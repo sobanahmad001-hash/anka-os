@@ -9,6 +9,7 @@ export default function WindowManager({
   onFocus,
   onMove,
   onResize,
+  openAppById,
 }) {
   return (
     <>
@@ -25,6 +26,7 @@ export default function WindowManager({
               onFocus={() => onFocus(w.id)}
               onMove={(x, y) => onMove(w.id, x, y)}
               onResize={(width, height) => onResize(w.id, width, height)}
+              openAppById={openAppById}
             />
           ),
       )}

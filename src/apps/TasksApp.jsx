@@ -24,6 +24,8 @@ export default function TasksApp() {
   const [projects, setProjects] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
   const [expandedTask, setExpandedTask] = useState(null);
+  const [subtasks, setSubtasks] = useState({}); // { taskId: [subtask, ...] }
+  const [newSubtask, setNewSubtask] = useState({}); // { taskId: 'text' }
   const [form, setForm] = useState({
     title: '',
     description: '',
@@ -43,7 +45,26 @@ export default function TasksApp() {
       .select('*, project:projects!project_id(name)')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
-    if (data) setTasks(data);
+    if (data) {
+      setTasks(data);
+      // Load subtasks for all tasks
+      const taskIds = data.map((t) => t.id);
+      if (taskIds.length > 0) {
+        const { data: subs } = await supabase
+          .from('subtasks')
+          .select('*')
+          .in('task_id', taskIds)
+          .order('sort_order');
+        if (subs) {
+          const grouped = {};
+          subs.forEach((s) => {
+            if (!grouped[s.task_id]) grouped[s.task_id] = [];
+            grouped[s.task_id].push(s);
+          });
+          setSubtasks(grouped);
+        }
+      }
+    }
   }
 
   async function loadProjects() {
@@ -81,6 +102,29 @@ export default function TasksApp() {
   function isOverdue(dueDate) {
     if (!dueDate) return false;
     return new Date(dueDate) < new Date(new Date().toDateString());
+  }
+
+  async function addSubtask(taskId) {
+    const text = (newSubtask[taskId] || '').trim();
+    if (!text) return;
+    const existing = subtasks[taskId] || [];
+    await supabase.from('subtasks').insert([{
+      task_id: taskId,
+      title: text,
+      sort_order: existing.length,
+    }]);
+    setNewSubtask((p) => ({ ...p, [taskId]: '' }));
+    loadTasks();
+  }
+
+  async function toggleSubtask(subtaskId, completed) {
+    await supabase.from('subtasks').update({ completed: !completed }).eq('id', subtaskId);
+    loadTasks();
+  }
+
+  async function deleteSubtask(subtaskId) {
+    await supabase.from('subtasks').delete().eq('id', subtaskId);
+    loadTasks();
   }
 
   return (
@@ -192,6 +236,47 @@ export default function TasksApp() {
                           📅 {task.due_date}
                         </span>
                       )}
+                      {(subtasks[task.id]?.length > 0) && (
+                        <span className="text-[10px] text-[var(--anka-text-secondary)]">
+                          ☑ {subtasks[task.id].filter((s) => s.completed).length}/{subtasks[task.id].length}
+                        </span>
+                      )}
+                    </div>
+                    {/* Subtasks checklist */}
+                    {subtasks[task.id]?.length > 0 && (
+                      <div className="mb-2 space-y-1">
+                        {subtasks[task.id].map((sub) => (
+                          <div key={sub.id} className="flex items-center gap-1.5 group/sub">
+                            <button
+                              onClick={() => toggleSubtask(sub.id, sub.completed)}
+                              className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 cursor-pointer transition ${
+                                sub.completed
+                                  ? 'bg-[var(--anka-accent)] border-[var(--anka-accent)] text-white'
+                                  : 'border-[var(--anka-border)] hover:border-[var(--anka-accent)]'
+                              }`}
+                            >
+                              {sub.completed && <span className="text-[8px]">✓</span>}
+                            </button>
+                            <span className={`text-[11px] flex-1 truncate ${sub.completed ? 'line-through text-[var(--anka-text-secondary)]' : ''}`}>
+                              {sub.title}
+                            </span>
+                            <button
+                              onClick={() => deleteSubtask(sub.id)}
+                              className="text-[9px] text-red-400 opacity-0 group-hover/sub:opacity-100 cursor-pointer"
+                            >✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* Add subtask inline */}
+                    <div className="flex gap-1 mb-2">
+                      <input
+                        value={newSubtask[task.id] || ''}
+                        onChange={(e) => setNewSubtask((p) => ({ ...p, [task.id]: e.target.value }))}
+                        onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addSubtask(task.id))}
+                        placeholder="+ subtask"
+                        className="flex-1 px-2 py-0.5 bg-transparent border-b border-transparent hover:border-[var(--anka-border)] focus:border-[var(--anka-accent)] text-[10px] text-[var(--anka-text-primary)] placeholder-[var(--anka-text-secondary)]/50 focus:outline-none"
+                      />
                     </div>
                     <div className="flex items-center gap-1">
                       {STATUSES.filter((s) => s !== status).map((s) => (

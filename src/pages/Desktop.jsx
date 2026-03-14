@@ -161,6 +161,7 @@ export default function Desktop() {
           onFocus={focusWindow}
           onMove={updateWindowPosition}
           onResize={updateWindowSize}
+          openAppById={openAppById}
         />
 
         {/* App Launcher overlay */}

@@ -23,6 +23,8 @@ import ReportsApp from '../apps/ReportsApp.jsx';
 import WikiApp from '../apps/WikiApp.jsx';
 import InvoicesApp from '../apps/InvoicesApp.jsx';
 import TemplatesApp from '../apps/TemplatesApp.jsx';
+import ContactsApp from '../apps/ContactsApp.jsx';
+import NotificationsApp from '../apps/NotificationsApp.jsx';
 
 // ─── Shared apps available to all departments ─────────────────────────────────
 const sharedApps = [
@@ -38,6 +40,8 @@ const sharedApps = [
   { id: 'reports', name: 'Reports', icon: '📊', component: ReportsApp, defaultWidth: 900, defaultHeight: 650 },
   { id: 'wiki', name: 'Wiki', icon: '📖', component: WikiApp, defaultWidth: 900, defaultHeight: 650 },
   { id: 'templates', name: 'Templates', icon: '📋', component: TemplatesApp, defaultWidth: 800, defaultHeight: 600 },
+  { id: 'contacts', name: 'Contacts', icon: '📇', component: ContactsApp, defaultWidth: 750, defaultHeight: 600 },
+  { id: 'notifications', name: 'Notifications', icon: '🔔', component: NotificationsApp, defaultWidth: 600, defaultHeight: 650 },
   { id: 'settings', name: 'Settings', icon: '⚙️', component: SettingsApp, defaultWidth: 750, defaultHeight: 600 },
 ];
 

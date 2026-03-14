@@ -18,6 +18,7 @@ export default function Window({
   onFocus,
   onMove,
   onResize,
+  openAppById,
 }) {
   const headerRef = useRef(null);
   const [dragging, setDragging] = useState(false);
@@ -133,7 +134,7 @@ export default function Window({
 
       {/* Content area */}
       <div className="flex-1 bg-[var(--anka-bg-primary)] overflow-auto">
-        {AppComponent && <AppComponent />}
+        {AppComponent && <AppComponent openAppById={openAppById} />}
       </div>
 
       {/* Resize handle */}

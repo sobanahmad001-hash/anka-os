@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
-export default function DashboardApp() {
+export default function DashboardApp({ openAppById }) {
   const { user, profile } = useAuth();
   const [stats, setStats] = useState(null);
   const [recentTasks, setRecentTasks] = useState([]);
   const [recentProjects, setRecentProjects] = useState([]);
   const [activity, setActivity] = useState([]);
+  const [pinnedApps, setPinnedApps] = useState([]);
+  const [timeToday, setTimeToday] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -17,7 +19,9 @@ export default function DashboardApp() {
   async function loadDashboard() {
     setLoading(true);
 
-    const [tasksRes, projectsRes, notifRes, activityRes] = await Promise.all([
+    const today = new Date().toISOString().split('T')[0];
+
+    const [tasksRes, projectsRes, notifRes, activityRes, pinnedRes, timeRes] = await Promise.all([
       supabase
         .from('tasks')
         .select('*')
@@ -39,6 +43,17 @@ export default function DashboardApp() {
         .select('*')
         .order('created_at', { ascending: false })
         .limit(10),
+      supabase
+        .from('pinned_apps')
+        .select('app_id, sort_order')
+        .eq('user_id', user.id)
+        .order('sort_order'),
+      supabase
+        .from('time_logs')
+        .select('duration_minutes')
+        .eq('user_id', user.id)
+        .gte('start_time', today + 'T00:00:00')
+        .not('end_time', 'is', null),
     ]);
 
     // Get task counts
@@ -58,6 +73,10 @@ export default function DashboardApp() {
     if (tasksRes.data) setRecentTasks(tasksRes.data);
     if (projectsRes.data) setRecentProjects(projectsRes.data);
     if (activityRes.data) setActivity(activityRes.data);
+    if (pinnedRes.data) setPinnedApps(pinnedRes.data.map((p) => p.app_id));
+    if (timeRes.data) {
+      setTimeToday(timeRes.data.reduce((sum, t) => sum + (t.duration_minutes || 0), 0));
+    }
     setLoading(false);
   }
 
@@ -121,8 +140,28 @@ export default function DashboardApp() {
         </p>
       </div>
 
+      {/* Quick Actions */}
+      <div className="flex gap-2 flex-wrap">
+        {[
+          { label: 'New Task', icon: '✅', app: 'tasks' },
+          { label: 'New Note', icon: '📝', app: 'notes' },
+          { label: 'Team Chat', icon: '💬', app: 'chat' },
+          { label: 'Time Tracker', icon: '⏱️', app: 'timetracker' },
+          { label: 'AI Assistant', icon: '🤖', app: 'ai' },
+        ].map((action) => (
+          <button
+            key={action.app}
+            onClick={() => openAppById && openAppById(action.app)}
+            className="flex items-center gap-2 px-3 py-2 bg-[var(--anka-bg-secondary)] border border-[var(--anka-border)] rounded-lg hover:border-[var(--anka-accent)]/30 transition text-xs cursor-pointer"
+          >
+            <span>{action.icon}</span>
+            {action.label}
+          </button>
+        ))}
+      </div>
+
       {/* Stat cards */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-5 gap-3">
         <StatCard
           icon="📝"
           label="To Do"
@@ -146,6 +185,13 @@ export default function DashboardApp() {
           label="Notifications"
           value={stats.unreadNotifications}
           color="text-[var(--anka-accent)]"
+        />
+        <StatCard
+          icon="⏱️"
+          label="Tracked Today"
+          value={`${Math.floor(timeToday / 60)}h ${timeToday % 60}m`}
+          color="text-cyan-400"
+          small
         />
       </div>
 
@@ -227,12 +273,12 @@ export default function DashboardApp() {
   );
 }
 
-function StatCard({ icon, label, value, color }) {
+function StatCard({ icon, label, value, color, small }) {
   return (
     <div className="bg-[var(--anka-bg-secondary)] border border-[var(--anka-border)] rounded-xl p-4">
       <div className="flex items-center justify-between mb-2">
         <span className="text-lg">{icon}</span>
-        <span className={`text-2xl font-bold ${color}`}>{value}</span>
+        <span className={`${small ? 'text-base' : 'text-2xl'} font-bold ${color}`}>{value}</span>
       </div>
       <div className="text-[10px] text-[var(--anka-text-secondary)] uppercase">{label}</div>
     </div>
