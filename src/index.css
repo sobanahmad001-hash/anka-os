@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+/* ─── Anka OS Design Tokens ─────────────────────────────────────────────────── */
+:root {
+  --anka-bg-primary: #0f1117;
+  --anka-bg-secondary: #1a1d27;
+  --anka-bg-tertiary: #242837;
+  --anka-accent: #6c5ce7;
+  --anka-accent-hover: #7c6ef7;
+  --anka-text-primary: #e8e8ed;
+  --anka-text-secondary: #9ca3af;
+  --anka-border: #2d3148;
+  --anka-success: #00d97e;
+  --anka-danger: #ff4757;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--anka-bg-primary);
+  color: var(--anka-text-primary);
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+}
+
+#root {
+  height: 100vh;
+  width: 100vw;
+}
+
+/* ─── Scrollbar Styling ──────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--anka-bg-secondary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--anka-bg-tertiary);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--anka-accent);
+}
+
+/* ─── Selection ──────────────────────────────────────────────────────────────── */
+::selection {
+  background: var(--anka-accent);
+  color: white;
+}
