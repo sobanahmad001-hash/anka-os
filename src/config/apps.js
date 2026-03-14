@@ -30,6 +30,9 @@ import ActivityApp from '../apps/ActivityApp.jsx';
 import TeamApp from '../apps/TeamApp.jsx';
 import PomodoroApp from '../apps/PomodoroApp.jsx';
 import SnippetsApp from '../apps/SnippetsApp.jsx';
+import GitIntegrationApp from '../apps/GitIntegrationApp.jsx';
+import PullRequestDashboardApp from '../apps/PullRequestDashboardApp.jsx';
+import CIPipelineDashboardApp from '../apps/CIPipelineDashboardApp.jsx';
 
 // ─── Shared apps available to all departments ─────────────────────────────────
 const sharedApps = [
@@ -71,6 +74,9 @@ const departmentApps = {
     { id: 'terminal', name: 'Terminal', icon: '🖥️', component: TerminalApp, defaultWidth: 850, defaultHeight: 500 },
     { id: 'browser', name: 'Browser', icon: '🌐', component: BrowserApp },
     { id: 'docs', name: 'API Docs', icon: '📚', component: ApiDocsApp, defaultWidth: 900, defaultHeight: 600 },
+    { id: 'git', name: 'Git Repos', icon: '🔗', component: GitIntegrationApp, defaultWidth: 850, defaultHeight: 600 },
+    { id: 'pullrequests', name: 'Pull Requests', icon: '🔀', component: PullRequestDashboardApp, defaultWidth: 900, defaultHeight: 650 },
+    { id: 'ci-pipelines', name: 'CI/CD Pipelines', icon: '⚙️', component: CIPipelineDashboardApp, defaultWidth: 900, defaultHeight: 650 },
   ],
   marketing: [
     { id: 'clients', name: 'Clients', icon: '🤝', component: ClientsApp, defaultWidth: 900, defaultHeight: 600 },
