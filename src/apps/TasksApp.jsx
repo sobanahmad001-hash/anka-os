@@ -17,37 +17,48 @@ const PRIORITY_COLORS = {
   high: 'text-orange-400',
   urgent: 'text-red-400',
 };
+const DEPARTMENTS = ['design', 'development', 'marketing'];
 
 export default function TasksApp() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const isAdmin = profile?.role === 'admin';
+  const isHead = profile?.role === 'department_head';
+  const canAssign = isAdmin || isHead;
+
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [teamMembers, setTeamMembers] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
   const [expandedTask, setExpandedTask] = useState(null);
-  const [subtasks, setSubtasks] = useState({}); // { taskId: [subtask, ...] }
-  const [newSubtask, setNewSubtask] = useState({}); // { taskId: 'text' }
+  const [subtasks, setSubtasks] = useState({});
+  const [newSubtask, setNewSubtask] = useState({});
+  const [filterView, setFilterView] = useState('all'); // 'all' | 'mine' | 'assigned'
+  const [filterDept, setFilterDept] = useState('all'); // admin only: filter by department
   const [form, setForm] = useState({
     title: '',
     description: '',
     priority: 'medium',
     due_date: '',
     project_id: '',
+    assigned_to: '',
   });
 
   useEffect(() => {
     loadTasks();
     loadProjects();
+    if (canAssign) loadTeamMembers();
   }, []);
 
   async function loadTasks() {
-    const { data } = await supabase
+    // RLS handles visibility — just fetch all accessible tasks
+    let query = supabase
       .from('tasks')
-      .select('*, project:projects!project_id(name)')
-      .eq('user_id', user.id)
+      .select('*, project:projects!project_id(name), assignee:profiles!assigned_to(full_name), assigner:profiles!assigned_by(full_name)')
       .order('created_at', { ascending: false });
+
+    const { data } = await query;
     if (data) {
       setTasks(data);
-      // Load subtasks for all tasks
       const taskIds = data.map((t) => t.id);
       if (taskIds.length > 0) {
         const { data: subs } = await supabase
@@ -72,19 +83,32 @@ export default function TasksApp() {
     if (data) setProjects(data);
   }
 
+  async function loadTeamMembers() {
+    let query = supabase.from('profiles').select('id, full_name, department, role');
+    if (!isAdmin) {
+      query = query.eq('department', profile?.department);
+    }
+    const { data } = await query.order('full_name');
+    if (data) setTeamMembers(data.filter((m) => m.id !== user.id));
+  }
+
   async function addTask(e) {
     e.preventDefault();
     if (!form.title.trim()) return;
-    await supabase.from('tasks').insert([{
+    const taskData = {
       title: form.title.trim(),
       description: form.description,
       priority: form.priority,
       due_date: form.due_date || null,
       project_id: form.project_id || null,
-      user_id: user.id,
+      user_id: form.assigned_to || user.id,
+      assigned_to: form.assigned_to || null,
+      assigned_by: form.assigned_to ? user.id : null,
+      department: profile?.department,
       status: 'todo',
-    }]);
-    setForm({ title: '', description: '', priority: 'medium', due_date: '', project_id: '' });
+    };
+    await supabase.from('tasks').insert([taskData]);
+    setForm({ title: '', description: '', priority: 'medium', due_date: '', project_id: '', assigned_to: '' });
     setShowCreate(false);
     loadTasks();
   }
@@ -127,17 +151,50 @@ export default function TasksApp() {
     loadTasks();
   }
 
+  // Client-side filtering (RLS handles access; this filters the view)
+  const filteredTasks = tasks.filter((t) => {
+    if (filterView === 'mine' && t.user_id !== user.id) return false;
+    if (filterView === 'assigned' && t.assigned_to !== user.id) return false;
+    if (isAdmin && filterDept !== 'all' && t.department !== filterDept) return false;
+    return true;
+  });
+
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-[var(--anka-border)] bg-[var(--anka-bg-secondary)] flex items-center justify-between">
+      <div className="px-4 py-3 border-b border-[var(--anka-border)] bg-[var(--anka-bg-secondary)] flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Tasks</h3>
-        <button
-          onClick={() => setShowCreate(!showCreate)}
-          className="px-3 py-1.5 bg-[var(--anka-accent)] hover:bg-[var(--anka-accent-hover)] text-white text-xs rounded-lg transition cursor-pointer"
-        >
-          + New Task
-        </button>
+        <div className="flex items-center gap-2">
+          {/* View filter */}
+          <select
+            value={filterView}
+            onChange={(e) => setFilterView(e.target.value)}
+            className="text-xs bg-[var(--anka-bg-tertiary)] border border-[var(--anka-border)] rounded-lg px-2 py-1.5 text-[var(--anka-text-primary)] focus:outline-none"
+          >
+            <option value="all">{isAdmin ? 'All Tasks' : isHead ? 'Department Tasks' : 'All My Tasks'}</option>
+            {(isAdmin || isHead) && <option value="mine">Created by Me</option>}
+            <option value="assigned">Assigned to Me</option>
+          </select>
+          {/* Admin department filter */}
+          {isAdmin && (
+            <select
+              value={filterDept}
+              onChange={(e) => setFilterDept(e.target.value)}
+              className="text-xs bg-[var(--anka-bg-tertiary)] border border-[var(--anka-border)] rounded-lg px-2 py-1.5 text-[var(--anka-text-primary)] focus:outline-none"
+            >
+              <option value="all">All Depts</option>
+              {DEPARTMENTS.map((d) => (
+                <option key={d} value={d}>{d.charAt(0).toUpperCase() + d.slice(1)}</option>
+              ))}
+            </select>
+          )}
+          <button
+            onClick={() => setShowCreate(!showCreate)}
+            className="px-3 py-1.5 bg-[var(--anka-accent)] hover:bg-[var(--anka-accent-hover)] text-white text-xs rounded-lg transition cursor-pointer"
+          >
+            + New Task
+          </button>
+        </div>
       </div>
 
       {/* Create form */}
@@ -156,7 +213,7 @@ export default function TasksApp() {
             placeholder="Description (optional)"
             className="w-full px-3 py-2 bg-[var(--anka-bg-tertiary)] border border-[var(--anka-border)] rounded-lg text-sm text-[var(--anka-text-primary)] placeholder-[var(--anka-text-secondary)] focus:outline-none focus:border-[var(--anka-accent)]"
           />
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <select
               value={form.priority}
               onChange={(e) => setForm({ ...form, priority: e.target.value })}
@@ -176,6 +233,18 @@ export default function TasksApp() {
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
+            {canAssign && (
+              <select
+                value={form.assigned_to}
+                onChange={(e) => setForm({ ...form, assigned_to: e.target.value })}
+                className="text-xs bg-[var(--anka-bg-tertiary)] border border-[var(--anka-border)] rounded-lg px-2 py-1.5 text-[var(--anka-text-primary)] focus:outline-none"
+              >
+                <option value="">Assign to self</option>
+                {teamMembers.map((m) => (
+                  <option key={m.id} value={m.id}>{m.full_name} ({m.role})</option>
+                ))}
+              </select>
+            )}
             <input
               type="date"
               value={form.due_date}
@@ -205,11 +274,11 @@ export default function TasksApp() {
                 {STATUS_LABELS[status]}
               </span>
               <span className="text-[10px] text-[var(--anka-text-secondary)] ml-auto">
-                {tasks.filter((t) => t.status === status).length}
+                {filteredTasks.filter((t) => t.status === status).length}
               </span>
             </div>
             <div className="flex-1 overflow-y-auto p-2 space-y-2">
-              {tasks
+              {filteredTasks
                 .filter((t) => t.status === status)
                 .map((task) => (
                   <div
@@ -226,6 +295,16 @@ export default function TasksApp() {
                       <div className="text-[11px] text-[var(--anka-text-secondary)] mb-2 line-clamp-2">{task.description}</div>
                     )}
                     <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      {task.assignee && (
+                        <span className="text-[10px] px-1.5 py-0.5 bg-purple-500/10 text-purple-400 rounded">
+                          👤 {task.assignee.full_name}
+                        </span>
+                      )}
+                      {task.assigner && (
+                        <span className="text-[10px] px-1.5 py-0.5 bg-blue-500/10 text-blue-400 rounded">
+                          ↳ by {task.assigner.full_name}
+                        </span>
+                      )}
                       {task.project && (
                         <span className="text-[10px] px-1.5 py-0.5 bg-[var(--anka-accent)]/10 text-[var(--anka-accent)] rounded">
                           📋 {task.project.name}
@@ -239,6 +318,11 @@ export default function TasksApp() {
                       {(subtasks[task.id]?.length > 0) && (
                         <span className="text-[10px] text-[var(--anka-text-secondary)]">
                           ☑ {subtasks[task.id].filter((s) => s.completed).length}/{subtasks[task.id].length}
+                        </span>
+                      )}
+                      {task.department && (isAdmin || isHead) && (
+                        <span className="text-[10px] px-1.5 py-0.5 bg-[var(--anka-bg-secondary)] text-[var(--anka-text-secondary)] rounded capitalize ml-auto">
+                          {task.department}
                         </span>
                       )}
                     </div>

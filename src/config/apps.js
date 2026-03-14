@@ -82,14 +82,22 @@ const departmentApps = {
 };
 
 export function getDepartmentApps(department, role) {
+  if (role === 'admin') {
+    // Admin sees ALL department apps + admin panel + shared apps
+    const allDeptApps = Object.values(departmentApps).flat();
+    // Deduplicate by id
+    const seen = new Set();
+    const unique = [];
+    for (const app of [...adminApps, ...allDeptApps, ...sharedApps]) {
+      if (!seen.has(app.id)) {
+        seen.add(app.id);
+        unique.push(app);
+      }
+    }
+    return unique;
+  }
   const deptSpecific = departmentApps[department] || [];
-  const admin = role === 'admin' ? adminApps : [];
-  // admins also get clients + assets regardless of department
-  const extraApps = role === 'admin' ? [
-    ...(department !== 'marketing' ? [{ id: 'clients', name: 'Clients', icon: '🤝', component: ClientsApp, defaultWidth: 900, defaultHeight: 600 }] : []),
-    ...(department !== 'design' ? [{ id: 'assets', name: 'Asset Library', icon: '🖼️', component: AssetsApp, defaultWidth: 900, defaultHeight: 600 }] : []),
-  ] : [];
-  return [...admin, ...deptSpecific, ...extraApps, ...sharedApps];
+  return [...deptSpecific, ...sharedApps];
 }
 
 export function getAllApps() {

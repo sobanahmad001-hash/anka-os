@@ -116,9 +116,9 @@ export default function AiAssistantApp() {
       // Assemble context in parallel
       const { systemPrompt, snapshot } = await assembleContext(user.id, profile);
 
-      // Build message history for AI (last 20 messages)
+      // Build message history for AI (last 10 messages)
       const historyForAI = messages
-        .slice(-20)
+        .slice(-10)
         .concat([userEntry])
         .map((m) => ({ role: m.role, content: m.content }));
 

@@ -20,61 +20,61 @@ export async function assembleContext(userId, profile) {
     // User's tasks (all statuses)
     supabase
       .from('tasks')
-      .select('id, title, status, priority, due_date, description, project_id')
+      .select('id, title, status, priority, due_date, project_id')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
-      .limit(30),
+      .limit(15),
 
     // Projects user can see
     supabase
       .from('projects')
-      .select('id, name, status, priority, department_id, due_date, description')
+      .select('id, name, status, priority, department_id, due_date')
       .order('updated_at', { ascending: false })
-      .limit(15),
+      .limit(10),
 
     // Recent activity
     supabase
       .from('activity_log')
       .select('action, entity_type, metadata, created_at')
       .order('created_at', { ascending: false })
-      .limit(20),
+      .limit(8),
 
     // Decisions (especially closed ones with outcomes for learning)
     supabase
       .from('decisions')
-      .select('title, status, outcome, outcome_rating, tags, decided_at, created_at')
+      .select('title, status, outcome, outcome_rating')
       .order('created_at', { ascending: false })
-      .limit(15),
+      .limit(8),
 
     // Recent behavior for cognitive awareness
     supabase
       .from('behavior_logs')
-      .select('event_type, app_id, metadata, created_at')
+      .select('event_type, app_id, created_at')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
-      .limit(20),
+      .limit(10),
 
     // Unread notifications
     supabase
       .from('notifications')
-      .select('title, type, body, created_at')
+      .select('title, type')
       .eq('user_id', userId)
       .eq('read', false)
-      .limit(10),
+      .limit(8),
 
     // Team members in same department
     supabase
       .from('profiles')
-      .select('full_name, role, department')
+      .select('full_name, role')
       .eq('department', profile?.department || '')
-      .limit(20),
+      .limit(10),
 
     // Recent chat messages for awareness
     supabase
       .from('messages')
-      .select('content, sender_name, department, created_at')
+      .select('content, sender_name, created_at')
       .order('created_at', { ascending: false })
-      .limit(10),
+      .limit(5),
   ]);
 
   // ─── Cognitive State Assessment ─────────────────────────────────────────

@@ -25,6 +25,7 @@ export default function ProjectsApp() {
   const { user, profile } = useAuth();
   const [projects, setProjects] = useState([]);
   const [members, setMembers] = useState({});
+  const [projectTasks, setProjectTasks] = useState([]);
   const [view, setView] = useState('list'); // list | detail | create
   const [selectedProject, setSelectedProject] = useState(null);
   const [filter, setFilter] = useState('all');
@@ -93,6 +94,16 @@ export default function ProjectsApp() {
     setSelectedProject(project);
     setView('detail');
     loadMembers(project.id);
+    loadProjectTasks(project.id);
+  }
+
+  async function loadProjectTasks(projectId) {
+    const { data } = await supabase
+      .from('tasks')
+      .select('id, title, status, priority, assigned_to, assignee:profiles!assigned_to(full_name)')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false });
+    if (data) setProjectTasks(data);
   }
 
   const filtered = filter === 'all' ? projects : projects.filter((p) => p.status === filter);
@@ -165,9 +176,19 @@ export default function ProjectsApp() {
                   <span className="capitalize">📂 {project.department_id}</span>
                   <span>👤 {project.owner?.full_name || 'Unassigned'}</span>
                   {project.due_date && <span>📅 {project.due_date}</span>}
-                  <span className="ml-auto capitalize px-2 py-0.5 rounded-full bg-[var(--anka-bg-tertiary)]">
+                  <span className="capitalize px-2 py-0.5 rounded-full bg-[var(--anka-bg-tertiary)]">
                     {project.status.replace('_', ' ')}
                   </span>
+                </div>
+                {/* Progress bar */}
+                <div className="mt-2 flex items-center gap-2">
+                  <div className="flex-1 h-1.5 bg-[var(--anka-bg-tertiary)] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[var(--anka-accent)] rounded-full transition-all"
+                      style={{ width: `${project.progress || 0}%` }}
+                    />
+                  </div>
+                  <span className="text-[10px] text-[var(--anka-text-secondary)] tabular-nums">{project.progress || 0}%</span>
                 </div>
               </button>
             ))
@@ -290,6 +311,23 @@ export default function ProjectsApp() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Progress */}
+        <div className="bg-[var(--anka-bg-secondary)] border border-[var(--anka-border)] rounded-xl p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-[10px] uppercase text-[var(--anka-text-secondary)] font-semibold">Progress</div>
+            <span className="text-sm font-semibold text-[var(--anka-accent)]">{proj?.progress || 0}%</span>
+          </div>
+          <div className="h-2 bg-[var(--anka-bg-tertiary)] rounded-full overflow-hidden">
+            <div
+              className="h-full bg-[var(--anka-accent)] rounded-full transition-all"
+              style={{ width: `${proj?.progress || 0}%` }}
+            />
+          </div>
+          <div className="text-[10px] text-[var(--anka-text-secondary)] mt-1">
+            {projectTasks.filter((t) => t.status === 'done').length} of {projectTasks.length} tasks completed
+          </div>
+        </div>
+
         {/* Info cards */}
         <div className="grid grid-cols-2 gap-3">
           <InfoCard label="Priority" value={proj?.priority} />
@@ -324,6 +362,35 @@ export default function ProjectsApp() {
                     <div className="text-xs font-medium truncate">{m.user?.full_name}</div>
                     <div className="text-[10px] text-[var(--anka-text-secondary)] capitalize">{m.role} · {m.user?.department}</div>
                   </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Linked Tasks */}
+        <div className="bg-[var(--anka-bg-secondary)] border border-[var(--anka-border)] rounded-xl p-4">
+          <div className="text-[10px] uppercase text-[var(--anka-text-secondary)] font-semibold mb-3">
+            Tasks ({projectTasks.length})
+          </div>
+          {projectTasks.length === 0 ? (
+            <div className="text-xs text-[var(--anka-text-secondary)]">No tasks linked to this project yet.</div>
+          ) : (
+            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+              {projectTasks.map((task) => (
+                <div key={task.id} className="flex items-center gap-2 py-1 px-2 rounded-lg bg-[var(--anka-bg-tertiary)]">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${
+                    task.status === 'done' ? 'bg-green-500' : task.status === 'in_progress' ? 'bg-yellow-500' : 'bg-gray-500'
+                  }`} />
+                  <span className={`text-xs flex-1 truncate ${task.status === 'done' ? 'line-through text-[var(--anka-text-secondary)]' : ''}`}>
+                    {task.title}
+                  </span>
+                  {task.assignee && (
+                    <span className="text-[10px] text-[var(--anka-text-secondary)]">{task.assignee.full_name}</span>
+                  )}
+                  <span className={`text-[10px] font-semibold uppercase ${PRIORITY_COLORS[task.priority]}`}>
+                    {task.priority}
+                  </span>
                 </div>
               ))}
             </div>
