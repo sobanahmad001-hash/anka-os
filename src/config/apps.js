@@ -28,6 +28,8 @@ import NotificationsApp from '../apps/NotificationsApp.jsx';
 import KanbanApp from '../apps/KanbanApp.jsx';
 import ActivityApp from '../apps/ActivityApp.jsx';
 import TeamApp from '../apps/TeamApp.jsx';
+import PomodoroApp from '../apps/PomodoroApp.jsx';
+import SnippetsApp from '../apps/SnippetsApp.jsx';
 
 // ─── Shared apps available to all departments ─────────────────────────────────
 const sharedApps = [
@@ -48,6 +50,8 @@ const sharedApps = [
   { id: 'kanban', name: 'Kanban Board', icon: '📌', component: KanbanApp, defaultWidth: 1000, defaultHeight: 650 },
   { id: 'activity', name: 'Activity', icon: '📜', component: ActivityApp, defaultWidth: 700, defaultHeight: 650 },
   { id: 'team', name: 'Team', icon: '👥', component: TeamApp, defaultWidth: 800, defaultHeight: 600 },
+  { id: 'pomodoro', name: 'Pomodoro', icon: '🍅', component: PomodoroApp, defaultWidth: 420, defaultHeight: 650 },
+  { id: 'snippets', name: 'Snippets', icon: '✂️', component: SnippetsApp, defaultWidth: 750, defaultHeight: 600 },
   { id: 'settings', name: 'Settings', icon: '⚙️', component: SettingsApp, defaultWidth: 750, defaultHeight: 600 },
 ];
 
