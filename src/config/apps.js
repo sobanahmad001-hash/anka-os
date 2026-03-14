@@ -20,6 +20,8 @@ import DesignReviewsApp from '../apps/DesignReviewsApp.jsx';
 import ApiDocsApp from '../apps/ApiDocsApp.jsx';
 import TimeTrackerApp from '../apps/TimeTrackerApp.jsx';
 import ReportsApp from '../apps/ReportsApp.jsx';
+import WikiApp from '../apps/WikiApp.jsx';
+import InvoicesApp from '../apps/InvoicesApp.jsx';
 
 // ─── Shared apps available to all departments ─────────────────────────────────
 const sharedApps = [
@@ -33,6 +35,7 @@ const sharedApps = [
   { id: 'calendar', name: 'Calendar', icon: '📅', component: CalendarApp },
   { id: 'timetracker', name: 'Time Tracker', icon: '⏱️', component: TimeTrackerApp, defaultWidth: 500, defaultHeight: 650 },
   { id: 'reports', name: 'Reports', icon: '📊', component: ReportsApp, defaultWidth: 900, defaultHeight: 650 },
+  { id: 'wiki', name: 'Wiki', icon: '📖', component: WikiApp, defaultWidth: 900, defaultHeight: 650 },
   { id: 'settings', name: 'Settings', icon: '⚙️', component: SettingsApp },
 ];
 
@@ -58,6 +61,7 @@ const departmentApps = {
     { id: 'campaigns', name: 'Campaigns', icon: '📊', component: CampaignsApp, defaultWidth: 900, defaultHeight: 600 },
     { id: 'content', name: 'Content Hub', icon: '✏️', component: ContentHubApp, defaultWidth: 950, defaultHeight: 650 },
     { id: 'analytics', name: 'Analytics', icon: '📈', component: AnalyticsApp, defaultWidth: 900, defaultHeight: 650 },
+    { id: 'invoices', name: 'Invoices', icon: '🧾', component: InvoicesApp, defaultWidth: 900, defaultHeight: 650 },
   ],
 };
 

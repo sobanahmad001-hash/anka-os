@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase.js';
 import { useAuth } from '../context/AuthContext.jsx';
+import CommentsPanel from '../components/CommentsPanel.jsx';
 
 const STATUSES = ['todo', 'in_progress', 'done'];
 const STATUS_LABELS = { todo: 'To Do', in_progress: 'In Progress', done: 'Done' };
@@ -22,6 +23,7 @@ export default function TasksApp() {
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
+  const [expandedTask, setExpandedTask] = useState(null);
   const [form, setForm] = useState({
     title: '',
     description: '',
@@ -202,12 +204,24 @@ export default function TasksApp() {
                         </button>
                       ))}
                       <button
+                        onClick={() => setExpandedTask(expandedTask === task.id ? null : task.id)}
+                        className="text-[10px] px-2 py-0.5 rounded bg-[var(--anka-bg-secondary)] text-[var(--anka-text-secondary)] hover:text-[var(--anka-accent)] transition cursor-pointer"
+                        title="Comments"
+                      >
+                        💬
+                      </button>
+                      <button
                         onClick={() => deleteTask(task.id)}
                         className="text-[10px] px-2 py-0.5 rounded bg-[var(--anka-bg-secondary)] text-red-400 hover:text-red-300 transition ml-auto opacity-0 group-hover:opacity-100 cursor-pointer"
                       >
                         ✕
                       </button>
                     </div>
+                    {expandedTask === task.id && (
+                      <div className="mt-2 border-t border-[var(--anka-border)] pt-2">
+                        <CommentsPanel entityType="task" entityId={task.id} />
+                      </div>
+                    )}
                   </div>
                 ))}
             </div>

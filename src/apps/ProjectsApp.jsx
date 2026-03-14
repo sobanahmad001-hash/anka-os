@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase.js';
 import { useAuth } from '../context/AuthContext.jsx';
+import CommentsPanel from '../components/CommentsPanel.jsx';
 
 const STATUS_OPTIONS = ['planning', 'active', 'on_hold', 'completed', 'archived'];
 const PRIORITY_OPTIONS = ['low', 'medium', 'high', 'urgent'];
@@ -327,6 +328,11 @@ export default function ProjectsApp() {
               ))}
             </div>
           )}
+        </div>
+
+        {/* Comments */}
+        <div className="bg-[var(--anka-bg-secondary)] border border-[var(--anka-border)] rounded-xl p-4">
+          <CommentsPanel entityType="project" entityId={proj?.id} />
         </div>
       </div>
     </div>

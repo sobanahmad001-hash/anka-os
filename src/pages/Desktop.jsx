@@ -1,7 +1,8 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import Taskbar from '../components/Taskbar.jsx';
 import WindowManager from '../components/WindowManager.jsx';
 import AppLauncher from '../components/AppLauncher.jsx';
+import GlobalSearch from '../components/GlobalSearch.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { getDepartmentApps } from '../config/apps.js';
 
@@ -9,12 +10,31 @@ export default function Desktop() {
   const { profile } = useAuth();
   const [windows, setWindows] = useState([]);
   const [showLauncher, setShowLauncher] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [activeWindowId, setActiveWindowId] = useState(null);
   const [nextZIndex, setNextZIndex] = useState(10);
 
   const department = profile?.department || 'development';
   const role = profile?.role || 'intern';
   const apps = getDepartmentApps(department, role);
+
+  // Cmd+K / Ctrl+K global search shortcut
+  useEffect(() => {
+    function handleKeyDown(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setShowSearch((s) => !s);
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Open app by id (used by global search)
+  const openAppById = useCallback((appId) => {
+    const app = apps.find((a) => a.id === appId);
+    if (app) openApp(app);
+  }, [apps]);
 
   const openApp = useCallback(
     (app) => {
@@ -149,6 +169,14 @@ export default function Desktop() {
             apps={apps}
             onOpenApp={openApp}
             onClose={() => setShowLauncher(false)}
+          />
+        )}
+
+        {/* Global Search overlay */}
+        {showSearch && (
+          <GlobalSearch
+            onClose={() => setShowSearch(false)}
+            onOpenApp={openAppById}
           />
         )}
       </div>
