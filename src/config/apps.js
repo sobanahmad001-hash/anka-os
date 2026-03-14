@@ -25,6 +25,9 @@ import InvoicesApp from '../apps/InvoicesApp.jsx';
 import TemplatesApp from '../apps/TemplatesApp.jsx';
 import ContactsApp from '../apps/ContactsApp.jsx';
 import NotificationsApp from '../apps/NotificationsApp.jsx';
+import KanbanApp from '../apps/KanbanApp.jsx';
+import ActivityApp from '../apps/ActivityApp.jsx';
+import TeamApp from '../apps/TeamApp.jsx';
 
 // ─── Shared apps available to all departments ─────────────────────────────────
 const sharedApps = [
@@ -42,6 +45,9 @@ const sharedApps = [
   { id: 'templates', name: 'Templates', icon: '📋', component: TemplatesApp, defaultWidth: 800, defaultHeight: 600 },
   { id: 'contacts', name: 'Contacts', icon: '📇', component: ContactsApp, defaultWidth: 750, defaultHeight: 600 },
   { id: 'notifications', name: 'Notifications', icon: '🔔', component: NotificationsApp, defaultWidth: 600, defaultHeight: 650 },
+  { id: 'kanban', name: 'Kanban Board', icon: '📌', component: KanbanApp, defaultWidth: 1000, defaultHeight: 650 },
+  { id: 'activity', name: 'Activity', icon: '📜', component: ActivityApp, defaultWidth: 700, defaultHeight: 650 },
+  { id: 'team', name: 'Team', icon: '👥', component: TeamApp, defaultWidth: 800, defaultHeight: 600 },
   { id: 'settings', name: 'Settings', icon: '⚙️', component: SettingsApp, defaultWidth: 750, defaultHeight: 600 },
 ];
 
