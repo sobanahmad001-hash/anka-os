@@ -18,6 +18,8 @@ import AnalyticsApp from '../apps/AnalyticsApp.jsx';
 import MoodboardApp from '../apps/MoodboardApp.jsx';
 import DesignReviewsApp from '../apps/DesignReviewsApp.jsx';
 import ApiDocsApp from '../apps/ApiDocsApp.jsx';
+import TimeTrackerApp from '../apps/TimeTrackerApp.jsx';
+import ReportsApp from '../apps/ReportsApp.jsx';
 
 // ─── Shared apps available to all departments ─────────────────────────────────
 const sharedApps = [
@@ -29,6 +31,8 @@ const sharedApps = [
   { id: 'notes', name: 'Notes', icon: '📝', component: NotesApp },
   { id: 'files', name: 'Files', icon: '📁', component: FileManagerApp },
   { id: 'calendar', name: 'Calendar', icon: '📅', component: CalendarApp },
+  { id: 'timetracker', name: 'Time Tracker', icon: '⏱️', component: TimeTrackerApp, defaultWidth: 500, defaultHeight: 650 },
+  { id: 'reports', name: 'Reports', icon: '📊', component: ReportsApp, defaultWidth: 900, defaultHeight: 650 },
   { id: 'settings', name: 'Settings', icon: '⚙️', component: SettingsApp },
 ];
 
