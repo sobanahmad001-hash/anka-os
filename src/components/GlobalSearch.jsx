@@ -2,10 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
-/**
- * Global search overlay — Cmd+K style.
- * Searches across tasks, projects, notes, wiki, clients, campaigns.
- */
 export default function GlobalSearch({ onClose, onOpenApp }) {
   const { user } = useAuth();
   const [query, setQuery] = useState('');
@@ -68,52 +64,89 @@ export default function GlobalSearch({ onClose, onOpenApp }) {
   }
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-start justify-center pt-[15vh]"
-      onClick={onClose}>
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <div className="relative w-full max-w-lg bg-[var(--anka-bg-secondary)] border border-[var(--anka-border)] rounded-xl shadow-2xl overflow-hidden"
-        onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 z-[9999] flex items-start justify-center"
+      style={{ paddingTop: '18vh' }}
+      onClick={onClose}
+    >
+      {/* Backdrop */}
+      <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }} />
+
+      {/* Search panel */}
+      <div
+        className="anka-glass-heavy anka-scale-in"
+        style={{
+          position: 'relative', width: '100%', maxWidth: 560,
+          borderRadius: 16, border: '1px solid var(--anka-border)',
+          boxShadow: 'var(--anka-shadow-xl), var(--anka-shadow-glow)',
+          overflow: 'hidden',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Search input */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--anka-border)]">
-          <span className="text-[var(--anka-text-secondary)]">🔍</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', borderBottom: '1px solid var(--anka-border-subtle)' }}>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, opacity: 0.4 }}>
+            <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M11 11l3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
           <input
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Search tasks, projects, notes, wiki, clients..."
-            className="flex-1 bg-transparent text-sm text-[var(--anka-text-primary)] placeholder-[var(--anka-text-secondary)] focus:outline-none"
+            style={{
+              flex: 1, background: 'transparent', border: 'none', outline: 'none',
+              fontSize: 14, color: 'var(--anka-text-primary)', letterSpacing: '-0.01em',
+            }}
           />
-          <kbd className="text-[10px] text-[var(--anka-text-secondary)] bg-[var(--anka-bg-tertiary)] px-1.5 py-0.5 rounded border border-[var(--anka-border)]">ESC</kbd>
+          <kbd style={{
+            fontSize: 10, color: 'var(--anka-text-tertiary)', background: 'var(--anka-bg-surface)',
+            padding: '3px 8px', borderRadius: 6, border: '1px solid var(--anka-border)',
+          }}>
+            ESC
+          </kbd>
         </div>
 
         {/* Results */}
-        <div className="max-h-80 overflow-y-auto">
-          {loading && <div className="px-4 py-3 text-xs text-[var(--anka-text-secondary)]">Searching...</div>}
+        <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+          {loading && (
+            <div style={{ padding: '16px 18px', fontSize: 12, color: 'var(--anka-text-tertiary)' }}>
+              Searching...
+            </div>
+          )}
           {!loading && query && results.length === 0 && (
-            <div className="px-4 py-6 text-center text-sm text-[var(--anka-text-secondary)]">No results found.</div>
+            <div style={{ padding: '32px 18px', textAlign: 'center', fontSize: 13, color: 'var(--anka-text-tertiary)' }}>
+              No results found
+            </div>
           )}
           {results.map((r, i) => (
             <button
               key={`${r.type}-${r.id}`}
               onClick={() => selectResult(r)}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition cursor-pointer ${
-                i === selectedIdx ? 'bg-[var(--anka-accent)]/10' : 'hover:bg-[var(--anka-bg-tertiary)]'
-              }`}
+              className="cursor-pointer"
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: 14, padding: '12px 18px',
+                textAlign: 'left', border: 'none', color: 'inherit',
+                background: i === selectedIdx ? 'var(--anka-accent-muted)' : 'transparent',
+                transition: 'all 0.1s ease',
+              }}
+              onMouseEnter={(e) => { setSelectedIdx(i); e.currentTarget.style.background = 'var(--anka-accent-muted)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
             >
-              <span className="text-lg">{r.icon}</span>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium truncate">{r.label}</div>
-                <div className="text-[10px] text-[var(--anka-text-secondary)] capitalize">{r.type} · {r.sub}</div>
+              <span style={{ fontSize: 18, flexShrink: 0 }}>{r.icon}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.label}</div>
+                <div style={{ fontSize: 11, color: 'var(--anka-text-tertiary)', textTransform: 'capitalize', marginTop: 1 }}>{r.type} · {r.sub}</div>
               </div>
-              <span className="text-xs text-[var(--anka-text-secondary)]">↵</span>
+              <span style={{ fontSize: 11, color: 'var(--anka-text-tertiary)' }}>↵</span>
             </button>
           ))}
         </div>
 
-        {/* Footer */}
+        {/* Footer hints */}
         {results.length > 0 && (
-          <div className="px-4 py-2 border-t border-[var(--anka-border)] flex gap-4 text-[10px] text-[var(--anka-text-secondary)]">
+          <div style={{ padding: '8px 18px', borderTop: '1px solid var(--anka-border-subtle)', display: 'flex', gap: 16, fontSize: 10, color: 'var(--anka-text-tertiary)' }}>
             <span>↑↓ Navigate</span>
             <span>↵ Open</span>
             <span>ESC Close</span>

@@ -4,6 +4,18 @@ import { useAuth } from '../context/AuthContext.jsx';
 
 const DEPARTMENTS = ['design', 'development', 'marketing'];
 
+const inputStyle = {
+  width: '100%',
+  padding: '12px 16px',
+  borderRadius: 12,
+  border: '1px solid var(--anka-border)',
+  background: 'var(--anka-bg-surface)',
+  color: 'var(--anka-text-primary)',
+  fontSize: 14,
+  outline: 'none',
+  transition: 'all 0.2s ease',
+};
+
 export default function Login() {
   const { signIn, signUp } = useAuth();
   const navigate = useNavigate();
@@ -40,71 +52,101 @@ export default function Login() {
   }
 
   return (
-    <div className="h-screen w-screen flex items-center justify-center bg-[var(--anka-bg-primary)]">
-      {/* Background gradient blobs */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -left-40 w-96 h-96 rounded-full bg-[var(--anka-accent)] opacity-10 blur-3xl" />
-        <div className="absolute -bottom-40 -right-40 w-96 h-96 rounded-full bg-purple-500 opacity-10 blur-3xl" />
+    <div style={{
+      height: '100vh', width: '100vw', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'var(--anka-bg-primary)', position: 'relative', overflow: 'hidden',
+    }}>
+      {/* Ambient gradient orbs */}
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+        <div style={{
+          position: 'absolute', top: '-20%', left: '-10%', width: 600, height: 600, borderRadius: '50%',
+          background: 'radial-gradient(circle, var(--anka-accent-glow) 0%, transparent 70%)',
+          filter: 'blur(80px)', opacity: 0.6, animation: 'anka-float 8s ease-in-out infinite',
+        }} />
+        <div style={{
+          position: 'absolute', bottom: '-20%', right: '-10%', width: 500, height: 500, borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(167, 139, 250, 0.15) 0%, transparent 70%)',
+          filter: 'blur(80px)', opacity: 0.5, animation: 'anka-float 10s ease-in-out infinite reverse',
+        }} />
+        <div style={{
+          position: 'absolute', top: '40%', right: '20%', width: 300, height: 300, borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(96, 165, 250, 0.08) 0%, transparent 70%)',
+          filter: 'blur(60px)', animation: 'anka-float 12s ease-in-out infinite',
+        }} />
       </div>
 
-      <div className="relative z-10 w-full max-w-md mx-4">
+      <div className="anka-fade-in" style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 420, margin: '0 24px' }}>
         {/* Logo */}
-        <div className="text-center mb-8">
-          <h1 className="text-5xl font-bold bg-gradient-to-r from-[var(--anka-accent)] to-purple-400 bg-clip-text text-transparent">
+        <div style={{ textAlign: 'center', marginBottom: 40 }}>
+          <h1 style={{
+            fontSize: 42, fontWeight: 700, letterSpacing: '-0.03em', lineHeight: 1,
+            background: 'linear-gradient(135deg, var(--anka-accent), #a78bfa, #60a5fa)',
+            backgroundSize: '200% 200%', animation: 'anka-gradient-flow 6s ease infinite',
+            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text',
+          }}>
             Anka OS
           </h1>
-          <p className="text-[var(--anka-text-secondary)] mt-2 text-sm">
-            Anka Studio Workspace
+          <p style={{ color: 'var(--anka-text-tertiary)', marginTop: 8, fontSize: 14, fontWeight: 400 }}>
+            Your creative workspace, reimagined
           </p>
         </div>
 
         {/* Card */}
-        <div className="bg-[var(--anka-bg-secondary)] border border-[var(--anka-border)] rounded-2xl p-8 shadow-2xl">
-          <h2 className="text-xl font-semibold mb-6">
-            {isRegister ? 'Create Account' : 'Welcome Back'}
+        <div className="anka-glass-heavy" style={{
+          borderRadius: 20, padding: 36, border: '1px solid var(--anka-border)',
+          boxShadow: 'var(--anka-shadow-xl), var(--anka-shadow-glow)',
+        }}>
+          <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 28, letterSpacing: '-0.02em' }}>
+            {isRegister ? 'Create your account' : 'Welcome back'}
           </h2>
 
           {error && (
-            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+            <div style={{
+              marginBottom: 20, padding: '12px 16px', borderRadius: 12,
+              background: 'var(--anka-danger-muted)', border: '1px solid rgba(248, 113, 113, 0.2)',
+              color: 'var(--anka-danger)', fontSize: 13,
+            }}>
               {error}
             </div>
           )}
 
           {success && (
-            <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg text-green-400 text-sm">
+            <div style={{
+              marginBottom: 20, padding: '12px 16px', borderRadius: 12,
+              background: 'var(--anka-success-muted)', border: '1px solid rgba(52, 211, 153, 0.2)',
+              color: 'var(--anka-success)', fontSize: 13,
+            }}>
               {success}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
             {isRegister && (
               <>
                 <div>
-                  <label className="block text-sm text-[var(--anka-text-secondary)] mb-1">
+                  <label style={{ display: 'block', fontSize: 13, color: 'var(--anka-text-secondary)', marginBottom: 6, fontWeight: 500 }}>
                     Full Name
                   </label>
                   <input
-                    type="text"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    required
-                    className="w-full px-4 py-3 bg-[var(--anka-bg-tertiary)] border border-[var(--anka-border)] rounded-lg text-[var(--anka-text-primary)] placeholder-[var(--anka-text-secondary)] focus:outline-none focus:border-[var(--anka-accent)] transition"
-                    placeholder="John Doe"
+                    type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} required
+                    style={inputStyle} placeholder="John Doe"
+                    onFocus={(e) => { e.target.style.borderColor = 'var(--anka-accent)'; e.target.style.boxShadow = '0 0 0 3px var(--anka-accent-soft)'; }}
+                    onBlur={(e) => { e.target.style.borderColor = 'var(--anka-border)'; e.target.style.boxShadow = 'none'; }}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-[var(--anka-text-secondary)] mb-1">
+                  <label style={{ display: 'block', fontSize: 13, color: 'var(--anka-text-secondary)', marginBottom: 6, fontWeight: 500 }}>
                     Department
                   </label>
                   <select
-                    value={department}
-                    onChange={(e) => setDepartment(e.target.value)}
-                    className="w-full px-4 py-3 bg-[var(--anka-bg-tertiary)] border border-[var(--anka-border)] rounded-lg text-[var(--anka-text-primary)] focus:outline-none focus:border-[var(--anka-accent)] transition"
+                    value={department} onChange={(e) => setDepartment(e.target.value)}
+                    style={{ ...inputStyle, cursor: 'pointer' }}
+                    onFocus={(e) => { e.target.style.borderColor = 'var(--anka-accent)'; e.target.style.boxShadow = '0 0 0 3px var(--anka-accent-soft)'; }}
+                    onBlur={(e) => { e.target.style.borderColor = 'var(--anka-border)'; e.target.style.boxShadow = 'none'; }}
                   >
                     {DEPARTMENTS.map((d) => (
-                      <option key={d} value={d}>
-                        {d.charAt(0).toUpperCase() + d.slice(1)}
-                      </option>
+                      <option key={d} value={d}>{d.charAt(0).toUpperCase() + d.slice(1)}</option>
                     ))}
                   </select>
                 </div>
@@ -112,64 +154,61 @@ export default function Login() {
             )}
 
             <div>
-              <label className="block text-sm text-[var(--anka-text-secondary)] mb-1">
+              <label style={{ display: 'block', fontSize: 13, color: 'var(--anka-text-secondary)', marginBottom: 6, fontWeight: 500 }}>
                 Email
               </label>
               <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="w-full px-4 py-3 bg-[var(--anka-bg-tertiary)] border border-[var(--anka-border)] rounded-lg text-[var(--anka-text-primary)] placeholder-[var(--anka-text-secondary)] focus:outline-none focus:border-[var(--anka-accent)] transition"
-                placeholder="you@ankastudio.com"
+                type="email" value={email} onChange={(e) => setEmail(e.target.value)} required
+                style={inputStyle} placeholder="you@ankastudio.com"
+                onFocus={(e) => { e.target.style.borderColor = 'var(--anka-accent)'; e.target.style.boxShadow = '0 0 0 3px var(--anka-accent-soft)'; }}
+                onBlur={(e) => { e.target.style.borderColor = 'var(--anka-border)'; e.target.style.boxShadow = 'none'; }}
               />
             </div>
 
             <div>
-              <label className="block text-sm text-[var(--anka-text-secondary)] mb-1">
+              <label style={{ display: 'block', fontSize: 13, color: 'var(--anka-text-secondary)', marginBottom: 6, fontWeight: 500 }}>
                 Password
               </label>
               <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={6}
-                className="w-full px-4 py-3 bg-[var(--anka-bg-tertiary)] border border-[var(--anka-border)] rounded-lg text-[var(--anka-text-primary)] placeholder-[var(--anka-text-secondary)] focus:outline-none focus:border-[var(--anka-accent)] transition"
-                placeholder="••••••••"
+                type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6}
+                style={inputStyle} placeholder="••••••••"
+                onFocus={(e) => { e.target.style.borderColor = 'var(--anka-accent)'; e.target.style.boxShadow = '0 0 0 3px var(--anka-accent-soft)'; }}
+                onBlur={(e) => { e.target.style.borderColor = 'var(--anka-border)'; e.target.style.boxShadow = 'none'; }}
               />
             </div>
 
             <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-3 bg-[var(--anka-accent)] hover:bg-[var(--anka-accent-hover)] text-white font-medium rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              type="submit" disabled={loading} className="cursor-pointer"
+              style={{
+                width: '100%', padding: '13px 0', borderRadius: 12, border: 'none',
+                background: 'linear-gradient(135deg, var(--anka-accent), #a78bfa)',
+                color: 'white', fontSize: 14, fontWeight: 600, letterSpacing: '-0.01em',
+                cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1,
+                transition: 'all 0.2s ease',
+                boxShadow: '0 4px 16px var(--anka-accent-glow)',
+              }}
+              onMouseEnter={(e) => { if (!loading) { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 6px 24px var(--anka-accent-glow)'; } }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 4px 16px var(--anka-accent-glow)'; }}
             >
-              {loading
-                ? 'Please wait...'
-                : isRegister
-                  ? 'Create Account'
-                  : 'Sign In'}
+              {loading ? 'Please wait...' : isRegister ? 'Create Account' : 'Sign In'}
             </button>
           </form>
 
-          <div className="mt-6 text-center">
+          <div style={{ marginTop: 24, textAlign: 'center' }}>
             <button
-              onClick={() => {
-                setIsRegister(!isRegister);
-                setError('');
-                setSuccess('');
+              onClick={() => { setIsRegister(!isRegister); setError(''); setSuccess(''); }}
+              className="cursor-pointer"
+              style={{
+                background: 'none', border: 'none', fontSize: 13,
+                color: 'var(--anka-text-accent)', fontWeight: 500,
               }}
-              className="text-sm text-[var(--anka-accent)] hover:text-[var(--anka-accent-hover)] transition cursor-pointer"
             >
-              {isRegister
-                ? 'Already have an account? Sign In'
-                : "Don't have an account? Register"}
+              {isRegister ? 'Already have an account? Sign In' : "Don't have an account? Register"}
             </button>
           </div>
         </div>
 
-        <p className="text-center text-xs text-[var(--anka-text-secondary)] mt-6">
+        <p style={{ textAlign: 'center', fontSize: 11, color: 'var(--anka-text-tertiary)', marginTop: 32 }}>
           © 2026 Anka Studio. All rights reserved.
         </p>
       </div>

@@ -123,33 +123,78 @@ export default function Desktop() {
   }, []);
 
   return (
-    <div className="h-screen w-screen bg-[var(--anka-bg-primary)] flex flex-col overflow-hidden select-none">
-      {/* Desktop area with subtle grid */}
+    <div style={{
+      height: '100vh', width: '100vw', background: 'var(--anka-bg-primary)',
+      display: 'flex', flexDirection: 'column', overflow: 'hidden', userSelect: 'none',
+    }}>
+      {/* Desktop area */}
       <div
         className="flex-1 relative"
-        style={{
-          backgroundImage:
-            'radial-gradient(circle at 1px 1px, rgba(108,92,231,0.03) 1px, transparent 0)',
-          backgroundSize: '40px 40px',
-        }}
+        style={{ position: 'relative' }}
         onClick={() => showLauncher && setShowLauncher(false)}
       >
-        {/* Desktop icons — quick access to apps */}
-        <div className="absolute top-6 left-6 flex flex-col gap-4">
-          {apps.slice(0, 6).map((app) => (
+        {/* Ambient background — soft gradient mesh */}
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+          <div style={{
+            position: 'absolute', top: '5%', right: '10%', width: 400, height: 400, borderRadius: '50%',
+            background: 'radial-gradient(circle, var(--anka-accent-soft) 0%, transparent 70%)',
+            filter: 'blur(80px)',
+          }} />
+          <div style={{
+            position: 'absolute', bottom: '10%', left: '5%', width: 300, height: 300, borderRadius: '50%',
+            background: 'radial-gradient(circle, rgba(167, 139, 250, 0.04) 0%, transparent 70%)',
+            filter: 'blur(60px)',
+          }} />
+          {/* Subtle dot grid */}
+          <div style={{
+            position: 'absolute', inset: 0,
+            backgroundImage: 'radial-gradient(circle at 1px 1px, var(--anka-border-subtle) 1px, transparent 0)',
+            backgroundSize: '48px 48px',
+          }} />
+        </div>
+
+        {/* Desktop icons — refined with hover effect */}
+        <div style={{ position: 'absolute', top: 24, left: 24, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {apps.slice(0, 8).map((app) => (
             <button
               key={app.id}
               onDoubleClick={() => openApp(app)}
-              className="flex flex-col items-center gap-1 p-3 rounded-xl hover:bg-white/5 transition w-20 cursor-pointer"
+              className="cursor-pointer"
               title={app.name}
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                padding: '10px 8px', borderRadius: 12, width: 76, background: 'transparent',
+                border: 'none', color: 'inherit', transition: 'all 0.2s ease',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--anka-bg-hover)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
             >
-              <span className="text-3xl">{app.icon}</span>
-              <span className="text-[10px] text-[var(--anka-text-secondary)] truncate w-full text-center">
+              <span style={{ fontSize: 28, lineHeight: 1, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))' }}>{app.icon}</span>
+              <span style={{
+                fontSize: 10, fontWeight: 500, color: 'var(--anka-text-secondary)',
+                width: '100%', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                textShadow: '0 1px 2px rgba(0,0,0,0.3)',
+              }}>
                 {app.name}
               </span>
             </button>
           ))}
         </div>
+
+        {/* Cmd+K hint */}
+        {windows.length === 0 && !showLauncher && !showSearch && (
+          <div className="anka-fade-in" style={{
+            position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+            textAlign: 'center', pointerEvents: 'none',
+          }}>
+            <p style={{ fontSize: 14, color: 'var(--anka-text-tertiary)', marginBottom: 12 }}>
+              Press <kbd style={{
+                padding: '3px 8px', borderRadius: 6, background: 'var(--anka-bg-surface)',
+                border: '1px solid var(--anka-border)', fontSize: 12, color: 'var(--anka-text-secondary)',
+              }}>⌘K</kbd> to search or double-click an app to get started
+            </p>
+          </div>
+        )}
 
         {/* Windows */}
         <WindowManager

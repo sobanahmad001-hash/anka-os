@@ -22,6 +22,7 @@ export default function Window({
 }) {
   const headerRef = useRef(null);
   const [dragging, setDragging] = useState(false);
+  const [hovering, setHovering] = useState(false);
 
   const handleMouseDown = useCallback(
     (e) => {
@@ -80,69 +81,91 @@ export default function Window({
 
   return (
     <div
-      className={`absolute flex flex-col rounded-xl overflow-hidden border transition-shadow ${
-        isActive
-          ? 'border-[var(--anka-accent)]/40 shadow-2xl shadow-[var(--anka-accent)]/10'
-          : 'border-[var(--anka-border)] shadow-lg'
-      }`}
-      style={style}
+      className="absolute flex flex-col overflow-hidden anka-scale-in"
+      style={{
+        ...style,
+        borderRadius: maximized ? 0 : 16,
+        boxShadow: isActive
+          ? 'var(--anka-shadow-xl), var(--anka-shadow-glow)'
+          : 'var(--anka-shadow-lg)',
+        border: `1px solid ${isActive ? 'var(--anka-border-accent)' : 'var(--anka-border)'}`,
+        transition: dragging ? 'none' : 'box-shadow 0.3s ease, border-color 0.3s ease',
+      }}
       onMouseDown={onFocus}
     >
-      {/* Title bar */}
+      {/* Title bar — sleek glass effect */}
       <div
         ref={headerRef}
         onMouseDown={handleMouseDown}
         onDoubleClick={onMaximize}
-        className={`h-10 flex items-center px-3 gap-2 shrink-0 ${
-          dragging ? 'cursor-grabbing' : 'cursor-grab'
-        } ${
-          isActive
-            ? 'bg-[var(--anka-bg-secondary)]'
-            : 'bg-[var(--anka-bg-secondary)]/80'
-        }`}
+        onMouseEnter={() => setHovering(true)}
+        onMouseLeave={() => setHovering(false)}
+        className="anka-glass-heavy shrink-0"
+        style={{
+          height: 44,
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 14px',
+          gap: 10,
+          cursor: dragging ? 'grabbing' : 'grab',
+          borderBottom: '1px solid var(--anka-border-subtle)',
+        }}
       >
-        <span className="text-sm">{icon}</span>
-        <span className="text-xs font-medium flex-1 truncate text-[var(--anka-text-secondary)]">
-          {title}
-        </span>
-
-        {/* Window controls */}
-        <div className="flex items-center gap-1.5">
+        {/* Traffic lights */}
+        <div className="flex items-center gap-2">
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onMinimize();
-            }}
-            className="w-3 h-3 rounded-full bg-yellow-500 hover:bg-yellow-400 transition cursor-pointer"
-          />
+            onClick={(e) => { e.stopPropagation(); onClose(); }}
+            className="group cursor-pointer"
+            style={{ width: 13, height: 13, borderRadius: '50%', background: hovering || isActive ? '#ff5f57' : 'var(--anka-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }}
+          >
+            {hovering && <svg width="7" height="7" viewBox="0 0 7 7" fill="none"><path d="M1 1l5 5M6 1L1 6" stroke="rgba(0,0,0,0.5)" strokeWidth="1.5" strokeLinecap="round" /></svg>}
+          </button>
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onMaximize();
-            }}
-            className="w-3 h-3 rounded-full bg-green-500 hover:bg-green-400 transition cursor-pointer"
-          />
+            onClick={(e) => { e.stopPropagation(); onMinimize(); }}
+            className="group cursor-pointer"
+            style={{ width: 13, height: 13, borderRadius: '50%', background: hovering || isActive ? '#febc2e' : 'var(--anka-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }}
+          >
+            {hovering && <svg width="7" height="2" viewBox="0 0 7 2" fill="none"><path d="M0.5 1h6" stroke="rgba(0,0,0,0.5)" strokeWidth="1.5" strokeLinecap="round" /></svg>}
+          </button>
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose();
-            }}
-            className="w-3 h-3 rounded-full bg-red-500 hover:bg-red-400 transition cursor-pointer"
-          />
+            onClick={(e) => { e.stopPropagation(); onMaximize(); }}
+            className="group cursor-pointer"
+            style={{ width: 13, height: 13, borderRadius: '50%', background: hovering || isActive ? '#28c840' : 'var(--anka-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s ease' }}
+          >
+            {hovering && <svg width="7" height="7" viewBox="0 0 7 7" fill="none"><path d="M1 2.5V1h4.5M6 4.5V6H1.5" stroke="rgba(0,0,0,0.5)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+          </button>
         </div>
+
+        {/* Title centered */}
+        <div className="flex-1 flex items-center justify-center gap-2 min-w-0">
+          <span className="text-sm opacity-70">{icon}</span>
+          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--anka-text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {title}
+          </span>
+        </div>
+
+        {/* Spacer to balance traffic lights */}
+        <div style={{ width: 55 }} />
       </div>
 
       {/* Content area */}
-      <div className="flex-1 bg-[var(--anka-bg-primary)] overflow-auto">
+      <div className="flex-1 overflow-auto" style={{ background: 'var(--anka-bg-primary)' }}>
         {AppComponent && <AppComponent openAppById={openAppById} />}
       </div>
 
-      {/* Resize handle */}
+      {/* Resize handle — subtle corner grip */}
       {!maximized && (
         <div
           onMouseDown={handleResizeMouseDown}
-          className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize"
-        />
+          className="absolute bottom-0 right-0 cursor-se-resize opacity-0 hover:opacity-40 transition-opacity"
+          style={{ width: 18, height: 18 }}
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" style={{ position: 'absolute', bottom: 3, right: 3 }}>
+            <line x1="9" y1="1" x2="1" y2="9" stroke="var(--anka-text-tertiary)" strokeWidth="1" />
+            <line x1="9" y1="4" x2="4" y2="9" stroke="var(--anka-text-tertiary)" strokeWidth="1" />
+            <line x1="9" y1="7" x2="7" y2="9" stroke="var(--anka-text-tertiary)" strokeWidth="1" />
+          </svg>
+        </div>
       )}
     </div>
   );

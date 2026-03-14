@@ -1,34 +1,96 @@
 @import "tailwindcss";
 
-/* ─── Anka OS Design Tokens (Dark — default) ────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════════
+   Anka OS — Fluid Design System
+   Inspired by Claude's warmth & spaciousness + Anka's vibrant identity
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Dark Theme (default) ───────────────────────────────────────────────────── */
 :root,
 [data-theme="dark"] {
-  --anka-bg-primary: #0f1117;
-  --anka-bg-secondary: #1a1d27;
-  --anka-bg-tertiary: #242837;
-  --anka-accent: #6c5ce7;
-  --anka-accent-hover: #7c6ef7;
-  --anka-text-primary: #e8e8ed;
-  --anka-text-secondary: #9ca3af;
-  --anka-border: #2d3148;
-  --anka-success: #00d97e;
-  --anka-danger: #ff4757;
+  --anka-bg-primary: #111114;
+  --anka-bg-secondary: #19191f;
+  --anka-bg-tertiary: #222230;
+  --anka-bg-elevated: #1e1e28;
+  --anka-bg-surface: rgba(255, 255, 255, 0.03);
+  --anka-bg-hover: rgba(255, 255, 255, 0.06);
+
+  --anka-accent: #8b7cf6;
+  --anka-accent-hover: #a09afb;
+  --anka-accent-muted: rgba(139, 124, 246, 0.12);
+  --anka-accent-soft: rgba(139, 124, 246, 0.06);
+  --anka-accent-glow: rgba(139, 124, 246, 0.2);
+
+  --anka-text-primary: #ededf0;
+  --anka-text-secondary: #8e8ea0;
+  --anka-text-tertiary: #64647a;
+  --anka-text-accent: #b4a9fc;
+
+  --anka-border: rgba(255, 255, 255, 0.06);
+  --anka-border-subtle: rgba(255, 255, 255, 0.03);
+  --anka-border-accent: rgba(139, 124, 246, 0.2);
+
+  --anka-success: #34d399;
+  --anka-success-muted: rgba(52, 211, 153, 0.12);
+  --anka-warning: #fbbf24;
+  --anka-warning-muted: rgba(251, 191, 36, 0.12);
+  --anka-danger: #f87171;
+  --anka-danger-muted: rgba(248, 113, 113, 0.12);
+
+  --anka-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --anka-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --anka-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --anka-shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.5);
+  --anka-shadow-glow: 0 0 40px rgba(139, 124, 246, 0.08);
+
+  --anka-glass: rgba(25, 25, 31, 0.8);
+  --anka-glass-heavy: rgba(25, 25, 31, 0.92);
+  --anka-glass-light: rgba(25, 25, 31, 0.6);
 }
 
 /* ─── Light Theme ────────────────────────────────────────────────────────────── */
 [data-theme="light"] {
-  --anka-bg-primary: #f5f5f7;
+  --anka-bg-primary: #f8f7f4;
   --anka-bg-secondary: #ffffff;
-  --anka-bg-tertiary: #e8eaed;
-  --anka-accent: #6c5ce7;
-  --anka-accent-hover: #5a4bd6;
-  --anka-text-primary: #1a1d27;
-  --anka-text-secondary: #6b7280;
-  --anka-border: #d1d5db;
+  --anka-bg-tertiary: #f0eeeb;
+  --anka-bg-elevated: #ffffff;
+  --anka-bg-surface: rgba(0, 0, 0, 0.02);
+  --anka-bg-hover: rgba(0, 0, 0, 0.04);
+
+  --anka-accent: #7c6cf0;
+  --anka-accent-hover: #6a58e0;
+  --anka-accent-muted: rgba(124, 108, 240, 0.1);
+  --anka-accent-soft: rgba(124, 108, 240, 0.05);
+  --anka-accent-glow: rgba(124, 108, 240, 0.15);
+
+  --anka-text-primary: #1a1a2e;
+  --anka-text-secondary: #6e6e80;
+  --anka-text-tertiary: #9e9eaf;
+  --anka-text-accent: #6a58e0;
+
+  --anka-border: rgba(0, 0, 0, 0.07);
+  --anka-border-subtle: rgba(0, 0, 0, 0.04);
+  --anka-border-accent: rgba(124, 108, 240, 0.2);
+
   --anka-success: #059669;
+  --anka-success-muted: rgba(5, 150, 105, 0.1);
+  --anka-warning: #d97706;
+  --anka-warning-muted: rgba(217, 119, 6, 0.1);
   --anka-danger: #dc2626;
+  --anka-danger-muted: rgba(220, 38, 38, 0.1);
+
+  --anka-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --anka-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --anka-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.1);
+  --anka-shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.12);
+  --anka-shadow-glow: 0 0 40px rgba(124, 108, 240, 0.06);
+
+  --anka-glass: rgba(255, 255, 255, 0.8);
+  --anka-glass-heavy: rgba(255, 255, 255, 0.92);
+  --anka-glass-light: rgba(255, 255, 255, 0.6);
 }
 
+/* ─── Base Reset ─────────────────────────────────────────────────────────────── */
 * {
   box-sizing: border-box;
 }
@@ -36,12 +98,16 @@
 body {
   margin: 0;
   padding: 0;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   background: var(--anka-bg-primary);
   color: var(--anka-text-primary);
   overflow: hidden;
   height: 100vh;
   width: 100vw;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em;
+  line-height: 1.5;
 }
 
 #root {
@@ -49,23 +115,99 @@ body {
   width: 100vw;
 }
 
-/* ─── Scrollbar Styling ──────────────────────────────────────────────────────── */
+/* ─── Fluid Scrollbars ───────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--anka-bg-secondary);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--anka-bg-tertiary);
-  border-radius: 3px;
+  background: var(--anka-border);
+  border-radius: 100px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--anka-accent);
+  background: var(--anka-text-tertiary);
 }
 
 /* ─── Selection ──────────────────────────────────────────────────────────────── */
 ::selection {
-  background: var(--anka-accent);
-  color: white;
+  background: var(--anka-accent-muted);
+  color: var(--anka-text-primary);
+}
+
+/* ─── Fluid Animations ───────────────────────────────────────────────────────── */
+@keyframes anka-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes anka-scale-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes anka-slide-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes anka-slide-down {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes anka-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes anka-pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes anka-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes anka-gradient-flow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* ─── Utility Classes ────────────────────────────────────────────────────────── */
+.anka-fade-in { animation: anka-fade-in 0.3s ease-out; }
+.anka-scale-in { animation: anka-scale-in 0.25s ease-out; }
+.anka-slide-up { animation: anka-slide-up 0.35s cubic-bezier(0.16, 1, 0.3, 1); }
+.anka-slide-down { animation: anka-slide-down 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
+
+/* ─── Glass Panel ────────────────────────────────────────────────────────────── */
+.anka-glass {
+  background: var(--anka-glass);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+}
+
+.anka-glass-heavy {
+  background: var(--anka-glass-heavy);
+  backdrop-filter: blur(40px) saturate(1.5);
+  -webkit-backdrop-filter: blur(40px) saturate(1.5);
+}
+
+/* ─── Focus Styles ───────────────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--anka-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ─── Smooth Everything ──────────────────────────────────────────────────────── */
+button, a, input, select, textarea {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+input, select, textarea {
+  font-family: inherit;
 }

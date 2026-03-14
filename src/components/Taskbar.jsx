@@ -28,64 +28,113 @@ export default function Taskbar({
   const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const dateStr = time.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 
-  const departmentColors = {
-    design: 'from-pink-500 to-purple-500',
-    development: 'from-blue-500 to-cyan-500',
-    marketing: 'from-orange-500 to-yellow-500',
+  const departmentLabel = {
+    design: { emoji: '🎨', color: 'var(--anka-accent)' },
+    development: { emoji: '⚡', color: '#60a5fa' },
+    marketing: { emoji: '📣', color: '#f59e0b' },
   };
 
-  const gradientClass =
-    departmentColors[profile?.department] || departmentColors.development;
+  const dept = departmentLabel[profile?.department] || departmentLabel.development;
+
+  // Shared popup style
+  const popupStyle = 'anka-glass-heavy anka-slide-up';
 
   return (
-    <div className="h-14 bg-[var(--anka-bg-secondary)]/95 backdrop-blur-xl border-t border-[var(--anka-border)] flex items-center px-3 gap-2 z-[9999]">
-      {/* Start / Launcher button */}
+    <div
+      className="anka-glass-heavy z-[9999]"
+      style={{
+        height: 52,
+        borderTop: '1px solid var(--anka-border-subtle)',
+        display: 'flex',
+        alignItems: 'center',
+        padding: '0 12px',
+        gap: 6,
+      }}
+    >
+      {/* Launcher button */}
       <button
         onClick={onToggleLauncher}
-        className={`h-10 w-10 rounded-xl flex items-center justify-center transition cursor-pointer ${
-          showLauncher
-            ? 'bg-[var(--anka-accent)]'
-            : 'hover:bg-[var(--anka-bg-tertiary)]'
-        }`}
+        className="cursor-pointer"
         title="App Launcher"
+        style={{
+          width: 38,
+          height: 38,
+          borderRadius: 10,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: showLauncher ? 'var(--anka-accent)' : 'transparent',
+          color: showLauncher ? 'white' : 'var(--anka-text-secondary)',
+          transition: 'all 0.2s ease',
+        }}
+        onMouseEnter={(e) => { if (!showLauncher) e.currentTarget.style.background = 'var(--anka-bg-hover)'; }}
+        onMouseLeave={(e) => { if (!showLauncher) e.currentTarget.style.background = 'transparent'; }}
       >
-        <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
-          <rect x="1" y="1" width="7" height="7" rx="1.5" />
-          <rect x="10" y="1" width="7" height="7" rx="1.5" />
-          <rect x="1" y="10" width="7" height="7" rx="1.5" />
-          <rect x="10" y="10" width="7" height="7" rx="1.5" />
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+          <rect x="1" y="1" width="6" height="6" rx="2" />
+          <rect x="9" y="1" width="6" height="6" rx="2" />
+          <rect x="1" y="9" width="6" height="6" rx="2" />
+          <rect x="9" y="9" width="6" height="6" rx="2" />
         </svg>
       </button>
 
-      {/* Separator */}
-      <div className="w-px h-6 bg-[var(--anka-border)]" />
+      {/* Subtle divider */}
+      <div style={{ width: 1, height: 20, background: 'var(--anka-border)', margin: '0 4px' }} />
 
-      {/* Open windows */}
-      <div className="flex-1 flex items-center gap-1 overflow-x-auto">
-        {windows.map((w) => (
-          <button
-            key={w.id}
-            onClick={() => onFocus(w.id)}
-            className={`h-9 px-3 rounded-lg flex items-center gap-2 text-xs transition truncate max-w-48 cursor-pointer ${
-              w.id === activeWindowId
-                ? 'bg-[var(--anka-accent)]/20 text-[var(--anka-accent)]'
-                : 'hover:bg-[var(--anka-bg-tertiary)] text-[var(--anka-text-secondary)]'
-            } ${w.minimized ? 'opacity-50' : ''}`}
-          >
-            <span>{w.icon}</span>
-            <span className="truncate">{w.title}</span>
-          </button>
-        ))}
+      {/* Open windows — pill style */}
+      <div className="flex-1 flex items-center gap-1 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+        {windows.map((w) => {
+          const isActive = w.id === activeWindowId;
+          return (
+            <button
+              key={w.id}
+              onClick={() => onFocus(w.id)}
+              className="cursor-pointer shrink-0"
+              style={{
+                height: 34,
+                padding: '0 12px',
+                borderRadius: 8,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 7,
+                fontSize: 12,
+                fontWeight: isActive ? 500 : 400,
+                maxWidth: 180,
+                overflow: 'hidden',
+                color: isActive ? 'var(--anka-text-accent)' : 'var(--anka-text-secondary)',
+                background: isActive ? 'var(--anka-accent-muted)' : 'transparent',
+                opacity: w.minimized ? 0.45 : 1,
+                transition: 'all 0.2s ease',
+              }}
+              onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--anka-bg-hover)'; }}
+              onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
+            >
+              <span style={{ fontSize: 13, flexShrink: 0 }}>{w.icon}</span>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.title}</span>
+              {isActive && <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--anka-accent)', flexShrink: 0 }} />}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Right side — department badge, notifications, time, user */}
-      <div className="flex items-center gap-3">
-        {/* Department badge */}
+      {/* Right side controls */}
+      <div className="flex items-center gap-1">
+        {/* Department chip */}
         {profile?.department && (
           <span
-            className={`text-[10px] font-semibold uppercase px-2 py-1 rounded-full bg-gradient-to-r ${gradientClass} text-white`}
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              padding: '4px 10px',
+              borderRadius: 100,
+              background: 'var(--anka-accent-muted)',
+              color: 'var(--anka-text-accent)',
+              marginRight: 4,
+            }}
           >
-            {profile.department}
+            {dept.emoji} {profile.department}
           </span>
         )}
 
@@ -93,37 +142,54 @@ export default function Taskbar({
         <div className="relative">
           <button
             onClick={() => { setShowPresence((s) => !s); setShowNotifs(false); setShowUserMenu(false); }}
-            className="h-9 px-2 rounded-lg hover:bg-[var(--anka-bg-tertiary)] flex items-center gap-1.5 transition cursor-pointer"
+            className="cursor-pointer"
             title="Team online"
+            style={{
+              height: 34,
+              padding: '0 10px',
+              borderRadius: 8,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              background: 'transparent',
+              color: 'var(--anka-text-secondary)',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--anka-bg-hover)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
-            <span className="w-2 h-2 rounded-full bg-green-500" />
-            <span className="text-[10px] text-[var(--anka-text-secondary)]">{onlineCount}</span>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--anka-success)' }} />
+            <span style={{ fontSize: 11, fontWeight: 500 }}>{onlineCount}</span>
           </button>
 
           {showPresence && (
-            <div className="absolute bottom-12 right-0 w-64 max-h-72 bg-[var(--anka-bg-secondary)] border border-[var(--anka-border)] rounded-xl shadow-2xl overflow-hidden z-[9999]">
-              <div className="px-3 py-2 border-b border-[var(--anka-border)]">
-                <span className="text-xs font-semibold">Team Status</span>
+            <div className={popupStyle} style={{
+              position: 'absolute', bottom: 48, right: 0, width: 280, maxHeight: 320,
+              borderRadius: 14, border: '1px solid var(--anka-border)', boxShadow: 'var(--anka-shadow-xl)',
+              overflow: 'hidden', zIndex: 9999,
+            }}>
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--anka-border-subtle)' }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>Team Status</span>
               </div>
-              <div className="overflow-y-auto max-h-56">
+              <div style={{ overflowY: 'auto', maxHeight: 260 }}>
                 {teamStatus.length === 0 ? (
-                  <div className="p-4 text-center text-xs text-[var(--anka-text-secondary)]">
+                  <div style={{ padding: 24, textAlign: 'center', fontSize: 12, color: 'var(--anka-text-tertiary)' }}>
                     No team members online
                   </div>
                 ) : (
                   teamStatus.map((member) => {
-                    const statusColor = { online: 'bg-green-500', away: 'bg-yellow-500', busy: 'bg-red-500', offline: 'bg-gray-500' };
+                    const statusColors = { online: 'var(--anka-success)', away: 'var(--anka-warning)', busy: 'var(--anka-danger)', offline: 'var(--anka-text-tertiary)' };
                     return (
-                      <div key={member.user_id} className="px-3 py-2.5 border-b border-[var(--anka-border)] last:border-0 flex items-center gap-2.5">
-                        <div className="relative">
-                          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[var(--anka-accent)] to-purple-500 flex items-center justify-center text-[10px] font-bold">
+                      <div key={member.user_id} style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12, borderBottom: '1px solid var(--anka-border-subtle)' }}>
+                        <div style={{ position: 'relative' }}>
+                          <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg, var(--anka-accent), #a78bfa)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'white' }}>
                             {member.full_name?.charAt(0)?.toUpperCase() || '?'}
                           </div>
-                          <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-[var(--anka-bg-secondary)] ${statusColor[member.status] || 'bg-gray-500'}`} />
+                          <span style={{ position: 'absolute', bottom: -1, right: -1, width: 10, height: 10, borderRadius: '50%', border: '2px solid var(--anka-bg-secondary)', background: statusColors[member.status] || statusColors.offline }} />
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-xs font-medium truncate">{member.full_name}</div>
-                          <div className="text-[10px] text-[var(--anka-text-secondary)] truncate">
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member.full_name}</div>
+                          <div style={{ fontSize: 11, color: 'var(--anka-text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {member.status_text || member.status}
                           </div>
                         </div>
@@ -139,60 +205,83 @@ export default function Taskbar({
         {/* Theme toggle */}
         <button
           onClick={toggleTheme}
-          className="h-9 w-9 rounded-lg hover:bg-[var(--anka-bg-tertiary)] flex items-center justify-center transition cursor-pointer"
+          className="cursor-pointer"
           title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+          style={{
+            width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'transparent', fontSize: 14, transition: 'all 0.2s ease',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--anka-bg-hover)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         >
-          <span className="text-sm">{theme === 'dark' ? '☀️' : '🌙'}</span>
+          {theme === 'dark' ? '☀️' : '🌙'}
         </button>
 
         {/* Notification bell */}
         <div className="relative">
           <button
             onClick={() => { setShowNotifs((s) => !s); setShowUserMenu(false); setShowPresence(false); }}
-            className="h-9 w-9 rounded-lg hover:bg-[var(--anka-bg-tertiary)] flex items-center justify-center transition cursor-pointer relative"
+            className="cursor-pointer relative"
             title="Notifications"
+            style={{
+              width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'transparent', fontSize: 14, transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--anka-bg-hover)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
-            <span className="text-sm">🔔</span>
+            🔔
             {unreadCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 flex items-center justify-center bg-red-500 text-white text-[9px] font-bold rounded-full px-1">
+              <span style={{
+                position: 'absolute', top: 2, right: 2, minWidth: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                borderRadius: 100, background: 'var(--anka-danger)', color: 'white', fontSize: 9, fontWeight: 700, padding: '0 4px',
+              }}>
                 {unreadCount > 99 ? '99+' : unreadCount}
               </span>
             )}
           </button>
 
           {showNotifs && (
-            <div className="absolute bottom-12 right-0 w-80 max-h-96 bg-[var(--anka-bg-secondary)] border border-[var(--anka-border)] rounded-xl shadow-2xl overflow-hidden z-[9999]">
-              <div className="px-3 py-2 border-b border-[var(--anka-border)] flex items-center justify-between">
-                <span className="text-xs font-semibold">Notifications</span>
+            <div className={popupStyle} style={{
+              position: 'absolute', bottom: 48, right: 0, width: 340, maxHeight: 400,
+              borderRadius: 14, border: '1px solid var(--anka-border)', boxShadow: 'var(--anka-shadow-xl)',
+              overflow: 'hidden', zIndex: 9999,
+            }}>
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--anka-border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>Notifications</span>
                 {unreadCount > 0 && (
-                  <button
-                    onClick={markAllRead}
-                    className="text-[10px] text-[var(--anka-accent)] hover:text-[var(--anka-accent-hover)] cursor-pointer"
-                  >
+                  <button onClick={markAllRead} className="cursor-pointer" style={{ fontSize: 11, color: 'var(--anka-accent)', background: 'none', border: 'none', fontWeight: 500 }}>
                     Mark all read
                   </button>
                 )}
               </div>
-              <div className="overflow-y-auto max-h-72">
+              <div style={{ overflowY: 'auto', maxHeight: 340 }}>
                 {notifications.length === 0 ? (
-                  <div className="p-4 text-center text-xs text-[var(--anka-text-secondary)]">
+                  <div style={{ padding: 32, textAlign: 'center', fontSize: 12, color: 'var(--anka-text-tertiary)' }}>
                     No notifications yet
                   </div>
                 ) : (
                   notifications.slice(0, 20).map((n) => (
                     <button
                       key={n.id}
-                      onClick={() => { markAsRead(n.id); }}
-                      className={`w-full text-left px-3 py-2.5 border-b border-[var(--anka-border)] last:border-0 hover:bg-[var(--anka-bg-tertiary)] transition cursor-pointer ${
-                        !n.read ? 'bg-[var(--anka-accent)]/5' : ''
-                      }`}
+                      onClick={() => markAsRead(n.id)}
+                      className="cursor-pointer"
+                      style={{
+                        width: '100%', textAlign: 'left', padding: '12px 16px',
+                        borderBottom: '1px solid var(--anka-border-subtle)',
+                        background: !n.read ? 'var(--anka-accent-soft)' : 'transparent',
+                        display: 'block', transition: 'all 0.15s ease', border: 'none',
+                        color: 'inherit',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--anka-bg-hover)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = !n.read ? 'var(--anka-accent-soft)' : 'transparent'; }}
                     >
-                      <div className="flex items-start gap-2">
-                        {!n.read && <span className="w-1.5 h-1.5 rounded-full bg-[var(--anka-accent)] shrink-0 mt-1.5" />}
-                        <div className="flex-1 min-w-0">
-                          <div className="text-xs font-medium truncate">{n.title}</div>
-                          {n.body && <div className="text-[10px] text-[var(--anka-text-secondary)] truncate">{n.body}</div>}
-                          <div className="text-[9px] text-[var(--anka-text-secondary)] mt-0.5">
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                        {!n.read && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--anka-accent)', flexShrink: 0, marginTop: 6 }} />}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.title}</div>
+                          {n.body && <div style={{ fontSize: 11, color: 'var(--anka-text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>{n.body}</div>}
+                          <div style={{ fontSize: 10, color: 'var(--anka-text-tertiary)', marginTop: 4 }}>
                             {new Date(n.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                           </div>
                         </div>
@@ -206,36 +295,59 @@ export default function Taskbar({
         </div>
 
         {/* Time / Date */}
-        <div className="text-right leading-tight">
-          <div className="text-xs font-medium">{timeStr}</div>
-          <div className="text-[10px] text-[var(--anka-text-secondary)]">{dateStr}</div>
+        <div style={{ textAlign: 'right', lineHeight: 1.3, padding: '0 6px' }}>
+          <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--anka-text-primary)', letterSpacing: '0.02em' }}>{timeStr}</div>
+          <div style={{ fontSize: 10, color: 'var(--anka-text-tertiary)' }}>{dateStr}</div>
         </div>
 
         {/* User avatar / menu */}
         <div className="relative">
           <button
             onClick={() => { setShowUserMenu((s) => !s); setShowNotifs(false); setShowPresence(false); }}
-            className="h-9 w-9 rounded-full bg-gradient-to-br from-[var(--anka-accent)] to-purple-500 flex items-center justify-center text-xs font-bold cursor-pointer relative"
+            className="cursor-pointer"
+            style={{
+              width: 34, height: 34, borderRadius: '50%',
+              background: 'linear-gradient(135deg, var(--anka-accent), #a78bfa)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 12, fontWeight: 700, color: 'white', position: 'relative',
+              border: 'none', transition: 'all 0.2s ease',
+              boxShadow: '0 0 0 0 var(--anka-accent-glow)',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 0 0 3px var(--anka-accent-glow)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.boxShadow = '0 0 0 0 var(--anka-accent-glow)'; }}
           >
             {profile?.full_name?.charAt(0)?.toUpperCase() || '?'}
-            <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[var(--anka-bg-secondary)] ${
-              myStatus === 'online' ? 'bg-green-500' : myStatus === 'away' ? 'bg-yellow-500' : myStatus === 'busy' ? 'bg-red-500' : 'bg-gray-500'
-            }`} />
+            <span style={{
+              position: 'absolute', bottom: -1, right: -1, width: 10, height: 10, borderRadius: '50%',
+              border: '2px solid var(--anka-bg-secondary)',
+              background: myStatus === 'online' ? 'var(--anka-success)' : myStatus === 'away' ? 'var(--anka-warning)' : myStatus === 'busy' ? 'var(--anka-danger)' : 'var(--anka-text-tertiary)',
+            }} />
           </button>
 
           {showUserMenu && (
-            <div className="absolute bottom-12 right-0 w-56 bg-[var(--anka-bg-secondary)] border border-[var(--anka-border)] rounded-xl p-3 shadow-2xl">
-              <div className="mb-3 pb-3 border-b border-[var(--anka-border)]">
-                <div className="font-medium text-sm">
+            <div className={popupStyle} style={{
+              position: 'absolute', bottom: 48, right: 0, width: 240,
+              borderRadius: 14, border: '1px solid var(--anka-border)', boxShadow: 'var(--anka-shadow-xl)',
+              overflow: 'hidden', zIndex: 9999, padding: 8,
+            }}>
+              <div style={{ padding: '12px', borderBottom: '1px solid var(--anka-border-subtle)', marginBottom: 6 }}>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>
                   {profile?.full_name || 'User'}
                 </div>
-                <div className="text-xs text-[var(--anka-text-secondary)]">
+                <div style={{ fontSize: 11, color: 'var(--anka-text-tertiary)', marginTop: 2 }}>
                   {profile?.role || 'member'} · {profile?.department || '—'}
                 </div>
               </div>
               <button
                 onClick={signOut}
-                className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 rounded-lg transition cursor-pointer"
+                className="cursor-pointer"
+                style={{
+                  width: '100%', textAlign: 'left', padding: '10px 12px', fontSize: 13,
+                  color: 'var(--anka-danger)', background: 'transparent', border: 'none',
+                  borderRadius: 8, transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--anka-danger-muted)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
               >
                 Sign Out
               </button>
