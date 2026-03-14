@@ -22,6 +22,7 @@ import TimeTrackerApp from '../apps/TimeTrackerApp.jsx';
 import ReportsApp from '../apps/ReportsApp.jsx';
 import WikiApp from '../apps/WikiApp.jsx';
 import InvoicesApp from '../apps/InvoicesApp.jsx';
+import TemplatesApp from '../apps/TemplatesApp.jsx';
 
 // ─── Shared apps available to all departments ─────────────────────────────────
 const sharedApps = [
@@ -36,7 +37,8 @@ const sharedApps = [
   { id: 'timetracker', name: 'Time Tracker', icon: '⏱️', component: TimeTrackerApp, defaultWidth: 500, defaultHeight: 650 },
   { id: 'reports', name: 'Reports', icon: '📊', component: ReportsApp, defaultWidth: 900, defaultHeight: 650 },
   { id: 'wiki', name: 'Wiki', icon: '📖', component: WikiApp, defaultWidth: 900, defaultHeight: 650 },
-  { id: 'settings', name: 'Settings', icon: '⚙️', component: SettingsApp },
+  { id: 'templates', name: 'Templates', icon: '📋', component: TemplatesApp, defaultWidth: 800, defaultHeight: 600 },
+  { id: 'settings', name: 'Settings', icon: '⚙️', component: SettingsApp, defaultWidth: 750, defaultHeight: 600 },
 ];
 
 // ─── Admin-only apps ──────────────────────────────────────────────────────────

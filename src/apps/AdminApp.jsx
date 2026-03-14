@@ -19,6 +19,7 @@ export default function AdminApp() {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingUser, setEditingUser] = useState(null);
+  const [auditLogs, setAuditLogs] = useState([]);
 
   const isAdmin = profile?.role === 'admin';
 
@@ -28,16 +29,28 @@ export default function AdminApp() {
 
   async function loadData() {
     setLoading(true);
-    const [usersRes, projectsRes] = await Promise.all([
+    const [usersRes, projectsRes, auditRes] = await Promise.all([
       supabase.from('profiles').select('*').order('created_at', { ascending: false }),
       supabase.from('projects').select('*').order('created_at', { ascending: false }),
+      supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(100),
     ]);
     if (usersRes.data) setUsers(usersRes.data);
     if (projectsRes.data) setProjects(projectsRes.data);
+    if (auditRes.data) setAuditLogs(auditRes.data);
     setLoading(false);
   }
 
   async function updateUser(userId, updates) {
+    // Log to audit
+    const oldUser = users.find((u) => u.id === userId);
+    await supabase.from('audit_logs').insert([{
+      actor_id: profile.id,
+      action: 'update_user',
+      entity_type: 'user',
+      entity_id: userId,
+      old_values: { role: oldUser?.role, department: oldUser?.department },
+      new_values: updates,
+    }]);
     await supabase.from('profiles').update(updates).eq('id', userId);
     setEditingUser(null);
     loadData();
@@ -73,6 +86,7 @@ export default function AdminApp() {
     { id: 'overview', label: 'Overview', icon: '📊' },
     { id: 'users', label: 'Users', icon: '👥' },
     { id: 'projects', label: 'Projects', icon: '📋' },
+    { id: 'audit', label: 'Audit Log', icon: '📜' },
   ];
 
   return (
@@ -113,6 +127,8 @@ export default function AdminApp() {
             setEditingUser={setEditingUser}
             onUpdateUser={updateUser}
           />
+        ) : tab === 'audit' ? (
+          <AuditTab logs={auditLogs} users={users} />
         ) : (
           <ProjectsTab projects={projects} />
         )}
@@ -329,6 +345,78 @@ function ProjectsTab({ projects }) {
               {p.due_date && (
                 <div className="text-[10px] text-[var(--anka-text-secondary)] shrink-0">📅 {p.due_date}</div>
               )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Audit Log Tab ────────────────────────────────────────────────────────────
+function AuditTab({ logs, users }) {
+  const userMap = {};
+  users.forEach((u) => { userMap[u.id] = u.full_name || u.id.slice(0, 8); });
+
+  const ACTION_ICONS = {
+    update_user: '👤',
+    create_project: '📋',
+    delete_project: '🗑️',
+    update_project: '✏️',
+    login: '🔑',
+  };
+
+  function timeAgo(dateStr) {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  }
+
+  return (
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold">Audit Log</h2>
+        <span className="text-xs text-[var(--anka-text-secondary)]">{logs.length} entries</span>
+      </div>
+
+      {logs.length === 0 ? (
+        <div className="text-center text-[var(--anka-text-secondary)] text-sm mt-20">No audit logs yet.</div>
+      ) : (
+        <div className="bg-[var(--anka-bg-secondary)] border border-[var(--anka-border)] rounded-xl overflow-hidden">
+          {logs.map((log, i) => (
+            <div
+              key={log.id}
+              className={`px-4 py-3 flex items-start gap-3 ${
+                i !== logs.length - 1 ? 'border-b border-[var(--anka-border)]' : ''
+              } hover:bg-[var(--anka-bg-tertiary)]/50`}
+            >
+              <span className="text-lg mt-0.5">{ACTION_ICONS[log.action] || '📌'}</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm">
+                  <span className="font-medium">{userMap[log.actor_id] || 'System'}</span>
+                  {' '}
+                  <span className="text-[var(--anka-text-secondary)]">
+                    {log.action.replace(/_/g, ' ')}
+                  </span>
+                  {' '}
+                  <span className="text-[var(--anka-text-secondary)]">
+                    on {log.entity_type}
+                  </span>
+                </div>
+                {log.new_values && (
+                  <div className="text-[10px] text-[var(--anka-text-secondary)] mt-1 font-mono">
+                    {JSON.stringify(log.new_values)}
+                  </div>
+                )}
+              </div>
+              <span className="text-[10px] text-[var(--anka-text-secondary)] shrink-0 mt-0.5">
+                {timeAgo(log.created_at)}
+              </span>
             </div>
           ))}
         </div>

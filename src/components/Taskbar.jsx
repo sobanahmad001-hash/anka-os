@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useNotifications } from '../hooks/useNotifications.js';
+import { usePresence } from '../hooks/usePresence.js';
+import { useTheme } from '../hooks/useTheme.jsx';
 
 export default function Taskbar({
   windows,
@@ -11,9 +13,12 @@ export default function Taskbar({
 }) {
   const { profile, signOut } = useAuth();
   const { notifications, unreadCount, markAsRead, markAllRead } = useNotifications();
+  const { teamStatus, myStatus, onlineCount } = usePresence();
+  const { theme, toggleTheme } = useTheme();
   const [time, setTime] = useState(new Date());
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
+  const [showPresence, setShowPresence] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => setTime(new Date()), 1000);
@@ -84,10 +89,66 @@ export default function Taskbar({
           </span>
         )}
 
+        {/* Team presence */}
+        <div className="relative">
+          <button
+            onClick={() => { setShowPresence((s) => !s); setShowNotifs(false); setShowUserMenu(false); }}
+            className="h-9 px-2 rounded-lg hover:bg-[var(--anka-bg-tertiary)] flex items-center gap-1.5 transition cursor-pointer"
+            title="Team online"
+          >
+            <span className="w-2 h-2 rounded-full bg-green-500" />
+            <span className="text-[10px] text-[var(--anka-text-secondary)]">{onlineCount}</span>
+          </button>
+
+          {showPresence && (
+            <div className="absolute bottom-12 right-0 w-64 max-h-72 bg-[var(--anka-bg-secondary)] border border-[var(--anka-border)] rounded-xl shadow-2xl overflow-hidden z-[9999]">
+              <div className="px-3 py-2 border-b border-[var(--anka-border)]">
+                <span className="text-xs font-semibold">Team Status</span>
+              </div>
+              <div className="overflow-y-auto max-h-56">
+                {teamStatus.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-[var(--anka-text-secondary)]">
+                    No team members online
+                  </div>
+                ) : (
+                  teamStatus.map((member) => {
+                    const statusColor = { online: 'bg-green-500', away: 'bg-yellow-500', busy: 'bg-red-500', offline: 'bg-gray-500' };
+                    return (
+                      <div key={member.user_id} className="px-3 py-2.5 border-b border-[var(--anka-border)] last:border-0 flex items-center gap-2.5">
+                        <div className="relative">
+                          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[var(--anka-accent)] to-purple-500 flex items-center justify-center text-[10px] font-bold">
+                            {member.full_name?.charAt(0)?.toUpperCase() || '?'}
+                          </div>
+                          <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-[var(--anka-bg-secondary)] ${statusColor[member.status] || 'bg-gray-500'}`} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-medium truncate">{member.full_name}</div>
+                          <div className="text-[10px] text-[var(--anka-text-secondary)] truncate">
+                            {member.status_text || member.status}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Theme toggle */}
+        <button
+          onClick={toggleTheme}
+          className="h-9 w-9 rounded-lg hover:bg-[var(--anka-bg-tertiary)] flex items-center justify-center transition cursor-pointer"
+          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+        >
+          <span className="text-sm">{theme === 'dark' ? '☀️' : '🌙'}</span>
+        </button>
+
         {/* Notification bell */}
         <div className="relative">
           <button
-            onClick={() => { setShowNotifs((s) => !s); setShowUserMenu(false); }}
+            onClick={() => { setShowNotifs((s) => !s); setShowUserMenu(false); setShowPresence(false); }}
             className="h-9 w-9 rounded-lg hover:bg-[var(--anka-bg-tertiary)] flex items-center justify-center transition cursor-pointer relative"
             title="Notifications"
           >
@@ -153,10 +214,13 @@ export default function Taskbar({
         {/* User avatar / menu */}
         <div className="relative">
           <button
-            onClick={() => { setShowUserMenu((s) => !s); setShowNotifs(false); }}
-            className="h-9 w-9 rounded-full bg-gradient-to-br from-[var(--anka-accent)] to-purple-500 flex items-center justify-center text-xs font-bold cursor-pointer"
+            onClick={() => { setShowUserMenu((s) => !s); setShowNotifs(false); setShowPresence(false); }}
+            className="h-9 w-9 rounded-full bg-gradient-to-br from-[var(--anka-accent)] to-purple-500 flex items-center justify-center text-xs font-bold cursor-pointer relative"
           >
             {profile?.full_name?.charAt(0)?.toUpperCase() || '?'}
+            <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[var(--anka-bg-secondary)] ${
+              myStatus === 'online' ? 'bg-green-500' : myStatus === 'away' ? 'bg-yellow-500' : myStatus === 'busy' ? 'bg-red-500' : 'bg-gray-500'
+            }`} />
           </button>
 
           {showUserMenu && (
