@@ -11,6 +11,7 @@ const CORE_APPS = [
   { name: 'Time Tracker', path: '/time-tracker', icon: '⏱️', roles: ['all'] },
   { name: 'Clients', path: '/clients', icon: '🤝', roles: ['admin', 'department_head', 'marketing'] },
   { name: 'Campaigns', path: '/campaigns', icon: '📢', roles: ['admin', 'department_head', 'marketing'] },
+    { name: 'Admin', path: '/admin', icon: '⚙️', roles: ['admin'] },
   { name: 'Settings', path: '/settings', icon: '⚙️', roles: ['all'] },
 ]
 
