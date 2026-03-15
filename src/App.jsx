@@ -15,6 +15,9 @@ import Clients from './apps/Clients'
 import Campaigns from './apps/Campaigns'
 import Settings from './apps/Settings'
 import AdminDashboard from './apps/AdminDashboard'
+import DevDashboard from './apps/DevDashboard'
+import GitIntegration from './apps/GitIntegration'
+import Terminal from './apps/Terminal'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -50,6 +53,9 @@ export default function App() {
         <Route path="clients" element={<Clients />} />
         <Route path="campaigns" element={<Campaigns />} />
         <Route path="admin" element={<AdminDashboard />} />
+        <Route path="dev-dashboard" element={<DevDashboard />} />
+        <Route path="git" element={<GitIntegration />} />
+        <Route path="terminal" element={<Terminal />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>
