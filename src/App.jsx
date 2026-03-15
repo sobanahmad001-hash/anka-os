@@ -1,7 +1,17 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.jsx';
 import Login from './pages/Login.jsx';
-import Desktop from './pages/Desktop.jsx';
+import Layout from './components/Layout.jsx';
+import DashboardApp from './apps/DashboardApp.jsx';
+import ProjectsApp from './apps/ProjectsApp.jsx';
+import TasksApp from './apps/TasksApp.jsx';
+import ChatApp from './apps/ChatApp.jsx';
+import FileManagerApp from './apps/FileManagerApp.jsx';
+import CalendarApp from './apps/CalendarApp.jsx';
+import TimeTrackerApp from './apps/TimeTrackerApp.jsx';
+import ClientsApp from './apps/ClientsApp.jsx';
+import CampaignsApp from './apps/CampaignsApp.jsx';
+import SettingsApp from './apps/SettingsApp.jsx';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -41,13 +51,26 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route
-        path="/*"
+        path="/"
         element={
           <ProtectedRoute>
-            <Desktop />
+            <Layout />
           </ProtectedRoute>
         }
-      />
+      >
+        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route path="dashboard" element={<DashboardApp />} />
+        <Route path="projects" element={<ProjectsApp />} />
+        <Route path="tasks" element={<TasksApp />} />
+        <Route path="chat" element={<ChatApp />} />
+        <Route path="files" element={<FileManagerApp />} />
+        <Route path="calendar" element={<CalendarApp />} />
+        <Route path="time-tracker" element={<TimeTrackerApp />} />
+        <Route path="clients" element={<ClientsApp />} />
+        <Route path="campaigns" element={<CampaignsApp />} />
+        <Route path="settings" element={<SettingsApp />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Route>
     </Routes>
   );
 }
