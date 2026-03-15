@@ -23,37 +23,56 @@ export default function AdminDashboard() {
   
   async function fetchMetrics() {
     setLoading(true)
-    const dateFilter = getDateFilter(timeRange)
     
-    const [
-      departmentMetrics,
-      systemHealth,
-      recentActivity,
-      userCount,
-      taskStats,
-      deploymentStats
-    ] = await Promise.all([
-      supabase.from('department_metrics').select('*').gte('date', dateFilter).order('date', { ascending: false }),
-      supabase.from('system_health_logs').select('*').order('recorded_at', { ascending: false }).limit(10),
-      supabase.from('user_activity_logs').select('*, profiles(full_name, department)').order('created_at', { ascending: false }).limit(20),
-      supabase.from('profiles').select('id, department, role', { count: 'exact' }),
-      supabase.from('tasks').select('status, created_at, completed_at').gte('created_at', dateFilter),
-      supabase.from('deployments').select('*').gte('deployed_at', dateFilter)
-    ])
-    
-    const deptComparison = calculateDepartmentComparison(departmentMetrics.data)
-    
-    setMetrics({
-      departments: deptComparison,
-      systemHealth: systemHealth.data,
-      recentActivity: recentActivity.data,
-      totalUsers: userCount.count,
-      usersByDept: groupBy(userCount.data, 'department'),
-      taskStats: calculateTaskStats(taskStats.data),
-      deploymentCount: deploymentStats.data?.length || 0
-    })
-    
-    setLoading(false)
+    try {
+      const dateFilter = getDateFilter(timeRange)
+      
+      const results = await Promise.allSettled([
+        supabase.from('department_metrics').select('*').gte('date', dateFilter).order('date', { ascending: false }),
+        supabase.from('system_health_logs').select('*').order('recorded_at', { ascending: false }).limit(10),
+        supabase.from('user_activity_logs').select('*, profiles(full_name, department)').order('created_at', { ascending: false }).limit(20),
+        supabase.from('profiles').select('id, department, role', { count: 'exact' }),
+        supabase.from('tasks').select('status, created_at, completed_at').gte('created_at', dateFilter),
+        supabase.from('deployments').select('*').gte('deployed_at', dateFilter)
+      ])
+      
+      const [departmentMetrics, systemHealth, recentActivity, userCount, taskStats, deploymentStats] = results.map((r, i) => {
+        if (r.status === 'rejected') {
+          console.warn(`Query ${i} failed:`, r.reason)
+          return { data: [], count: 0 }
+        }
+        if (r.value?.error) {
+          console.warn(`Query ${i} error:`, r.value.error)
+          return { data: [], count: 0 }
+        }
+        return r.value
+      })
+      
+      const deptComparison = calculateDepartmentComparison(departmentMetrics.data)
+      
+      setMetrics({
+        departments: deptComparison,
+        systemHealth: systemHealth.data || [],
+        recentActivity: recentActivity.data || [],
+        totalUsers: userCount.count || 0,
+        usersByDept: groupBy(userCount.data, 'department'),
+        taskStats: calculateTaskStats(taskStats.data || []),
+        deploymentCount: deploymentStats.data?.length || 0
+      })
+    } catch (error) {
+      console.error('Failed to fetch metrics:', error)
+      setMetrics({
+        departments: [],
+        systemHealth: [],
+        recentActivity: [],
+        totalUsers: 0,
+        usersByDept: {},
+        taskStats: { total: 0, completed: 0, inProgress: 0, avgCompletionTime: 0 },
+        deploymentCount: 0
+      })
+    } finally {
+      setLoading(false)
+    }
   }
   
   function getDateFilter(range) {
@@ -224,40 +243,48 @@ export default function AdminDashboard() {
       <div className="grid grid-cols-2 gap-6">
         <Card title="System Health">
           <div className="space-y-3">
-            {metrics.systemHealth.slice(0, 5).map(log => (
-              <div key={log.id} className="flex items-center justify-between py-2">
-                <div>
-                  <p className="font-medium text-sm">{log.metric_type}</p>
-                  <p className="text-xs text-gray-500">{new Date(log.recorded_at).toLocaleString()}</p>
+            {metrics.systemHealth && metrics.systemHealth.length > 0 ? (
+              metrics.systemHealth.slice(0, 5).map(log => (
+                <div key={log.id} className="flex items-center justify-between py-2">
+                  <div>
+                    <p className="font-medium text-sm">{log.metric_type}</p>
+                    <p className="text-xs text-gray-500">{new Date(log.recorded_at).toLocaleString()}</p>
+                  </div>
+                  <Badge variant={
+                    log.status === 'healthy' ? 'success' :
+                    log.status === 'warning' ? 'warning' : 'danger'
+                  }>
+                    {log.status}
+                  </Badge>
                 </div>
-                <Badge variant={
-                  log.status === 'healthy' ? 'success' :
-                  log.status === 'warning' ? 'warning' : 'danger'
-                }>
-                  {log.status}
-                </Badge>
-              </div>
-            ))}
+              ))
+            ) : (
+              <p className="text-gray-500 dark:text-gray-400 py-4">No system health data available</p>
+            )}
           </div>
         </Card>
         
         <Card title="Recent Activity">
           <div className="space-y-3 max-h-80 overflow-y-auto">
-            {metrics.recentActivity.map(activity => (
-              <div key={activity.id} className="flex items-start gap-3 py-2 border-b border-gray-100 dark:border-gray-700 last:border-0">
-                <div className="flex-1">
-                  <p className="text-sm font-medium">
-                    {activity.profiles?.full_name} 
-                    <span className="text-gray-500 font-normal"> {activity.action}</span>
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    <Badge variant="default" size="sm">{activity.profiles?.department}</Badge>
-                    {' • '}
-                    {new Date(activity.created_at).toLocaleTimeString()}
-                  </p>
+            {metrics.recentActivity && metrics.recentActivity.length > 0 ? (
+              metrics.recentActivity.map(activity => (
+                <div key={activity.id} className="flex items-start gap-3 py-2 border-b border-gray-100 dark:border-gray-700 last:border-0">
+                  <div className="flex-1">
+                    <p className="text-sm font-medium">
+                      {activity.profiles?.full_name} 
+                      <span className="text-gray-500 font-normal"> {activity.action}</span>
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      <Badge variant="default" size="sm">{activity.profiles?.department}</Badge>
+                      {' • '}
+                      {new Date(activity.created_at).toLocaleTimeString()}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            ) : (
+              <p className="text-gray-500 dark:text-gray-400 py-4">No recent activity</p>
+            )}
           </div>
         </Card>
       </div>
