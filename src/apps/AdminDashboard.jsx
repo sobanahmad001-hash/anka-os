@@ -20,64 +20,84 @@ export default function AdminDashboard() {
   async function fetchMetrics() {
     setLoading(true)
     
-    const dateFilter = getDateFilter(timeRange)
-    
-    // Fetch aggregated data from all departments
-    const [
-      departmentMetrics,
-      systemHealth,
-      recentActivity,
-      userCount,
-      taskStats,
-      deploymentStats
-    ] = await Promise.all([
-      supabase
-        .from('department_metrics')
-        .select('*')
-        .gte('date', dateFilter)
-        .order('date', { ascending: false }),
+    try {
+      const dateFilter = getDateFilter(timeRange)
       
-      supabase
-        .from('system_health_logs')
-        .select('*')
-        .order('recorded_at', { ascending: false })
-        .limit(10),
+      // Fetch aggregated data from all departments with error handling
+      const results = await Promise.allSettled([
+        supabase
+          .from('department_metrics')
+          .select('*')
+          .gte('date', dateFilter)
+          .order('date', { ascending: false }),
+        
+        supabase
+          .from('system_health_logs')
+          .select('*')
+          .order('recorded_at', { ascending: false })
+          .limit(10),
+        
+        supabase
+          .from('user_activity_logs')
+          .select('*, profiles(full_name, department)')
+          .order('created_at', { ascending: false })
+          .limit(20),
+        
+        supabase
+          .from('profiles')
+          .select('id, department, role', { count: 'exact' }),
+        
+        supabase
+          .from('tasks')
+          .select('status, created_at, completed_at')
+          .gte('created_at', dateFilter),
+        
+        supabase
+          .from('deployments')
+          .select('*')
+          .gte('deployed_at', dateFilter)
+      ])
       
-      supabase
-        .from('user_activity_logs')
-        .select('*, profiles(full_name, department)')
-        .order('created_at', { ascending: false })
-        .limit(20),
+      // Extract values or use empty arrays on failure
+      const [departmentMetrics, systemHealth, recentActivity, userCount, taskStats, deploymentStats] = results.map((r, i) => {
+        if (r.status === 'rejected') {
+          console.warn(`Query ${i} failed:`, r.reason);
+          return { data: [], count: 0 };
+        }
+        if (r.value?.error) {
+          console.warn(`Query ${i} error:`, r.value.error);
+          return { data: [], count: 0 };
+        }
+        return r.value;
+      })
       
-      supabase
-        .from('profiles')
-        .select('id, department, role', { count: 'exact' }),
+      // Calculate department comparison
+      const deptComparison = calculateDepartmentComparison(departmentMetrics.data)
       
-      supabase
-        .from('tasks')
-        .select('status, created_at, completed_at')
-        .gte('created_at', dateFilter),
-      
-      supabase
-        .from('deployments')
-        .select('*')
-        .gte('deployed_at', dateFilter)
-    ])
-    
-    // Calculate department comparison
-    const deptComparison = calculateDepartmentComparison(departmentMetrics.data)
-    
-    setMetrics({
-      departments: deptComparison,
-      systemHealth: systemHealth.data,
-      recentActivity: recentActivity.data,
-      totalUsers: userCount.count,
-      usersByDept: groupBy(userCount.data, 'department'),
-      taskStats: calculateTaskStats(taskStats.data),
-      deploymentCount: deploymentStats.data?.length || 0
-    })
-    
-    setLoading(false)
+      setMetrics({
+        departments: deptComparison,
+        systemHealth: systemHealth.data || [],
+        recentActivity: recentActivity.data || [],
+        totalUsers: userCount.count || 0,
+        usersByDept: groupBy(userCount.data, 'department'),
+        taskStats: calculateTaskStats(taskStats.data || []),
+        deploymentCount: deploymentStats.data?.length || 0
+      })
+    } catch (error) {
+      console.error('Failed to fetch metrics:', error)
+      // Set default metrics on error
+      setMetrics({
+        departments: [],
+        systemHealth: [],
+        recentActivity: [],
+        totalUsers: 0,
+        usersByDept: {},
+        taskStats: { total: 0, completed: 0, inProgress: 0, avgCompletionTime: 0 },
+        deploymentCount: 0
+      })
+    } finally {
+      setLoading(false)
+    }
   }
   
   function getDateFilter(range) {
@@ -144,6 +164,16 @@ export default function AdminDashboard() {
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-gray-600 dark:text-gray-400">Loading admin dashboard...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!metrics) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <p className="text-gray-600 dark:text-gray-400">Failed to load metrics. Please refresh.</p>
         </div>
       </div>
     )
@@ -220,9 +250,13 @@ export default function AdminDashboard() {
       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
         <h2 className="text-xl font-bold mb-6">Department Performance</h2>
         <div className="space-y-4">
-          {metrics.departments.map(dept => (
-            <DepartmentRow key={dept.department} data={dept} />
-          ))}
+          {metrics.departments && metrics.departments.length > 0 ? (
+            metrics.departments.map(dept => (
+              <DepartmentRow key={dept.department} data={dept} />
+            ))
+          ) : (
+            <p className="text-gray-500 dark:text-gray-400">No department data available</p>
+          )}
         </div>
       </div>
       
@@ -232,12 +266,13 @@ export default function AdminDashboard() {
         <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
           <h2 className="text-xl font-bold mb-4">System Health</h2>
           <div className="space-y-3">
-            {metrics.systemHealth.slice(0, 5).map(log => (
-              <div key={log.id} className="flex items-center justify-between py-2">
-                <div>
-                  <p className="font-medium text-sm">{log.metric_type}</p>
-                  <p className="text-xs text-gray-500">{new Date(log.recorded_at).toLocaleString()}</p>
-                </div>
+            {metrics.systemHealth && metrics.systemHealth.length > 0 ? (
+              metrics.systemHealth.slice(0, 5).map(log => (
+                <div key={log.id} className="flex items-center justify-between py-2">
+                  <div>
+                    <p className="font-medium text-sm">{log.metric_type}</p>
+                    <p className="text-xs text-gray-500">{new Date(log.recorded_at).toLocaleString()}</p>
+                  </div>
                 <span className={`px-3 py-1 rounded-full text-xs font-medium ${
                   log.status === 'healthy' 
                     ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
@@ -248,7 +283,10 @@ export default function AdminDashboard() {
                   {log.status}
                 </span>
               </div>
-            ))}
+              ))
+            ) : (
+              <p className="text-gray-500 dark:text-gray-400">No system health data available</p>
+            )}
           </div>
         </div>
         
@@ -256,19 +294,23 @@ export default function AdminDashboard() {
         <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
           <h2 className="text-xl font-bold mb-4">Recent Activity</h2>
           <div className="space-y-3 max-h-80 overflow-y-auto">
-            {metrics.recentActivity.map(activity => (
-              <div key={activity.id} className="flex items-start gap-3 py-2 border-b border-gray-100 dark:border-gray-700 last:border-0">
-                <div className="flex-1">
-                  <p className="text-sm font-medium">
-                    {activity.profiles?.full_name} 
-                    <span className="text-gray-500 font-normal"> {activity.action}</span>
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {activity.profiles?.department} • {new Date(activity.created_at).toLocaleTimeString()}
-                  </p>
+            {metrics.recentActivity && metrics.recentActivity.length > 0 ? (
+              metrics.recentActivity.map(activity => (
+                <div key={activity.id} className="flex items-start gap-3 py-2 border-b border-gray-100 dark:border-gray-700 last:border-0">
+                  <div className="flex-1">
+                    <p className="text-sm font-medium">
+                      {activity.profiles?.full_name} 
+                      <span className="text-gray-500 font-normal"> {activity.action}</span>
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {activity.profiles?.department} • {new Date(activity.created_at).toLocaleTimeString()}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            ) : (
+              <p className="text-gray-500 dark:text-gray-400">No activity data available</p>
+            )}
           </div>
         </div>
       </div>
