@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { sendAIMessage } from '../lib/ai-provider'
+import { sendAiMessage } from '../lib/ai-provider'
 import { executeAction } from '../lib/ai-actions'
 
 export default function AIPanel() {
@@ -33,9 +33,9 @@ export default function AIPanel() {
         recentMessages: messages.slice(-5),
       }
 
-      const response = await sendAIMessage(input, context)
+      const response = await sendAiMessage([userMessage], context)
       
-      setMessages(prev => [...prev, { role: 'assistant', content: response.message }])
+      setMessages(prev => [...prev, { role: 'assistant', content: response.content || response.message }])
       
       if (response.action) {
         setPendingAction(response.action)
