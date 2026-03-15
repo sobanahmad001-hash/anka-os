@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { buildAIContext, detectIntent } from '../lib/ai-context'
 import { sendAiMessage } from '../lib/ai-provider'
 import { executeAction } from '../lib/ai-actions'
 
@@ -22,20 +23,38 @@ export default function AIPanel() {
 
     const userMessage = { role: 'user', content: input }
     setMessages(prev => [...prev, userMessage])
+    
+    // Detect intent from message
+    const intent = detectIntent(input)
+    console.log('🧠 Detected intent:', intent)
+    
     setInput('')
     setLoading(true)
 
     try {
-      const context = {
-        user: profile?.full_name,
-        department: profile?.department,
-        currentPage: location.pathname,
-        recentMessages: messages.slice(-5),
-      }
+      // Build rich context with real data
+      const context = await buildAIContext(location.pathname, profile)
+      context.detectedIntent = intent
+      context.recentMessages = messages.slice(-5)
 
-      const response = await sendAiMessage([userMessage], context)
+      const response = await sendAiMessage([...messages, userMessage], context)
       
-      setMessages(prev => [...prev, { role: 'assistant', content: response.content || response.message }])
+      // Check if response contains an action proposal
+      const actionMatch = response.match ? response.match(/\[ANKA_ACTION\](.*?)\[\/ANKA_ACTION\]/s) : null
+      
+      if (actionMatch) {
+        const actionData = JSON.parse(actionMatch[1])
+        setPendingAction(actionData)
+        
+        // Show AI message without the action block
+        const cleanResponse = response.replace(/\[ANKA_ACTION\].*?\[\/ANKA_ACTION\]/s, '').trim()
+        setMessages(prev => [...prev, { role: 'assistant', content: cleanResponse }])
+      } else {
+        setMessages(prev => [...prev, { 
+          role: 'assistant', 
+          content: response.content || response.message || response 
+        }])
+      }
       
       if (response.action) {
         setPendingAction(response.action)
