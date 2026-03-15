@@ -15,6 +15,7 @@ export default function AdminDashboard() {
   
   useEffect(() => {
     if (profile?.role !== 'admin') {
+    console.log("Profile in AdminDashboard:", profile)
       window.location.href = '/dashboard'
       return
     }
@@ -30,9 +31,9 @@ export default function AdminDashboard() {
       const results = await Promise.allSettled([
         supabase.from('department_metrics').select('*').gte('date', dateFilter).order('date', { ascending: false }),
         supabase.from('system_health_logs').select('*').order('recorded_at', { ascending: false }).limit(10),
-        supabase.from('user_activity_logs').select('*, profiles(full_name, department)').order('created_at', { ascending: false }).limit(20),
+        supabase.from('user_activity_logs').select('*').order('created_at', { ascending: false }).limit(20),
         supabase.from('profiles').select('id, department, role', { count: 'exact' }),
-        supabase.from('tasks').select('status, created_at, completed_at').gte('created_at', dateFilter),
+        supabase.from('tasks').select('status, created_at, updated_at').gte('created_at', dateFilter),
         supabase.from('deployments').select('*').gte('deployed_at', dateFilter)
       ])
       
@@ -101,8 +102,8 @@ export default function AdminDashboard() {
     const total = tasks.length
     const completed = tasks.filter(t => t.status === 'done').length
     const inProgress = tasks.filter(t => t.status === 'in_progress').length
-    const avgCompletionTime = tasks.filter(t => t.completed_at).reduce((sum, t) => {
-      const hours = (new Date(t.completed_at) - new Date(t.created_at)) / (1000 * 60 * 60)
+    const avgCompletionTime = tasks.filter(t => t.updated_at).reduce((sum, t) => {
+      const hours = (new Date(t.updated_at) - new Date(t.created_at)) / (1000 * 60 * 60)
       return sum + hours
     }, 0) / (completed || 1)
     

@@ -17,6 +17,10 @@ import Settings from './apps/Settings'
 import AdminDashboard from './apps/AdminDashboard'
 import DevDashboard from './apps/DevDashboard'
 import GitIntegration from './apps/GitIntegration'
+import Kanban from './apps/Kanban'
+import ApiDocs from './apps/ApiDocs'
+import UserManagement from './apps/UserManagement'
+import Header from './components/Header'
 import Terminal from './apps/Terminal'
 
 function ProtectedRoute({ children }) {
@@ -53,6 +57,9 @@ export default function App() {
         <Route path="clients" element={<Clients />} />
         <Route path="campaigns" element={<Campaigns />} />
         <Route path="dev-dashboard" element={<DevDashboard />} />
+        <Route path="kanban" element={<Kanban />} />
+        <Route path="api-docs" element={<ApiDocs />} />
+        <Route path="users" element={<UserManagement />} />
         <Route path="git" element={<GitIntegration />} />
         <Route path="terminal" element={<Terminal />} />
         <Route path="admin" element={<AdminDashboard />} />

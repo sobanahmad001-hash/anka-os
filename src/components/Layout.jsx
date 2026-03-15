@@ -1,21 +1,16 @@
 import { Outlet } from 'react-router-dom'
+import Header from './Header'
 import Sidebar from './Sidebar'
-import AIPanel from './AIPanel'
 
 export default function Layout() {
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Sidebar Navigation */}
-      <Sidebar />
-      
-      {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto p-6">
-        <Outlet />
-      </main>
-      
-      {/* AI Panel */}
-      <div className="w-80 border-l border-gray-200 dark:border-gray-700 flex flex-col">
-        <AIPanel />
+    <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
+      <Header />
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar />
+        <main className="flex-1 overflow-y-auto">
+          <Outlet />
+        </main>
       </div>
     </div>
   )
