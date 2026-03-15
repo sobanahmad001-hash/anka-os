@@ -12,6 +12,20 @@ Think of it as an all-in-one internal platform where your team can manage projec
 
 ---
 
+## What Changed (Latest Refactor)
+
+The `src/` directory was reorganised for cleaner routing and separation of concerns:
+
+| Before | After |
+|---|---|
+| Desktop + auth logic mixed into `App.jsx` | `App.jsx` is now a **thin 2-route router** only |
+| No dedicated pages folder | `src/pages/Desktop.jsx` — the full windowed desktop |
+| | `src/pages/Login.jsx` — sign in / register form |
+
+Everything else (the windowing system, all apps, hooks, lib, components, and the database schema) remains **unchanged**.
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |
@@ -31,7 +45,7 @@ anka-os/
 ├── vite.config.js              # Vite + TailwindCSS config
 ├── vercel.json                 # Vercel deployment config
 │
-├── supabase/                   # Database migration files
+├── supabase/                   # Database migration files (run in order)
 │   ├── schema.sql              # Base schema (profiles, notes, tasks, messages)
 │   ├── phase2.sql              # Departments, projects, clients, assets
 │   ├── phase3.sql              # Notifications, activity log
@@ -47,34 +61,41 @@ anka-os/
 │   └── storage.sql             # Supabase Storage bucket policies
 │
 └── src/
-    ├── main.jsx                # React root (AuthProvider, ThemeProvider, Router)
-    ├── index.css               # Global styles
+    ├── main.jsx                # React root — mounts AuthProvider, ThemeProvider, Router
+    ├── App.jsx                 # Thin router: /login → Login, /* → Desktop (protected)
+    ├── index.css               # Global styles & CSS custom properties (themes)
+    │
+    ├── pages/                  # Top-level page components
+    │   ├── Desktop.jsx         # Full desktop environment: windows, desktop icons,
+    │   │                       #   taskbar, app launcher, global search overlay
+    │   └── Login.jsx           # Sign in / register form (department selection)
     │
     ├── config/
-    │   └── apps.js             # App registry — maps IDs to components, controls
-    │                           #   which apps are visible per role/department
+    │   └── apps.js             # App registry — maps IDs to components, defines
+    │                           #   per-role and per-department app visibility
     │
     ├── context/
     │   └── AuthContext.jsx     # Supabase auth state (user, profile, sign in/up/out)
     │
     ├── hooks/
     │   ├── usePresence.js      # Real-time user presence (online/away/busy/offline)
-    │   ├── useNotifications.js # In-app notification subscriptions
-    │   ├── useBehaviorLog.js   # Logs user actions for audit/AI context
-    │   └── useTheme.jsx        # Dark/light theme management
+    │   ├── useNotifications.js # In-app notification subscriptions via Realtime
+    │   ├── useBehaviorLog.js   # Logs user actions (app opens, task completes) for AI
+    │   └── useTheme.jsx        # Dark/light theme management + persistence
     │
     ├── lib/
     │   ├── supabase.js         # Supabase client singleton
     │   ├── ai-provider.js      # AI API calls (Claude → OpenAI cascade)
-    │   ├── ai-context.js       # Builds workspace context sent to the AI
-    │   └── ai-actions.js       # Parses & executes AI-suggested actions
+    │   ├── ai-context.js       # Parallel context assembler — builds the AI system prompt
+    │   │                       #   from live DB data (tasks, projects, team, chat, etc.)
+    │   └── ai-actions.js       # Parses [ANKA_ACTION] blocks & executes approved actions
     │
     ├── components/
     │   ├── WindowManager.jsx   # Renders all open (non-minimized) windows
-    │   ├── Window.jsx          # Draggable, resizable window frame
-    │   ├── Taskbar.jsx         # Bottom bar: pinned apps, open windows, clock
-    │   ├── AppLauncher.jsx     # Start-menu-style app grid
-    │   ├── GlobalSearch.jsx    # Cross-app search
+    │   ├── Window.jsx          # Draggable, resizable window frame with traffic-light buttons
+    │   ├── Taskbar.jsx         # Bottom bar: launcher, open windows, presence, notifs, clock
+    │   ├── AppLauncher.jsx     # Start-menu-style searchable app grid (⌘K shortcut)
+    │   ├── GlobalSearch.jsx    # Cross-app search overlay
     │   └── CommentsPanel.jsx   # Contextual comments sidebar
     │
     └── apps/                   # One file per app (see "Apps" section below)
@@ -149,7 +170,7 @@ anka-os/
 - **Role-based access control** — `admin` sees everything; `department_head`, `executive`, and `intern` see shared apps plus their own department's apps.
 - **Real-time collaboration** — Supabase Realtime keeps chat, tasks, and presence in sync across all connected users.
 - **User presence** — see who on your team is online, away, or busy at a glance.
-- **Anka AI** — the built-in AI assistant has full workspace context and can create tasks, update projects, log decisions, send notifications, and add clients — all with your approval before anything is written to the database.
+- **Anka AI** — the built-in AI assistant has full workspace context (tasks, projects, team, chat history, past decisions) and can create tasks, update projects, log decisions, send notifications, and add clients — all with your approval before anything is written to the database. It also monitors behavior patterns (app switches, idle time, task completions) to dynamically adjust its response depth: brief when you're context-switching, detailed when you're in deep focus, a status summary when you've been idle.
 - **Global search** — search across apps from a single input.
 - **Themes** — dark and light mode, persisted in user preferences.
 - **Audit trail** — every significant action is logged for accountability.
