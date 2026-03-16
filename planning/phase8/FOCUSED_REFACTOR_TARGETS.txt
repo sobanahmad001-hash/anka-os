@@ -1,0 +1,18 @@
+# Likely Navigation / Environment Targets
+
+src/apps/AdminDashboard.jsx
+src/apps/ApiDocs.jsx
+src/apps/Campaigns.jsx
+src/apps/Dashboard.jsx
+src/apps/DevDashboard.jsx
+src/apps/DevDashboard.jsx.backup
+src/apps/Kanban.jsx
+src/apps/Projects.jsx
+src/apps/Terminal.jsx
+src/apps/UserManagement.jsx
+src/components/DevSidebar.jsx
+src/components/Header.jsx
+src/components/Layout.jsx
+src/components/Sidebar.jsx
+src/lib/github.js
+src/lib/github.js.backup
