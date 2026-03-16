@@ -1,40 +1,93 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { Navigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import Card from '../components/Card'
+import StatCard from '../components/StatCard'
+import EmptyState from '../components/EmptyState'
+import Badge from '../components/Badge'
+
+function normalizeDepartmentName(value) {
+  if (!value) return 'Unassigned'
+  return String(value)
+    .replace(/[_-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function titleCase(value) {
+  return normalizeDepartmentName(value)
+    .split(' ')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function inferEnvironmentFit(user) {
+  const role = String(user?.role || '').toLowerCase()
+  const department = String(user?.department || '').toLowerCase()
+
+  if (role === 'admin') return 'Admin'
+  if (department.includes('design') || department.includes('creative')) return 'Design'
+  if (
+    department.includes('marketing') ||
+    department.includes('content') ||
+    department.includes('growth')
+  ) {
+    return 'Marketing'
+  }
+  if (
+    department.includes('engineering') ||
+    department.includes('development') ||
+    department.includes('product') ||
+    department.includes('tech')
+  ) {
+    return 'Development'
+  }
+
+  return 'Shared Core'
+}
+
+function badgeVariantForEnvironment(environment) {
+  if (environment === 'Admin') return 'danger'
+  if (environment === 'Development') return 'default'
+  if (environment === 'Design') return 'warning'
+  if (environment === 'Marketing') return 'success'
+  return 'default'
+}
 
 export default function UserManagement() {
+  const { profile } = useAuth()
   const [users, setUsers] = useState([])
   const [departments, setDepartments] = useState([])
   const [loading, setLoading] = useState(true)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState('member')
   const [inviteDept, setInviteDept] = useState('')
-  const { profile } = useAuth()
 
   useEffect(() => {
     if (profile?.role === 'admin') {
-      fetchUsers()
-      fetchDepartments()
+      fetchData()
     }
   }, [profile])
 
-  async function fetchUsers() {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .order('created_at', { ascending: false })
+  async function fetchData() {
+    setLoading(true)
 
-    if (!error) setUsers(data || [])
-    setLoading(false)
-  }
+    try {
+      const [usersResult, departmentsResult] = await Promise.all([
+        supabase.from('profiles').select('*').order('created_at', { ascending: false }),
+        supabase.from('departments').select('id, name').order('name'),
+      ])
 
-  async function fetchDepartments() {
-    const { data, error } = await supabase
-      .from('departments')
-      .select('id, name')
-      .order('name')
-
-    if (!error) setDepartments(data || [])
+      if (!usersResult.error) setUsers(usersResult.data || [])
+      if (!departmentsResult.error) setDepartments(departmentsResult.data || [])
+    } catch (error) {
+      console.error('Failed to load user management data:', error)
+      setUsers([])
+      setDepartments([])
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function inviteUser() {
@@ -43,11 +96,16 @@ export default function UserManagement() {
       return
     }
 
-    // In production, this would call auth.admin.createUser
-    // For now, just log the invite
-    console.log('Invite:', { email: inviteEmail, role: inviteRole, department: inviteDept })
-    alert(`Invite sent to ${inviteEmail}`)
+    console.log('Invite:', {
+      email: inviteEmail,
+      role: inviteRole,
+      department: inviteDept,
+    })
+
+    alert(`Invite prepared for ${inviteEmail}`)
     setInviteEmail('')
+    setInviteRole('member')
+    setInviteDept('')
   }
 
   async function updateUserRole(userId, newRole) {
@@ -56,7 +114,7 @@ export default function UserManagement() {
       .update({ role: newRole })
       .eq('id', userId)
 
-    if (!error) fetchUsers()
+    if (!error) fetchData()
   }
 
   async function updateUserDepartment(userId, deptId) {
@@ -65,108 +123,287 @@ export default function UserManagement() {
       .update({ department: deptId })
       .eq('id', userId)
 
-    if (!error) fetchUsers()
+    if (!error) fetchData()
   }
 
-  if (profile?.role !== 'admin') {
-    return <div className="p-6 text-red-600">Access denied. Admin only.</div>
+  const derived = useMemo(() => {
+    const adminCount = users.filter((user) => user.role === 'admin').length
+    const memberCount = users.filter((user) => user.role !== 'admin').length
+    const departmentCount =
+      departments.length ||
+      new Set(users.map((user) => normalizeDepartmentName(user.department))).size
+
+    const environmentCounts = users.reduce((acc, user) => {
+      const env = inferEnvironmentFit(user)
+      acc[env] = (acc[env] || 0) + 1
+      return acc
+    }, {})
+
+    return {
+      adminCount,
+      memberCount,
+      departmentCount,
+      environmentCounts,
+    }
+  }, [users, departments])
+
+  if (!profile) return null
+
+  if (profile.role !== 'admin') {
+    return <Navigate to="/dev-dashboard" replace />
   }
 
-  if (loading) return <div className="p-6">Loading users...</div>
+  if (loading) {
+    return <div className="p-6">Loading people and access data...</div>
+  }
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-6">👥 User Management</h1>
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">People & Access</h1>
+          <p className="mt-1 text-gray-600 dark:text-gray-400">
+            Administrative control over roles, departments, and environment alignment.
+          </p>
+        </div>
 
-      {/* Invite Section */}
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 mb-6">
-        <h2 className="text-lg font-bold mb-4">Invite New User</h2>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <input
-            type="email"
-            placeholder="Email address"
-            value={inviteEmail}
-            onChange={(e) => setInviteEmail(e.target.value)}
-            className="px-4 py-2 border rounded dark:bg-gray-700 dark:border-gray-600"
-          />
-          <select
-            value={inviteRole}
-            onChange={(e) => setInviteRole(e.target.value)}
-            className="px-4 py-2 border rounded dark:bg-gray-700 dark:border-gray-600"
-          >
-            <option value="member">Member</option>
-            <option value="admin">Admin</option>
-          </select>
-          <select
-            value={inviteDept}
-            onChange={(e) => setInviteDept(e.target.value)}
-            className="px-4 py-2 border rounded dark:bg-gray-700 dark:border-gray-600"
-          >
-            <option value="">Select Department</option>
-            {departments.map(d => (
-              <option key={d.id} value={d.id}>{d.name}</option>
-            ))}
-          </select>
-          <button
-            onClick={inviteUser}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-          >
-            Send Invite
-          </button>
+        <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3 bg-white dark:bg-gray-800">
+          <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            Admin Scope
+          </div>
+          <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
+            Roles, departments, and invite flow
+          </div>
+          <div className="text-sm text-gray-500 dark:text-gray-400">
+            This surface will later connect to deeper permissions and rules.
+          </div>
         </div>
       </div>
 
-      {/* User List */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-gray-50 dark:bg-gray-700">
-            <tr>
-              <th className="px-4 py-3 text-left">Name</th>
-              <th className="px-4 py-3 text-left">Email</th>
-              <th className="px-4 py-3 text-left">Role</th>
-              <th className="px-4 py-3 text-left">Department</th>
-              <th className="px-4 py-3 text-left">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map(user => (
-              <tr key={user.id} className="border-t border-gray-200 dark:border-gray-700">
-                <td className="px-4 py-3">{user.full_name || 'N/A'}</td>
-                <td className="px-4 py-3">{user.email || 'N/A'}</td>
-                <td className="px-4 py-3">
-                  <select
-                    value={user.role || 'member'}
-                    onChange={(e) => updateUserRole(user.id, e.target.value)}
-                    className="px-2 py-1 border rounded text-sm dark:bg-gray-700"
-                  >
-                    <option value="member">Member</option>
-                    <option value="admin">Admin</option>
-                  </select>
-                </td>
-                <td className="px-4 py-3">
-                  <select
-                    value={user.department || ''}
-                    onChange={(e) => updateUserDepartment(user.id, e.target.value)}
-                    className="px-2 py-1 border rounded text-sm dark:bg-gray-700"
-                  >
-                    <option value="">None</option>
-                    {departments.map(d => (
-                      <option key={d.id} value={d.id}>{d.name}</option>
-                    ))}
-                  </select>
-                </td>
-                <td className="px-4 py-3">
-                  <span className={`px-2 py-1 rounded text-xs ${
-                    user.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'
-                  }`}>
-                    {user.role === 'admin' ? 'Admin' : 'Active'}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          label="Total People"
+          value={users.length}
+          change="Across org structure"
+          trend="up"
+          icon="👥"
+          color="blue"
+        />
+        <StatCard
+          label="Admins"
+          value={derived.adminCount}
+          change={derived.adminCount > 2 ? 'Review concentration' : 'Lean control'}
+          trend={derived.adminCount > 2 ? 'down' : 'up'}
+          icon="🛡️"
+          color="purple"
+        />
+        <StatCard
+          label="Members"
+          value={derived.memberCount}
+          change="Execution capacity"
+          trend="up"
+          icon="🧠"
+          color="green"
+        />
+        <StatCard
+          label="Departments"
+          value={derived.departmentCount}
+          change="Org distribution"
+          trend="up"
+          icon="🏛️"
+          color="yellow"
+        />
       </div>
+
+      <div className="grid gap-6 xl:grid-cols-[1.1fr_1.4fr]">
+        <Card
+          title="Invite & Assign"
+          subtitle="A transitional admin flow for bringing people into the organization."
+        >
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="md:col-span-2">
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Email address
+              </label>
+              <input
+                type="email"
+                placeholder="name@company.com"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2.5 dark:bg-gray-700 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Role
+              </label>
+              <select
+                value={inviteRole}
+                onChange={(e) => setInviteRole(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2.5 dark:bg-gray-700 dark:text-white"
+              >
+                <option value="member">Member</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Department
+              </label>
+              <select
+                value={inviteDept}
+                onChange={(e) => setInviteDept(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2.5 dark:bg-gray-700 dark:text-white"
+              >
+                <option value="">Select Department</option>
+                {departments.map((department) => (
+                  <option key={department.id} value={department.id}>
+                    {department.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Invite flow is placeholder-backed for now and should later connect to managed auth provisioning.
+            </p>
+
+            <button
+              onClick={inviteUser}
+              className="rounded-lg bg-blue-600 px-4 py-2.5 text-white font-medium hover:bg-blue-700 transition-colors"
+            >
+              Prepare Invite
+            </button>
+          </div>
+        </Card>
+
+        <Card
+          title="Environment Alignment"
+          subtitle="A temporary but useful view of where people most naturally fit in the operating system."
+        >
+          {Object.keys(derived.environmentCounts).length === 0 ? (
+            <EmptyState
+              icon="🧭"
+              title="No people available"
+              description="Environment alignment will appear once users are present in profiles."
+            />
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2">
+              {Object.entries(derived.environmentCounts).map(([environment, count]) => (
+                <div
+                  key={environment}
+                  className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-900"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                      {environment}
+                    </div>
+                    <Badge variant={badgeVariantForEnvironment(environment)}>
+                      {count}
+                    </Badge>
+                  </div>
+
+                  <div className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                    {environment === 'Admin' && 'Oversight and governance access'}
+                    {environment === 'Development' && 'Technical execution context'}
+                    {environment === 'Design' && 'Creative execution context'}
+                    {environment === 'Marketing' && 'Campaign and content context'}
+                    {environment === 'Shared Core' && 'Cross-environment project context'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <Card
+        title="People Directory"
+        subtitle="Administrative visibility into role, department, and likely environment fit."
+      >
+        {users.length === 0 ? (
+          <EmptyState
+            icon="👥"
+            title="No users found"
+            description="User records will appear here once profiles are available."
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px]">
+              <thead>
+                <tr className="border-b border-gray-200 dark:border-gray-700 text-left">
+                  <th className="px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300">Name</th>
+                  <th className="px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300">Email</th>
+                  <th className="px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300">Role</th>
+                  <th className="px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300">Department</th>
+                  <th className="px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300">Environment Fit</th>
+                  <th className="px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((user) => {
+                  const environmentFit = inferEnvironmentFit(user)
+                  const departmentName =
+                    departments.find((department) => department.id === user.department)?.name ||
+                    titleCase(user.department)
+
+                  return (
+                    <tr
+                      key={user.id}
+                      className="border-b border-gray-200 dark:border-gray-800 last:border-b-0"
+                    >
+                      <td className="px-4 py-4 text-sm text-gray-900 dark:text-white">
+                        {user.full_name || 'Unnamed user'}
+                      </td>
+                      <td className="px-4 py-4 text-sm text-gray-600 dark:text-gray-400">
+                        {user.email || 'No email'}
+                      </td>
+                      <td className="px-4 py-4">
+                        <select
+                          value={user.role || 'member'}
+                          onChange={(e) => updateUserRole(user.id, e.target.value)}
+                          className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm dark:bg-gray-700 dark:text-white"
+                        >
+                          <option value="member">Member</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      </td>
+                      <td className="px-4 py-4">
+                        <select
+                          value={user.department || ''}
+                          onChange={(e) => updateUserDepartment(user.id, e.target.value)}
+                          className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm dark:bg-gray-700 dark:text-white"
+                        >
+                          <option value="">None</option>
+                          {departments.map((department) => (
+                            <option key={department.id} value={department.id}>
+                              {department.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-4 py-4">
+                        <Badge variant={badgeVariantForEnvironment(environmentFit)}>
+                          {environmentFit}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-4">
+                        <Badge variant={user.role === 'admin' ? 'danger' : 'success'}>
+                          {user.role === 'admin' ? 'Admin access' : 'Active'}
+                        </Badge>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </div>
   )
 }

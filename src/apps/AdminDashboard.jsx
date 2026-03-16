@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { Navigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Card from '../components/Card'
@@ -7,118 +8,227 @@ import Badge from '../components/Badge'
 import EmptyState from '../components/EmptyState'
 import LoadingSkeleton from '../components/LoadingSkeleton'
 
+function normalizeDepartmentName(value) {
+  if (!value) return 'Unassigned'
+  return String(value)
+    .replace(/[_-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function titleCase(value) {
+  return normalizeDepartmentName(value)
+    .split(' ')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function inferProjectHealth(project, relatedTasks = []) {
+  const status = project?.status || ''
+  const blockedTasks = relatedTasks.filter((task) => ['blocked', 'blocked_review'].includes(task.status)).length
+  const overdueTasks = relatedTasks.filter((task) => {
+    if (!task.due_date) return false
+    return new Date(task.due_date) < new Date() && task.status !== 'done'
+  }).length
+
+  if (blockedTasks > 0) return 'At Risk'
+  if (overdueTasks > 0) return 'Needs Attention'
+  if (status === 'completed' || status === 'done') return 'Stable'
+  return 'Active'
+}
+
+function inferHealthVariant(health) {
+  if (health === 'At Risk') return 'danger'
+  if (health === 'Needs Attention') return 'warning'
+  if (health === 'Stable') return 'success'
+  return 'default'
+}
+
+function inferDecisionState(project) {
+  if (!project) return 'No signal'
+  if (project.priority === 'high' || project.priority === 'urgent') return 'Review priority'
+  if (project.status === 'planning') return 'Scope decision'
+  if (project.status === 'blocked') return 'Escalation needed'
+  return 'Tracked'
+}
+
 export default function AdminDashboard() {
-  const [timeRange, setTimeRange] = useState('today')
-  const [metrics, setMetrics] = useState(null)
-  const [loading, setLoading] = useState(true)
   const { profile } = useAuth()
-  
+  const [loading, setLoading] = useState(true)
+  const [adminData, setAdminData] = useState({
+    users: [],
+    departments: [],
+    tasks: [],
+    projects: [],
+    projectsAvailable: true,
+  })
+
   useEffect(() => {
-    if (profile?.role !== 'admin') {
-    console.log("Profile in AdminDashboard:", profile)
-      window.location.href = '/dashboard'
-      return
+    if (profile?.role === 'admin') {
+      fetchAdminData()
     }
-    fetchMetrics()
-  }, [timeRange, profile])
-  
-  async function fetchMetrics() {
+  }, [profile])
+
+  async function fetchAdminData() {
     setLoading(true)
-    
+
     try {
-      const dateFilter = getDateFilter(timeRange)
-      
-      const results = await Promise.allSettled([
-        supabase.from('department_metrics').select('*').gte('date', dateFilter).order('date', { ascending: false }),
-        supabase.from('system_health_logs').select('*').order('recorded_at', { ascending: false }).limit(10),
-        supabase.from('user_activity_logs').select('*').order('created_at', { ascending: false }).limit(20),
-        supabase.from('profiles').select('id, department, role', { count: 'exact' }),
-        supabase.from('tasks').select('status, created_at, updated_at').gte('created_at', dateFilter),
-        supabase.from('deployments').select('*').gte('deployed_at', dateFilter)
+      const [profilesResult, departmentsResult, tasksResult, projectsResult] = await Promise.allSettled([
+        supabase.from('profiles').select('*').order('created_at', { ascending: false }),
+        supabase.from('departments').select('*').order('name'),
+        supabase.from('tasks').select('*').order('created_at', { ascending: false }),
+        supabase.from('projects').select('*').order('created_at', { ascending: false }),
       ])
-      
-      const [departmentMetrics, systemHealth, recentActivity, userCount, taskStats, deploymentStats] = results.map((r, i) => {
-        if (r.status === 'rejected') {
-          console.warn(`Query ${i} failed:`, r.reason)
-          return { data: [], count: 0 }
-        }
-        if (r.value?.error) {
-          console.warn(`Query ${i} error:`, r.value.error)
-          return { data: [], count: 0 }
-        }
-        return r.value
-      })
-      
-      const deptComparison = calculateDepartmentComparison(departmentMetrics.data)
-      
-      setMetrics({
-        departments: deptComparison,
-        systemHealth: systemHealth.data || [],
-        recentActivity: recentActivity.data || [],
-        totalUsers: userCount.count || 0,
-        usersByDept: groupBy(userCount.data, 'department'),
-        taskStats: calculateTaskStats(taskStats.data || []),
-        deploymentCount: deploymentStats.data?.length || 0
+
+      const profiles =
+        profilesResult.status === 'fulfilled' && !profilesResult.value.error
+          ? profilesResult.value.data || []
+          : []
+
+      const departments =
+        departmentsResult.status === 'fulfilled' && !departmentsResult.value.error
+          ? departmentsResult.value.data || []
+          : []
+
+      const tasks =
+        tasksResult.status === 'fulfilled' && !tasksResult.value.error
+          ? tasksResult.value.data || []
+          : []
+
+      const projectsAvailable =
+        projectsResult.status === 'fulfilled' && !projectsResult.value.error
+
+      const projects =
+        projectsAvailable
+          ? projectsResult.value.data || []
+          : []
+
+      setAdminData({
+        users: profiles,
+        departments,
+        tasks,
+        projects,
+        projectsAvailable,
       })
     } catch (error) {
-      console.error('Failed to fetch metrics:', error)
-      setMetrics({
+      console.error('Failed to load admin dashboard data:', error)
+      setAdminData({
+        users: [],
         departments: [],
-        systemHealth: [],
-        recentActivity: [],
-        totalUsers: 0,
-        usersByDept: {},
-        taskStats: { total: 0, completed: 0, inProgress: 0, avgCompletionTime: 0 },
-        deploymentCount: 0
+        tasks: [],
+        projects: [],
+        projectsAvailable: false,
       })
     } finally {
       setLoading(false)
     }
   }
-  
-  function getDateFilter(range) {
-    const now = new Date()
-    switch(range) {
-      case 'today': return new Date(now.setHours(0,0,0,0)).toISOString()
-      case 'week': return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
-      case 'month': return new Date(now.setMonth(now.getMonth() - 1)).toISOString()
-      case 'quarter': return new Date(now.setMonth(now.getMonth() - 3)).toISOString()
-      default: return new Date(now.setHours(0,0,0,0)).toISOString()
-    }
-  }
-  
-  function calculateDepartmentComparison(data) {
-    const byDept = groupBy(data, 'department_id')
-    return Object.entries(byDept).map(([dept, metrics]) => ({
-      department: dept,
-      totalTasks: metrics.reduce((sum, m) => sum + (m.tasks_completed || 0), 0),
-      velocity: metrics.reduce((sum, m) => sum + (m.velocity || 0), 0),
-      activeUsers: metrics[0]?.active_users || 0,
-      blockers: metrics.reduce((sum, m) => sum + (m.blockers_count || 0), 0)
-    }))
-  }
-  
-  function calculateTaskStats(tasks) {
-    const total = tasks.length
-    const completed = tasks.filter(t => t.status === 'done').length
-    const inProgress = tasks.filter(t => t.status === 'in_progress').length
-    const avgCompletionTime = tasks.filter(t => t.updated_at).reduce((sum, t) => {
-      const hours = (new Date(t.updated_at) - new Date(t.created_at)) / (1000 * 60 * 60)
-      return sum + hours
-    }, 0) / (completed || 1)
-    
-    return { total, completed, inProgress, avgCompletionTime: Math.round(avgCompletionTime) }
-  }
-  
-  function groupBy(array, key) {
-    return (array || []).reduce((result, item) => {
-      const group = item[key] || 'unknown'
-      result[group] = result[group] || []
-      result[group].push(item)
-      return result
+
+  const derived = useMemo(() => {
+    const users = adminData.users || []
+    const departments = adminData.departments || []
+    const tasks = adminData.tasks || []
+    const projects = adminData.projects || []
+
+    const admins = users.filter((user) => user.role === 'admin').length
+    const activeTasks = tasks.filter((task) => task.status !== 'done').length
+    const blockedTasks = tasks.filter((task) =>
+      ['blocked', 'blocked_review'].includes(task.status)
+    ).length
+    const overdueTasks = tasks.filter((task) => {
+      if (!task.due_date) return false
+      return new Date(task.due_date) < new Date() && task.status !== 'done'
+    }).length
+
+    const usersByDepartment = users.reduce((acc, user) => {
+      const key = normalizeDepartmentName(user.department)
+      acc[key] = (acc[key] || 0) + 1
+      return acc
     }, {})
+
+    const departmentCoverage = Object.entries(usersByDepartment)
+      .map(([department, count]) => ({
+        department: titleCase(department),
+        members: count,
+        admins: users.filter(
+          (user) => normalizeDepartmentName(user.department) === department && user.role === 'admin'
+        ).length,
+      }))
+      .sort((a, b) => b.members - a.members)
+
+    const portfolioRows = (projects || []).slice(0, 6).map((project) => {
+      const relatedTasks = tasks.filter((task) => {
+        return (
+          task.project_id === project.id ||
+          task.project === project.id ||
+          task.project_name === project.name
+        )
+      })
+
+      const blockerCount = relatedTasks.filter((task) =>
+        ['blocked', 'blocked_review'].includes(task.status)
+      ).length
+
+      const health = inferProjectHealth(project, relatedTasks)
+
+      return {
+        id: project.id,
+        name: project.name || project.title || 'Untitled Project',
+        owner: project.owner || project.owner_name || project.lead || 'Unassigned',
+        status: project.status || 'unknown',
+        blockers: blockerCount,
+        health,
+        decisionState: inferDecisionState(project),
+      }
+    })
+
+    const latestTasks = tasks.slice(0, 8).map((task) => ({
+      id: task.id,
+      title: task.title || task.name || 'Untitled task',
+      status: task.status || 'unknown',
+      due_date: task.due_date,
+      assignee: task.assignee || task.owner || 'Unassigned',
+    }))
+
+    const governanceSignals = [
+      {
+        label: 'Rules surface',
+        value: 'Settings route active',
+        tone: 'Tracked in Admin shell',
+      },
+      {
+        label: 'Permissions posture',
+        value: `${admins} admin account${admins === 1 ? '' : 's'}`,
+        tone: admins > 3 ? 'Review admin sprawl' : 'Within expected range',
+      },
+      {
+        label: 'Decision visibility',
+        value: portfolioRows.length > 0 ? 'Project-level decision cues available' : 'No project cues yet',
+        tone: 'Dedicated decisions model can attach later',
+      },
+    ]
+
+    return {
+      totalUsers: users.length,
+      totalDepartments: departments.length || Object.keys(usersByDepartment).length,
+      totalProjects: projects.length,
+      activeTasks,
+      blockedTasks,
+      overdueTasks,
+      admins,
+      departmentCoverage,
+      portfolioRows,
+      latestTasks,
+      governanceSignals,
+    }
+  }, [adminData])
+
+  if (!profile) return null
+
+  if (profile.role !== 'admin') {
+    return <Navigate to="/dev-dashboard" replace />
   }
-  
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -126,167 +236,243 @@ export default function AdminDashboard() {
       </div>
     )
   }
-  
+
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Admin Dashboard</h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">System-wide metrics and monitoring</p>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Admin Overview</h1>
+          <p className="mt-1 text-gray-600 dark:text-gray-400">
+            Organizational oversight across portfolio health, execution risk, and team coverage.
+          </p>
         </div>
-        
-        <div className="flex gap-3">
-          {/* Time Range Selector */}
-          <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
-            {['today', 'week', 'month', 'quarter'].map(range => (
-              <button
-                key={range}
-                onClick={() => setTimeRange(range)}
-                className={`px-4 py-2 rounded-md font-medium capitalize transition-all ${
-                  timeRange === range
-                    ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm'
-                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-                }`}
-              >
-                {range}
-              </button>
-            ))}
+
+        <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3 bg-white dark:bg-gray-800">
+          <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            Current Lens
           </div>
-          
-          <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors">
-            📊 Export
-          </button>
+          <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
+            Admin environment
+          </div>
+          <div className="text-sm text-gray-500 dark:text-gray-400">
+            Org spine and cross-project visibility
+          </div>
         </div>
       </div>
-      
-      {/* Stat Cards */}
-      <div className="grid grid-cols-4 gap-6">
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label="Total Users"
-          value={metrics.totalUsers}
-          change="+12%"
+          label="Active Projects"
+          value={derived.totalProjects}
+          change={derived.totalProjects > 0 ? 'Portfolio in view' : 'No projects yet'}
           trend="up"
-          icon="👥"
+          icon="🗂️"
           color="blue"
         />
         <StatCard
-          label="Tasks Completed"
-          value={metrics.taskStats.completed}
-          change={`${metrics.taskStats.total} total`}
-          trend="up"
-          icon="✓"
-          color="green"
+          label="Open Work"
+          value={derived.activeTasks}
+          change={`${derived.blockedTasks} blocked`}
+          trend={derived.blockedTasks > 0 ? 'down' : 'up'}
+          icon="🧩"
+          color="yellow"
         />
         <StatCard
-          label="Deployments"
-          value={metrics.deploymentCount}
-          icon="🚀"
+          label="People"
+          value={derived.totalUsers}
+          change={`${derived.admins} admins`}
+          trend="up"
+          icon="👥"
           color="purple"
         />
         <StatCard
-          label="Avg Time"
-          value={`${metrics.taskStats.avgCompletionTime}h`}
-          trend="down"
-          icon="⏱️"
-          color="yellow"
+          label="Departments"
+          value={derived.totalDepartments}
+          change={derived.overdueTasks > 0 ? `${derived.overdueTasks} overdue tasks` : 'No overdue signal'}
+          trend={derived.overdueTasks > 0 ? 'down' : 'up'}
+          icon="🏛️"
+          color="green"
         />
       </div>
-      
-      {/* Department Performance */}
-      <Card title="Department Performance" subtitle="Compare team productivity">
-        {metrics.departments.length === 0 ? (
-          <EmptyState
-            icon="📊"
-            title="No department data"
-            description="Department metrics will appear here once teams start working"
-          />
-        ) : (
-          <div className="space-y-4">
-            {metrics.departments.map(dept => (
-              <div key={dept.department} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                <div className="flex items-center gap-4 flex-1">
-                  <div className="w-32">
-                    <p className="font-bold text-gray-900 dark:text-white capitalize">{dept.department}</p>
+
+      <div className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
+        <Card
+          title="Portfolio Health"
+          subtitle="A cross-project view built for oversight rather than execution detail."
+        >
+          {!adminData.projectsAvailable ? (
+            <EmptyState
+              icon="🗂️"
+              title="Projects table not available"
+              description="Admin can still oversee people and task signals, but portfolio rows will appear once project records are available."
+            />
+          ) : derived.portfolioRows.length === 0 ? (
+            <EmptyState
+              icon="🗂️"
+              title="No projects in portfolio"
+              description="As project records land in the shared core, admin portfolio visibility will appear here."
+            />
+          ) : (
+            <div className="space-y-3">
+              {derived.portfolioRows.map((project) => (
+                <div
+                  key={project.id}
+                  className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-900"
+                >
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                        {project.name}
+                      </div>
+                      <div className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                        Owner: {project.owner}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant={inferHealthVariant(project.health)}>{project.health}</Badge>
+                      <Badge>{project.status}</Badge>
+                      <Badge variant={project.blockers > 0 ? 'danger' : 'success'}>
+                        {project.blockers} blockers
+                      </Badge>
+                    </div>
                   </div>
-                  <div className="flex gap-8">
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Tasks</p>
-                      <p className="font-bold">{dept.totalTasks}</p>
+
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <div className="rounded-md bg-white dark:bg-gray-800 px-3 py-2 border border-gray-200 dark:border-gray-700">
+                      <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        Decision signal
+                      </div>
+                      <div className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
+                        {project.decisionState}
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Velocity</p>
-                      <p className="font-bold">{dept.velocity}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Active Users</p>
-                      <p className="font-bold">{dept.activeUsers}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Blockers</p>
-                      <Badge variant="danger">{dept.blockers}</Badge>
+
+                    <div className="rounded-md bg-white dark:bg-gray-800 px-3 py-2 border border-gray-200 dark:border-gray-700">
+                      <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        Oversight note
+                      </div>
+                      <div className="mt-1 text-sm font-medium text-gray-900 dark:text-white">
+                        {project.blockers > 0
+                          ? 'Escalation path should stay visible in admin.'
+                          : 'Project is moving without current blocker pressure.'}
+                      </div>
                     </div>
                   </div>
                 </div>
-                <div className="w-64 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                  <div 
-                    className="bg-blue-600 h-2 rounded-full" 
-                    style={{ width: `${Math.min((dept.totalTasks / 50) * 100, 100)}%` }}
-                  ></div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <Card
+          title="Governance Signals"
+          subtitle="Early admin-facing indicators for rules, permissions, and coordination posture."
+        >
+          <div className="space-y-3">
+            {derived.governanceSignals.map((signal) => (
+              <div
+                key={signal.label}
+                className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-900"
+              >
+                <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                  {signal.label}
+                </div>
+                <div className="mt-1 text-sm text-gray-700 dark:text-gray-300">
+                  {signal.value}
+                </div>
+                <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  {signal.tone}
                 </div>
               </div>
             ))}
           </div>
-        )}
-      </Card>
-      
-      {/* System Health & Activity */}
-      <div className="grid grid-cols-2 gap-6">
-        <Card title="System Health">
-          <div className="space-y-3">
-            {metrics.systemHealth && metrics.systemHealth.length > 0 ? (
-              metrics.systemHealth.slice(0, 5).map(log => (
-                <div key={log.id} className="flex items-center justify-between py-2">
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Card
+          title="Department Coverage"
+          subtitle="Admin should understand where people are concentrated and where oversight may be thin."
+        >
+          {derived.departmentCoverage.length === 0 ? (
+            <EmptyState
+              icon="🏛️"
+              title="No department structure yet"
+              description="Department coverage will appear once people are assigned into the organizational spine."
+            />
+          ) : (
+            <div className="space-y-3">
+              {derived.departmentCoverage.map((dept) => (
+                <div
+                  key={dept.department}
+                  className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-900"
+                >
                   <div>
-                    <p className="font-medium text-sm">{log.metric_type}</p>
-                    <p className="text-xs text-gray-500">{new Date(log.recorded_at).toLocaleString()}</p>
+                    <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                      {dept.department}
+                    </div>
+                    <div className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      {dept.members} member{dept.members === 1 ? '' : 's'} • {dept.admins} admin{dept.admins === 1 ? '' : 's'}
+                    </div>
                   </div>
-                  <Badge variant={
-                    log.status === 'healthy' ? 'success' :
-                    log.status === 'warning' ? 'warning' : 'danger'
-                  }>
-                    {log.status}
+
+                  <Badge variant={dept.members <= 1 ? 'warning' : 'success'}>
+                    {dept.members <= 1 ? 'Thin coverage' : 'Covered'}
                   </Badge>
                 </div>
-              ))
-            ) : (
-              <p className="text-gray-500 dark:text-gray-400 py-4">No system health data available</p>
-            )}
-          </div>
+              ))}
+            </div>
+          )}
         </Card>
-        
-        <Card title="Recent Activity">
-          <div className="space-y-3 max-h-80 overflow-y-auto">
-            {metrics.recentActivity && metrics.recentActivity.length > 0 ? (
-              metrics.recentActivity.map(activity => (
-                <div key={activity.id} className="flex items-start gap-3 py-2 border-b border-gray-100 dark:border-gray-700 last:border-0">
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">
-                      {activity.profiles?.full_name} 
-                      <span className="text-gray-500 font-normal"> {activity.action}</span>
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      <Badge variant="default" size="sm">{activity.profiles?.department}</Badge>
-                      {' • '}
-                      {new Date(activity.created_at).toLocaleTimeString()}
-                    </p>
+
+        <Card
+          title="Execution Pressure"
+          subtitle="Cross-project work signals that need administrative awareness."
+        >
+          {derived.latestTasks.length === 0 ? (
+            <EmptyState
+              icon="🧩"
+              title="No task activity found"
+              description="Task-level execution signals will appear here as work enters the shared core."
+            />
+          ) : (
+            <div className="space-y-3">
+              {derived.latestTasks.map((task) => {
+                const isBlocked = ['blocked', 'blocked_review'].includes(task.status)
+                const isDone = task.status === 'done'
+
+                return (
+                  <div
+                    key={task.id}
+                    className="flex items-start justify-between gap-4 rounded-lg border border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-900"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                        {task.title}
+                      </div>
+                      <div className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                        Assignee: {task.assignee}
+                      </div>
+                      {task.due_date && (
+                        <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          Due: {new Date(task.due_date).toLocaleDateString()}
+                        </div>
+                      )}
+                    </div>
+
+                    <Badge
+                      variant={
+                        isBlocked ? 'danger' : isDone ? 'success' : 'warning'
+                      }
+                    >
+                      {task.status}
+                    </Badge>
                   </div>
-                </div>
-              ))
-            ) : (
-              <p className="text-gray-500 dark:text-gray-400 py-4">No recent activity</p>
-            )}
-          </div>
+                )
+              })}
+            </div>
+          )}
         </Card>
       </div>
     </div>
