@@ -6,7 +6,6 @@ export const environmentNav = [
     description: 'Org spine',
     items: [
       { label: 'Overview', path: '/admin' },
-      { label: 'Portfolio', path: '/projects' },
       { label: 'Users', path: '/users' },
       { label: 'Rules', path: '/settings' },
     ],
@@ -28,12 +27,9 @@ export const environmentNav = [
   {
     key: 'design',
     label: 'Design',
-    basePath: '/projects',
+    basePath: '/files',
     description: 'Creative execution',
-    items: [
-      { label: 'Overview', path: '/projects' },
-      { label: 'Files', path: '/files' },
-    ],
+    items: [{ label: 'Overview', path: '/files' }],
   },
   {
     key: 'marketing',
@@ -57,20 +53,22 @@ export function getEnvironmentFromPath(pathname) {
 
   if (
     pathname === '/dev-dashboard' ||
+    pathname === '/projects' ||
     pathname === '/kanban' ||
     pathname === '/api-docs' ||
     pathname === '/terminal' ||
-    pathname === '/git'
+    pathname === '/git' ||
+    pathname === '/dashboard'
   ) {
     return 'development'
   }
 
-  if (pathname === '/campaigns' || pathname === '/calendar' || pathname === '/clients') {
-    return 'marketing'
+  if (pathname === '/files') {
+    return 'design'
   }
 
-  if (pathname === '/projects' || pathname === '/files') {
-    return 'design'
+  if (pathname === '/campaigns' || pathname === '/calendar' || pathname === '/clients') {
+    return 'marketing'
   }
 
   return 'development'

@@ -20,7 +20,6 @@ import GitIntegration from './apps/GitIntegration'
 import Kanban from './apps/Kanban'
 import ApiDocs from './apps/ApiDocs'
 import UserManagement from './apps/UserManagement'
-import Header from './components/Header'
 import Terminal from './apps/Terminal'
 
 function ProtectedRoute({ children }) {
@@ -46,7 +45,7 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route index element={<Navigate to="/dev-dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="projects" element={<Projects />} />
         <Route path="tasks" element={<Tasks />} />
