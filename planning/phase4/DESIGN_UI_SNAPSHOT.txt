@@ -1,0 +1,7 @@
+# Design-related UI files
+
+src/apps/AdminDashboard.jsx
+src/apps/Dashboard.jsx
+src/apps/DevDashboard.jsx
+src/apps/DevDashboard.jsx.backup
+src/apps/Projects.jsx
