@@ -1,35 +1,39 @@
-export default function StatCard({ 
-  label, 
-  value, 
-  change, 
-  trend, 
+export default function StatCard({
+  label,
+  value,
+  change,
+  trend,
   icon,
-  color = 'blue' 
+  color = 'blue'
 }) {
   const colors = {
-    blue: 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400',
-    green: 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400',
-    red: 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400',
-    yellow: 'bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400',
-    purple: 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400',
+    blue: 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 shadow-sm',
+    green: 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 shadow-sm',
+    red: 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 shadow-sm',
+    yellow: 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 shadow-sm',
+    purple: 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 shadow-sm',
   }
-  
+
   return (
-    <div className={`rounded-xl p-6 ${colors[color]}`}>
+    <div className={`rounded-2xl p-5 ${colors[color]}`}>
       <div className="flex items-center justify-between mb-3">
-        <span className="text-sm font-medium opacity-80">{label}</span>
-        {icon && <span className="text-2xl">{icon}</span>}
+        <span className="text-sm font-medium text-slate-500 dark:text-slate-400">{label}</span>
+        {icon && <span className="text-xl">{icon}</span>}
       </div>
-      
+
       <div className="flex items-baseline gap-3">
-        <span className="text-3xl font-bold">{value}</span>
-        
+        <span className="text-3xl font-bold tracking-tight">{value}</span>
+
         {change && (
-          <span className={`text-sm font-medium ${
-            trend === 'up' ? 'text-green-600' : 
-            trend === 'down' ? 'text-red-600' : 
-            'text-gray-600'
-          }`}>
+          <span
+            className={`text-sm font-medium ${
+              trend === 'up'
+                ? 'text-blue-600 dark:text-blue-300'
+                : trend === 'down'
+                ? 'text-amber-600 dark:text-amber-300'
+                : 'text-slate-500 dark:text-slate-400'
+            }`}
+          >
             {trend === 'up' ? '↑' : trend === 'down' ? '↓' : '→'} {change}
           </span>
         )}

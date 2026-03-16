@@ -2,45 +2,38 @@ import { supabase } from './supabase'
 
 export async function executeAction(action) {
   const { type, params } = action
-  
+
   switch (type) {
     case 'team.create_task':
       return await createTask(params)
-    
+
     case 'team.complete_task':
       return await completeTask(params)
-    
-    case 'team.flag_blocker':
-      return await flagBlocker(params)
-    
-    case 'team.log_decision':
-      return await logDecision(params)
-    
+
     case 'team.create_project':
       return await createProject(params)
-    
-    case 'team.add_project_update':
-      return await addProjectUpdate(params)
-    
+
     default:
-      throw new Error(`Unknown action type: ${type}`)
+      throw new Error(`Unsupported action type: ${type}`)
   }
 }
 
-async function createTask({ title, project_id, assignee, priority, due_date }) {
+async function createTask({ title, project_id = null, assignee = null, priority = 'medium', due_date = null }) {
+  const payload = {
+    title,
+    project_id,
+    assigned_to: assignee,
+    priority,
+    due_date,
+    status: 'todo',
+  }
+
   const { data, error } = await supabase
     .from('tasks')
-    .insert({
-      title,
-      project_id,
-      assigned_to: assignee,
-      priority,
-      due_date,
-      status: 'todo',
-    })
+    .insert(payload)
     .select()
     .single()
-  
+
   if (error) throw error
   return { success: true, data }
 }
@@ -55,83 +48,37 @@ async function completeTask({ task_id }) {
     .eq('id', task_id)
     .select()
     .single()
-  
+
   if (error) throw error
   return { success: true, data }
 }
 
-async function flagBlocker({ task_id, blocker_type, description, waiting_on }) {
-  const { data: user } = await supabase.auth.getUser()
-  
-  const { data, error } = await supabase
-    .from('blockers')
-    .insert({
-      task_id,
-      blocker_type,
-      description,
-      blocked_user: user.user.id,
-      waiting_on,
-    })
-    .select()
-    .single()
-  
-  if (error) throw error
-  return { success: true, data }
-}
+async function createProject({ name, description = null, department = null, due_date = null, priority = 'medium' }) {
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser()
 
-async function logDecision({ context, verdict, probability, project_id, participants }) {
-  const { data, error } = await supabase
-    .from('team_decisions')
-    .insert({
-      context,
-      verdict,
-      probability,
-      project_id,
-      participants,
-      outcome: 'open',
-    })
-    .select()
-    .single()
-  
-  if (error) throw error
-  return { success: true, data }
-}
+  if (authError || !user) {
+    throw new Error('Not authenticated')
+  }
 
-async function createProject({ name, description, department }) {
-  const { data: user } = await supabase.auth.getUser()
-  
+  const payload = {
+    name,
+    description,
+    department_id: department,
+    owner_id: user.id,
+    status: 'active',
+    priority,
+    due_date,
+  }
+
   const { data, error } = await supabase
     .from('projects')
-    .insert({
-      name,
-      description,
-      department_id: department,
-      owner_id: user.user.id,
-      status: 'active',
-    })
+    .insert(payload)
     .select()
     .single()
-  
-  if (error) throw error
-  return { success: true, data }
-}
 
-async function addProjectUpdate({ project_id, content, update_type, next_actions }) {
-  const { data: user } = await supabase.auth.getUser()
-  
-  const { data, error } = await supabase
-    .from('project_updates')
-    .insert({
-      project_id,
-      content,
-      update_type,
-      next_actions,
-      created_by: user.user.id,
-      created_by_ai: true,
-    })
-    .select()
-    .single()
-  
   if (error) throw error
   return { success: true, data }
 }
