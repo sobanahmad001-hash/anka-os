@@ -9,7 +9,7 @@ const SILICONFLOW_KEY = import.meta.env.VITE_SILICONFLOW_KEY
 const IMAGE_PROVIDERS = [
   { id: 'siliconflow', label: 'Siliconflow', badge: 'Free credits · Flux', color: 'bg-green-900/50 text-green-300' },
   { id: 'pollinations', label: 'Pollinations', badge: 'Free · Unstable', color: 'bg-yellow-900/50 text-yellow-300' },
-  { id: 'huggingface', label: 'Hugging Face', badge: 'Needs proxy', color: 'bg-gray-700 text-gray-400', disabled: true },
+  { id: 'huggingface', label: 'Hugging Face', badge: 'Free · Flux', color: 'bg-yellow-900/50 text-yellow-300' },
   { id: 'gemini', label: 'Google Imagen', badge: 'Coming soon', color: 'bg-gray-700 text-gray-400', disabled: true },
   { id: 'dalle', label: 'DALL-E 3', badge: 'Paid', color: 'bg-gray-700 text-gray-400', disabled: true },
 ]
@@ -86,7 +86,29 @@ async function generateSiliconflow(prompt, width, height, model) {
 }
 
 async function generateHuggingFace(prompt, model) {
-  throw new Error('HuggingFace requires a backend proxy due to CORS. Use Pollinations or Google Imagen instead — or we can add a Supabase Edge Function to proxy HF requests.')
+  const response = await fetch(
+    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/hf-proxy`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({
+        model: model || 'black-forest-labs/FLUX.1-schnell',
+        inputs: prompt,
+        task: 'image'
+      }),
+    }
+  )
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}))
+    throw new Error(err.error || `Proxy error: ${response.status}`)
+  }
+  const data = await response.json()
+  if (!data.data) throw new Error('No image data returned')
+  const url = `data:${data.contentType};base64,${data.data}`
+  return { url, provider: 'huggingface' }
 }
 
 async function generateGemini(prompt) {
