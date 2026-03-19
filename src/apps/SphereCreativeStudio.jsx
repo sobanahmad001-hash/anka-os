@@ -447,14 +447,33 @@ export default function SphereCreativeStudio() {
                 <div className="grid grid-cols-2 gap-4">
                   {generatedImages.map((img) => (
                     <div key={img.ts} className="bg-gray-800 rounded-xl overflow-hidden border border-gray-700">
-                      <a href={img.url} target="_blank" rel="noopener noreferrer">
-                        <img
-                          src={img.url}
-                          alt={img.prompt}
-                          className="w-full object-cover"
-                          style={{ aspectRatio: img.ratio?.replace(':', '/') || '1/1', display: 'block' }}
-                        />
-                      </a>
+                      {/* Background image approach — bypasses CORS on localhost */}
+                      <div
+                        style={{
+                          backgroundImage: `url("${img.url}")`,
+                          backgroundSize: 'cover',
+                          backgroundPosition: 'center',
+                          aspectRatio: img.ratio?.replace(':', '/') || '1/1',
+                          minHeight: '200px',
+                          backgroundColor: '#111827',
+                        }}
+                        className="w-full relative group"
+                      >
+                        {/* Overlay with open link */}
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+                          <a href={img.url} target="_blank" rel="noopener noreferrer"
+                            className="bg-white text-gray-900 text-xs font-semibold px-4 py-2 rounded-lg">
+                            ↗ Open Full Image
+                          </a>
+                        </div>
+                        {/* Loading indicator — shows until background loads */}
+                        <div className="absolute inset-0 flex items-center justify-center text-gray-600 text-xs -z-10">
+                          <div className="text-center">
+                            <p className="text-2xl mb-1">🎨</p>
+                            <p>Loading...</p>
+                          </div>
+                        </div>
+                      </div>
                       <div className="p-3">
                         <p className="text-xs text-gray-400 line-clamp-2 mb-2">{img.prompt}</p>
                         <div className="flex items-center gap-2 flex-wrap">
