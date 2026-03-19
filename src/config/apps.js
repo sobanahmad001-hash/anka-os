@@ -35,6 +35,7 @@ import PullRequestDashboardApp from '../apps/PullRequestDashboardApp.jsx';
 import CIPipelineDashboardApp from '../apps/CIPipelineDashboardApp.jsx';
 import AnkaSphereProjects from '../apps/AnkaSphereProjects.jsx';
 import AnkaSpherePortal from '../apps/AnkaSpherePortal.jsx';
+import AnkaSphereClients from '../apps/AnkaSphereClients.jsx';
 
 // ─── Shared apps available to all departments ─────────────────────────────────
 const sharedApps = [
@@ -43,6 +44,7 @@ const sharedApps = [
   { id: 'projects', name: 'Projects', icon: '📋', component: ProjectsApp, defaultWidth: 900, defaultHeight: 600 },
   { id: 'sphere', name: 'Anka Sphere', icon: '🌐', component: AnkaSphereProjects, defaultWidth: 950, defaultHeight: 700 },
   { id: 'portal', name: 'Client Portal', icon: '🔮', component: AnkaSpherePortal, defaultWidth: 800, defaultHeight: 650 },
+  { id: 'as-clients', name: 'AS Clients', icon: '👥', component: AnkaSphereClients, defaultWidth: 800, defaultHeight: 650 },
   { id: 'chat', name: 'Team Chat', icon: '💬', component: ChatApp },
   { id: 'tasks', name: 'Tasks', icon: '✅', component: TasksApp },
   { id: 'notes', name: 'Notes', icon: '📝', component: NotesApp },
