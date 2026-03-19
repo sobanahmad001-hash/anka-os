@@ -21,6 +21,9 @@ import Kanban from './apps/Kanban'
 import ApiDocs from './apps/ApiDocs'
 import UserManagement from './apps/UserManagement'
 import Terminal from './apps/Terminal'
+import AnkaSphereProjects from './apps/AnkaSphereProjects'
+import AnkaSpherePortal from './apps/AnkaSpherePortal'
+import AnkaSphereClients from './apps/AnkaSphereClients'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -63,6 +66,9 @@ export default function App() {
         <Route path="terminal" element={<Terminal />} />
         <Route path="admin" element={<AdminDashboard />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="sphere/projects" element={<AnkaSphereProjects />} />
+        <Route path="sphere/clients" element={<AnkaSphereClients />} />
+        <Route path="sphere/portal" element={<AnkaSpherePortal />} />
       </Route>
     </Routes>
   )
