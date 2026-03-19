@@ -7,13 +7,13 @@ const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY
 
 const IMAGE_PROVIDERS = [
   { id: 'pollinations', label: 'Pollinations', badge: 'Free · No key', color: 'bg-green-900/50 text-green-300' },
-  { id: 'huggingface', label: 'Hugging Face', badge: 'Free · Flux', color: 'bg-yellow-900/50 text-yellow-300' },
+  { id: 'huggingface', label: 'Hugging Face', badge: 'Needs proxy', color: 'bg-gray-700 text-gray-400', disabled: true },
   { id: 'gemini', label: 'Google Imagen', badge: 'Free tier', color: 'bg-blue-900/50 text-blue-300' },
   { id: 'dalle', label: 'DALL-E 3', badge: 'Paid', color: 'bg-gray-700 text-gray-400' },
 ]
 
 const VIDEO_PROVIDERS = [
-  { id: 'huggingface_video', label: 'HuggingFace', badge: 'Free · Zeroscope', color: 'bg-green-900/50 text-green-300' },
+  { id: 'huggingface_video', label: 'HuggingFace', badge: 'Needs proxy', color: 'bg-gray-700 text-gray-400', disabled: true },
   { id: 'runway', label: 'Runway ML', badge: '125 free credits', color: 'bg-purple-900/50 text-purple-300' },
   { id: 'veo', label: 'Google Veo', badge: 'Coming soon', color: 'bg-gray-700 text-gray-400', disabled: true },
 ]
@@ -27,70 +27,44 @@ const ASPECT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4']
 
 async function generatePollinations(prompt, width, height) {
   const encoded = encodeURIComponent(prompt)
-  const url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true&enhance=true`
+  const seed = Math.floor(Math.random() * 999999)
+  const url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true&enhance=true&seed=${seed}`
+  await new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = resolve
+    img.onerror = reject
+    img.src = url
+  })
   return { url, provider: 'pollinations' }
 }
 
-async function generateHuggingFace(prompt, model = 'black-forest-labs/FLUX.1-schnell') {
-  const response = await fetch(
-    `https://api-inference.huggingface.co/models/${model}`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${HF_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ inputs: prompt }),
-    }
-  )
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}))
-    throw new Error(err.error || `HuggingFace error: ${response.status}`)
-  }
-  const blob = await response.blob()
-  const url = URL.createObjectURL(blob)
-  return { url, blob, provider: 'huggingface' }
+async function generateHuggingFace(prompt, model) {
+  throw new Error('HuggingFace requires a backend proxy due to CORS. Use Pollinations or Google Imagen instead — or we can add a Supabase Edge Function to proxy HF requests.')
 }
 
 async function generateGemini(prompt) {
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=${GEMINI_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${GEMINI_KEY}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+        instances: [{ prompt: prompt }],
+        parameters: { sampleCount: 1 },
       }),
     }
   )
   if (!response.ok) throw new Error(`Gemini error: ${response.status}`)
   const data = await response.json()
-  const imagePart = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData)
-  if (!imagePart) throw new Error('No image in Gemini response')
-  const url = `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`
+  const imageB64 = data.predictions?.[0]?.bytesBase64Encoded
+  if (!imageB64) throw new Error('No image in Gemini response')
+  const url = `data:image/png;base64,${imageB64}`
   return { url, provider: 'gemini' }
 }
 
-async function generateHFVideo(prompt, model = 'ali-vilab/text-to-video-ms-1.7b') {
-  const response = await fetch(
-    `https://api-inference.huggingface.co/models/${model}`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${HF_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ inputs: prompt }),
-    }
-  )
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}))
-    throw new Error(err.error || `HuggingFace video error: ${response.status}`)
-  }
-  const blob = await response.blob()
-  const url = URL.createObjectURL(blob)
-  return { url, blob, provider: 'huggingface_video' }
+async function generateHFVideo(prompt) {
+  throw new Error("HuggingFace video requires a backend proxy. We'll add this via Supabase Edge Function in the next sprint.")
 }
 
 function getDimensions(ratio) {
@@ -459,6 +433,8 @@ export default function SphereCreativeStudio() {
                   {generatedImages.map((img, i) => (
                     <div key={img.ts} className="bg-gray-800 rounded-xl overflow-hidden border border-gray-700">
                       <img src={img.url} alt={img.prompt}
+                        crossOrigin="anonymous"
+                        onError={e => e.target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="%23374151"/><text x="50" y="50" text-anchor="middle" fill="%239CA3AF" font-size="12">Loading...</text></svg>'}
                         className="w-full object-cover"
                         style={{ aspectRatio: img.ratio?.replace(':', '/') || '1/1' }} />
                       <div className="p-3">
