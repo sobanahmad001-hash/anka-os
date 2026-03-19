@@ -26,6 +26,7 @@ import AnkaSphereTeamBoard from './apps/AnkaSphereTeamBoard'
 import AnkaSpherePortal from './apps/AnkaSpherePortal'
 import AnkaSphereClients from './apps/AnkaSphereClients'
 import CodingAgent from './apps/CodingAgent'
+import SphereCreativeStudio from './apps/SphereCreativeStudio'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -63,9 +64,9 @@ export default function App() {
         <Route path="sphere/clients" element={<AnkaSphereClients />} />
         <Route path="sphere/portal" element={<AnkaSpherePortal />} />
         <Route path="sphere/team-board" element={<AnkaSphereTeamBoard />} />
-        <Route path="sphere/assets" element={<Files />} />
-        <Route path="sphere/moodboard" element={<Files />} />
-        <Route path="sphere/design-reviews" element={<Files />} />
+        <Route path="sphere/assets" element={<SphereCreativeStudio />} />
+        <Route path="sphere/moodboard" element={<SphereCreativeStudio />} />
+        <Route path="sphere/design-reviews" element={<SphereCreativeStudio />} />
         <Route path="sphere/wp-sites" element={<Projects />} />
         <Route path="sphere/deployments" element={<Projects />} />
         <Route path="sphere/performance" element={<Projects />} />

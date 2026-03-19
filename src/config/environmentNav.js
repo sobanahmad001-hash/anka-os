@@ -24,9 +24,9 @@
 
       // Design dept
       { label: '— Design', path: null, dept: 'design', isHeader: true },
-      { label: 'Assets', path: '/sphere/assets', dept: 'design' },
-      { label: 'Moodboard', path: '/sphere/moodboard', dept: 'design' },
-      { label: 'Design Reviews', path: '/sphere/design-reviews', dept: 'design' },
+      { label: 'Creative Studio', path: '/sphere/assets', dept: 'design' },
+      { label: 'Asset Library', path: '/sphere/moodboard', dept: 'design' },
+      { label: 'Brand Guidelines', path: '/sphere/design-reviews', dept: 'design' },
 
       // Development dept (WordPress focused)
       { label: '— Development', path: null, dept: 'development', isHeader: true },
