@@ -4,12 +4,22 @@ import { useAuth } from '../context/AuthContext.jsx'
 
 const HF_TOKEN = import.meta.env.VITE_HUGGING_FACE_TOKEN
 const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY
+const SILICONFLOW_KEY = import.meta.env.VITE_SILICONFLOW_KEY
 
 const IMAGE_PROVIDERS = [
-  { id: 'pollinations', label: 'Pollinations', badge: 'Free · No key', color: 'bg-green-900/50 text-green-300' },
+  { id: 'siliconflow', label: 'Siliconflow', badge: 'Free credits · Flux', color: 'bg-green-900/50 text-green-300' },
+  { id: 'pollinations', label: 'Pollinations', badge: 'Free · Unstable', color: 'bg-yellow-900/50 text-yellow-300' },
   { id: 'huggingface', label: 'Hugging Face', badge: 'Needs proxy', color: 'bg-gray-700 text-gray-400', disabled: true },
   { id: 'gemini', label: 'Google Imagen', badge: 'Coming soon', color: 'bg-gray-700 text-gray-400', disabled: true },
   { id: 'dalle', label: 'DALL-E 3', badge: 'Paid', color: 'bg-gray-700 text-gray-400', disabled: true },
+]
+
+const SILICONFLOW_MODELS = [
+  { id: 'black-forest-labs/FLUX.1-schnell', label: 'FLUX Schnell (Fast)' },
+  { id: 'black-forest-labs/FLUX.1-dev', label: 'FLUX Dev (Quality)' },
+  { id: 'stabilityai/stable-diffusion-xl-base-1.0', label: 'SDXL' },
+  { id: 'stabilityai/stable-diffusion-3-5-large', label: 'SD 3.5 Large' },
+  { id: 'Pro/black-forest-labs/FLUX.1-schnell', label: 'FLUX Pro Schnell' },
 ]
 
 const VIDEO_PROVIDERS = [
@@ -37,6 +47,31 @@ async function generatePollinations(prompt, width, height) {
     img.src = url
   })
   return { url, provider: 'pollinations' }
+}
+
+async function generateSiliconflow(prompt, width, height, model) {
+  const response = await fetch('https://api.siliconflow.cn/v1/images/generations', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${SILICONFLOW_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: model || 'black-forest-labs/FLUX.1-schnell',
+      prompt,
+      image_size: `${width}x${height}`,
+      num_inference_steps: 20,
+      guidance_scale: 7.5,
+    }),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}))
+    throw new Error(err.message || `Siliconflow error: ${response.status}`)
+  }
+  const data = await response.json()
+  const url = data.images?.[0]?.url
+  if (!url) throw new Error('No image returned from Siliconflow')
+  return { url, provider: 'siliconflow' }
 }
 
 async function generateHuggingFace(prompt, model) {
@@ -91,7 +126,7 @@ export default function SphereCreativeStudio() {
   const [assetsLoading, setAssetsLoading] = useState(false)
 
   // Image generation state
-  const [imageProvider, setImageProvider] = useState('pollinations')
+  const [imageProvider, setImageProvider] = useState('siliconflow')
   const [imagePrompt, setImagePrompt] = useState('')
   const [imageStyle, setImageStyle] = useState('')
   const [aspectRatio, setAspectRatio] = useState('1:1')
@@ -99,6 +134,7 @@ export default function SphereCreativeStudio() {
   const [imageLoading, setImageLoading] = useState(false)
   const [imageError, setImageError] = useState('')
   const [hfModel, setHfModel] = useState('black-forest-labs/FLUX.1-schnell')
+  const [sfModel, setSfModel] = useState('black-forest-labs/FLUX.1-schnell')
 
   // Video generation state
   const [videoProvider, setVideoProvider] = useState('huggingface_video')
@@ -191,22 +227,20 @@ export default function SphereCreativeStudio() {
     setImageError('')
     const fullPrompt = imageStyle ? `${imagePrompt}, ${imageStyle} style` : imagePrompt
     const [w, h] = getDimensions(aspectRatio)
-    const encoded = encodeURIComponent(fullPrompt)
-    const seed = Math.floor(Math.random() * 999999)
-
-    // Try multiple Pollinations models in order
-    const models = ['flux-pro', 'flux', 'turbo']
-    const url = `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&seed=${seed}&model=${models[0]}`
-
-    const newImage = {
-      url,
-      provider: 'pollinations',
-      prompt: fullPrompt,
-      ratio: aspectRatio,
-      ts: Date.now(),
-      models,
+    try {
+      let result
+      if (imageProvider === 'siliconflow') result = await generateSiliconflow(fullPrompt, w, h, sfModel)
+      else if (imageProvider === 'pollinations') {
+        const encoded = encodeURIComponent(fullPrompt)
+        const seed = Math.floor(Math.random() * 999999)
+        const url = `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&seed=${seed}&model=flux`
+        result = { url, provider: 'pollinations' }
+      }
+      else { setImageError('Provider not available'); setImageLoading(false); return }
+      setGeneratedImages(prev => [{ ...result, prompt: fullPrompt, ratio: aspectRatio, ts: Date.now() }, ...prev.slice(0, 7)])
+    } catch (err) {
+      setImageError(err.message)
     }
-    setGeneratedImages(prev => [newImage, ...prev.slice(0, 7)])
     setImageLoading(false)
   }
 
@@ -357,6 +391,16 @@ export default function SphereCreativeStudio() {
                 <select value={hfModel} onChange={e => setHfModel(e.target.value)}
                   className="bg-gray-800 text-white text-xs rounded-lg px-3 py-2 border border-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500">
                   {HF_IMAGE_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                </select>
+              </div>
+            )}
+
+            {imageProvider === 'siliconflow' && (
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Model</label>
+                <select value={sfModel} onChange={e => setSfModel(e.target.value)}
+                  className="bg-gray-800 text-white text-xs rounded-lg px-3 py-2 border border-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500">
+                  {SILICONFLOW_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                 </select>
               </div>
             )}
