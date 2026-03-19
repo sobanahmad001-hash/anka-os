@@ -191,15 +191,22 @@ export default function SphereCreativeStudio() {
     setImageError('')
     const fullPrompt = imageStyle ? `${imagePrompt}, ${imageStyle} style` : imagePrompt
     const [w, h] = getDimensions(aspectRatio)
-    try {
-      const encoded = encodeURIComponent(fullPrompt)
-      const seed = Math.floor(Math.random() * 999999)
-      const url = `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&seed=${seed}&model=flux&enhance=false`
-      const newImage = { url, provider: 'pollinations', prompt: fullPrompt, ratio: aspectRatio, ts: Date.now() }
-      setGeneratedImages(prev => [newImage, ...prev.slice(0, 7)])
-    } catch (err) {
-      setImageError(err.message)
+    const encoded = encodeURIComponent(fullPrompt)
+    const seed = Math.floor(Math.random() * 999999)
+
+    // Try multiple Pollinations models in order
+    const models = ['flux-pro', 'flux', 'turbo']
+    const url = `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&seed=${seed}&model=${models[0]}`
+
+    const newImage = {
+      url,
+      provider: 'pollinations',
+      prompt: fullPrompt,
+      ratio: aspectRatio,
+      ts: Date.now(),
+      models,
     }
+    setGeneratedImages(prev => [newImage, ...prev.slice(0, 7)])
     setImageLoading(false)
   }
 
@@ -471,12 +478,22 @@ export default function SphereCreativeStudio() {
                       }}
                       className="w-full"
                     />
-                    <div className="px-4 py-2 flex items-center gap-2">
+                    <div className="px-4 py-2 flex items-center gap-2 flex-wrap">
                       <span className="text-xs text-gray-500">{img.provider}</span>
-                      <span className="text-xs text-gray-600">·</span>
                       <span className="text-xs text-gray-500">{img.ratio}</span>
-                      <span className="text-xs text-gray-600">·</span>
-                      <span className="text-xs text-gray-500">{new Date(img.ts).toLocaleTimeString()}</span>
+                      <div className="ml-auto flex gap-1">
+                        {['flux-pro', 'flux', 'turbo'].map(m => {
+                          const enc = encodeURIComponent(img.prompt)
+                          const [mw, mh] = getDimensions(img.ratio)
+                          const altUrl = `https://image.pollinations.ai/prompt/${enc}?width=${mw}&height=${mh}&nologo=true&seed=${img.ts}&model=${m}`
+                          return (
+                            <a key={m} href={altUrl} target="_blank" rel="noopener noreferrer"
+                              className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded">
+                              {m}
+                            </a>
+                          )
+                        })}
+                      </div>
                     </div>
                   </div>
                 ))}
