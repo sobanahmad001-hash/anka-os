@@ -22,6 +22,7 @@ import ApiDocs from './apps/ApiDocs'
 import UserManagement from './apps/UserManagement'
 import Terminal from './apps/Terminal'
 import AnkaSphereProjects from './apps/AnkaSphereProjects'
+import AnkaSphereTeamBoard from './apps/AnkaSphereTeamBoard'
 import AnkaSpherePortal from './apps/AnkaSpherePortal'
 import AnkaSphereClients from './apps/AnkaSphereClients'
 import CodingAgent from './apps/CodingAgent'
@@ -61,6 +62,7 @@ export default function App() {
         <Route path="sphere/projects" element={<AnkaSphereProjects />} />
         <Route path="sphere/clients" element={<AnkaSphereClients />} />
         <Route path="sphere/portal" element={<AnkaSpherePortal />} />
+        <Route path="sphere/team-board" element={<AnkaSphereTeamBoard />} />
         <Route path="sphere/assets" element={<Files />} />
         <Route path="sphere/moodboard" element={<Files />} />
         <Route path="sphere/design-reviews" element={<Files />} />
