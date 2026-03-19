@@ -42,6 +42,17 @@ export const environmentNav = [
       { label: 'Clients', path: '/clients' },
     ],
   },
+  {
+    key: 'sphere',
+    label: 'Anka Sphere',
+    basePath: '/sphere',
+    description: 'Client project execution',
+    items: [
+      { label: 'Projects', path: '/sphere/projects' },
+      { label: 'Clients', path: '/sphere/clients' },
+      { label: 'Client Portal', path: '/sphere/portal' },
+    ],
+  },
 ]
 
 export function getEnvironmentFromPath(pathname) {
@@ -69,6 +80,10 @@ export function getEnvironmentFromPath(pathname) {
 
   if (pathname === '/campaigns' || pathname === '/calendar' || pathname === '/clients') {
     return 'marketing'
+  }
+
+  if (pathname.startsWith('/sphere')) {
+    return 'sphere'
   }
 
   return 'development'
