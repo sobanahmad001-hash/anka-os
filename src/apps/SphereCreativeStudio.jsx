@@ -192,12 +192,11 @@ export default function SphereCreativeStudio() {
     const fullPrompt = imageStyle ? `${imagePrompt}, ${imageStyle} style` : imagePrompt
     const [w, h] = getDimensions(aspectRatio)
     try {
-      let result
-      if (imageProvider === 'pollinations') result = await generatePollinations(fullPrompt, w, h)
-      else if (imageProvider === 'huggingface') result = await generateHuggingFace(fullPrompt, hfModel)
-      else if (imageProvider === 'gemini') result = await generateGemini(fullPrompt)
-      else { setImageError('Provider not configured yet'); setImageLoading(false); return }
-      setGeneratedImages(prev => [{ ...result, prompt: fullPrompt, ratio: aspectRatio, ts: Date.now() }, ...prev.slice(0, 7)])
+      const encoded = encodeURIComponent(fullPrompt)
+      const seed = Math.floor(Math.random() * 999999)
+      const url = `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&seed=${seed}`
+      const newImage = { url, provider: 'pollinations', prompt: fullPrompt, ratio: aspectRatio, ts: Date.now() }
+      setGeneratedImages(prev => [newImage, ...prev.slice(0, 7)])
     } catch (err) {
       setImageError(err.message)
     }
@@ -442,56 +441,45 @@ export default function SphereCreativeStudio() {
 
             {/* Generated images */}
             {generatedImages.length > 0 && (
-              <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">Generated ({generatedImages.length})</p>
-                <div className="grid grid-cols-2 gap-4">
-                  {generatedImages.map((img) => (
-                    <div key={img.ts} className="bg-gray-800 rounded-xl overflow-hidden border border-gray-700">
-                      {/* Background image approach — bypasses CORS on localhost */}
-                      <div
-                        style={{
-                          backgroundImage: `url("${img.url}")`,
-                          backgroundSize: 'cover',
-                          backgroundPosition: 'center',
-                          aspectRatio: img.ratio?.replace(':', '/') || '1/1',
-                          minHeight: '200px',
-                          backgroundColor: '#111827',
-                        }}
-                        className="w-full relative group"
-                      >
-                        {/* Overlay with open link */}
-                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
-                          <a href={img.url} target="_blank" rel="noopener noreferrer"
-                            className="bg-white text-gray-900 text-xs font-semibold px-4 py-2 rounded-lg">
-                            ↗ Open Full Image
-                          </a>
-                        </div>
-                        {/* Loading indicator — shows until background loads */}
-                        <div className="absolute inset-0 flex items-center justify-center text-gray-600 text-xs -z-10">
-                          <div className="text-center">
-                            <p className="text-2xl mb-1">🎨</p>
-                            <p>Loading...</p>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="p-3">
-                        <p className="text-xs text-gray-400 line-clamp-2 mb-2">{img.prompt}</p>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded">{img.provider}</span>
-                          <span className="text-xs text-gray-500">{img.ratio}</span>
-                          <div className="ml-auto flex gap-2">
-                            <a href={img.url} target="_blank" rel="noopener noreferrer"
-                              className="text-xs text-blue-400 hover:text-blue-300">↗ Open</a>
-                            {selectedProjectId && (
-                              <button onClick={() => saveToAssetLibrary(img.url, null, 'image', img.prompt.slice(0, 50))}
-                                className="text-xs text-purple-400 hover:text-purple-300">+ Library</button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
+              <div className="space-y-4">
+                <p className="text-xs text-gray-400 uppercase tracking-wide">Generated ({generatedImages.length})</p>
+                {generatedImages.map((img) => (
+                  <div key={img.ts} className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+                    {/* Direct URL display — always visible */}
+                    <div className="px-4 py-3 bg-gray-900 border-b border-gray-700 flex items-center gap-3">
+                      <span className="text-xs text-gray-400 truncate flex-1">{img.prompt}</span>
+                      <a href={img.url} target="_blank" rel="noopener noreferrer"
+                        className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg flex-shrink-0 font-medium">
+                        ↗ Open Image
+                      </a>
+                      {selectedProjectId && (
+                        <button onClick={() => saveToAssetLibrary(img.url, null, 'image', img.prompt.slice(0, 50))}
+                          className="text-xs bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg flex-shrink-0">
+                          + Library
+                        </button>
+                      )}
                     </div>
-                  ))}
-                </div>
+                    {/* Image display */}
+                    <div
+                      style={{
+                        backgroundImage: `url("${img.url}")`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                        aspectRatio: img.ratio?.replace(':', '/') || '1/1',
+                        minHeight: '250px',
+                        backgroundColor: '#1f2937',
+                      }}
+                      className="w-full"
+                    />
+                    <div className="px-4 py-2 flex items-center gap-2">
+                      <span className="text-xs text-gray-500">{img.provider}</span>
+                      <span className="text-xs text-gray-600">·</span>
+                      <span className="text-xs text-gray-500">{img.ratio}</span>
+                      <span className="text-xs text-gray-600">·</span>
+                      <span className="text-xs text-gray-500">{new Date(img.ts).toLocaleTimeString()}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
