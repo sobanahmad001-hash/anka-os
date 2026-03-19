@@ -20,6 +20,7 @@
       { label: 'Projects', path: '/sphere/projects', dept: null },
       { label: 'Clients', path: '/sphere/clients', dept: null },
       { label: 'Client Portal', path: '/sphere/portal', dept: null },
+      { label: 'Team Board', path: '/sphere/team-board', dept: null },
 
       // Design dept
       { label: '— Design', path: null, dept: 'design', isHeader: true },
