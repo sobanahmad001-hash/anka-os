@@ -124,3 +124,113 @@ export async function fetchRepoInfo() {
     return null
   }
 }
+
+export async function getRepoContents(path = '') {
+  try {
+    const response = await fetch(
+      `${GITHUB_API}/repos/${org}/${repo}/contents/${path}`,
+      { headers }
+    )
+    if (!response.ok) throw new Error(`GitHub API error: ${response.status}`)
+    return await response.json()
+  } catch (error) {
+    console.error('Error fetching repo contents:', error)
+    return null
+  }
+}
+
+export async function getFileContent(path) {
+  try {
+    const response = await fetch(
+      `${GITHUB_API}/repos/${org}/${repo}/contents/${path}`,
+      { headers }
+    )
+    if (!response.ok) throw new Error(`GitHub API error: ${response.status}`)
+    const data = await response.json()
+    return {
+      content: atob(data.content.replace(/\n/g, '')),
+      sha: data.sha,
+      path: data.path
+    }
+  } catch (error) {
+    console.error('Error fetching file:', error)
+    return null
+  }
+}
+
+export async function createOrUpdateFile(path, content, message, sha = null) {
+  try {
+    const body = {
+      message,
+      content: btoa(unescape(encodeURIComponent(content))),
+      branch: `agent/${Date.now()}`
+    }
+    if (sha) body.sha = sha
+
+    // First create branch from main
+    const repoInfo = await fetchRepoInfo()
+    const defaultBranch = repoInfo?.default_branch || 'main'
+
+    const refRes = await fetch(
+      `${GITHUB_API}/repos/${org}/${repo}/git/refs/heads/${defaultBranch}`,
+      { headers }
+    )
+    const refData = await refRes.json()
+    const sha_ref = refData.object?.sha
+
+    if (sha_ref) {
+      await fetch(`${GITHUB_API}/repos/${org}/${repo}/git/refs`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ref: `refs/heads/${body.branch}`, sha: sha_ref })
+      })
+    }
+
+    const response = await fetch(
+      `${GITHUB_API}/repos/${org}/${repo}/contents/${path}`,
+      {
+        method: 'PUT',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }
+    )
+    if (!response.ok) throw new Error(`GitHub API error: ${response.status}`)
+    return { branch: body.branch, ...(await response.json()) }
+  } catch (error) {
+    console.error('Error creating/updating file:', error)
+    return null
+  }
+}
+
+export async function createPullRequest(title, body, headBranch, baseBranch = 'main') {
+  try {
+    const response = await fetch(
+      `${GITHUB_API}/repos/${org}/${repo}/pulls`,
+      {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, body, head: headBranch, base: baseBranch })
+      }
+    )
+    if (!response.ok) throw new Error(`GitHub API error: ${response.status}`)
+    return await response.json()
+  } catch (error) {
+    console.error('Error creating PR:', error)
+    return null
+  }
+}
+
+export async function searchCode(query) {
+  try {
+    const response = await fetch(
+      `${GITHUB_API}/search/code?q=${encodeURIComponent(query)}+repo:${org}/${repo}`,
+      { headers }
+    )
+    if (!response.ok) throw new Error(`GitHub API error: ${response.status}`)
+    const data = await response.json()
+    return data.items || []
+  } catch (error) {
+    console.error('Error searching code:', error)
+    return []
+  }
+}
