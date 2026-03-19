@@ -23,6 +23,7 @@ const SILICONFLOW_MODELS = [
 ]
 
 const VIDEO_PROVIDERS = [
+  { id: 'siliconflow_video', label: 'Siliconflow', badge: 'Wan2.1 · Credits', color: 'bg-green-900/50 text-green-300' },
   { id: 'huggingface_video', label: 'HuggingFace', badge: 'Needs proxy', color: 'bg-gray-700 text-gray-400', disabled: true },
   { id: 'runway', label: 'Runway ML', badge: '125 free credits', color: 'bg-purple-900/50 text-purple-300' },
   { id: 'veo', label: 'Google Veo', badge: 'Coming soon', color: 'bg-gray-700 text-gray-400', disabled: true },
@@ -115,6 +116,45 @@ async function generateHFVideo(prompt) {
   throw new Error("HuggingFace video requires a backend proxy. We'll add this via Supabase Edge Function in the next sprint.")
 }
 
+async function generateSiliconflowVideo(prompt) {
+  // Submit job
+  const submitRes = await fetch('https://api.siliconflow.cn/v1/video/submit', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${SILICONFLOW_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'Wan-AI/Wan2.1-T2V-14B',
+      prompt,
+    }),
+  })
+  if (!submitRes.ok) {
+    const err = await submitRes.json().catch(() => ({}))
+    throw new Error(err.message || `Submit error: ${submitRes.status}`)
+  }
+  const { requestId } = await submitRes.json()
+  if (!requestId) throw new Error('No request ID returned')
+
+  // Poll for result
+  let attempts = 0
+  while (attempts < 30) {
+    await new Promise(r => setTimeout(r, 5000))
+    const statusRes = await fetch(`https://api.siliconflow.cn/v1/video/status/${requestId}`, {
+      headers: { Authorization: `Bearer ${SILICONFLOW_KEY}` }
+    })
+    const statusData = await statusRes.json()
+    if (statusData.status === 'Succeed') {
+      const url = statusData.results?.videos?.[0]?.url
+      if (!url) throw new Error('No video URL in response')
+      return { url, provider: 'siliconflow_video' }
+    }
+    if (statusData.status === 'Failed') throw new Error('Video generation failed')
+    attempts++
+  }
+  throw new Error('Video generation timed out after 2.5 minutes')
+}
+
 function getDimensions(ratio) {
   const map = {
     '1:1': [1024, 1024],
@@ -147,7 +187,7 @@ export default function SphereCreativeStudio() {
   const [sfModel, setSfModel] = useState('Kwai-Kolors/Kolors')
 
   // Video generation state
-  const [videoProvider, setVideoProvider] = useState('huggingface_video')
+  const [videoProvider, setVideoProvider] = useState('siliconflow_video')
   const [videoPrompt, setVideoPrompt] = useState('')
   const [generatedVideos, setGeneratedVideos] = useState([])
   const [videoLoading, setVideoLoading] = useState(false)
@@ -260,8 +300,8 @@ export default function SphereCreativeStudio() {
     setVideoError('')
     try {
       let result
-      if (videoProvider === 'huggingface_video') result = await generateHFVideo(videoPrompt)
-      else { setVideoError('Provider not configured yet'); setVideoLoading(false); return }
+      if (videoProvider === 'siliconflow_video') result = await generateSiliconflowVideo(videoPrompt)
+      else { setVideoError('Provider not available'); setVideoLoading(false); return }
       setGeneratedVideos(prev => [{ ...result, prompt: videoPrompt, ts: Date.now() }, ...prev.slice(0, 5)])
     } catch (err) {
       setVideoError(err.message)
@@ -671,8 +711,13 @@ export default function SphereCreativeStudio() {
             {videoLoading && (
               <div className="flex flex-col items-center justify-center py-16 text-gray-500">
                 <div className="text-4xl mb-3 animate-pulse">🎥</div>
-                <p className="text-sm">Generating video...</p>
-                <p className="text-xs mt-1 text-gray-600">This can take 1-3 minutes on HuggingFace free tier</p>
+                <p className="text-sm font-medium text-white">Generating video...</p>
+                <p className="text-xs mt-1 text-gray-500">Wan2.1 takes 1-3 minutes — polling every 5 seconds</p>
+                <div className="mt-3 flex gap-1">
+                  {[0,1,2].map(i => (
+                    <div key={i} className="w-2 h-2 rounded-full bg-purple-500 animate-bounce" style={{ animationDelay: `${i * 0.2}s` }} />
+                  ))}
+                </div>
               </div>
             )}
           </div>
