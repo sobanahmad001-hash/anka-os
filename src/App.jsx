@@ -49,28 +49,36 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to="/dev-dashboard" replace />} />
-        <Route path="dashboard" element={<Dashboard />} />
-        <Route path="projects" element={<Projects />} />
-        <Route path="tasks" element={<Tasks />} />
-        <Route path="chat" element={<Chat />} />
-        <Route path="files" element={<Files />} />
-        <Route path="calendar" element={<Calendar />} />
-        <Route path="time-tracker" element={<TimeTracker />} />
-        <Route path="clients" element={<Clients />} />
-        <Route path="campaigns" element={<Campaigns />} />
-        <Route path="dev-dashboard" element={<DevDashboard />} />
-        <Route path="kanban" element={<Kanban />} />
-        <Route path="api-docs" element={<ApiDocs />} />
-        <Route path="users" element={<UserManagement />} />
-        <Route path="git" element={<GitIntegration />} />
-        <Route path="coding-agent" element={<CodingAgent />} />
-        <Route path="terminal" element={<Terminal />} />
+        {/* Default redirect */}
+        <Route index element={<Navigate to="/diversify/projects" replace />} />
+
+        {/* ADMIN */}
         <Route path="admin" element={<AdminDashboard />} />
+        <Route path="users" element={<UserManagement />} />
         <Route path="settings" element={<Settings />} />
+
+        {/* ANKA SPHERE */}
         <Route path="sphere/projects" element={<AnkaSphereProjects />} />
         <Route path="sphere/clients" element={<AnkaSphereClients />} />
         <Route path="sphere/portal" element={<AnkaSpherePortal />} />
+        <Route path="sphere/assets" element={<Files />} />
+        <Route path="sphere/moodboard" element={<Files />} />
+        <Route path="sphere/design-reviews" element={<Files />} />
+        <Route path="sphere/wp-sites" element={<Projects />} />
+        <Route path="sphere/deployments" element={<Projects />} />
+        <Route path="sphere/performance" element={<Projects />} />
+        <Route path="sphere/campaigns" element={<Campaigns />} />
+        <Route path="sphere/content" element={<Files />} />
+        <Route path="sphere/calendar" element={<Calendar />} />
+        <Route path="sphere/seo" element={<Files />} />
+
+        {/* ANKA DIVERSIFY */}
+        <Route path="diversify/projects" element={<Projects />} />
+        <Route path="diversify/agent" element={<CodingAgent />} />
+        <Route path="diversify/kanban" element={<Kanban />} />
+        <Route path="diversify/git" element={<GitIntegration />} />
+        <Route path="diversify/api-docs" element={<ApiDocs />} />
+        <Route path="diversify/terminal" element={<Terminal />} />
       </Route>
     </Routes>
   )

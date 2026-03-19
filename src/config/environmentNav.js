@@ -1,9 +1,9 @@
-export const environmentNav = [
+﻿export const environmentNav = [
   {
     key: 'admin',
     label: 'Admin',
     basePath: '/admin',
-    description: 'Org spine',
+    description: 'Central hub',
     items: [
       { label: 'Overview', path: '/admin' },
       { label: 'Users', path: '/users' },
@@ -11,82 +11,56 @@ export const environmentNav = [
     ],
   },
   {
-    key: 'development',
-    label: 'Development',
-    basePath: '/dev-dashboard',
-    description: 'Technical execution',
-    items: [
-      { label: 'Overview', path: '/dev-dashboard' },
-      { label: 'Projects', path: '/projects' },
-      { label: 'Sprint / Queue', path: '/kanban' },
-      { label: 'API Docs', path: '/api-docs' },
-      { label: 'Terminal', path: '/terminal' },
-      { label: 'Git', path: '/git' },
-      { label: 'Coding Agent', path: '/coding-agent' },
-    ],
-  },
-  {
-    key: 'design',
-    label: 'Design',
-    basePath: '/files',
-    description: 'Creative execution',
-    items: [{ label: 'Overview', path: '/files' }],
-  },
-  {
-    key: 'marketing',
-    label: 'Marketing',
-    basePath: '/campaigns',
-    description: 'Campaign execution',
-    items: [
-      { label: 'Overview', path: '/campaigns' },
-      { label: 'Calendar', path: '/calendar' },
-      { label: 'Clients', path: '/clients' },
-    ],
-  },
-  {
     key: 'sphere',
     label: 'Anka Sphere',
     basePath: '/sphere/projects',
-    description: 'Client project execution',
+    description: 'Client delivery',
     items: [
-      { label: 'Projects', path: '/sphere/projects' },
-      { label: 'Clients', path: '/sphere/clients' },
-      { label: 'Client Portal', path: '/sphere/portal' },
+      // Core — visible to all
+      { label: 'Projects', path: '/sphere/projects', dept: null },
+      { label: 'Clients', path: '/sphere/clients', dept: null },
+      { label: 'Client Portal', path: '/sphere/portal', dept: null },
+
+      // Design dept
+      { label: '— Design', path: null, dept: 'design', isHeader: true },
+      { label: 'Assets', path: '/sphere/assets', dept: 'design' },
+      { label: 'Moodboard', path: '/sphere/moodboard', dept: 'design' },
+      { label: 'Design Reviews', path: '/sphere/design-reviews', dept: 'design' },
+
+      // Development dept (WordPress focused)
+      { label: '— Development', path: null, dept: 'development', isHeader: true },
+      { label: 'WP Sites', path: '/sphere/wp-sites', dept: 'development' },
+      { label: 'Deployments', path: '/sphere/deployments', dept: 'development' },
+      { label: 'Performance', path: '/sphere/performance', dept: 'development' },
+
+      // Marketing dept
+      { label: '— Marketing', path: null, dept: 'marketing', isHeader: true },
+      { label: 'Campaigns', path: '/sphere/campaigns', dept: 'marketing' },
+      { label: 'Content Hub', path: '/sphere/content', dept: 'marketing' },
+      { label: 'Calendar', path: '/sphere/calendar', dept: 'marketing' },
+      { label: 'SEO Tracker', path: '/sphere/seo', dept: 'marketing' },
+    ],
+  },
+  {
+    key: 'diversify',
+    label: 'Anka Diversify',
+    basePath: '/diversify/projects',
+    description: 'Product build',
+    items: [
+      { label: 'Projects', path: '/diversify/projects', dept: null },
+      { label: 'Coding Agent', path: '/diversify/agent', dept: null },
+      { label: 'Sprint / Queue', path: '/diversify/kanban', dept: null },
+      { label: 'Git & PRs', path: '/diversify/git', dept: null },
+      { label: 'API Docs', path: '/diversify/api-docs', dept: null },
+      { label: 'Terminal', path: '/diversify/terminal', dept: null },
     ],
   },
 ]
 
 export function getEnvironmentFromPath(pathname) {
-  if (!pathname) return 'development'
-
-  if (pathname === '/admin' || pathname === '/users' || pathname === '/settings') {
-    return 'admin'
-  }
-
-  if (
-    pathname === '/dev-dashboard' ||
-    pathname === '/projects' ||
-    pathname === '/kanban' ||
-    pathname === '/api-docs' ||
-    pathname === '/terminal' ||
-    pathname === '/git' ||
-    pathname === '/coding-agent' ||
-    pathname === '/dashboard'
-  ) {
-    return 'development'
-  }
-
-  if (pathname === '/files') {
-    return 'design'
-  }
-
-  if (pathname === '/campaigns' || pathname === '/calendar' || pathname === '/clients') {
-    return 'marketing'
-  }
-
-  if (pathname.startsWith('/sphere')) {
-    return 'sphere'
-  }
-
-  return 'development'
+  if (!pathname) return 'diversify'
+  if (pathname.startsWith('/admin') || pathname === '/users' || pathname === '/settings') return 'admin'
+  if (pathname.startsWith('/sphere')) return 'sphere'
+  if (pathname.startsWith('/diversify')) return 'diversify'
+  return 'diversify'
 }
