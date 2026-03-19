@@ -23,7 +23,7 @@ const SILICONFLOW_MODELS = [
 ]
 
 const VIDEO_PROVIDERS = [
-  { id: 'siliconflow_video', label: 'Siliconflow', badge: 'Wan2.1 · Credits', color: 'bg-green-900/50 text-green-300' },
+  { id: 'siliconflow_video', label: 'Siliconflow', badge: 'Wan2.1-1.3B · Credits', color: 'bg-green-900/50 text-green-300' },
   { id: 'huggingface_video', label: 'HuggingFace', badge: 'Needs proxy', color: 'bg-gray-700 text-gray-400', disabled: true },
   { id: 'runway', label: 'Runway ML', badge: '125 free credits', color: 'bg-purple-900/50 text-purple-300' },
   { id: 'veo', label: 'Google Veo', badge: 'Coming soon', color: 'bg-gray-700 text-gray-400', disabled: true },
@@ -125,8 +125,9 @@ async function generateSiliconflowVideo(prompt) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'Wan-AI/Wan2.1-T2V-14B',
+      model: 'Wan-AI/Wan2.1-T2V-1.3B',
       prompt,
+      image_size: '720x480',
     }),
   })
   if (!submitRes.ok) {
@@ -712,7 +713,7 @@ export default function SphereCreativeStudio() {
               <div className="flex flex-col items-center justify-center py-16 text-gray-500">
                 <div className="text-4xl mb-3 animate-pulse">🎥</div>
                 <p className="text-sm font-medium text-white">Generating video...</p>
-                <p className="text-xs mt-1 text-gray-500">Wan2.1 takes 1-3 minutes — polling every 5 seconds</p>
+                <p className="text-xs mt-1 text-gray-500">Wan2.1-T2V-1.3B — polling every 5s, may take 1-3 min</p>
                 <div className="mt-3 flex gap-1">
                   {[0,1,2].map(i => (
                     <div key={i} className="w-2 h-2 rounded-full bg-purple-500 animate-bounce" style={{ animationDelay: `${i * 0.2}s` }} />
