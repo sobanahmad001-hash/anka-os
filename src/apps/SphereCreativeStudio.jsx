@@ -15,11 +15,11 @@ const IMAGE_PROVIDERS = [
 ]
 
 const SILICONFLOW_MODELS = [
-  { id: 'black-forest-labs/FLUX.1-schnell', label: 'FLUX Schnell (Fast)' },
-  { id: 'black-forest-labs/FLUX.1-dev', label: 'FLUX Dev (Quality)' },
-  { id: 'stabilityai/stable-diffusion-xl-base-1.0', label: 'SDXL' },
-  { id: 'stabilityai/stable-diffusion-3-5-large', label: 'SD 3.5 Large' },
+  { id: 'Kwai-Kolors/Kolors', label: 'Kolors (Recommended)' },
+  { id: 'stabilityai/stable-diffusion-xl-base-1.0', label: 'SDXL Base' },
   { id: 'Pro/black-forest-labs/FLUX.1-schnell', label: 'FLUX Pro Schnell' },
+  { id: 'Pro/black-forest-labs/FLUX.1-dev', label: 'FLUX Pro Dev' },
+  { id: 'Pro/Kwai-Kolors/Kolors', label: 'Kolors Pro' },
 ]
 
 const VIDEO_PROVIDERS = [
@@ -50,6 +50,17 @@ async function generatePollinations(prompt, width, height) {
 }
 
 async function generateSiliconflow(prompt, width, height, model) {
+  // Siliconflow only accepts specific size strings
+  const sizeMap = {
+    '1024x1024': '1024x1024',
+    '1280x720': '1280x720',
+    '720x1280': '720x1280',
+    '1024x768': '1024x768',
+    '768x1024': '768x1024',
+  }
+  const sizeKey = `${width}x${height}`
+  const image_size = sizeMap[sizeKey] || '1024x1024'
+
   const response = await fetch('https://api.siliconflow.cn/v1/images/generations', {
     method: 'POST',
     headers: {
@@ -57,20 +68,19 @@ async function generateSiliconflow(prompt, width, height, model) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: model || 'black-forest-labs/FLUX.1-schnell',
+      model,
       prompt,
-      image_size: `${width}x${height}`,
+      image_size,
       num_inference_steps: 20,
-      guidance_scale: 7.5,
     }),
   })
   if (!response.ok) {
     const err = await response.json().catch(() => ({}))
-    throw new Error(err.message || `Siliconflow error: ${response.status}`)
+    throw new Error(err.message || err.error || `Siliconflow error: ${response.status}`)
   }
   const data = await response.json()
   const url = data.images?.[0]?.url
-  if (!url) throw new Error('No image returned from Siliconflow')
+  if (!url) throw new Error('No image returned')
   return { url, provider: 'siliconflow' }
 }
 
@@ -134,7 +144,7 @@ export default function SphereCreativeStudio() {
   const [imageLoading, setImageLoading] = useState(false)
   const [imageError, setImageError] = useState('')
   const [hfModel, setHfModel] = useState('black-forest-labs/FLUX.1-schnell')
-  const [sfModel, setSfModel] = useState('black-forest-labs/FLUX.1-schnell')
+  const [sfModel, setSfModel] = useState('Kwai-Kolors/Kolors')
 
   // Video generation state
   const [videoProvider, setVideoProvider] = useState('huggingface_video')
