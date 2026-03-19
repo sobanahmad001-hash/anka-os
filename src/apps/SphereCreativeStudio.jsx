@@ -45,21 +45,24 @@ async function generateHuggingFace(prompt, model) {
 
 async function generateGemini(prompt) {
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${GEMINI_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_KEY}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        instances: [{ prompt: prompt }],
-        parameters: { sampleCount: 1 },
+        contents: [{ parts: [{ text: `Generate an image: ${prompt}` }] }],
+        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
       }),
     }
   )
-  if (!response.ok) throw new Error(`Gemini error: ${response.status}`)
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}))
+    throw new Error(err.error?.message || `Gemini error: ${response.status}`)
+  }
   const data = await response.json()
-  const imageB64 = data.predictions?.[0]?.bytesBase64Encoded
-  if (!imageB64) throw new Error('No image in Gemini response')
-  const url = `data:image/png;base64,${imageB64}`
+  const imagePart = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData)
+  if (!imagePart) throw new Error('Gemini returned no image. Try a different prompt.')
+  const url = `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`
   return { url, provider: 'gemini' }
 }
 
