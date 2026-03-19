@@ -24,6 +24,7 @@ import Terminal from './apps/Terminal'
 import AnkaSphereProjects from './apps/AnkaSphereProjects'
 import AnkaSpherePortal from './apps/AnkaSpherePortal'
 import AnkaSphereClients from './apps/AnkaSphereClients'
+import CodingAgent from './apps/CodingAgent'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -63,6 +64,7 @@ export default function App() {
         <Route path="api-docs" element={<ApiDocs />} />
         <Route path="users" element={<UserManagement />} />
         <Route path="git" element={<GitIntegration />} />
+        <Route path="coding-agent" element={<CodingAgent />} />
         <Route path="terminal" element={<Terminal />} />
         <Route path="admin" element={<AdminDashboard />} />
         <Route path="settings" element={<Settings />} />

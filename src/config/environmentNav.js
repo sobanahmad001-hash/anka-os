@@ -22,6 +22,7 @@ export const environmentNav = [
       { label: 'API Docs', path: '/api-docs' },
       { label: 'Terminal', path: '/terminal' },
       { label: 'Git', path: '/git' },
+      { label: 'Coding Agent', path: '/coding-agent' },
     ],
   },
   {
@@ -69,6 +70,7 @@ export function getEnvironmentFromPath(pathname) {
     pathname === '/api-docs' ||
     pathname === '/terminal' ||
     pathname === '/git' ||
+    pathname === '/coding-agent' ||
     pathname === '/dashboard'
   ) {
     return 'development'
