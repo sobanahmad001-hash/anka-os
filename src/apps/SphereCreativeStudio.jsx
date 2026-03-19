@@ -23,9 +23,9 @@ const SILICONFLOW_MODELS = [
 ]
 
 const VIDEO_PROVIDERS = [
-  { id: 'siliconflow_video', label: 'Siliconflow', badge: 'Wan2.1-1.3B · Credits', color: 'bg-green-900/50 text-green-300' },
-  { id: 'huggingface_video', label: 'HuggingFace', badge: 'Needs proxy', color: 'bg-gray-700 text-gray-400', disabled: true },
-  { id: 'runway', label: 'Runway ML', badge: '125 free credits', color: 'bg-purple-900/50 text-purple-300' },
+  { id: 'huggingface_video', label: 'HuggingFace', badge: 'Free · Basic', color: 'bg-green-900/50 text-green-300' },
+  { id: 'siliconflow_video', label: 'Siliconflow', badge: '$0.29 · Best quality', color: 'bg-purple-900/50 text-purple-300' },
+  { id: 'runway', label: 'Runway ML', badge: '125 free credits', color: 'bg-yellow-900/50 text-yellow-300' },
   { id: 'veo', label: 'Google Veo', badge: 'Coming soon', color: 'bg-gray-700 text-gray-400', disabled: true },
 ]
 
@@ -135,7 +135,29 @@ async function generateGemini(prompt) {
 }
 
 async function generateHFVideo(prompt) {
-  throw new Error("HuggingFace video requires a backend proxy. We'll add this via Supabase Edge Function in the next sprint.")
+  const response = await fetch(
+    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/hf-proxy`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'ali-vilab/text-to-video-ms-1.7b',
+        inputs: prompt,
+        task: 'video',
+      }),
+    }
+  )
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}))
+    throw new Error(err.error || `Proxy error: ${response.status}`)
+  }
+  const data = await response.json()
+  if (!data.data) throw new Error('No video data returned')
+  const url = `data:${data.contentType};base64,${data.data}`
+  return { url, provider: 'huggingface_video' }
 }
 
 async function generateSiliconflowVideo(prompt) {
@@ -210,7 +232,7 @@ export default function SphereCreativeStudio() {
   const [sfModel, setSfModel] = useState('Kwai-Kolors/Kolors')
 
   // Video generation state
-  const [videoProvider, setVideoProvider] = useState('siliconflow_video')
+  const [videoProvider, setVideoProvider] = useState('huggingface_video')
   const [videoPrompt, setVideoPrompt] = useState('')
   const [generatedVideos, setGeneratedVideos] = useState([])
   const [videoLoading, setVideoLoading] = useState(false)
@@ -323,8 +345,9 @@ export default function SphereCreativeStudio() {
     setVideoError('')
     try {
       let result
-      if (videoProvider === 'siliconflow_video') result = await generateSiliconflowVideo(videoPrompt)
-      else { setVideoError('Provider not available'); setVideoLoading(false); return }
+      if (videoProvider === 'huggingface_video') result = await generateHFVideo(videoPrompt)
+      else if (videoProvider === 'siliconflow_video') result = await generateSiliconflowVideo(videoPrompt)
+      else { setVideoError('Provider not available yet'); setVideoLoading(false); return }
       setGeneratedVideos(prev => [{ ...result, prompt: videoPrompt, ts: Date.now() }, ...prev.slice(0, 5)])
     } catch (err) {
       setVideoError(err.message)
