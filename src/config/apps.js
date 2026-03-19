@@ -115,3 +115,30 @@ export function getDepartmentApps(department, role) {
 export function getAllApps() {
   return sharedApps;
 }
+// ANKA SPHERE APPS - injected
+export const ankaSphereApps = [
+  {
+    id: 'as-projects',
+    name: 'AS Projects',
+    icon: '🚀',
+    component: 'AnkaSphereProjects',
+    departments: ['admin', 'all'],
+    description: 'Anka Sphere project phase management'
+  },
+  {
+    id: 'as-portal',
+    name: 'Client Portal',
+    icon: '🔮',
+    component: 'AnkaSpherePortal',
+    departments: ['all'],
+    description: 'Real-time client project visibility'
+  },
+  {
+    id: 'as-clients',
+    name: 'AS Clients',
+    icon: '👥',
+    component: 'AnkaSphereClients',
+    departments: ['admin', 'all'],
+    description: 'Anka Sphere client management'
+  }
+]
