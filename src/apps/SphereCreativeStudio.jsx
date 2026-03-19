@@ -28,7 +28,7 @@ const ASPECT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4']
 async function generatePollinations(prompt, width, height) {
   const encoded = encodeURIComponent(prompt)
   const seed = Math.floor(Math.random() * 999999)
-  const url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true&enhance=true&seed=${seed}`
+  const url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true&model=flux&enhance=false&seed=${seed}`
   await new Promise((resolve, reject) => {
     const img = new Image()
     img.crossOrigin = 'anonymous'
@@ -194,7 +194,7 @@ export default function SphereCreativeStudio() {
     try {
       const encoded = encodeURIComponent(fullPrompt)
       const seed = Math.floor(Math.random() * 999999)
-      const url = `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&seed=${seed}&model=flux`
+      const url = `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&seed=${seed}&model=flux&enhance=false`
       const newImage = { url, provider: 'pollinations', prompt: fullPrompt, ratio: aspectRatio, ts: Date.now() }
       setGeneratedImages(prev => [newImage, ...prev.slice(0, 7)])
     } catch (err) {
