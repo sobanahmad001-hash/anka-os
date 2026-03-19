@@ -428,6 +428,18 @@ export default function SphereCreativeStudio() {
               </div>
             )}
 
+            {/* Loading state */}
+            {imageLoading && (
+              <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+                <div className="flex flex-col items-center justify-center py-16 text-gray-500">
+                  <div className="text-4xl mb-3 animate-pulse">🎨</div>
+                  <p className="text-sm font-medium text-white">Generating...</p>
+                  <p className="text-xs mt-1 text-gray-500">Pollinations takes 5-15 seconds</p>
+                  <p className="text-xs mt-3 text-gray-600">If image doesn't appear, click ↗ Open to view directly</p>
+                </div>
+              </div>
+            )}
+
             {/* Generated images */}
             {generatedImages.length > 0 && (
               <div>
@@ -435,25 +447,22 @@ export default function SphereCreativeStudio() {
                 <div className="grid grid-cols-2 gap-4">
                   {generatedImages.map((img) => (
                     <div key={img.ts} className="bg-gray-800 rounded-xl overflow-hidden border border-gray-700">
-                      <div className="relative bg-gray-900"
-                        style={{ aspectRatio: img.ratio?.replace(':', '/') || '1/1' }}>
-                        <iframe
+                      <a href={img.url} target="_blank" rel="noopener noreferrer">
+                        <img
                           src={img.url}
-                          title={img.prompt}
-                          className="w-full h-full border-0"
-                          style={{ minHeight: '200px' }}
+                          alt={img.prompt}
+                          className="w-full object-cover"
+                          style={{ aspectRatio: img.ratio?.replace(':', '/') || '1/1', display: 'block' }}
                         />
-                      </div>
+                      </a>
                       <div className="p-3">
                         <p className="text-xs text-gray-400 line-clamp-2 mb-2">{img.prompt}</p>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded capitalize">{img.provider}</span>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded">{img.provider}</span>
                           <span className="text-xs text-gray-500">{img.ratio}</span>
                           <div className="ml-auto flex gap-2">
                             <a href={img.url} target="_blank" rel="noopener noreferrer"
                               className="text-xs text-blue-400 hover:text-blue-300">↗ Open</a>
-                            <a href={img.url} download={`generated_${img.ts}.png`}
-                              className="text-xs text-green-400 hover:text-green-300">↓ Save</a>
                             {selectedProjectId && (
                               <button onClick={() => saveToAssetLibrary(img.url, null, 'image', img.prompt.slice(0, 50))}
                                 className="text-xs text-purple-400 hover:text-purple-300">+ Library</button>
@@ -464,18 +473,6 @@ export default function SphereCreativeStudio() {
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
-
-            {imageLoading && (
-              <div className="flex flex-col items-center justify-center py-16 text-gray-500">
-                <div className="text-4xl mb-3 animate-pulse">🎨</div>
-                <p className="text-sm">Generating your image...</p>
-                <p className="text-xs mt-1 text-gray-600">
-                  {imageProvider === 'huggingface' ? 'HuggingFace may take 20-60 seconds' :
-                   imageProvider === 'gemini' ? 'Gemini usually takes 5-15 seconds' :
-                   'Pollinations usually takes 3-8 seconds'}
-                </p>
               </div>
             )}
           </div>
