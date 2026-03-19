@@ -8,8 +8,8 @@ const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY
 const IMAGE_PROVIDERS = [
   { id: 'pollinations', label: 'Pollinations', badge: 'Free · No key', color: 'bg-green-900/50 text-green-300' },
   { id: 'huggingface', label: 'Hugging Face', badge: 'Needs proxy', color: 'bg-gray-700 text-gray-400', disabled: true },
-  { id: 'gemini', label: 'Google Imagen', badge: 'Free tier', color: 'bg-blue-900/50 text-blue-300' },
-  { id: 'dalle', label: 'DALL-E 3', badge: 'Paid', color: 'bg-gray-700 text-gray-400' },
+  { id: 'gemini', label: 'Google Imagen', badge: 'Coming soon', color: 'bg-gray-700 text-gray-400', disabled: true },
+  { id: 'dalle', label: 'DALL-E 3', badge: 'Paid', color: 'bg-gray-700 text-gray-400', disabled: true },
 ]
 
 const VIDEO_PROVIDERS = [
@@ -433,24 +433,30 @@ export default function SphereCreativeStudio() {
               <div>
                 <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">Generated ({generatedImages.length})</p>
                 <div className="grid grid-cols-2 gap-4">
-                  {generatedImages.map((img, i) => (
+                  {generatedImages.map((img) => (
                     <div key={img.ts} className="bg-gray-800 rounded-xl overflow-hidden border border-gray-700">
-                      <img src={img.url} alt={img.prompt}
-                        crossOrigin="anonymous"
-                        onError={e => e.target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="%23374151"/><text x="50" y="50" text-anchor="middle" fill="%239CA3AF" font-size="12">Loading...</text></svg>'}
-                        className="w-full object-cover"
-                        style={{ aspectRatio: img.ratio?.replace(':', '/') || '1/1' }} />
+                      <div className="relative bg-gray-900"
+                        style={{ aspectRatio: img.ratio?.replace(':', '/') || '1/1' }}>
+                        <iframe
+                          src={img.url}
+                          title={img.prompt}
+                          className="w-full h-full border-0"
+                          style={{ minHeight: '200px' }}
+                        />
+                      </div>
                       <div className="p-3">
                         <p className="text-xs text-gray-400 line-clamp-2 mb-2">{img.prompt}</p>
                         <div className="flex items-center gap-2">
                           <span className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded capitalize">{img.provider}</span>
                           <span className="text-xs text-gray-500">{img.ratio}</span>
                           <div className="ml-auto flex gap-2">
-                            <a href={img.url} download={`generated_${img.ts}.png`} target="_blank" rel="noopener noreferrer"
-                              className="text-xs text-blue-400 hover:text-blue-300">↓ Save</a>
+                            <a href={img.url} target="_blank" rel="noopener noreferrer"
+                              className="text-xs text-blue-400 hover:text-blue-300">↗ Open</a>
+                            <a href={img.url} download={`generated_${img.ts}.png`}
+                              className="text-xs text-green-400 hover:text-green-300">↓ Save</a>
                             {selectedProjectId && (
-                              <button onClick={() => saveToAssetLibrary(img.url, img.blob, 'image', img.prompt.slice(0, 50))}
-                                className="text-xs text-green-400 hover:text-green-300">+ Library</button>
+                              <button onClick={() => saveToAssetLibrary(img.url, null, 'image', img.prompt.slice(0, 50))}
+                                className="text-xs text-purple-400 hover:text-purple-300">+ Library</button>
                             )}
                           </div>
                         </div>
