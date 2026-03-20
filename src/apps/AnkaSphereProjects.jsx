@@ -307,12 +307,21 @@ export default function AnkaSphereProjects() {
     try {
       const ext = file.name.split('.').pop()
       const fileName = `${selectedProject.id}/${Date.now()}.${ext}`
+
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('sphere-deliverables')
         .upload(fileName, file)
-      if (uploadError) throw uploadError
+
+      if (uploadError) {
+        console.error('Storage upload error:', uploadError)
+        alert(`Upload failed: ${uploadError.message}`)
+        setUploadingFile(false)
+        return
+      }
+
       const { data: urlData } = supabase.storage.from('sphere-deliverables').getPublicUrl(fileName)
-      await supabase.from('as_deliverables').insert({
+
+      const { error: dbError } = await supabase.from('as_deliverables').insert({
         project_id: selectedProject.id,
         phase: uploadPhase,
         title: uploadTitle || file.name,
@@ -323,14 +332,30 @@ export default function AnkaSphereProjects() {
         created_by: user?.id,
         uploaded_by: user?.id
       })
+
+      if (dbError) {
+        console.error('DB insert error:', dbError)
+        alert(`DB error: ${dbError.message}`)
+        setUploadingFile(false)
+        return
+      }
+
       await supabase.from('as_timeline_events').insert({
-        project_id: selectedProject.id, event_type: 'deliverable_uploaded',
-        description: `File uploaded: ${uploadTitle || file.name}`, created_by: user?.id
+        project_id: selectedProject.id,
+        event_type: 'deliverable_uploaded',
+        description: `File uploaded: ${uploadTitle || file.name}`,
+        created_by: user?.id
       })
+
       setUploadTitle('')
-      fetchProjectDetail(selectedProject)
+      const { data } = await supabase.from('as_deliverables')
+        .select('*').eq('project_id', selectedProject.id)
+        .order('created_at', { ascending: false })
+      setDeliverables(data || [])
+
     } catch (err) {
-      console.error('Upload error:', err)
+      console.error('Upload exception:', err)
+      alert(`Exception: ${err.message}`)
     }
     setUploadingFile(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
