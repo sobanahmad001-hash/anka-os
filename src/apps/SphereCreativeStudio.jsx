@@ -24,7 +24,7 @@ const SILICONFLOW_MODELS = [
 
 const VIDEO_PROVIDERS = [
   { id: 'kling', label: 'Kling AI', badge: 'Free tier · 5s video', color: 'bg-green-900/50 text-green-300' },
-  { id: 'huggingface_video', label: 'HuggingFace', badge: 'Free · Basic', color: 'bg-yellow-900/50 text-yellow-300' },
+  { id: 'huggingface_video', label: 'HuggingFace', badge: 'Needs dedicated endpoint', color: 'bg-gray-700 text-gray-400', disabled: true },
   { id: 'siliconflow_video', label: 'Siliconflow', badge: 'ID verify required', color: 'bg-gray-700 text-gray-400', disabled: true },
   { id: 'runway', label: 'Runway ML', badge: '125 free credits', color: 'bg-purple-900/50 text-purple-300' },
   { id: 'veo', label: 'Google Veo', badge: 'Coming soon', color: 'bg-gray-700 text-gray-400', disabled: true },
