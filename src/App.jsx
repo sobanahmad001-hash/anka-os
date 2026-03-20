@@ -30,6 +30,7 @@ import SphereCreativeStudio from './apps/SphereCreativeStudio'
 import SphereWPEngine from './apps/SphereWPEngine'
 import SphereMarketing from './apps/SphereMarketing'
 import SphereFigmaWorkspace from './apps/SphereFigmaWorkspace'
+import AnkaAssistant from './apps/AnkaAssistant'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -86,6 +87,9 @@ export default function App() {
         <Route path="diversify/git" element={<GitIntegration />} />
         <Route path="diversify/api-docs" element={<ApiDocs />} />
         <Route path="diversify/terminal" element={<Terminal />} />
+
+        {/* ANKA ASSISTANT */}
+        <Route path="assistant" element={<AnkaAssistant />} />
       </Route>
     </Routes>
   )

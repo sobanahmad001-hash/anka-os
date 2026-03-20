@@ -8,6 +8,7 @@
       { label: 'Overview', path: '/admin' },
       { label: 'Users', path: '/users' },
       { label: 'Rules', path: '/settings' },
+      { label: 'Assistant', path: '/assistant' },
     ],
   },
   {

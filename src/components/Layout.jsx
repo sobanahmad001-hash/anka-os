@@ -2,6 +2,7 @@ import { Outlet, useLocation } from 'react-router-dom'
 import Header from './Header'
 import Sidebar from './Sidebar'
 import { getEnvironmentFromPath } from '../config/environmentNav'
+import AssistantFloat from './AssistantFloat'
 
 export default function Layout() {
   const location = useLocation()
@@ -16,6 +17,7 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+      <AssistantFloat />
     </div>
   )
 }
