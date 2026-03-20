@@ -21,7 +21,7 @@ serve(async (req) => {
       )
     }
 
-    const hfUrl = `https://api-inference.huggingface.co/models/${model}`
+    const hfUrl = `https://router.huggingface.co/hf-inference/models/${model}`
 
     const response = await fetch(hfUrl, {
       method: 'POST',
