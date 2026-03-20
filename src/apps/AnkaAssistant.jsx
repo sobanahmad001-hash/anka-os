@@ -205,6 +205,7 @@ Be direct, specific, and reference actual data from the OS context when relevant
         })
       })
       const data = await res.json()
+      if (data.error) throw new Error(data.error.message || JSON.stringify(data.error))
       const reply = data.content?.[0]?.text || 'No response'
 
       await supabase.from('as_assistant_messages').insert({

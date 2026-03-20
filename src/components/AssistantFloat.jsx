@@ -1,7 +1,9 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 
 export default function AssistantFloat() {
+  const location = useLocation()
+  if (location.pathname === '/assistant') return null
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState([])
@@ -34,6 +36,7 @@ export default function AssistantFloat() {
         })
       })
       const data = await res.json()
+      if (data.error) throw new Error(data.error.message || JSON.stringify(data.error))
       setMessages(prev => [...prev, { role: 'assistant', content: data.content?.[0]?.text || 'No response' }])
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Error connecting to AI.' }])
