@@ -24,20 +24,21 @@
 
       // Design dept
       { label: '— Design', path: null, dept: 'design', isHeader: true },
+      { label: 'Figma Workspace', path: '/sphere/figma', dept: 'design' },
       { label: 'Creative Studio', path: '/sphere/assets', dept: 'design' },
       { label: 'Asset Library', path: '/sphere/moodboard', dept: 'design' },
       { label: 'Brand Guidelines', path: '/sphere/design-reviews', dept: 'design' },
 
       // Development dept (WordPress focused)
       { label: '— Development', path: null, dept: 'development', isHeader: true },
-      { label: 'WP Sites', path: '/sphere/wp-sites', dept: 'development' },
-      { label: 'Deployments', path: '/sphere/deployments', dept: 'development' },
-      { label: 'Performance', path: '/sphere/performance', dept: 'development' },
+      { label: 'WP Engine', path: '/sphere/wp-sites', dept: 'development' },
+      { label: 'Page Builder', path: '/sphere/deployments', dept: 'development' },
+      { label: 'Site Tracker', path: '/sphere/performance', dept: 'development' },
 
       // Marketing dept
       { label: '— Marketing', path: null, dept: 'marketing', isHeader: true },
-      { label: 'Campaigns', path: '/sphere/campaigns', dept: 'marketing' },
-      { label: 'Content Hub', path: '/sphere/content', dept: 'marketing' },
+      { label: 'Marketing Hub', path: '/sphere/campaigns', dept: 'marketing' },
+      { label: 'Content', path: '/sphere/content', dept: 'marketing' },
       { label: 'Calendar', path: '/sphere/calendar', dept: 'marketing' },
       { label: 'SEO Tracker', path: '/sphere/seo', dept: 'marketing' },
     ],

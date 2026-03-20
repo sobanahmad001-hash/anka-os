@@ -27,6 +27,9 @@ import AnkaSpherePortal from './apps/AnkaSpherePortal'
 import AnkaSphereClients from './apps/AnkaSphereClients'
 import CodingAgent from './apps/CodingAgent'
 import SphereCreativeStudio from './apps/SphereCreativeStudio'
+import SphereWPEngine from './apps/SphereWPEngine'
+import SphereMarketing from './apps/SphereMarketing'
+import SphereFigmaWorkspace from './apps/SphereFigmaWorkspace'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -64,16 +67,17 @@ export default function App() {
         <Route path="sphere/clients" element={<AnkaSphereClients />} />
         <Route path="sphere/portal" element={<AnkaSpherePortal />} />
         <Route path="sphere/team-board" element={<AnkaSphereTeamBoard />} />
+        <Route path="sphere/figma" element={<SphereFigmaWorkspace />} />
         <Route path="sphere/assets" element={<SphereCreativeStudio />} />
         <Route path="sphere/moodboard" element={<SphereCreativeStudio />} />
         <Route path="sphere/design-reviews" element={<SphereCreativeStudio />} />
-        <Route path="sphere/wp-sites" element={<Projects />} />
-        <Route path="sphere/deployments" element={<Projects />} />
-        <Route path="sphere/performance" element={<Projects />} />
-        <Route path="sphere/campaigns" element={<Campaigns />} />
-        <Route path="sphere/content" element={<Files />} />
-        <Route path="sphere/calendar" element={<Calendar />} />
-        <Route path="sphere/seo" element={<Files />} />
+        <Route path="sphere/wp-sites" element={<SphereWPEngine />} />
+        <Route path="sphere/deployments" element={<SphereWPEngine />} />
+        <Route path="sphere/performance" element={<SphereWPEngine />} />
+        <Route path="sphere/campaigns" element={<SphereMarketing />} />
+        <Route path="sphere/content" element={<SphereMarketing />} />
+        <Route path="sphere/calendar" element={<SphereMarketing />} />
+        <Route path="sphere/seo" element={<SphereMarketing />} />
 
         {/* ANKA DIVERSIFY */}
         <Route path="diversify/projects" element={<Projects />} />

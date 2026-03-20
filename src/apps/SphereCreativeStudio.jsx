@@ -1,68 +1,61 @@
-import { useState, useEffect, useRef } from 'react'
+﻿import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { useAuth } from '../context/AuthContext.jsx'
 
-const HF_TOKEN = import.meta.env.VITE_HUGGING_FACE_TOKEN
-const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY
+const OPENAI_KEY = import.meta.env.VITE_OPENAI_KEY
 const SILICONFLOW_KEY = import.meta.env.VITE_SILICONFLOW_KEY
+const FAL_KEY = import.meta.env.VITE_FAL_KEY
+
+const IMAGE_SIZES = ['1024x1024', '1792x1024', '1024x1792']
+const IMAGE_SIZE_LABELS = { '1024x1024': '1:1 Square', '1792x1024': '16:9 Landscape', '1024x1792': '9:16 Portrait' }
+const IMAGE_STYLES = ['vivid', 'natural']
+const IMAGE_QUALITIES = ['standard', 'hd']
+
+const VIDEO_DURATIONS = [5, 8, 10]
 
 const IMAGE_PROVIDERS = [
-  { id: 'siliconflow', label: 'Siliconflow', badge: 'Free credits · Flux', color: 'bg-green-900/50 text-green-300' },
-  { id: 'pollinations', label: 'Pollinations', badge: 'Free · Unstable', color: 'bg-yellow-900/50 text-yellow-300' },
-  { id: 'huggingface', label: 'Hugging Face', badge: 'Free · Flux', color: 'bg-yellow-900/50 text-yellow-300' },
-  { id: 'gemini', label: 'Google Imagen', badge: 'Coming soon', color: 'bg-gray-700 text-gray-400', disabled: true },
-  { id: 'dalle', label: 'DALL-E 3', badge: 'Paid', color: 'bg-gray-700 text-gray-400', disabled: true },
-]
-
-const SILICONFLOW_MODELS = [
-  { id: 'Kwai-Kolors/Kolors', label: 'Kolors (Recommended)' },
-  { id: 'stabilityai/stable-diffusion-xl-base-1.0', label: 'SDXL Base' },
-  { id: 'Pro/black-forest-labs/FLUX.1-schnell', label: 'FLUX Pro Schnell' },
-  { id: 'Pro/black-forest-labs/FLUX.1-dev', label: 'FLUX Pro Dev' },
-  { id: 'Pro/Kwai-Kolors/Kolors', label: 'Kolors Pro' },
+  { id: 'fal', label: 'FAL · Flux Pro', badge: '$0.03/img · Best quality', color: 'bg-purple-900/50 text-purple-300' },
+  { id: 'siliconflow', label: 'Siliconflow', badge: 'Free credits · Kolors', color: 'bg-green-900/50 text-green-300' },
+  { id: 'dalle', label: 'DALL-E 3', badge: '$0.04/img · Best for text', color: 'bg-blue-900/50 text-blue-300' },
 ]
 
 const VIDEO_PROVIDERS = [
-  { id: 'kling', label: 'Kling AI', badge: 'Free tier · 5s video', color: 'bg-green-900/50 text-green-300' },
-  { id: 'huggingface_video', label: 'HuggingFace', badge: 'Needs dedicated endpoint', color: 'bg-gray-700 text-gray-400', disabled: true },
-  { id: 'siliconflow_video', label: 'Siliconflow', badge: 'ID verify required', color: 'bg-gray-700 text-gray-400', disabled: true },
-  { id: 'runway', label: 'Runway ML', badge: '125 free credits', color: 'bg-purple-900/50 text-purple-300' },
-  { id: 'veo', label: 'Google Veo', badge: 'Coming soon', color: 'bg-gray-700 text-gray-400', disabled: true },
+  { id: 'fal_video', label: 'Kling 2.1', badge: '~$0.35/5s · FAL.AI', color: 'bg-purple-900/50 text-purple-300' },
+  { id: 'sora', label: 'Sora 2', badge: '$0.50/5s · OpenAI', color: 'bg-blue-900/50 text-blue-300' },
 ]
 
-const IMAGE_STYLES = [
-  'photorealistic', 'cinematic', 'illustration', 'minimalist',
-  'brand identity', 'social media', 'product shot', 'abstract',
-]
-
-const ASPECT_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4']
-
-async function generatePollinations(prompt, width, height) {
-  const encoded = encodeURIComponent(prompt)
-  const seed = Math.floor(Math.random() * 999999)
-  const url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true&model=flux&enhance=false&seed=${seed}`
-  await new Promise((resolve, reject) => {
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = resolve
-    img.onerror = reject
-    img.src = url
+async function generateDALLE(prompt, size, quality, style) {
+  const response = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${OPENAI_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'dall-e-3',
+      prompt,
+      n: 1,
+      size: size || '1024x1024',
+      quality: quality || 'standard',
+      style: style || 'vivid',
+    }),
   })
-  return { url, provider: 'pollinations' }
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}))
+    throw new Error(err.error?.message || `DALL-E error: ${response.status}`)
+  }
+  const data = await response.json()
+  const url = data.data?.[0]?.url
+  if (!url) throw new Error('No image URL returned')
+  return { url, provider: 'dall-e-3', revised_prompt: data.data?.[0]?.revised_prompt }
 }
 
-async function generateSiliconflow(prompt, width, height, model) {
-  // Siliconflow only accepts specific size strings
+async function generateSiliconflow(prompt, size) {
   const sizeMap = {
     '1024x1024': '1024x1024',
-    '1280x720': '1280x720',
-    '720x1280': '720x1280',
-    '1024x768': '1024x768',
-    '768x1024': '768x1024',
+    '1792x1024': '1280x720',
+    '1024x1792': '720x1280',
   }
-  const sizeKey = `${width}x${height}`
-  const image_size = sizeMap[sizeKey] || '1024x1024'
-
   const response = await fetch('https://api.siliconflow.cn/v1/images/generations', {
     method: 'POST',
     headers: {
@@ -70,15 +63,15 @@ async function generateSiliconflow(prompt, width, height, model) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model,
+      model: 'Kwai-Kolors/Kolors',
       prompt,
-      image_size,
+      image_size: sizeMap[size] || '1024x1024',
       num_inference_steps: 20,
     }),
   })
   if (!response.ok) {
     const err = await response.json().catch(() => ({}))
-    throw new Error(err.message || err.error || `Siliconflow error: ${response.status}`)
+    throw new Error(err.message || `Siliconflow error: ${response.status}`)
   }
   const data = await response.json()
   const url = data.images?.[0]?.url
@@ -86,187 +79,127 @@ async function generateSiliconflow(prompt, width, height, model) {
   return { url, provider: 'siliconflow' }
 }
 
-async function generateHuggingFace(prompt, model) {
-  const response = await fetch(
-    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/hf-proxy`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-      },
-      body: JSON.stringify({
-        model: model || 'black-forest-labs/FLUX.1-schnell',
-        inputs: prompt,
-        task: 'image'
-      }),
-    }
-  )
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}))
-    throw new Error(err.error || `Proxy error: ${response.status}`)
+async function generateFAL(prompt, size) {
+  const sizeMap = {
+    '1024x1024': { width: 1024, height: 1024 },
+    '1792x1024': { width: 1792, height: 1024 },
+    '1024x1792': { width: 1024, height: 1792 },
   }
-  const data = await response.json()
-  if (!data.data) throw new Error('No image data returned')
-  const url = `data:${data.contentType};base64,${data.data}`
-  return { url, provider: 'huggingface' }
-}
+  const dims = sizeMap[size] || { width: 1024, height: 1024 }
 
-async function generateGemini(prompt) {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: `Generate an image: ${prompt}` }] }],
-        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
-      }),
-    }
-  )
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}))
-    throw new Error(err.error?.message || `Gemini error: ${response.status}`)
-  }
-  const data = await response.json()
-  const imagePart = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData)
-  if (!imagePart) throw new Error('Gemini returned no image. Try a different prompt.')
-  const url = `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`
-  return { url, provider: 'gemini' }
-}
-
-async function generateKlingVideo(prompt) {
-  const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
-  const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
-
-  const createRes = await fetch(`${SUPABASE_URL}/functions/v1/kling-proxy`, {
+  // Submit request
+  const submitRes = await fetch('https://queue.fal.run/fal-ai/flux-pro/v1.1', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
-      'apikey': ANON_KEY,
-      Authorization: `Bearer ${ANON_KEY}`,
-    },
-    body: JSON.stringify({ action: 'create', prompt }),
-  })
-
-  if (!createRes.ok) {
-    const err = await createRes.json().catch(() => ({}))
-    throw new Error(err.error || `Kling create error: ${createRes.status}`)
-  }
-
-  const createData = await createRes.json()
-  const taskId = createData.data?.task_id
-  if (!taskId) throw new Error(`No task ID. Response: ${JSON.stringify(createData)}`)
-
-  for (let i = 0; i < 24; i++) {
-    await new Promise(r => setTimeout(r, 5000))
-
-    const statusRes = await fetch(`${SUPABASE_URL}/functions/v1/kling-proxy`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': ANON_KEY,
-        Authorization: `Bearer ${ANON_KEY}`,
-      },
-      body: JSON.stringify({ action: 'status', task_id: taskId }),
-    })
-
-    const statusData = await statusRes.json()
-    const status = statusData.data?.task_status
-
-    if (status === 'succeed') {
-      const url = statusData.data?.task_result?.videos?.[0]?.url
-      if (!url) throw new Error('No video URL in response')
-      return { url, provider: 'kling' }
-    }
-    if (status === 'failed') {
-      throw new Error(statusData.data?.task_status_msg || 'Kling generation failed')
-    }
-  }
-  throw new Error('Kling timed out after 2 minutes')
-}
-
-async function generateHFVideo(prompt) {
-  const response = await fetch(
-    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/hf-proxy`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-      },
-      body: JSON.stringify({
-        model: 'ali-vilab/text-to-video-ms-1.7b',
-        inputs: prompt,
-        task: 'video',
-      }),
-    }
-  )
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}))
-    throw new Error(err.error || `Proxy error: ${response.status}`)
-  }
-  const data = await response.json()
-  if (!data.data) throw new Error('No video data returned')
-  const url = `data:${data.contentType};base64,${data.data}`
-  return { url, provider: 'huggingface_video' }
-}
-
-async function generateSiliconflowVideo(prompt) {
-  // Submit job
-  const submitRes = await fetch('https://api.siliconflow.cn/v1/video/submit', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${SILICONFLOW_KEY}`,
+      Authorization: `Key ${FAL_KEY}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'Pro/Wan-AI/Wan2.1-T2V-14B',
       prompt,
-      image_size: '720x480',
+      image_size: dims,
+      num_inference_steps: 28,
+      guidance_scale: 3.5,
+      num_images: 1,
+      safety_tolerance: '2',
     }),
   })
   if (!submitRes.ok) {
     const err = await submitRes.json().catch(() => ({}))
-    throw new Error(err.message || `Submit error: ${submitRes.status}`)
+    throw new Error(err.detail || err.message || `FAL submit error: ${submitRes.status}`)
   }
-  const { requestId } = await submitRes.json()
-  if (!requestId) throw new Error('No request ID returned')
+  const { request_id } = await submitRes.json()
+  if (!request_id) throw new Error('No request ID from FAL')
 
   // Poll for result
-  let attempts = 0
-  while (attempts < 30) {
-    await new Promise(r => setTimeout(r, 5000))
-    const statusRes = await fetch(`https://api.siliconflow.cn/v1/video/status/${requestId}`, {
-      headers: { Authorization: `Bearer ${SILICONFLOW_KEY}` }
-    })
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 3000))
+    const statusRes = await fetch(
+      `https://queue.fal.run/fal-ai/flux-pro/v1.1/requests/${request_id}`,
+      { headers: { Authorization: `Key ${FAL_KEY}` } }
+    )
     const statusData = await statusRes.json()
-    if (statusData.status === 'Succeed') {
-      const url = statusData.results?.videos?.[0]?.url
-      if (!url) throw new Error('No video URL in response')
-      return { url, provider: 'siliconflow_video' }
+    if (statusData.status === 'COMPLETED') {
+      const url = statusData.output?.images?.[0]?.url
+      if (!url) throw new Error('No image URL in FAL response')
+      return { url, provider: 'fal-flux-pro' }
     }
-    if (statusData.status === 'Failed') throw new Error('Video generation failed')
-    attempts++
+    if (statusData.status === 'FAILED') throw new Error(statusData.error || 'FAL generation failed')
   }
-  throw new Error('Video generation timed out after 2.5 minutes')
+  throw new Error('FAL timed out')
 }
 
-function getDimensions(ratio) {
-  const map = {
-    '1:1': [1024, 1024],
-    '16:9': [1280, 720],
-    '9:16': [720, 1280],
-    '4:3': [1024, 768],
-    '3:4': [768, 1024],
+async function generateFALVideo(prompt, duration) {
+  // Submit Kling request
+  const submitRes = await fetch('https://queue.fal.run/fal-ai/kling-video/v2.1/standard/text-to-video', {
+    method: 'POST',
+    headers: {
+      Authorization: `Key ${FAL_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      prompt,
+      duration: duration <= 5 ? '5' : '10',
+      aspect_ratio: '16:9',
+    }),
+  })
+  if (!submitRes.ok) {
+    const err = await submitRes.json().catch(() => ({}))
+    throw new Error(err.detail || err.message || `FAL video submit error: ${submitRes.status}`)
   }
-  return map[ratio] || [1024, 1024]
+  const { request_id } = await submitRes.json()
+  if (!request_id) throw new Error('No request ID from FAL')
+
+  // Poll for result
+  for (let i = 0; i < 36; i++) {
+    await new Promise(r => setTimeout(r, 5000))
+    const statusRes = await fetch(
+      `https://queue.fal.run/fal-ai/kling-video/v2.1/standard/text-to-video/requests/${request_id}`,
+      { headers: { Authorization: `Key ${FAL_KEY}` } }
+    )
+    const statusData = await statusRes.json()
+    if (statusData.status === 'COMPLETED') {
+      const url = statusData.output?.video?.url
+      if (!url) throw new Error('No video URL in FAL response')
+      return { url, provider: 'kling-2.1' }
+    }
+    if (statusData.status === 'FAILED') throw new Error(statusData.error || 'FAL video failed')
+  }
+  throw new Error('FAL video timed out after 3 minutes')
+}
+
+async function createSoraVideo(prompt, duration) {
+  const response = await fetch('https://api.openai.com/v1/videos/generations', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${OPENAI_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'sora-2',
+      prompt,
+      duration,
+      resolution: '720p',
+      n: 1,
+    }),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}))
+    throw new Error(err.error?.message || `Sora error: ${response.status}`)
+  }
+  const data = await response.json()
+  return data.id || data.data?.[0]?.id
+}
+
+async function getSoraStatus(videoId) {
+  const response = await fetch(`https://api.openai.com/v1/videos/generations/${videoId}`, {
+    headers: { Authorization: `Bearer ${OPENAI_KEY}` }
+  })
+  if (!response.ok) throw new Error(`Status check failed: ${response.status}`)
+  return await response.json()
 }
 
 export default function SphereCreativeStudio() {
-  const { user, profile } = useAuth()
+  const { user } = useAuth()
   const [activeTab, setActiveTab] = useState('image')
   const [projects, setProjects] = useState([])
   const [selectedProjectId, setSelectedProjectId] = useState('')
@@ -274,34 +207,31 @@ export default function SphereCreativeStudio() {
   const [brandGuide, setBrandGuide] = useState(null)
   const [assetsLoading, setAssetsLoading] = useState(false)
 
-  // Image generation state
-  const [imageProvider, setImageProvider] = useState('siliconflow')
   const [imagePrompt, setImagePrompt] = useState('')
-  const [imageStyle, setImageStyle] = useState('')
-  const [aspectRatio, setAspectRatio] = useState('1:1')
+  const [imageSize, setImageSize] = useState('1024x1024')
+  const [imageQuality, setImageQuality] = useState('standard')
+  const [imageStyle, setImageStyle] = useState('vivid')
+  const [imageProvider, setImageProvider] = useState('fal')
   const [generatedImages, setGeneratedImages] = useState([])
   const [imageLoading, setImageLoading] = useState(false)
   const [imageError, setImageError] = useState('')
-  const [hfModel, setHfModel] = useState('black-forest-labs/FLUX.1-schnell')
-  const [sfModel, setSfModel] = useState('Kwai-Kolors/Kolors')
 
-  // Video generation state
-  const [videoProvider, setVideoProvider] = useState('kling')
   const [videoPrompt, setVideoPrompt] = useState('')
+  const [videoDuration, setVideoDuration] = useState(5)
+  const [videoProvider, setVideoProvider] = useState('fal_video')
   const [generatedVideos, setGeneratedVideos] = useState([])
   const [videoLoading, setVideoLoading] = useState(false)
   const [videoError, setVideoError] = useState('')
+  const [videoStatus, setVideoStatus] = useState('')
 
-  // Brand guide state
   const [editingBrand, setEditingBrand] = useState(false)
   const [brandForm, setBrandForm] = useState({
     brand_name: '', primary_colors: '', secondary_colors: '',
-    fonts: '', brand_tone: '', target_audience: '', brand_positioning: '',
-    logo_url: '', guidelines_url: ''
+    fonts: '', brand_tone: '', target_audience: '',
+    brand_positioning: '', logo_url: '', guidelines_url: ''
   })
   const [savingBrand, setSavingBrand] = useState(false)
 
-  // Upload
   const [uploadingAsset, setUploadingAsset] = useState(false)
   const fileRef = useRef(null)
   const logoRef = useRef(null)
@@ -318,9 +248,8 @@ export default function SphereCreativeStudio() {
   async function fetchAssets() {
     setAssetsLoading(true)
     const { data } = await supabase.from('as_deliverables')
-      .select('*')
-      .eq('project_id', selectedProjectId)
-      .in('deliverable_type', ['image', 'video', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4', 'mov', 'generated_image', 'generated_video'])
+      .select('*').eq('project_id', selectedProjectId)
+      .in('deliverable_type', ['generated_image', 'generated_video', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4', 'mov'])
       .order('created_at', { ascending: false })
     setAssets(data || [])
     setAssetsLoading(false)
@@ -331,28 +260,21 @@ export default function SphereCreativeStudio() {
       .select('*').eq('project_id', selectedProjectId).eq('doc_type', 'brand_identity').single()
     if (data) {
       setBrandGuide(data)
-      try {
-        const parsed = JSON.parse(data.content)
-        setBrandForm(parsed)
-      } catch {
-        setBrandForm(f => ({ ...f, brand_name: data.title }))
-      }
+      try { setBrandForm(JSON.parse(data.content)) } catch { }
     }
   }
 
-  async function saveToAssetLibrary(url, blob, type, title) {
+  async function saveToLibrary(url, type, title, blob) {
     if (!selectedProjectId) return
     try {
       let finalUrl = url
       if (blob) {
         const ext = type === 'video' ? 'mp4' : 'png'
         const fileName = `${selectedProjectId}/${Date.now()}.${ext}`
-        const { error } = await supabase.storage
-          .from('sphere-deliverables').upload(fileName, blob)
+        const { error } = await supabase.storage.from('sphere-deliverables').upload(fileName, blob)
         if (!error) {
-          const { data: urlData } = supabase.storage
-            .from('sphere-deliverables').getPublicUrl(fileName)
-          finalUrl = urlData.publicUrl
+          const { data } = supabase.storage.from('sphere-deliverables').getPublicUrl(fileName)
+          finalUrl = data.publicUrl
         }
       }
       await supabase.from('as_deliverables').insert({
@@ -365,32 +287,21 @@ export default function SphereCreativeStudio() {
         created_by: user?.id, uploaded_by: user?.id
       })
       fetchAssets()
-    } catch (err) {
-      console.error('Save error:', err)
-    }
+    } catch (err) { console.error('Save error:', err) }
   }
 
   async function generateImage() {
     if (!imagePrompt.trim()) return
     setImageLoading(true)
     setImageError('')
-    const fullPrompt = imageStyle ? `${imagePrompt}, ${imageStyle} style` : imagePrompt
-    const [w, h] = getDimensions(aspectRatio)
     try {
       let result
-      if (imageProvider === 'siliconflow') result = await generateSiliconflow(fullPrompt, w, h, sfModel)
-      else if (imageProvider === 'pollinations') {
-        const encoded = encodeURIComponent(fullPrompt)
-        const seed = Math.floor(Math.random() * 999999)
-        const url = `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&seed=${seed}&model=flux`
-        result = { url, provider: 'pollinations' }
-      }
-      else if (imageProvider === 'huggingface') result = await generateHuggingFace(fullPrompt, hfModel)
-      else { setImageError('Provider not available'); setImageLoading(false); return }
-      setGeneratedImages(prev => [{ ...result, prompt: fullPrompt, ratio: aspectRatio, ts: Date.now() }, ...prev.slice(0, 7)])
-    } catch (err) {
-      setImageError(err.message)
-    }
+      if (imageProvider === 'fal') result = await generateFAL(imagePrompt, imageSize)
+      else if (imageProvider === 'siliconflow') result = await generateSiliconflow(imagePrompt, imageSize)
+      else if (imageProvider === 'dalle') result = await generateDALLE(imagePrompt, imageSize, imageQuality, imageStyle)
+      else { setImageError('Provider not configured'); setImageLoading(false); return }
+      setGeneratedImages(prev => [{ ...result, prompt: imagePrompt, size: imageSize, ts: Date.now() }, ...prev.slice(0, 7)])
+    } catch (err) { setImageError(err.message) }
     setImageLoading(false)
   }
 
@@ -398,16 +309,59 @@ export default function SphereCreativeStudio() {
     if (!videoPrompt.trim()) return
     setVideoLoading(true)
     setVideoError('')
+    setVideoStatus('Submitting to ' + (videoProvider === 'fal_video' ? 'Kling 2.1 via FAL' : 'Sora 2 via OpenAI') + '...')
     try {
       let result
-      if (videoProvider === 'kling') result = await generateKlingVideo(videoPrompt)
-      else if (videoProvider === 'huggingface_video') result = await generateHFVideo(videoPrompt)
-      else { setVideoError('Provider not available yet'); setVideoLoading(false); return }
-      setGeneratedVideos(prev => [{ ...result, prompt: videoPrompt, ts: Date.now() }, ...prev.slice(0, 5)])
+      if (videoProvider === 'fal_video') result = await generateFALVideo(videoPrompt, videoDuration)
+      else result = await generateSoraVideo(videoPrompt, videoDuration)
+      setGeneratedVideos(prev => [{ ...result, prompt: videoPrompt, duration: videoDuration, ts: Date.now() }, ...prev.slice(0, 5)])
+      setVideoStatus('')
     } catch (err) {
       setVideoError(err.message)
+      setVideoStatus('')
     }
     setVideoLoading(false)
+  }
+
+  async function generateSoraVideo(prompt, duration) {
+    setVideoStatus('Creating Sora 2 video job...')
+    const response = await fetch('https://api.openai.com/v1/videos/generations', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${OPENAI_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'sora-2',
+        prompt,
+        duration,
+        resolution: '720p',
+        n: 1,
+      }),
+    })
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      throw new Error(err.error?.message || `Sora error: ${response.status}`)
+    }
+    const data = await response.json()
+    const videoId = data.id || data.data?.[0]?.id
+    if (!videoId) throw new Error('No video ID from Sora')
+
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 10000))
+      const statusRes = await fetch(`https://api.openai.com/v1/videos/generations/${videoId}`, {
+        headers: { Authorization: `Bearer ${OPENAI_KEY}` }
+      })
+      const status = await statusRes.json()
+      setVideoStatus(`Sora status: ${status.status} — attempt ${i + 1}/30`)
+      if (status.status === 'completed') {
+        const url = status.data?.[0]?.url || status.url
+        if (!url) throw new Error('No video URL')
+        return { url, provider: 'sora-2' }
+      }
+      if (status.status === 'failed') throw new Error('Sora generation failed')
+    }
+    throw new Error('Sora timed out')
   }
 
   async function handleAssetUpload(e) {
@@ -418,10 +372,10 @@ export default function SphereCreativeStudio() {
     const fileName = `${selectedProjectId}/${Date.now()}.${ext}`
     const { error } = await supabase.storage.from('sphere-deliverables').upload(fileName, file)
     if (!error) {
-      const { data: urlData } = supabase.storage.from('sphere-deliverables').getPublicUrl(fileName)
+      const { data } = supabase.storage.from('sphere-deliverables').getPublicUrl(fileName)
       await supabase.from('as_deliverables').insert({
         project_id: selectedProjectId, phase: 'product_modeling',
-        title: file.name, file_url: urlData.publicUrl,
+        title: file.name, file_url: data.publicUrl,
         deliverable_type: ext, file_type: file.type,
         file_size: file.size, created_by: user?.id, uploaded_by: user?.id
       })
@@ -429,18 +383,6 @@ export default function SphereCreativeStudio() {
     }
     setUploadingAsset(false)
     if (fileRef.current) fileRef.current.value = ''
-  }
-
-  async function handleLogoUpload(e) {
-    const file = e.target.files?.[0]
-    if (!file || !selectedProjectId) return
-    const fileName = `${selectedProjectId}/logo_${Date.now()}.${file.name.split('.').pop()}`
-    const { error } = await supabase.storage.from('sphere-deliverables').upload(fileName, file)
-    if (!error) {
-      const { data: urlData } = supabase.storage.from('sphere-deliverables').getPublicUrl(fileName)
-      setBrandForm(f => ({ ...f, logo_url: urlData.publicUrl }))
-    }
-    if (logoRef.current) logoRef.current.value = ''
   }
 
   async function saveBrandGuide() {
@@ -465,7 +407,7 @@ export default function SphereCreativeStudio() {
   }
 
   async function deleteAsset(asset) {
-    if (asset.file_url) {
+    if (asset.file_url?.includes('sphere-deliverables')) {
       const path = asset.file_url.split('sphere-deliverables/')[1]
       if (path) await supabase.storage.from('sphere-deliverables').remove([path])
     }
@@ -473,31 +415,24 @@ export default function SphereCreativeStudio() {
     fetchAssets()
   }
 
-  const HF_IMAGE_MODELS = [
-    { id: 'black-forest-labs/FLUX.1-schnell', label: 'FLUX Schnell (Fast)' },
-    { id: 'black-forest-labs/FLUX.1-dev', label: 'FLUX Dev (Quality)' },
-    { id: 'stabilityai/stable-diffusion-xl-base-1.0', label: 'SDXL (Stable)' },
-    { id: 'runwayml/stable-diffusion-v1-5', label: 'SD 1.5 (Classic)' },
-  ]
+  const videoCost = videoProvider === 'fal_video'
+    ? `~$${(videoDuration * 0.07).toFixed(2)}`
+    : `~$${(videoDuration * 0.10).toFixed(2)}`
 
   return (
     <div className="flex flex-col h-full bg-gray-950 text-white">
-      {/* Header */}
       <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold text-white">Creative Studio</h2>
-          <p className="text-xs text-gray-400 mt-0.5">AI image & video generation · Asset library · Brand guidelines</p>
+          <p className="text-xs text-gray-400 mt-0.5">DALL-E 3 · Sora 2 · Asset library · Brand guidelines</p>
         </div>
         <select value={selectedProjectId} onChange={e => setSelectedProjectId(e.target.value)}
           className="bg-gray-800 text-gray-300 text-xs rounded-lg px-3 py-2 border border-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500">
           <option value="">Select project</option>
-          {projects.map(p => (
-            <option key={p.id} value={p.id}>{p.name}{p.as_clients?.name ? ` · ${p.as_clients.name}` : ''}</option>
-          ))}
+          {projects.map(p => <option key={p.id} value={p.id}>{p.name}{p.as_clients?.name ? ` · ${p.as_clients.name}` : ''}</option>)}
         </select>
       </div>
 
-      {/* Tabs */}
       <div className="flex gap-1 px-6 py-3 border-b border-gray-800">
         {[
           { id: 'image', label: '🖼️ Images' },
@@ -514,20 +449,15 @@ export default function SphereCreativeStudio() {
 
       <div className="flex-1 overflow-y-auto p-6">
 
-        {/* IMAGE GENERATION */}
         {activeTab === 'image' && (
           <div className="space-y-5">
-            {/* Provider selector */}
+            {/* Provider selector - Images */}
             <div>
               <label className="block text-xs text-gray-400 uppercase tracking-wide mb-2">Provider</label>
               <div className="flex gap-2 flex-wrap">
                 {IMAGE_PROVIDERS.map(p => (
-                  <button key={p.id} onClick={() => !p.disabled && setImageProvider(p.id)}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${
-                      imageProvider === p.id ? 'border-purple-500 bg-purple-900/20' :
-                      p.disabled ? 'border-gray-700 opacity-40 cursor-not-allowed' :
-                      'border-gray-700 hover:border-gray-600 bg-gray-800'
-                    }`}>
+                  <button key={p.id} onClick={() => setImageProvider(p.id)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${imageProvider === p.id ? 'border-purple-500 bg-purple-900/20' : 'border-gray-700 bg-gray-800 hover:border-gray-600'}`}>
                     <span className="text-sm font-medium text-white">{p.label}</span>
                     <span className={`text-xs px-1.5 py-0.5 rounded-full ${p.color}`}>{p.badge}</span>
                   </button>
@@ -535,231 +465,72 @@ export default function SphereCreativeStudio() {
               </div>
             </div>
 
-            {/* HF model selector */}
-            {imageProvider === 'huggingface' && (
+            <div className="grid grid-cols-3 gap-4">
               <div>
-                <label className="block text-xs text-gray-400 mb-1">Model</label>
-                <select value={hfModel} onChange={e => setHfModel(e.target.value)}
-                  className="bg-gray-800 text-white text-xs rounded-lg px-3 py-2 border border-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500">
-                  {HF_IMAGE_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-                </select>
-              </div>
-            )}
-
-            {imageProvider === 'siliconflow' && (
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">Model</label>
-                <select value={sfModel} onChange={e => setSfModel(e.target.value)}
-                  className="bg-gray-800 text-white text-xs rounded-lg px-3 py-2 border border-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500">
-                  {SILICONFLOW_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-                </select>
-              </div>
-            )}
-
-            {/* Controls */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">Style</label>
-                <select value={imageStyle} onChange={e => setImageStyle(e.target.value)}
-                  className="w-full bg-gray-800 text-white text-sm rounded-xl px-3 py-2 border border-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500">
-                  <option value="">No style</option>
-                  {IMAGE_STYLES.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">Aspect Ratio</label>
-                <div className="flex gap-1">
-                  {ASPECT_RATIOS.map(r => (
-                    <button key={r} onClick={() => setAspectRatio(r)}
-                      className={`flex-1 py-2 text-xs rounded-lg transition-colors ${aspectRatio === r ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white border border-gray-700'}`}>
-                      {r}
+                <label className="block text-xs text-gray-400 mb-1">Size</label>
+                <div className="flex flex-col gap-1">
+                  {IMAGE_SIZES.map(s => (
+                    <button key={s} onClick={() => setImageSize(s)}
+                      className={`px-3 py-1.5 text-xs rounded-lg text-left transition-colors ${imageSize === s ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white border border-gray-700'}`}>
+                      {IMAGE_SIZE_LABELS[s]}
                     </button>
                   ))}
                 </div>
               </div>
+              {imageProvider === 'dalle' && (
+                <>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Quality</label>
+                    <div className="flex flex-col gap-1">
+                      {IMAGE_QUALITIES.map(q => (
+                        <button key={q} onClick={() => setImageQuality(q)}
+                          className={`px-3 py-1.5 text-xs rounded-lg capitalize transition-colors ${imageQuality === q ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white border border-gray-700'}`}>
+                          {q} {q === 'hd' ? '($0.08)' : '($0.04)'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Style</label>
+                    <div className="flex flex-col gap-1">
+                      {IMAGE_STYLES.map(s => (
+                        <button key={s} onClick={() => setImageStyle(s)}
+                          className={`px-3 py-1.5 text-xs rounded-lg capitalize transition-colors ${imageStyle === s ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white border border-gray-700'}`}>
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
-            {/* Prompt */}
             <div>
               <label className="block text-xs text-gray-400 mb-1">Prompt</label>
               <div className="flex gap-2">
                 <textarea value={imagePrompt} onChange={e => setImagePrompt(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && e.ctrlKey && generateImage()}
                   className="flex-1 bg-gray-800 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 border border-gray-700 resize-none"
-                  rows={3} placeholder="Describe the image you want to create... (Ctrl+Enter to generate)" />
+                  rows={3} placeholder="Describe the image... (Ctrl+Enter to generate)" />
                 <button onClick={generateImage} disabled={imageLoading || !imagePrompt.trim()}
-                  className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-5 rounded-xl text-sm font-medium transition-colors flex-shrink-0">
-                  {imageLoading ? (
-                    <span className="flex flex-col items-center gap-1">
-                      <span className="animate-spin text-lg">⏳</span>
-                      <span className="text-xs">Gen...</span>
-                    </span>
-                  ) : '✨ Generate'}
+                  className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-5 rounded-xl text-sm font-medium transition-colors flex-shrink-0 flex flex-col items-center justify-center gap-1">
+                  {imageLoading ? <><span className="animate-spin text-lg">⏳</span><span className="text-xs">Gen...</span></> : <><span>✨</span><span>Generate</span></>}
                 </button>
               </div>
             </div>
 
-            {/* Quick prompts */}
             <div>
               <p className="text-xs text-gray-500 mb-2">Quick prompts</p>
               <div className="flex gap-2 flex-wrap">
                 {[
                   'Professional brand logo on white background',
-                  'Modern website hero background, abstract geometric',
+                  'Modern website hero section, abstract geometric',
                   'Social media post template, clean minimal design',
                   'Product lifestyle photography, luxury feel',
-                  'Corporate team photo background',
+                  'Corporate team background, professional',
                   'Instagram story template, bold typography',
                 ].map(s => (
                   <button key={s} onClick={() => setImagePrompt(s)}
-                    className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg border border-gray-700 transition-colors">
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Error */}
-            {imageError && (
-              <div className="bg-red-900/30 border border-red-700/50 rounded-xl p-3">
-                <p className="text-xs text-red-300">❌ {imageError}</p>
-                {imageError.includes('loading') && (
-                  <p className="text-xs text-red-400 mt-1">Model is warming up — wait 20 seconds and try again</p>
-                )}
-              </div>
-            )}
-
-            {/* Loading state */}
-            {imageLoading && (
-              <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-                <div className="flex flex-col items-center justify-center py-16 text-gray-500">
-                  <div className="text-4xl mb-3 animate-pulse">🎨</div>
-                  <p className="text-sm font-medium text-white">Generating...</p>
-                  <p className="text-xs mt-1 text-gray-500">Pollinations takes 5-15 seconds</p>
-                  <p className="text-xs mt-3 text-gray-600">If image doesn't appear, click ↗ Open to view directly</p>
-                </div>
-              </div>
-            )}
-
-            {/* Generated images */}
-            {generatedImages.length > 0 && (
-              <div className="space-y-4">
-                <p className="text-xs text-gray-400 uppercase tracking-wide">Generated ({generatedImages.length})</p>
-                {generatedImages.map((img) => (
-                  <div key={img.ts} className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-                    {/* Direct URL display — always visible */}
-                    <div className="px-4 py-3 bg-gray-900 border-b border-gray-700 flex items-center gap-3">
-                      <span className="text-xs text-gray-400 truncate flex-1">{img.prompt}</span>
-                      <a href={img.url} target="_blank" rel="noopener noreferrer"
-                        className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg flex-shrink-0 font-medium">
-                        ↗ Open Image
-                      </a>
-                      {selectedProjectId && (
-                        <button onClick={() => saveToAssetLibrary(img.url, null, 'image', img.prompt.slice(0, 50))}
-                          className="text-xs bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg flex-shrink-0">
-                          + Library
-                        </button>
-                      )}
-                    </div>
-                    {/* Image display */}
-                    <div
-                      style={{
-                        backgroundImage: `url("${img.url}")`,
-                        backgroundSize: 'cover',
-                        backgroundPosition: 'center',
-                        aspectRatio: img.ratio?.replace(':', '/') || '1/1',
-                        minHeight: '250px',
-                        backgroundColor: '#1f2937',
-                      }}
-                      className="w-full"
-                    />
-                    <div className="px-4 py-2 flex items-center gap-2 flex-wrap">
-                      <span className="text-xs text-gray-500">{img.provider}</span>
-                      <span className="text-xs text-gray-500">{img.ratio}</span>
-                      <div className="ml-auto flex gap-1">
-                        {['flux-pro', 'flux', 'turbo'].map(m => {
-                          const enc = encodeURIComponent(img.prompt)
-                          const [mw, mh] = getDimensions(img.ratio)
-                          const altUrl = `https://image.pollinations.ai/prompt/${enc}?width=${mw}&height=${mh}&nologo=true&seed=${img.ts}&model=${m}`
-                          return (
-                            <a key={m} href={altUrl} target="_blank" rel="noopener noreferrer"
-                              className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded">
-                              {m}
-                            </a>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* VIDEO GENERATION */}
-        {activeTab === 'video' && (
-          <div className="space-y-5">
-            {/* Provider selector */}
-            <div>
-              <label className="block text-xs text-gray-400 uppercase tracking-wide mb-2">Provider</label>
-              <div className="flex gap-2 flex-wrap">
-                {VIDEO_PROVIDERS.map(p => (
-                  <button key={p.id} onClick={() => !p.disabled && setVideoProvider(p.id)}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${
-                      videoProvider === p.id ? 'border-purple-500 bg-purple-900/20' :
-                      p.disabled ? 'border-gray-700 opacity-40 cursor-not-allowed' :
-                      'border-gray-700 hover:border-gray-600 bg-gray-800'
-                    }`}>
-                    <span className="text-sm font-medium text-white">{p.label}</span>
-                    <span className={`text-xs px-1.5 py-0.5 rounded-full ${p.color}`}>{p.badge}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Runway info */}
-            {videoProvider === 'runway' && (
-              <div className="bg-purple-900/20 border border-purple-700/50 rounded-xl p-4">
-                <p className="text-sm font-medium text-purple-300 mb-1">Runway ML</p>
-                <p className="text-xs text-gray-400 mb-3">Runway offers 125 free credits on signup. Add your API key to use it here.</p>
-                <input placeholder="Enter Runway API key..."
-                  className="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-purple-500 border border-gray-700" />
-                <a href="https://runwayml.com" target="_blank" rel="noopener noreferrer"
-                  className="text-xs text-purple-400 hover:text-purple-300 mt-2 block">Get free credits at runwayml.com →</a>
-              </div>
-            )}
-
-            {/* Prompt */}
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Video Prompt</label>
-              <div className="flex gap-2">
-                <textarea value={videoPrompt} onChange={e => setVideoPrompt(e.target.value)}
-                  className="flex-1 bg-gray-800 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 border border-gray-700 resize-none"
-                  rows={3} placeholder="Describe the video you want to generate... Keep it simple for best results" />
-                <button onClick={generateVideo} disabled={videoLoading || !videoPrompt.trim() || videoProvider === 'runway'}
-                  className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-5 rounded-xl text-sm font-medium transition-colors flex-shrink-0">
-                  {videoLoading ? (
-                    <span className="flex flex-col items-center gap-1">
-                      <span className="animate-spin text-lg">⏳</span>
-                      <span className="text-xs">Gen...</span>
-                    </span>
-                  ) : '🎥 Generate'}
-                </button>
-              </div>
-            </div>
-
-            {/* Quick prompts */}
-            <div>
-              <p className="text-xs text-gray-500 mb-2">Quick prompts</p>
-              <div className="flex gap-2 flex-wrap">
-                {[
-                  'A car driving through city streets at night',
-                  'Abstract flowing particles, brand colors',
-                  'Professional business meeting timelapse',
-                  'Product rotating on clean background',
-                ].map(s => (
-                  <button key={s} onClick={() => setVideoPrompt(s)}
                     className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg border border-gray-700">
                     {s}
                   </button>
@@ -767,56 +538,51 @@ export default function SphereCreativeStudio() {
               </div>
             </div>
 
-            {/* Warning */}
-            <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
-              <p className="text-xs text-gray-400">
-                <span className="text-yellow-400 font-medium">⚠ Note:</span> Free video generation via HuggingFace produces short clips (2-4 seconds) at lower resolution. Quality improves significantly with Runway ML. Google Veo integration coming when API becomes available.
-              </p>
-            </div>
-
-            {/* Error */}
-            {videoError && (
+            {imageError && (
               <div className="bg-red-900/30 border border-red-700/50 rounded-xl p-3">
-                <p className="text-xs text-red-300">❌ {videoError}</p>
+                <p className="text-xs text-red-300">❌ {imageError}</p>
               </div>
             )}
 
-            {/* Generated videos */}
-            {generatedVideos.length > 0 && (
+            {imageLoading && (
+              <div className="bg-gray-800 rounded-xl border border-gray-700 p-12 flex flex-col items-center text-gray-500">
+                <div className="text-4xl mb-3 animate-pulse">🎨</div>
+                <p className="text-sm font-medium text-white">Generating image...</p>
+                <p className="text-xs mt-1 text-gray-500">
+                  {imageProvider === 'fal' ? 'FAL Flux Pro usually takes 10-20 seconds' : imageProvider === 'dalle' ? 'DALL-E 3 usually takes 5-15 seconds' : 'Siliconflow usually takes 10-20 seconds'}
+                </p>
+              </div>
+            )}
+
+            {generatedImages.length > 0 && (
               <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">Generated Videos</p>
-                <div className="grid grid-cols-1 gap-4">
-                  {generatedVideos.map(vid => (
-                    <div key={vid.ts} className="bg-gray-800 rounded-xl overflow-hidden border border-gray-700">
-                      <video src={vid.url} controls className="w-full" style={{ maxHeight: '300px' }} />
-                      <div className="p-3">
-                        <p className="text-xs text-gray-400 mb-2">{vid.prompt}</p>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded">{vid.provider}</span>
-                          <div className="ml-auto flex gap-2">
-                            <a href={vid.url} download={`video_${vid.ts}.mp4`}
-                              className="text-xs text-blue-400 hover:text-blue-300">↓ Save</a>
-                            {selectedProjectId && (
-                              <button onClick={() => saveToAssetLibrary(vid.url, vid.blob, 'video', vid.prompt.slice(0, 50))}
-                                className="text-xs text-green-400 hover:text-green-300">+ Library</button>
-                            )}
-                          </div>
-                        </div>
+                <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">Generated ({generatedImages.length})</p>
+                <div className="grid grid-cols-2 gap-4">
+                  {generatedImages.map(img => (
+                    <div key={img.ts} className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+                      <div className="px-3 py-2 bg-gray-900 border-b border-gray-700 flex items-center gap-2">
+                        <p className="text-xs text-gray-400 truncate flex-1">{img.prompt}</p>
+                        <a href={img.url} target="_blank" rel="noopener noreferrer"
+                          className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded flex-shrink-0">↗ Open</a>
+                        {selectedProjectId && (
+                          <button onClick={() => saveToLibrary(img.url, 'image', img.prompt.slice(0, 50))}
+                            className="text-xs bg-purple-600 hover:bg-purple-700 text-white px-2 py-1 rounded flex-shrink-0">+ Save</button>
+                        )}
                       </div>
+                      <div style={{
+                        backgroundImage: `url("${img.url}")`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                        aspectRatio: img.size === '1792x1024' ? '16/9' : img.size === '1024x1792' ? '9/16' : '1/1',
+                        minHeight: '200px',
+                        backgroundColor: '#111827',
+                      }} />
+                      {img.revised_prompt && (
+                        <div className="px-3 py-2 border-t border-gray-700">
+                          <p className="text-xs text-gray-500 line-clamp-2">Revised: {img.revised_prompt}</p>
+                        </div>
+                      )}
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {videoLoading && (
-              <div className="flex flex-col items-center justify-center py-16 text-gray-500">
-                <div className="text-4xl mb-3 animate-pulse">🎥</div>
-                <p className="text-sm font-medium text-white">Generating video...</p>
-                <p className="text-xs mt-1 text-gray-500">Wan2.1-T2V-1.3B — polling every 5s, may take 1-3 min</p>
-                <div className="mt-3 flex gap-1">
-                  {[0,1,2].map(i => (
-                    <div key={i} className="w-2 h-2 rounded-full bg-purple-500 animate-bounce" style={{ animationDelay: `${i * 0.2}s` }} />
                   ))}
                 </div>
               </div>
@@ -824,7 +590,131 @@ export default function SphereCreativeStudio() {
           </div>
         )}
 
-        {/* ASSET LIBRARY */}
+        {activeTab === 'video' && (
+          <div className="space-y-5">
+            <div className="bg-gray-800 rounded-xl p-4 border border-purple-500/30">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-purple-600 rounded-lg flex items-center justify-center text-sm">S2</div>
+                <div>
+                  <p className="text-sm font-semibold text-white">Sora 2 by OpenAI</p>
+                  <p className="text-xs text-gray-400">$0.10/second · 720p · Best quality video generation available</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Provider selector - Video */}
+            <div>
+              <label className="block text-xs text-gray-400 uppercase tracking-wide mb-2">Provider</label>
+              <div className="flex gap-2">
+                {VIDEO_PROVIDERS.map(p => (
+                  <button key={p.id} onClick={() => setVideoProvider(p.id)}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border transition-all ${videoProvider === p.id ? 'border-purple-500 bg-purple-900/20' : 'border-gray-700 bg-gray-800 hover:border-gray-600'}`}>
+                    <span className="text-sm font-medium text-white">{p.label}</span>
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full ${p.color}`}>{p.badge}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs text-gray-400 uppercase tracking-wide mb-2">Duration</label>
+              <div className="flex gap-2">
+                {VIDEO_DURATIONS.map(d => (
+                  <button key={d} onClick={() => setVideoDuration(d)}
+                    className={`flex-1 py-3 rounded-xl text-sm font-medium transition-all ${videoDuration === d ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white border border-gray-700'}`}>
+                    <div>{d}s</div>
+                    <div className="text-xs mt-0.5 opacity-70">${(d * 0.10).toFixed(2)}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Video Prompt</label>
+              <div className="flex gap-2">
+                <textarea value={videoPrompt} onChange={e => setVideoPrompt(e.target.value)}
+                  className="flex-1 bg-gray-800 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 border border-gray-700 resize-none"
+                  rows={4} placeholder="Describe your video in detail. Include: shot type, subject, action, setting, lighting, camera movement..." />
+                <button onClick={generateVideo} disabled={videoLoading || !videoPrompt.trim()}
+                  className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-5 rounded-xl text-sm font-medium transition-colors flex-shrink-0 flex flex-col items-center justify-center gap-1">
+                  {videoLoading ? <><span className="animate-spin">⏳</span><span className="text-xs">Gen...</span></> : <><span>🎥</span><span>Generate</span><span className="text-xs opacity-70">{videoCost}</span></>}
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
+              <p className="text-xs font-medium text-gray-300 mb-2">💡 For best results include:</p>
+              <div className="grid grid-cols-2 gap-1 text-xs text-gray-500">
+                <span>• Shot type (wide, close-up, aerial)</span>
+                <span>• Subject and action</span>
+                <span>• Setting and environment</span>
+                <span>• Lighting (golden hour, studio)</span>
+                <span>• Camera movement (pan, zoom)</span>
+                <span>• Mood/style (cinematic, documentary)</span>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs text-gray-500 mb-2">Quick prompts</p>
+              <div className="flex gap-2 flex-wrap">
+                {[
+                  'Wide shot of a luxury car driving through city streets at night, cinematic lighting, slow pan',
+                  'Close-up product shot of a smartphone rotating on clean white background, studio lighting',
+                  'Aerial view of a modern office building, golden hour sunlight, slowly zooming out',
+                  'Professional business meeting in glass conference room, natural lighting, camera slowly pans',
+                ].map(s => (
+                  <button key={s} onClick={() => setVideoPrompt(s)}
+                    className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg border border-gray-700 text-left">
+                    {s.slice(0, 60)}...
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {videoStatus && (
+              <div className="bg-blue-900/20 border border-blue-700/50 rounded-xl p-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-1">
+                    {[0,1,2].map(i => (
+                      <div key={i} className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+                    ))}
+                  </div>
+                  <p className="text-xs text-blue-300">{videoStatus}</p>
+                </div>
+              </div>
+            )}
+
+            {videoError && (
+              <div className="bg-red-900/30 border border-red-700/50 rounded-xl p-3">
+                <p className="text-xs text-red-300">❌ {videoError}</p>
+              </div>
+            )}
+
+            {generatedVideos.length > 0 && (
+              <div>
+                <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">Generated Videos</p>
+                <div className="space-y-4">
+                  {generatedVideos.map(vid => (
+                    <div key={vid.ts} className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+                      <video src={vid.url} controls className="w-full" style={{ maxHeight: '360px' }} />
+                      <div className="p-3 flex items-center gap-2">
+                        <p className="text-xs text-gray-400 flex-1 truncate">{vid.prompt}</p>
+                        <span className="text-xs text-gray-500">{vid.duration}s</span>
+                        <a href={vid.url} download={`sora_${vid.ts}.mp4`}
+                          className="text-xs text-blue-400 hover:text-blue-300">↓ Download</a>
+                        {selectedProjectId && (
+                          <button onClick={() => saveToLibrary(vid.url, 'video', vid.prompt.slice(0, 50))}
+                            className="text-xs text-purple-400 hover:text-purple-300">+ Library</button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'assets' && (
           <div>
             <div className="flex items-center justify-between mb-4">
@@ -832,13 +722,11 @@ export default function SphereCreativeStudio() {
                 Asset Library {selectedProjectId ? `(${assets.length})` : '— select a project'}
               </h3>
               {selectedProjectId && (
-                <div className="flex gap-2">
-                  <input ref={fileRef} type="file" onChange={handleAssetUpload}
-                    className="hidden" accept="image/*,video/*,.pdf,.ai,.psd,.fig,.sketch" />
-                  <button onClick={() => fileRef.current?.click()}
-                    disabled={uploadingAsset}
-                    className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg transition-colors">
-                    {uploadingAsset ? '⏳ Uploading...' : '↑ Upload Asset'}
+                <div>
+                  <input ref={fileRef} type="file" onChange={handleAssetUpload} className="hidden" accept="image/*,video/*" />
+                  <button onClick={() => fileRef.current?.click()} disabled={uploadingAsset}
+                    className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg">
+                    {uploadingAsset ? '⏳ Uploading...' : '↑ Upload'}
                   </button>
                 </div>
               )}
@@ -847,85 +735,62 @@ export default function SphereCreativeStudio() {
             {!selectedProjectId ? (
               <div className="text-center py-16 text-gray-500">
                 <p className="text-4xl mb-3">📁</p>
-                <p className="text-sm">Select a project above to view its assets</p>
+                <p className="text-sm">Select a project to view assets</p>
               </div>
             ) : assetsLoading ? (
               <div className="flex justify-center py-12">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-500" />
               </div>
+            ) : assets.length === 0 ? (
+              <div className="text-center py-16 text-gray-500">
+                <p className="text-4xl mb-3">🖼️</p>
+                <p className="text-sm">No assets yet</p>
+                <p className="text-xs mt-1">Generate images/videos or upload files</p>
+              </div>
             ) : (
-              <div>
-                {/* Filter tabs */}
-                {assets.length > 0 && (
-                  <div className="flex gap-2 mb-4">
-                    {['all', 'generated_image', 'generated_video', 'uploaded'].map(f => {
-                      const count = f === 'all' ? assets.length :
-                        f === 'uploaded' ? assets.filter(a => !a.deliverable_type?.startsWith('generated')).length :
-                        assets.filter(a => a.deliverable_type === f).length
-                      return (
-                        <button key={f}
-                          className="px-3 py-1 text-xs rounded-full bg-gray-800 text-gray-400 hover:text-white border border-gray-700 capitalize">
-                          {f.replace(/_/g, ' ')} ({count})
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-3 gap-4">
-                  {assets.map(asset => (
-                    <div key={asset.id} className="bg-gray-800 rounded-xl overflow-hidden border border-gray-700 group">
-                      {asset.file_type?.startsWith('image') || asset.deliverable_type === 'generated_image' ? (
-                        <div className="aspect-square overflow-hidden bg-gray-900">
-                          <img src={asset.file_url} alt={asset.title}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                        </div>
-                      ) : asset.file_type?.startsWith('video') || asset.deliverable_type === 'generated_video' ? (
-                        <div className="aspect-video bg-gray-900 flex items-center justify-center">
-                          <video src={asset.file_url} className="w-full h-full object-cover" />
-                        </div>
-                      ) : (
-                        <div className="aspect-square bg-gray-900 flex items-center justify-center">
-                          <span className="text-4xl">📎</span>
-                        </div>
-                      )}
-                      <div className="p-3">
-                        <p className="text-xs font-medium text-white truncate">{asset.title}</p>
-                        <p className="text-xs text-gray-500 mt-0.5 capitalize">
-                          {asset.deliverable_type?.replace(/_/g, ' ')} · {new Date(asset.created_at).toLocaleDateString()}
-                        </p>
-                        <div className="flex gap-2 mt-2">
-                          <a href={asset.file_url} target="_blank" rel="noopener noreferrer"
-                            className="text-xs text-blue-400 hover:text-blue-300">↗ Open</a>
-                          <button onClick={() => navigator.clipboard.writeText(asset.file_url)}
-                            className="text-xs text-gray-400 hover:text-white">Copy URL</button>
-                          <button onClick={() => deleteAsset(asset)}
-                            className="text-xs text-red-400 hover:text-red-300 ml-auto">Delete</button>
-                        </div>
+              <div className="grid grid-cols-3 gap-4">
+                {assets.map(asset => (
+                  <div key={asset.id} className="bg-gray-800 rounded-xl overflow-hidden border border-gray-700 group">
+                    {asset.file_type?.startsWith('image') || asset.deliverable_type === 'generated_image' ? (
+                      <div className="aspect-square overflow-hidden bg-gray-900">
+                        <img src={asset.file_url} alt={asset.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                      </div>
+                    ) : asset.file_type?.startsWith('video') || asset.deliverable_type === 'generated_video' ? (
+                      <div className="aspect-video bg-gray-900">
+                        <video src={asset.file_url} className="w-full h-full object-cover" />
+                      </div>
+                    ) : (
+                      <div className="aspect-square bg-gray-900 flex items-center justify-center">
+                        <span className="text-4xl">📎</span>
+                      </div>
+                    )}
+                    <div className="p-3">
+                      <p className="text-xs font-medium text-white truncate">{asset.title}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{new Date(asset.created_at).toLocaleDateString()}</p>
+                      <div className="flex gap-2 mt-2">
+                        <a href={asset.file_url} target="_blank" rel="noopener noreferrer"
+                          className="text-xs text-blue-400 hover:text-blue-300">↗ Open</a>
+                        <button onClick={() => navigator.clipboard.writeText(asset.file_url)}
+                          className="text-xs text-gray-400 hover:text-white">Copy URL</button>
+                        <button onClick={() => deleteAsset(asset)}
+                          className="text-xs text-red-400 hover:text-red-300 ml-auto">Delete</button>
                       </div>
                     </div>
-                  ))}
-                </div>
-                {assets.length === 0 && (
-                  <div className="text-center py-16 text-gray-500">
-                    <p className="text-4xl mb-3">🖼️</p>
-                    <p className="text-sm">No assets yet</p>
-                    <p className="text-xs mt-1">Generate images or upload files to build the library</p>
                   </div>
-                )}
+                ))}
               </div>
             )}
           </div>
         )}
 
-        {/* BRAND GUIDELINES */}
         {activeTab === 'brand' && (
           <div>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-gray-300">Brand Guidelines</h3>
               {selectedProjectId && (
                 <button onClick={() => setEditingBrand(!editingBrand)}
-                  className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${editingBrand ? 'bg-gray-700 text-gray-300' : 'bg-purple-600 hover:bg-purple-700 text-white'}`}>
+                  className={`text-xs px-3 py-1.5 rounded-lg ${editingBrand ? 'bg-gray-700 text-gray-300' : 'bg-purple-600 hover:bg-purple-700 text-white'}`}>
                   {editingBrand ? 'Cancel' : brandGuide ? '✏️ Edit' : '+ Create'}
                 </button>
               )}
@@ -939,39 +804,21 @@ export default function SphereCreativeStudio() {
             ) : editingBrand ? (
               <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">Brand Name</label>
-                    <input value={brandForm.brand_name} onChange={e => setBrandForm({...brandForm, brand_name: e.target.value})}
-                      className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-purple-500" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">Target Audience</label>
-                    <input value={brandForm.target_audience} onChange={e => setBrandForm({...brandForm, target_audience: e.target.value})}
-                      className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-purple-500" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">Primary Colors (hex codes)</label>
-                    <input value={brandForm.primary_colors} onChange={e => setBrandForm({...brandForm, primary_colors: e.target.value})}
-                      className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-purple-500"
-                      placeholder="#1a1a2e, #16213e" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">Secondary Colors</label>
-                    <input value={brandForm.secondary_colors} onChange={e => setBrandForm({...brandForm, secondary_colors: e.target.value})}
-                      className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-purple-500" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">Fonts</label>
-                    <input value={brandForm.fonts} onChange={e => setBrandForm({...brandForm, fonts: e.target.value})}
-                      className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-purple-500"
-                      placeholder="Primary: Inter, Secondary: Playfair" />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">Brand Tone</label>
-                    <input value={brandForm.brand_tone} onChange={e => setBrandForm({...brandForm, brand_tone: e.target.value})}
-                      className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-purple-500"
-                      placeholder="Professional, authoritative, approachable" />
-                  </div>
+                  {[
+                    { key: 'brand_name', label: 'Brand Name', placeholder: 'Acme Corp' },
+                    { key: 'target_audience', label: 'Target Audience', placeholder: 'B2B SaaS companies' },
+                    { key: 'primary_colors', label: 'Primary Colors', placeholder: '#1a1a2e, #16213e' },
+                    { key: 'secondary_colors', label: 'Secondary Colors', placeholder: '#0f3460, #e94560' },
+                    { key: 'fonts', label: 'Fonts', placeholder: 'Primary: Inter, Secondary: Playfair' },
+                    { key: 'brand_tone', label: 'Brand Tone', placeholder: 'Professional, authoritative, approachable' },
+                  ].map(f => (
+                    <div key={f.key}>
+                      <label className="block text-xs text-gray-400 mb-1">{f.label}</label>
+                      <input value={brandForm[f.key]} onChange={e => setBrandForm({...brandForm, [f.key]: e.target.value})}
+                        className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        placeholder={f.placeholder} />
+                    </div>
+                  ))}
                 </div>
                 <div>
                   <label className="block text-xs text-gray-400 mb-1">Brand Positioning</label>
@@ -982,13 +829,20 @@ export default function SphereCreativeStudio() {
                   <div>
                     <label className="block text-xs text-gray-400 mb-1">Logo</label>
                     <div className="flex items-center gap-3">
-                      {brandForm.logo_url && (
-                        <img src={brandForm.logo_url} alt="Logo" className="w-12 h-12 object-contain bg-white rounded-lg p-1" />
-                      )}
-                      <input ref={logoRef} type="file" onChange={handleLogoUpload} className="hidden" accept="image/*,.svg" />
+                      {brandForm.logo_url && <img src={brandForm.logo_url} alt="Logo" className="w-10 h-10 object-contain bg-white rounded p-1" />}
+                      <input ref={logoRef} type="file" onChange={async e => {
+                        const file = e.target.files?.[0]
+                        if (!file) return
+                        const fileName = `${selectedProjectId}/logo_${Date.now()}.${file.name.split('.').pop()}`
+                        const { error } = await supabase.storage.from('sphere-deliverables').upload(fileName, file)
+                        if (!error) {
+                          const { data } = supabase.storage.from('sphere-deliverables').getPublicUrl(fileName)
+                          setBrandForm(f => ({ ...f, logo_url: data.publicUrl }))
+                        }
+                      }} className="hidden" accept="image/*,.svg" />
                       <button onClick={() => logoRef.current?.click()}
                         className="bg-gray-700 hover:bg-gray-600 text-white text-xs px-3 py-2 rounded-lg">
-                        {brandForm.logo_url ? 'Replace Logo' : 'Upload Logo'}
+                        {brandForm.logo_url ? 'Replace' : 'Upload Logo'}
                       </button>
                     </div>
                   </div>
@@ -999,7 +853,7 @@ export default function SphereCreativeStudio() {
                       placeholder="Google Drive / Notion link" />
                   </div>
                 </div>
-                <div className="flex gap-3 pt-2">
+                <div className="flex gap-3">
                   <button onClick={saveBrandGuide} disabled={savingBrand}
                     className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium">
                     {savingBrand ? 'Saving...' : 'Save Brand Guide'}
@@ -1009,74 +863,53 @@ export default function SphereCreativeStudio() {
               </div>
             ) : brandGuide ? (
               <div className="space-y-4">
-                {/* Brand header */}
                 <div className="bg-gray-800 rounded-xl p-5 border border-gray-700 flex items-center gap-4">
-                  {brandForm.logo_url && (
-                    <img src={brandForm.logo_url} alt="Logo" className="w-16 h-16 object-contain bg-white rounded-xl p-2" />
-                  )}
+                  {brandForm.logo_url && <img src={brandForm.logo_url} alt="Logo" className="w-14 h-14 object-contain bg-white rounded-xl p-1.5" />}
                   <div>
-                    <h3 className="text-xl font-bold text-white">{brandForm.brand_name || 'Brand'}</h3>
+                    <h3 className="text-xl font-bold text-white">{brandForm.brand_name}</h3>
                     <p className="text-sm text-gray-400 mt-1">{brandForm.brand_positioning}</p>
                   </div>
                 </div>
-
                 <div className="grid grid-cols-2 gap-4">
-                  {/* Colors */}
-                  <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
+                  <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
                     <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Colors</h4>
-                    <div className="space-y-2">
-                      {brandForm.primary_colors && (
-                        <div>
-                          <p className="text-xs text-gray-500 mb-1">Primary</p>
-                          <div className="flex gap-2 flex-wrap">
-                            {brandForm.primary_colors.split(',').map(c => (
-                              <div key={c} className="flex items-center gap-1.5">
-                                <div className="w-6 h-6 rounded-full border border-gray-600" style={{ backgroundColor: c.trim() }} />
-                                <span className="text-xs text-gray-300">{c.trim()}</span>
-                              </div>
-                            ))}
+                    {brandForm.primary_colors && (
+                      <div className="flex gap-2 flex-wrap mb-2">
+                        {brandForm.primary_colors.split(',').map(c => (
+                          <div key={c} className="flex items-center gap-1.5">
+                            <div className="w-5 h-5 rounded-full border border-gray-600" style={{ backgroundColor: c.trim() }} />
+                            <span className="text-xs text-gray-300">{c.trim()}</span>
                           </div>
-                        </div>
-                      )}
-                      {brandForm.secondary_colors && (
-                        <div>
-                          <p className="text-xs text-gray-500 mb-1">Secondary</p>
-                          <div className="flex gap-2 flex-wrap">
-                            {brandForm.secondary_colors.split(',').map(c => (
-                              <div key={c} className="flex items-center gap-1.5">
-                                <div className="w-6 h-6 rounded-full border border-gray-600" style={{ backgroundColor: c.trim() }} />
-                                <span className="text-xs text-gray-300">{c.trim()}</span>
-                              </div>
-                            ))}
+                        ))}
+                      </div>
+                    )}
+                    {brandForm.secondary_colors && (
+                      <div className="flex gap-2 flex-wrap">
+                        {brandForm.secondary_colors.split(',').map(c => (
+                          <div key={c} className="flex items-center gap-1.5">
+                            <div className="w-4 h-4 rounded-full border border-gray-600 opacity-70" style={{ backgroundColor: c.trim() }} />
+                            <span className="text-xs text-gray-400">{c.trim()}</span>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Typography + tone */}
-                  <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
-                    <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Typography & Voice</h4>
-                    {brandForm.fonts && <p className="text-sm text-gray-300 mb-2">{brandForm.fonts}</p>}
-                    {brandForm.brand_tone && (
-                      <p className="text-xs bg-gray-700 text-gray-300 px-3 py-2 rounded-lg">{brandForm.brand_tone}</p>
+                        ))}
+                      </div>
                     )}
                   </div>
-
-                  {/* Audience */}
+                  <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
+                    <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Voice & Type</h4>
+                    {brandForm.fonts && <p className="text-xs text-gray-300 mb-2">{brandForm.fonts}</p>}
+                    {brandForm.brand_tone && <p className="text-xs bg-gray-700 text-gray-300 px-3 py-2 rounded-lg">{brandForm.brand_tone}</p>}
+                  </div>
                   {brandForm.target_audience && (
-                    <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
-                      <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Target Audience</h4>
+                    <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
+                      <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Audience</h4>
                       <p className="text-sm text-gray-300">{brandForm.target_audience}</p>
                     </div>
                   )}
-
-                  {/* External links */}
                   {brandForm.guidelines_url && (
-                    <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
+                    <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
                       <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Resources</h4>
                       <a href={brandForm.guidelines_url} target="_blank" rel="noopener noreferrer"
-                        className="text-sm text-blue-400 hover:text-blue-300">📄 Brand Guidelines Doc →</a>
+                        className="text-sm text-blue-400 hover:text-blue-300">📄 Guidelines Doc →</a>
                     </div>
                   )}
                 </div>
