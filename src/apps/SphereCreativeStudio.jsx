@@ -93,6 +93,7 @@ async function generateHuggingFace(prompt, model) {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
       },
       body: JSON.stringify({
         model: model || 'black-forest-labs/FLUX.1-schnell',
@@ -142,6 +143,7 @@ async function generateHFVideo(prompt) {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
       },
       body: JSON.stringify({
         model: 'ali-vilab/text-to-video-ms-1.7b',
@@ -169,7 +171,7 @@ async function generateSiliconflowVideo(prompt) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'Wan-AI/Wan2.1-T2V-1.3B',
+      model: 'Pro/Wan-AI/Wan2.1-T2V-14B',
       prompt,
       image_size: '720x480',
     }),
@@ -331,6 +333,7 @@ export default function SphereCreativeStudio() {
         const url = `https://image.pollinations.ai/prompt/${encoded}?width=${w}&height=${h}&nologo=true&seed=${seed}&model=flux`
         result = { url, provider: 'pollinations' }
       }
+      else if (imageProvider === 'huggingface') result = await generateHuggingFace(fullPrompt, hfModel)
       else { setImageError('Provider not available'); setImageLoading(false); return }
       setGeneratedImages(prev => [{ ...result, prompt: fullPrompt, ratio: aspectRatio, ts: Date.now() }, ...prev.slice(0, 7)])
     } catch (err) {
