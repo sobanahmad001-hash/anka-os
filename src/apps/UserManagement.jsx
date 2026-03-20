@@ -1,409 +1,272 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Navigate } from 'react-router-dom'
+﻿import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import Card from '../components/Card'
-import StatCard from '../components/StatCard'
-import EmptyState from '../components/EmptyState'
-import Badge from '../components/Badge'
+import { Navigate } from 'react-router-dom'
 
-function normalizeDepartmentName(value) {
-  if (!value) return 'Unassigned'
-  return String(value)
-    .replace(/[_-]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+const DEPARTMENTS = ['design', 'development', 'marketing']
+const ROLES = ['admin', 'member']
+
+const DEPT_COLORS = {
+  design: 'bg-pink-900/50 text-pink-300 border-pink-700/50',
+  development: 'bg-blue-900/50 text-blue-300 border-blue-700/50',
+  marketing: 'bg-green-900/50 text-green-300 border-green-700/50',
+  unassigned: 'bg-gray-700 text-gray-400 border-gray-600',
 }
 
-function titleCase(value) {
-  return normalizeDepartmentName(value)
-    .split(' ')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ')
-}
-
-function inferEnvironmentFit(user) {
-  const role = String(user?.role || '').toLowerCase()
-  const department = String(user?.department || '').toLowerCase()
-
-  if (role === 'admin') return 'Admin'
-  if (department.includes('design') || department.includes('creative')) return 'Design'
-  if (
-    department.includes('marketing') ||
-    department.includes('content') ||
-    department.includes('growth')
-  ) {
-    return 'Marketing'
-  }
-  if (
-    department.includes('engineering') ||
-    department.includes('development') ||
-    department.includes('product') ||
-    department.includes('tech')
-  ) {
-    return 'Development'
-  }
-
-  return 'Shared Core'
-}
-
-function badgeVariantForEnvironment(environment) {
-  if (environment === 'Admin') return 'danger'
-  if (environment === 'Development') return 'default'
-  if (environment === 'Design') return 'warning'
-  if (environment === 'Marketing') return 'success'
-  return 'default'
+const ROLE_COLORS = {
+  admin: 'bg-purple-900/50 text-purple-300',
+  member: 'bg-gray-700 text-gray-300',
 }
 
 export default function UserManagement() {
   const { profile } = useAuth()
   const [users, setUsers] = useState([])
-  const [departments, setDepartments] = useState([])
   const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(null)
+  const [showInvite, setShowInvite] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteDept, setInviteDept] = useState('design')
   const [inviteRole, setInviteRole] = useState('member')
-  const [inviteDept, setInviteDept] = useState('')
+  const [inviting, setInviting] = useState(false)
+  const [inviteResult, setInviteResult] = useState(null)
+  const [search, setSearch] = useState('')
+  const [filterDept, setFilterDept] = useState('all')
 
-  useEffect(() => {
-    if (profile?.role === 'admin') {
-      fetchData()
-    }
-  }, [profile])
+  if (profile?.role !== 'admin') return <Navigate to="/sphere/projects" replace />
 
-  async function fetchData() {
+  useEffect(() => { fetchUsers() }, [])
+
+  async function fetchUsers() {
     setLoading(true)
+    const { data } = await supabase
+      .from('profiles')
+      .select('*')
+      .order('created_at', { ascending: false })
+    setUsers(data || [])
+    setLoading(false)
+  }
 
-    try {
-      const [usersResult, departmentsResult] = await Promise.all([
-        supabase.from('profiles').select('*').order('created_at', { ascending: false }),
-        supabase.from('departments').select('id, name').order('name'),
-      ])
-
-      if (!usersResult.error) setUsers(usersResult.data || [])
-      if (!departmentsResult.error) setDepartments(departmentsResult.data || [])
-    } catch (error) {
-      console.error('Failed to load user management data:', error)
-      setUsers([])
-      setDepartments([])
-    } finally {
-      setLoading(false)
-    }
+  async function updateUser(userId, updates) {
+    setSaving(userId)
+    await supabase.from('profiles').update({
+      ...updates,
+      updated_at: new Date().toISOString()
+    }).eq('id', userId)
+    setUsers(users.map(u => u.id === userId ? { ...u, ...updates } : u))
+    setSaving(null)
   }
 
   async function inviteUser() {
-    if (!inviteEmail || !inviteDept) {
-      alert('Email and department required')
-      return
+    if (!inviteEmail.trim()) return
+    setInviting(true)
+    setInviteResult(null)
+    try {
+      const { data, error } = await supabase.auth.admin.inviteUserByEmail(inviteEmail, {
+        data: { department: inviteDept, role: inviteRole }
+      })
+      if (error) throw error
+      setInviteResult({ success: true, message: `Invite sent to ${inviteEmail}` })
+      setInviteEmail('')
+      setTimeout(() => fetchUsers(), 2000)
+    } catch (err) {
+      // Fallback — create profile manually if admin invite not available
+      setInviteResult({ success: false, message: err.message })
     }
-
-    console.log('Invite:', {
-      email: inviteEmail,
-      role: inviteRole,
-      department: inviteDept,
-    })
-
-    alert(`Invite prepared for ${inviteEmail}`)
-    setInviteEmail('')
-    setInviteRole('member')
-    setInviteDept('')
+    setInviting(false)
   }
 
-  async function updateUserRole(userId, newRole) {
-    const { error } = await supabase
-      .from('profiles')
-      .update({ role: newRole })
-      .eq('id', userId)
+  const filtered = users.filter(u => {
+    const matchSearch = !search || u.full_name?.toLowerCase().includes(search.toLowerCase()) || u.email?.toLowerCase().includes(search.toLowerCase())
+    const matchDept = filterDept === 'all' || u.department === filterDept || (!u.department && filterDept === 'unassigned')
+    return matchSearch && matchDept
+  })
 
-    if (!error) fetchData()
+  const stats = {
+    total: users.length,
+    admins: users.filter(u => u.role === 'admin').length,
+    unassigned: users.filter(u => !u.department).length,
+    byDept: DEPARTMENTS.reduce((acc, d) => ({ ...acc, [d]: users.filter(u => u.department === d).length }), {}),
   }
 
-  async function updateUserDepartment(userId, deptId) {
-    const { error } = await supabase
-      .from('profiles')
-      .update({ department: deptId })
-      .eq('id', userId)
-
-    if (!error) fetchData()
-  }
-
-  const derived = useMemo(() => {
-    const adminCount = users.filter((user) => user.role === 'admin').length
-    const memberCount = users.filter((user) => user.role !== 'admin').length
-    const departmentCount =
-      departments.length ||
-      new Set(users.map((user) => normalizeDepartmentName(user.department))).size
-
-    const environmentCounts = users.reduce((acc, user) => {
-      const env = inferEnvironmentFit(user)
-      acc[env] = (acc[env] || 0) + 1
-      return acc
-    }, {})
-
-    return {
-      adminCount,
-      memberCount,
-      departmentCount,
-      environmentCounts,
-    }
-  }, [users, departments])
-
-  if (!profile) return null
-
-  if (profile.role !== 'admin') {
-    return <Navigate to="/dev-dashboard" replace />
-  }
-
-  if (loading) {
-    return <div className="p-6">Loading people and access data...</div>
-  }
+  if (loading) return (
+    <div className="flex items-center justify-center h-full bg-gray-950">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500" />
+    </div>
+  )
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
+    <div className="flex flex-col h-full bg-gray-950 text-white">
+      {/* Header */}
+      <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">People & Access</h1>
-          <p className="mt-1 text-gray-600 dark:text-gray-400">
-            Administrative control over roles, departments, and environment alignment.
-          </p>
+          <h2 className="text-lg font-bold text-white">Team Management</h2>
+          <p className="text-xs text-gray-400 mt-0.5">{stats.total} members · {stats.unassigned} unassigned</p>
         </div>
+        <button onClick={() => setShowInvite(!showInvite)}
+          className="bg-purple-600 hover:bg-purple-700 text-white text-sm px-4 py-2 rounded-lg">
+          + Invite Member
+        </button>
+      </div>
 
-        <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3 bg-white dark:bg-gray-800">
-          <div className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-            Admin Scope
-          </div>
-          <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
-            Roles, departments, and invite flow
-          </div>
-          <div className="text-sm text-gray-500 dark:text-gray-400">
-            This surface will later connect to deeper permissions and rules.
-          </div>
+      {/* Stats */}
+      <div className="px-6 py-4 border-b border-gray-800">
+        <div className="grid grid-cols-5 gap-3">
+          {[
+            { label: 'Total', value: stats.total, color: 'text-white' },
+            { label: 'Admins', value: stats.admins, color: 'text-purple-400' },
+            { label: 'Design', value: stats.byDept.design, color: 'text-pink-400' },
+            { label: 'Development', value: stats.byDept.development, color: 'text-blue-400' },
+            { label: 'Marketing', value: stats.byDept.marketing, color: 'text-green-400' },
+          ].map(s => (
+            <div key={s.label} className="bg-gray-800 rounded-xl p-3 text-center border border-gray-700">
+              <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
+              <p className="text-xs text-gray-500 mt-0.5">{s.label}</p>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="Total People"
-          value={users.length}
-          change="Across org structure"
-          trend="up"
-          icon="👥"
-          color="blue"
-        />
-        <StatCard
-          label="Admins"
-          value={derived.adminCount}
-          change={derived.adminCount > 2 ? 'Review concentration' : 'Lean control'}
-          trend={derived.adminCount > 2 ? 'down' : 'up'}
-          icon="🛡️"
-          color="purple"
-        />
-        <StatCard
-          label="Members"
-          value={derived.memberCount}
-          change="Execution capacity"
-          trend="up"
-          icon="🧠"
-          color="green"
-        />
-        <StatCard
-          label="Departments"
-          value={derived.departmentCount}
-          change="Org distribution"
-          trend="up"
-          icon="🏛️"
-          color="yellow"
-        />
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-[1.1fr_1.4fr]">
-        <Card
-          title="Invite & Assign"
-          subtitle="A transitional admin flow for bringing people into the organization."
-        >
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="md:col-span-2">
-              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Email address
-              </label>
-              <input
-                type="email"
-                placeholder="name@company.com"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2.5 dark:bg-gray-700 dark:text-white"
-              />
+      {/* Invite form */}
+      {showInvite && (
+        <div className="mx-6 mt-4 bg-gray-800 rounded-xl p-5 border border-gray-700 space-y-4">
+          <h3 className="text-sm font-semibold text-white">Invite New Team Member</h3>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-1">
+              <label className="block text-xs text-gray-400 mb-1">Email *</label>
+              <input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-purple-500"
+                placeholder="teammate@company.com" type="email" />
             </div>
-
             <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Role
-              </label>
-              <select
-                value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2.5 dark:bg-gray-700 dark:text-white"
-              >
-                <option value="member">Member</option>
-                <option value="admin">Admin</option>
+              <label className="block text-xs text-gray-400 mb-1">Department</label>
+              <select value={inviteDept} onChange={e => setInviteDept(e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none">
+                {DEPARTMENTS.map(d => <option key={d} value={d} className="capitalize">{d}</option>)}
               </select>
             </div>
-
             <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Department
-              </label>
-              <select
-                value={inviteDept}
-                onChange={(e) => setInviteDept(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2.5 dark:bg-gray-700 dark:text-white"
-              >
-                <option value="">Select Department</option>
-                {departments.map((department) => (
-                  <option key={department.id} value={department.id}>
-                    {department.name}
-                  </option>
-                ))}
+              <label className="block text-xs text-gray-400 mb-1">Role</label>
+              <select value={inviteRole} onChange={e => setInviteRole(e.target.value)}
+                className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none">
+                {ROLES.map(r => <option key={r} value={r} className="capitalize">{r}</option>)}
               </select>
             </div>
           </div>
-
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Invite flow is placeholder-backed for now and should later connect to managed auth provisioning.
-            </p>
-
-            <button
-              onClick={inviteUser}
-              className="rounded-lg bg-blue-600 px-4 py-2.5 text-white font-medium hover:bg-blue-700 transition-colors"
-            >
-              Prepare Invite
-            </button>
-          </div>
-        </Card>
-
-        <Card
-          title="Environment Alignment"
-          subtitle="A temporary but useful view of where people most naturally fit in the operating system."
-        >
-          {Object.keys(derived.environmentCounts).length === 0 ? (
-            <EmptyState
-              icon="🧭"
-              title="No people available"
-              description="Environment alignment will appear once users are present in profiles."
-            />
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2">
-              {Object.entries(derived.environmentCounts).map(([environment, count]) => (
-                <div
-                  key={environment}
-                  className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-900"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm font-semibold text-gray-900 dark:text-white">
-                      {environment}
-                    </div>
-                    <Badge variant={badgeVariantForEnvironment(environment)}>
-                      {count}
-                    </Badge>
-                  </div>
-
-                  <div className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                    {environment === 'Admin' && 'Oversight and governance access'}
-                    {environment === 'Development' && 'Technical execution context'}
-                    {environment === 'Design' && 'Creative execution context'}
-                    {environment === 'Marketing' && 'Campaign and content context'}
-                    {environment === 'Shared Core' && 'Cross-environment project context'}
-                  </div>
-                </div>
-              ))}
+          {inviteResult && (
+            <div className={`rounded-lg p-3 text-xs font-medium ${inviteResult.success ? 'bg-green-900/30 text-green-300 border border-green-700/50' : 'bg-red-900/30 text-red-300 border border-red-700/50'}`}>
+              {inviteResult.success ? '✅' : '❌'} {inviteResult.message}
             </div>
           )}
-        </Card>
+          <div className="flex gap-3">
+            <button onClick={inviteUser} disabled={inviting || !inviteEmail.trim()}
+              className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium">
+              {inviting ? 'Sending...' : 'Send Invite'}
+            </button>
+            <button onClick={() => { setShowInvite(false); setInviteResult(null) }}
+              className="text-gray-400 text-sm hover:text-white px-3">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="px-6 py-3 flex items-center gap-3">
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          className="bg-gray-800 text-white rounded-lg px-3 py-1.5 text-xs border border-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500 w-48"
+          placeholder="Search by name or email..." />
+        <div className="flex gap-1 bg-gray-800 rounded-lg p-1">
+          {['all', ...DEPARTMENTS, 'unassigned'].map(d => (
+            <button key={d} onClick={() => setFilterDept(d)}
+              className={`px-3 py-1 text-xs rounded-md capitalize transition-colors ${filterDept === d ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+              {d}
+            </button>
+          ))}
+        </div>
+        <span className="text-xs text-gray-500 ml-auto">{filtered.length} members</span>
       </div>
 
-      <Card
-        title="People Directory"
-        subtitle="Administrative visibility into role, department, and likely environment fit."
-      >
-        {users.length === 0 ? (
-          <EmptyState
-            icon="👥"
-            title="No users found"
-            description="User records will appear here once profiles are available."
-          />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px]">
-              <thead>
-                <tr className="border-b border-gray-200 dark:border-gray-700 text-left">
-                  <th className="px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300">Name</th>
-                  <th className="px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300">Email</th>
-                  <th className="px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300">Role</th>
-                  <th className="px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300">Department</th>
-                  <th className="px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300">Environment Fit</th>
-                  <th className="px-4 py-3 text-sm font-semibold text-gray-700 dark:text-gray-300">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user) => {
-                  const environmentFit = inferEnvironmentFit(user)
-                  const departmentName =
-                    departments.find((department) => department.id === user.department)?.name ||
-                    titleCase(user.department)
+      {/* User list */}
+      <div className="flex-1 overflow-y-auto px-6 pb-6">
+        <div className="space-y-2">
+          {filtered.map(user => (
+            <div key={user.id} className={`bg-gray-800 rounded-xl p-4 border transition-all ${saving === user.id ? 'border-purple-500/50' : 'border-gray-700'}`}>
+              <div className="flex items-center gap-4">
+                {/* Avatar */}
+                <div className="w-10 h-10 rounded-full bg-purple-600 flex items-center justify-center text-sm font-bold flex-shrink-0">
+                  {(user.full_name || user.email || '?')[0].toUpperCase()}
+                </div>
 
-                  return (
-                    <tr
-                      key={user.id}
-                      className="border-b border-gray-200 dark:border-gray-800 last:border-b-0"
-                    >
-                      <td className="px-4 py-4 text-sm text-gray-900 dark:text-white">
-                        {user.full_name || 'Unnamed user'}
-                      </td>
-                      <td className="px-4 py-4 text-sm text-gray-600 dark:text-gray-400">
-                        {user.email || 'No email'}
-                      </td>
-                      <td className="px-4 py-4">
-                        <select
-                          value={user.role || 'member'}
-                          onChange={(e) => updateUserRole(user.id, e.target.value)}
-                          className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm dark:bg-gray-700 dark:text-white"
-                        >
-                          <option value="member">Member</option>
-                          <option value="admin">Admin</option>
-                        </select>
-                      </td>
-                      <td className="px-4 py-4">
-                        <select
-                          value={user.department || ''}
-                          onChange={(e) => updateUserDepartment(user.id, e.target.value)}
-                          className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm dark:bg-gray-700 dark:text-white"
-                        >
-                          <option value="">None</option>
-                          {departments.map((department) => (
-                            <option key={department.id} value={department.id}>
-                              {department.name}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-4 py-4">
-                        <Badge variant={badgeVariantForEnvironment(environmentFit)}>
-                          {environmentFit}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-4">
-                        <Badge variant={user.role === 'admin' ? 'danger' : 'success'}>
-                          {user.role === 'admin' ? 'Admin access' : 'Active'}
-                        </Badge>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <p className="text-sm font-semibold text-white truncate">
+                      {user.full_name || 'No name set'}
+                    </p>
+                    {user.id === profile?.id && (
+                      <span className="text-xs bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded">you</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400 truncate">{user.email || 'No email'}</p>
+                  <p className="text-xs text-gray-600 mt-0.5">
+                    Joined {new Date(user.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+
+                {/* Department selector */}
+                <div className="flex-shrink-0">
+                  <label className="block text-xs text-gray-500 mb-1">Department</label>
+                  <select
+                    value={user.department || ''}
+                    onChange={e => updateUser(user.id, { department: e.target.value || null })}
+                    className={`text-xs px-3 py-1.5 rounded-lg border focus:outline-none focus:ring-1 focus:ring-purple-500 ${user.department ? DEPT_COLORS[user.department] : DEPT_COLORS.unassigned} bg-transparent`}>
+                    <option value="">Unassigned</option>
+                    {DEPARTMENTS.map(d => (
+                      <option key={d} value={d} className="bg-gray-800 text-white capitalize">{d}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Role selector */}
+                <div className="flex-shrink-0">
+                  <label className="block text-xs text-gray-500 mb-1">Role</label>
+                  <select
+                    value={user.role || 'member'}
+                    onChange={e => updateUser(user.id, { role: e.target.value })}
+                    disabled={user.id === profile?.id}
+                    className={`text-xs px-3 py-1.5 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-500 disabled:opacity-50 ${ROLE_COLORS[user.role] || ROLE_COLORS.member} bg-transparent border border-gray-600`}>
+                    {ROLES.map(r => (
+                      <option key={r} value={r} className="bg-gray-800 text-white capitalize">{r}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Status indicator */}
+                <div className="flex-shrink-0 w-6 text-center">
+                  {saving === user.id ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-500 mx-auto" />
+                  ) : (
+                    <div className={`w-2 h-2 rounded-full mx-auto ${user.department ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                  )}
+                </div>
+              </div>
+
+              {/* Warning if unassigned */}
+              {!user.department && (
+                <div className="mt-3 flex items-center gap-2 bg-yellow-900/20 border border-yellow-700/30 rounded-lg px-3 py-2">
+                  <span className="text-yellow-400 text-xs">⚠</span>
+                  <p className="text-xs text-yellow-300">No department assigned — this user will only see core Sphere items and no department-specific tools</p>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {filtered.length === 0 && (
+            <div className="text-center py-16 text-gray-500">
+              <p className="text-4xl mb-3">👥</p>
+              <p className="text-sm">No team members found</p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
