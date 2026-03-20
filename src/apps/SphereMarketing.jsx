@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { useAuth } from '../context/AuthContext.jsx'
+import MarketingFiles from '../components/MarketingFiles.jsx'
 
 const PLATFORMS = ['Instagram', 'TikTok', 'Facebook', 'LinkedIn', 'YouTube']
 const POST_TYPES = ['static', 'reel', 'carousel', 'story', 'video', 'live']
@@ -119,6 +120,13 @@ export default function SphereMarketing() {
   const [aiGenerating, setAiGenerating] = useState(false)
   const [aiPrompt, setAiPrompt] = useState('')
   const [aiOutput, setAiOutput] = useState('')
+
+  // CSV import
+  const [showCSVImport, setShowCSVImport] = useState(false)
+  const [csvText, setCsvText] = useState('')
+  const [csvImporting, setCsvImporting] = useState(false)
+  const [csvResult, setCsvResult] = useState(null)
+  const [csvType, setCsvType] = useState('seo')
 
   useEffect(() => { fetchProjects() }, [])
   useEffect(() => {
@@ -297,6 +305,95 @@ Be specific, actionable, and tailored to the brand.`,
     setAiGenerating(false)
   }
 
+  async function importCSV(type) {
+    if (!csvText.trim() || !selectedProjectId) return
+    setCsvImporting(true)
+    setCsvResult(null)
+    try {
+      const lines = csvText.trim().split('\n').filter(l => l.trim())
+      if (lines.length < 2) throw new Error('CSV needs at least a header row and one data row')
+
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/['"]/g, '').replace(/\s+/g, '_'))
+
+      const rows = lines.slice(1).map(line => {
+        const values = []
+        let current = ''
+        let inQuotes = false
+        for (const char of line) {
+          if (char === '"') { inQuotes = !inQuotes }
+          else if (char === ',' && !inQuotes) { values.push(current.trim()); current = '' }
+          else { current += char }
+        }
+        values.push(current.trim())
+        return headers.reduce((obj, header, i) => {
+          obj[header] = (values[i] || '').replace(/^["']|["']$/g, '').trim()
+          return obj
+        }, {})
+      }).filter(row => Object.values(row).some(v => v))
+
+      if (!rows.length) throw new Error('No valid rows found')
+
+      let inserted = 0
+      let skipped = 0
+
+      if (type === 'seo') {
+        const inserts = rows.map(row => ({
+          project_id: selectedProjectId,
+          page_name: row.page_name || row.page || row.name || '',
+          url: row.url || row.full_url || row.slug || '',
+          page_type: row.page_type || row.type || 'service_page',
+          primary_keyword: row.primary_keyword || row.keyword || '',
+          primary_kw_volume: parseInt(row.primary_kw_volume || row.search_volume || row.sv || '0') || null,
+          primary_kw_difficulty: parseInt(row.primary_kw_difficulty || row.kd || row.difficulty || '0') || null,
+          primary_kw_position: parseInt(row.primary_kw_position || row.position || row.rank || '0') || null,
+          meta_title: row.meta_title || '',
+          meta_description: row.meta_description || '',
+          seo_score: parseInt(row.seo_score || '0') || null,
+          content_status: row.content_status || row.status || 'not_started',
+        })).filter(r => r.page_name)
+
+        if (!inserts.length) throw new Error('No rows with page_name found')
+
+        const { error } = await supabase.from('as_seo_tracker').insert(inserts)
+        if (error) throw error
+        inserted = inserts.length
+        skipped = rows.length - inserts.length
+
+      } else if (type === 'content') {
+        const inserts = rows.map(row => ({
+          project_id: selectedProjectId,
+          title: row.title || row.name || '',
+          content_type: row.content_type || row.type || 'blog',
+          primary_keyword: row.primary_keyword || row.keyword || '',
+          assigned_writer: row.assigned_writer || row.writer || '',
+          status: row.status || 'idea',
+          draft_link: row.draft_link || row.draft || '',
+          published_link: row.published_link || row.url || row.link || '',
+          seo_score: parseInt(row.seo_score || '0') || null,
+          publish_date: row.publish_date || row.date || null,
+        })).filter(r => r.title)
+
+        if (!inserts.length) throw new Error('No rows with title found')
+
+        const { error } = await supabase.from('as_content_tracker').insert(inserts)
+        if (error) throw error
+        inserted = inserts.length
+        skipped = rows.length - inserts.length
+      }
+
+      setCsvResult({
+        success: true,
+        message: `✅ Imported ${inserted} rows successfully${skipped ? ` · ${skipped} rows skipped (missing required fields)` : ''}`
+      })
+      setCsvText('')
+      fetchAll()
+
+    } catch (err) {
+      setCsvResult({ success: false, message: `❌ ${err.message}` })
+    }
+    setCsvImporting(false)
+  }
+
   // Analytics helpers
   const latestSnapshot = snapshots[0]
   const prevSnapshot = snapshots[1]
@@ -360,6 +457,7 @@ Be specific, actionable, and tailored to the brand.`,
               { id: 'paid', label: '💰 Paid' },
               { id: 'calendar', label: '📅 Calendar' },
               { id: 'scope', label: '⚙️ Scope' },
+              { id: 'files', label: '📎 Files' },
             ].map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                 className={`px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors ${activeTab === tab.id ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}>
@@ -546,8 +644,64 @@ Be specific, actionable, and tailored to the brand.`,
                       <span>Off-page: <span className={scope.seo_offpage ? 'text-green-400' : 'text-gray-600'}>{scope.seo_offpage ? 'Active' : 'Off'}</span></span>
                     </div>
                   </div>
-                  <button onClick={() => setShowNewSEO(!showNewSEO)} className="bg-purple-600 hover:bg-purple-700 text-white text-xs px-3 py-1.5 rounded-lg">+ Add Page</button>
+                  <div className="flex gap-2">
+                    <button onClick={() => { setShowCSVImport(!showCSVImport); setCsvType('seo') }}
+                      className="bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs px-3 py-1.5 rounded-lg border border-gray-600">
+                      ↑ Import CSV
+                    </button>
+                    <button onClick={() => setShowNewSEO(!showNewSEO)} className="bg-purple-600 hover:bg-purple-700 text-white text-xs px-3 py-1.5 rounded-lg">+ Add Page</button>
+                  </div>
                 </div>
+
+                {showCSVImport && (
+                  <div className="bg-gray-800 rounded-xl p-5 border border-gray-700 mb-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-semibold text-white">CSV Import</h4>
+                      <div className="flex gap-2">
+                        <select value={csvType} onChange={e => setCsvType(e.target.value)}
+                          className="bg-gray-700 text-white rounded px-2 py-1 text-xs focus:outline-none">
+                          <option value="seo">SEO Pages</option>
+                          <option value="content">Content</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {csvType === 'seo' && (
+                      <div className="bg-gray-700/50 rounded-lg p-3 text-xs text-gray-400">
+                        <p className="font-medium text-gray-300 mb-1">Expected columns (in any order):</p>
+                        <p>page_name, url, page_type, primary_keyword, primary_kw_volume, primary_kw_difficulty, primary_kw_position, meta_title, meta_description, seo_score</p>
+                        <p className="mt-1 text-gray-500">Only page_name is required. Extra columns are ignored.</p>
+                      </div>
+                    )}
+
+                    {csvType === 'content' && (
+                      <div className="bg-gray-700/50 rounded-lg p-3 text-xs text-gray-400">
+                        <p className="font-medium text-gray-300 mb-1">Expected columns:</p>
+                        <p>title, content_type, primary_keyword, assigned_writer, status, draft_link, published_link, seo_score, publish_date</p>
+                        <p className="mt-1 text-gray-500">Only title is required.</p>
+                      </div>
+                    )}
+
+                    <textarea value={csvText} onChange={e => setCsvText(e.target.value)}
+                      className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-purple-500 resize-none" rows={8}
+                      placeholder="Paste CSV content here — first row must be headers..." />
+
+                    {csvResult && (
+                      <div className={`rounded-lg p-3 text-xs ${csvResult.success ? 'bg-green-900/30 text-green-300 border border-green-700/50' : 'bg-red-900/30 text-red-300 border border-red-700/50'}`}>
+                        {csvResult.message}
+                      </div>
+                    )}
+
+                    <div className="flex gap-3">
+                      <button onClick={() => importCSV(csvType)} disabled={csvImporting || !csvText.trim()}
+                        className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs px-4 py-1.5 rounded">
+                        {csvImporting ? '⏳ Importing...' : '↑ Import'}
+                      </button>
+                      <button onClick={() => { setShowCSVImport(false); setCsvText(''); setCsvResult(null) }}
+                        className="text-gray-400 text-xs hover:text-white px-3">Cancel</button>
+                    </div>
+                  </div>
+                )}
 
                 {showNewSEO && (
                   <div className="bg-gray-800 rounded-xl p-4 mb-4 border border-gray-700 space-y-3">
@@ -1053,6 +1207,20 @@ Be specific, actionable, and tailored to the brand.`,
                     </div>
                   )
                 })}
+              </div>
+            )}
+
+            {/* FILES TAB */}
+            {activeTab === 'files' && selectedProjectId && (
+              <MarketingFiles
+                projectId={selectedProjectId}
+                userId={user?.id}
+              />
+            )}
+            {activeTab === 'files' && !selectedProjectId && (
+              <div className="text-center py-16 text-gray-500">
+                <p className="text-4xl mb-3">📎</p>
+                <p className="text-sm">Select a project to manage files</p>
               </div>
             )}
           </div>
