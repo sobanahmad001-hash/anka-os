@@ -23,9 +23,10 @@ const SILICONFLOW_MODELS = [
 ]
 
 const VIDEO_PROVIDERS = [
-  { id: 'huggingface_video', label: 'HuggingFace', badge: 'Free · Basic', color: 'bg-green-900/50 text-green-300' },
-  { id: 'siliconflow_video', label: 'Siliconflow', badge: '$0.29 · Best quality', color: 'bg-purple-900/50 text-purple-300' },
-  { id: 'runway', label: 'Runway ML', badge: '125 free credits', color: 'bg-yellow-900/50 text-yellow-300' },
+  { id: 'kling', label: 'Kling AI', badge: 'Free tier · 5s video', color: 'bg-green-900/50 text-green-300' },
+  { id: 'huggingface_video', label: 'HuggingFace', badge: 'Free · Basic', color: 'bg-yellow-900/50 text-yellow-300' },
+  { id: 'siliconflow_video', label: 'Siliconflow', badge: 'ID verify required', color: 'bg-gray-700 text-gray-400', disabled: true },
+  { id: 'runway', label: 'Runway ML', badge: '125 free credits', color: 'bg-purple-900/50 text-purple-300' },
   { id: 'veo', label: 'Google Veo', badge: 'Coming soon', color: 'bg-gray-700 text-gray-400', disabled: true },
 ]
 
@@ -135,6 +136,57 @@ async function generateGemini(prompt) {
   return { url, provider: 'gemini' }
 }
 
+async function generateKlingVideo(prompt) {
+  const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+  const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+  const createRes = await fetch(`${SUPABASE_URL}/functions/v1/kling-proxy`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': ANON_KEY,
+      Authorization: `Bearer ${ANON_KEY}`,
+    },
+    body: JSON.stringify({ action: 'create', prompt }),
+  })
+
+  if (!createRes.ok) {
+    const err = await createRes.json().catch(() => ({}))
+    throw new Error(err.error || `Kling create error: ${createRes.status}`)
+  }
+
+  const createData = await createRes.json()
+  const taskId = createData.data?.task_id
+  if (!taskId) throw new Error(`No task ID. Response: ${JSON.stringify(createData)}`)
+
+  for (let i = 0; i < 24; i++) {
+    await new Promise(r => setTimeout(r, 5000))
+
+    const statusRes = await fetch(`${SUPABASE_URL}/functions/v1/kling-proxy`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': ANON_KEY,
+        Authorization: `Bearer ${ANON_KEY}`,
+      },
+      body: JSON.stringify({ action: 'status', task_id: taskId }),
+    })
+
+    const statusData = await statusRes.json()
+    const status = statusData.data?.task_status
+
+    if (status === 'succeed') {
+      const url = statusData.data?.task_result?.videos?.[0]?.url
+      if (!url) throw new Error('No video URL in response')
+      return { url, provider: 'kling' }
+    }
+    if (status === 'failed') {
+      throw new Error(statusData.data?.task_status_msg || 'Kling generation failed')
+    }
+  }
+  throw new Error('Kling timed out after 2 minutes')
+}
+
 async function generateHFVideo(prompt) {
   const response = await fetch(
     `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/hf-proxy`,
@@ -234,7 +286,7 @@ export default function SphereCreativeStudio() {
   const [sfModel, setSfModel] = useState('Kwai-Kolors/Kolors')
 
   // Video generation state
-  const [videoProvider, setVideoProvider] = useState('huggingface_video')
+  const [videoProvider, setVideoProvider] = useState('kling')
   const [videoPrompt, setVideoPrompt] = useState('')
   const [generatedVideos, setGeneratedVideos] = useState([])
   const [videoLoading, setVideoLoading] = useState(false)
@@ -348,8 +400,8 @@ export default function SphereCreativeStudio() {
     setVideoError('')
     try {
       let result
-      if (videoProvider === 'huggingface_video') result = await generateHFVideo(videoPrompt)
-      else if (videoProvider === 'siliconflow_video') result = await generateSiliconflowVideo(videoPrompt)
+      if (videoProvider === 'kling') result = await generateKlingVideo(videoPrompt)
+      else if (videoProvider === 'huggingface_video') result = await generateHFVideo(videoPrompt)
       else { setVideoError('Provider not available yet'); setVideoLoading(false); return }
       setGeneratedVideos(prev => [{ ...result, prompt: videoPrompt, ts: Date.now() }, ...prev.slice(0, 5)])
     } catch (err) {
