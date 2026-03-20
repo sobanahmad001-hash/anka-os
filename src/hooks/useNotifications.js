@@ -1,78 +1,71 @@
-import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabase.js';
-import { useAuth } from '../context/AuthContext.jsx';
+import { useState, useEffect } from 'react'
+import { supabase } from '../lib/supabase.js'
+import { useAuth } from '../context/AuthContext.jsx'
 
 export function useNotifications() {
-  const { user } = useAuth();
-  const [notifications, setNotifications] = useState([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-
-  const loadNotifications = useCallback(async () => {
-    if (!user) return;
-    const { data } = await supabase
-      .from('notifications')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(50);
-    if (data) {
-      setNotifications(data);
-      setUnreadCount(data.filter((n) => !n.read).length);
-    }
-  }, [user]);
+  const { user } = useAuth()
+  const [notifications, setNotifications] = useState([])
+  const [unread, setUnread] = useState(0)
 
   useEffect(() => {
-    loadNotifications();
+    if (!user?.id) return
+    fetchNotifications()
 
-    if (!user) return;
-
+    // Real-time subscription
     const channel = supabase
-      .channel('user-notifications')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notifications',
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          setNotifications((prev) => [payload.new, ...prev]);
-          setUnreadCount((c) => c + 1);
-        },
-      )
-      .subscribe();
+      .channel('notifications')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'as_notifications',
+        filter: `recipient_id=eq.${user.id}`
+      }, payload => {
+        setNotifications(prev => [payload.new, ...prev.slice(0, 19)])
+        setUnread(prev => prev + 1)
+      })
+      .subscribe()
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user, loadNotifications]);
+    return () => supabase.removeChannel(channel)
+  }, [user?.id])
 
-  async function markAsRead(id) {
-    await supabase.from('notifications').update({ read: true }).eq('id', id);
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
-    );
-    setUnreadCount((c) => Math.max(0, c - 1));
+  async function fetchNotifications() {
+    const { data } = await supabase
+      .from('as_notifications')
+      .select('*')
+      .eq('recipient_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(20)
+    setNotifications(data || [])
+    setUnread((data || []).filter(n => !n.read).length)
+  }
+
+  async function markRead(id) {
+    await supabase.from('as_notifications').update({ read: true }).eq('id', id)
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))
+    setUnread(prev => Math.max(0, prev - 1))
   }
 
   async function markAllRead() {
-    if (!user) return;
-    await supabase
-      .from('notifications')
+    await supabase.from('as_notifications')
       .update({ read: true })
-      .eq('user_id', user.id)
-      .eq('read', false);
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    setUnreadCount(0);
+      .eq('recipient_id', user.id)
+      .eq('read', false)
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+    setUnread(0)
   }
 
-  async function clearAll() {
-    if (!user) return;
-    await supabase.from('notifications').delete().eq('user_id', user.id);
-    setNotifications([]);
-    setUnreadCount(0);
-  }
+  return { notifications, unread, markRead, markAllRead, fetchNotifications }
+}
 
-  return { notifications, unreadCount, markAsRead, markAllRead, clearAll, reload: loadNotifications };
+// Helper — call this from anywhere to create a notification
+export async function createNotification(recipientId, type, title, message, projectId = null) {
+  if (!recipientId) return
+  await supabase.from('as_notifications').insert({
+    recipient_id: recipientId,
+    notification_type: type,
+    title,
+    message,
+    project_id: projectId,
+    read: false
+  })
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { useAuth } from '../context/AuthContext.jsx'
+import { createNotification } from '../hooks/useNotifications.js'
 
 const PHASES = ['product_modeling', 'development', 'marketing']
 const PHASE_LABELS = {
@@ -174,6 +175,16 @@ export default function AnkaSphereProjects() {
         description: `Task "${newTask.title}" created in ${PHASE_LABELS[newTask.phase]}`,
         created_by: user?.id
       })
+      // Notify assigned user
+      if (newTask.assigned_to && newTask.assigned_to !== user?.id) {
+        await createNotification(
+          newTask.assigned_to,
+          'task_assigned',
+          'Task assigned to you',
+          `"${newTask.title}" in ${selectedProject.name}`,
+          selectedProject.id
+        )
+      }
       setNewTask({ title: '', description: '', phase: 'product_modeling', due_date: '', assigned_to: '', priority: 'medium' })
       setShowNewTask(false)
       fetchProjectDetail(selectedProject)
@@ -219,6 +230,19 @@ export default function AnkaSphereProjects() {
           description: `All ${PHASE_LABELS[phase]} tasks done — handoff to ${PHASE_LABELS[toPhase]} requested`,
           created_by: user?.id
         })
+        // Notify admin
+        if (profile?.role !== 'admin') {
+          const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'admin')
+          for (const admin of admins || []) {
+            await createNotification(
+              admin.id,
+              'handoff_requested',
+              'Handoff approval needed',
+              `All ${PHASE_LABELS[phase]} tasks done in ${selectedProject.name}`,
+              selectedProject.id
+            )
+          }
+        }
       } else {
         await requestClientSignoff('marketing')
       }
@@ -240,6 +264,14 @@ export default function AnkaSphereProjects() {
       description: `Handoff approved: ${PHASE_LABELS[handoff.from_phase]} → ${PHASE_LABELS[handoff.to_phase]}`,
       created_by: user?.id
     })
+    // Notify all project members
+    await createNotification(
+      user?.id,
+      'handoff_approved',
+      'Handoff approved',
+      `${PHASE_LABELS[handoff.from_phase]} → ${PHASE_LABELS[handoff.to_phase]} in ${selectedProject.name}`,
+      selectedProject.id
+    )
     fetchProjectDetail({ ...selectedProject, current_phase: handoff.to_phase, status: 'active' })
     fetchProjects()
   }
