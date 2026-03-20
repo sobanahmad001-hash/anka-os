@@ -1,4 +1,4 @@
-ï»¿import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { environmentNav, getEnvironmentFromPath } from '../config/environmentNav'
 
@@ -54,7 +54,7 @@ export default function Sidebar() {
         {activeEnv.key === 'sphere' && profile?.role === 'admin' && (
           <div className="mt-3">
             <span className="text-xs px-2 py-1 rounded-full font-medium bg-purple-900/50 text-purple-300">
-              admin Â· all depts
+              admin · all depts
             </span>
           </div>
         )}
@@ -70,7 +70,7 @@ export default function Sidebar() {
               return (
                 <div key={i} className="px-2 pt-4 pb-1">
                   <p className="text-[10px] uppercase tracking-widest text-gray-600 font-semibold">
-                    {item.label.replace('â€” ', '')}
+                    {item.label.replace('— ', '')}
                   </p>
                 </div>
               )

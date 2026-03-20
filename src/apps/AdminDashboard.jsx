@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -432,7 +432,7 @@ export default function AdminDashboard() {
               <button onClick={() => computePerformance(users)}
                 disabled={snapshotsLoading}
                 className="text-xs text-purple-400 hover:text-purple-300 bg-gray-800 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
-                {snapshotsLoading ? 'Computing...' : '↻ Recompute'}
+                {snapshotsLoading ? 'Computing...' : '? Recompute'}
               </button>
             </div>
 
@@ -489,7 +489,7 @@ export default function AdminDashboard() {
                           { label: 'Completion %', value: `${snap.completion_rate}%`, color: snap.completion_rate >= 70 ? 'text-green-400' : snap.completion_rate >= 40 ? 'text-yellow-400' : 'text-red-400' },
                           { label: 'Blocked', value: snap.tasks_blocked, color: snap.tasks_blocked > 0 ? 'text-red-400' : 'text-gray-500' },
                           { label: 'Overdue', value: snap.tasks_overdue, color: snap.tasks_overdue > 0 ? 'text-yellow-400' : 'text-gray-500' },
-                          { label: 'Avg response', value: snap.avg_response_hours ? `${snap.avg_response_hours}h` : '—', color: 'text-gray-300' },
+                          { label: 'Avg response', value: snap.avg_response_hours ? `${snap.avg_response_hours}h` : '�', color: 'text-gray-300' },
                         ].map(m => (
                           <div key={m.label} className="bg-gray-700/50 rounded-lg p-2 text-center">
                             <p className={`text-sm font-bold ${m.color}`}>{m.value}</p>
@@ -518,7 +518,7 @@ export default function AdminDashboard() {
               })}
               {users.length === 0 && (
                 <div className="text-center py-12 text-gray-500">
-                  <p className="text-4xl mb-3">👥</p>
+                  <p className="text-4xl mb-3">??</p>
                   <p className="text-sm">No team members yet</p>
                 </div>
               )}

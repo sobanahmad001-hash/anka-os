@@ -289,7 +289,7 @@ export default function SphereMarketing() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': import.meta.env.VITE_ANTHROPIC_KEY,
+          'x-api-key': import.meta.env.VITE_CLAUDE_API_KEY,
           'anthropic-version': '2023-06-01',
           'anthropic-dangerous-direct-browser-access': 'true',
         },

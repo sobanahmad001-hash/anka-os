@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { Navigate } from 'react-router-dom'
@@ -61,15 +61,29 @@ export default function UserManagement() {
     setInviting(true)
     setInviteResult(null)
     try {
-      const { data, error } = await supabase.auth.admin.inviteUserByEmail(inviteEmail, {
-        data: { department: inviteDept, role: inviteRole }
-      })
-      if (error) throw error
-      setInviteResult({ success: true, message: `Invite sent to ${inviteEmail}` })
+      const { data: { session } } = await supabase.auth.getSession()
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-user`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`,
+            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({
+            email: inviteEmail,
+            department: inviteDept,
+            role: inviteRole,
+          })
+        }
+      )
+      const result = await response.json()
+      if (result.error) throw new Error(result.error)
+      setInviteResult({ success: true, message: result.message })
       setInviteEmail('')
       setTimeout(() => fetchUsers(), 2000)
     } catch (err) {
-      // Fallback — create profile manually if admin invite not available
       setInviteResult({ success: false, message: err.message })
     }
     setInviting(false)
@@ -100,7 +114,7 @@ export default function UserManagement() {
       <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold text-white">Team Management</h2>
-          <p className="text-xs text-gray-400 mt-0.5">{stats.total} members · {stats.unassigned} unassigned</p>
+          <p className="text-xs text-gray-400 mt-0.5">{stats.total} members � {stats.unassigned} unassigned</p>
         </div>
         <button onClick={() => setShowInvite(!showInvite)}
           className="bg-purple-600 hover:bg-purple-700 text-white text-sm px-4 py-2 rounded-lg">
@@ -154,7 +168,7 @@ export default function UserManagement() {
           </div>
           {inviteResult && (
             <div className={`rounded-lg p-3 text-xs font-medium ${inviteResult.success ? 'bg-green-900/30 text-green-300 border border-green-700/50' : 'bg-red-900/30 text-red-300 border border-red-700/50'}`}>
-              {inviteResult.success ? '✅' : '❌'} {inviteResult.message}
+              {inviteResult.success ? '?' : '?'} {inviteResult.message}
             </div>
           )}
           <div className="flex gap-3">
@@ -252,8 +266,8 @@ export default function UserManagement() {
               {/* Warning if unassigned */}
               {!user.department && (
                 <div className="mt-3 flex items-center gap-2 bg-yellow-900/20 border border-yellow-700/30 rounded-lg px-3 py-2">
-                  <span className="text-yellow-400 text-xs">⚠</span>
-                  <p className="text-xs text-yellow-300">No department assigned — this user will only see core Sphere items and no department-specific tools</p>
+                  <span className="text-yellow-400 text-xs">?</span>
+                  <p className="text-xs text-yellow-300">No department assigned � this user will only see core Sphere items and no department-specific tools</p>
                 </div>
               )}
             </div>
@@ -261,7 +275,7 @@ export default function UserManagement() {
 
           {filtered.length === 0 && (
             <div className="text-center py-16 text-gray-500">
-              <p className="text-4xl mb-3">👥</p>
+              <p className="text-4xl mb-3">??</p>
               <p className="text-sm">No team members found</p>
             </div>
           )}

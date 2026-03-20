@@ -1,4 +1,4 @@
-ï»¿export const environmentNav = [
+export const environmentNav = [
   {
     key: 'admin',
     label: 'Admin',
@@ -17,27 +17,27 @@
     basePath: '/sphere/projects',
     description: 'Client delivery',
     items: [
-      // Core â€” visible to all
+      // Core — visible to all
       { label: 'Projects', path: '/sphere/projects', dept: null },
       { label: 'Clients', path: '/sphere/clients', dept: null },
       { label: 'Client Portal', path: '/sphere/portal', dept: null },
       { label: 'Team Board', path: '/sphere/team-board', dept: null },
 
       // Design dept
-      { label: 'â€” Design', path: null, dept: 'design', isHeader: true },
+      { label: '— Design', path: null, dept: 'design', isHeader: true },
       { label: 'Figma Workspace', path: '/sphere/figma', dept: 'design' },
       { label: 'Creative Studio', path: '/sphere/assets', dept: 'design' },
       { label: 'Asset Library', path: '/sphere/moodboard', dept: 'design' },
       { label: 'Brand Guidelines', path: '/sphere/design-reviews', dept: 'design' },
 
       // Development dept (WordPress focused)
-      { label: 'â€” Development', path: null, dept: 'development', isHeader: true },
+      { label: '— Development', path: null, dept: 'development', isHeader: true },
       { label: 'WP Engine', path: '/sphere/wp-sites', dept: 'development' },
       { label: 'Page Builder', path: '/sphere/deployments', dept: 'development' },
       { label: 'Site Tracker', path: '/sphere/performance', dept: 'development' },
 
       // Marketing dept
-      { label: 'â€” Marketing', path: null, dept: 'marketing', isHeader: true },
+      { label: '— Marketing', path: null, dept: 'marketing', isHeader: true },
       { label: 'Marketing Hub', path: '/sphere/campaigns', dept: 'marketing' },
       { label: 'Content', path: '/sphere/content', dept: 'marketing' },
       { label: 'Calendar', path: '/sphere/calendar', dept: 'marketing' },

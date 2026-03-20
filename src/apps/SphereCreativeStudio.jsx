@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { useAuth } from '../context/AuthContext.jsx'
 
@@ -14,14 +14,14 @@ const IMAGE_QUALITIES = ['standard', 'hd']
 const VIDEO_DURATIONS = [5, 8, 10]
 
 const IMAGE_PROVIDERS = [
-  { id: 'fal', label: 'FAL · Flux Pro', badge: '$0.03/img · Best quality', color: 'bg-purple-900/50 text-purple-300' },
-  { id: 'siliconflow', label: 'Siliconflow', badge: 'Free credits · Kolors', color: 'bg-green-900/50 text-green-300' },
-  { id: 'dalle', label: 'DALL-E 3', badge: '$0.04/img · Best for text', color: 'bg-blue-900/50 text-blue-300' },
+  { id: 'fal', label: 'FAL � Flux Pro', badge: '$0.03/img � Best quality', color: 'bg-purple-900/50 text-purple-300' },
+  { id: 'siliconflow', label: 'Siliconflow', badge: 'Free credits � Kolors', color: 'bg-green-900/50 text-green-300' },
+  { id: 'dalle', label: 'DALL-E 3', badge: '$0.04/img � Best for text', color: 'bg-blue-900/50 text-blue-300' },
 ]
 
 const VIDEO_PROVIDERS = [
-  { id: 'fal_video', label: 'Kling 2.1', badge: '~$0.35/5s · FAL.AI', color: 'bg-purple-900/50 text-purple-300' },
-  { id: 'sora', label: 'Sora 2', badge: '$0.50/5s · OpenAI', color: 'bg-blue-900/50 text-blue-300' },
+  { id: 'fal_video', label: 'Kling 2.1', badge: '~$0.35/5s � FAL.AI', color: 'bg-purple-900/50 text-purple-300' },
+  { id: 'sora', label: 'Sora 2', badge: '$0.50/5s � OpenAI', color: 'bg-blue-900/50 text-blue-300' },
 ]
 
 async function generateDALLE(prompt, size, quality, style) {
@@ -353,7 +353,7 @@ export default function SphereCreativeStudio() {
         headers: { Authorization: `Bearer ${OPENAI_KEY}` }
       })
       const status = await statusRes.json()
-      setVideoStatus(`Sora status: ${status.status} — attempt ${i + 1}/30`)
+      setVideoStatus(`Sora status: ${status.status} � attempt ${i + 1}/30`)
       if (status.status === 'completed') {
         const url = status.data?.[0]?.url || status.url
         if (!url) throw new Error('No video URL')
@@ -424,21 +424,21 @@ export default function SphereCreativeStudio() {
       <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold text-white">Creative Studio</h2>
-          <p className="text-xs text-gray-400 mt-0.5">DALL-E 3 · Sora 2 · Asset library · Brand guidelines</p>
+          <p className="text-xs text-gray-400 mt-0.5">DALL-E 3 � Sora 2 � Asset library � Brand guidelines</p>
         </div>
         <select value={selectedProjectId} onChange={e => setSelectedProjectId(e.target.value)}
           className="bg-gray-800 text-gray-300 text-xs rounded-lg px-3 py-2 border border-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500">
           <option value="">Select project</option>
-          {projects.map(p => <option key={p.id} value={p.id}>{p.name}{p.as_clients?.name ? ` · ${p.as_clients.name}` : ''}</option>)}
+          {projects.map(p => <option key={p.id} value={p.id}>{p.name}{p.as_clients?.name ? ` � ${p.as_clients.name}` : ''}</option>)}
         </select>
       </div>
 
       <div className="flex gap-1 px-6 py-3 border-b border-gray-800">
         {[
-          { id: 'image', label: '🖼️ Images' },
-          { id: 'video', label: '🎥 Video' },
-          { id: 'assets', label: '📁 Asset Library' },
-          { id: 'brand', label: '🎨 Brand Guidelines' },
+          { id: 'image', label: '??? Images' },
+          { id: 'video', label: '?? Video' },
+          { id: 'assets', label: '?? Asset Library' },
+          { id: 'brand', label: '?? Brand Guidelines' },
         ].map(tab => (
           <button key={tab.id} onClick={() => setActiveTab(tab.id)}
             className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${activeTab === tab.id ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}>
@@ -514,7 +514,7 @@ export default function SphereCreativeStudio() {
                   rows={3} placeholder="Describe the image... (Ctrl+Enter to generate)" />
                 <button onClick={generateImage} disabled={imageLoading || !imagePrompt.trim()}
                   className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-5 rounded-xl text-sm font-medium transition-colors flex-shrink-0 flex flex-col items-center justify-center gap-1">
-                  {imageLoading ? <><span className="animate-spin text-lg">⏳</span><span className="text-xs">Gen...</span></> : <><span>✨</span><span>Generate</span></>}
+                  {imageLoading ? <><span className="animate-spin text-lg">?</span><span className="text-xs">Gen...</span></> : <><span>?</span><span>Generate</span></>}
                 </button>
               </div>
             </div>
@@ -540,13 +540,13 @@ export default function SphereCreativeStudio() {
 
             {imageError && (
               <div className="bg-red-900/30 border border-red-700/50 rounded-xl p-3">
-                <p className="text-xs text-red-300">❌ {imageError}</p>
+                <p className="text-xs text-red-300">? {imageError}</p>
               </div>
             )}
 
             {imageLoading && (
               <div className="bg-gray-800 rounded-xl border border-gray-700 p-12 flex flex-col items-center text-gray-500">
-                <div className="text-4xl mb-3 animate-pulse">🎨</div>
+                <div className="text-4xl mb-3 animate-pulse">??</div>
                 <p className="text-sm font-medium text-white">Generating image...</p>
                 <p className="text-xs mt-1 text-gray-500">
                   {imageProvider === 'fal' ? 'FAL Flux Pro usually takes 10-20 seconds' : imageProvider === 'dalle' ? 'DALL-E 3 usually takes 5-15 seconds' : 'Siliconflow usually takes 10-20 seconds'}
@@ -563,7 +563,7 @@ export default function SphereCreativeStudio() {
                       <div className="px-3 py-2 bg-gray-900 border-b border-gray-700 flex items-center gap-2">
                         <p className="text-xs text-gray-400 truncate flex-1">{img.prompt}</p>
                         <a href={img.url} target="_blank" rel="noopener noreferrer"
-                          className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded flex-shrink-0">↗ Open</a>
+                          className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded flex-shrink-0">? Open</a>
                         {selectedProjectId && (
                           <button onClick={() => saveToLibrary(img.url, 'image', img.prompt.slice(0, 50))}
                             className="text-xs bg-purple-600 hover:bg-purple-700 text-white px-2 py-1 rounded flex-shrink-0">+ Save</button>
@@ -597,7 +597,7 @@ export default function SphereCreativeStudio() {
                 <div className="w-8 h-8 bg-purple-600 rounded-lg flex items-center justify-center text-sm">S2</div>
                 <div>
                   <p className="text-sm font-semibold text-white">Sora 2 by OpenAI</p>
-                  <p className="text-xs text-gray-400">$0.10/second · 720p · Best quality video generation available</p>
+                  <p className="text-xs text-gray-400">$0.10/second � 720p � Best quality video generation available</p>
                 </div>
               </div>
             </div>
@@ -637,20 +637,20 @@ export default function SphereCreativeStudio() {
                   rows={4} placeholder="Describe your video in detail. Include: shot type, subject, action, setting, lighting, camera movement..." />
                 <button onClick={generateVideo} disabled={videoLoading || !videoPrompt.trim()}
                   className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-5 rounded-xl text-sm font-medium transition-colors flex-shrink-0 flex flex-col items-center justify-center gap-1">
-                  {videoLoading ? <><span className="animate-spin">⏳</span><span className="text-xs">Gen...</span></> : <><span>🎥</span><span>Generate</span><span className="text-xs opacity-70">{videoCost}</span></>}
+                  {videoLoading ? <><span className="animate-spin">?</span><span className="text-xs">Gen...</span></> : <><span>??</span><span>Generate</span><span className="text-xs opacity-70">{videoCost}</span></>}
                 </button>
               </div>
             </div>
 
             <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
-              <p className="text-xs font-medium text-gray-300 mb-2">💡 For best results include:</p>
+              <p className="text-xs font-medium text-gray-300 mb-2">?? For best results include:</p>
               <div className="grid grid-cols-2 gap-1 text-xs text-gray-500">
-                <span>• Shot type (wide, close-up, aerial)</span>
-                <span>• Subject and action</span>
-                <span>• Setting and environment</span>
-                <span>• Lighting (golden hour, studio)</span>
-                <span>• Camera movement (pan, zoom)</span>
-                <span>• Mood/style (cinematic, documentary)</span>
+                <span>� Shot type (wide, close-up, aerial)</span>
+                <span>� Subject and action</span>
+                <span>� Setting and environment</span>
+                <span>� Lighting (golden hour, studio)</span>
+                <span>� Camera movement (pan, zoom)</span>
+                <span>� Mood/style (cinematic, documentary)</span>
               </div>
             </div>
 
@@ -686,7 +686,7 @@ export default function SphereCreativeStudio() {
 
             {videoError && (
               <div className="bg-red-900/30 border border-red-700/50 rounded-xl p-3">
-                <p className="text-xs text-red-300">❌ {videoError}</p>
+                <p className="text-xs text-red-300">? {videoError}</p>
               </div>
             )}
 
@@ -701,7 +701,7 @@ export default function SphereCreativeStudio() {
                         <p className="text-xs text-gray-400 flex-1 truncate">{vid.prompt}</p>
                         <span className="text-xs text-gray-500">{vid.duration}s</span>
                         <a href={vid.url} download={`sora_${vid.ts}.mp4`}
-                          className="text-xs text-blue-400 hover:text-blue-300">↓ Download</a>
+                          className="text-xs text-blue-400 hover:text-blue-300">? Download</a>
                         {selectedProjectId && (
                           <button onClick={() => saveToLibrary(vid.url, 'video', vid.prompt.slice(0, 50))}
                             className="text-xs text-purple-400 hover:text-purple-300">+ Library</button>
@@ -719,14 +719,14 @@ export default function SphereCreativeStudio() {
           <div>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-gray-300">
-                Asset Library {selectedProjectId ? `(${assets.length})` : '— select a project'}
+                Asset Library {selectedProjectId ? `(${assets.length})` : '� select a project'}
               </h3>
               {selectedProjectId && (
                 <div>
                   <input ref={fileRef} type="file" onChange={handleAssetUpload} className="hidden" accept="image/*,video/*" />
                   <button onClick={() => fileRef.current?.click()} disabled={uploadingAsset}
                     className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg">
-                    {uploadingAsset ? '⏳ Uploading...' : '↑ Upload'}
+                    {uploadingAsset ? '? Uploading...' : '? Upload'}
                   </button>
                 </div>
               )}
@@ -734,7 +734,7 @@ export default function SphereCreativeStudio() {
 
             {!selectedProjectId ? (
               <div className="text-center py-16 text-gray-500">
-                <p className="text-4xl mb-3">📁</p>
+                <p className="text-4xl mb-3">??</p>
                 <p className="text-sm">Select a project to view assets</p>
               </div>
             ) : assetsLoading ? (
@@ -743,7 +743,7 @@ export default function SphereCreativeStudio() {
               </div>
             ) : assets.length === 0 ? (
               <div className="text-center py-16 text-gray-500">
-                <p className="text-4xl mb-3">🖼️</p>
+                <p className="text-4xl mb-3">???</p>
                 <p className="text-sm">No assets yet</p>
                 <p className="text-xs mt-1">Generate images/videos or upload files</p>
               </div>
@@ -762,7 +762,7 @@ export default function SphereCreativeStudio() {
                       </div>
                     ) : (
                       <div className="aspect-square bg-gray-900 flex items-center justify-center">
-                        <span className="text-4xl">📎</span>
+                        <span className="text-4xl">??</span>
                       </div>
                     )}
                     <div className="p-3">
@@ -770,7 +770,7 @@ export default function SphereCreativeStudio() {
                       <p className="text-xs text-gray-500 mt-0.5">{new Date(asset.created_at).toLocaleDateString()}</p>
                       <div className="flex gap-2 mt-2">
                         <a href={asset.file_url} target="_blank" rel="noopener noreferrer"
-                          className="text-xs text-blue-400 hover:text-blue-300">↗ Open</a>
+                          className="text-xs text-blue-400 hover:text-blue-300">? Open</a>
                         <button onClick={() => navigator.clipboard.writeText(asset.file_url)}
                           className="text-xs text-gray-400 hover:text-white">Copy URL</button>
                         <button onClick={() => deleteAsset(asset)}
@@ -791,14 +791,14 @@ export default function SphereCreativeStudio() {
               {selectedProjectId && (
                 <button onClick={() => setEditingBrand(!editingBrand)}
                   className={`text-xs px-3 py-1.5 rounded-lg ${editingBrand ? 'bg-gray-700 text-gray-300' : 'bg-purple-600 hover:bg-purple-700 text-white'}`}>
-                  {editingBrand ? 'Cancel' : brandGuide ? '✏️ Edit' : '+ Create'}
+                  {editingBrand ? 'Cancel' : brandGuide ? '?? Edit' : '+ Create'}
                 </button>
               )}
             </div>
 
             {!selectedProjectId ? (
               <div className="text-center py-16 text-gray-500">
-                <p className="text-4xl mb-3">🎨</p>
+                <p className="text-4xl mb-3">??</p>
                 <p className="text-sm">Select a project to manage brand guidelines</p>
               </div>
             ) : editingBrand ? (
@@ -909,14 +909,14 @@ export default function SphereCreativeStudio() {
                     <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
                       <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Resources</h4>
                       <a href={brandForm.guidelines_url} target="_blank" rel="noopener noreferrer"
-                        className="text-sm text-blue-400 hover:text-blue-300">📄 Guidelines Doc →</a>
+                        className="text-sm text-blue-400 hover:text-blue-300">?? Guidelines Doc ?</a>
                     </div>
                   )}
                 </div>
               </div>
             ) : (
               <div className="text-center py-16 text-gray-500">
-                <p className="text-4xl mb-3">🎨</p>
+                <p className="text-4xl mb-3">??</p>
                 <p className="text-sm">No brand guide yet</p>
                 <button onClick={() => setEditingBrand(true)}
                   className="mt-4 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm">
