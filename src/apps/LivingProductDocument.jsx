@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useLivingProductDocument } from '../hooks/useLivingProductDocument.js'
+import LPDTabs from '../components/LPDTabs'
 
 const TABS = [
   { key: 'document', label: 'Document' },
@@ -158,9 +159,7 @@ export default function LivingProductDocument() {
           ) : (
             <div className="p-6">
               {document?.content ? (
-                <pre className="whitespace-pre-wrap font-mono text-sm text-gray-200 leading-relaxed">
-                  {document.content}
-                </pre>
+                <LPDTabs markdown={document.content} />
               ) : (
                 <div className="text-center py-16 text-gray-500">
                   <p className="text-4xl mb-3">📄</p>
