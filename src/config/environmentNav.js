@@ -8,6 +8,7 @@ export const environmentNav = [
       { label: 'Overview', path: '/admin' },
       { label: 'Users', path: '/users' },
       { label: 'Rules', path: '/settings' },
+      { label: 'Product Document', path: '/admin/living-product-document' },
       { label: 'Assistant', path: '/assistant' },
     ],
   },
@@ -17,27 +18,27 @@ export const environmentNav = [
     basePath: '/sphere/projects',
     description: 'Client delivery',
     items: [
-      // Core — visible to all
+      // Core ï¿½ visible to all
       { label: 'Projects', path: '/sphere/projects', dept: null },
       { label: 'Clients', path: '/sphere/clients', dept: null },
       { label: 'Client Portal', path: '/sphere/portal', dept: null },
       { label: 'Team Board', path: '/sphere/team-board', dept: null },
 
       // Design dept
-      { label: '— Design', path: null, dept: 'design', isHeader: true },
+      { label: 'ï¿½ Design', path: null, dept: 'design', isHeader: true },
       { label: 'Figma Workspace', path: '/sphere/figma', dept: 'design' },
       { label: 'Creative Studio', path: '/sphere/assets', dept: 'design' },
       { label: 'Asset Library', path: '/sphere/moodboard', dept: 'design' },
       { label: 'Brand Guidelines', path: '/sphere/design-reviews', dept: 'design' },
 
       // Development dept (WordPress focused)
-      { label: '— Development', path: null, dept: 'development', isHeader: true },
+      { label: 'ï¿½ Development', path: null, dept: 'development', isHeader: true },
       { label: 'WP Engine', path: '/sphere/wp-sites', dept: 'development' },
       { label: 'Page Builder', path: '/sphere/deployments', dept: 'development' },
       { label: 'Site Tracker', path: '/sphere/performance', dept: 'development' },
 
       // Marketing dept
-      { label: '— Marketing', path: null, dept: 'marketing', isHeader: true },
+      { label: 'ï¿½ Marketing', path: null, dept: 'marketing', isHeader: true },
       { label: 'Marketing Hub', path: '/sphere/campaigns', dept: 'marketing' },
       { label: 'Content', path: '/sphere/content', dept: 'marketing' },
       { label: 'Calendar', path: '/sphere/calendar', dept: 'marketing' },

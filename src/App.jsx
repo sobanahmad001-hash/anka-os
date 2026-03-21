@@ -31,6 +31,7 @@ import SphereWPEngine from './apps/SphereWPEngine'
 import SphereMarketing from './apps/SphereMarketing'
 import SphereFigmaWorkspace from './apps/SphereFigmaWorkspace'
 import AnkaAssistant from './apps/AnkaAssistant'
+import LivingProductDocument from './apps/LivingProductDocument'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -60,6 +61,7 @@ export default function App() {
 
         {/* ADMIN */}
         <Route path="admin" element={<AdminDashboard />} />
+        <Route path="admin/living-product-document" element={<LivingProductDocument />} />
         <Route path="users" element={<UserManagement />} />
         <Route path="settings" element={<Settings />} />
 
