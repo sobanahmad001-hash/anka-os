@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { useAuth } from '../context/AuthContext.jsx'
 
-const OPENAI_KEY = import.meta.env.VITE_OPENAI_KEY
+const OPENAI_KEY = import.meta.env.VITE_OPENAI_KEY || import.meta.env.VITE_OPENAI_API_KEY
 const SILICONFLOW_KEY = import.meta.env.VITE_SILICONFLOW_KEY
 const FAL_KEY = import.meta.env.VITE_FAL_KEY
 
@@ -14,14 +14,14 @@ const IMAGE_QUALITIES = ['standard', 'hd']
 const VIDEO_DURATIONS = [5, 8, 10]
 
 const IMAGE_PROVIDERS = [
-  { id: 'fal', label: 'FAL · Flux Pro', badge: '$0.03/img · Best quality', color: 'bg-purple-900/50 text-purple-300' },
-  { id: 'siliconflow', label: 'Siliconflow', badge: 'Free credits · Kolors', color: 'bg-green-900/50 text-green-300' },
-  { id: 'dalle', label: 'DALL-E 3', badge: '$0.04/img · Best for text', color: 'bg-blue-900/50 text-blue-300' },
+  { id: 'fal', label: 'FAL ï¿½ Flux Pro', badge: '$0.03/img ï¿½ Best quality', color: 'bg-purple-900/50 text-purple-300' },
+  { id: 'siliconflow', label: 'Siliconflow', badge: 'Free credits ï¿½ Kolors', color: 'bg-green-900/50 text-green-300' },
+  { id: 'dalle', label: 'DALL-E 3', badge: '$0.04/img ï¿½ Best for text', color: 'bg-blue-900/50 text-blue-300' },
 ]
 
 const VIDEO_PROVIDERS = [
-  { id: 'fal_video', label: 'Kling 2.1', badge: '~$0.35/5s · FAL.AI', color: 'bg-purple-900/50 text-purple-300' },
-  { id: 'sora', label: 'Sora 2', badge: '$0.50/5s · OpenAI', color: 'bg-blue-900/50 text-blue-300' },
+  { id: 'fal_video', label: 'Kling 2.1', badge: '~$0.35/5s ï¿½ FAL.AI', color: 'bg-purple-900/50 text-purple-300' },
+  { id: 'sora', label: 'Sora 2', badge: '$0.50/5s ï¿½ OpenAI', color: 'bg-blue-900/50 text-blue-300' },
 ]
 
 async function generateDALLE(prompt, size, quality, style) {
@@ -353,7 +353,7 @@ export default function SphereCreativeStudio() {
         headers: { Authorization: `Bearer ${OPENAI_KEY}` }
       })
       const status = await statusRes.json()
-      setVideoStatus(`Sora status: ${status.status} — attempt ${i + 1}/30`)
+      setVideoStatus(`Sora status: ${status.status} ï¿½ attempt ${i + 1}/30`)
       if (status.status === 'completed') {
         const url = status.data?.[0]?.url || status.url
         if (!url) throw new Error('No video URL')
@@ -424,12 +424,12 @@ export default function SphereCreativeStudio() {
       <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold text-white">Creative Studio</h2>
-          <p className="text-xs text-gray-400 mt-0.5">DALL-E 3 · Sora 2 · Asset library · Brand guidelines</p>
+          <p className="text-xs text-gray-400 mt-0.5">DALL-E 3 ï¿½ Sora 2 ï¿½ Asset library ï¿½ Brand guidelines</p>
         </div>
         <select value={selectedProjectId} onChange={e => setSelectedProjectId(e.target.value)}
           className="bg-gray-800 text-gray-300 text-xs rounded-lg px-3 py-2 border border-gray-700 focus:outline-none focus:ring-1 focus:ring-purple-500">
           <option value="">Select project</option>
-          {projects.map(p => <option key={p.id} value={p.id}>{p.name}{p.as_clients?.name ? ` · ${p.as_clients.name}` : ''}</option>)}
+          {projects.map(p => <option key={p.id} value={p.id}>{p.name}{p.as_clients?.name ? ` ï¿½ ${p.as_clients.name}` : ''}</option>)}
         </select>
       </div>
 
@@ -597,7 +597,7 @@ export default function SphereCreativeStudio() {
                 <div className="w-8 h-8 bg-purple-600 rounded-lg flex items-center justify-center text-sm">S2</div>
                 <div>
                   <p className="text-sm font-semibold text-white">Sora 2 by OpenAI</p>
-                  <p className="text-xs text-gray-400">$0.10/second · 720p · Best quality video generation available</p>
+                  <p className="text-xs text-gray-400">$0.10/second ï¿½ 720p ï¿½ Best quality video generation available</p>
                 </div>
               </div>
             </div>
@@ -645,12 +645,12 @@ export default function SphereCreativeStudio() {
             <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
               <p className="text-xs font-medium text-gray-300 mb-2">?? For best results include:</p>
               <div className="grid grid-cols-2 gap-1 text-xs text-gray-500">
-                <span>• Shot type (wide, close-up, aerial)</span>
-                <span>• Subject and action</span>
-                <span>• Setting and environment</span>
-                <span>• Lighting (golden hour, studio)</span>
-                <span>• Camera movement (pan, zoom)</span>
-                <span>• Mood/style (cinematic, documentary)</span>
+                <span>ï¿½ Shot type (wide, close-up, aerial)</span>
+                <span>ï¿½ Subject and action</span>
+                <span>ï¿½ Setting and environment</span>
+                <span>ï¿½ Lighting (golden hour, studio)</span>
+                <span>ï¿½ Camera movement (pan, zoom)</span>
+                <span>ï¿½ Mood/style (cinematic, documentary)</span>
               </div>
             </div>
 
@@ -719,7 +719,7 @@ export default function SphereCreativeStudio() {
           <div>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-gray-300">
-                Asset Library {selectedProjectId ? `(${assets.length})` : '— select a project'}
+                Asset Library {selectedProjectId ? `(${assets.length})` : 'ï¿½ select a project'}
               </h3>
               {selectedProjectId && (
                 <div>

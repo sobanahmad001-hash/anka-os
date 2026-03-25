@@ -19,7 +19,7 @@ export async function callAI({ system = '', messages = [], maxTokens = 2000 }) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${import.meta.env.VITE_OPENAI_KEY}`,
+        Authorization: `Bearer ${import.meta.env.VITE_OPENAI_KEY || import.meta.env.VITE_OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
         model: 'gpt-4.1',
