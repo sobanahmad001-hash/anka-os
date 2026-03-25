@@ -43,6 +43,8 @@ export default function SphereWPEngine() {
   const [generatingPage, setGeneratingPage] = useState(null)
   const [generationLog, setGenerationLog] = useState([])
   const [pushingPage, setPushingPage] = useState(null)
+  const [editingPage, setEditingPage] = useState(null)
+  const [editForm, setEditForm] = useState({})
   const [wpTestResult, setWpTestResult] = useState(null)
   const [testingWP, setTestingWP] = useState(false)
   const [figmaPreview, setFigmaPreview] = useState(null)
@@ -414,6 +416,16 @@ Return ONLY the Elementor JSON array.`
     setPushingPage(null)
   }
 
+  async function savePageEdit() {
+    if (!editingPage) return
+    await supabase.from('as_wp_pages').update({
+      ...editForm,
+      updated_at: new Date().toISOString()
+    }).eq('id', editingPage)
+    setEditingPage(null)
+    fetchPages()
+  }
+
   async function addPage() {
     if (!pageForm.page_name || !selectedSite) return
     const { error } = await supabase.from('as_wp_pages').insert({
@@ -454,13 +466,30 @@ Return ONLY the Elementor JSON array.`
         <div className="px-6 py-3 border-b border-gray-800 flex items-center gap-3">
           <div className="flex gap-2 flex-1 overflow-x-auto">
             {sites.map(site => (
-              <button key={site.id} onClick={() => setSelectedSite(site)}
-                className={`px-3 py-1.5 text-xs rounded-lg whitespace-nowrap transition-colors ${selectedSite?.id === site.id ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white border border-gray-700'}`}>
-                {site.site_name}
-              </button>
+              <div key={site.id} className="flex items-center gap-1">
+                <button onClick={() => setSelectedSite(site)}
+                  className={`px-3 py-1.5 text-xs rounded-lg whitespace-nowrap transition-colors ${selectedSite?.id === site.id ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white border border-gray-700'}`}>
+                  {site.site_name}
+                </button>
+                {/* Delete site button */}
+                <button
+                  onClick={async () => {
+                    if (!confirm(`Delete "${site.site_name}"? This will also delete all its pages.`)) return
+                    await supabase.from('as_wp_pages').delete().eq('site_id', site.id)
+                    await supabase.from('as_wp_sites').delete().eq('id', site.id)
+                    setSites(prev => prev.filter(s => s.id !== site.id))
+                    if (selectedSite?.id === site.id) setSelectedSite(null)
+                  }}
+                  className="w-5 h-5 flex items-center justify-center text-gray-600 hover:text-red-400 hover:bg-gray-800 rounded transition-colors text-xs">
+                  ✕
+                </button>
+              </div>
             ))}
+            {sites.length === 0 && (
+              <p className="text-xs text-gray-500 py-1.5">No sites yet — add one below</p>
+            )}
           </div>
-          <button onClick={() => setShowSiteForm(!showSiteForm)}
+          <button onClick={() => { setShowSiteForm(true); setSelectedSite(null) }}
             className="bg-purple-600 hover:bg-purple-700 text-white text-xs px-3 py-1.5 rounded-lg flex-shrink-0">
             + Add Site
           </button>
@@ -707,67 +736,127 @@ Return ONLY the Elementor JSON array.`
             <div className="space-y-3">
               {pages.map(page => (
                 <div key={page.id} className="bg-gray-800 rounded-xl p-4 border border-gray-700">
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-sm font-semibold text-white">{page.page_name}</h4>
-                        <span className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded capitalize">{page.page_type}</span>
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[page.status]}`}>{page.status}</span>
+                  {editingPage === page.id ? (
+                    /* EDIT MODE */
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-white">{page.page_name}</p>
+                        <div className="flex gap-2">
+                          <button onClick={savePageEdit}
+                            className="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1 rounded">Save</button>
+                          <button onClick={() => setEditingPage(null)}
+                            className="text-gray-400 text-xs hover:text-white">Cancel</button>
+                        </div>
                       </div>
-                      {page.slug && <p className="text-xs text-gray-500 mt-0.5">/{page.slug}</p>}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Content Brief</label>
+                          <textarea value={editForm.content || ''} onChange={e => setEditForm({...editForm, content: e.target.value})}
+                            className="w-full bg-gray-700 text-white rounded px-2 py-1.5 text-xs focus:outline-none resize-none" rows={3}/>
+                        </div>
+                        <div className="space-y-2">
+                          <div>
+                            <label className="block text-xs text-gray-400 mb-1">Meta Title</label>
+                            <input value={editForm.meta_title || ''} onChange={e => setEditForm({...editForm, meta_title: e.target.value})}
+                              className="w-full bg-gray-700 text-white rounded px-2 py-1.5 text-xs focus:outline-none"/>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-400 mb-1">Meta Description</label>
+                            <input value={editForm.meta_description || ''} onChange={e => setEditForm({...editForm, meta_description: e.target.value})}
+                              className="w-full bg-gray-700 text-white rounded px-2 py-1.5 text-xs focus:outline-none"/>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-400 mb-1">Figma Frame URL</label>
+                            <input value={editForm.figma_frame_url || ''} onChange={e => setEditForm({...editForm, figma_frame_url: e.target.value})}
+                              className="w-full bg-gray-700 text-white rounded px-2 py-1.5 text-xs focus:outline-none"/>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      {!page.elementor_json ? (
-                        <button onClick={() => generateElementorPage(page)}
-                          disabled={generatingPage === page.id}
-                          className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg transition-colors">
-                          {generatingPage === page.id ? '⏳ Generating...' : '🤖 Generate'}
-                        </button>
-                      ) : (
-                        <button onClick={() => generateElementorPage(page)}
-                          className="bg-gray-600 hover:bg-gray-500 text-white text-xs px-3 py-1.5 rounded-lg">
-                          🔄 Regenerate
-                        </button>
-                      )}
-                      {page.elementor_json && (
-                        <button onClick={() => pushToWordPress(page)}
-                          disabled={pushingPage === page.id}
-                          className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg transition-colors">
-                          {pushingPage === page.id ? '⏳ Pushing...' : '🚀 Push to WP'}
-                        </button>
-                      )}
-                      {page.wp_page_url && (
-                        <a href={page.wp_page_url} target="_blank" rel="noopener noreferrer"
-                          className="bg-purple-600 hover:bg-purple-700 text-white text-xs px-3 py-1.5 rounded-lg">
-                          ↗ View
-                        </a>
-                      )}
-                    </div>
-                  </div>
+                  ) : (
+                    /* VIEW MODE */
+                    <div>
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-semibold text-white">{page.page_name}</h4>
+                            <span className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded capitalize">{page.page_type}</span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[page.status]}`}>{page.status}</span>
+                          </div>
+                          {page.slug && <p className="text-xs text-gray-500 mt-0.5">/{page.slug}</p>}
+                        </div>
+                        <div className="flex gap-2 flex-wrap">
+                          {/* Edit button */}
+                          <button onClick={() => {
+                            setEditingPage(page.id)
+                            setEditForm({
+                              content: page.content,
+                              meta_title: page.meta_title,
+                              meta_description: page.meta_description,
+                              figma_frame_url: page.figma_frame_url,
+                            })
+                          }} className="bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs px-3 py-1.5 rounded-lg">
+                            ✏️ Edit
+                          </button>
+                          {/* Generate / Regenerate */}
+                          <button onClick={() => generateElementorPage(page)}
+                            disabled={generatingPage === page.id}
+                            className={`disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg transition-colors ${page.elementor_json ? 'bg-gray-600 hover:bg-gray-500' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                            {generatingPage === page.id ? '⏳ Generating...' : page.elementor_json ? '🔄 Regenerate' : '🤖 Generate'}
+                          </button>
+                          {/* Push / Re-push */}
+                          {page.elementor_json && (
+                            <button onClick={() => pushToWordPress(page)}
+                              disabled={pushingPage === page.id}
+                              className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg transition-colors">
+                              {pushingPage === page.id ? '⏳ Pushing...' : page.wp_page_id ? '🔄 Re-push to WP' : '🚀 Push to WP'}
+                            </button>
+                          )}
+                          {page.wp_page_url && (
+                            <a href={page.wp_page_url} target="_blank" rel="noopener noreferrer"
+                              className="bg-purple-600 hover:bg-purple-700 text-white text-xs px-3 py-1.5 rounded-lg">↗ View</a>
+                          )}
+                          {/* WP Admin edit link */}
+                          {page.wp_page_id && selectedSite && (
+                            <a href={`${selectedSite.site_url}/wp-admin/post.php?post=${page.wp_page_id}&action=elementor`}
+                              target="_blank" rel="noopener noreferrer"
+                              className="bg-orange-600 hover:bg-orange-700 text-white text-xs px-3 py-1.5 rounded-lg">
+                              🎨 Elementor
+                            </a>
+                          )}
+                        </div>
+                      </div>
 
-                  <div className="grid grid-cols-3 gap-2 text-xs">
-                    <div className="flex items-center gap-1.5">
-                      <span className={page.figma_frame_url ? 'text-green-400' : 'text-gray-600'}>
-                        {page.figma_frame_url ? '✓' : '○'}
-                      </span>
-                      <span className="text-gray-500">Figma</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className={page.elementor_json ? 'text-green-400' : 'text-gray-600'}>
-                        {page.elementor_json ? '✓' : '○'}
-                      </span>
-                      <span className="text-gray-500">Elementor JSON</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className={page.wp_page_id ? 'text-green-400' : 'text-gray-600'}>
-                        {page.wp_page_id ? '✓' : '○'}
-                      </span>
-                      <span className="text-gray-500">In WordPress {page.wp_page_id ? `(ID: ${page.wp_page_id})` : ''}</span>
-                    </div>
-                  </div>
+                      <div className="grid grid-cols-3 gap-2 text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <span className={page.figma_frame_url ? 'text-green-400' : 'text-gray-600'}>
+                            {page.figma_frame_url ? '✓' : '○'}
+                          </span>
+                          <span className="text-gray-500">Figma</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className={page.elementor_json ? 'text-green-400' : 'text-gray-600'}>
+                            {page.elementor_json ? '✓' : '○'}
+                          </span>
+                          <span className="text-gray-500">Elementor JSON</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className={page.wp_page_id ? 'text-green-400' : 'text-gray-600'}>
+                            {page.wp_page_id ? '✓' : '○'}
+                          </span>
+                          <span className="text-gray-500">
+                            {page.wp_page_id ? `WP #${page.wp_page_id}` : 'Not in WP'}
+                          </span>
+                        </div>
+                      </div>
 
-                  {page.content && (
-                    <p className="text-xs text-gray-500 mt-2 line-clamp-1">{page.content}</p>
+                      {page.content && (
+                        <p className="text-xs text-gray-500 mt-2 line-clamp-1">{page.content}</p>
+                      )}
+                      {page.pushed_at && (
+                        <p className="text-xs text-gray-600 mt-1">Last pushed: {new Date(page.pushed_at).toLocaleString()}</p>
+                      )}
+                    </div>
                   )}
                 </div>
               ))}
