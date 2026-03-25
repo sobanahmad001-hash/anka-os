@@ -2,8 +2,6 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 
-const DEPARTMENTS = ['design', 'development', 'marketing'];
-
 const inputStyle = {
   width: '100%',
   padding: '12px 16px',
@@ -17,17 +15,13 @@ const inputStyle = {
 };
 
 export default function Login() {
-  const { signIn, signUp } = useAuth();
+  const { signIn } = useAuth();
   const navigate = useNavigate();
 
-  const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
-  const [department, setDepartment] = useState('development');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState('');
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -36,14 +30,8 @@ export default function Login() {
     setLoading(true);
 
     try {
-      if (isRegister) {
-        await signUp(email, password, fullName, department);
-        setSuccess('Account created! Check your email to confirm, then sign in.');
-        setIsRegister(false);
-      } else {
-        await signIn(email, password);
-        navigate('/', { replace: true });
-      }
+      await signIn(email, password);
+      navigate('/', { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -98,7 +86,7 @@ export default function Login() {
           boxShadow: 'var(--anka-shadow-xl), var(--anka-shadow-glow)',
         }}>
           <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 28, letterSpacing: '-0.02em' }}>
-            {isRegister ? 'Create your account' : 'Welcome back'}
+            Welcome back
           </h2>
 
           {error && (
@@ -111,48 +99,7 @@ export default function Login() {
             </div>
           )}
 
-          {success && (
-            <div style={{
-              marginBottom: 20, padding: '12px 16px', borderRadius: 12,
-              background: 'var(--anka-success-muted)', border: '1px solid rgba(52, 211, 153, 0.2)',
-              color: 'var(--anka-success)', fontSize: 13,
-            }}>
-              {success}
-            </div>
-          )}
-
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-            {isRegister && (
-              <>
-                <div>
-                  <label style={{ display: 'block', fontSize: 13, color: 'var(--anka-text-secondary)', marginBottom: 6, fontWeight: 500 }}>
-                    Full Name
-                  </label>
-                  <input
-                    type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} required
-                    style={inputStyle} placeholder="John Doe"
-                    onFocus={(e) => { e.target.style.borderColor = 'var(--anka-accent)'; e.target.style.boxShadow = '0 0 0 3px var(--anka-accent-soft)'; }}
-                    onBlur={(e) => { e.target.style.borderColor = 'var(--anka-border)'; e.target.style.boxShadow = 'none'; }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 13, color: 'var(--anka-text-secondary)', marginBottom: 6, fontWeight: 500 }}>
-                    Department
-                  </label>
-                  <select
-                    value={department} onChange={(e) => setDepartment(e.target.value)}
-                    style={{ ...inputStyle, cursor: 'pointer' }}
-                    onFocus={(e) => { e.target.style.borderColor = 'var(--anka-accent)'; e.target.style.boxShadow = '0 0 0 3px var(--anka-accent-soft)'; }}
-                    onBlur={(e) => { e.target.style.borderColor = 'var(--anka-border)'; e.target.style.boxShadow = 'none'; }}
-                  >
-                    {DEPARTMENTS.map((d) => (
-                      <option key={d} value={d}>{d.charAt(0).toUpperCase() + d.slice(1)}</option>
-                    ))}
-                  </select>
-                </div>
-              </>
-            )}
-
             <div>
               <label style={{ display: 'block', fontSize: 13, color: 'var(--anka-text-secondary)', marginBottom: 6, fontWeight: 500 }}>
                 Email
@@ -190,22 +137,11 @@ export default function Login() {
               onMouseEnter={(e) => { if (!loading) { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 6px 24px var(--anka-accent-glow)'; } }}
               onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 4px 16px var(--anka-accent-glow)'; }}
             >
-              {loading ? 'Please wait...' : isRegister ? 'Create Account' : 'Sign In'}
+              {loading ? 'Please wait...' : 'Sign In'}
             </button>
           </form>
 
-          <div style={{ marginTop: 24, textAlign: 'center' }}>
-            <button
-              onClick={() => { setIsRegister(!isRegister); setError(''); setSuccess(''); }}
-              className="cursor-pointer"
-              style={{
-                background: 'none', border: 'none', fontSize: 13,
-                color: 'var(--anka-text-accent)', fontWeight: 500,
-              }}
-            >
-              {isRegister ? 'Already have an account? Sign In' : "Don't have an account? Register"}
-            </button>
-          </div>
+
         </div>
 
         <p style={{ textAlign: 'center', fontSize: 11, color: 'var(--anka-text-tertiary)', marginTop: 32 }}>

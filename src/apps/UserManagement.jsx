@@ -114,7 +114,7 @@ export default function UserManagement() {
       <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold text-white">Team Management</h2>
-          <p className="text-xs text-gray-400 mt-0.5">{stats.total} members · {stats.unassigned} unassigned</p>
+          <p className="text-xs text-gray-400 mt-0.5">{stats.total} members ï¿½ {stats.unassigned} unassigned</p>
         </div>
         <button onClick={() => setShowInvite(!showInvite)}
           className="bg-purple-600 hover:bg-purple-700 text-white text-sm px-4 py-2 rounded-lg">
@@ -261,13 +261,37 @@ export default function UserManagement() {
                     <div className={`w-2 h-2 rounded-full mx-auto ${user.department ? 'bg-green-500' : 'bg-yellow-500'}`} />
                   )}
                 </div>
+
+                {/* Delete user button â€” only admin can delete, can't delete yourself */}
+                {profile?.role === 'admin' && user.id !== profile?.id && (
+                  <button
+                    onClick={async () => {
+                      if (!confirm(`Remove ${user.full_name || user.email} from the team?`)) return
+                      await supabase.from('profiles').delete().eq('id', user.id)
+                      const { data: { session } } = await supabase.auth.getSession()
+                      await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-user`, {
+                        method: 'DELETE',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'Authorization': `Bearer ${session?.access_token}`,
+                          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+                        },
+                        body: JSON.stringify({ user_id: user.id })
+                      })
+                      setUsers(users.filter(u => u.id !== user.id))
+                    }}
+                    className="flex-shrink-0 w-7 h-7 flex items-center justify-center text-gray-600 hover:text-red-400 hover:bg-gray-800 rounded-lg transition-colors text-xs"
+                    title="Remove from team">
+                    ðŸ—‘
+                  </button>
+                )}
               </div>
 
               {/* Warning if unassigned */}
               {!user.department && (
                 <div className="mt-3 flex items-center gap-2 bg-yellow-900/20 border border-yellow-700/30 rounded-lg px-3 py-2">
                   <span className="text-yellow-400 text-xs">?</span>
-                  <p className="text-xs text-yellow-300">No department assigned — this user will only see core Sphere items and no department-specific tools</p>
+                  <p className="text-xs text-yellow-300">No department assigned ï¿½ this user will only see core Sphere items and no department-specific tools</p>
                 </div>
               )}
             </div>
