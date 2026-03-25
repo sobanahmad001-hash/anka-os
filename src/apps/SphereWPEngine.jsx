@@ -307,14 +307,17 @@ Return ONLY the Elementor JSON array.`
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
-          max_tokens: 4000,
+          max_tokens: 8000,
           system: systemPrompt,
-          messages: [{ role: 'user', content: userPrompt }]
+          messages: [
+            { role: 'user', content: userPrompt },
+            { role: 'assistant', content: '[{"id":"' }
+          ]
         })
       })
 
       const data = await response.json()
-      const rawText = data.content?.[0]?.text || ''
+      const rawText = '[{"id":"' + (data.content?.[0]?.text || '')
 
       addLog('Claude response received, parsing JSON...', 'info')
 
