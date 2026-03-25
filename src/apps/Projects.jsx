@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { useAuth } from '../context/AuthContext.jsx'
+import { callAI } from '../lib/callAI.js'
 
 const STATUS_COLORS = {
   planning: 'bg-gray-700 text-gray-300',
@@ -163,23 +164,11 @@ export default function Projects() {
     setSuggestingFor(researchItem.id)
     setAiLoading(true)
     try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': import.meta.env.VITE_CLAUDE_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          system: `You are a project manager AI. Given research notes, suggest 4-6 concrete actionable tasks. Return ONLY a JSON array like: [{"title":"Task name","description":"Brief description","priority":"medium"}]. No markdown, no explanation.`,
-          messages: [{ role: 'user', content: `Project: ${selectedProject?.name}\nResearch Title: ${researchItem.title}\nResearch Content: ${researchItem.content}\n\nSuggest tasks based on this research.` }]
-        })
+      const text = await callAI({
+        system: `You are a project manager AI. Given research notes, suggest 4-6 concrete actionable tasks. Return ONLY a JSON array like: [{"title":"Task name","description":"Brief description","priority":"medium"}]. No markdown, no explanation.`,
+        messages: [{ role: 'user', content: `Project: ${selectedProject?.name}\nResearch Title: ${researchItem.title}\nResearch Content: ${researchItem.content}\n\nSuggest tasks based on this research.` }],
+        maxTokens: 1000
       })
-      const data = await response.json()
-      const text = data.content?.[0]?.text || '[]'
       const suggestions = JSON.parse(text.replace(/```json|```/g, '').trim())
       setTaskSuggestions(suggestions)
     } catch (e) {

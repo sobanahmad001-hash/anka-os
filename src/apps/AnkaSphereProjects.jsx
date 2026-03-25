@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import { createNotification } from '../hooks/useNotifications.js'
+import { callAI } from '../lib/callAI.js'
 
 const PHASES = ['product_modeling', 'development', 'marketing']
 const PHASE_LABELS = {
@@ -439,26 +440,14 @@ export default function AnkaSphereProjects() {
       : `You are the Anka Sphere AI work assistant. You help the team plan, prioritize, and manage project work.\n\nProject context: ${JSON.stringify(projectContext)}\n\nBe direct, specific, and actionable. Reference actual project data when relevant.`
 
     try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': import.meta.env.VITE_CLAUDE_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 2000,
-          system: systemPrompt,
-          messages: [
-            ...aiMessages.map(m => ({ role: m.role, content: m.content })),
-            { role: 'user', content: userMsg }
-          ]
-        })
+      const reply = await callAI({
+        system: systemPrompt,
+        messages: [
+          ...aiMessages.map(m => ({ role: m.role, content: m.content })),
+          { role: 'user', content: userMsg }
+        ],
+        maxTokens: 2000
       })
-      const data = await response.json()
-      const reply = data.content?.[0]?.text || 'No response'
       setAiMessages(prev => [...prev, { role: 'assistant', content: reply }])
       if (aiMode === 'execute') setAiOutput(reply)
     } catch (e) {

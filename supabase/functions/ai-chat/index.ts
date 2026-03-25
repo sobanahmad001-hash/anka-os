@@ -22,14 +22,8 @@ Deno.serve(async (req) => {
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!
+    const openaiApiKey = Deno.env.get('OPENAI_API_KEY')
     const anthropicApiKey = Deno.env.get('ANTHROPIC_API_KEY')
-
-    if (!anthropicApiKey) {
-      return new Response(JSON.stringify({ error: 'Missing ANTHROPIC_API_KEY secret' }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
 
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
@@ -85,41 +79,82 @@ Do not claim that an action has already happened unless it has been approved and
 `
 
     const model = Deno.env.get('ANTHROPIC_MODEL') || 'claude-3-5-sonnet-latest'
+    const mappedMessages = messages.map((m: any) => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: String(m.content || ''),
+    }))
 
-    const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': anthropicApiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 1400,
-        system: systemPrompt,
-        messages: messages.map((m: any) => ({
-          role: m.role === 'assistant' ? 'assistant' : 'user',
-          content: String(m.content || ''),
-        })),
-      }),
-    })
+    let content = ''
+    let usedProvider = 'openai'
 
-    if (!anthropicRes.ok) {
-      const errorText = await anthropicRes.text()
-      return new Response(JSON.stringify({ error: errorText }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+    // ── Primary: GPT-4.1 ──────────────────────────────────────────────────
+    if (openaiApiKey) {
+      try {
+        const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openaiApiKey}`,
+          },
+          body: JSON.stringify({
+            model: 'gpt-4.1',
+            max_tokens: 1400,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              ...mappedMessages,
+            ],
+          }),
+        })
+        const openaiData = await openaiRes.json()
+        if (openaiData.error) throw new Error(openaiData.error.message)
+        content = openaiData.choices?.[0]?.message?.content || ''
+        if (!content) throw new Error('Empty OpenAI response')
+      } catch (openaiErr) {
+        console.warn('GPT-4.1 failed, falling back to Claude:', openaiErr)
+        usedProvider = 'anthropic'
+      }
+    } else {
+      usedProvider = 'anthropic'
     }
 
-    const data = await anthropicRes.json()
-    const content = data?.content?.[0]?.text || ''
+    // ── Fallback: Claude ──────────────────────────────────────────────────
+    if (usedProvider === 'anthropic') {
+      if (!anthropicApiKey) {
+        return new Response(JSON.stringify({ error: 'No AI provider configured (OPENAI_API_KEY or ANTHROPIC_API_KEY required)' }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+      const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': anthropicApiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 1400,
+          system: systemPrompt,
+          messages: mappedMessages,
+        }),
+      })
+      if (!anthropicRes.ok) {
+        const errorText = await anthropicRes.text()
+        return new Response(JSON.stringify({ error: errorText }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+      const anthropicData = await anthropicRes.json()
+      content = anthropicData?.content?.[0]?.text || ''
+    }
 
     return new Response(
       JSON.stringify({
         content,
-        provider: 'anthropic',
-        model,
+        provider: usedProvider,
+        model: usedProvider === 'openai' ? 'gpt-4.1' : model,
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

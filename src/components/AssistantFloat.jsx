@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { callAI } from '../lib/callAI.js'
 
 export default function AssistantFloat() {
   const location = useLocation()
@@ -17,27 +18,15 @@ export default function AssistantFloat() {
     setMessages(prev => [...prev, { role: 'user', content: msg }])
     setLoading(true)
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': import.meta.env.VITE_CLAUDE_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 500,
-          system: 'You are Anka, a concise AI assistant built into Anka OS. Answer briefly. If the user wants detailed work, suggest they open the full assistant.',
-          messages: [
-            ...messages.map(m => ({ role: m.role, content: m.content })),
-            { role: 'user', content: msg }
-          ]
-        })
+      const reply = await callAI({
+        system: 'You are Anka, a concise AI assistant built into Anka OS. Answer briefly. If the user wants detailed work, suggest they open the full assistant.',
+        messages: [
+          ...messages.map(m => ({ role: m.role, content: m.content })),
+          { role: 'user', content: msg }
+        ],
+        maxTokens: 500
       })
-      const data = await res.json()
-      if (data.error) throw new Error(data.error.message || JSON.stringify(data.error))
-      setMessages(prev => [...prev, { role: 'assistant', content: data.content?.[0]?.text || 'No response' }])
+      setMessages(prev => [...prev, { role: 'assistant', content: reply || 'No response' }])
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Error connecting to AI.' }])
     }

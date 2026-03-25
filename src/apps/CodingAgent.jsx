@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import { fetchBranches, fetchCommits, getRepoContents, getFileContent, createOrUpdateFile, createPullRequest, searchCode } from '../lib/github.js'
+import { callAI } from '../lib/callAI.js'
 
 const AGENT_MODES = {
   explore: 'Explore Repo',
@@ -150,26 +151,14 @@ When writing code, be specific about file paths. Format code in triple backtick 
 Be concise and actionable. If suggesting file changes, mention the exact file path.`
 
     try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': import.meta.env.VITE_CLAUDE_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 2000,
-          system: systemPrompt,
-          messages: [
-            ...messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
-            { role: 'user', content: userMsg }
-          ]
-        })
+      const reply = await callAI({
+        system: systemPrompt,
+        messages: [
+          ...messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
+          { role: 'user', content: userMsg }
+        ],
+        maxTokens: 2000
       })
-      const data = await response.json()
-      const reply = data.content?.[0]?.text || 'No response'
       addMessage('assistant', reply)
 
       const codeMatch = reply.match(/```(?:jsx?|tsx?|ts|js|python|css)?\n([\s\S]+?)```/)

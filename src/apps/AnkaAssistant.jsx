@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { useAuth } from '../context/AuthContext.jsx'
+import { callAI } from '../lib/callAI.js'
 
 const MODES = {
   chat: { label: '💬 Chat', desc: 'Ask anything about your OS' },
@@ -175,18 +176,8 @@ TEAM: ${osContext.members.map(m => `${m.full_name || m.email} (${m.department})`
 ` : 'OS context loading...'
 
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': import.meta.env.VITE_CLAUDE_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1500,
-          system: `You are Anka, the AI assistant built into Anka OS — an internal operating system for a digital agency called Anka Sphere. You have full context of the workspace.
+      const reply = await callAI({
+        system: `You are Anka, the AI assistant built into Anka OS — an internal operating system for a digital agency called Anka Sphere. You have full context of the workspace.
 
 ${contextStr}
 
@@ -198,15 +189,12 @@ You can:
 - Suggest next actions
 
 Be direct, specific, and reference actual data from the OS context when relevant. When you don't have specific data, say so.`,
-          messages: [
-            ...messages.slice(-10).map(m => ({ role: m.role, content: m.content })),
-            { role: 'user', content: msg }
-          ]
-        })
+        messages: [
+          ...messages.slice(-10).map(m => ({ role: m.role, content: m.content })),
+          { role: 'user', content: msg }
+        ],
+        maxTokens: 1500
       })
-      const data = await res.json()
-      if (data.error) throw new Error(data.error.message || JSON.stringify(data.error))
-      const reply = data.content?.[0]?.text || 'No response'
 
       await supabase.from('as_assistant_messages').insert({
         thread_id: threadId, user_id: user?.id, role: 'assistant', content: reply
@@ -245,22 +233,11 @@ Format as:
 📊 PROJECT PULSE (one line per active project)`
 
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': import.meta.env.VITE_CLAUDE_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 800,
-          messages: [{ role: 'user', content: prompt }]
-        })
+      const standup = await callAI({
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens: 800
       })
-      const data = await res.json()
-      setMessages([{ role: 'assistant', content: data.content?.[0]?.text || 'No standup data', created_at: new Date().toISOString() }])
+      setMessages([{ role: 'assistant', content: standup || 'No standup data', created_at: new Date().toISOString() }])
     } catch (err) {
       setMessages([{ role: 'assistant', content: 'Error generating standup.' }])
     }
@@ -272,30 +249,19 @@ Format as:
     setGeneratingBrief(true)
     setBriefOutput('')
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': import.meta.env.VITE_CLAUDE_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 2000,
-          system: `You are a senior strategist at a digital agency. Generate professional, detailed, actionable documents. Use proper headings and structure.`,
-          messages: [{
-            role: 'user',
-            content: `Generate a complete ${briefType} document.
+      const brief = await callAI({
+        system: `You are a senior strategist at a digital agency. Generate professional, detailed, actionable documents. Use proper headings and structure.`,
+        messages: [{
+          role: 'user',
+          content: `Generate a complete ${briefType} document.
 ${briefContext ? `Context: ${briefContext}` : ''}
 ${osContext ? `Agency context: Working with clients including ${osContext.clients.slice(0, 3).map(c => c.name).join(', ')}` : ''}
 
 Make it comprehensive, professional, and immediately usable.`
-          }]
-        })
+        }],
+        maxTokens: 2000
       })
-      const data = await res.json()
-      setBriefOutput(data.content?.[0]?.text || 'No output')
+      setBriefOutput(brief || 'No output')
     } catch (err) {
       setBriefOutput('Error: ' + err.message)
     }
@@ -335,18 +301,8 @@ Make it comprehensive, professional, and immediately usable.`
     setExecuteResult(null)
 
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': import.meta.env.VITE_CLAUDE_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 500,
-          system: `You are Anka OS execute mode. The user wants to perform an action in the OS.
+      const text = await callAI({
+        system: `You are Anka OS execute mode. The user wants to perform an action in the OS.
 Analyse their request and respond ONLY with a JSON object:
 {
   "action": "create_task" | "update_project_status" | "log_content" | "unsupported",
@@ -356,11 +312,9 @@ Analyse their request and respond ONLY with a JSON object:
 }
 
 Available projects: ${osContext?.activeProjects.map(p => `${p.id}:${p.name}`).join(', ')}`,
-          messages: [{ role: 'user', content: executePrompt }]
-        })
+        messages: [{ role: 'user', content: executePrompt }],
+        maxTokens: 500
       })
-      const data = await res.json()
-      const text = data.content?.[0]?.text || '{}'
       const action = JSON.parse(text.replace(/```json|```/g, '').trim())
 
       if (action.action === 'create_task' && action.params?.title && action.params?.project_id) {
