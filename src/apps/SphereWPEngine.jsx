@@ -320,6 +320,7 @@ Return ONLY the Elementor JSON array.`
       const rawText = '[{"id":"' + (data.content?.[0]?.text || '')
 
       addLog('Claude response received, parsing JSON...', 'info')
+      addLog(`Raw response preview: ${rawText.slice(0, 200)}`, 'info')
 
       let elementorJson
       try {
