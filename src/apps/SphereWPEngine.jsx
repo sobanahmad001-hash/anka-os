@@ -51,6 +51,15 @@ export default function SphereWPEngine() {
   const [fetchingFigma, setFetchingFigma] = useState(false)
   const logEndRef = useRef(null)
 
+  // Sync from WP
+  const [showSyncModal, setShowSyncModal] = useState(false)
+  const [wpLivePages, setWpLivePages] = useState([])
+  const [syncLoading, setSyncLoading] = useState(false)
+  const [syncError, setSyncError] = useState('')
+  const [selectedForImport, setSelectedForImport] = useState([])
+  const [importing, setImporting] = useState(false)
+  const [importFilter, setImportFilter] = useState('all')
+
   useEffect(() => { fetchProjects(); fetchMembers() }, [])
   useEffect(() => { if (selectedProjectId) fetchSites() }, [selectedProjectId])
   useEffect(() => { if (selectedSite) fetchPages() }, [selectedSite])
@@ -426,6 +435,67 @@ Return ONLY the Elementor JSON array.`
     fetchPages()
   }
 
+  async function fetchWPLivePages() {
+    if (!selectedSite) return
+    setSyncLoading(true)
+    setSyncError('')
+    setWpLivePages([])
+    setSelectedForImport([])
+    try {
+      const credentials = btoa(`${selectedSite.wp_username}:${selectedSite.wp_app_password}`)
+      let allPages = []
+      let page = 1
+      while (true) {
+        const res = await fetch(
+          `${selectedSite.site_url}/wp-json/wp/v2/pages?per_page=100&page=${page}&_fields=id,title,slug,status,link,modified,content,excerpt,yoast_head_json,meta`,
+          { headers: { Authorization: `Basic ${credentials}` } }
+        )
+        if (!res.ok) throw new Error(`WP API error: ${res.status}`)
+        const data = await res.json()
+        if (!data.length) break
+        allPages = [...allPages, ...data]
+        if (data.length < 100) break
+        page++
+      }
+      setWpLivePages(allPages)
+    } catch (err) {
+      setSyncError(err.message)
+    }
+    setSyncLoading(false)
+  }
+
+  async function importSelectedPages() {
+    if (!selectedForImport.length || !selectedSite) return
+    setImporting(true)
+    const toImport = wpLivePages.filter(p => selectedForImport.includes(p.id))
+    const inserts = toImport.map(p => {
+      const yoast = p.yoast_head_json || {}
+      return {
+        site_id: selectedSite.id,
+        project_id: selectedProjectId,
+        page_name: p.title?.rendered || p.slug,
+        slug: p.slug,
+        page_type: 'page',
+        wp_page_id: p.id,
+        wp_page_url: p.link,
+        status: 'needs_review',
+        content: p.content?.rendered?.replace(/<[^>]+>/g, '').slice(0, 500) || '',
+        meta_title: yoast.title || p.title?.rendered || '',
+        meta_description: yoast.description || '',
+        figma_frame_url: null,
+        elementor_json: null,
+        pushed_at: p.modified ? new Date(p.modified).toISOString() : null,
+      }
+    })
+    const { error } = await supabase.from('as_wp_pages').insert(inserts)
+    if (!error) {
+      setShowSyncModal(false)
+      setSelectedForImport([])
+      fetchPages()
+    }
+    setImporting(false)
+  }
+
   async function addPage() {
     if (!pageForm.page_name || !selectedSite) return
     const { error } = await supabase.from('as_wp_pages').insert({
@@ -667,10 +737,17 @@ Return ONLY the Elementor JSON array.`
           <div>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-gray-300">Pages ({pages.length})</h3>
-              <button onClick={() => setShowPageForm(!showPageForm)}
-                className="bg-purple-600 hover:bg-purple-700 text-white text-xs px-3 py-1.5 rounded-lg">
-                + Add Page
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setShowSyncModal(true); fetchWPLivePages() }}
+                  className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded-lg">
+                  🔄 Sync from WP
+                </button>
+                <button onClick={() => setShowPageForm(!showPageForm)}
+                  className="bg-purple-600 hover:bg-purple-700 text-white text-xs px-3 py-1.5 rounded-lg">
+                  + Add Page
+                </button>
+              </div>
             </div>
 
             {showPageForm && (
@@ -869,6 +946,179 @@ Return ONLY the Elementor JSON array.`
                 </div>
               )}
             </div>
+
+            {/* SYNC MODAL */}
+            {showSyncModal && (
+              <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+                <div className="bg-gray-800 rounded-2xl w-full max-w-2xl border border-gray-700 flex flex-col"
+                  style={{ maxHeight: '80vh' }}>
+                  {/* Header */}
+                  <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700">
+                    <div>
+                      <h3 className="text-base font-bold text-white">Import from WordPress</h3>
+                      <p className="text-xs text-gray-400 mt-0.5">{selectedSite?.site_name} · {selectedSite?.site_url}</p>
+                    </div>
+                    <button onClick={() => setShowSyncModal(false)}
+                      className="text-gray-400 hover:text-white text-lg">✕</button>
+                  </div>
+
+                  {/* Filter + select all */}
+                  {wpLivePages.length > 0 && (
+                    <div className="px-6 py-3 border-b border-gray-700 flex items-center gap-3">
+                      <div className="flex gap-1 bg-gray-700 rounded-lg p-1">
+                        {['all', 'publish', 'draft'].map(f => (
+                          <button key={f} onClick={() => setImportFilter(f)}
+                            className={`px-3 py-1 text-xs rounded-md capitalize transition-colors ${importFilter === f ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                            {f}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        onClick={() => {
+                          const filtered = wpLivePages.filter(p => importFilter === 'all' || p.status === importFilter)
+                          const filteredIds = filtered.map(p => p.id)
+                          const alreadyImported = pages.map(p => p.wp_page_id).filter(Boolean)
+                          const available = filteredIds.filter(id => !alreadyImported.includes(id))
+                          setSelectedForImport(prev =>
+                            prev.length === available.length ? [] : available
+                          )
+                        }}
+                        className="text-xs text-purple-400 hover:text-purple-300">
+                        {selectedForImport.length > 0 ? 'Deselect all' : 'Select all'}
+                      </button>
+                      <span className="text-xs text-gray-500 ml-auto">
+                        {selectedForImport.length} selected
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Content */}
+                  <div className="flex-1 overflow-y-auto p-6">
+                    {syncLoading && (
+                      <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-3" />
+                        <p className="text-sm">Fetching pages from WordPress...</p>
+                      </div>
+                    )}
+
+                    {syncError && (
+                      <div className="bg-red-900/30 border border-red-700/50 rounded-xl p-4">
+                        <p className="text-sm text-red-300">❌ {syncError}</p>
+                        <p className="text-xs text-gray-400 mt-1">Make sure CORS is enabled and credentials are correct.</p>
+                      </div>
+                    )}
+
+                    {!syncLoading && !syncError && wpLivePages.length > 0 && (() => {
+                      const alreadyImported = pages.map(p => p.wp_page_id).filter(Boolean)
+                      const filtered = wpLivePages.filter(p => importFilter === 'all' || p.status === importFilter)
+                      return (
+                        <div className="space-y-2">
+                          {filtered.map(wpPage => {
+                            const isImported = alreadyImported.includes(wpPage.id)
+                            const isSelected = selectedForImport.includes(wpPage.id)
+                            const yoast = wpPage.yoast_head_json || {}
+                            return (
+                              <div key={wpPage.id}
+                                onClick={() => {
+                                  if (isImported) return
+                                  setSelectedForImport(prev =>
+                                    prev.includes(wpPage.id)
+                                      ? prev.filter(id => id !== wpPage.id)
+                                      : [...prev, wpPage.id]
+                                  )
+                                }}
+                                className={`rounded-xl p-4 border transition-all ${
+                                  isImported
+                                    ? 'border-gray-700 bg-gray-700/20 opacity-50 cursor-not-allowed'
+                                    : isSelected
+                                      ? 'border-purple-500 bg-purple-900/20 cursor-pointer'
+                                      : 'border-gray-700 bg-gray-800 hover:border-gray-600 cursor-pointer'
+                                }`}>
+                                <div className="flex items-start gap-3">
+                                  {/* Checkbox */}
+                                  <div className={`w-4 h-4 rounded border flex-shrink-0 mt-0.5 flex items-center justify-center ${
+                                    isImported ? 'bg-gray-600 border-gray-500' :
+                                    isSelected ? 'bg-purple-600 border-purple-500' :
+                                    'border-gray-600'
+                                  }`}>
+                                    {(isSelected || isImported) && (
+                                      <span className="text-white text-xs">✓</span>
+                                    )}
+                                  </div>
+
+                                  {/* Page info */}
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <p className="text-sm font-medium text-white truncate">
+                                        {wpPage.title?.rendered || wpPage.slug}
+                                      </p>
+                                      <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${
+                                        wpPage.status === 'publish' ? 'bg-green-900/50 text-green-300' : 'bg-gray-700 text-gray-400'
+                                      }`}>
+                                        {wpPage.status}
+                                      </span>
+                                      {isImported && (
+                                        <span className="text-xs bg-blue-900/50 text-blue-300 px-1.5 py-0.5 rounded flex-shrink-0">
+                                          Already imported
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs text-gray-500">
+                                      <span>/{wpPage.slug}</span>
+                                      <span>ID: {wpPage.id}</span>
+                                      {wpPage.modified && (
+                                        <span>Modified: {new Date(wpPage.modified).toLocaleDateString()}</span>
+                                      )}
+                                      {yoast.title && (
+                                        <span className="truncate">SEO: {yoast.title}</span>
+                                      )}
+                                    </div>
+
+                                    {yoast.description && (
+                                      <p className="text-xs text-gray-600 mt-1 line-clamp-1">{yoast.description}</p>
+                                    )}
+                                  </div>
+
+                                  {/* Live link */}
+                                  <a href={wpPage.link} target="_blank" rel="noopener noreferrer"
+                                    onClick={e => e.stopPropagation()}
+                                    className="text-xs text-blue-400 hover:text-blue-300 flex-shrink-0">↗</a>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )
+                    })()}
+
+                    {!syncLoading && !syncError && wpLivePages.length === 0 && (
+                      <div className="text-center py-12 text-gray-500">
+                        <p className="text-4xl mb-3">📄</p>
+                        <p className="text-sm">No pages found</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Footer */}
+                  <div className="px-6 py-4 border-t border-gray-700 flex items-center justify-between">
+                    <p className="text-xs text-gray-500">
+                      {wpLivePages.length} pages found · {pages.filter(p => p.wp_page_id).length} already imported
+                    </p>
+                    <div className="flex gap-3">
+                      <button onClick={() => setShowSyncModal(false)}
+                        className="text-gray-400 text-sm hover:text-white px-3">Cancel</button>
+                      <button
+                        onClick={importSelectedPages}
+                        disabled={!selectedForImport.length || importing}
+                        className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium">
+                        {importing ? '⏳ Importing...' : `Import ${selectedForImport.length} pages`}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
