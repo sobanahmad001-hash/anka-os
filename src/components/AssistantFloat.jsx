@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { callAI } from '../lib/callAI.js'
+import { sendAiMessage } from '../lib/ai-provider'
 
 export default function AssistantFloat() {
   const location = useLocation()
@@ -18,15 +18,13 @@ export default function AssistantFloat() {
     setMessages(prev => [...prev, { role: 'user', content: msg }])
     setLoading(true)
     try {
-      const reply = await callAI({
-        system: 'You are Anka, a concise AI assistant built into Anka OS. Answer briefly. If the user wants detailed work, suggest they open the full assistant.',
-        messages: [
-          ...messages.map(m => ({ role: m.role, content: m.content })),
-          { role: 'user', content: msg }
-        ],
-        maxTokens: 500
-      })
-      setMessages(prev => [...prev, { role: 'assistant', content: reply || 'No response' }])
+      const allMessages = [
+        ...messages.map(m => ({ role: m.role, content: m.content })),
+        { role: 'user', content: msg }
+      ]
+      const response = await sendAiMessage(allMessages, {}, {})
+      const reply = response?.content || response?.message || 'No response'
+      setMessages(prev => [...prev, { role: 'assistant', content: reply }])
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Error connecting to AI.' }])
     }
