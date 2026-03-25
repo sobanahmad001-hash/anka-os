@@ -174,12 +174,13 @@ export default function SphereWPEngine() {
 
     const project = projects.find(p => p.id === selectedProjectId)
 
-    const { data: brandDoc } = await supabase
+    const { data: brandDocData } = await supabase
       .from('as_project_documents')
       .select('content')
       .eq('project_id', selectedProjectId)
       .eq('doc_type', 'brand_identity')
-      .single()
+      .limit(1)
+    const brandDoc = brandDocData?.[0] || null
 
     let brandContext = ''
     if (brandDoc?.content) {
@@ -194,12 +195,13 @@ Positioning: ${brand.brand_positioning}`
       } catch { brandContext = brandDoc.content }
     }
 
-    const { data: pageKeyword } = await supabase
+    const { data: pageKeywordData } = await supabase
       .from('as_project_pages')
       .select('primary_keyword, primary_kw_volume')
       .eq('project_id', selectedProjectId)
       .ilike('page_name', `%${page.page_name}%`)
-      .single()
+      .limit(1)
+    const pageKeyword = pageKeywordData?.[0] || null
 
     addLog('Fetching project context and brand guidelines...', 'info')
     if (brandContext) addLog('Brand guidelines loaded ✓', 'success')
@@ -242,7 +244,7 @@ Positioning: ${brand.brand_positioning}`
       }
     }
 
-    addLog('Sending to Claude AI for Elementor generation...', 'info')
+    addLog('Sending to GPT-4.1 for Elementor generation...', 'info')
 
     const systemPrompt = `You are an expert WordPress Elementor developer. Generate a complete Elementor page JSON structure.
 
@@ -297,38 +299,35 @@ Create a complete, professional ${page.page_type} page with appropriate sections
 Return ONLY the Elementor JSON array.`
 
     try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': import.meta.env.VITE_CLAUDE_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
+          'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_KEY}`,
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: 'gpt-4.1',
           max_tokens: 8000,
-          system: systemPrompt,
           messages: [
-            { role: 'user', content: userPrompt },
-            { role: 'assistant', content: '[{"id":"' }
-          ]
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
+          response_format: { type: 'json_object' }
         })
       })
 
       const data = await response.json()
-      const rawText = '[{"id":"' + (data.content?.[0]?.text || '')
+      if (data.error) throw new Error(data.error.message)
 
-      addLog('Claude response received, parsing JSON...', 'info')
-      addLog(`Raw response preview: ${rawText.slice(0, 200)}`, 'info')
+      const rawText = data.choices?.[0]?.message?.content || ''
+      addLog('GPT-4.1 response received, parsing JSON...', 'info')
 
       let elementorJson
       try {
-        const cleaned = rawText
-          .replace(/```json\n?/g, '')
-          .replace(/```\n?/g, '')
-          .trim()
-        elementorJson = JSON.parse(cleaned)
+        const parsed = JSON.parse(rawText)
+        // response_format: json_object may wrap the array — unwrap if needed
+        elementorJson = Array.isArray(parsed) ? parsed : (parsed.elements || parsed.sections || parsed.data || Object.values(parsed)[0])
+        if (!Array.isArray(elementorJson)) throw new Error('Not an array')
         addLog(`Generated ${elementorJson.length} sections ✓`, 'success')
       } catch (parseErr) {
         addLog('JSON parse failed — trying to extract...', 'warning')
