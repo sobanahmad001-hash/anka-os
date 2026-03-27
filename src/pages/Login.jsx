@@ -128,14 +128,14 @@ export default function Login() {
               type="submit" disabled={loading} className="cursor-pointer"
               style={{
                 width: '100%', padding: '13px 0', borderRadius: 12, border: 'none',
-                background: 'linear-gradient(135deg, var(--anka-accent), #a78bfa)',
+                background: 'linear-gradient(135deg, #6366f1, #a78bfa)',
                 color: 'white', fontSize: 14, fontWeight: 600, letterSpacing: '-0.01em',
                 cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.6 : 1,
                 transition: 'all 0.2s ease',
-                boxShadow: '0 4px 16px var(--anka-accent-glow)',
+                boxShadow: '0 4px 16px rgba(99, 102, 241, 0.4)',
               }}
-              onMouseEnter={(e) => { if (!loading) { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 6px 24px var(--anka-accent-glow)'; } }}
-              onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 4px 16px var(--anka-accent-glow)'; }}
+              onMouseEnter={(e) => { if (!loading) { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 6px 24px rgba(99, 102, 241, 0.5)'; } }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 4px 16px rgba(99, 102, 241, 0.4)'; }}
             >
               {loading ? 'Please wait...' : 'Sign In'}
             </button>
