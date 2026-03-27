@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 
@@ -26,7 +26,6 @@ export default function Login() {
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
-    setSuccess('');
     setLoading(true);
 
     try {
@@ -118,7 +117,7 @@ export default function Login() {
               </label>
               <input
                 type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6}
-                style={inputStyle} placeholder="••••••••"
+                style={inputStyle} placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                 onFocus={(e) => { e.target.style.borderColor = 'var(--anka-accent)'; e.target.style.boxShadow = '0 0 0 3px var(--anka-accent-soft)'; }}
                 onBlur={(e) => { e.target.style.borderColor = 'var(--anka-border)'; e.target.style.boxShadow = 'none'; }}
               />
@@ -145,7 +144,7 @@ export default function Login() {
         </div>
 
         <p style={{ textAlign: 'center', fontSize: 11, color: 'var(--anka-text-tertiary)', marginTop: 32 }}>
-          © 2026 Anka Studio. All rights reserved.
+          Â© 2026 Anka Studio. All rights reserved.
         </p>
       </div>
     </div>
