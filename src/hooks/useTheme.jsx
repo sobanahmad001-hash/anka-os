@@ -17,7 +17,7 @@ export function ThemeProvider({ children }) {
       .from('user_preferences')
       .select('theme')
       .eq('user_id', user.id)
-      .single()
+      .maybeSingle()
       .then(({ data }) => {
         if (data?.theme) {
           setThemeState(data.theme);
@@ -56,3 +56,4 @@ export function useTheme() {
   if (!ctx) throw new Error('useTheme must be used within ThemeProvider');
   return ctx;
 }
+
