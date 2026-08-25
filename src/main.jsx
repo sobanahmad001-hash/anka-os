@@ -14,9 +14,7 @@ window.addEventListener('vite:preloadError', (event) => {
   if (Date.now() - lastReload > 60_000) {
     event.preventDefault()
     sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()))
-    const url = new URL(window.location.href)
-    url.searchParams.set('anka_reload', String(Date.now()))
-    window.location.replace(url)
+    window.location.reload()
   }
 })
 

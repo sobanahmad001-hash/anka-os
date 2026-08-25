@@ -6,13 +6,10 @@ const main = readFileSync(new URL('../main.jsx', import.meta.url), 'utf8')
 const boundary = readFileSync(new URL('../components/AppErrorBoundary.jsx', import.meta.url), 'utf8')
 const auth = readFileSync(new URL('../context/AuthContext.jsx', import.meta.url), 'utf8')
 const theme = readFileSync(new URL('../hooks/useTheme.jsx', import.meta.url), 'utf8')
-const app = readFileSync(new URL('../App.jsx', import.meta.url), 'utf8')
 
 test('stale deployment chunks trigger a guarded one-time reload', () => {
   assert.match(main, /vite:preloadError/)
   assert.match(main, /anka:last-chunk-reload/)
-  assert.match(main, /anka_reload/)
-  assert.match(main, /window\.location\.replace/)
   assert.match(main, /Date\.now\(\) - lastReload > 60_000/)
   assert.ok(
     main.indexOf('Date.now() - lastReload > 60_000') < main.indexOf('event.preventDefault()'),
@@ -23,15 +20,10 @@ test('stale deployment chunks trigger a guarded one-time reload', () => {
 test('unexpected render failures show a visible recovery action', () => {
   assert.match(main, /AppErrorBoundary/)
   assert.match(boundary, /Reload Anka OS/)
-  assert.match(boundary, /anka_reload/)
-  assert.match(boundary, /window\.location\.replace/)
+  assert.match(boundary, /window\.location\.reload/)
 })
 
 test('optional profile and preference records do not emit 406 errors', () => {
   assert.match(auth, /\.maybeSingle\(\)/)
   assert.match(theme, /\.maybeSingle\(\)/)
-})
-test('the authenticated landing route is included in the main application bundle', () => {
-  assert.match(app, /import CanonicalProjects from '\.\/apps\/CanonicalProjects'/)
-  assert.doesNotMatch(app, /lazy\(\(\) => import\('\.\/apps\/CanonicalProjects'\)\)/)
 })

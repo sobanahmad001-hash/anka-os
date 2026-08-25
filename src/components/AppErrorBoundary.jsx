@@ -11,12 +11,6 @@ export default class AppErrorBoundary extends Component {
     console.error('Anka OS render failure', error, info)
   }
 
-  reloadLatestVersion = () => {
-    const url = new URL(window.location.href)
-    url.searchParams.set('anka_reload', String(Date.now()))
-    window.location.replace(url)
-  }
-
   render() {
     if (!this.state.error) return this.props.children
 
@@ -30,7 +24,7 @@ export default class AppErrorBoundary extends Component {
           </p>
           <button
             type="button"
-            onClick={this.reloadLatestVersion}
+            onClick={() => window.location.reload()}
             className="mt-6 rounded-xl bg-purple-600 px-5 py-2.5 text-sm font-semibold hover:bg-purple-500"
           >
             Reload Anka OS
