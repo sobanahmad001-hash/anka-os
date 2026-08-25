@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   TASK_STATUSES,
@@ -36,6 +37,15 @@ function createFakeClient(tableResults = {}) {
     },
   }
 }
+
+test('delivery runtime composes approval support without mutating the frozen repository', () => {
+  const repository = createDeliveryRepository(createFakeClient())
+  const runtimeSource = readFileSync(new URL('./delivery.js', import.meta.url), 'utf8')
+
+  assert.equal(Object.isExtensible(repository), false)
+  assert.doesNotMatch(runtimeSource, /Object\.assign\(repository/)
+  assert.match(runtimeSource, /Object\.freeze\(\{\s*\.\.\.repository,/)
+})
 
 test('project workspace reads only canonical delivery tables', async () => {
   const client = createFakeClient({
