@@ -21,7 +21,7 @@ Required result:
 - Tests: all passing.
 - Production build: passing.
 - No privileged `VITE_*` provider credential in `src/`.
-- Client approvals remain disabled.
+- Client approvals, AI assistance, and read-only external integration tests are enabled for controlled UAT.
 
 Create a database backup or confirm point-in-time recovery before applying migrations.
 
@@ -46,7 +46,7 @@ supabase migration repair 20260825010000 20260825020000 20260825030000 202608250
 supabase migration list
 ```
 
-Do not mark Migrations 6–11 applied. They have not been deployed yet.
+Do not mark Migrations 6–13 applied. They have not been deployed yet.
 
 Run a dry run:
 
@@ -62,6 +62,8 @@ The dry run must list only:
 - `20260825090000_ai_audit_and_human_control`
 - `20260825100000_secure_integration_gateway`
 - `20260825110000_version_review_annotations`
+- `20260825120000_retire_insecure_api_docs_policy`
+- `20260825130000_enable_client_approvals_for_testing`
 
 Stop if Migrations 1–5 appear in the execution plan.
 
@@ -72,7 +74,7 @@ supabase db push
 supabase migration list
 ```
 
-Run verification files 6–11 in order through SQL Editor. Each must return its expected migration identifier with no missing table, policy, trigger, column, or grant failure.
+Run verification files 6–13 in order through SQL Editor. Each must return its expected migration identifier with no missing table, policy, trigger, column, or grant failure.
 
 ## 5. Configure Edge Function secrets
 
@@ -138,7 +140,8 @@ Never configure a service-role key or provider credential as a frontend environm
 7. Confirm the assigned team queue, notification, activity event, and Living Project Record update.
 8. Verify a second client cannot read the project.
 9. Verify client reports contain no tasks, research, internal activity, prompts, provider data, or costs.
-10. Keep formal client approval disabled until this UAT passes with no P0/P1 defect.
+10. Approve the exact released version and confirm the portal item and deliverable both show `client_approved`.
+11. Repeat with a second version using **Request revision** and confirm it shows `revision_requested`.
 
 ## 10. Production automation
 

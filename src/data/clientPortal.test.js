@@ -26,6 +26,10 @@ test('portal revision stays linked to the exact released version', () => {
 
 test('formal client approval is available behind the feature flag', () => {
   assert.match(portal, /featureFlags\.clientApprovals/)
+  assert.match(portal, /Approve version/)
+  assert.match(portal, /delivery\.recordClientApproval/)
+  assert.match(portal, /deliverableId: approvalTarget\.payload\?\.deliverable_id/)
+  assert.match(portal, /deliverableVersionId: approvalTarget\.source_id/)
   assert.match(approvals, /approval_type: 'client_approval'/)
   assert.match(deliveryEntry, /recordClientApproval/)
 })

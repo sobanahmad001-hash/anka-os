@@ -73,6 +73,23 @@ begin
     where id = new.deliverable_version_id;
   end if;
 
+  update public.deliverables
+  set status = case
+    when new.decision = 'approved' then 'client_approved'
+    else 'revision_requested'
+  end
+  where id = new.deliverable_id;
+
+  update public.client_portal_items
+  set status = case
+    when new.decision = 'approved' then 'client_approved'
+    else 'revision_requested'
+  end
+  where project_id = new.project_id
+    and source_type = 'deliverable_version'
+    and source_id = new.deliverable_version_id
+    and withdrawn_at is null;
+
   return new;
 end;
 $$;
