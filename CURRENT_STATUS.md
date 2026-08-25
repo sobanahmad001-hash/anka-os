@@ -1,93 +1,89 @@
-# Anka OS Development Status
-**Last Updated:** $(date)
-**Development Environment:** Local (Git Bash on Windows)
+# Anka Sphere OS - Current Status
 
-## ✅ Setup Complete
+Last updated: 2026-08-25
 
-- ✅ Repository cloned locally
-- ✅ Dependencies installed (183 packages)
-- ✅ Dev server running on http://localhost:5173/
-- ✅ Git Bash terminal working
+Active branch: `codex/phase-0-foundation`
 
-## 📊 Database Schema (Supabase)
+Product authority: `docs/product/RELEASE_1_AUTHORITY.md`
 
-### Phase 1 Tables Created:
-1. **sprints** - Dev workflow tracking (velocity, goals, dates)
-2. **pull_requests** - GitHub PR integration
-3. **deployments** - Deployment history (env, status, version)
-4. **code_snippets** - Dev knowledge base (language, code, usage_count)
-5. **department_metrics** - Admin aggregated data
-6. **system_health_logs** - Admin monitoring
-7. **user_activity_logs** - Admin audit trail
+## Current outcome
 
-### Key Columns:
-- `tasks.workflow_stage` - backlog | in_progress | code_review | testing | deployed
-- `sprints.velocity_target` - Expected story points
-- `sprints.velocity_actual` - Completed story points
+Phase 0 is complete, the Phase 1 canonical database foundation is deployed, and the main Phase 2 delivery surfaces are built. Anka Sphere is the only active delivery environment, text AI uses the authenticated server gateway, client approvals default to disabled, and CI/lint/build gates are established.
 
-## 🎨 UI Components (Buddies Style)
+Migration 1 (`20260825010000_organization_access_foundation`) is live and verified on Supabase project `fhoxaogfjszftoqtnbav`. It establishes the organization and membership boundary, the four approved work environments, canonical client-contact/project-access/workstream tables, and default-deny legacy client visibility.
 
-Should exist in `src/components/`:
-- Card.jsx
-- StatCard.jsx
-- Badge.jsx
-- EmptyState.jsx
-- LoadingSkeleton.jsx
-- ErrorBoundary.jsx
-- DevSidebar.jsx
+Migration 2 (`20260825020000_security_boundary_hardening`) is also live and verified. Anonymous public-table grants and unnecessary elevated authenticated grants are removed, privileged functions have safe execution boundaries, and deliverable storage is restricted to internal team memberships without removing stored objects.
 
-## 📱 Apps Built (Phase 1-4)
+Migration 3 (`20260825030000_guarded_test_data_reset`) is live and verified. It cleared all 128 owner-approved test application rows while preserving five identities, five profiles, five memberships, one organization, four departments, and seven storage objects.
 
-Should exist in `src/apps/`:
-1. **AdminDashboard.jsx** - System-wide metrics, department comparison, time range selector
-2. **DevDashboard.jsx** - Sprint progress, PRs, deployments, tasks by stage
-3. **GitIntegration.jsx** - Read PRs, branches, commits from GitHub API
-4. **Terminal.jsx** - Embedded xterm.js terminal
+Migration 4 (`20260825040000_canonical_delivery_core`) is live and structurally verified. It defines the canonical delivery records, database-enforced task and deliverable-version lifecycles, immutable internal approvals and history, the automatic Living Project Record, and sanitized client portal projections. All canonical tables, RLS boundaries, grants, triggers, and client-approval gates passed.
 
-## 🤖 AI System
+Migration 5 (`20260825050000_retire_legacy_design_review_access`) is live and verified. The retired design review subsystem has zero policies, zero anonymous grants, zero authenticated grants, zero rows, and RLS remains enabled.
 
-Should exist in `src/lib/`:
-- **ai-provider.js** - Claude 3.5 Sonnet integration
-- **ai-actions.js** - executeAction handler for DB writes
-- **ai-context.js** - buildAIContext, detectIntent (general)
-- **dev-ai-context.js** - buildDevAIContext, detectDevIntent (dev-specific)
-- **github-api.js** - fetchPullRequests, fetchBranches, fetchCommits, fetchRepoInfo
+Migration 6 (`20260825060000_team_profile_alignment`) is prepared but intentionally not deployed during the build-first pass. It aligns display profiles with all four canonical departments without granting authorization from editable metadata. The rewritten invitation function authorizes against organization memberships and creates both the invited identity and active membership.
 
-## 🚧 Next Phase: Kanban Board
+Migration 7 (`20260825070000_release1_workflow_templates`) is prepared but not deployed. It seeds versioned Custom, Branding, Website Delivery, and Campaign workflows, including department ownership, explicit entry/exit quality criteria, human review gates, and project-scoped task dependency enforcement.
 
-### What We Need to Build:
-1. **Kanban.jsx** component with drag-drop
-2. **Workflow stages visualization**
-3. **AI integration** - auto-update tasks when moved
-4. **Real-time sync** - tasks update across users
+Migration 8 (`20260825080000_canonical_activity_notifications`) is prepared but not deployed. It replaces the permissive legacy notification policy with recipient-only read/update access, removes browser notification insertion, captures authorized delivery activity in private database triggers, advances the Living Project Record, and publishes the canonical notification feed to Realtime.
 
-### Implementation Plan:
-- Use @dnd-kit/core for drag-drop
-- Connect to tasks table (workflow_stage column)
-- AI detects task moves and updates DB
-- Real-time subscription to tasks changes
+Migration 9 (`20260825090000_ai_audit_and_human_control`) is prepared but not deployed. It adds immutable AI run evidence with caller/project/capability, authorized source manifests, provider/model, latency, token usage, optional cost estimates, and separately recorded human decisions. Browser writes are unavailable; the authenticated AI Edge Function owns audit mutations.
 
-## 📝 Environment Variables Required
+Migration 10 (`20260825100000_secure_integration_gateway`) is prepared but not deployed. It stores secret-free GitHub, Figma, and WordPress connection metadata behind team-only RLS, keeps browser writes revoked, and records immutable connection audit events. Credentials are resolved only from named Supabase Edge Function secrets.
 
-Create `.env` file with:
-[200~
-## 🔗 Important Links
-- **GitHub Repo:** https://github.com/sobanahmad001-hash/anka-os
-- **Supabase Project:** https://vzjpaptthqrohqnbhfvn.supabase.co
-- **Local Dev:** http://localhost:5173/
+Migration 11 (`20260825110000_version_review_annotations`) is prepared but not deployed. It adds structured section, page, frame, timecode, and normalized-coordinate anchors to exact-version comments without changing the separate revision-request workflow.
 
-## 🎯 Completed Phases
+The active project route now uses the canonical delivery repository. Content, Design, Marketing, and Delivery & Development each have a reusable canonical workshop with task queues, shared research, deliverables, cross-department requests, and milestones. No specialist workspace duplicates project or task records.
 
-- ✅ Phase 1: Database schema (7 new tables)
-- ✅ Phase 2: Admin Dashboard
-- ✅ Phase 3: Dev Dashboard
-- ✅ Phase 4: GitHub Integration + Terminal
+My Work now combines assigned tasks, handoffs, owned deliverables, internal reviews, and controlled releases. Exact deliverable versions support private file upload, immutable metadata, human internal quality decisions, and sanitized client release.
 
-## 🚀 Next Steps
+The client portal and client administration surfaces now use canonical records. Client contacts receive explicit per-project access without team membership. The portal receives only sanitized projections and released versions, supports live updates, project conversations and exact-version revisions, and uses short-lived authorization-checked file links. Formal client approval remains disabled.
 
-1. Verify all components exist locally
-2. Check browser at http://localhost:5173/
-3. Build Kanban board with AI integration
-4. Add Design department module
-5. Add Marketing department module
+Project intake now activates the selected workflow, generates sequenced execution tasks, and creates finish-to-start or approval dependencies. Legacy provider screens that expose browser credentials or write `as_*` records are no longer imported or linked; their old URLs safely redirect to the appropriate canonical workshop while secure replacements are evaluated.
 
+The agency command centre now presents active engagements, risk exceptions, workload by department, overdue work, review/release queues, milestones, and recent database-generated activity. These are operational pressure signals and are not treated as employee performance scores.
+
+The active Anka AI surface now uses canonical records instead of `as_*` context. Project Pulse, Daily Brief, Research Support, Writing Support, Quality Review, and Action Proposal retrieve context through the caller's RLS session. AI cannot approve or execute directly; supported task/research proposals require a separate human confirmation and outcome audit. The unaudited floating mini-chat has been retired.
+
+Reports & Living Records is now a first-class Sphere workspace. It composes the current canonical project state, preserves immutable internal or client snapshot checkpoints using the existing RLS-protected tables, and exports Markdown, JSON, or print-ready output. Client projections are allowlisted to client-visible milestones, released exact deliverable versions, client requests, and client-visible activity; they exclude tasks, research, scope, exclusions, internal activity, provider prompts, and costs.
+
+All major application surfaces now use route-level lazy loading with a shared loading boundary. Projects, Portal, clients, workshops, AI, admin, settings, and reporting no longer have to ship as one initial application chunk.
+
+The Admin Settings surface is now a secure Integration Center. GitHub repository, Figma file, and WordPress site connections can be configured and tested without entering credentials into the browser or database. Release 1 provider operations are read/test-only; external modification and publishing remain disabled during UAT.
+
+Obsolete desktop-shell, duplicate project/workshop, browser-credential, and unaudited media-generation modules have been removed from the release source. They remain recoverable from Git history if a future secure feature intentionally reuses their product ideas.
+
+## Verification
+
+- Production build: passing; route-split initial JavaScript is approximately 426 kB (125 kB gzip), reduced from approximately 911 kB.
+- ESLint: passing with zero errors and 119 tracked warnings.
+- Active Diversify routes/navigation: none.
+- Database target: `fhoxaogfjszftoqtnbav`, verified.
+- Migration 1 live verification: passed.
+- Foundation tables: all five present.
+- Organization memberships: five for five authentication users.
+- Client-visible legacy records: zero.
+- Formal client signoff update policy: absent.
+- `sphere-deliverables` bucket: private.
+- Anonymous public-table grants: zero.
+- Elevated authenticated table grants: zero.
+- Reviewed privileged functions with anonymous execution: zero.
+- Internal deliverable storage policies: four.
+- Preserved `sphere-deliverables` objects: seven.
+- Canonical repository, route, workflow, workshop, quality, AI, command-centre, notification, portal, annotation, reporting, integration, export-privacy, performance, security, and provisioning tests: sixty-seven passing.
+- Migration 4 static security checks: passing.
+- Migration 5 live verification: passed.
+
+## Current blockers
+
+1. Live multi-user RLS tests require seeded team/client fixtures before client portal activation.
+2. The Supabase migration ledger still needs Migrations 1–5 marked applied before automated deployment.
+3. Migrations 6–11 and authenticated Edge Functions are prepared but not deployed.
+4. Any provider key previously included as a browser `VITE_*` value must be rotated before production use.
+5. Component/browser and multi-role UAT remain deployment-stage gates.
+6. Frontend hosting must be confirmed and connected after the controlled Supabase deployment.
+
+## Next gate
+
+The Release 1 feature build is complete. Follow `docs/release/DEPLOYMENT_RUNBOOK.md` for migration-history repair, controlled database/function deployment, frontend hosting, and multi-role UAT.
+
+See `docs/phase-1/MIGRATION_1_VERIFICATION.md`, `LIVE_SUPABASE_INVENTORY_FINDINGS.md`, and `MIGRATION_1_RUNBOOK.md` for current evidence.

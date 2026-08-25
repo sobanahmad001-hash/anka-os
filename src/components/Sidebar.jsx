@@ -6,27 +6,22 @@ export default function Sidebar() {
   const { profile } = useAuth()
   const location = useLocation()
   const activeEnvKey = getEnvironmentFromPath(location.pathname)
-  const activeEnv = environmentNav.find(e => e.key === activeEnvKey) || environmentNav[2]
+  const activeEnv = environmentNav.find((environment) => environment.key === activeEnvKey)
+    || environmentNav.find((environment) => environment.key === 'sphere')
   const userDept = profile?.department
 
   function shouldShow(item) {
-    if (activeEnv.key === 'admin') {
-      return profile?.role === 'admin'
-    }
-    if (activeEnv.key === 'diversify') return true
+    if (activeEnv.key === 'admin') return profile?.role === 'admin'
     if (activeEnv.key === 'sphere') {
       if (item.dept === null) return true
-      if (item.isHeader) {
-        return profile?.role === 'admin' || userDept === item.dept
-      }
       return profile?.role === 'admin' || userDept === item.dept
     }
-    return true
+    return false
   }
 
   const visibleItems = activeEnv.items.filter(shouldShow)
-
-  const DEPT_BADGE_COLORS = {
+  const departmentBadgeColors = {
+    content: 'bg-amber-900/50 text-amber-300',
     design: 'bg-pink-900/50 text-pink-300',
     development: 'bg-blue-900/50 text-blue-300',
     marketing: 'bg-green-900/50 text-green-300',
@@ -38,23 +33,19 @@ export default function Sidebar() {
         <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">
           Current Environment
         </div>
-        <div className="mt-2 text-lg font-bold text-white">
-          {activeEnv.label}
-        </div>
-        <div className="mt-1 text-xs text-gray-500">
-          {activeEnv.description}
-        </div>
+        <div className="mt-2 text-lg font-bold text-white">{activeEnv.label}</div>
+        <div className="mt-1 text-xs text-gray-500">{activeEnv.description}</div>
         {activeEnv.key === 'sphere' && userDept && profile?.role !== 'admin' && (
           <div className="mt-3">
-            <span className={`text-xs px-2 py-1 rounded-full font-medium capitalize ${DEPT_BADGE_COLORS[userDept] || 'bg-gray-700 text-gray-300'}`}>
-              {userDept} dept
+            <span className={`text-xs px-2 py-1 rounded-full font-medium capitalize ${departmentBadgeColors[userDept] || 'bg-gray-700 text-gray-300'}`}>
+              {userDept} department
             </span>
           </div>
         )}
         {activeEnv.key === 'sphere' && profile?.role === 'admin' && (
           <div className="mt-3">
             <span className="text-xs px-2 py-1 rounded-full font-medium bg-purple-900/50 text-purple-300">
-              admin · all depts
+              Admin - all departments
             </span>
           </div>
         )}
@@ -65,12 +56,12 @@ export default function Sidebar() {
           Views
         </div>
         <div className="space-y-0.5">
-          {visibleItems.map((item, i) => {
+          {visibleItems.map((item) => {
             if (item.isHeader) {
               return (
-                <div key={i} className="px-2 pt-4 pb-1">
+                <div key={`header-${item.label}`} className="px-2 pt-4 pb-1">
                   <p className="text-[10px] uppercase tracking-widest text-gray-600 font-semibold">
-                    {item.label.replace('— ', '')}
+                    {item.label}
                   </p>
                 </div>
               )

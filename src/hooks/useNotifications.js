@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
-import { supabase } from '../lib/supabase.js'
+import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
+import { supabase } from '../lib/supabase.js'
 
 export function useNotifications() {
   const { user } = useAuth()
@@ -8,64 +8,61 @@ export function useNotifications() {
   const [unread, setUnread] = useState(0)
 
   useEffect(() => {
-    if (!user?.id) return
+    if (!user?.id) return undefined
     fetchNotifications()
 
-    // Real-time subscription
-    const channel = supabase
-      .channel('notifications')
+    const channel = supabase.channel(`notifications-${user.id}`)
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
-        table: 'as_notifications',
-        filter: `recipient_id=eq.${user.id}`
+        table: 'notifications',
+        filter: `user_id=eq.${user.id}`,
       }, payload => {
-        setNotifications(prev => [payload.new, ...prev.slice(0, 19)])
-        setUnread(prev => prev + 1)
+        setNotifications(current => [payload.new, ...current].slice(0, 30))
+        setUnread(current => current + 1)
       })
       .subscribe()
 
-    return () => supabase.removeChannel(channel)
+    return () => { supabase.removeChannel(channel) }
   }, [user?.id])
 
   async function fetchNotifications() {
-    const { data } = await supabase
-      .from('as_notifications')
-      .select('*')
-      .eq('recipient_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(20)
+    if (!user?.id) return
+    const { data, error } = await supabase.from('notifications')
+      .select('*').eq('user_id', user.id).is('archived_at', null)
+      .order('created_at', { ascending: false }).limit(30)
+    if (error) return
     setNotifications(data || [])
-    setUnread((data || []).filter(n => !n.read).length)
+    setUnread((data || []).filter(item => !item.read).length)
   }
 
   async function markRead(id) {
-    await supabase.from('as_notifications').update({ read: true }).eq('id', id)
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))
-    setUnread(prev => Math.max(0, prev - 1))
+    const readAt = new Date().toISOString()
+    const { error } = await supabase.from('notifications')
+      .update({ read: true, read_at: readAt }).eq('id', id).eq('user_id', user.id)
+    if (error) return
+    setNotifications(current => current.map(item => item.id === id ? { ...item, read: true, read_at: readAt } : item))
+    setUnread(current => Math.max(0, current - 1))
   }
 
   async function markAllRead() {
-    await supabase.from('as_notifications')
-      .update({ read: true })
-      .eq('recipient_id', user.id)
-      .eq('read', false)
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+    if (!user?.id || unread === 0) return
+    const readAt = new Date().toISOString()
+    const { error } = await supabase.from('notifications')
+      .update({ read: true, read_at: readAt })
+      .eq('user_id', user.id).eq('read', false)
+    if (error) return
+    setNotifications(current => current.map(item => ({ ...item, read: true, read_at: readAt })))
     setUnread(0)
   }
 
-  return { notifications, unread, markRead, markAllRead, fetchNotifications }
-}
-
-// Helper — call this from anywhere to create a notification
-export async function createNotification(recipientId, type, title, message, projectId = null) {
-  if (!recipientId) return
-  await supabase.from('as_notifications').insert({
-    recipient_id: recipientId,
-    notification_type: type,
-    title,
-    message,
-    project_id: projectId,
-    read: false
-  })
+  return {
+    notifications,
+    unread,
+    unreadCount: unread,
+    markRead,
+    markAsRead: markRead,
+    markAllRead,
+    fetchNotifications,
+  }
 }

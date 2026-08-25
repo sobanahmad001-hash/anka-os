@@ -1,37 +1,28 @@
+import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import Layout from './components/Layout'
-import Login from './pages/Login'
 
-// Import existing app components
-import Dashboard from './apps/Dashboard'
-import Projects from './apps/Projects'
-import Tasks from './apps/Tasks'
-import Chat from './apps/Chat'
-import Files from './apps/Files'
-import Calendar from './apps/Calendar'
-import TimeTracker from './apps/TimeTracker'
-import Clients from './apps/Clients'
-import Campaigns from './apps/Campaigns'
-import Settings from './apps/Settings'
-import AdminDashboard from './apps/AdminDashboard'
-import DevDashboard from './apps/DevDashboard'
-import GitIntegration from './apps/GitIntegration'
-import Kanban from './apps/Kanban'
-import ApiDocs from './apps/ApiDocs'
-import UserManagement from './apps/UserManagement'
-import Terminal from './apps/Terminal'
-import AnkaSphereProjects from './apps/AnkaSphereProjects'
-import AnkaSphereTeamBoard from './apps/AnkaSphereTeamBoard'
-import AnkaSpherePortal from './apps/AnkaSpherePortal'
-import AnkaSphereClients from './apps/AnkaSphereClients'
-import CodingAgent from './apps/CodingAgent'
-import SphereCreativeStudio from './apps/SphereCreativeStudio'
-import SphereWPEngine from './apps/SphereWPEngine'
-import SphereMarketing from './apps/SphereMarketing'
-import SphereFigmaWorkspace from './apps/SphereFigmaWorkspace'
-import AnkaAssistant from './apps/AnkaAssistant'
-import LivingProductDocument from './apps/LivingProductDocument'
+const Login = lazy(() => import('./pages/Login'))
+const Settings = lazy(() => import('./apps/Settings'))
+const AgencyCommandCenter = lazy(() => import('./apps/AgencyCommandCenter'))
+const UserManagement = lazy(() => import('./apps/UserManagement'))
+const CanonicalProjects = lazy(() => import('./apps/CanonicalProjects'))
+const DepartmentWorkshop = lazy(() => import('./apps/DepartmentWorkshop'))
+const MyWork = lazy(() => import('./apps/MyWork'))
+const AnkaSpherePortal = lazy(() => import('./apps/AnkaSpherePortal'))
+const AnkaSphereClients = lazy(() => import('./apps/AnkaSphereClients'))
+const AnkaAssistant = lazy(() => import('./apps/AnkaAssistant'))
+const LivingProductDocument = lazy(() => import('./apps/LivingProductDocument'))
+const ReportsAndRecords = lazy(() => import('./apps/ReportsAndRecords'))
+
+function RouteFallback() {
+  return (
+    <div className="flex h-full min-h-48 items-center justify-center bg-slate-950 text-sm text-slate-400">
+      Loading workspace…
+    </div>
+  )
+}
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -45,6 +36,7 @@ function ProtectedRoute({ children }) {
 
 export default function App() {
   return (
+    <Suspense fallback={<RouteFallback />}>
     <Routes>
       <Route path="/login" element={<Login />} />
       
@@ -57,42 +49,42 @@ export default function App() {
         }
       >
         {/* Default redirect */}
-        <Route index element={<Navigate to="/diversify/projects" replace />} />
+        <Route index element={<Navigate to="/sphere/projects" replace />} />
 
         {/* ADMIN */}
-        <Route path="admin" element={<AdminDashboard />} />
+        <Route path="admin" element={<AgencyCommandCenter />} />
         <Route path="admin/living-product-document" element={<LivingProductDocument />} />
         <Route path="users" element={<UserManagement />} />
         <Route path="settings" element={<Settings />} />
 
         {/* ANKA SPHERE */}
-        <Route path="sphere/projects" element={<AnkaSphereProjects />} />
+        <Route path="sphere/projects" element={<CanonicalProjects />} />
+        <Route path="sphere/my-work" element={<MyWork />} />
+        <Route path="sphere/content" element={<DepartmentWorkshop departmentId="content" />} />
+        <Route path="sphere/design" element={<DepartmentWorkshop departmentId="design" />} />
+        <Route path="sphere/marketing" element={<DepartmentWorkshop departmentId="marketing" />} />
+        <Route path="sphere/delivery" element={<DepartmentWorkshop departmentId="development" />} />
         <Route path="sphere/clients" element={<AnkaSphereClients />} />
         <Route path="sphere/portal" element={<AnkaSpherePortal />} />
-        <Route path="sphere/team-board" element={<AnkaSphereTeamBoard />} />
-        <Route path="sphere/figma" element={<SphereFigmaWorkspace />} />
-        <Route path="sphere/assets" element={<SphereCreativeStudio />} />
-        <Route path="sphere/moodboard" element={<SphereCreativeStudio />} />
-        <Route path="sphere/design-reviews" element={<SphereCreativeStudio />} />
-        <Route path="sphere/wp-sites" element={<SphereWPEngine />} />
-        <Route path="sphere/deployments" element={<SphereWPEngine />} />
-        <Route path="sphere/performance" element={<SphereWPEngine />} />
-        <Route path="sphere/campaigns" element={<SphereMarketing />} />
-        <Route path="sphere/content" element={<SphereMarketing />} />
-        <Route path="sphere/calendar" element={<SphereMarketing />} />
-        <Route path="sphere/seo" element={<SphereMarketing />} />
-
-        {/* ANKA DIVERSIFY */}
-        <Route path="diversify/projects" element={<Projects />} />
-        <Route path="diversify/agent" element={<CodingAgent />} />
-        <Route path="diversify/kanban" element={<Kanban />} />
-        <Route path="diversify/git" element={<GitIntegration />} />
-        <Route path="diversify/api-docs" element={<ApiDocs />} />
-        <Route path="diversify/terminal" element={<Terminal />} />
+        <Route path="sphere/reports" element={<ReportsAndRecords />} />
+        <Route path="sphere/team-board" element={<Navigate to="/sphere/my-work" replace />} />
+        <Route path="sphere/figma" element={<Navigate to="/sphere/design" replace />} />
+        <Route path="sphere/assets" element={<Navigate to="/sphere/design" replace />} />
+        <Route path="sphere/moodboard" element={<Navigate to="/sphere/design" replace />} />
+        <Route path="sphere/design-reviews" element={<Navigate to="/sphere/design" replace />} />
+        <Route path="sphere/wp-sites" element={<Navigate to="/sphere/delivery" replace />} />
+        <Route path="sphere/deployments" element={<Navigate to="/sphere/delivery" replace />} />
+        <Route path="sphere/performance" element={<Navigate to="/sphere/delivery" replace />} />
+        <Route path="sphere/campaigns" element={<Navigate to="/sphere/marketing" replace />} />
+        <Route path="sphere/calendar" element={<Navigate to="/sphere/marketing" replace />} />
+        <Route path="sphere/seo" element={<Navigate to="/sphere/marketing" replace />} />
 
         {/* ANKA ASSISTANT */}
         <Route path="assistant" element={<AnkaAssistant />} />
+
+        <Route path="*" element={<Navigate to="/sphere/projects" replace />} />
       </Route>
     </Routes>
+    </Suspense>
   )
 }

@@ -30,14 +30,14 @@ export default function Header() {
 
   const NOTIF_ICONS = {
     task_assigned: '📋',
-    handoff_requested: '🔄',
-    handoff_approved: '✅',
-    handoff_rejected: '❌',
-    phase_changed: '⚡',
-    client_signoff_requested: '✍️',
-    deliverable_uploaded: '📎',
-    comment: '💬',
-    mention: '@',
+    task_status: '✓',
+    request_assigned: '↗',
+    request_status: '↻',
+    review_required: '◎',
+    client_revision: '↩',
+    client_message: '💬',
+    project_update: '⚡',
+    system: '◆',
   }
 
   return (
@@ -114,13 +114,14 @@ export default function Header() {
                       key={notif.id}
                       onClick={() => {
                         markRead(notif.id)
-                        if (notif.project_id) navigate(`/sphere/projects`)
+                        if (notif.action_url) navigate(notif.action_url)
+                        else if (notif.project_id) navigate('/sphere/projects')
                         setShowNotifications(false)
                       }}
                       className={`w-full text-left px-4 py-3 border-b border-gray-700/50 hover:bg-gray-700/50 transition-colors ${!notif.read ? 'bg-purple-900/10' : ''}`}>
                       <div className="flex items-start gap-3">
                         <span className="text-base flex-shrink-0 mt-0.5">
-                          {NOTIF_ICONS[notif.notification_type] || '🔔'}
+                          {NOTIF_ICONS[notif.type] || '🔔'}
                         </span>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
@@ -131,7 +132,7 @@ export default function Header() {
                               <div className="w-1.5 h-1.5 rounded-full bg-purple-500 flex-shrink-0" />
                             )}
                           </div>
-                          <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{notif.message}</p>
+                          <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{notif.body}</p>
                           <p className="text-xs text-gray-600 mt-1">
                             {new Date(notif.created_at).toLocaleString('en', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                           </p>
