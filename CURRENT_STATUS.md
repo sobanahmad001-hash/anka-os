@@ -2,13 +2,13 @@
 
 Last updated: 2026-08-25
 
-Active branch: `codex/phase-0-foundation`
+Active branch: `chore/repo-hygiene-and-test-flags`
 
 Product authority: `docs/product/RELEASE_1_AUTHORITY.md`
 
 ## Current outcome
 
-Phase 0 is complete, the Phase 1 canonical database foundation is deployed, and the main Phase 2 delivery surfaces are built. Anka Sphere is the only active delivery environment, text AI uses the authenticated server gateway, client approvals default to disabled, and CI/lint/build gates are established.
+Phase 0 is complete, the Phase 1 canonical database foundation is deployed, and the main Phase 2 delivery surfaces are built. Anka Sphere is the only active delivery environment, text AI uses the authenticated server gateway, client approvals / AI assistance / integration tests default to enabled for full-path testing, and CI/lint/build gates are established.
 
 Migration 1 (`20260825010000_organization_access_foundation`) is live and verified on Supabase project `fhoxaogfjszftoqtnbav`. It establishes the organization and membership boundary, the four approved work environments, canonical client-contact/project-access/workstream tables, and default-deny legacy client visibility.
 
@@ -32,11 +32,13 @@ Migration 10 (`20260825100000_secure_integration_gateway`) is prepared but not d
 
 Migration 11 (`20260825110000_version_review_annotations`) is prepared but not deployed. It adds structured section, page, frame, timecode, and normalized-coordinate anchors to exact-version comments without changing the separate revision-request workflow.
 
+Migration 13 (`20260825130000_enable_client_approvals_for_testing`) is prepared. It turns on `client_approvals_enabled`, allows authorized clients to record approvals against released versions, and advances the exact-version lifecycle.
+
 The active project route now uses the canonical delivery repository. Content, Design, Marketing, and Delivery & Development each have a reusable canonical workshop with task queues, shared research, deliverables, cross-department requests, and milestones. No specialist workspace duplicates project or task records.
 
 My Work now combines assigned tasks, handoffs, owned deliverables, internal reviews, and controlled releases. Exact deliverable versions support private file upload, immutable metadata, human internal quality decisions, and sanitized client release.
 
-The client portal and client administration surfaces now use canonical records. Client contacts receive explicit per-project access without team membership. The portal receives only sanitized projections and released versions, supports live updates, project conversations and exact-version revisions, and uses short-lived authorization-checked file links. Formal client approval remains disabled.
+The client portal and client administration surfaces now use canonical records. Client contacts receive explicit per-project access without team membership. The portal receives only sanitized projections and released versions, supports live updates, project conversations and exact-version revisions, and uses short-lived authorization-checked file links. Formal client approval is enabled behind the feature flag and organization setting.
 
 Project intake now activates the selected workflow, generates sequenced execution tasks, and creates finish-to-start or approval dependencies. Legacy provider screens that expose browser credentials or write `as_*` records are no longer imported or linked; their old URLs safely redirect to the appropriate canonical workshop while secure replacements are evaluated.
 
@@ -69,7 +71,7 @@ Obsolete desktop-shell, duplicate project/workshop, browser-credential, and unau
 - Reviewed privileged functions with anonymous execution: zero.
 - Internal deliverable storage policies: four.
 - Preserved `sphere-deliverables` objects: seven.
-- Canonical repository, route, workflow, workshop, quality, AI, command-centre, notification, portal, annotation, reporting, integration, export-privacy, performance, security, and provisioning tests: sixty-seven passing.
+- Canonical repository, route, workflow, workshop, quality, AI, command-centre, notification, portal, annotation, reporting, integration, export-privacy, performance, security, and provisioning tests: sixty-eight passing.
 - Migration 4 static security checks: passing.
 - Migration 5 live verification: passed.
 
@@ -77,13 +79,13 @@ Obsolete desktop-shell, duplicate project/workshop, browser-credential, and unau
 
 1. Live multi-user RLS tests require seeded team/client fixtures before client portal activation.
 2. The Supabase migration ledger still needs Migrations 1–5 marked applied before automated deployment.
-3. Migrations 6–11 and authenticated Edge Functions are prepared but not deployed.
+3. Migrations 6–13 and authenticated Edge Functions are prepared but not deployed.
 4. Any provider key previously included as a browser `VITE_*` value must be rotated before production use.
 5. Component/browser and multi-role UAT remain deployment-stage gates.
 6. Frontend hosting must be confirmed and connected after the controlled Supabase deployment.
 
 ## Next gate
 
-The Release 1 feature build is complete. Follow `docs/release/DEPLOYMENT_RUNBOOK.md` for migration-history repair, controlled database/function deployment, frontend hosting, and multi-role UAT.
+Testing flags are on in the application. Follow `docs/release/DEPLOYMENT_RUNBOOK.md` for migration-history repair, controlled database/function deployment of migrations 6–13, frontend hosting, and multi-role UAT.
 
 See `docs/phase-1/MIGRATION_1_VERIFICATION.md`, `LIVE_SUPABASE_INVENTORY_FINDINGS.md`, and `MIGRATION_1_RUNBOOK.md` for current evidence.
