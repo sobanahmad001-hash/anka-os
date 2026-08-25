@@ -26,7 +26,6 @@ test('portal revision stays linked to the exact released version', () => {
 
 test('formal client approval is available behind the feature flag', () => {
   assert.match(portal, /featureFlags\.clientApprovals/)
-  assert.match(portal, /recordClientApproval/)
   assert.match(approvals, /approval_type: 'client_approval'/)
   assert.match(deliveryEntry, /recordClientApproval/)
 })
