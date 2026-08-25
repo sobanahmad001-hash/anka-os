@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { useAuth } from '../context/AuthContext.jsx'
+import { featureFlags } from '../config/featureFlags.js'
 import {
   TASK_TRANSITIONS,
   WORKSTREAM_DEPARTMENTS,
@@ -60,6 +61,20 @@ const STATUS_STYLES = {
   cancelled: 'bg-slate-900 text-slate-500',
 }
 
+const STATUS_FILTERS = [
+  ['all', 'All'],
+  ['active', 'Active'],
+  ['planning', 'Planning'],
+  ['on_hold', 'On hold'],
+  ['completed', 'Completed'],
+]
+
+const PROJECT_ACCENTS = {
+  project: 'from-violet-500/25 to-indigo-500/10 text-violet-200 ring-violet-500/20',
+  retainer: 'from-cyan-500/25 to-blue-500/10 text-cyan-200 ring-cyan-500/20',
+  internal: 'from-amber-500/25 to-orange-500/10 text-amber-200 ring-amber-500/20',
+}
+
 const INPUT_CLASS = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20'
 const LABEL_CLASS = 'mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400'
 
@@ -82,10 +97,24 @@ function StatusBadge({ value }) {
 
 function Metric({ label, value, note }) {
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-      <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
-      {note && <p className="mt-1 text-xs text-slate-500">{note}</p>}
+    <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.12)]">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-500">{label}</p>
+        <span className="mt-0.5 h-1.5 w-1.5 rounded-full bg-violet-400/70" />
+      </div>
+      <p className="mt-3 text-2xl font-semibold tracking-tight text-white">{value}</p>
+      {note && <p className="mt-1 text-[11px] text-slate-600">{note}</p>}
+    </div>
+  )
+}
+
+function ProjectGlyph({ type }) {
+  return (
+    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ring-1 ${PROJECT_ACCENTS[type] || PROJECT_ACCENTS.project}`}>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M5 19V8.5L12 4l7 4.5V19" />
+        <path d="M9 19v-5h6v5M8 10h.01M16 10h.01" />
+      </svg>
     </div>
   )
 }
@@ -139,6 +168,8 @@ export default function CanonicalProjects() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [showIntake, setShowIntake] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [engagement, setEngagement] = useState(initialEngagement)
   const [taskForm, setTaskForm] = useState({ title: '', workstreamId: '', priority: 'medium', dueDate: '', acceptanceCriteria: '' })
   const [researchForm, setResearchForm] = useState({ title: '', workstreamId: '', researchType: 'market', question: '', findings: '' })
@@ -405,24 +436,39 @@ export default function CanonicalProjects() {
     const days = (new Date(project.due_date) - new Date()) / 86400000
     return days >= 0 && days <= 14
   }).length
+  const normalizedSearch = searchQuery.trim().toLowerCase()
+  const filteredProjects = projects.filter((project) => {
+    const client = clientsById.get(project.client_id)
+    const matchesStatus = statusFilter === 'all' || project.status === statusFilter
+    const matchesSearch = !normalizedSearch || [
+      project.name,
+      project.description,
+      project.engagement_type,
+      client?.name,
+      client?.company,
+    ].some((value) => String(value || '').toLowerCase().includes(normalizedSearch))
+    return matchesStatus && matchesSearch
+  })
 
   return (
-    <div className="h-full overflow-y-auto bg-slate-950 text-white">
-      <div className="mx-auto max-w-7xl px-6 py-7">
+    <div className="h-full overflow-y-auto text-white">
+      <div className="mx-auto max-w-[1440px] px-4 py-5 sm:px-6 sm:py-7 lg:px-8">
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-400">Internal Delivery OS</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight">Projects & Retainers</h1>
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-400">
+              <span>Anka Sphere</span><span className="text-slate-700">/</span><span className="text-slate-500">Delivery</span>
+            </div>
+            <h1 className="mt-2 text-3xl font-semibold tracking-[-0.035em] sm:text-4xl">Projects</h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-              One engagement record connecting department work, research, deliverables, requests, and project history.
+              Plan, coordinate, and release every client engagement from one accountable workspace.
             </p>
           </div>
           <button
             type="button"
             onClick={() => setShowIntake(true)}
-            className="rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-purple-500"
+            className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-[0_10px_30px_rgba(255,255,255,0.08)] transition hover:-translate-y-0.5 hover:bg-violet-100"
           >
-            New engagement
+            <span className="text-lg leading-none">+</span> New engagement
           </button>
         </div>
 
@@ -432,52 +478,96 @@ export default function CanonicalProjects() {
           </div>
         )}
 
-        <div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Metric label="Engagements" value={projects.length} note="Projects, retainers, and internal work" />
-          <Metric label="Active" value={activeCount} note="Currently in delivery" />
-          <Metric label="Due in 14 days" value={dueSoonCount} note="Upcoming delivery pressure" />
-          <Metric label="Client approvals" value="Off" note="Held until portal UAT" />
+        <div className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Metric label="Total engagements" value={projects.length} note="Projects, retainers, and internal work" />
+          <Metric label="Active delivery" value={activeCount} note="Currently moving through production" />
+          <Metric label="Due soon" value={dueSoonCount} note="Due within the next 14 days" />
+          <Metric label="Client approvals" value={featureFlags.clientApprovals ? 'Enabled' : 'Off'} note="Exact released-version decisions" />
         </div>
 
-        <div className="mt-7">
+        <section className="mt-6 overflow-hidden rounded-3xl border border-white/[0.07] bg-[#0e111a]/80 shadow-[0_28px_100px_rgba(0,0,0,0.24)] backdrop-blur-sm">
+          <div className="border-b border-white/[0.07] p-4 sm:p-5">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-white">Engagement directory</h2>
+                <p className="mt-1 text-xs text-slate-500">{filteredProjects.length} of {projects.length} visible</p>
+              </div>
+              <label className="relative block w-full xl:max-w-md">
+                <span className="sr-only">Search projects or clients</span>
+                <svg className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-600" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                <input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search projects or clients…"
+                  className="w-full rounded-xl border border-white/[0.08] bg-black/20 py-2.5 pl-10 pr-4 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/10"
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+              {STATUS_FILTERS.map(([value, label]) => {
+                const count = value === 'all' ? projects.length : projects.filter((project) => project.status === value).length
+                const active = statusFilter === value
+                return (
+                  <button
+                    type="button"
+                    key={value}
+                    onClick={() => setStatusFilter(value)}
+                    className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${active ? 'border-violet-400/25 bg-violet-500/15 text-violet-100' : 'border-white/[0.07] bg-white/[0.02] text-slate-500 hover:border-white/15 hover:text-slate-200'}`}
+                  >
+                    {label}<span className={`rounded-full px-1.5 py-0.5 text-[10px] ${active ? 'bg-violet-400/15 text-violet-200' : 'bg-white/[0.04] text-slate-600'}`}>{count}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="p-4 sm:p-5">
           {projects.length === 0 ? (
             <EmptyPanel
               title="No canonical engagements yet"
               description="The test data has been cleared. Create the first real internal engagement to activate workstreams and its Living Project Record."
             />
+          ) : filteredProjects.length === 0 ? (
+            <EmptyPanel
+              title="No matching engagements"
+              description="Try a different client, project name, or delivery status."
+            />
           ) : (
-            <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-              {projects.map((project) => {
+            <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+              {filteredProjects.map((project) => {
                 const client = clientsById.get(project.client_id)
                 return (
                   <button
                     type="button"
                     key={project.id}
                     onClick={() => openWorkspace(project.id)}
-                    className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-left transition hover:-translate-y-0.5 hover:border-purple-700 hover:bg-slate-900"
+                    className="group rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5 text-left transition duration-200 hover:-translate-y-0.5 hover:border-violet-500/30 hover:bg-white/[0.045] hover:shadow-[0_20px_50px_rgba(0,0,0,0.2)]"
                   >
                     <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
-                          {labelize(project.engagement_type)}
-                        </p>
-                        <h2 className="mt-2 text-lg font-semibold text-white">{project.name}</h2>
+                      <div className="flex min-w-0 items-center gap-3">
+                        <ProjectGlyph type={project.engagement_type} />
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-slate-600">{labelize(project.engagement_type)}</p>
+                          <h3 className="mt-1 truncate text-base font-semibold text-white transition-colors group-hover:text-violet-100">{project.name}</h3>
+                        </div>
                       </div>
                       <StatusBadge value={project.status} />
                     </div>
-                    <p className="mt-3 line-clamp-2 min-h-10 text-sm leading-5 text-slate-400">
+                    <p className="mt-4 line-clamp-2 min-h-10 text-sm leading-5 text-slate-400">
                       {project.description || 'No description added yet.'}
                     </p>
-                    <div className="mt-5 flex items-center justify-between border-t border-slate-800 pt-4 text-xs text-slate-500">
-                      <span>{client?.company || client?.name || 'Internal engagement'}</span>
-                      <span>{formatDate(project.due_date)}</span>
+                    <div className="mt-5 flex items-center justify-between gap-3 border-t border-white/[0.06] pt-4 text-xs text-slate-500">
+                      <span className="truncate">{client?.company || client?.name || 'Internal engagement'}</span>
+                      <span className="shrink-0">Due {formatDate(project.due_date)}</span>
                     </div>
                   </button>
                 )
               })}
             </div>
           )}
-        </div>
+          </div>
+        </section>
       </div>
 
       {showIntake && (
