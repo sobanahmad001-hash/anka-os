@@ -11,7 +11,7 @@ entrypoint = "./functions/invite-user/index.ts"
 # static_files = [ "./functions/invite-user/*.html" ]
 
 [functions.ai-chat]
-enabled = true
+enabled = false
 verify_jwt = true
 entrypoint = "./functions/ai-chat/index.ts"
 
@@ -26,6 +26,6 @@ verify_jwt = true
 entrypoint = "./functions/portal-file-url/index.ts"
 
 [functions.integration-gateway]
-enabled = true
+enabled = false
 verify_jwt = true
 entrypoint = "./functions/integration-gateway/index.ts"

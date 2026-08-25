@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import Layout from './components/Layout'
+import { featureFlags } from './config/featureFlags'
 
 const Login = lazy(() => import('./pages/Login'))
 const Settings = lazy(() => import('./apps/Settings'))
@@ -80,7 +81,7 @@ export default function App() {
         <Route path="sphere/seo" element={<Navigate to="/sphere/marketing" replace />} />
 
         {/* ANKA ASSISTANT */}
-        <Route path="assistant" element={<AnkaAssistant />} />
+        <Route path="assistant" element={featureFlags.aiAssistance ? <AnkaAssistant /> : <Navigate to="/sphere/projects" replace />} />
 
         <Route path="*" element={<Navigate to="/sphere/projects" replace />} />
       </Route>

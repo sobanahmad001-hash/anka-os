@@ -1,6 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { environmentNav, getEnvironmentFromPath } from '../config/environmentNav'
+import { featureFlags } from '../config/featureFlags'
 
 export default function Sidebar() {
   const { profile } = useAuth()
@@ -11,6 +12,7 @@ export default function Sidebar() {
   const userDept = profile?.department
 
   function shouldShow(item) {
+    if (item.path === '/assistant' && !featureFlags.aiAssistance) return false
     if (activeEnv.key === 'admin') return profile?.role === 'admin'
     if (activeEnv.key === 'sphere') {
       if (item.dept === null) return true
