@@ -4,6 +4,7 @@
 node_modules/
 dist/
 temp-vite/
+supabase/.temp/
 *.swp
 *.swo
 .DS_Store
