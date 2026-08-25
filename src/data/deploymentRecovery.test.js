@@ -11,6 +11,8 @@ const app = readFileSync(new URL('../App.jsx', import.meta.url), 'utf8')
 test('stale deployment chunks trigger a guarded one-time reload', () => {
   assert.match(main, /vite:preloadError/)
   assert.match(main, /anka:last-chunk-reload/)
+  assert.match(main, /anka_reload/)
+  assert.match(main, /window\.location\.replace/)
   assert.match(main, /Date\.now\(\) - lastReload > 60_000/)
   assert.ok(
     main.indexOf('Date.now() - lastReload > 60_000') < main.indexOf('event.preventDefault()'),
@@ -21,7 +23,8 @@ test('stale deployment chunks trigger a guarded one-time reload', () => {
 test('unexpected render failures show a visible recovery action', () => {
   assert.match(main, /AppErrorBoundary/)
   assert.match(boundary, /Reload Anka OS/)
-  assert.match(boundary, /window\.location\.reload/)
+  assert.match(boundary, /anka_reload/)
+  assert.match(boundary, /window\.location\.replace/)
 })
 
 test('optional profile and preference records do not emit 406 errors', () => {
