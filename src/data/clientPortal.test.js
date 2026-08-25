@@ -4,14 +4,16 @@ import test from 'node:test'
 
 const portal = readFileSync(new URL('../apps/AnkaSpherePortal.jsx', import.meta.url), 'utf8')
 const repository = readFileSync(new URL('./deliveryRepository.js', import.meta.url), 'utf8')
+const approvals = readFileSync(new URL('./clientApprovals.js', import.meta.url), 'utf8')
+const deliveryEntry = readFileSync(new URL('./delivery.js', import.meta.url), 'utf8')
 const fileFunction = readFileSync(new URL('../../supabase/functions/portal-file-url/index.ts', import.meta.url), 'utf8')
 
 test('client portal uses only the canonical repository and projection records', () => {
   assert.doesNotMatch(portal, /\.from\(/)
   assert.doesNotMatch(portal, /as_/)
   assert.match(repository, /from\('client_project_projections'\)/)
-  assert.match(repository, /from\('requests'\)/)
   assert.match(repository, /from\('client_portal_items'\)/)
+  assert.match(repository, /from\('requests'\)/)
   assert.match(repository, /from\('comments'\)/)
 })
 
@@ -25,7 +27,8 @@ test('portal revision stays linked to the exact released version', () => {
 test('formal client approval is available behind the feature flag', () => {
   assert.match(portal, /featureFlags\.clientApprovals/)
   assert.match(portal, /recordClientApproval/)
-  assert.match(repository, /approval_type: 'client_approval'/)
+  assert.match(approvals, /approval_type: 'client_approval'/)
+  assert.match(deliveryEntry, /recordClientApproval/)
 })
 
 test('released files use short-lived signed URLs after project authorization', () => {
