@@ -4,10 +4,11 @@ import { readFileSync } from 'node:fs'
 
 const app = readFileSync(new URL('../App.jsx', import.meta.url), 'utf8')
 
-test('non-critical application surfaces are loaded as independent route chunks', () => {
+test('major application surfaces are loaded as independent route chunks', () => {
   assert.match(app, /import \{ lazy, Suspense \} from 'react'/)
   for (const moduleName of [
     'AgencyCommandCenter',
+    'CanonicalProjects',
     'DepartmentWorkshop',
     'MyWork',
     'AnkaSpherePortal',
