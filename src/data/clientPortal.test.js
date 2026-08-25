@@ -10,8 +10,8 @@ test('client portal uses only the canonical repository and projection records', 
   assert.doesNotMatch(portal, /\.from\(/)
   assert.doesNotMatch(portal, /as_/)
   assert.match(repository, /from\('client_project_projections'\)/)
-  assert.match(repository, /from\('client_portal_items'\)/)
   assert.match(repository, /from\('requests'\)/)
+  assert.match(repository, /from\('client_portal_items'\)/)
   assert.match(repository, /from\('comments'\)/)
 })
 
@@ -22,10 +22,10 @@ test('portal revision stays linked to the exact released version', () => {
   assert.match(repository, /visibility: 'client_visible'/)
 })
 
-test('formal approval remains unavailable during UAT', () => {
+test('formal client approval is available behind the feature flag', () => {
   assert.match(portal, /featureFlags\.clientApprovals/)
-  assert.doesNotMatch(portal, /client_approved/)
-  assert.doesNotMatch(portal, /approval_type: 'client_approval'/)
+  assert.match(portal, /recordClientApproval/)
+  assert.match(repository, /approval_type: 'client_approval'/)
 })
 
 test('released files use short-lived signed URLs after project authorization', () => {
@@ -42,4 +42,11 @@ test('portal subscribes only to sanitized and collaboration records', () => {
   assert.match(repository, /table: 'requests'/)
   assert.match(repository, /table: 'comments'/)
   assert.doesNotMatch(repository, /table: 'tasks'/)
+})
+
+test('migration 13 enables client approval inserts when the organization setting is on', () => {
+  const migration = readFileSync(new URL('../../supabase/migrations/20260825130000_enable_client_approvals_for_testing.sql', import.meta.url), 'utf8')
+  assert.match(migration, /client_approvals_enabled/)
+  assert.match(migration, /Clients can record client approvals/)
+  assert.match(migration, /apply_client_approval_decision/)
 })
