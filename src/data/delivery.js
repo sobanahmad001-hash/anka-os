@@ -4,6 +4,7 @@ import { createDeliveryRepository } from './deliveryRepository.js'
 
 const repository = createDeliveryRepository(supabase)
 
-export const delivery = Object.assign(repository, {
+export const delivery = Object.freeze({
+  ...repository,
   recordClientApproval: (input, userId) => recordClientApproval(supabase, input, userId),
 })
