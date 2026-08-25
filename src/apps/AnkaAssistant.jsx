@@ -1,700 +1,174 @@
-import { useState, useEffect, useRef } from 'react'
-import { supabase } from '../lib/supabase.js'
+import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
-import { callAI } from '../lib/callAI.js'
+import { aiRepository } from '../data/aiRepository.js'
+import { delivery } from '../data/delivery.js'
 
-const MODES = {
-  chat: { label: '💬 Chat', desc: 'Ask anything about your OS' },
-  standup: { label: '☀️ Standup', desc: 'What needs attention today' },
-  brief: { label: '📄 Brief', desc: 'Generate SOPs, strategies, briefs' },
-  search: { label: '🔍 Search', desc: 'Find anything across the OS' },
-  execute: { label: '⚡ Execute', desc: 'Create tasks, update projects' },
-}
-
-const BRIEF_TYPES = [
-  'SOP — Standard Operating Procedure',
-  'Marketing Strategy',
-  'Content Brief',
-  'Project Brief',
-  'SEO Strategy',
-  'Social Media Strategy',
-  'Campaign Brief',
-  'Onboarding Guide',
-  'Client Proposal',
+const CAPABILITIES = [
+  ['project_pulse', 'Project Pulse', 'Status, risks, blockers, reviews, and next actions from live project records.'],
+  ['daily_brief', 'Daily Brief', 'Your assigned work, overdue items, and recommended sequencing.'],
+  ['research_support', 'Research Support', 'Separate evidence, inference, gaps, and next research steps.'],
+  ['writing_support', 'Writing Support', 'Draft content grounded in the selected project context.'],
+  ['quality_review', 'Quality Review', 'Identify issues against scope and criteria without approving anything.'],
+  ['action_proposal', 'Action Proposal', 'Turn a request into one structured task or research proposal for your confirmation.'],
 ]
+const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-purple-500'
+const labelize = value => String(value || '').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
+const dateTime = value => new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
 
 export default function AnkaAssistant() {
-  const { user, profile } = useAuth()
-  const [mode, setMode] = useState('chat')
-  const [threads, setThreads] = useState([])
-  const [activeThread, setActiveThread] = useState(null)
-  const [messages, setMessages] = useState([])
+  const { user } = useAuth()
+  const [projects, setProjects] = useState([])
+  const [workspace, setWorkspace] = useState(null)
+  const [projectId, setProjectId] = useState('')
+  const [capability, setCapability] = useState('project_pulse')
   const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState(null)
+  const [runs, setRuns] = useState([])
+  const [activeTab, setActiveTab] = useState('assistant')
+  const [loading, setLoading] = useState(true)
+  const [running, setRunning] = useState(false)
+  const [decisionSaving, setDecisionSaving] = useState(false)
+  const [error, setError] = useState('')
 
-  // OS context
-  const [osContext, setOsContext] = useState(null)
-  const [contextLoading, setContextLoading] = useState(false)
-
-  // Search
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState(null)
-  const [searching, setSearching] = useState(false)
-
-  // Brief
-  const [briefType, setBriefType] = useState('')
-  const [briefContext, setBriefContext] = useState('')
-  const [briefOutput, setBriefOutput] = useState('')
-  const [generatingBrief, setGeneratingBrief] = useState(false)
-
-  // Execute
-  const [executePrompt, setExecutePrompt] = useState('')
-  const [executeResult, setExecuteResult] = useState(null)
-  const [executing, setExecuting] = useState(false)
-
-  const messagesEndRef = useRef(null)
-
+  useEffect(() => { load() }, [])
   useEffect(() => {
-    fetchThreads()
-    fetchOSContext()
-  }, [])
+    if (!projectId) return setWorkspace(null)
+    delivery.getProjectWorkspace(projectId).then(setWorkspace).catch(loadError => setError(loadError.message))
+  }, [projectId])
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
-
-  useEffect(() => {
-    if (activeThread) fetchMessages(activeThread)
-  }, [activeThread])
-
-  async function fetchOSContext() {
-    setContextLoading(true)
-    try {
-      const [projectsRes, tasksRes, clientsRes, membersRes] = await Promise.all([
-        supabase.from('as_projects').select('id, name, status, current_phase, as_clients(name)').order('updated_at', { ascending: false }).limit(20),
-        supabase.from('as_tasks').select('id, title, status, phase, priority, assigned_to, project_id').eq('status', 'todo').order('created_at', { ascending: false }).limit(50),
-        supabase.from('as_clients').select('id, name, company').order('name').limit(20),
-        supabase.from('profiles').select('id, full_name, email, department, role').order('full_name'),
-      ])
-
-      const myTasks = (tasksRes.data || []).filter(t => t.assigned_to === user?.id)
-      const blockedTasks = (tasksRes.data || []).filter(t => t.status === 'blocked')
-      const activeProjects = (projectsRes.data || []).filter(p => p.status === 'active')
-      const pendingHandoffs = (projectsRes.data || []).filter(p => p.status === 'pending_handoff')
-
-      setOsContext({
-        projects: projectsRes.data || [],
-        activeProjects,
-        pendingHandoffs,
-        myTasks,
-        blockedTasks,
-        clients: clientsRes.data || [],
-        members: membersRes.data || [],
-        user: profile,
-        summary: {
-          totalProjects: projectsRes.data?.length || 0,
-          activeProjects: activeProjects.length,
-          pendingHandoffs: pendingHandoffs.length,
-          myTaskCount: myTasks.length,
-          blockedCount: blockedTasks.length,
-          totalClients: clientsRes.data?.length || 0,
-        }
-      })
-    } catch (err) {
-      console.error('Context fetch error:', err)
-    }
-    setContextLoading(false)
-  }
-
-  async function fetchThreads() {
-    const { data } = await supabase.from('as_assistant_threads')
-      .select('*').eq('user_id', user?.id)
-      .order('updated_at', { ascending: false }).limit(20)
-    setThreads(data || [])
-    if (data?.length && !activeThread) setActiveThread(data[0].id)
-  }
-
-  async function fetchMessages(threadId) {
-    const { data } = await supabase.from('as_assistant_messages')
-      .select('*').eq('thread_id', threadId)
-      .order('created_at')
-    setMessages(data || [])
-  }
-
-  async function newThread() {
-    const { data } = await supabase.from('as_assistant_threads').insert({
-      user_id: user?.id, title: 'New conversation'
-    }).select().single()
-    if (data) {
-      setThreads(prev => [data, ...prev])
-      setActiveThread(data.id)
-      setMessages([])
-    }
-  }
-
-  async function sendMessage() {
-    if (!input.trim()) return
-    const msg = input.trim()
-    setInput('')
+  async function load() {
     setLoading(true)
-
-    let threadId = activeThread
-    if (!threadId) {
-      const { data } = await supabase.from('as_assistant_threads').insert({
-        user_id: user?.id, title: msg.slice(0, 50)
-      }).select().single()
-      if (data) {
-        threadId = data.id
-        setActiveThread(data.id)
-        setThreads(prev => [data, ...prev])
-      }
-    }
-
-    // Save user message
-    await supabase.from('as_assistant_messages').insert({
-      thread_id: threadId, user_id: user?.id, role: 'user', content: msg
-    })
-    setMessages(prev => [...prev, { role: 'user', content: msg, created_at: new Date().toISOString() }])
-
-    // Build system prompt with OS context
-    const contextStr = osContext ? `
-ANKA OS CONTEXT — Live data as of right now:
-User: ${osContext.user?.full_name || 'Unknown'} (${osContext.user?.role}, ${osContext.user?.department} dept)
-
-PROJECTS (${osContext.summary.totalProjects} total, ${osContext.summary.activeProjects} active):
-${osContext.activeProjects.slice(0, 10).map(p => `- ${p.name} | Phase: ${p.current_phase} | Client: ${p.as_clients?.name || 'none'} | Status: ${p.status}`).join('\n')}
-${osContext.pendingHandoffs.length > 0 ? `\nPENDING HANDOFFS (${osContext.pendingHandoffs.length}):\n${osContext.pendingHandoffs.map(p => `- ${p.name} waiting approval`).join('\n')}` : ''}
-
-MY TASKS (${osContext.myTasks.length}):
-${osContext.myTasks.slice(0, 10).map(t => `- ${t.title} | ${t.priority} priority | ${t.phase}`).join('\n')}
-
-BLOCKED TASKS (${osContext.blockedTasks.length}):
-${osContext.blockedTasks.slice(0, 5).map(t => `- ${t.title}`).join('\n')}
-
-CLIENTS (${osContext.summary.totalClients}): ${osContext.clients.map(c => c.name).join(', ')}
-TEAM: ${osContext.members.map(m => `${m.full_name || m.email} (${m.department})`).join(', ')}
-` : 'OS context loading...'
-
+    setError('')
     try {
-      const reply = await callAI({
-        system: `You are Anka, the AI assistant built into Anka OS — an internal operating system for a digital agency called Anka Sphere. You have full context of the workspace.
-
-${contextStr}
-
-You can:
-- Answer questions about projects, tasks, clients, team
-- Provide strategic advice on marketing, development, design work
-- Summarise status, blockers, priorities
-- Draft content, SOPs, briefs, emails
-- Suggest next actions
-
-Be direct, specific, and reference actual data from the OS context when relevant. When you don't have specific data, say so.`,
-        messages: [
-          ...messages.slice(-10).map(m => ({ role: m.role, content: m.content })),
-          { role: 'user', content: msg }
-        ],
-        maxTokens: 1500
-      })
-
-      await supabase.from('as_assistant_messages').insert({
-        thread_id: threadId, user_id: user?.id, role: 'assistant', content: reply
-      })
-      setMessages(prev => [...prev, { role: 'assistant', content: reply, created_at: new Date().toISOString() }])
-
-      // Update thread title from first message
-      if (messages.length === 0) {
-        await supabase.from('as_assistant_threads').update({
-          title: msg.slice(0, 60), updated_at: new Date().toISOString()
-        }).eq('id', threadId)
-        setThreads(prev => prev.map(t => t.id === threadId ? { ...t, title: msg.slice(0, 60) } : t))
-      }
-    } catch (err) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}` }])
+      const [projectRows, runRows] = await Promise.all([delivery.listProjects(), aiRepository.listRuns()])
+      setProjects(projectRows)
+      setRuns(runRows)
+      setProjectId(current => current || projectRows[0]?.id || '')
+    } catch (loadError) {
+      setError(loadError.message)
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
-  async function generateStandup() {
-    setLoading(true)
-    setMode('standup')
-    if (!osContext) { setLoading(false); return }
-
-    const prompt = `Generate a concise daily standup briefing for ${osContext.user?.full_name || 'the user'} based on this OS data:
-
-Active projects: ${osContext.activeProjects.map(p => `${p.name} (${p.current_phase})`).join(', ')}
-My tasks today: ${osContext.myTasks.map(t => `${t.title} [${t.priority}]`).join(', ') || 'none'}
-Blocked: ${osContext.blockedTasks.map(t => t.title).join(', ') || 'none'}
-Pending handoffs needing approval: ${osContext.pendingHandoffs.map(p => p.name).join(', ') || 'none'}
-
-Format as:
-🎯 FOCUS TODAY (top 3 priorities)
-⚠️ BLOCKERS (anything stuck)
-✅ PENDING APPROVALS (handoffs waiting)
-📊 PROJECT PULSE (one line per active project)`
-
+  async function runAssistant(event) {
+    event.preventDefault()
+    if (!projectId && capability !== 'daily_brief') return setError('Select a project for this capability.')
+    setRunning(true)
+    setError('')
+    setResult(null)
     try {
-      const standup = await callAI({
-        messages: [{ role: 'user', content: prompt }],
-        maxTokens: 800
-      })
-      setMessages([{ role: 'assistant', content: standup || 'No standup data', created_at: new Date().toISOString() }])
-    } catch (err) {
-      setMessages([{ role: 'assistant', content: 'Error generating standup.' }])
+      const response = await aiRepository.run({ capability, projectId: projectId || null, input })
+      setResult(response)
+      setRuns(current => [{
+        id: response.run_id, project_id: projectId || null, capability,
+        status: 'completed', output_text: response.content,
+        proposed_action: response.proposed_action,
+        provider: response.provider, model: response.model,
+        input_tokens: response.usage?.input_tokens,
+        output_tokens: response.usage?.output_tokens,
+        estimated_cost_microusd: response.usage?.estimated_cost_microusd,
+        human_decision: response.proposed_action ? 'pending' : 'not_applicable',
+        created_at: new Date().toISOString(),
+      }, ...current])
+    } catch (runError) {
+      setError(runError.message)
+    } finally {
+      setRunning(false)
     }
-    setLoading(false)
   }
 
-  async function generateBrief() {
-    if (!briefType) return
-    setGeneratingBrief(true)
-    setBriefOutput('')
+  async function rejectProposal() {
+    if (!result?.run_id) return
+    setDecisionSaving(true)
     try {
-      const brief = await callAI({
-        system: `You are a senior strategist at a digital agency. Generate professional, detailed, actionable documents. Use proper headings and structure.`,
-        messages: [{
-          role: 'user',
-          content: `Generate a complete ${briefType} document.
-${briefContext ? `Context: ${briefContext}` : ''}
-${osContext ? `Agency context: Working with clients including ${osContext.clients.slice(0, 3).map(c => c.name).join(', ')}` : ''}
-
-Make it comprehensive, professional, and immediately usable.`
-        }],
-        maxTokens: 2000
-      })
-      setBriefOutput(brief || 'No output')
-    } catch (err) {
-      setBriefOutput('Error: ' + err.message)
-    }
-    setGeneratingBrief(false)
+      await aiRepository.recordDecision(result.run_id, 'rejected', 'Rejected by the user without execution.')
+      setResult(current => ({ ...current, decision: 'rejected' }))
+      await refreshRuns()
+    } catch (decisionError) { setError(decisionError.message) }
+    finally { setDecisionSaving(false) }
   }
 
-  async function searchOS() {
-    if (!searchQuery.trim()) return
-    setSearching(true)
-    setSearchResults(null)
-    const q = searchQuery.toLowerCase()
+  async function confirmProposal() {
+    const action = result?.proposed_action
+    if (!action || !user?.id || !workspace) return
+    setDecisionSaving(true)
+    setError('')
     try {
-      const [projectsRes, tasksRes, clientsRes, contentRes, seoRes] = await Promise.all([
-        supabase.from('as_projects').select('id, name, status, current_phase').ilike('name', `%${q}%`).limit(5),
-        supabase.from('as_tasks').select('id, title, status, project_id').ilike('title', `%${q}%`).limit(10),
-        supabase.from('as_clients').select('id, name, company').or(`name.ilike.%${q}%,company.ilike.%${q}%`).limit(5),
-        supabase.from('as_content_tracker').select('id, title, status, content_type').ilike('title', `%${q}%`).limit(5),
-        supabase.from('as_seo_tracker').select('id, page_name, primary_keyword, project_id').or(`page_name.ilike.%${q}%,primary_keyword.ilike.%${q}%`).limit(5),
-      ])
-      setSearchResults({
-        projects: projectsRes.data || [],
-        tasks: tasksRes.data || [],
-        clients: clientsRes.data || [],
-        content: contentRes.data || [],
-        seo: seoRes.data || [],
-        total: (projectsRes.data?.length || 0) + (tasksRes.data?.length || 0) + (clientsRes.data?.length || 0) + (contentRes.data?.length || 0) + (seoRes.data?.length || 0)
-      })
-    } catch (err) {
-      setSearchResults({ error: err.message })
-    }
-    setSearching(false)
-  }
-
-  async function executeAction() {
-    if (!executePrompt.trim()) return
-    setExecuting(true)
-    setExecuteResult(null)
-
-    try {
-      const text = await callAI({
-        system: `You are Anka OS execute mode. The user wants to perform an action in the OS.
-Analyse their request and respond ONLY with a JSON object:
-{
-  "action": "create_task" | "update_project_status" | "log_content" | "unsupported",
-  "params": { ... relevant params ... },
-  "confirmation": "Human readable description of what will happen",
-  "unsupported_reason": "If unsupported, explain why"
-}
-
-Available projects: ${osContext?.activeProjects.map(p => `${p.id}:${p.name}`).join(', ')}`,
-        messages: [{ role: 'user', content: executePrompt }],
-        maxTokens: 500
-      })
-      const action = JSON.parse(text.replace(/```json|```/g, '').trim())
-
-      if (action.action === 'create_task' && action.params?.title && action.params?.project_id) {
-        const { error } = await supabase.from('as_tasks').insert({
+      let created
+      if (action.type === 'create_task') {
+        const workstream = workspace.workstreams.find(item => item.id === action.params.workstream_id)
+        created = await delivery.createTask({
+          projectId,
+          workstreamId: workstream?.id || null,
+          departmentId: workstream?.department_id || null,
           title: action.params.title,
-          project_id: action.params.project_id,
-          phase: action.params.phase || 'product_modeling',
+          description: action.params.description || '',
+          acceptanceCriteria: action.params.acceptance_criteria || '',
           priority: action.params.priority || 'medium',
-          status: 'todo',
-          user_id: user?.id,
-          assigned_to: user?.id
-        })
-        setExecuteResult({ success: !error, message: error ? error.message : `✅ Task created: "${action.params.title}"` })
-      } else if (action.action === 'unsupported') {
-        setExecuteResult({ success: false, message: action.unsupported_reason || 'Action not supported yet' })
+          dueDate: action.params.due_date || null,
+        }, user.id)
+      } else if (action.type === 'create_research_record') {
+        created = await delivery.createResearchRecord({
+          projectId,
+          workstreamId: action.params.workstream_id || null,
+          title: action.params.title,
+          researchType: action.params.research_type || 'general',
+          question: action.params.question || '',
+          findings: '',
+          recommendation: action.params.recommendation || '',
+          sources: [],
+        }, user.id)
       } else {
-        setExecuteResult({ success: true, message: `✅ ${action.confirmation}` })
+        throw new Error('Unsupported proposal type')
       }
-    } catch (err) {
-      setExecuteResult({ success: false, message: 'Parse error: ' + err.message })
+      await aiRepository.recordDecision(result.run_id, 'accepted', `Created ${action.type} record ${created.id}`)
+      setResult(current => ({ ...current, decision: 'accepted', createdRecordId: created.id }))
+      setWorkspace(await delivery.getProjectWorkspace(projectId))
+      await refreshRuns()
+    } catch (decisionError) {
+      setError(decisionError.message)
+    } finally {
+      setDecisionSaving(false)
     }
-    setExecuting(false)
   }
 
-  return (
-    <div className="flex h-full bg-gray-950 text-white">
-      {/* Sidebar — threads */}
-      <div className="w-56 border-r border-gray-800 flex flex-col bg-gray-900">
-        <div className="p-4 border-b border-gray-800">
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-7 h-7 bg-purple-600 rounded-lg flex items-center justify-center">
-              <span className="text-white text-xs font-bold">A</span>
-            </div>
-            <span className="text-sm font-semibold text-white">Anka</span>
-          </div>
-          <button onClick={newThread}
-            className="w-full bg-purple-600 hover:bg-purple-700 text-white text-xs px-3 py-2 rounded-lg">
-            + New conversation
-          </button>
-        </div>
+  async function refreshRuns() { setRuns(await aiRepository.listRuns()) }
 
-        {/* Mode switcher */}
-        <div className="p-3 border-b border-gray-800 space-y-1">
-          {Object.entries(MODES).map(([key, m]) => (
-            <button key={key} onClick={() => setMode(key)}
-              className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${mode === key ? 'bg-purple-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}>
-              {m.label}
-            </button>
-          ))}
-        </div>
+  const selectedCapability = CAPABILITIES.find(item => item[0] === capability)
+  const projectById = useMemo(() => new Map(projects.map(project => [project.id, project])), [projects])
+  const usage = useMemo(() => ({
+    runs: runs.filter(run => run.status === 'completed').length,
+    inputTokens: runs.reduce((sum, run) => sum + Number(run.input_tokens || 0), 0),
+    outputTokens: runs.reduce((sum, run) => sum + Number(run.output_tokens || 0), 0),
+    cost: runs.reduce((sum, run) => sum + Number(run.estimated_cost_microusd || 0), 0),
+  }), [runs])
 
-        {/* Thread history */}
-        <div className="flex-1 overflow-y-auto p-3">
-          <p className="text-xs text-gray-600 uppercase tracking-wide mb-2">History</p>
-          {threads.map(t => (
-            <button key={t.id} onClick={() => { setActiveThread(t.id); setMode('chat') }}
-              className={`w-full text-left px-3 py-2 rounded-lg text-xs mb-1 transition-colors truncate ${activeThread === t.id ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}>
-              {t.title || 'New conversation'}
-            </button>
-          ))}
-        </div>
+  if (loading) return <div className="flex h-full items-center justify-center bg-slate-950"><div className="h-8 w-8 animate-spin rounded-full border-b-2 border-purple-500" /></div>
 
-        {/* Context status */}
-        <div className="p-3 border-t border-gray-800">
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${osContext ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'}`} />
-            <span className="text-xs text-gray-500">
-              {osContext ? `${osContext.summary.totalProjects} projects loaded` : 'Loading context...'}
-            </span>
-          </div>
-        </div>
-      </div>
+  return <div className="min-h-full bg-slate-950 text-white">
+    <header className="border-b border-slate-800 bg-gradient-to-r from-purple-950/50 to-slate-950 px-6 py-6"><div className="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-400">Human-controlled intelligence</p><h1 className="mt-1 text-2xl font-semibold">Anka AI Assistant</h1><p className="mt-1 text-sm text-slate-400">Permission-scoped project support with source manifests, cost tracking, and audited human decisions.</p></div><div className="flex gap-2"><button onClick={() => setActiveTab('assistant')} className={`rounded-xl px-4 py-2 text-sm ${activeTab === 'assistant' ? 'bg-purple-600' : 'bg-slate-800 text-slate-400'}`}>Assistant</button><button onClick={() => setActiveTab('audit')} className={`rounded-xl px-4 py-2 text-sm ${activeTab === 'audit' ? 'bg-purple-600' : 'bg-slate-800 text-slate-400'}`}>AI Audit</button></div></div></header>
+    <div className="border-b border-amber-900/50 bg-amber-950/20 px-6 py-3 text-center text-xs text-amber-300">AI can analyze, draft, review, and propose. It cannot approve, publish, deploy, launch spend, change scope, or act without your confirmation.</div>
+    {error && <div className="mx-auto mt-4 max-w-7xl rounded-xl border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">{error}</div>}
 
-      {/* Main area */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+    {activeTab === 'assistant' ? <main className="mx-auto grid max-w-7xl gap-6 p-6 xl:grid-cols-[360px_1fr]">
+      <form onSubmit={runAssistant} className="h-fit space-y-5 rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div><h2 className="font-semibold">Request assistance</h2><p className="mt-1 text-xs text-slate-500">The server retrieves only records your session can access.</p></div><Field label="Capability"><div className="space-y-2">{CAPABILITIES.map(([id, label, description]) => <button type="button" key={id} onClick={() => setCapability(id)} className={`w-full rounded-xl border p-3 text-left ${capability === id ? 'border-purple-600 bg-purple-950/40' : 'border-slate-800 bg-slate-950/40'}`}><p className="text-sm font-medium">{label}</p><p className="mt-1 text-xs text-slate-500">{description}</p></button>)}</div></Field><Field label="Project context"><select className={INPUT} value={projectId} onChange={event => setProjectId(event.target.value)}><option value="">My work only</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></Field><Field label={capability === 'project_pulse' ? 'Specific focus (optional)' : 'Request'}><textarea className={INPUT} rows="5" value={input} onChange={event => setInput(event.target.value)} placeholder={placeholder(capability)} /></Field><button disabled={running || (!projectId && capability !== 'daily_brief')} className="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold disabled:opacity-50">{running ? 'Analyzing authorized context…' : `Run ${selectedCapability?.[1]}`}</button></form>
 
-        {/* CHAT MODE */}
-        {mode === 'chat' && (
-          <>
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
-              {messages.length === 0 && (
-                <div className="text-center py-12 text-gray-500">
-                  <div className="w-16 h-16 bg-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                    <span className="text-white text-2xl font-bold">A</span>
-                  </div>
-                  <p className="text-lg font-medium text-gray-400">Anka Assistant</p>
-                  <p className="text-sm mt-1 mb-6">Context-aware · Knows your OS · Ready to help</p>
-                  <div className="grid grid-cols-2 gap-2 max-w-lg mx-auto">
-                    {[
-                      "What's the status of all active projects?",
-                      "Which tasks are blocked right now?",
-                      "Summarise what REL needs this week",
-                      "Who has the most tasks assigned?",
-                      "What handoffs are pending approval?",
-                      "Write a client update email for REL",
-                    ].map(s => (
-                      <button key={s} onClick={() => setInput(s)}
-                        className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-2.5 rounded-lg text-left border border-gray-700 transition-colors">
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {messages.map((m, i) => (
-                <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  {m.role === 'assistant' && (
-                    <div className="w-7 h-7 bg-purple-600 rounded-full flex items-center justify-center text-xs font-bold text-white mr-2 flex-shrink-0 mt-1">A</div>
-                  )}
-                  <div className={`max-w-2xl rounded-2xl px-4 py-3 text-sm ${m.role === 'user' ? 'bg-purple-600 text-white rounded-br-sm' : 'bg-gray-800 text-gray-200 border border-gray-700 rounded-bl-sm'}`}>
-                    <pre className="whitespace-pre-wrap font-sans">{m.content}</pre>
-                    <p className="text-xs opacity-40 mt-1">{m.created_at ? new Date(m.created_at).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' }) : ''}</p>
-                  </div>
-                </div>
-              ))}
-              {loading && (
-                <div className="flex justify-start">
-                  <div className="w-7 h-7 bg-purple-600 rounded-full flex items-center justify-center text-xs font-bold text-white mr-2 flex-shrink-0">A</div>
-                  <div className="bg-gray-800 rounded-2xl rounded-bl-sm px-4 py-3 border border-gray-700">
-                    <div className="flex gap-1">
-                      {[0,1,2].map(i => <div key={i} className="w-2 h-2 rounded-full bg-purple-500 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />)}
-                    </div>
-                  </div>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-            <div className="p-4 border-t border-gray-800">
-              <div className="flex gap-3">
-                <input value={input} onChange={e => setInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-                  className="flex-1 bg-gray-800 text-white rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 border border-gray-700"
-                  placeholder="Ask Anka anything about your projects, team, or clients..." />
-                <button onClick={sendMessage} disabled={loading || !input.trim()}
-                  className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-5 py-3 rounded-2xl text-sm transition-colors">→</button>
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* STANDUP MODE */}
-        {mode === 'standup' && (
-          <div className="flex-1 overflow-y-auto p-6">
-            <div className="max-w-2xl mx-auto">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-xl font-bold text-white">Daily Standup</h2>
-                  <p className="text-sm text-gray-400 mt-0.5">{new Date().toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
-                </div>
-                <button onClick={generateStandup} disabled={loading || contextLoading}
-                  className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm">
-                  {loading ? '⏳ Generating...' : '☀️ Generate Standup'}
-                </button>
-              </div>
-
-              {/* Quick stats */}
-              {osContext && (
-                <div className="grid grid-cols-4 gap-3 mb-6">
-                  {[
-                    { label: 'My tasks', value: osContext.summary.myTaskCount, color: 'text-white' },
-                    { label: 'Blocked', value: osContext.summary.blockedCount, color: osContext.summary.blockedCount > 0 ? 'text-red-400' : 'text-gray-500' },
-                    { label: 'Handoffs', value: osContext.summary.pendingHandoffs, color: osContext.summary.pendingHandoffs > 0 ? 'text-yellow-400' : 'text-gray-500' },
-                    { label: 'Active projects', value: osContext.summary.activeProjects, color: 'text-green-400' },
-                  ].map(s => (
-                    <div key={s.label} className="bg-gray-800 rounded-xl p-4 border border-gray-700 text-center">
-                      <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
-                      <p className="text-xs text-gray-500 mt-1">{s.label}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {messages.length > 0 && (
-                <div className="bg-gray-800 rounded-2xl p-5 border border-gray-700">
-                  <pre className="whitespace-pre-wrap font-sans text-sm text-gray-200 leading-relaxed">{messages[0]?.content}</pre>
-                </div>
-              )}
-
-              {!messages.length && !loading && (
-                <div className="text-center py-12 text-gray-500">
-                  <p className="text-4xl mb-3">☀️</p>
-                  <p className="text-sm">Click Generate Standup to see your daily briefing</p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* BRIEF MODE */}
-        {mode === 'brief' && (
-          <div className="flex-1 overflow-y-auto p-6">
-            <div className="max-w-3xl mx-auto space-y-5">
-              <div>
-                <h2 className="text-xl font-bold text-white mb-1">Brief Generator</h2>
-                <p className="text-sm text-gray-400">Generate SOPs, strategies, and briefs instantly</p>
-              </div>
-
-              <div className="bg-gray-800 rounded-xl p-5 border border-gray-700 space-y-4">
-                <div>
-                  <label className="block text-xs text-gray-400 mb-2">Document Type</label>
-                  <div className="flex flex-wrap gap-2">
-                    {BRIEF_TYPES.map(t => (
-                      <button key={t} onClick={() => setBriefType(t)}
-                        className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${briefType === t ? 'bg-purple-600 text-white border-purple-500' : 'bg-gray-700 text-gray-300 border-gray-600 hover:border-gray-500'}`}>
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Additional Context (optional)</label>
-                  <textarea value={briefContext} onChange={e => setBriefContext(e.target.value)}
-                    className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-purple-500 resize-none" rows={3}
-                    placeholder="Add specific details, client name, goals, constraints..." />
-                </div>
-                <button onClick={generateBrief} disabled={!briefType || generatingBrief}
-                  className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium">
-                  {generatingBrief ? '⏳ Generating...' : '📄 Generate Brief'}
-                </button>
-              </div>
-
-              {briefOutput && (
-                <div className="bg-gray-800 rounded-2xl p-5 border border-gray-700">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-sm font-semibold text-white">{briefType}</p>
-                    <button onClick={() => navigator.clipboard.writeText(briefOutput)}
-                      className="text-xs text-blue-400 hover:text-blue-300">Copy</button>
-                  </div>
-                  <pre className="whitespace-pre-wrap font-sans text-sm text-gray-200 leading-relaxed">{briefOutput}</pre>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* SEARCH MODE */}
-        {mode === 'search' && (
-          <div className="flex-1 overflow-y-auto p-6">
-            <div className="max-w-2xl mx-auto space-y-5">
-              <div>
-                <h2 className="text-xl font-bold text-white mb-1">Search Anka OS</h2>
-                <p className="text-sm text-gray-400">Find projects, tasks, clients, content, keywords</p>
-              </div>
-
-              <div className="flex gap-3">
-                <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && searchOS()}
-                  className="flex-1 bg-gray-800 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 border border-gray-700"
-                  placeholder="Search for anything — projects, tasks, clients, keywords..." />
-                <button onClick={searchOS} disabled={searching || !searchQuery.trim()}
-                  className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-5 py-3 rounded-xl text-sm">
-                  {searching ? '⏳' : '🔍'}
-                </button>
-              </div>
-
-              {searchResults && !searchResults.error && (
-                <div className="space-y-4">
-                  <p className="text-xs text-gray-400">{searchResults.total} results for "{searchQuery}"</p>
-
-                  {searchResults.projects.length > 0 && (
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Projects ({searchResults.projects.length})</p>
-                      {searchResults.projects.map(p => (
-                        <div key={p.id} className="bg-gray-800 rounded-lg px-4 py-3 mb-2 border border-gray-700">
-                          <p className="text-sm font-medium text-white">{p.name}</p>
-                          <p className="text-xs text-gray-400 mt-0.5">{p.current_phase} · {p.status}</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {searchResults.tasks.length > 0 && (
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Tasks ({searchResults.tasks.length})</p>
-                      {searchResults.tasks.map(t => (
-                        <div key={t.id} className="bg-gray-800 rounded-lg px-4 py-3 mb-2 border border-gray-700 flex items-center justify-between">
-                          <p className="text-sm text-white">{t.title}</p>
-                          <span className="text-xs text-gray-500 capitalize">{t.status}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {searchResults.clients.length > 0 && (
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Clients ({searchResults.clients.length})</p>
-                      {searchResults.clients.map(c => (
-                        <div key={c.id} className="bg-gray-800 rounded-lg px-4 py-3 mb-2 border border-gray-700">
-                          <p className="text-sm font-medium text-white">{c.name}</p>
-                          {c.company && <p className="text-xs text-gray-400">{c.company}</p>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {searchResults.content.length > 0 && (
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Content ({searchResults.content.length})</p>
-                      {searchResults.content.map(c => (
-                        <div key={c.id} className="bg-gray-800 rounded-lg px-4 py-3 mb-2 border border-gray-700 flex items-center justify-between">
-                          <p className="text-sm text-white">{c.title}</p>
-                          <span className="text-xs text-gray-500 capitalize">{c.content_type} · {c.status}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {searchResults.seo.length > 0 && (
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">SEO Pages ({searchResults.seo.length})</p>
-                      {searchResults.seo.map(s => (
-                        <div key={s.id} className="bg-gray-800 rounded-lg px-4 py-3 mb-2 border border-gray-700">
-                          <p className="text-sm font-medium text-white">{s.page_name}</p>
-                          {s.primary_keyword && <p className="text-xs text-gray-400">Keyword: {s.primary_keyword}</p>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {searchResults.total === 0 && (
-                    <div className="text-center py-8 text-gray-500">
-                      <p className="text-4xl mb-3">🔍</p>
-                      <p className="text-sm">No results found for "{searchQuery}"</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* EXECUTE MODE */}
-        {mode === 'execute' && (
-          <div className="flex-1 overflow-y-auto p-6">
-            <div className="max-w-2xl mx-auto space-y-5">
-              <div>
-                <h2 className="text-xl font-bold text-white mb-1">Execute</h2>
-                <p className="text-sm text-gray-400">Tell Anka what to do in the OS — create tasks, update projects</p>
-              </div>
-
-              <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-xl p-3">
-                <p className="text-xs text-yellow-300">⚡ Execute mode takes real actions in your OS. Review the confirmation before proceeding.</p>
-              </div>
-
-              <div className="bg-gray-800 rounded-xl p-5 border border-gray-700 space-y-4">
-                <div>
-                  <label className="block text-xs text-gray-400 mb-2">What should Anka do?</label>
-                  <textarea value={executePrompt} onChange={e => setExecutePrompt(e.target.value)}
-                    className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-purple-500 resize-none" rows={4}
-                    placeholder="e.g. Create a task called 'Review homepage design' in the REL project with high priority..." />
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    "Create a task for homepage review in product modeling",
-                    "Create a high priority task for SEO audit",
-                    "Add a task to fix mobile layout",
-                  ].map(s => (
-                    <button key={s} onClick={() => setExecutePrompt(s)}
-                      className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1.5 rounded-lg border border-gray-600">
-                      {s}
-                    </button>
-                  ))}
-                </div>
-                <button onClick={executeAction} disabled={!executePrompt.trim() || executing}
-                  className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium">
-                  {executing ? '⏳ Executing...' : '⚡ Execute'}
-                </button>
-              </div>
-
-              {executeResult && (
-                <div className={`rounded-xl p-4 border ${executeResult.success ? 'bg-green-900/30 border-green-700/50' : 'bg-red-900/30 border-red-700/50'}`}>
-                  <p className={`text-sm font-medium ${executeResult.success ? 'text-green-300' : 'text-red-300'}`}>
-                    {executeResult.message}
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  )
+      <section className="min-w-0 space-y-5">{result ? <><article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-purple-400">{labelize(capability)}</p><p className="mt-1 text-xs text-slate-600">{result.provider} · {result.model} · Run {result.run_id}</p></div><Usage usage={result.usage} /></div><pre className="mt-5 whitespace-pre-wrap font-sans text-sm leading-7 text-slate-200">{result.content}</pre><SourceManifest manifest={result.context_manifest} /></article>{result.proposed_action && <ProposalCard result={result} workspace={workspace} saving={decisionSaving} onConfirm={confirmProposal} onReject={rejectProposal} />}</> : <div className="flex min-h-[540px] items-center justify-center rounded-2xl border border-dashed border-slate-800 bg-slate-900/30 p-8 text-center"><div><div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-purple-600 text-2xl font-bold">A</div><h2 className="mt-5 text-lg font-semibold">Select a capability and project</h2><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-500">Anka will use canonical tasks, research, deliverables, requests, and the Living Project Record. Record IDs are preserved in the audit manifest.</p></div></div>}</section>
+    </main> : <AuditView runs={runs} projects={projectById} usage={usage} />}
+  </div>
 }
+
+function ProposalCard({ result, workspace, saving, onConfirm, onReject }) {
+  const action = result.proposed_action
+  const workstream = workspace?.workstreams.find(item => item.id === action.params.workstream_id)
+  return <article className="rounded-2xl border border-amber-800 bg-amber-950/20 p-5"><div className="flex justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-amber-300">Human confirmation required</p><h3 className="mt-2 font-semibold">{labelize(action.type)} · {action.params.title}</h3><p className="mt-2 text-sm text-slate-400">{action.params.description || action.params.question || 'No additional description.'}</p><div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500"><span className="rounded-full bg-slate-900 px-2 py-1">{workstream?.name || 'Project-wide'}</span>{action.params.priority && <span className="rounded-full bg-slate-900 px-2 py-1">{labelize(action.params.priority)}</span>}</div></div><span className="h-fit rounded-full bg-amber-900 px-2 py-1 text-xs text-amber-200">{result.decision || 'Pending'}</span></div>{!result.decision && <div className="mt-5 flex gap-3"><button disabled={saving} onClick={onConfirm} className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold disabled:opacity-50">Confirm and create record</button><button disabled={saving} onClick={onReject} className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 disabled:opacity-50">Reject proposal</button></div>}{result.createdRecordId && <p className="mt-4 text-xs text-emerald-300">Created canonical record {result.createdRecordId}</p>}</article>
+}
+
+function AuditView({ runs, projects, usage }) { return <main className="mx-auto max-w-7xl space-y-6 p-6"><section className="grid gap-4 md:grid-cols-4"><Metric label="Completed runs" value={usage.runs} /><Metric label="Input tokens" value={usage.inputTokens.toLocaleString()} /><Metric label="Output tokens" value={usage.outputTokens.toLocaleString()} /><Metric label="Estimated cost" value={usage.cost ? `$${(usage.cost / 1_000_000).toFixed(4)}` : 'Not configured'} /></section><section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70"><div className="border-b border-slate-800 p-5"><h2 className="font-semibold">Audited AI runs</h2><p className="mt-1 text-xs text-slate-500">Your runs, or organization runs visible to authorized leadership through RLS.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-slate-950/70 text-xs uppercase tracking-wider text-slate-500"><tr><th className="px-4 py-3">Time</th><th className="px-4 py-3">Capability</th><th className="px-4 py-3">Project</th><th className="px-4 py-3">Provider</th><th className="px-4 py-3">Usage</th><th className="px-4 py-3">Human decision</th><th className="px-4 py-3">Status</th></tr></thead><tbody>{runs.map(run => <tr key={run.id} className="border-t border-slate-800"><td className="px-4 py-3 text-xs text-slate-500">{dateTime(run.created_at)}</td><td className="px-4 py-3">{labelize(run.capability)}</td><td className="px-4 py-3 text-slate-400">{projects.get(run.project_id)?.name || 'My work'}</td><td className="px-4 py-3 text-slate-400">{run.provider ? `${run.provider} · ${run.model}` : '—'}</td><td className="px-4 py-3 text-xs text-slate-500">{Number(run.input_tokens || 0) + Number(run.output_tokens || 0)} tokens</td><td className="px-4 py-3"><Badge value={run.human_decision} /></td><td className="px-4 py-3"><Badge value={run.status} /></td></tr>)}</tbody></table></div>{!runs.length && <div className="py-16 text-center text-sm text-slate-500">No AI runs recorded yet.</div>}</section></main> }
+function SourceManifest({ manifest }) { const records = manifest?.record_ids || {}; return <div className="mt-6 border-t border-slate-800 pt-4"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Authorized source manifest</p><div className="mt-2 flex flex-wrap gap-2">{Object.entries(records).map(([type, ids]) => <span key={type} className="rounded-full bg-slate-950 px-2.5 py-1 text-xs text-slate-500">{labelize(type)} · {ids.length}</span>)}</div></div> }
+function Usage({ usage }) { return <div className="text-right text-[11px] text-slate-600"><p>{Number(usage?.input_tokens || 0) + Number(usage?.output_tokens || 0)} tokens</p><p>{usage?.estimated_cost_microusd === null ? 'Cost rate not configured' : `$${(Number(usage?.estimated_cost_microusd || 0) / 1_000_000).toFixed(4)}`}</p></div> }
+function Metric({ label, value }) { return <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><p className="text-2xl font-semibold">{value}</p><p className="mt-1 text-xs uppercase tracking-wider text-slate-500">{label}</p></div> }
+function Badge({ value }) { return <span className="rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-300">{labelize(value)}</span> }
+function Field({ label, children }) { return <label><span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">{label}</span>{children}</label> }
+function placeholder(capability) { return ({ project_pulse: 'Focus on launch readiness and current blockers…', daily_brief: 'Optional focus for today…', research_support: 'What do we know about this audience, market, or decision?', writing_support: 'Draft the homepage messaging using approved project context…', quality_review: 'Paste the work to review and state what it should achieve…', action_proposal: 'Create a high-priority internal task to review the homepage against the approved brief…' })[capability] }

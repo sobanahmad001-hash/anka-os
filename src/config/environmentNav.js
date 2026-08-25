@@ -18,53 +18,35 @@ export const environmentNav = [
     basePath: '/sphere/projects',
     description: 'Client delivery',
     items: [
-      // Core � visible to all
-      { label: 'Projects', path: '/sphere/projects', dept: null },
+      // Core - visible to all authorized team members
+      { label: 'My Work', path: '/sphere/my-work', dept: null },
+      { label: 'Projects & Retainers', path: '/sphere/projects', dept: null },
       { label: 'Clients', path: '/sphere/clients', dept: null },
       { label: 'Client Portal', path: '/sphere/portal', dept: null },
-      { label: 'Team Board', path: '/sphere/team-board', dept: null },
+      { label: 'Reports & Records', path: '/sphere/reports', dept: null },
+
+      // Content dept
+      { label: 'Content', path: null, dept: 'content', isHeader: true },
+      { label: 'Content Workshop', path: '/sphere/content', dept: 'content' },
 
       // Design dept
-      { label: '� Design', path: null, dept: 'design', isHeader: true },
-      { label: 'Figma Workspace', path: '/sphere/figma', dept: 'design' },
-      { label: 'Creative Studio', path: '/sphere/assets', dept: 'design' },
-      { label: 'Asset Library', path: '/sphere/moodboard', dept: 'design' },
-      { label: 'Brand Guidelines', path: '/sphere/design-reviews', dept: 'design' },
+      { label: 'Design', path: null, dept: 'design', isHeader: true },
+      { label: 'Design Workshop', path: '/sphere/design', dept: 'design' },
 
       // Development dept (WordPress focused)
-      { label: '� Development', path: null, dept: 'development', isHeader: true },
-      { label: 'WP Engine', path: '/sphere/wp-sites', dept: 'development' },
-      { label: 'Page Builder', path: '/sphere/deployments', dept: 'development' },
-      { label: 'Site Tracker', path: '/sphere/performance', dept: 'development' },
+      { label: 'Delivery & Development', path: null, dept: 'development', isHeader: true },
+      { label: 'Delivery Workspace', path: '/sphere/delivery', dept: 'development' },
 
       // Marketing dept
-      { label: '� Marketing', path: null, dept: 'marketing', isHeader: true },
-      { label: 'Marketing Hub', path: '/sphere/campaigns', dept: 'marketing' },
-      { label: 'Content', path: '/sphere/content', dept: 'marketing' },
-      { label: 'Calendar', path: '/sphere/calendar', dept: 'marketing' },
-      { label: 'SEO Tracker', path: '/sphere/seo', dept: 'marketing' },
-    ],
-  },
-  {
-    key: 'diversify',
-    label: 'Anka Diversify',
-    basePath: '/diversify/projects',
-    description: 'Product build',
-    items: [
-      { label: 'Projects', path: '/diversify/projects', dept: null },
-      { label: 'Coding Agent', path: '/diversify/agent', dept: null },
-      { label: 'Sprint / Queue', path: '/diversify/kanban', dept: null },
-      { label: 'Git & PRs', path: '/diversify/git', dept: null },
-      { label: 'API Docs', path: '/diversify/api-docs', dept: null },
-      { label: 'Terminal', path: '/diversify/terminal', dept: null },
+      { label: 'Marketing', path: null, dept: 'marketing', isHeader: true },
+      { label: 'Marketing Workshop', path: '/sphere/marketing', dept: 'marketing' },
     ],
   },
 ]
 
 export function getEnvironmentFromPath(pathname) {
-  if (!pathname) return 'diversify'
+  if (!pathname) return 'sphere'
   if (pathname.startsWith('/admin') || pathname === '/users' || pathname === '/settings') return 'admin'
   if (pathname.startsWith('/sphere')) return 'sphere'
-  if (pathname.startsWith('/diversify')) return 'diversify'
-  return 'diversify'
+  return 'sphere'
 }
