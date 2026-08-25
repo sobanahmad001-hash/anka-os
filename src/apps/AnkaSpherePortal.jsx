@@ -22,6 +22,8 @@ export default function AnkaSpherePortal() {
   const [comment, setComment] = useState('')
   const [feedbackTarget, setFeedbackTarget] = useState(null)
   const [feedback, setFeedback] = useState({ reference: '', content: '' })
+  const [approvalTarget, setApprovalTarget] = useState(null)
+  const [approvalRationale, setApprovalRationale] = useState('')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => { if (user?.id) loadProjects() }, [user?.id])
@@ -127,6 +129,29 @@ export default function AnkaSpherePortal() {
     }
   }
 
+  async function submitApproval(event) {
+    event.preventDefault()
+    if (!approvalTarget) return
+    setSaving(true)
+    setError('')
+    try {
+      await delivery.recordClientApproval({
+        projectId: selectedId,
+        deliverableId: approvalTarget.payload?.deliverable_id,
+        deliverableVersionId: approvalTarget.source_id,
+        decision: 'approved',
+        rationale: approvalRationale,
+      }, user.id)
+      setApprovalTarget(null)
+      setApprovalRationale('')
+      await loadPortal(selectedId, false)
+    } catch (approvalError) {
+      setError(approvalError.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function openFile(item) {
     const previewUrl = item.payload?.preview_url
     if (previewUrl) return window.open(previewUrl, '_blank', 'noopener,noreferrer')
@@ -166,7 +191,7 @@ export default function AnkaSpherePortal() {
             <nav className="mt-5 flex gap-1 overflow-x-auto border-b border-slate-800">{TABS.map(([id, label]) => <button key={id} onClick={() => setActiveTab(id)} className={`border-b-2 px-4 py-3 text-sm ${activeTab === id ? 'border-purple-500 text-white' : 'border-transparent text-slate-500'}`}>{label}</button>)}</nav>
             <div className="pt-5">
               {activeTab === 'overview' && <ProgressView portal={portal} itemsByType={itemsByType} />}
-              {activeTab === 'deliverables' && <DeliverablesView items={itemsByType.deliverable} onOpen={openFile} onFeedback={item => { setFeedbackTarget(item); setFeedback({ reference: '', content: '' }) }} onRevision={item => { setRevisionTarget(item); setRevision({ title: `Revision request: ${item.title}`, requestedOutput: '', priority: 'medium' }) }} />}
+              {activeTab === 'deliverables' && <DeliverablesView items={itemsByType.deliverable} onOpen={openFile} onFeedback={item => { setFeedbackTarget(item); setFeedback({ reference: '', content: '' }) }} onRevision={item => { setRevisionTarget(item); setRevision({ title: `Revision request: ${item.title}`, requestedOutput: '', priority: 'medium' }) }} onApprove={item => { setApprovalTarget(item); setApprovalRationale('') }} />}
               {activeTab === 'requests' && <RequestsView requests={portal.requests} />}
               {activeTab === 'conversation' && <ConversationView comments={portal.comments} comment={comment} setComment={setComment} onSubmit={submitComment} saving={saving} />}
             </div>
@@ -176,6 +201,7 @@ export default function AnkaSpherePortal() {
 
       {revisionTarget && <Modal title={`Request changes · ${revisionTarget.title}`} onClose={() => setRevisionTarget(null)}><form onSubmit={submitRevision} className="space-y-4"><Field label="Request title"><input required className={INPUT} value={revision.title} onChange={event => setRevision({ ...revision, title: event.target.value })} /></Field><Field label="What should change, and why?"><textarea required rows="5" className={INPUT} value={revision.requestedOutput} onChange={event => setRevision({ ...revision, requestedOutput: event.target.value })} /></Field><Field label="Priority"><select className={INPUT} value={revision.priority} onChange={event => setRevision({ ...revision, priority: event.target.value })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select></Field><button disabled={saving} className="w-full rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold disabled:opacity-50">Submit revision request</button><p className="text-xs text-slate-500">This request stays linked to version {revisionTarget.payload?.version_number} and appears in the assigned team queue.</p></form></Modal>}
       {feedbackTarget && <Modal title={`Comment on version ${feedbackTarget.payload?.version_number} · ${feedbackTarget.title}`} onClose={() => setFeedbackTarget(null)}><form onSubmit={submitVersionFeedback} className="space-y-4"><Field label="Section, page, frame, or timecode"><input required className={INPUT} value={feedback.reference} onChange={event => setFeedback({ ...feedback, reference: event.target.value })} placeholder="Homepage hero, page 4, frame 12, or 00:18" /></Field><Field label="Comment"><textarea required rows="5" className={INPUT} value={feedback.content} onChange={event => setFeedback({ ...feedback, content: event.target.value })} placeholder="Describe the observation or question for this exact version…" /></Field><button disabled={saving} className="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold disabled:opacity-50">Add version comment</button><p className="text-xs text-slate-500">Use a revision request when the comment requires a tracked change and delivery response.</p></form></Modal>}
+      {approvalTarget && <Modal title={`Approve version ${approvalTarget.payload?.version_number} · ${approvalTarget.title}`} onClose={() => setApprovalTarget(null)}><form onSubmit={submitApproval} className="space-y-4"><p className="rounded-xl border border-emerald-900 bg-emerald-950/40 p-3 text-sm text-emerald-200">Your approval applies only to this exact released version and becomes part of the permanent project record.</p><Field label="Approval note (optional)"><textarea rows="4" className={INPUT} value={approvalRationale} onChange={event => setApprovalRationale(event.target.value)} placeholder="Add any final confirmation or context…" /></Field><button disabled={saving} className="w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold disabled:opacity-50">Confirm approval</button></form></Modal>}
     </div>
   )
 }
@@ -184,7 +210,7 @@ function ProgressView({ portal, itemsByType }) {
   const progressItems = [...itemsByType.workstream, ...itemsByType.milestone, ...itemsByType.activity]
   return <div className="grid gap-4 md:grid-cols-3"><Stat label="Released items" value={portal.items.length} /><Stat label="Deliverables to review" value={itemsByType.deliverable.filter(item => item.status === 'ready_for_review').length} /><Stat label="Open requests" value={portal.requests.filter(item => !['completed', 'declined', 'withdrawn'].includes(item.status)).length} /><div className="md:col-span-3"><h3 className="mb-3 text-sm font-semibold">Released progress</h3>{progressItems.length ? <div className="space-y-3">{progressItems.map(item => <Record key={item.id} item={item} />)}</div> : <Empty text="The team has not released progress items yet." />}</div></div>
 }
-function DeliverablesView({ items, onOpen, onFeedback, onRevision }) { return <div><div className="mb-4 flex items-center justify-between"><div><h3 className="font-semibold">Released deliverables</h3><p className="mt-1 text-sm text-slate-500">Only versions that passed internal quality review appear here.</p></div>{!featureFlags.clientApprovals && <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-400">Formal approval disabled during UAT</span>}</div>{items.length ? <div className="grid gap-4 md:grid-cols-2">{items.map(item => <article key={item.id} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><p className="text-xs text-purple-400">Version {item.payload?.version_number}</p><h4 className="mt-1 font-semibold">{item.title}</h4><p className="mt-2 text-sm text-slate-400">{item.summary || 'Ready for your review.'}</p><div className="mt-4 flex flex-wrap gap-2"><button onClick={() => onOpen(item)} className="rounded-lg bg-purple-600 px-3 py-2 text-xs font-semibold">Open version</button><button onClick={() => onFeedback(item)} className="rounded-lg border border-purple-800 px-3 py-2 text-xs text-purple-300">Comment on version</button><button onClick={() => onRevision(item)} className="rounded-lg border border-orange-800 px-3 py-2 text-xs text-orange-300">Request revision</button></div></article>)}</div> : <Empty text="No deliverables have been released yet." />}</div> }
+function DeliverablesView({ items, onOpen, onFeedback, onRevision, onApprove }) { return <div><div className="mb-4 flex items-center justify-between"><div><h3 className="font-semibold">Released deliverables</h3><p className="mt-1 text-sm text-slate-500">Only versions that passed internal quality review appear here.</p></div>{!featureFlags.clientApprovals && <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-400">Formal approval disabled during UAT</span>}</div>{items.length ? <div className="grid gap-4 md:grid-cols-2">{items.map(item => { const decided = ['client_approved', 'revision_requested'].includes(item.status); return <article key={item.id} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><p className="text-xs text-purple-400">Version {item.payload?.version_number}</p><h4 className="mt-1 font-semibold">{item.title}</h4><p className="mt-2 text-sm text-slate-400">{item.summary || 'Ready for your review.'}</p>{decided && <p className={`mt-3 text-xs font-semibold ${item.status === 'client_approved' ? 'text-emerald-300' : 'text-orange-300'}`}>{labelize(item.status)}</p>}<div className="mt-4 flex flex-wrap gap-2"><button onClick={() => onOpen(item)} className="rounded-lg bg-purple-600 px-3 py-2 text-xs font-semibold">Open version</button><button onClick={() => onFeedback(item)} className="rounded-lg border border-purple-800 px-3 py-2 text-xs text-purple-300">Comment on version</button>{!decided && <button onClick={() => onRevision(item)} className="rounded-lg border border-orange-800 px-3 py-2 text-xs text-orange-300">Request revision</button>}{featureFlags.clientApprovals && !decided && <button onClick={() => onApprove(item)} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Approve version</button>}</div></article> })}</div> : <Empty text="No deliverables have been released yet." />}</div> }
 function RequestsView({ requests }) { return requests.length ? <div className="space-y-3">{requests.map(item => <article key={item.id} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><div className="flex justify-between gap-3"><div><p className="font-medium">{item.title}</p><p className="mt-1 text-sm text-slate-400">{item.requested_output}</p></div><span className="h-fit rounded-full bg-slate-800 px-2 py-1 text-xs">{labelize(item.status)}</span></div>{item.resolution && <p className="mt-3 rounded-lg bg-slate-950 p-3 text-sm text-emerald-300">Resolution: {item.resolution}</p>}</article>)}</div> : <Empty text="No revision or client work requests." /> }
 function ConversationView({ comments, comment, setComment, onSubmit, saving }) { return <div className="grid gap-5 lg:grid-cols-[1fr_300px]"><div className="space-y-3">{comments.length ? comments.map(item => <article key={item.id} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">{item.entity_type === 'deliverable_version' && <p className="mb-2 text-xs font-medium text-purple-300">Version comment · {item.anchor?.label || 'Referenced area'}</p>}<p className="text-sm">{item.content}</p><p className="mt-2 text-xs text-slate-500">{dateTime(item.created_at)}</p></article>) : <Empty text="Start the project conversation here." />}</div><form onSubmit={onSubmit} className="h-fit space-y-3 rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><Field label="New project message"><textarea required rows="5" className={INPUT} value={comment} onChange={event => setComment(event.target.value)} placeholder="Ask a question or share project context…" /></Field><button disabled={saving || !comment.trim()} className="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold disabled:opacity-50">Send message</button></form></div> }
 function Record({ item }) { return <article className="rounded-xl border border-slate-800 bg-slate-900/70 p-4"><div className="flex justify-between gap-3"><div><p className="font-medium">{item.title}</p><p className="mt-1 text-sm text-slate-400">{item.summary}</p></div><span className="h-fit rounded-full bg-slate-800 px-2 py-1 text-xs">{labelize(item.status)}</span></div></article> }

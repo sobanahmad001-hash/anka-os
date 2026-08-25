@@ -8,7 +8,11 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "test": "node --test 'src/**/*.test.js'"
+    "test": "node --test src/data/*.test.js",
+    "supabase:login": "supabase login",
+    "supabase:link": "supabase link --project-ref fhoxaogfjszftoqtnbav",
+    "supabase:migrations": "supabase migration list",
+    "supabase:deploy:functions": "supabase functions deploy ai-chat && supabase functions deploy integration-gateway && supabase functions deploy invite-user && supabase functions deploy invite-client-contact && supabase functions deploy portal-file-url"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.1",
@@ -27,6 +31,7 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
+    "supabase": "2.115.0",
     "tailwindcss": "^4.1.8",
     "vite": "^6.3.5"
   }
