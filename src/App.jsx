@@ -3,12 +3,12 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import Layout from './components/Layout'
 import { featureFlags } from './config/featureFlags'
+import CanonicalProjects from './apps/CanonicalProjects'
 
 const Login = lazy(() => import('./pages/Login'))
 const Settings = lazy(() => import('./apps/Settings'))
 const AgencyCommandCenter = lazy(() => import('./apps/AgencyCommandCenter'))
 const UserManagement = lazy(() => import('./apps/UserManagement'))
-const CanonicalProjects = lazy(() => import('./apps/CanonicalProjects'))
 const DepartmentWorkshop = lazy(() => import('./apps/DepartmentWorkshop'))
 const MyWork = lazy(() => import('./apps/MyWork'))
 const AnkaSpherePortal = lazy(() => import('./apps/AnkaSpherePortal'))

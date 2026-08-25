@@ -6,6 +6,7 @@ const main = readFileSync(new URL('../main.jsx', import.meta.url), 'utf8')
 const boundary = readFileSync(new URL('../components/AppErrorBoundary.jsx', import.meta.url), 'utf8')
 const auth = readFileSync(new URL('../context/AuthContext.jsx', import.meta.url), 'utf8')
 const theme = readFileSync(new URL('../hooks/useTheme.jsx', import.meta.url), 'utf8')
+const app = readFileSync(new URL('../App.jsx', import.meta.url), 'utf8')
 
 test('stale deployment chunks trigger a guarded one-time reload', () => {
   assert.match(main, /vite:preloadError/)
@@ -26,4 +27,8 @@ test('unexpected render failures show a visible recovery action', () => {
 test('optional profile and preference records do not emit 406 errors', () => {
   assert.match(auth, /\.maybeSingle\(\)/)
   assert.match(theme, /\.maybeSingle\(\)/)
+})
+test('the authenticated landing route is included in the main application bundle', () => {
+  assert.match(app, /import CanonicalProjects from '\.\/apps\/CanonicalProjects'/)
+  assert.doesNotMatch(app, /lazy\(\(\) => import\('\.\/apps\/CanonicalProjects'\)\)/)
 })
