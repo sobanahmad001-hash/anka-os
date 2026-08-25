@@ -13,7 +13,7 @@ export function AuthProvider({ children }) {
       .from('profiles')
       .select('*')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
     setProfile(data);
   }
 
@@ -69,3 +69,4 @@ export function useAuth() {
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');
   return ctx;
 }
+
