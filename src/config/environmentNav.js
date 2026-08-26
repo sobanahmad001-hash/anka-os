@@ -7,7 +7,7 @@ export const environmentNav = [
     items: [
       { label: 'Overview', path: '/admin' },
       { label: 'Users', path: '/users' },
-      { label: 'Rules', path: '/settings' },
+      { label: 'Connectors', path: '/settings' },
       { label: 'Product Document', path: '/admin/living-product-document' },
       { label: 'Assistant', path: '/assistant' },
     ],
@@ -34,8 +34,8 @@ export const environmentNav = [
       { label: 'Design Workshop', path: '/sphere/design', dept: 'design' },
 
       // Development dept (WordPress focused)
-      { label: 'Delivery & Development', path: null, dept: 'development', isHeader: true },
-      { label: 'Delivery Workspace', path: '/sphere/delivery', dept: 'development' },
+      { label: 'Development', path: null, dept: 'development', isHeader: true },
+      { label: 'Development Studio', path: '/sphere/delivery', dept: 'development' },
 
       // Marketing dept
       { label: 'Marketing', path: null, dept: 'marketing', isHeader: true },

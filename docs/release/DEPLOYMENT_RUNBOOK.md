@@ -37,16 +37,15 @@ supabase migration list
 
 Never paste the access token, database password, service-role key, provider token, or application password into chat or Git.
 
-## 3. Repair the manually applied migration history
+## 3. Confirm migration history
 
-Migrations 1–5 were executed and verified through SQL Editor. Mark those versions as applied without executing their SQL again:
+Migrations through `20260825130000` were confirmed locally and remotely on 26 August 2026. Re-check before every deployment:
 
 ```bash
-supabase migration repair 20260825010000 20260825020000 20260825030000 20260825040000 20260825050000 --status applied
 supabase migration list
 ```
 
-Do not mark Migrations 6–13 applied. They have not been deployed yet.
+Stop if any local and remote version differs. Do not repair migration history unless the SQL was independently applied and verified.
 
 Run a dry run:
 
@@ -54,18 +53,7 @@ Run a dry run:
 supabase db push --dry-run
 ```
 
-The dry run must list only:
-
-- `20260825060000_team_profile_alignment`
-- `20260825070000_release1_workflow_templates`
-- `20260825080000_canonical_activity_notifications`
-- `20260825090000_ai_audit_and_human_control`
-- `20260825100000_secure_integration_gateway`
-- `20260825110000_version_review_annotations`
-- `20260825120000_retire_insecure_api_docs_policy`
-- `20260825130000_enable_client_approvals_for_testing`
-
-Stop if Migrations 1–5 appear in the execution plan.
+For the department connector release, the dry run must list only `20260826135713_department_connector_registry`. Stop if an older migration appears.
 
 ## 4. Apply the queued database migrations
 
@@ -74,7 +62,7 @@ supabase db push
 supabase migration list
 ```
 
-Run verification files 6–13 in order through SQL Editor. Each must return its expected migration identifier with no missing table, policy, trigger, column, or grant failure.
+Run `supabase/verify_20260826135713_department_connector_registry.sql` through SQL Editor. Confirm department mappings, RLS, and grants before deploying the frontend.
 
 ## 5. Configure Edge Function secrets
 
@@ -88,6 +76,7 @@ Release 1 integration credentials use connection-specific names. Examples:
 - `ANKA_GITHUB_PRIMARY`
 - `ANKA_FIGMA_PRIMARY`
 - `ANKA_WORDPRESS_CLIENTNAME`
+- `ANKA_OPENAI_PRIMARY`
 
 Add values through Supabase Edge Function Secrets. The Anka OS Integration screen stores only the matching environment-variable name and public connection metadata.
 
@@ -111,14 +100,15 @@ The retired `hf-proxy` and `kling-proxy` functions are excluded from Release 1. 
 
 ## 7. Integration setup
 
-In Anka OS Admin → Rules / Secure Integrations:
+In Anka OS Admin → Connectors:
 
-1. Add public metadata for GitHub, Figma, or WordPress.
-2. Enter only the Supabase secret name—not its value.
-3. Run **Test connection**.
-4. Confirm an immutable `integration_events` audit record exists.
+1. Add public metadata for OpenAI, GitHub, Figma, or WordPress.
+2. Select every department allowed to use the connection.
+3. Enter only the Supabase secret name—not its value.
+4. Run **Test connection**.
+5. Confirm an immutable `integration_events` audit record exists.
 
-Release 1 integration tests are read-only. They cannot push code, modify Figma, publish WordPress content, or expose provider responses.
+Connector tests are read-only. They cannot push code, modify Figma, publish WordPress content, run an OpenAI generation, or expose provider responses. Google Analytics, Search Console, and Ads remain labelled **OAuth planned** until their consent flows are implemented.
 
 ## 8. Frontend deployment
 

@@ -24,7 +24,7 @@ export const DELIVERABLE_VERSION_STATUSES = Object.freeze([
 export const WORKSTREAM_DEPARTMENTS = Object.freeze([
   Object.freeze({ id: 'content', name: 'Content' }),
   Object.freeze({ id: 'design', name: 'Design' }),
-  Object.freeze({ id: 'development', name: 'Delivery & Development' }),
+  Object.freeze({ id: 'development', name: 'Development' }),
   Object.freeze({ id: 'marketing', name: 'Marketing' }),
 ])
 

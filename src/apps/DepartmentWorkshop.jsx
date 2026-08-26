@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
+import DepartmentConnectors from '../components/DepartmentConnectors.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { delivery } from '../data/delivery.js'
 import { TASK_TRANSITIONS } from '../data/deliveryRepository.js'
@@ -28,11 +29,11 @@ const DEPARTMENT_CONFIG = {
     description: 'Campaign planning, channel execution, distribution, optimization, reporting, and cross-department requests.',
   },
   development: {
-    name: 'Delivery & Development',
-    shortName: 'Delivery',
+    name: 'Development Studio',
+    shortName: 'Development',
     accent: 'blue',
     accentClass: 'text-blue-400',
-    description: 'Website delivery, development queues, QA, deployment readiness, maintenance, and technical handoffs.',
+    description: 'WordPress delivery, cross-engagement development queues, QA, launch readiness, maintenance, and technical handoffs.',
   },
 }
 
@@ -42,6 +43,7 @@ const TABS = [
   ['deliverables', 'Deliverables'],
   ['requests', 'Requests'],
   ['milestones', 'Milestones'],
+  ['connectors', 'Connectors'],
 ]
 
 const INPUT_CLASS = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20'
@@ -238,8 +240,14 @@ export default function DepartmentWorkshop({ departmentId }) {
           <Stat label="Incoming requests" value={incoming} note="Cross-department handoffs" />
         </div>
 
-        {workspace.workstreams.length === 0 ? (
-          <div className="mt-7"><Empty title={`No active ${config.shortName} workstreams`} description="Create or update an engagement in Projects & Retainers and activate this department. The work will appear here automatically." /></div>
+        <div className="mt-6 flex gap-1 overflow-x-auto border-b border-slate-800">
+          {TABS.map(([id, label]) => <button key={id} type="button" onClick={() => setActiveTab(id)} className={`whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium ${activeTab === id ? 'border-purple-500 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>{label}</button>)}
+        </div>
+
+        {activeTab === 'connectors' ? (
+          <div className="mt-6"><DepartmentConnectors departmentId={departmentId} departmentName={config.shortName} /></div>
+        ) : workspace.workstreams.length === 0 ? (
+          <div className="mt-7"><Empty title={`No active ${config.shortName} workstreams`} description="Create or update an engagement in Projects & Retainers and activate this department. The work will appear here automatically. Department connectors remain available from the Connectors tab." /></div>
         ) : (
           <>
             <div className="mt-7 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
@@ -257,10 +265,6 @@ export default function DepartmentWorkshop({ departmentId }) {
                 <span>·</span>
                 <span>Due {dateLabel(selectedWorkstream?.projects?.due_date)}</span>
               </div>
-            </div>
-
-            <div className="mt-6 flex gap-1 overflow-x-auto border-b border-slate-800">
-              {TABS.map(([id, label]) => <button key={id} type="button" onClick={() => setActiveTab(id)} className={`whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium ${activeTab === id ? 'border-purple-500 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>{label}</button>)}
             </div>
 
             <div className="mt-6 grid gap-5 xl:grid-cols-[1fr_350px]">

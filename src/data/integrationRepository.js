@@ -8,7 +8,7 @@ async function invoke(body) {
 }
 
 export const integrations = Object.freeze({
-  list: () => invoke({ action: 'list' }),
+  list: (departmentId = null) => invoke({ action: 'list', department_id: departmentId }),
   save: (connection) => invoke({ action: 'save', ...connection }),
   test: (connectionId) => invoke({ action: 'test', connection_id: connectionId }),
   disable: (connectionId) => invoke({ action: 'disable', connection_id: connectionId }),

@@ -2,12 +2,14 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.99.1'
 
 const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
-const PROVIDERS = new Set(['github', 'figma', 'wordpress'])
+const PROVIDERS = new Set(['github', 'figma', 'wordpress', 'openai'])
+const DEPARTMENTS = new Set(['content', 'design', 'development', 'marketing'])
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 const SECRET_PREFIX = {
   github: 'ANKA_GITHUB_',
   figma: 'ANKA_FIGMA_',
   wordpress: 'ANKA_WORDPRESS_',
+  openai: 'ANKA_OPENAI_',
 } as const
 
 const corsHeaders = {
@@ -35,7 +37,19 @@ function safePublicConfig(provider: string, value: unknown) {
   if (provider === 'figma') {
     return { file_key: text(input.file_key, 160) }
   }
+  if (provider === 'openai') {
+    return { model_id: text(input.model_id, 120) || 'gpt-5.6-terra' }
+  }
   return { username: text(input.username, 160) }
+}
+
+function safeDepartmentIds(value: unknown) {
+  if (!Array.isArray(value)) throw new Error('Select at least one department')
+  const departmentIds = [...new Set(value.map((item) => text(item, 40)).filter(Boolean))]
+  if (!departmentIds.length || departmentIds.some((departmentId) => !DEPARTMENTS.has(departmentId))) {
+    throw new Error('Select valid department access')
+  }
+  return departmentIds
 }
 
 function validateSecretName(provider: string, value: unknown) {
@@ -93,7 +107,7 @@ async function testConnection(connection: Record<string, unknown>, secret: strin
       const data = await response.json()
       summary = { file_name: data.name, last_modified: data.lastModified, version: data.version }
     }
-  } else {
+  } else if (provider === 'wordpress') {
     const baseUrl = safeHttpsBaseUrl(connection.base_url)
     if (!baseUrl || !config.username) throw new Error('WordPress URL and username are required')
     response = await fetch(`${baseUrl}/wp-json/wp/v2/users/me?context=edit`, {
@@ -103,6 +117,16 @@ async function testConnection(connection: Record<string, unknown>, secret: strin
     if (response.ok) {
       const data = await response.json()
       summary = { site: new URL(baseUrl).hostname, user_name: data.name, user_id: data.id }
+    }
+  } else {
+    if (!config.model_id) throw new Error('OpenAI model ID is required')
+    response = await fetch(`https://api.openai.com/v1/models/${encodeURIComponent(config.model_id)}`, {
+      headers: { Authorization: `Bearer ${secret}` },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (response.ok) {
+      const data = await response.json()
+      summary = { model_id: data.id, owned_by: data.owned_by }
     }
   }
 
@@ -149,14 +173,25 @@ serve(async (req) => {
     const isLeader = LEADER_ROLES.has(membership.role)
 
     if (action === 'list') {
+      const departmentId = text(body.department_id, 40)
+      if (departmentId && !DEPARTMENTS.has(departmentId)) return json({ error: 'Unknown department' }, 400)
       const { data, error } = await userClient.from('integration_connections')
-        .select('*').is('archived_at', null).order('provider').order('display_name')
+        .select('*, integration_connection_departments(department_id)')
+        .is('archived_at', null).order('provider').order('display_name')
       if (error) throw error
-      return json({
-        connections: (data || []).map((connection) => ({
-          ...connection,
+      const visibleConnections = (data || []).map((connection) => {
+        const mappings = Array.isArray(connection.integration_connection_departments)
+          ? connection.integration_connection_departments as Array<{ department_id: string }>
+          : []
+        const { integration_connection_departments: _mappings, ...publicConnection } = connection
+        return {
+          ...publicConnection,
+          department_ids: mappings.map((mapping) => mapping.department_id),
           secret_configured: Boolean(connection.secret_name && Deno.env.get(connection.secret_name)),
-        })),
+        }
+      }).filter((connection) => !departmentId || connection.department_ids.includes(departmentId))
+      return json({
+        connections: visibleConnections,
         can_manage: isLeader,
       })
     }
@@ -169,6 +204,7 @@ serve(async (req) => {
       const displayName = text(body.display_name, 120)
       if (!displayName) return json({ error: 'Connection name is required' }, 400)
       const secretName = validateSecretName(provider, body.secret_name)
+      const departmentIds = safeDepartmentIds(body.department_ids)
       const payload = {
         organization_id: ORGANIZATION_ID,
         provider,
@@ -186,6 +222,18 @@ serve(async (req) => {
         : adminClient.from('integration_connections').insert(payload)
       const { data: connection, error } = await query.select().single()
       if (error) throw error
+      const { error: deleteMappingError } = await adminClient.from('integration_connection_departments')
+        .delete().eq('connection_id', connection.id).eq('organization_id', ORGANIZATION_ID)
+      if (deleteMappingError) throw deleteMappingError
+      const { error: insertMappingError } = await adminClient.from('integration_connection_departments').insert(
+        departmentIds.map((departmentId) => ({
+          connection_id: connection.id,
+          organization_id: ORGANIZATION_ID,
+          department_id: departmentId,
+          created_by: user.id,
+        })),
+      )
+      if (insertMappingError) throw insertMappingError
       await adminClient.from('integration_events').insert({
         organization_id: ORGANIZATION_ID,
         connection_id: connection.id,
@@ -193,9 +241,9 @@ serve(async (req) => {
         operation: connectionId ? 'updated' : 'created',
         outcome: 'succeeded',
         provider,
-        metadata: { display_name: displayName },
+        metadata: { display_name: displayName, department_ids: departmentIds },
       })
-      return json({ connection: { ...connection, secret_configured: Boolean(secretName && Deno.env.get(secretName)) } })
+      return json({ connection: { ...connection, department_ids: departmentIds, secret_configured: Boolean(secretName && Deno.env.get(secretName)) } })
     }
 
     const connectionId = text(body.connection_id, 80)
