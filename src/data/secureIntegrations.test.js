@@ -4,6 +4,7 @@ import test from 'node:test'
 
 const migration = readFileSync(new URL('../../supabase/migrations/20260825100000_secure_integration_gateway.sql', import.meta.url), 'utf8')
 const departmentMigration = readFileSync(new URL('../../supabase/migrations/20260826135713_department_connector_registry.sql', import.meta.url), 'utf8')
+const connectorIndexMigration = readFileSync(new URL('../../supabase/migrations/20260826141452_index_department_connector_foreign_keys.sql', import.meta.url), 'utf8')
 const gateway = readFileSync(new URL('../../supabase/functions/integration-gateway/index.ts', import.meta.url), 'utf8')
 const config = readFileSync(new URL('../../supabase/config.toml', import.meta.url), 'utf8')
 const settings = readFileSync(new URL('../apps/Settings.jsx', import.meta.url), 'utf8')
@@ -54,6 +55,9 @@ test('department connector mappings are protected and browser read-only', () => 
   assert.doesNotMatch(departmentMigration, /grant (insert|update|delete|all) on public\.integration_connection_departments to authenticated/)
   assert.match(gateway, /integration_connection_departments\(department_id\)/)
   assert.match(gateway, /department_ids: departmentIds/)
+  assert.match(connectorIndexMigration, /\(connection_id, organization_id\)/)
+  assert.match(connectorIndexMigration, /\(department_id\)/)
+  assert.match(connectorIndexMigration, /\(created_by\)/)
 })
 
 test('OpenAI uses a named server secret and a read-only model verification request', () => {

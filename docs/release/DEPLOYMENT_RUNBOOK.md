@@ -53,7 +53,12 @@ Run a dry run:
 supabase db push --dry-run
 ```
 
-For the department connector release, the dry run must list only `20260826135713_department_connector_registry`. Stop if an older migration appears.
+For the department connector release, the only migrations that may appear—if not already present remotely—are:
+
+- `20260826135713_department_connector_registry`
+- `20260826141452_index_department_connector_foreign_keys`
+
+Stop if an older migration appears.
 
 ## 4. Apply the queued database migrations
 
@@ -62,7 +67,7 @@ supabase db push
 supabase migration list
 ```
 
-Run `supabase/verify_20260826135713_department_connector_registry.sql` through SQL Editor. Confirm department mappings, RLS, and grants before deploying the frontend.
+Run both connector verification files through SQL Editor. Confirm department mappings, RLS, grants, and foreign-key indexes before deploying the frontend.
 
 ## 5. Configure Edge Function secrets
 
