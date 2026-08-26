@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { environmentNav } from '../config/environmentNav'
+import { featureFlags } from '../config/featureFlags'
 import { useNotifications } from '../hooks/useNotifications'
 
 export default function Header() {
@@ -9,6 +10,7 @@ export default function Header() {
   const navigate = useNavigate()
   const location = useLocation()
   const [showNotifications, setShowNotifications] = useState(false)
+  const [showMobileNav, setShowMobileNav] = useState(false)
   const notifRef = useRef(null)
   const { notifications, unread, markRead, markAllRead } = useNotifications()
 
@@ -16,6 +18,12 @@ export default function Header() {
     location.pathname.startsWith(e.basePath?.split('/').slice(0, 2).join('/') || '__') ||
     (e.key === 'admin' && (location.pathname.startsWith('/admin') || location.pathname === '/users' || location.pathname === '/settings'))
   )
+  const mobileItems = (activeEnv?.items || []).filter((item) => {
+    if (item.isHeader || !item.path) return false
+    if (item.path === '/assistant' && !featureFlags.aiAssistance) return false
+    if (activeEnv?.key === 'admin') return profile?.role === 'admin'
+    return item.dept === null || profile?.role === 'admin' || profile?.department === item.dept
+  })
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -27,6 +35,10 @@ export default function Header() {
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
+
+  useEffect(() => {
+    setShowMobileNav(false)
+  }, [location.pathname])
 
   const NOTIF_ICONS = {
     task_assigned: '📋',
@@ -41,18 +53,49 @@ export default function Header() {
   }
 
   return (
-    <header className="h-14 border-b border-gray-800 bg-gray-900 flex items-center px-6 gap-6 shrink-0 z-40">
+    <header className="relative z-40 flex h-16 shrink-0 items-center gap-3 border-b border-white/[0.07] bg-[#0b0e15]/90 px-3 backdrop-blur-xl sm:px-5">
       {/* Logo */}
-      <div className="flex items-center gap-2 flex-shrink-0">
-        <div className="w-6 h-6 bg-purple-600 rounded-md flex items-center justify-center">
-          <span className="text-white text-xs font-bold">A</span>
+      <div className="flex min-w-0 shrink-0 items-center gap-3 md:w-[220px]">
+        <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 shadow-[0_0_24px_rgba(124,58,237,0.22)]">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="8" />
+            <path d="M8.5 9.5 12 7l3.5 2.5v5L12 17l-3.5-2.5z" />
+          </svg>
         </div>
-        <span className="text-sm font-semibold text-white">Anka OS</span>
-        <span className="text-xs text-gray-500 hidden md:block">Internal operating system for organized execution</span>
+        <div className="min-w-0">
+          <span className="block truncate text-sm font-semibold tracking-tight text-white">Anka OS</span>
+          <span className="hidden text-[10px] font-medium uppercase tracking-[0.15em] text-slate-600 lg:block">Creative delivery system</span>
+        </div>
       </div>
 
+      <button
+        type="button"
+        aria-label="Open workspace navigation"
+        aria-expanded={showMobileNav}
+        onClick={() => setShowMobileNav((current) => !current)}
+        className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.06] text-slate-400 sm:hidden"
+      >
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+
+      {showMobileNav && (
+        <nav className="absolute left-3 right-3 top-[3.75rem] rounded-2xl border border-white/10 bg-[#141824] p-2 shadow-2xl sm:hidden">
+          <p className="px-3 pb-2 pt-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">{activeEnv?.label}</p>
+          {mobileItems.map((item) => (
+            <button
+              type="button"
+              key={item.path}
+              onClick={() => navigate(item.path)}
+              className={`block w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium ${location.pathname === item.path ? 'bg-violet-500/15 text-violet-100' : 'text-slate-400 hover:bg-white/[0.05] hover:text-white'}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </nav>
+      )}
+
       {/* Environment tabs */}
-      <nav className="flex items-center gap-1 flex-1">
+      <nav className="hidden flex-1 items-center gap-1 sm:flex">
         {environmentNav.map(env => {
           if (env.key === 'admin' && profile?.role !== 'admin') return null
           const isActive = activeEnv?.key === env.key
@@ -60,10 +103,10 @@ export default function Header() {
             <button
               key={env.key}
               onClick={() => navigate(env.basePath)}
-              className={`px-4 py-1.5 text-sm rounded-lg transition-colors ${
+              className={`rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
                 isActive
-                  ? 'bg-gray-700 text-white font-medium'
-                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                  ? 'bg-white/[0.07] text-white'
+                  : 'text-slate-500 hover:bg-white/[0.04] hover:text-slate-200'
               }`}>
               {env.label}
             </button>
@@ -72,13 +115,14 @@ export default function Header() {
       </nav>
 
       {/* Right side */}
-      <div className="flex items-center gap-3 flex-shrink-0">
+      <div className="ml-auto flex shrink-0 items-center gap-2">
 
         {/* Notification bell */}
         <div className="relative" ref={notifRef}>
           <button
             onClick={() => { setShowNotifications(!showNotifications); if (!showNotifications && unread > 0) markAllRead() }}
-            className="relative w-8 h-8 flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors">
+            aria-label="Open notifications"
+            className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.06] bg-white/[0.025] text-slate-400 transition-colors hover:border-white/10 hover:bg-white/[0.06] hover:text-white">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
               <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
@@ -92,7 +136,7 @@ export default function Header() {
 
           {/* Dropdown */}
           {showNotifications && (
-            <div className="absolute right-0 top-10 w-80 bg-gray-800 border border-gray-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+            <div className="absolute right-0 top-12 z-50 w-[min(20rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-white/10 bg-[#141824] shadow-2xl">
               <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
                 <p className="text-sm font-semibold text-white">Notifications</p>
                 {notifications.some(n => !n.read) && (
@@ -153,18 +197,22 @@ export default function Header() {
         </div>
 
         {/* User info */}
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-full bg-purple-600 flex items-center justify-center text-xs font-bold text-white">
+        <div className="flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.025] py-1.5 pl-1.5 pr-2.5">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 text-xs font-bold text-white">
             {(profile?.full_name || profile?.email || '?')[0].toUpperCase()}
           </div>
-          <span className="text-sm text-gray-300 hidden md:block">
+          <span className="hidden max-w-28 truncate text-xs font-medium text-slate-300 lg:block">
             {profile?.full_name || profile?.email?.split('@')[0]}
           </span>
         </div>
 
         <button onClick={signOut}
-          className="text-xs text-gray-400 hover:text-white px-3 py-1.5 rounded-lg hover:bg-gray-800 transition-colors">
-          Sign Out
+          aria-label="Sign out"
+          title="Sign out"
+          className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-white/[0.05] hover:text-white">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M10 17l5-5-5-5M15 12H3"/><path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5"/>
+          </svg>
         </button>
       </div>
     </header>

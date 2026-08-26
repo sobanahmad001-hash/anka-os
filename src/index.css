@@ -8,6 +8,8 @@ body,
 
 body {
   margin: 0;
+  background: #090b11;
+  color: #f8fafc;
   font-family:
     Inter,
     ui-sans-serif,
@@ -22,4 +24,48 @@ body {
 
 * {
   box-sizing: border-box;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: rgba(139, 92, 246, 0.35);
+  color: white;
+}
+
+.anka-workspace {
+  background:
+    radial-gradient(circle at 88% 4%, rgba(124, 58, 237, 0.09), transparent 27rem),
+    radial-gradient(circle at 18% 92%, rgba(14, 165, 233, 0.05), transparent 24rem),
+    #090b11;
+}
+
+* {
+  scrollbar-color: #334155 transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #334155;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
 }

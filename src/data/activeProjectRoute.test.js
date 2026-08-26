@@ -17,4 +17,7 @@ test('active project route uses the canonical project workspace', async () => {
   assert.doesNotMatch(projectSource, /as_/)
   assert.match(projectSource, /delivery\.createWorkstreams/)
   assert.match(projectSource, /Living Project Record/)
+  assert.match(projectSource, /STATUS_FILTERS/)
+  assert.match(projectSource, /searchQuery/)
+  assert.match(projectSource, /featureFlags\.clientApprovals/)
 })
