@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import {
   CONFIGURABLE_CONNECTOR_IDS,
@@ -29,11 +30,12 @@ function labelize(value) {
 }
 
 function Status({ value }) {
-  const style = value === 'verified' ? 'bg-emerald-950 text-emerald-300' : value === 'error' ? 'bg-red-950 text-red-300' : value === 'oauth_planned' ? 'bg-amber-950 text-amber-300' : 'bg-slate-800 text-slate-300'
+  const style = value === 'verified' ? 'bg-emerald-950 text-emerald-300' : value === 'error' ? 'bg-red-950 text-red-300' : ['oauth_planned', 'authorizing'].includes(value) ? 'bg-amber-950 text-amber-300' : 'bg-slate-800 text-slate-300'
   return <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${style}`}>{labelize(value)}</span>
 }
 
 export default function Settings() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [connections, setConnections] = useState([])
   const [canManage, setCanManage] = useState(false)
   const [form, setForm] = useState(initialForm())
@@ -57,6 +59,23 @@ export default function Settings() {
   }
 
   useEffect(() => { loadConnections() }, [])
+  useEffect(() => {
+    const outcome = searchParams.get('oauth')
+    if (!outcome) return
+    const provider = searchParams.get('provider')
+    const reason = searchParams.get('reason')
+    if (outcome === 'success') {
+      setMessage(`${connectorLabel(provider)} was authorised successfully.`)
+      setError('')
+      loadConnections()
+    } else {
+      setMessage('')
+      setError(`Google authorisation was not completed${reason ? ` (${labelize(reason)})` : ''}.`)
+    }
+    const next = new URLSearchParams(searchParams)
+    for (const key of ['oauth', 'provider', 'reason']) next.delete(key)
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams])
 
   function chooseProvider(provider) {
     setForm(initialForm(provider))
@@ -121,6 +140,43 @@ export default function Settings() {
     }
   }
 
+  async function authorizeGoogle(event, existingConnection = null) {
+    event?.preventDefault()
+    const source = existingConnection || form
+    if (!source.department_ids?.length) return setError('Select at least one department for this connector.')
+    setSaving(true)
+    setMessage('')
+    setError('')
+    try {
+      const result = await integrations.startGoogleOAuth({
+        provider: source.provider,
+        connection_id: existingConnection?.id || null,
+        display_name: source.display_name,
+        department_ids: source.department_ids,
+        return_path: '/settings',
+      })
+      window.location.assign(result.authorize_url)
+    } catch (authorizeError) {
+      setError(authorizeError.message)
+      setSaving(false)
+    }
+  }
+
+  async function disconnectGoogle(connection) {
+    setSaving(true)
+    setMessage('')
+    setError('')
+    try {
+      const result = await integrations.disconnectGoogleOAuth(connection.id)
+      setMessage(`${connection.display_name} was disconnected${result.remote_revoked ? ' and its Google grant was revoked' : ''}.`)
+      await loadConnections()
+    } catch (disconnectError) {
+      setError(disconnectError.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function disableConnection(connection) {
     setSaving(true)
     setMessage('')
@@ -143,7 +199,7 @@ export default function Settings() {
       <header className="border-b border-slate-800 px-6 py-5">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-purple-400">Administration</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight">Connector Centre</h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Configure a provider once, assign it to the departments allowed to use it, and keep all credentials in Supabase Edge Function secrets. External writes remain human-controlled.</p>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Configure a provider once and assign it to the departments allowed to use it. Named provider secrets and encrypted OAuth tokens remain server-side. External writes remain human-controlled.</p>
       </header>
 
       <main className="mx-auto max-w-7xl space-y-6 px-6 py-6">
@@ -169,16 +225,22 @@ export default function Settings() {
             <div className="mt-5 space-y-3">
               {loading ? <p className="text-sm text-slate-500">Loading connectors…</p> : connections.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-700 px-5 py-10 text-center text-sm text-slate-500">No connectors configured yet.</div>
-              ) : connections.map((connection) => (
-                <article key={connection.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium text-white">{connection.display_name}</p><p className="mt-1 text-xs text-slate-500">{connectorLabel(connection.provider)} · {connection.secret_configured ? 'Secret configured' : 'Secret missing'}</p></div><Status value={connection.status} /></div>
-                  <div className="mt-3 flex flex-wrap gap-2">{(connection.department_ids || []).map((departmentId) => <span key={departmentId} className="rounded-full bg-slate-900 px-2.5 py-1 text-[11px] text-slate-400">{DEPARTMENT_LABELS[departmentId]}</span>)}</div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {canManage && <button type="button" disabled={!connection.secret_configured || testingId === connection.id} onClick={() => testConnection(connection)} className={BUTTON}>{testingId === connection.id ? 'Testing…' : 'Test connection'}</button>}
-                    {canManage && <button type="button" disabled={saving} onClick={() => disableConnection(connection)} className={BUTTON}>Disable</button>}
-                  </div>
-                </article>
-              ))}
+              ) : connections.map((connection) => {
+                const connector = CONNECTOR_CATALOG[connection.provider]
+                const isOAuth = connector?.authMode === 'oauth'
+                return (
+                  <article key={connection.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium text-white">{connection.display_name}</p><p className="mt-1 text-xs text-slate-500">{connectorLabel(connection.provider)} · {isOAuth ? (connection.status === 'verified' ? connection.public_config?.authorized_email || 'Google account authorised' : 'Google authorisation required') : connection.secret_configured ? 'Secret configured' : 'Secret missing'}</p></div><Status value={connection.status} /></div>
+                    <div className="mt-3 flex flex-wrap gap-2">{(connection.department_ids || []).map((departmentId) => <span key={departmentId} className="rounded-full bg-slate-900 px-2.5 py-1 text-[11px] text-slate-400">{DEPARTMENT_LABELS[departmentId]}</span>)}</div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {canManage && isOAuth && <button type="button" disabled={saving} onClick={(event) => authorizeGoogle(event, connection)} className={BUTTON}>{connection.status === 'verified' ? 'Reauthorise Google' : 'Continue authorisation'}</button>}
+                      {canManage && isOAuth && connection.status === 'verified' && <button type="button" disabled={saving} onClick={() => disconnectGoogle(connection)} className={BUTTON}>Disconnect Google</button>}
+                      {canManage && !isOAuth && <button type="button" disabled={!connection.secret_configured || testingId === connection.id} onClick={() => testConnection(connection)} className={BUTTON}>{testingId === connection.id ? 'Testing…' : 'Test connection'}</button>}
+                      {canManage && !isOAuth && <button type="button" disabled={saving} onClick={() => disableConnection(connection)} className={BUTTON}>Disable</button>}
+                    </div>
+                  </article>
+                )
+              })}
             </div>
           </section>
 
@@ -188,7 +250,15 @@ export default function Settings() {
               <div className="mt-5 rounded-xl border border-amber-900/60 bg-amber-950/30 p-4 text-sm leading-6 text-amber-200">
                 {selected.availability === 'oauth_planned' ? 'This connector needs a secure OAuth authorisation flow. It is shown in the relevant department now, but Anka OS will not request or store substitute credentials.' : 'This connector is recorded in the product catalogue and will be implemented in a later connector phase.'}
               </div>
-            ) : !canManage && !loading ? <p className="mt-4 text-sm leading-6 text-amber-300">Only system owners, operations admins, and executives can configure connectors.</p> : (
+            ) : !canManage && !loading ? <p className="mt-4 text-sm leading-6 text-amber-300">Only system owners, operations admins, and executives can configure connectors.</p> : selected.authMode === 'oauth' ? (
+              <form onSubmit={authorizeGoogle} className="mt-5 space-y-4">
+                <div className="rounded-xl border border-blue-900/60 bg-blue-950/30 p-4 text-sm leading-6 text-blue-200">Anka OS will open Google’s consent screen and request only the read/reporting permission needed for this connector. Offline access lets scheduled reporting continue after you close the browser. Tokens are encrypted before storage and are never returned to this page.</div>
+                <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Connection name<input required value={form.display_name} onChange={(event) => setForm({ ...form, display_name: event.target.value })} className={`${INPUT} mt-2 normal-case tracking-normal`} placeholder={`Primary ${selected.shortLabel} connection`} /></label>
+                <fieldset><legend className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Department access</legend><div className="mt-2 grid grid-cols-2 gap-2">{selected.departments.map((departmentId) => <label key={departmentId} className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-300"><input type="checkbox" checked={form.department_ids.includes(departmentId)} onChange={() => toggleDepartment(departmentId)} />{DEPARTMENT_LABELS[departmentId]}</label>)}</div></fieldset>
+                {form.provider === 'google_ads' && <p className="rounded-xl border border-amber-900/60 bg-amber-950/30 p-3 text-xs leading-5 text-amber-200">Google Ads reporting also requires Anka Sphere’s Google Ads developer token and an approved API access level. Account authorisation can be completed first.</p>}
+                <button disabled={saving} className="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-purple-500 disabled:opacity-50">{saving ? 'Preparing Google…' : 'Continue to Google'}</button>
+              </form>
+            ) : (
               <form onSubmit={saveConnection} className="mt-5 space-y-4">
                 <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Connection name<input required value={form.display_name} onChange={(event) => setForm({ ...form, display_name: event.target.value })} className={`${INPUT} mt-2 normal-case tracking-normal`} placeholder={`Primary ${selected.shortLabel} connection`} /></label>
                 {form.provider === 'openai' && <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Default model<input required value={form.model_id} onChange={(event) => setForm({ ...form, model_id: event.target.value })} className={`${INPUT} mt-2 font-mono normal-case tracking-normal`} /></label>}

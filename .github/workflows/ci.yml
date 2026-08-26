@@ -23,6 +23,6 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
-      - run: deno test --frozen supabase/functions/ai-chat/index.test.ts
-      - run: deno check --frozen supabase/functions/ai-chat/index.ts supabase/functions/ai-chat/index.test.ts
+      - run: deno test --frozen supabase/functions/ai-chat/index.test.ts supabase/functions/google-oauth/index.test.ts
+      - run: deno check --frozen supabase/functions/ai-chat/index.ts supabase/functions/ai-chat/index.test.ts supabase/functions/google-oauth/index.ts supabase/functions/google-oauth/index.test.ts
       - run: npm run build

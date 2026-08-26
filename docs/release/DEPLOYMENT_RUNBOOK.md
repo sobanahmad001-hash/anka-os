@@ -87,6 +87,23 @@ Add values through Supabase Edge Function Secrets. The Anka OS Integration scree
 
 Department AI resolves a verified OpenAI connector assigned to the selected operating department. Existing `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` secrets remain a compatibility fallback only while that department has no OpenAI connector record. Once a department is assigned an OpenAI connector, test it successfully before UAT; an unverified mapping intentionally does not fall back to the organization-wide credential.
 
+Google OAuth requires these Edge Function secrets:
+
+```text
+GOOGLE_OAUTH_CLIENT_ID
+GOOGLE_OAUTH_CLIENT_SECRET
+GOOGLE_OAUTH_ENCRYPTION_KEY
+ANKA_APP_URL=https://anka-os.vercel.app
+```
+
+Generate `GOOGLE_OAUTH_ENCRYPTION_KEY` as a random value of at least 32 characters. Never reuse the Google client secret as the encryption key. In Google Cloud, create a **Web application** OAuth client and register this exact authorised redirect URI:
+
+```text
+https://fhoxaogfjszftoqtnbav.supabase.co/functions/v1/google-oauth
+```
+
+Enable the Google Analytics Data/Admin APIs, Search Console API, and Google Ads API as needed. Configure the OAuth consent screen and add test users while the app remains in testing. Google Ads reporting additionally requires `GOOGLE_ADS_DEVELOPER_TOKEN` and an approved Google Ads API access level; OAuth account authorisation can be completed before that reporting credential is available.
+
 Any provider credential previously exposed through a browser `VITE_*` variable must be rotated before it is added as an Edge Function secret.
 
 ## 6. Deploy authenticated Edge Functions
@@ -117,7 +134,7 @@ In Anka OS Admin → Connectors:
 6. Open the department’s **Connectors** tab and follow **Open department assistant**.
 7. Run a test request and confirm the AI Audit records the operating department and connector connection ID.
 
-Connector tests are read-only. They cannot push code, modify Figma, publish WordPress content, run an OpenAI generation, or expose provider responses. Google Analytics, Search Console, and Ads remain labelled **OAuth planned** until their consent flows are implemented.
+Connector tests are read-only. They cannot push code, modify Figma, publish WordPress content, run an OpenAI generation, or expose provider responses. For Google Analytics, Search Console, and Ads, choose the connector, assign its allowed departments, and select **Continue to Google**. After consent returns to Anka OS, confirm the connection is **Verified**, the authorised account is shown, and no token fields are present in browser responses or public connector metadata. Then disconnect a test connection and confirm its encrypted local credential is removed; Google revocation is attempted and recorded in the integration audit.
 
 ## 8. Frontend deployment
 

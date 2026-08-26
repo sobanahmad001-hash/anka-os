@@ -12,6 +12,7 @@ function Status({ value }) {
   const styles = {
     verified: 'bg-emerald-950 text-emerald-300',
     configured: 'bg-blue-950 text-blue-300',
+    authorizing: 'bg-amber-950 text-amber-300',
     error: 'bg-red-950 text-red-300',
     disconnected: 'bg-slate-800 text-slate-300',
     oauth_planned: 'bg-amber-950 text-amber-300',
@@ -59,7 +60,7 @@ export default function DepartmentConnectors({ departmentId, departmentName }) {
       <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
         <div>
           <h2 className="font-semibold text-white">{departmentName} connectors</h2>
-          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-400">Use approved agency connections in this department. Credentials remain in secure server-side secrets; this workspace receives status and authorised capabilities only.</p>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-400">Use approved agency connections in this department. Provider secrets and encrypted OAuth tokens remain server-side; this workspace receives status and authorised capabilities only.</p>
         </div>
         <div className="flex items-center gap-3">
           <span className="rounded-full bg-slate-950 px-3 py-1.5 text-xs text-slate-400">{verifiedCount} verified</span>
@@ -88,7 +89,7 @@ export default function DepartmentConnectors({ departmentId, departmentName }) {
                 {connector.capabilities.map((capability) => <span key={capability} className="rounded-full bg-slate-950 px-2.5 py-1 text-[11px] text-slate-500">{capability}</span>)}
               </div>
               <div className="mt-auto border-t border-slate-800 pt-4 text-xs text-slate-500">
-                {loading ? 'Checking connection status…' : bestConnection ? `${bestConnection.display_name} · ${bestConnection.secret_configured ? 'Credential available' : 'Credential pending'}` : connector.availability === 'oauth_planned' ? 'OAuth authorisation is the next implementation step.' : connector.availability === 'planned' ? 'Planned connector; no credentials requested yet.' : 'Available to configure in Administration.'}
+                {loading ? 'Checking connection status…' : bestConnection ? `${bestConnection.display_name} · ${connector.authMode === 'oauth' ? (bestConnection.status === 'verified' ? 'Google account authorised' : 'Google authorisation required') : bestConnection.secret_configured ? 'Credential available' : 'Credential pending'}` : connector.availability === 'oauth_planned' ? 'OAuth authorisation is the next implementation step.' : connector.availability === 'planned' ? 'Planned connector; no credentials requested yet.' : 'Available to configure in Administration.'}
                 {connector.id === 'openai' && bestConnection?.status === 'verified' && <Link to={`/assistant?department=${departmentId}`} className="mt-3 block font-semibold text-purple-400 hover:text-purple-300">Open department assistant →</Link>}
               </div>
             </article>
