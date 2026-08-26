@@ -252,6 +252,9 @@ serve(async (req) => {
       .from('integration_connections').select('*')
       .eq('id', connectionId).eq('organization_id', ORGANIZATION_ID).is('archived_at', null).single()
     if (connectionError || !connection) return json({ error: 'Connection not found' }, 404)
+    if (!PROVIDERS.has(String(connection.provider))) {
+      return json({ error: 'Use the Google authorization service for this connector' }, 400)
+    }
 
     if (action === 'disable') {
       const now = new Date().toISOString()

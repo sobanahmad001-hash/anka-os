@@ -11,6 +11,10 @@ const settings = readFileSync(new URL('../apps/Settings.jsx', import.meta.url), 
 const workshop = readFileSync(new URL('../apps/DepartmentWorkshop.jsx', import.meta.url), 'utf8')
 const departmentConnectors = readFileSync(new URL('../components/DepartmentConnectors.jsx', import.meta.url), 'utf8')
 const connectorCatalog = readFileSync(new URL('../config/connectorCatalog.js', import.meta.url), 'utf8')
+const oauthMigration = readFileSync(new URL('../../supabase/migrations/20260827010000_google_oauth_connector_credentials.sql', import.meta.url), 'utf8')
+const oauthIndexMigration = readFileSync(new URL('../../supabase/migrations/20260827013000_index_google_oauth_foreign_keys.sql', import.meta.url), 'utf8')
+const googleOauth = readFileSync(new URL('../../supabase/functions/google-oauth/index.ts', import.meta.url), 'utf8')
+const integrationRepository = readFileSync(new URL('./integrationRepository.js', import.meta.url), 'utf8')
 
 test('integration metadata is RLS-protected and browser writes are unavailable', () => {
   assert.match(migration, /alter table public\.integration_connections enable row level security/)
@@ -78,6 +82,43 @@ test('every department exposes its scoped connector catalogue', () => {
   assert.match(workshop, /\['connectors', 'Connectors'\]/)
   assert.match(workshop, /<DepartmentConnectors departmentId={departmentId}/)
   assert.match(departmentConnectors, /integrations\.list\(departmentId\)/)
+})
+
+test('Google OAuth tokens and single-use state remain server-only', () => {
+  assert.match(oauthMigration, /create table public\.integration_oauth_sessions/)
+  assert.match(oauthMigration, /create table public\.integration_oauth_credentials/)
+  assert.match(oauthMigration, /enable row level security/g)
+  assert.match(oauthMigration, /revoke all on public\.integration_oauth_sessions from anon, authenticated/)
+  assert.match(oauthMigration, /revoke all on public\.integration_oauth_credentials from anon, authenticated/)
+  assert.doesNotMatch(oauthMigration, /grant (select|insert|update|delete|all) on public\.integration_oauth_(sessions|credentials) to authenticated/)
+  assert.match(oauthIndexMigration, /integration_oauth_sessions\(connection_id, organization_id\)/)
+  assert.match(oauthIndexMigration, /integration_oauth_credentials\(connection_id, organization_id\)/)
+  assert.match(googleOauth, /AES-GCM/)
+  assert.match(googleOauth, /state_hash: await sha256\(state\)/)
+  assert.match(googleOauth, /code_challenge_method: 'S256'/)
+  assert.match(googleOauth, /consumed_at/)
+  assert.doesNotMatch(settings, /refresh_token|access_token/)
+})
+
+test('Google OAuth uses provider-specific least-privilege scopes and explicit leadership auth', () => {
+  assert.match(googleOauth, /analytics\.readonly/)
+  assert.match(googleOauth, /webmasters\.readonly/)
+  assert.match(googleOauth, /www\.googleapis\.com\/auth\/adwords/)
+  assert.match(googleOauth, /userClient\.auth\.getUser\(\)/)
+  assert.match(googleOauth, /const user = await authenticatedLeader\(request, supabaseUrl\)[\s\S]*const config = oauthConfiguration\(\)/)
+  assert.match(googleOauth, /LEADER_ROLES/)
+  assert.match(googleOauth, /access_type: 'offline'/)
+  assert.doesNotMatch(googleOauth, /include_granted_scopes: 'true'/)
+  assert.match(googleOauth, /oauth2\.googleapis\.com\/revoke/)
+  assert.match(googleOauth, /\.is\('consumed_at', null\)/)
+  assert.match(googleOauth, /\.gt\('expires_at', claimedAt\)/)
+  assert.match(gateway, /Use the Google authorization service for this connector/)
+  assert.match(config, /\[functions\.google-oauth\][\s\S]*verify_jwt = false/)
+  assert.match(integrationRepository, /startGoogleOAuth/)
+  assert.match(integrationRepository, /disconnectGoogleOAuth/)
+  for (const provider of ['google_analytics', 'google_search_console', 'google_ads']) {
+    assert.match(connectorCatalog, new RegExp(`${provider}:[\\s\\S]*?authMode: 'oauth',[\\s\\S]*?availability: 'available'`))
+  }
 })
 
 test('retired browser credential modules and unaudited media proxies are removed', () => {

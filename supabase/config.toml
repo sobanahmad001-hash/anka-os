@@ -29,3 +29,10 @@ entrypoint = "./functions/portal-file-url/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/integration-gateway/index.ts"
+
+[functions.google-oauth]
+enabled = true
+# The Google callback has no Supabase JWT. The function validates a one-time,
+# expiring state value; POST actions still authenticate the caller explicitly.
+verify_jwt = false
+entrypoint = "./functions/google-oauth/index.ts"

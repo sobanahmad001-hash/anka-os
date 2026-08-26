@@ -59,7 +59,7 @@ export const CONNECTOR_CATALOG = Object.freeze({
     description: 'Website engagement, event, conversion, and page-performance reporting.',
     departments: Object.freeze(['development', 'marketing']),
     authMode: 'oauth',
-    availability: 'oauth_planned',
+    availability: 'available',
     capabilities: Object.freeze(['Reporting', 'Conversion measurement', 'Realtime health']),
   }),
   google_search_console: Object.freeze({
@@ -69,7 +69,7 @@ export const CONNECTOR_CATALOG = Object.freeze({
     description: 'Query, page, click, impression, CTR, position, and sitemap visibility.',
     departments: Object.freeze(['content', 'development', 'marketing']),
     authMode: 'oauth',
-    availability: 'oauth_planned',
+    availability: 'available',
     capabilities: Object.freeze(['Search performance', 'Page opportunities', 'Sitemap health']),
   }),
   google_ads: Object.freeze({
@@ -79,7 +79,7 @@ export const CONNECTOR_CATALOG = Object.freeze({
     description: 'Campaign, spend, search-term, conversion, and optimisation reporting.',
     departments: Object.freeze(['marketing']),
     authMode: 'oauth',
-    availability: 'oauth_planned',
+    availability: 'available',
     capabilities: Object.freeze(['Campaign reporting', 'Spend visibility', 'Conversion reporting']),
   }),
   google_drive: Object.freeze({
