@@ -8,6 +8,7 @@ const screen = readFileSync(new URL('../apps/AnkaAssistant.jsx', import.meta.url
 const float = readFileSync(new URL('../components/AssistantFloat.jsx', import.meta.url), 'utf8')
 const repository = readFileSync(new URL('./aiRepository.js', import.meta.url), 'utf8')
 const config = readFileSync(new URL('../../supabase/config.toml', import.meta.url), 'utf8')
+const departmentConnectors = readFileSync(new URL('../components/DepartmentConnectors.jsx', import.meta.url), 'utf8')
 
 test('AI audit is RLS-protected and browser writes are unavailable', () => {
   assert.match(migration, /alter table public\.ai_runs enable row level security/)
@@ -32,6 +33,39 @@ test('provider secrets remain server-only and authenticated JWT verification sta
   assert.match(edge, /Deno\.env\.get\('ANTHROPIC_API_KEY'\)/)
   assert.doesNotMatch(screen, /OPENAI_API_KEY|ANTHROPIC_API_KEY|VITE_OPENAI/)
   assert.match(config, /\[functions\.ai-chat\][\s\S]*verify_jwt = true/)
+})
+
+test('department AI resolves verified connector mappings on the server', () => {
+  assert.match(edge, /integration_connection_departments!inner\(department_id\)/)
+  assert.match(edge, /\.eq\('status', 'verified'\)/)
+  assert.match(edge, /No verified OpenAI connector is assigned to this department/)
+  assert.match(edge, /manifest\.connector_connection_id/)
+  assert.match(edge, /manifest\.credential_source/)
+  assert.match(repository, /departmentId/)
+  assert.match(repository, /body: \{ capability, projectId, departmentId, input \}/)
+})
+
+test('assistant requires a valid operating department and active project workstream', () => {
+  assert.match(edge, /Unknown operating department/)
+  assert.match(edge, /The selected department is not active on this project/)
+  assert.match(edge, /This department assistant is restricted to its team and organization leadership/)
+  assert.match(edge, /LEADER_ROLES/)
+  assert.match(screen, /Operating department/)
+  assert.match(screen, /useSearchParams/)
+  assert.match(screen, /verified connector assigned to the operating department/)
+  assert.match(departmentConnectors, /\/assistant\?department=\$\{departmentId\}/)
+})
+
+test('OpenAI generation uses Responses API with non-retained and structured action output', () => {
+  assert.match(edge, /api\.openai\.com\/v1\/responses/)
+  assert.match(edge, /instructions: systemPrompt/)
+  assert.match(edge, /store: false/)
+  assert.match(edge, /safety_identifier: await safetyIdentifier\(actorId\)/)
+  assert.match(edge, /crypto\.subtle\.digest\('SHA-256'/)
+  assert.match(edge, /type: 'json_schema'/)
+  assert.match(edge, /input_tokens/)
+  assert.match(edge, /output_tokens/)
+  assert.doesNotMatch(edge, /api\.openai\.com\/v1\/chat\/completions/)
 })
 
 test('AI proposals cannot execute until a separate human confirmation', () => {

@@ -89,6 +89,7 @@ export default function DepartmentConnectors({ departmentId, departmentName }) {
               </div>
               <div className="mt-auto border-t border-slate-800 pt-4 text-xs text-slate-500">
                 {loading ? 'Checking connection status…' : bestConnection ? `${bestConnection.display_name} · ${bestConnection.secret_configured ? 'Credential available' : 'Credential pending'}` : connector.availability === 'oauth_planned' ? 'OAuth authorisation is the next implementation step.' : connector.availability === 'planned' ? 'Planned connector; no credentials requested yet.' : 'Available to configure in Administration.'}
+                {connector.id === 'openai' && bestConnection?.status === 'verified' && <Link to={`/assistant?department=${departmentId}`} className="mt-3 block font-semibold text-purple-400 hover:text-purple-300">Open department assistant →</Link>}
               </div>
             </article>
           )

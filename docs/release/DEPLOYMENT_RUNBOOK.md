@@ -85,6 +85,8 @@ Release 1 integration credentials use connection-specific names. Examples:
 
 Add values through Supabase Edge Function Secrets. The Anka OS Integration screen stores only the matching environment-variable name and public connection metadata.
 
+Department AI resolves a verified OpenAI connector assigned to the selected operating department. Existing `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` secrets remain a compatibility fallback only while that department has no OpenAI connector record. Once a department is assigned an OpenAI connector, test it successfully before UAT; an unverified mapping intentionally does not fall back to the organization-wide credential.
+
 Any provider credential previously exposed through a browser `VITE_*` variable must be rotated before it is added as an Edge Function secret.
 
 ## 6. Deploy authenticated Edge Functions
@@ -112,6 +114,8 @@ In Anka OS Admin → Connectors:
 3. Enter only the Supabase secret name—not its value.
 4. Run **Test connection**.
 5. Confirm an immutable `integration_events` audit record exists.
+6. Open the department’s **Connectors** tab and follow **Open department assistant**.
+7. Run a test request and confirm the AI Audit records the operating department and connector connection ID.
 
 Connector tests are read-only. They cannot push code, modify Figma, publish WordPress content, run an OpenAI generation, or expose provider responses. Google Analytics, Search Console, and Ads remain labelled **OAuth planned** until their consent flows are implemented.
 
