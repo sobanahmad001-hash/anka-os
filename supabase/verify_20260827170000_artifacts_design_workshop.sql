@@ -29,7 +29,7 @@ select jsonb_build_object(
   'all_tables_exist', not exists (select 1 from table_state where relrowsecurity is null),
   'all_tables_use_rls', not exists (select 1 from table_state where relrowsecurity is distinct from true),
   'browser_roles_are_read_only', not exists (select 1 from browser_writes),
-  'six_immutable_history_triggers', (select count(*) = 6 from immutable_triggers),
+  'six_immutable_history_triggers', (select count(distinct trigger_name) = 6 from immutable_triggers),
   'three_artifact_types', (
     select pg_get_constraintdef(constraint_record.oid) ilike all(array['%discovery%', '%vision%', '%audience%'])
     from pg_constraint constraint_record
