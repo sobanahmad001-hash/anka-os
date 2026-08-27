@@ -1,7 +1,7 @@
 -- Read-only verification for the isolated engagement event vocabulary change.
 
 with event_columns as (
-  select array_agg(column_name order by ordinal_position) as names
+  select array_agg(column_name::text order by ordinal_position) as names
   from information_schema.columns
   where table_schema = 'public' and table_name = 'engagement_events'
 ), event_policies as (
