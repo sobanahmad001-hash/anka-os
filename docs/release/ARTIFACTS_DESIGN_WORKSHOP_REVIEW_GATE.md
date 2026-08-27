@@ -73,29 +73,33 @@ Before approval, record the results of:
 
 Current branch evidence (2026-08-27):
 
-- application tests: 98 passed, 0 failed;
+- application tests: 99 passed, 0 failed;
 - Edge Function tests: 5 passed, 0 failed;
 - lint: 0 errors (the repository's existing JSX-parser warnings remain);
 - production build: passed, including an independent Design Workshop chunk;
 - Deno type-check: passed;
-- linked Supabase dry run: no changes applied; it reported, in order,
-  Operating Spine `140000`/`150000`, audit exception `160000`, and Artifacts /
-  Design Workshop `170000` as pending;
-- preview workflow test: still required after an explicitly approved migration
-  and function deployment.
+- production migrations: Operating Spine `140000`/`150000`, audit exception
+  `160000`, Artifacts / Design Workshop `170000`, and boundary reassertion
+  `180000` applied successfully in order;
+- production SQL verification: all `160000` and `170000` invariants passed;
+- preview workflow test: still required after the function deployment.
 
 ### Post-DDL GraphQL boundary
 
-Supabase's `issue_pg_graphql_access` event trigger can restore browser execution
-on `graphql.resolve` after schema DDL. Migration `20260827180000` therefore runs
-after every schema-changing migration in this release. It only repeats the
-reviewed revoke from `public`, `anon`, and `authenticated`, and the grant to
-`service_role`. Its verifier must report both browser checks as `true`.
+Supabase's `issue_pg_graphql_access` event trigger restored browser execution on
+`graphql.resolve` after schema DDL. Migration `20260827180000` repeated the
+reviewed revoke from `public`, `anon`, and `authenticated`, and grant to
+`service_role`, but the migration role could not change the resolver owned by
+`supabase_admin`.
 
-This is a release-local safeguard, not a permanent platform configuration.
-Until `pg_graphql` is disabled for the project through Supabase's supported
-extension setting, every future schema-changing release must end with the same
-boundary reassertion and verification.
+The durable boundary is now enforced at project level: `pg_graphql` is disabled
+through Supabase's supported Database Extensions setting. Fresh schema requests
+as both `anon` and `authenticated` return `pg_graphql extension is not enabled`,
+and database introspection confirms that both the extension and resolver are
+absent. Future schema-changing releases do not need another revoke migration
+while the extension remains disabled. Migration `20260827180000` remains in the
+history as an isolated, conditional defense for environments where the resolver
+exists.
 
 ## 5. Explicit release sequence
 
@@ -104,8 +108,8 @@ After approval only:
 1. merge/deploy the Operating Spine dependency first;
 2. apply `20260827160000` and review its verification output;
 3. apply `20260827170000` and review its verification output;
-4. apply `20260827180000` and confirm GraphQL execution is unavailable to both
-   browser roles while remaining available to `service_role`;
+4. apply `20260827180000`, disable `pg_graphql` at project level, and confirm a
+   fresh schema request fails for both browser roles;
 5. deploy `design-workshop`;
 6. deploy the application preview and complete the human workflow smoke test;
 7. promote to production only after a second explicit approval.
