@@ -10,6 +10,7 @@ test('major application surfaces are loaded as independent route chunks', () => 
     'AgencyCommandCenter',
     'OperatingSpine',
     'DepartmentWorkshop',
+    'MarketingStudio',
     'MyWork',
     'AnkaSpherePortal',
     'AnkaAssistant',

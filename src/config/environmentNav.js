@@ -41,6 +41,7 @@ export const environmentNav = [
       // Marketing dept
       { label: 'Marketing', path: null, dept: 'marketing', isHeader: true },
       { label: 'Marketing Workshop', path: '/sphere/marketing', dept: 'marketing' },
+      { label: 'Marketing Studio', path: '/sphere/marketing/studio', dept: 'marketing' },
     ],
   },
 ]

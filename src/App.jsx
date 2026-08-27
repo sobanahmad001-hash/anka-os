@@ -10,6 +10,7 @@ const AgencyCommandCenter = lazy(() => import('./apps/AgencyCommandCenter'))
 const UserManagement = lazy(() => import('./apps/UserManagement'))
 const OperatingSpine = lazy(() => import('./apps/OperatingSpine'))
 const DesignWorkshop = lazy(() => import('./apps/DesignWorkshop'))
+const MarketingStudio = lazy(() => import('./apps/MarketingStudio'))
 const DepartmentWorkshop = lazy(() => import('./apps/DepartmentWorkshop'))
 const MyWork = lazy(() => import('./apps/MyWork'))
 const AnkaSpherePortal = lazy(() => import('./apps/AnkaSpherePortal'))
@@ -66,6 +67,7 @@ export default function App() {
         <Route path="sphere/design" element={<DepartmentWorkshop departmentId="design" />} />
         <Route path="sphere/design/workshop" element={<DesignWorkshop />} />
         <Route path="sphere/marketing" element={<DepartmentWorkshop departmentId="marketing" />} />
+        <Route path="sphere/marketing/studio" element={<MarketingStudio />} />
         <Route path="sphere/delivery" element={<DepartmentWorkshop departmentId="development" />} />
         <Route path="sphere/clients" element={<OperatingSpine initialView="clients" />} />
         <Route path="sphere/portal" element={<AnkaSpherePortal />} />
@@ -78,7 +80,7 @@ export default function App() {
         <Route path="sphere/wp-sites" element={<Navigate to="/sphere/delivery" replace />} />
         <Route path="sphere/deployments" element={<Navigate to="/sphere/delivery" replace />} />
         <Route path="sphere/performance" element={<Navigate to="/sphere/delivery" replace />} />
-        <Route path="sphere/campaigns" element={<Navigate to="/sphere/marketing" replace />} />
+        <Route path="sphere/campaigns" element={<Navigate to="/sphere/marketing/studio" replace />} />
         <Route path="sphere/calendar" element={<Navigate to="/sphere/marketing" replace />} />
         <Route path="sphere/seo" element={<Navigate to="/sphere/marketing" replace />} />
 
