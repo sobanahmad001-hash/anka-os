@@ -159,7 +159,7 @@ export default function Header() {
                       onClick={() => {
                         markRead(notif.id)
                         if (notif.action_url) navigate(notif.action_url)
-                        else if (notif.project_id) navigate('/sphere/projects')
+                        else if (notif.project_id) navigate('/sphere/engagements')
                         setShowNotifications(false)
                       }}
                       className={`w-full text-left px-4 py-3 border-b border-gray-700/50 hover:bg-gray-700/50 transition-colors ${!notif.read ? 'bg-purple-900/10' : ''}`}>

@@ -8,11 +8,10 @@ test('major application surfaces are loaded as independent route chunks', () => 
   assert.match(app, /import \{ lazy, Suspense \} from 'react'/)
   for (const moduleName of [
     'AgencyCommandCenter',
-    'CanonicalProjects',
+    'OperatingSpine',
     'DepartmentWorkshop',
     'MyWork',
     'AnkaSpherePortal',
-    'AnkaSphereClients',
     'AnkaAssistant',
     'ReportsAndRecords',
   ]) {

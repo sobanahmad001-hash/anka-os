@@ -8,11 +8,10 @@ const Login = lazy(() => import('./pages/Login'))
 const Settings = lazy(() => import('./apps/Settings'))
 const AgencyCommandCenter = lazy(() => import('./apps/AgencyCommandCenter'))
 const UserManagement = lazy(() => import('./apps/UserManagement'))
-const CanonicalProjects = lazy(() => import('./apps/CanonicalProjects'))
+const OperatingSpine = lazy(() => import('./apps/OperatingSpine'))
 const DepartmentWorkshop = lazy(() => import('./apps/DepartmentWorkshop'))
 const MyWork = lazy(() => import('./apps/MyWork'))
 const AnkaSpherePortal = lazy(() => import('./apps/AnkaSpherePortal'))
-const AnkaSphereClients = lazy(() => import('./apps/AnkaSphereClients'))
 const AnkaAssistant = lazy(() => import('./apps/AnkaAssistant'))
 const LivingProductDocument = lazy(() => import('./apps/LivingProductDocument'))
 const ReportsAndRecords = lazy(() => import('./apps/ReportsAndRecords'))
@@ -50,7 +49,7 @@ export default function App() {
         }
       >
         {/* Default redirect */}
-        <Route index element={<Navigate to="/sphere/projects" replace />} />
+        <Route index element={<Navigate to="/sphere/engagements" replace />} />
 
         {/* ADMIN */}
         <Route path="admin" element={<AgencyCommandCenter />} />
@@ -59,13 +58,14 @@ export default function App() {
         <Route path="settings" element={<Settings />} />
 
         {/* ANKA SPHERE */}
-        <Route path="sphere/projects" element={<CanonicalProjects />} />
+        <Route path="sphere/engagements" element={<OperatingSpine initialView="engagements" />} />
+        <Route path="sphere/projects" element={<Navigate to="/sphere/engagements" replace />} />
         <Route path="sphere/my-work" element={<MyWork />} />
         <Route path="sphere/content" element={<DepartmentWorkshop departmentId="content" />} />
         <Route path="sphere/design" element={<DepartmentWorkshop departmentId="design" />} />
         <Route path="sphere/marketing" element={<DepartmentWorkshop departmentId="marketing" />} />
         <Route path="sphere/delivery" element={<DepartmentWorkshop departmentId="development" />} />
-        <Route path="sphere/clients" element={<AnkaSphereClients />} />
+        <Route path="sphere/clients" element={<OperatingSpine initialView="clients" />} />
         <Route path="sphere/portal" element={<AnkaSpherePortal />} />
         <Route path="sphere/reports" element={<ReportsAndRecords />} />
         <Route path="sphere/team-board" element={<Navigate to="/sphere/my-work" replace />} />
@@ -81,9 +81,9 @@ export default function App() {
         <Route path="sphere/seo" element={<Navigate to="/sphere/marketing" replace />} />
 
         {/* ANKA ASSISTANT */}
-        <Route path="assistant" element={featureFlags.aiAssistance ? <AnkaAssistant /> : <Navigate to="/sphere/projects" replace />} />
+        <Route path="assistant" element={featureFlags.aiAssistance ? <AnkaAssistant /> : <Navigate to="/sphere/engagements" replace />} />
 
-        <Route path="*" element={<Navigate to="/sphere/projects" replace />} />
+        <Route path="*" element={<Navigate to="/sphere/engagements" replace />} />
       </Route>
     </Routes>
     </Suspense>
