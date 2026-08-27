@@ -84,6 +84,19 @@ Current branch evidence (2026-08-27):
 - preview workflow test: still required after an explicitly approved migration
   and function deployment.
 
+### Post-DDL GraphQL boundary
+
+Supabase's `issue_pg_graphql_access` event trigger can restore browser execution
+on `graphql.resolve` after schema DDL. Migration `20260827180000` therefore runs
+after every schema-changing migration in this release. It only repeats the
+reviewed revoke from `public`, `anon`, and `authenticated`, and the grant to
+`service_role`. Its verifier must report both browser checks as `true`.
+
+This is a release-local safeguard, not a permanent platform configuration.
+Until `pg_graphql` is disabled for the project through Supabase's supported
+extension setting, every future schema-changing release must end with the same
+boundary reassertion and verification.
+
 ## 5. Explicit release sequence
 
 After approval only:
@@ -91,6 +104,8 @@ After approval only:
 1. merge/deploy the Operating Spine dependency first;
 2. apply `20260827160000` and review its verification output;
 3. apply `20260827170000` and review its verification output;
-4. deploy `design-workshop`;
-5. deploy the application preview and complete the human workflow smoke test;
-6. promote to production only after a second explicit approval.
+4. apply `20260827180000` and confirm GraphQL execution is unavailable to both
+   browser roles while remaining available to `service_role`;
+5. deploy `design-workshop`;
+6. deploy the application preview and complete the human workflow smoke test;
+7. promote to production only after a second explicit approval.

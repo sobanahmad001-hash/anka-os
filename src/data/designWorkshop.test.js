@@ -8,6 +8,7 @@ const root = fileURLToPath(new URL('../../', import.meta.url))
 const read = path => readFileSync(`${root}${path}`, 'utf8')
 const eventMigration = read('supabase/migrations/20260827160000_engagement_events_artifact_types.sql')
 const migration = read('supabase/migrations/20260827170000_artifacts_design_workshop.sql')
+const graphqlBoundaryMigration = read('supabase/migrations/20260827180000_reassert_graphql_boundary.sql')
 const edge = read('supabase/functions/design-workshop/index.ts')
 const ui = read('src/apps/DesignWorkshop.jsx')
 
@@ -15,6 +16,12 @@ test('audit vocabulary exception is an isolated additive CHECK change', () => {
   assert.match(eventMigration, /alter table public\.engagement_events[\s\S]*drop constraint engagement_events_event_type_check/)
   assert.match(eventMigration, /artifact_version_created[\s\S]*artifact_approved[\s\S]*design_direction_released/)
   assert.doesNotMatch(eventMigration, /create table|create policy|enable row level security|add column|actor_id\s/)
+})
+
+test('final GraphQL boundary migration changes only resolve execution privileges', () => {
+  assert.match(graphqlBoundaryMigration, /revoke execute on function graphql\.resolve\(text,jsonb,text,jsonb\) from public, anon, authenticated/)
+  assert.match(graphqlBoundaryMigration, /grant execute on function graphql\.resolve\(text,jsonb,text,jsonb\) to service_role/)
+  assert.doesNotMatch(graphqlBoundaryMigration, /create table|alter table|create policy|row level security|grant all|grant select/)
 })
 
 test('artifact versions, approvals and direction versions are append-only exact records', () => {
