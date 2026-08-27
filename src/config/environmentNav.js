@@ -31,7 +31,8 @@ export const environmentNav = [
 
       // Design dept
       { label: 'Design', path: null, dept: 'design', isHeader: true },
-      { label: 'Design Workshop', path: '/sphere/design', dept: 'design' },
+      { label: 'Design Workspace', path: '/sphere/design', dept: 'design' },
+      { label: 'Design Workshop', path: '/sphere/design/workshop', dept: 'design' },
 
       // Development dept (WordPress focused)
       { label: 'Development', path: null, dept: 'development', isHeader: true },

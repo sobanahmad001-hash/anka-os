@@ -61,6 +61,8 @@ npm run build
 - `docs/release/DEPLOYMENT_RUNBOOK.md` — deploy sequence
 - `docs/release/OPERATING_SPINE_REVIEW_GATE.md` — required review and explicit
   approval gates for the branch-only Operating Spine release
+- `docs/release/ARTIFACTS_DESIGN_WORKSHOP_REVIEW_GATE.md` — isolated audit-event
+  review plus approval gates for the Artifacts and Design Workshop release
 - `ARCHITECTURE.md` — architecture notes
 
 ## Current testing posture
