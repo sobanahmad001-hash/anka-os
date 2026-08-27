@@ -42,17 +42,18 @@ test('department AI resolves verified connector mappings on the server', () => {
   assert.match(edge, /manifest\.connector_connection_id/)
   assert.match(edge, /manifest\.credential_source/)
   assert.match(repository, /departmentId/)
-  assert.match(repository, /body: \{ capability, projectId, departmentId, input \}/)
+  assert.match(repository, /body: \{ capability, projectId, engagementId, departmentId, input \}/)
 })
 
-test('assistant requires a valid operating department and active project workstream', () => {
+test('assistant requires a valid operating department and active project or engagement scope', () => {
   assert.match(edge, /Unknown operating department/)
   assert.match(edge, /The selected department is not active on this project/)
+  assert.match(edge, /The selected department has no active service on this engagement/)
   assert.match(edge, /This department assistant is restricted to its team and organization leadership/)
   assert.match(edge, /LEADER_ROLES/)
   assert.match(screen, /Operating department/)
   assert.match(screen, /useSearchParams/)
-  assert.match(screen, /verified connector assigned to the operating department/)
+  assert.match(screen, /verified connector mapped to the selected engagement and department/)
   assert.match(departmentConnectors, /\/assistant\?department=\$\{departmentId\}/)
 })
 

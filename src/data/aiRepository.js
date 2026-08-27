@@ -5,9 +5,9 @@ function failure(error, fallback) {
 }
 
 export const aiRepository = Object.freeze({
-  async run({ capability, projectId = null, departmentId, input = '' }) {
+  async run({ capability, projectId = null, engagementId = null, departmentId, input = '' }) {
     const { data, error } = await supabase.functions.invoke('ai-chat', {
-      body: { capability, projectId, departmentId, input },
+      body: { capability, projectId, engagementId, departmentId, input },
     })
     if (error) throw failure(error, 'AI request failed')
     if (data?.error) throw new Error(data.error)

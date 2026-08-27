@@ -15,13 +15,13 @@ export const environmentNav = [
   {
     key: 'sphere',
     label: 'Anka Sphere',
-    basePath: '/sphere/projects',
+    basePath: '/sphere/engagements',
     description: 'Client delivery',
     items: [
       // Core - visible to all authorized team members
       { label: 'My Work', path: '/sphere/my-work', dept: null },
-      { label: 'Projects & Retainers', path: '/sphere/projects', dept: null },
-      { label: 'Clients', path: '/sphere/clients', dept: null },
+      { label: 'Engagements', path: '/sphere/engagements', dept: null },
+      { label: 'Clients & Brands', path: '/sphere/clients', dept: null },
       { label: 'Client Portal', path: '/sphere/portal', dept: null },
       { label: 'Reports & Records', path: '/sphere/reports', dept: null },
 

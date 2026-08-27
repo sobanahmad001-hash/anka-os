@@ -1,6 +1,14 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 
 type AnySupabaseClient = ReturnType<typeof createClient<any>>
+type ConnectorRecord = {
+  id: string
+  public_config: Record<string, unknown> | null
+  secret_name: string | null
+}
+type EngagementServiceRecord = {
+  service_catalog: { department_id?: string | null } | Array<{ department_id?: string | null }> | null
+}
 
 const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
 const CAPABILITIES = new Set([
@@ -114,41 +122,62 @@ export function actionResponseFormat() {
 async function resolveAiProvider(
   adminClient: AnySupabaseClient,
   departmentId: string,
+  engagementId: string | null,
 ) {
-  const { data: connection, error: connectionError } = await adminClient
+  let connectionQuery = adminClient
     .from('integration_connections')
-    .select('id, public_config, secret_name, integration_connection_departments!inner(department_id)')
+    .select(engagementId
+      ? 'id, public_config, secret_name, integration_connection_departments!inner(department_id), integration_connection_engagements!inner(engagement_id, department_id)'
+      : 'id, public_config, secret_name, integration_connection_departments!inner(department_id)')
     .eq('organization_id', ORGANIZATION_ID)
     .eq('provider', 'openai')
     .eq('status', 'verified')
     .is('archived_at', null)
     .eq('integration_connection_departments.department_id', departmentId)
+  if (engagementId) {
+    connectionQuery = connectionQuery
+      .eq('integration_connection_engagements.engagement_id', engagementId)
+      .eq('integration_connection_engagements.department_id', departmentId)
+  }
+  const { data: connection, error: connectionError } = await connectionQuery
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle()
   if (connectionError) throw connectionError
 
-  if (connection) {
-    const secretName = typeof connection.secret_name === 'string' ? connection.secret_name : ''
+  const connector = connection as unknown as ConnectorRecord | null
+  if (connector) {
+    const secretName = typeof connector.secret_name === 'string' ? connector.secret_name : ''
     const credential = secretName ? Deno.env.get(secretName) : null
     if (!credential) throw new Error('The verified OpenAI connector credential is unavailable')
-    const config = connection.public_config && typeof connection.public_config === 'object'
-      ? connection.public_config as Record<string, unknown>
+    const config = connector.public_config && typeof connector.public_config === 'object'
+      ? connector.public_config
       : {}
     const model = typeof config.model_id === 'string' && config.model_id.trim()
       ? config.model_id.trim().slice(0, 120)
       : 'gpt-5.6-terra'
-    return { provider: 'openai', credential, model, connectorId: connection.id, credentialSource: 'connector' }
+    return { provider: 'openai', credential, model, connectorId: connector.id, credentialSource: 'connector' }
   }
 
-  const { count, error: countError } = await adminClient.from('integration_connections')
-    .select('id, integration_connection_departments!inner(department_id)', { count: 'exact', head: true })
+  let countQuery = adminClient.from('integration_connections')
+    .select(engagementId
+      ? 'id, integration_connection_departments!inner(department_id), integration_connection_engagements!inner(engagement_id, department_id)'
+      : 'id, integration_connection_departments!inner(department_id)', { count: 'exact', head: true })
     .eq('organization_id', ORGANIZATION_ID)
     .eq('provider', 'openai')
     .is('archived_at', null)
     .eq('integration_connection_departments.department_id', departmentId)
+  if (engagementId) {
+    countQuery = countQuery
+      .eq('integration_connection_engagements.engagement_id', engagementId)
+      .eq('integration_connection_engagements.department_id', departmentId)
+  }
+  const { count, error: countError } = await countQuery
   if (countError) throw countError
   if ((count || 0) > 0) throw new Error('No verified OpenAI connector is assigned to this department')
+  if (engagementId) {
+    throw new Error('No verified OpenAI connector is assigned to this engagement and department')
+  }
 
   const openaiKey = Deno.env.get('OPENAI_API_KEY')
   if (openaiKey) {
@@ -196,6 +225,7 @@ export async function handleRequest(request: Request) {
   let actorId = ''
   let capability = ''
   let projectId: string | null = null
+  let engagementId: string | null = null
   let departmentId: string | null = null
   let connectorId: string | null = null
   let inputText = ''
@@ -234,9 +264,14 @@ export async function handleRequest(request: Request) {
 
     capability = typeof body.capability === 'string' ? body.capability : ''
     projectId = typeof body.projectId === 'string' && body.projectId ? body.projectId : null
+    engagementId = typeof body.engagementId === 'string' && body.engagementId ? body.engagementId : null
     departmentId = safeDepartmentId(body.departmentId)
     inputText = typeof body.input === 'string' ? body.input.trim().slice(0, 8000) : ''
     if (!CAPABILITIES.has(capability)) return json({ error: 'Unsupported AI capability' }, 400)
+    if (projectId && engagementId) return json({ error: 'Select a project or an engagement, not both' }, 400)
+    if (engagementId && capability === 'action_proposal') {
+      return json({ error: 'Action proposals are not available for Operating Spine engagements yet' }, 400)
+    }
     if (!inputText && !['project_pulse', 'daily_brief'].includes(capability)) return json({ error: 'Input is required' }, 400)
 
     const { data: membership } = await userClient.from('organization_memberships')
@@ -271,10 +306,65 @@ export async function handleRequest(request: Request) {
     }
 
     let context: Record<string, unknown> = {}
-    const manifest: Record<string, unknown> = { capability, project_id: projectId, department_id: departmentId, record_ids: {} }
+    const manifest: Record<string, unknown> = {
+      capability,
+      project_id: projectId,
+      engagement_id: engagementId,
+      department_id: departmentId,
+      record_ids: {},
+    }
     let workstreamIds = new Set<string>()
 
-    if (projectId) {
+    if (engagementId) {
+      const [engagement, services, stages, dependencies, prerequisites, assets] = await Promise.all([
+        userClient.from('engagements')
+          .select('id, name, objective, status, start_date, target_date, agency_clients(name), brands(name)')
+          .eq('id', engagementId).single(),
+        userClient.from('engagement_services')
+          .select('id, status, owner_id, target_date, service_catalog(id, name, department_id, description)')
+          .eq('engagement_id', engagementId),
+        userClient.from('engagement_stage_instances')
+          .select('id, name, accountable_department_id, stage_kind, status, position')
+          .eq('engagement_id', engagementId).order('position'),
+        userClient.from('engagement_stage_dependencies')
+          .select('stage_instance_id, depends_on_stage_instance_id, dependency_kind, reason')
+          .eq('engagement_id', engagementId),
+        userClient.from('engagement_prerequisites')
+          .select('id, prerequisite_key, description, status, satisfaction_method')
+          .eq('engagement_id', engagementId),
+        userClient.from('engagement_assets')
+          .select('id, asset_kind, name, source_url, notes')
+          .eq('engagement_id', engagementId),
+      ])
+      if (engagement.error || !engagement.data) return json({ error: 'Engagement not found or inaccessible' }, 404)
+      for (const result of [services, stages, dependencies, prerequisites, assets]) {
+        if (result.error) throw result.error
+      }
+      const engagementDepartmentIds = [...new Set(((services.data || []) as unknown as EngagementServiceRecord[])
+        .map(item => Array.isArray(item.service_catalog) ? item.service_catalog[0]?.department_id : item.service_catalog?.department_id)
+        .filter((value): value is string => typeof value === 'string' && value.length > 0))]
+      if (!departmentId && engagementDepartmentIds.length === 1) departmentId = engagementDepartmentIds[0]
+      if (!departmentId) return json({ error: 'Select an operating department for this engagement' }, 400)
+      if (!engagementDepartmentIds.includes(departmentId)) {
+        return json({ error: 'The selected department has no active service on this engagement' }, 403)
+      }
+      manifest.department_id = departmentId
+      context = {
+        engagement: engagement.data,
+        services: services.data || [],
+        stages: stages.data || [],
+        dependencies: dependencies.data || [],
+        prerequisites: prerequisites.data || [],
+        existing_assets: assets.data || [],
+      }
+      manifest.record_ids = {
+        engagement: [engagementId],
+        services: (services.data || []).map(item => item.id),
+        stages: (stages.data || []).map(item => item.id),
+        prerequisites: (prerequisites.data || []).map(item => item.id),
+        assets: (assets.data || []).map(item => item.id),
+      }
+    } else if (projectId) {
       const [project, workstreams, tasks, research, deliverables, requests, livingRecord] = await Promise.all([
         userClient.from('projects').select('id, name, description, status, priority, health, due_date, scope_statement, exclusions').eq('id', projectId).single(),
         userClient.from('workstreams').select('id, department_id, name, status').eq('project_id', projectId),
@@ -346,7 +436,7 @@ ${capabilityInstruction[capability]}
 AUTHORIZED CONTEXT JSON:
 ${JSON.stringify(context).slice(0, 90000)}`
 
-    const providerConfig = await resolveAiProvider(adminClient, departmentId)
+    const providerConfig = await resolveAiProvider(adminClient, departmentId, engagementId)
     const provider = providerConfig.provider
     const model = providerConfig.model
     connectorId = providerConfig.connectorId
@@ -397,7 +487,7 @@ ${JSON.stringify(context).slice(0, 90000)}`
     const proposal = capability === 'action_proposal' ? parseAction(content, projectId, workstreamIds) : null
     const cost = estimatedCost(provider, inputTokens, outputTokens)
     const { data: run, error: auditError } = await adminClient.from('ai_runs').insert({
-      organization_id: ORGANIZATION_ID, project_id: projectId, user_id: actorId,
+      organization_id: ORGANIZATION_ID, project_id: projectId, engagement_id: engagementId, user_id: actorId,
       capability, status: 'completed', provider, model,
       input_text: inputText, output_text: proposal ? proposal.summary : content,
       context_manifest: manifest, proposed_action: proposal?.action || null,
@@ -411,7 +501,7 @@ ${JSON.stringify(context).slice(0, 90000)}`
       run_id: run.id,
       content: proposal ? proposal.summary : content,
       proposed_action: proposal?.action || null,
-      provider, model, department_id: departmentId,
+      provider, model, department_id: departmentId, engagement_id: engagementId,
       connector_connection_id: connectorId,
       usage: { input_tokens: inputTokens, output_tokens: outputTokens, estimated_cost_microusd: cost },
       context_manifest: manifest,
@@ -420,10 +510,10 @@ ${JSON.stringify(context).slice(0, 90000)}`
     const message = error instanceof Error ? error.message : 'Unexpected AI service error'
     if (adminClient && actorId && capability && CAPABILITIES.has(capability)) {
       await adminClient.from('ai_runs').insert({
-        organization_id: ORGANIZATION_ID, project_id: projectId, user_id: actorId,
+        organization_id: ORGANIZATION_ID, project_id: projectId, engagement_id: engagementId, user_id: actorId,
         capability, status: 'failed', input_text: inputText,
         output_text: message, latency_ms: Date.now() - startedAt,
-        context_manifest: { capability, project_id: projectId, department_id: departmentId, connector_connection_id: connectorId },
+        context_manifest: { capability, project_id: projectId, engagement_id: engagementId, department_id: departmentId, connector_connection_id: connectorId },
       })
     }
     return json({ error: message }, 400)

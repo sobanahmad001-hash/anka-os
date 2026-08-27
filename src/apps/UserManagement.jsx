@@ -136,7 +136,7 @@ export default function UserManagement() {
       (filterDepartment === 'all' || department === filterDepartment)
   }), [users, search, filterDepartment])
 
-  if (profile?.role !== 'admin') return <Navigate to="/sphere/projects" replace />
+  if (profile?.role !== 'admin') return <Navigate to="/sphere/engagements" replace />
   if (loading) return <div className="flex h-full items-center justify-center bg-gray-950"><div className="h-8 w-8 animate-spin rounded-full border-b-2 border-purple-500" /></div>
 
   return (
