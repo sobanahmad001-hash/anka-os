@@ -1,4 +1,15 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
+import {
+  decryptSecret,
+  encryptSecret,
+  googleCredentialConfiguration,
+  namedKey,
+  pkceChallenge,
+  randomToken,
+  sha256,
+} from '../_shared/googleOAuthTokens.ts'
+
+export { decryptSecret, encryptSecret, pkceChallenge, randomToken, sha256 }
 
 type AnySupabaseClient = ReturnType<typeof createClient<any>>
 
@@ -29,19 +40,6 @@ function json(body: Record<string, unknown>, status = 200) {
   })
 }
 
-function namedKey(envName: string, fallbackName: string) {
-  const encoded = Deno.env.get(envName)
-  if (encoded) {
-    try {
-      const keys = JSON.parse(encoded)
-      if (typeof keys.default === 'string') return keys.default
-      const first = Object.values(keys).find(value => typeof value === 'string')
-      if (typeof first === 'string') return first
-    } catch { /* use the legacy fallback */ }
-  }
-  return Deno.env.get(fallbackName) ?? ''
-}
-
 function text(value: unknown, max = 160) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
 }
@@ -50,6 +48,36 @@ function safeProvider(value: unknown) {
   const provider = text(value, 40)
   if (!GOOGLE_PROVIDERS.has(provider)) throw new Error('Unsupported Google connector')
   return provider
+}
+
+export function safeReportingConfig(provider: string, value: unknown) {
+  const input = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : {}
+  if (provider === 'google_analytics') {
+    const propertyId = text(input.property_id, 24).replace(/^properties\//, '')
+    if (!/^\d{4,20}$/.test(propertyId)) throw new Error('A valid GA4 property ID is required')
+    return { property_id: propertyId }
+  }
+  if (provider === 'google_search_console') {
+    const siteUrl = text(input.site_url, 500)
+    if (siteUrl.startsWith('sc-domain:')) {
+      const domain = siteUrl.slice(10).toLowerCase()
+      if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) throw new Error('A valid Search Console domain property is required')
+      return { site_url: `sc-domain:${domain}` }
+    }
+    const parsed = new URL(siteUrl)
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+      throw new Error('A valid Search Console property URL is required')
+    }
+    return { site_url: parsed.toString() }
+  }
+  const customerId = text(input.customer_id, 24).replaceAll('-', '')
+  const loginCustomerId = text(input.login_customer_id, 24).replaceAll('-', '')
+  if (!/^\d{10}$/.test(customerId)) throw new Error('A valid 10-digit Google Ads customer ID is required')
+  if (loginCustomerId && !/^\d{10}$/.test(loginCustomerId)) {
+    throw new Error('Google Ads manager ID must contain 10 digits')
+  }
+  return { customer_id: customerId, login_customer_id: loginCustomerId }
 }
 
 export function safeDepartmentIds(provider: string, value: unknown) {
@@ -70,69 +98,13 @@ function safeReturnPath(value: unknown) {
   return /^\/[A-Za-z0-9/_?&=.-]*$/.test(path) && !path.startsWith('//') ? path : '/settings'
 }
 
-function bytesToBase64Url(bytes: Uint8Array) {
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/g, '')
-}
-
-function base64UrlToBytes(value: string) {
-  const normalized = value.replaceAll('-', '+').replaceAll('_', '/')
-  const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4)
-  const binary = atob(padded)
-  return Uint8Array.from(binary, character => character.charCodeAt(0))
-}
-
-export function randomToken(byteLength = 32) {
-  return bytesToBase64Url(crypto.getRandomValues(new Uint8Array(byteLength)))
-}
-
-export async function sha256(value: string) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
-  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('')
-}
-
-export async function pkceChallenge(verifier: string) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))
-  return bytesToBase64Url(new Uint8Array(digest))
-}
-
-async function encryptionKey(material: string) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(material))
-  return crypto.subtle.importKey('raw', digest, 'AES-GCM', false, ['encrypt', 'decrypt'])
-}
-
-export async function encryptSecret(value: string, material: string) {
-  const iv = crypto.getRandomValues(new Uint8Array(12))
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    await encryptionKey(material),
-    new TextEncoder().encode(value),
-  )
-  return {
-    ciphertext: bytesToBase64Url(new Uint8Array(ciphertext)),
-    iv: bytesToBase64Url(iv),
-  }
-}
-
-export async function decryptSecret(ciphertext: string, iv: string, material: string) {
-  const plaintext = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: base64UrlToBytes(iv) },
-    await encryptionKey(material),
-    base64UrlToBytes(ciphertext),
-  )
-  return new TextDecoder().decode(plaintext)
-}
-
 function oauthConfiguration() {
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
-  const clientId = Deno.env.get('GOOGLE_OAUTH_CLIENT_ID') ?? ''
-  const clientSecret = Deno.env.get('GOOGLE_OAUTH_CLIENT_SECRET') ?? ''
-  const encryptionMaterial = Deno.env.get('GOOGLE_OAUTH_ENCRYPTION_KEY') ?? ''
+  const { clientId, clientSecret, encryptionMaterial } = googleCredentialConfiguration()
   const appUrl = (Deno.env.get('ANKA_APP_URL') || 'https://anka-os.vercel.app').replace(/\/$/, '')
   const redirectUri = Deno.env.get('GOOGLE_OAUTH_REDIRECT_URI')
     || `${supabaseUrl}/functions/v1/google-oauth`
-  if (!supabaseUrl || !clientId || !clientSecret || encryptionMaterial.length < 32) {
+  if (!supabaseUrl) {
     throw new Error('Google OAuth is not configured on the server')
   }
   return { supabaseUrl, clientId, clientSecret, encryptionMaterial, appUrl, redirectUri }
@@ -186,6 +158,7 @@ async function startAuthorization(request: Request, body: Record<string, unknown
   const config = oauthConfiguration()
   const admin = adminClient(config.supabaseUrl)
   const provider = safeProvider(body.provider)
+  const reportingConfig = safeReportingConfig(provider, body.public_config)
   const departmentIds = safeDepartmentIds(provider, body.department_ids)
   const displayName = text(body.display_name, 120)
   if (!displayName) return json({ error: 'Connection name is required' }, 400)
@@ -203,8 +176,11 @@ async function startAuthorization(request: Request, body: Record<string, unknown
     if (error || !existing || existing.provider !== provider) {
       return json({ error: 'Google connection not found' }, 404)
     }
+    const existingConfig = existing.public_config && typeof existing.public_config === 'object'
+      ? existing.public_config as Record<string, unknown> : {}
     const { data: updated, error: updateError } = await admin.from('integration_connections')
-      .update({ display_name: displayName, status: 'authorizing', last_check_status: null })
+      .update({ display_name: displayName, status: 'authorizing', last_check_status: null,
+        public_config: { ...existingConfig, ...reportingConfig } })
       .eq('id', existing.id)
       .select()
       .single()
@@ -215,7 +191,7 @@ async function startAuthorization(request: Request, body: Record<string, unknown
       organization_id: ORGANIZATION_ID,
       provider,
       display_name: displayName,
-      public_config: {},
+      public_config: reportingConfig,
       secret_name: null,
       status: 'authorizing',
       created_by: user.id,
@@ -278,6 +254,29 @@ async function startAuthorization(request: Request, body: Record<string, unknown
     code_challenge_method: 'S256',
   }).toString()
   return json({ authorize_url: authorizeUrl.toString(), connection_id: connection.id })
+}
+
+async function configureReporting(request: Request, body: Record<string, unknown>) {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+  if (!supabaseUrl) throw new Error('Function environment is incomplete')
+  await authenticatedLeader(request, supabaseUrl)
+  const admin = adminClient(supabaseUrl)
+  const connectionId = text(body.connection_id, 80)
+  if (!connectionId) return json({ error: 'Connection ID is required' }, 400)
+  const { data: connection, error } = await admin.from('integration_connections')
+    .select('id, provider, public_config').eq('id', connectionId)
+    .eq('organization_id', ORGANIZATION_ID).is('archived_at', null).maybeSingle()
+  if (error || !connection || !GOOGLE_PROVIDERS.has(connection.provider)) {
+    return json({ error: 'Google connection not found' }, 404)
+  }
+  const reportingConfig = safeReportingConfig(connection.provider, body.public_config)
+  const existingConfig = connection.public_config && typeof connection.public_config === 'object'
+    ? connection.public_config as Record<string, unknown> : {}
+  const publicConfig = { ...existingConfig, ...reportingConfig }
+  const { error: updateError } = await admin.from('integration_connections')
+    .update({ public_config: publicConfig }).eq('id', connection.id)
+  if (updateError) throw updateError
+  return json({ connection: { id: connection.id, public_config: publicConfig } })
 }
 
 async function disconnectAuthorization(request: Request, body: Record<string, unknown>) {
@@ -552,6 +551,7 @@ export async function handleRequest(request: Request) {
   try {
     const body = await request.json() as Record<string, unknown>
     if (body.action === 'start') return startAuthorization(request, body)
+    if (body.action === 'configure_reporting') return configureReporting(request, body)
     if (body.action === 'disconnect') return disconnectAuthorization(request, body)
     return json({ error: 'Unsupported action' }, 400)
   } catch (error) {
