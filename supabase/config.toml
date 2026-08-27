@@ -15,6 +15,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/ai-chat/index.ts"
 
+[functions.design-workshop]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/design-workshop/index.ts"
+
 [functions.invite-client-contact]
 enabled = true
 verify_jwt = true
