@@ -40,6 +40,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/proofing-layer/index.ts"
 
+[functions.development-studio]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/development-studio/index.ts"
+
 [functions.invite-client-contact]
 enabled = true
 verify_jwt = true
