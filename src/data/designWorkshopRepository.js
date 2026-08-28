@@ -50,8 +50,6 @@ export const designWorkshop = Object.freeze({
     }
   },
 
-  saveArtifact: input => invoke('save_artifact', input),
-  approveArtifact: (artifactVersionId, notes = '') => invoke('approve_artifact', { artifact_version_id: artifactVersionId, notes }),
   createSession: input => invoke('create_session', input),
   generateDirections: sessionId => invoke('generate_directions', { session_id: sessionId }),
   createDirectionRevision: (directionId, content) => invoke('create_direction_revision', { direction_id: directionId, content }),

@@ -28,6 +28,7 @@ export const environmentNav = [
       // Content dept
       { label: 'Content', path: null, dept: 'content', isHeader: true },
       { label: 'Content Workshop', path: '/sphere/content', dept: 'content' },
+      { label: 'Content Studio', path: '/sphere/content/studio', dept: 'content' },
 
       // Design dept
       { label: 'Design', path: null, dept: 'design', isHeader: true },

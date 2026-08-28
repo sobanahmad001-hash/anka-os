@@ -45,27 +45,6 @@ function strings(value: unknown, maxItems = 12) {
     : []
 }
 
-export function validateArtifactContent(type: string, value: unknown): Json {
-  if (!ARTIFACT_TYPES.has(type) || !value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('Unsupported artifact content')
-  }
-  const input = value as Json
-  const fields: Record<string, string[]> = {
-    discovery: ['summary', 'objectives', 'offers', 'evidence', 'constraints'],
-    vision: ['vision_statement', 'positioning', 'value_proposition', 'values', 'voice_principles'],
-    audience: ['primary_audience', 'segments', 'motivations', 'objections', 'desired_response', 'accessibility_considerations'],
-  }
-  const output: Json = {}
-  for (const field of fields[type]) {
-    const listField = !['summary', 'vision_statement', 'positioning', 'value_proposition', 'primary_audience', 'desired_response'].includes(field)
-    output[field] = listField ? strings(input[field]) : text(input[field], 3000)
-    if (listField ? !(output[field] as string[]).length : !output[field]) {
-      throw new Error(`${field.replaceAll('_', ' ')} is required`)
-    }
-  }
-  return output
-}
-
 function directionText(direction: Json) {
   return [direction.title, direction.rationale, direction.creative_thesis,
     ...(Array.isArray(direction.visual_principles) ? direction.visual_principles : []),
@@ -147,8 +126,6 @@ async function requireUser(req: Request, url: string, anonKey: string, admin: Cl
 export function hasWorkshopAuthority(membership: Json, action: string) {
   const role = String(membership.role || ''); const department = String(membership.department_id || '')
   if (LEADER_ROLES.has(role)) return true
-  if (action === 'save_artifact') return department === 'content'
-  if (action === 'approve_artifact') return department === 'content' && role === 'department_manager'
   if (action === 'release_direction') return department === 'design' && role === 'department_manager'
   return department === 'design'
 }
@@ -172,68 +149,6 @@ async function validateScope(admin: Client, engagementId: string, brandId: strin
     if (!stage) throw new Error('The selected stage is outside this engagement')
   }
   return engagement
-}
-
-async function saveArtifact(admin: Client, body: Json, actorId: string) {
-  const artifactType = text(body.artifact_type, 40)
-  const engagementId = text(body.engagement_id, 80); const brandId = text(body.brand_id, 80)
-  const stageId = text(body.engagement_stage_instance_id, 80) || null
-  const content = validateArtifactContent(artifactType, body.content)
-  await validateScope(admin, engagementId, brandId, stageId)
-  let artifactId = text(body.artifact_id, 80)
-  let createdArtifact = false
-  let parentVersionId: string | null = null
-  let versionNumber = 1
-  if (artifactId) {
-    const { data: artifact } = await admin.from('artifacts').select('id, artifact_type, engagement_id, brand_id')
-      .eq('id', artifactId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
-    if (!artifact || artifact.artifact_type !== artifactType || artifact.engagement_id !== engagementId || artifact.brand_id !== brandId) {
-      throw new Error('Artifact identity does not match this engagement, brand and type')
-    }
-    const { data: latest } = await admin.from('artifact_versions').select('id, version_number')
-      .eq('artifact_id', artifactId).order('version_number', { ascending: false }).limit(1).maybeSingle()
-    if (latest) { parentVersionId = latest.id; versionNumber = latest.version_number + 1 }
-  } else {
-    const { data: artifact, error } = await admin.from('artifacts').insert({
-      organization_id: ORGANIZATION_ID, brand_id: brandId, engagement_id: engagementId,
-      engagement_stage_instance_id: stageId, artifact_type: artifactType,
-      title: text(body.title, 240) || `${artifactType[0].toUpperCase()}${artifactType.slice(1)} artifact`, created_by: actorId,
-    }).select('id').single()
-    if (error) throw error
-    artifactId = artifact.id
-    createdArtifact = true
-  }
-  const checksum = await sha256(stableJson(content))
-  const { data: version, error: versionError } = await admin.from('artifact_versions').insert({
-    organization_id: ORGANIZATION_ID, artifact_id: artifactId, version_number: versionNumber,
-    parent_version_id: parentVersionId, content, content_checksum: checksum,
-    change_summary: text(body.change_summary, 1000), ai_use_allowed: body.ai_use_allowed === true,
-    data_classification: ['public', 'internal', 'confidential', 'restricted'].includes(String(body.data_classification))
-      ? body.data_classification : 'internal', created_by: actorId,
-  }).select('*').single()
-  if (versionError) {
-    if (createdArtifact) await admin.from('artifacts').delete().eq('id', artifactId)
-    throw versionError
-  }
-  await insertEvent(admin, engagementId, 'artifact_version_created', actorId, 'artifact', artifactId, version.id, 'version_created')
-  return { artifact_id: artifactId, version }
-}
-
-async function approveArtifact(admin: Client, body: Json, actorId: string) {
-  const versionId = text(body.artifact_version_id, 80)
-  const { data: version } = await admin.from('artifact_versions').select('id, artifact_id')
-    .eq('id', versionId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
-  if (!version) throw new Error('Artifact version not found')
-  const { data: artifact } = await admin.from('artifacts').select('id, engagement_id')
-    .eq('id', version.artifact_id).eq('organization_id', ORGANIZATION_ID).maybeSingle()
-  if (!artifact?.engagement_id) throw new Error('This phase approves engagement-scoped artifacts only')
-  const { data: approval, error } = await admin.from('artifact_approvals').insert({
-    organization_id: ORGANIZATION_ID, artifact_id: artifact.id, artifact_version_id: version.id,
-    engagement_id: artifact.engagement_id, notes: text(body.notes, 2000), approved_by: actorId,
-  }).select('*').single()
-  if (error) throw error
-  await insertEvent(admin, artifact.engagement_id, 'artifact_approved', actorId, 'artifact', artifact.id, version.id, 'approved')
-  return approval
 }
 
 async function createSession(admin: Client, body: Json, actorId: string) {
@@ -492,8 +407,6 @@ async function handler(req: Request) {
     const body = await req.json() as Json
     const action = text(body.action, 80)
     const actions: Record<string, () => Promise<unknown>> = {
-      save_artifact: () => saveArtifact(admin, body, user.id),
-      approve_artifact: () => approveArtifact(admin, body, user.id),
       create_session: () => createSession(admin, body, user.id),
       generate_directions: () => generateDirections(admin, body, user.id),
       create_direction_revision: () => createDirectionRevision(admin, body, user.id),

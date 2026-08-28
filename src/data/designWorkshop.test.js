@@ -2,7 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { ARTIFACT_FORMS, blankArtifactContent, latestByVersion } from './designWorkshop.js'
+import { latestByVersion } from './designWorkshop.js'
+import { CONTENT_ARTIFACT_FORMS, blankContentArtifact } from './contentStudio.js'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const read = path => readFileSync(`${root}${path}`, 'utf8')
@@ -45,11 +46,11 @@ test('every new table has organization RLS and browser roles remain read-only', 
   assert.doesNotMatch(migration, /grant (?:insert|update|delete|all)[\s\S]{0,500}to authenticated/)
 })
 
-test('the three human-completed artifact forms are structured', () => {
-  assert.deepEqual(Object.keys(ARTIFACT_FORMS), ['discovery', 'vision', 'audience'])
-  for (const type of Object.keys(ARTIFACT_FORMS)) {
-    assert(ARTIFACT_FORMS[type].fields.length >= 5)
-    assert.equal(Object.keys(blankArtifactContent(type)).length, ARTIFACT_FORMS[type].fields.length)
+test('Design inputs now use the structured Content Studio form definitions', () => {
+  assert.deepEqual(Object.keys(CONTENT_ARTIFACT_FORMS).slice(0, 3), ['discovery', 'vision', 'audience'])
+  for (const type of ['discovery', 'vision', 'audience']) {
+    assert(CONTENT_ARTIFACT_FORMS[type].fields.length >= 5)
+    assert.equal(Object.keys(blankContentArtifact(type)).length, CONTENT_ARTIFACT_FORMS[type].fields.length)
   }
   assert.equal(latestByVersion([{ version_number: 1 }, { version_number: 3 }]).version_number, 3)
 })

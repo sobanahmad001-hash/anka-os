@@ -11,6 +11,7 @@ const UserManagement = lazy(() => import('./apps/UserManagement'))
 const OperatingSpine = lazy(() => import('./apps/OperatingSpine'))
 const DesignWorkshop = lazy(() => import('./apps/DesignWorkshop'))
 const MarketingStudio = lazy(() => import('./apps/MarketingStudio'))
+const ContentStudio = lazy(() => import('./apps/ContentStudio'))
 const DepartmentWorkshop = lazy(() => import('./apps/DepartmentWorkshop'))
 const MyWork = lazy(() => import('./apps/MyWork'))
 const AnkaSpherePortal = lazy(() => import('./apps/AnkaSpherePortal'))
@@ -64,6 +65,7 @@ export default function App() {
         <Route path="sphere/projects" element={<Navigate to="/sphere/engagements" replace />} />
         <Route path="sphere/my-work" element={<MyWork />} />
         <Route path="sphere/content" element={<DepartmentWorkshop departmentId="content" />} />
+        <Route path="sphere/content/studio" element={<ContentStudio />} />
         <Route path="sphere/design" element={<DepartmentWorkshop departmentId="design" />} />
         <Route path="sphere/design/workshop" element={<DesignWorkshop />} />
         <Route path="sphere/marketing" element={<DepartmentWorkshop departmentId="marketing" />} />
