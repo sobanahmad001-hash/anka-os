@@ -9,6 +9,7 @@ const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 const MANAGER_ROLES = new Set(['department_manager'])
 const CLASSIFICATIONS = new Set(['internal', 'confidential', 'public', 'restricted'])
+const CUSTOM_FIELD_TYPES = new Set(['text', 'number', 'date', 'single_select', 'multi_select', 'checkbox'])
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -28,6 +29,25 @@ export function hasContentAuthority(membership: Json, action: string) {
   if (text(membership.department_id, 60) !== 'content') return false
   if (action === 'approve_artifact') return MANAGER_ROLES.has(role)
   return true
+}
+
+export function customFieldDefinitionInput(body: Json) {
+  const artifactType = text(body.artifact_type, 60)
+  const name = text(body.name, 80)
+  const fieldType = text(body.field_type, 30)
+  if (!CONTENT_ARTIFACT_TYPE_SET.has(artifactType)) throw new Error('Unsupported Content artifact type')
+  if (!name) throw new Error('Custom field name is required')
+  if (!CUSTOM_FIELD_TYPES.has(fieldType)) throw new Error('Unsupported custom field type')
+  const options = Array.isArray(body.options)
+    ? body.options.map(option => text(option, 80)).filter(Boolean)
+    : []
+  if (fieldType === 'single_select' || fieldType === 'multi_select') {
+    if (!options.length || options.length > 50) throw new Error('Select fields require between 1 and 50 options')
+    if (new Set(options).size !== options.length) throw new Error('Select options must be unique')
+  } else if (options.length) {
+    throw new Error('Only select fields can define options')
+  }
+  return { artifactType, name, fieldType, options: options.length ? options : null }
 }
 
 async function requireContext(request: Request) {
@@ -121,6 +141,34 @@ async function approveArtifact(admin: Client, body: Json, actorId: string) {
   return approval
 }
 
+async function createCustomFieldDefinition(admin: Client, body: Json, actorId: string) {
+  const input = customFieldDefinitionInput(body)
+  const { data, error } = await admin.rpc('create_artifact_custom_field_definition', {
+    p_organization_id: ORGANIZATION_ID,
+    p_artifact_type: input.artifactType,
+    p_name: input.name,
+    p_field_type: input.fieldType,
+    p_options: input.options,
+    p_actor_id: actorId,
+  })
+  if (error) throw error
+  return data
+}
+
+async function saveCustomFieldValue(admin: Client, body: Json, actorId: string) {
+  const artifactVersionId = text(body.artifact_version_id, 80)
+  const fieldDefId = text(body.field_def_id, 80)
+  if (!artifactVersionId || !fieldDefId) throw new Error('Artifact version and custom field are required')
+  const { data, error } = await admin.rpc('save_artifact_custom_field_value', {
+    p_artifact_version_id: artifactVersionId,
+    p_field_def_id: fieldDefId,
+    p_value: body.value ?? null,
+    p_actor_id: actorId,
+  })
+  if (error) throw error
+  return data
+}
+
 export async function handleRequest(request: Request) {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (request.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
@@ -134,6 +182,12 @@ export async function handleRequest(request: Request) {
     }
     if (action === 'save_artifact') return response({ data: await saveArtifact(admin, body, user.id) })
     if (action === 'approve_artifact') return response({ data: await approveArtifact(admin, body, user.id) })
+    if (action === 'create_custom_field_definition') {
+      return response({ data: await createCustomFieldDefinition(admin, body, user.id) })
+    }
+    if (action === 'save_custom_field_value') {
+      return response({ data: await saveCustomFieldValue(admin, body, user.id) })
+    }
     return response({ error: 'Unsupported action' }, 400)
   } catch (error) {
     const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : 400

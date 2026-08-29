@@ -1,5 +1,5 @@
-import { assertEquals } from 'jsr:@std/assert@1.0.14'
-import { hasContentAuthority } from './index.ts'
+import { assertEquals, assertThrows } from 'jsr:@std/assert@1.0.14'
+import { customFieldDefinitionInput, hasContentAuthority } from './index.ts'
 import { CONTENT_ARTIFACT_TYPES, contentArtifactResponseFormat, validateContentArtifact } from '../_shared/contentArtifacts.ts'
 
 Deno.test('Content authority keeps exact-version approval manager-controlled', () => {
@@ -29,4 +29,26 @@ Deno.test('chat response format is strict and type-specific', () => {
   assertEquals(format.strict, true)
   assertEquals(format.schema.additionalProperties, false)
   assertEquals(format.schema.required, ['content_strategy', 'pages'])
+})
+
+Deno.test('D5 accepts typed Content definitions and preserves select options', () => {
+  assertEquals(customFieldDefinitionInput({
+    artifact_type: 'content', name: 'channel', field_type: 'single_select',
+    options: ['blog', 'email'],
+  }), {
+    artifactType: 'content', name: 'channel', fieldType: 'single_select', options: ['blog', 'email'],
+  })
+})
+
+Deno.test('D5 rejects invalid custom-field definitions before the database call', () => {
+  assertThrows(() => customFieldDefinitionInput({
+    artifact_type: 'content', name: 'channel', field_type: 'single_select',
+    options: ['blog', 'blog'],
+  }), Error, 'unique')
+  assertThrows(() => customFieldDefinitionInput({
+    artifact_type: 'campaign_brief', name: 'channel', field_type: 'text',
+  }), Error, 'Content artifact type')
+  assertThrows(() => customFieldDefinitionInput({
+    artifact_type: 'content', name: 'keyword', field_type: 'text', options: ['unexpected'],
+  }), Error, 'Only select')
 })
