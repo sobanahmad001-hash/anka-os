@@ -55,11 +55,12 @@ begin
     raise exception 'W5 built-in artifact rule was not seeded.';
   end if;
 
-  select public.save_work_item(
+  select saved.* into v_item
+  from public.save_work_item(
     null, v_engagement.id, 'W5 rollback verification work item', '',
     'task', 'medium', 'in_progress', v_actor_id, null,
     v_artifact.id, null, null, null, null, 0, null, v_actor_id
-  ) into v_item;
+  ) saved;
 
   insert into public.engagement_events (
     organization_id, engagement_id, event_type, actor_id, payload
@@ -91,14 +92,15 @@ begin
     raise exception 'Automation audit marker or rule id is missing.';
   end if;
 
-  select public.save_work_item(
+  select saved.* into v_item
+  from public.save_work_item(
     v_item.id, v_item.engagement_id, v_item.title, v_item.description,
     v_item.work_item_type, v_item.priority, 'in_progress', v_item.assignee_id,
     v_item.department_id, v_item.linked_artifact_id,
     v_item.linked_artifact_version_id,
     v_item.linked_engagement_stage_instance_id, v_item.start_date,
     v_item.due_date, v_item.position, v_item.parent_work_item_id, v_actor_id
-  ) into v_item;
+  ) saved;
 
   if v_item.status <> 'in_progress' then
     raise exception 'Manual status change after automation was blocked.';
