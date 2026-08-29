@@ -7,6 +7,8 @@ create temporary table d5_runtime_checks (
   passed boolean not null
 ) on commit drop;
 
+grant select, insert on d5_runtime_checks to authenticated;
+
 do $$
 declare
   v_organization_id uuid;

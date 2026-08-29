@@ -55,6 +55,7 @@ test('RLS exposes organization reads but browser writes stay closed', () => {
   assert.match(migration, /grant select on public\.artifact_custom_field_defs, public\.artifact_custom_field_values to authenticated/)
   assert.doesNotMatch(migration, /grant (insert|update|delete)[^;]*authenticated/i)
   assert.match(verification, /browser_is_read_only/)
+  assert.match(verification, /grant select, insert on d5_runtime_checks to authenticated/)
 })
 
 test('writes use the Content authority path and never mutate approvals', () => {
