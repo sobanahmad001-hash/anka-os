@@ -1,0 +1,44 @@
+import { supabase } from '../lib/supabase.js'
+import { CONTENT_ARTIFACT_TYPES } from './contentStudio.js'
+
+async function dataOrThrow(query) {
+  const { data, error } = await query
+  if (error) throw new Error(error.message || 'Content Studio query failed')
+  return data
+}
+
+async function invoke(functionName, action, input = {}) {
+  const { data, error } = await supabase.functions.invoke(functionName, { body: { action, ...input } })
+  if (error) throw new Error(error.message || 'Content Studio function failed')
+  if (data?.error) throw new Error(data.error)
+  return data?.data
+}
+
+export const contentStudio = Object.freeze({
+  async listEngagements() {
+    return dataOrThrow(supabase.from('engagements')
+      .select('id, name, brand_id, status, agency_clients(name), brands(name), engagement_services!inner(id, status, service_catalog!inner(name, department_id))')
+      .eq('engagement_services.status', 'active')
+      .eq('engagement_services.service_catalog.department_id', 'content')
+      .order('updated_at', { ascending: false }))
+  },
+
+  async load(engagementId) {
+    const [engagement, stages, artifacts, versions, approvals] = await Promise.all([
+      dataOrThrow(supabase.from('engagements').select('*, agency_clients(name), brands(name)').eq('id', engagementId).single()),
+      dataOrThrow(supabase.from('engagement_stage_instances').select('*').eq('engagement_id', engagementId).order('position')),
+      dataOrThrow(supabase.from('artifacts').select('*').eq('engagement_id', engagementId).in('artifact_type', CONTENT_ARTIFACT_TYPES).order('created_at')),
+      dataOrThrow(supabase.from('artifact_versions').select('*, artifacts!inner(engagement_id, artifact_type)').eq('artifacts.engagement_id', engagementId).in('artifacts.artifact_type', CONTENT_ARTIFACT_TYPES).order('version_number')),
+      dataOrThrow(supabase.from('artifact_approvals').select('*, artifacts!inner(artifact_type)').eq('engagement_id', engagementId).in('artifacts.artifact_type', CONTENT_ARTIFACT_TYPES).order('approved_at')),
+    ])
+    return { engagement, stages, artifacts, versions, approvals }
+  },
+
+  saveArtifact: input => invoke('content-studio', 'save_artifact', input),
+  approveArtifact: (artifactVersionId, notes = '') => invoke('content-studio', 'approve_artifact', {
+    artifact_version_id: artifactVersionId, notes,
+  }),
+  proposeArtifact: input => invoke('department-chat', 'propose_artifact', {
+    department_id: 'content', ...input,
+  }),
+})

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { ARTIFACT_FORMS, OUTPUT_FAMILIES, approvalForVersion, blankArtifactContent, latestByVersion } from '../data/designWorkshop.js'
+import { Link } from 'react-router-dom'
+import { OUTPUT_FAMILIES, latestByVersion } from '../data/designWorkshop.js'
 import { designWorkshop } from '../data/designWorkshopRepository.js'
 
 const INPUT = 'w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-violet-500/60'
@@ -34,27 +35,26 @@ export default function DesignWorkshop() {
       <Field label="Engagement"><select className={`${INPUT} min-w-72`} value={engagementId} onChange={event => setEngagementId(event.target.value)}>{engagements.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
     </div>
     {error && <div className="mt-5 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">{error}</div>}
-    <div className="mt-5 flex gap-2">{[['artifacts', 'Approved context'], ['workshop', 'Direction workshop']].map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${tab === id ? 'bg-white text-slate-950' : 'bg-white/5 text-slate-300'}`}>{label}</button>)}</div>
+    <div className="mt-5 flex gap-2">{[['artifacts', 'Approved Content context'], ['workshop', 'Direction workshop']].map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${tab === id ? 'bg-white text-slate-950' : 'bg-white/5 text-slate-300'}`}>{label}</button>)}</div>
     {busy === 'load' || !workspace ? <div className="py-20 text-center text-sm text-slate-500">Loading exact versions…</div>
-      : tab === 'artifacts' ? <ArtifactWorkspace workspace={workspace} onEdit={type => setModal({ kind: 'artifact', type })} onApprove={version => act(`approve-${version.id}`, () => designWorkshop.approveArtifact(version.id))} busy={busy} />
+      : tab === 'artifacts' ? <ArtifactWorkspace workspace={workspace} />
         : <WorkshopWorkspace workspace={workspace} onCreate={() => setModal({ kind: 'session' })} onGenerate={session => act(`generate-${session.id}`, () => designWorkshop.generateDirections(session.id))} onRefine={(direction, version) => setModal({ kind: 'refine', direction, version })} onSelect={(session, version) => act(`select-${version.id}`, () => designWorkshop.selectDirection(session.id, version.id))} onRelease={session => act(`release-${session.id}`, () => designWorkshop.releaseDirection(session.id, 'Released by the accountable human reviewer.'))} busy={busy} />}
-    {modal?.kind === 'artifact' && <ArtifactModal type={modal.type} workspace={workspace} busy={busy} onClose={() => setModal(null)} onSave={input => act('save-artifact', () => designWorkshop.saveArtifact(input))} />}
     {modal?.kind === 'session' && <SessionModal workspace={workspace} busy={busy} onClose={() => setModal(null)} onSave={input => act('create-session', () => designWorkshop.createSession(input))} />}
     {modal?.kind === 'refine' && <RefineModal {...modal} busy={busy} onClose={() => setModal(null)} onSave={content => act('refine', () => designWorkshop.createDirectionRevision(modal.direction.id, content))} />}
   </Shell>
 }
 
-function ArtifactWorkspace({ workspace, onEdit, onApprove, busy }) {
-  return <div className="mt-6 grid gap-5 xl:grid-cols-3">{Object.entries(ARTIFACT_FORMS).map(([type, spec]) => {
+function ArtifactWorkspace({ workspace }) {
+  const types = [['discovery', 'Discovery'], ['vision', 'Vision'], ['audience', 'Audience']]
+  return <div className="mt-6"><Panel><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-violet-400">Read-only upstream context</p><h2 className="mt-2 text-xl font-semibold">Content Studio owns these artifacts</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Design compiles the exact approved versions below. Creation, revision, and approval now happen in Content Studio.</p></div><Link to="/sphere/content/studio" className={BUTTON}>Open Content Studio</Link></div></Panel><div className="mt-5 grid gap-5 xl:grid-cols-3">{types.map(([type, label]) => {
     const artifact = workspace.artifacts.find(item => item.artifact_type === type)
     const versions = workspace.versions.filter(item => item.artifact_id === artifact?.id)
-    const latest = latestByVersion(versions); const approval = approvalForVersion(workspace.approvals, latest?.id)
-    return <Panel key={type}><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-violet-400">{spec.label}</p><h2 className="mt-2 text-lg font-semibold">{artifact?.title || `${spec.label} artifact`}</h2></div><Badge tone={approval ? 'green' : 'amber'}>{approval ? 'Approved' : latest ? 'Draft' : 'Missing'}</Badge></div><p className="mt-3 text-sm leading-6 text-slate-400">{spec.description}</p>
-      {latest ? <div className="mt-5 space-y-2 rounded-xl bg-white/[0.03] p-3 text-xs text-slate-400"><p>Version {latest.version_number} · {new Date(latest.created_at).toLocaleString()}</p><p>{latest.ai_use_allowed ? 'Approved for AI context' : 'Not authorised for AI context'} · {latest.data_classification}</p></div> : <Empty title="No version" text="Complete this human-authored form." compact />}
-      <div className="mt-5 flex gap-2"><button className={BUTTON} onClick={() => onEdit(type)}>{latest ? 'Create revision' : 'Complete form'}</button>{latest && !approval && <button disabled={busy === `approve-${latest.id}`} onClick={() => onApprove(latest)} className="rounded-xl border border-emerald-500/30 px-3 py-2 text-sm font-semibold text-emerald-300 disabled:opacity-40">Approve exact version</button>}</div>
-      {versions.length > 1 && <p className="mt-3 text-xs text-slate-500">{versions.length} immutable versions retained.</p>}
+    const approval = [...workspace.approvals].filter(item => item.artifact_id === artifact?.id).sort((a, b) => new Date(b.approved_at) - new Date(a.approved_at))[0]
+    const approvedVersion = versions.find(item => item.id === approval?.artifact_version_id)
+    return <Panel key={type}><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-violet-400">{label}</p><h2 className="mt-2 text-lg font-semibold">{artifact?.title || `${label} artifact`}</h2></div><Badge tone={approvedVersion ? 'green' : 'amber'}>{approvedVersion ? 'Approved' : 'Missing'}</Badge></div>
+      {approvedVersion ? <div className="mt-5 space-y-2 rounded-xl bg-white/[0.03] p-3 text-xs text-slate-400"><p>Exact approved version {approvedVersion.version_number} · {new Date(approval.approved_at).toLocaleString()}</p><p>{approvedVersion.ai_use_allowed ? 'Authorised for Design AI context' : 'Not authorised for Design AI context'} · {approvedVersion.data_classification}</p></div> : <Empty title="No approved version" text="Complete and approve this artifact in Content Studio." compact />}
     </Panel>
-  })}</div>
+  })}</div></div>
 }
 
 function WorkshopWorkspace({ workspace, onCreate, onGenerate, onRefine, onSelect, onRelease, busy }) {
@@ -75,18 +75,6 @@ function WorkshopWorkspace({ workspace, onCreate, onGenerate, onRefine, onSelect
 function DirectionCard({ direction, version, selected, released, onRefine, onSelect, canSelect, busy }) {
   const content = version?.content || {}; const palette = Array.isArray(content.palette) ? content.palette : []
   return <Panel><div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-wider text-slate-500">Direction {direction.direction_slot} · v{version?.version_number}</p><h3 className="mt-2 text-xl font-semibold">{content.title}</h3></div>{(selected || released) && <Badge tone="green">{released ? 'Released' : 'Selected'}</Badge>}</div><div className="mt-4 overflow-hidden rounded-2xl border border-white/10" style={{ background: content.preview_spec?.background || '#111827' }}><div className="p-5"><div className="h-2 w-16 rounded-full" style={{ background: content.preview_spec?.accent || '#8b5cf6' }} /><p className="mt-10 text-2xl font-bold text-white">{content.creative_thesis}</p><p className="mt-3 text-sm text-white/70">{content.preview_spec?.composition}</p></div><div className="flex">{palette.map((color, index) => <div key={index} title={`${color.name}: ${color.hex}`} className="h-10 flex-1" style={{ background: color.hex }} />)}</div></div><p className="mt-4 text-sm leading-6 text-slate-400">{content.rationale}</p><div className="mt-4 flex flex-wrap gap-2">{(content.visual_principles || []).map(item => <Badge key={item}>{item}</Badge>)}</div><p className="mt-4 text-xs text-slate-500">Model run {version?.generation_run_id?.slice(0, 8) || 'human refinement'} · immutable version {version?.id?.slice(0, 8)}</p><div className="mt-5 flex gap-2"><button onClick={onRefine} className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold">Refine as new version</button>{canSelect && <button disabled={busy === `select-${version.id}`} onClick={onSelect} className={BUTTON}>Select this version</button>}</div></Panel>
-}
-
-function ArtifactModal({ type, workspace, onClose, onSave, busy }) {
-  const spec = ARTIFACT_FORMS[type]; const artifact = workspace.artifacts.find(item => item.artifact_type === type)
-  const latest = latestByVersion(workspace.versions.filter(item => item.artifact_id === artifact?.id))
-  const [content, setContent] = useState(latest?.content || blankArtifactContent(type))
-  const [summary, setSummary] = useState(latest ? `Revision from version ${latest.version_number}` : 'Initial human-completed version')
-  const [safe, setSafe] = useState(latest?.ai_use_allowed ?? false)
-  const [classification, setClassification] = useState(latest?.data_classification || 'internal')
-  function update(key, kind, value) { setContent(current => ({ ...current, [key]: kind === 'list' ? value.split('\n').map(item => item.trim()).filter(Boolean) : value })) }
-  function submit(event) { event.preventDefault(); onSave({ artifact_id: artifact?.id || null, artifact_type: type, title: artifact?.title || `${spec.label} artifact`, brand_id: workspace.engagement.brand_id, engagement_id: workspace.engagement.id, engagement_stage_instance_id: bestStage(workspace.stages, type)?.id || null, content, change_summary: summary, ai_use_allowed: safe, data_classification: classification }) }
-  return <Modal title={`${latest ? 'Revise' : 'Complete'} ${spec.label}`} onClose={onClose}><form onSubmit={submit} className="space-y-4">{spec.fields.map(([key, label, kind]) => <Field key={key} label={label}><textarea required rows={kind === 'list' ? 4 : 5} className={INPUT} value={kind === 'list' ? (content[key] || []).join('\n') : content[key] || ''} onChange={event => update(key, kind, event.target.value)} placeholder={kind === 'list' ? 'One item per line' : ''} /></Field>)}<Field label="Change summary"><input required className={INPUT} value={summary} onChange={event => setSummary(event.target.value)} /></Field><div className="grid gap-4 sm:grid-cols-2"><Field label="Data classification"><select className={INPUT} value={classification} onChange={event => setClassification(event.target.value)}><option value="internal">Internal</option><option value="confidential">Confidential</option><option value="public">Public</option><option value="restricted">Restricted</option></select></Field><label className="flex items-center gap-3 rounded-xl border border-white/10 p-3 text-sm"><input type="checkbox" checked={safe} onChange={event => setSafe(event.target.checked)} /><span>Explicitly safe to include in AI context</span></label></div><button disabled={busy === 'save-artifact'} className={`${BUTTON} w-full`}>Save immutable version</button></form></Modal>
 }
 
 function SessionModal({ workspace, onClose, onSave, busy }) {

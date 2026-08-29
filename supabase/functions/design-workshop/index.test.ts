@@ -1,4 +1,4 @@
-import { directionSchema, directionsAreDistinct, hasWorkshopAuthority, sha256, similarity, validateArtifactContent } from './index.ts'
+import { directionSchema, directionsAreDistinct, hasWorkshopAuthority, sha256, similarity } from './index.ts'
 
 function assert(value: unknown, message = 'Expected value to be truthy') {
   if (!value) throw new Error(message)
@@ -13,13 +13,9 @@ assert.throws = (callback: () => unknown) => {
   throw new Error('Expected callback to throw')
 }
 
-Deno.test('artifact forms require the agreed structured human fields', () => {
-  const discovery = validateArtifactContent('discovery', {
-    summary: 'A clear starting point', objectives: ['Grow trust'], offers: ['Strategy'],
-    evidence: ['Interview evidence'], constraints: ['Keep the current name'],
-  })
-  assert.equal(discovery.summary, 'A clear starting point')
-  assert.throws(() => validateArtifactContent('vision', { vision_statement: 'Only one field' }))
+Deno.test('Content members cannot call Design Workshop actions after authoring relocation', () => {
+  assert.equal(hasWorkshopAuthority({ role: 'member', department_id: 'content' }, 'create_session'), false)
+  assert.equal(hasWorkshopAuthority({ role: 'department_manager', department_id: 'content' }, 'generate_directions'), false)
 })
 
 Deno.test('direction schema is strict and includes traceable recommendation fields', () => {
@@ -44,10 +40,7 @@ Deno.test('context and output checksums are stable', async () => {
   assert((await sha256('approved-context')).match(/^[a-f0-9]{64}$/))
 })
 
-Deno.test('artifact approval and design release preserve accountable human authority', () => {
-  assert.equal(hasWorkshopAuthority({ role: 'member', department_id: 'content' }, 'save_artifact'), true)
-  assert.equal(hasWorkshopAuthority({ role: 'member', department_id: 'content' }, 'approve_artifact'), false)
-  assert.equal(hasWorkshopAuthority({ role: 'department_manager', department_id: 'content' }, 'approve_artifact'), true)
+Deno.test('design release preserves accountable human authority', () => {
   assert.equal(hasWorkshopAuthority({ role: 'member', department_id: 'design' }, 'release_direction'), false)
   assert.equal(hasWorkshopAuthority({ role: 'department_manager', department_id: 'design' }, 'release_direction'), true)
 })
