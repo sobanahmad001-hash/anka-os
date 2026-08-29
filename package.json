@@ -12,7 +12,7 @@
     "supabase:login": "supabase login",
     "supabase:link": "supabase link --project-ref fhoxaogfjszftoqtnbav",
     "supabase:migrations": "supabase migration list",
-    "supabase:deploy:functions": "supabase functions deploy ai-chat && supabase functions deploy content-studio && supabase functions deploy department-chat && supabase functions deploy proofing-layer && supabase functions deploy development-studio && supabase functions deploy design-workshop && supabase functions deploy marketing-studio && supabase functions deploy integration-gateway && supabase functions deploy google-oauth && supabase functions deploy invite-user && supabase functions deploy invite-client-contact && supabase functions deploy portal-file-url"
+    "supabase:deploy:functions": "supabase functions deploy ai-chat && supabase functions deploy content-studio && supabase functions deploy department-chat && supabase functions deploy proofing-layer && supabase functions deploy development-studio && supabase functions deploy work-items && supabase functions deploy design-workshop && supabase functions deploy marketing-studio && supabase functions deploy integration-gateway && supabase functions deploy google-oauth && supabase functions deploy invite-user && supabase functions deploy invite-client-contact && supabase functions deploy portal-file-url"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.1",
