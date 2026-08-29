@@ -3,7 +3,7 @@ import { namedKey } from '../_shared/googleOAuthTokens.ts'
 
 type Json = Record<string, unknown>
 
-const ACTIONS = new Set(['save', 'delete', 'add_dependency', 'remove_dependency'])
+const ACTIONS = new Set(['save', 'delete', 'add_dependency', 'remove_dependency', 'acknowledge_automation_flag'])
 const WORK_ITEM_TYPES = new Set(['task', 'bug', 'request'])
 const PRIORITIES = new Set(['low', 'medium', 'high', 'urgent'])
 const STATUSES = new Set(['not_started', 'in_progress', 'blocked', 'done'])
@@ -92,9 +92,19 @@ export async function handleRequest(request: Request) {
   if (request.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
   try {
     const body = await request.json() as Json
-    const action = text(body.action, 20)
+    const action = text(body.action, 40)
     if (!ACTIONS.has(action)) return response({ error: 'Unsupported action' }, 400)
     const { admin, user } = await requireContext(request)
+    if (action === 'acknowledge_automation_flag') {
+      const workItemId = optionalId(body.workItemId)
+      if (!workItemId) return response({ error: 'Work item is required' }, 400)
+      const { data, error } = await admin.rpc('acknowledge_work_item_automation_flag', {
+        p_work_item_id: workItemId,
+        p_actor_id: user.id,
+      })
+      if (error) throw error
+      return response({ data })
+    }
     if (action === 'add_dependency' || action === 'remove_dependency') {
       const workItemId = optionalId(body.workItemId)
       const dependsOnWorkItemId = optionalId(body.dependsOnWorkItemId)

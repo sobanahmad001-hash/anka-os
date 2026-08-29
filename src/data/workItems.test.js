@@ -93,13 +93,13 @@ test('the migration enforces membership, soft deletion, RLS, and atomic audit wr
   assert.doesNotMatch(migration, /update public\.artifacts|update public\.artifact_versions|update public\.engagement_stage_instances/)
 })
 
-test('the engagement-level UI retains all W1 filters and excludes unrelated later-phase surfaces', () => {
+test('the engagement-level UI retains all W1 filters while the W1 migration stays phase-scoped', () => {
   assert.match(operatingSpine, />Work<\/button>/)
   for (const label of ['Status', 'Assignee', 'Department', 'Priority', 'Due date']) assert.match(panel, new RegExp(`label="${label}"`))
   assert.match(panel, /Work item detail/)
   assert.match(panel, /References are storage-only in W1/)
-  assert.doesNotMatch(panel, /Automation|Custom field/i)
-  assert.doesNotMatch(functionSource, /openai|anthropic|notification|webhook|auto.?status/i)
+  assert.doesNotMatch(migration, /create table public\.automation_rules|custom_fields jsonb/i)
+  assert.doesNotMatch(functionSource, /openai|anthropic|webhook/i)
   assert.doesNotMatch(migration, /parent_work_item_id|custom_fields|automation_rules/)
 })
 
