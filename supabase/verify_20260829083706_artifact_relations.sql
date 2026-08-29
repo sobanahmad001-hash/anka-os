@@ -96,7 +96,7 @@ $$;
 
 select jsonb_build_object(
   'exact_relation_columns', (
-    select array_agg(column_name order by ordinal_position) = array[
+    select array_agg(column_name::text order by ordinal_position) = array[
       'id', 'organization_id', 'source_artifact_id', 'target_artifact_id',
       'relation_type', 'created_by', 'created_at'
     ]::text[]
