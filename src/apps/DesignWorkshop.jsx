@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { OUTPUT_FAMILIES, latestByVersion } from '../data/designWorkshop.js'
 import { designWorkshop } from '../data/designWorkshopRepository.js'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
+import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 
 const INPUT = 'w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-violet-500/60'
 const BUTTON = 'rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40'
@@ -53,7 +54,7 @@ function ArtifactWorkspace({ workspace }) {
     const approval = [...workspace.approvals].filter(item => item.artifact_id === artifact?.id).sort((a, b) => new Date(b.approved_at) - new Date(a.approved_at))[0]
     const approvedVersion = versions.find(item => item.id === approval?.artifact_version_id)
     return <Panel key={type}><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-violet-400">{label}</p><h2 className="mt-2 text-lg font-semibold">{artifact?.title || `${label} artifact`}</h2></div><Badge tone={approvedVersion ? 'green' : 'amber'}>{approvedVersion ? 'Approved' : 'Missing'}</Badge></div>
-      {approvedVersion ? <div className="mt-5 space-y-2 rounded-xl bg-white/[0.03] p-3 text-xs text-slate-400"><p>Exact approved version {approvedVersion.version_number} · {new Date(approval.approved_at).toLocaleString()}</p><p>{approvedVersion.ai_use_allowed ? 'Authorised for Design AI context' : 'Not authorised for Design AI context'} · {approvedVersion.data_classification}</p></div> : <Empty title="No approved version" text="Complete and approve this artifact in Content Studio." compact />}
+      {approvedVersion ? <><div className="mt-5 space-y-2 rounded-xl bg-white/[0.03] p-3 text-xs text-slate-400"><p>Exact approved version {approvedVersion.version_number} · {new Date(approval.approved_at).toLocaleString()}</p><p>{approvedVersion.ai_use_allowed ? 'Authorised for Design AI context' : 'Not authorised for Design AI context'} · {approvedVersion.data_classification}</p></div><ArtifactRelationsPanel artifact={artifact} /></> : <Empty title="No approved version" text="Complete and approve this artifact in Content Studio." compact />}
     </Panel>
   })}</div></div>
 }

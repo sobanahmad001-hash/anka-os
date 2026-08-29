@@ -40,6 +40,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/proofing-layer/index.ts"
 
+[functions.artifact-relations]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/artifact-relations/index.ts"
+
 [functions.development-studio]
 enabled = true
 verify_jwt = true
