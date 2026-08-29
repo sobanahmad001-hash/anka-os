@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import DevelopmentTrackingPanel from '../components/DevelopmentTrackingPanel.jsx'
+import PortfolioDashboard from '../components/PortfolioDashboard.jsx'
 import WorkItemsPanel from '../components/WorkItemsPanel.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { OPERATING_DEPARTMENTS } from '../data/operatingSpineRepository.js'
@@ -19,18 +20,13 @@ const INITIAL_ENGAGEMENT = {
 
 const labelize = value => String(value || '').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
 
-function formatDate(value) {
-  if (!value) return 'Not set'
-  return new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(new Date(`${value}T00:00:00`))
-}
-
 export default function OperatingSpine({ initialView = 'engagements' }) {
   const { user } = useAuth()
   const [view, setView] = useState(initialView)
   const [clients, setClients] = useState([])
   const [services, setServices] = useState([])
   const [owners, setOwners] = useState([])
-  const [engagements, setEngagements] = useState([])
+  const [portfolioSnapshot, setPortfolioSnapshot] = useState({ engagements: [], workItems: [], stages: [] })
   const [workspace, setWorkspace] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -56,16 +52,16 @@ export default function OperatingSpine({ initialView = 'engagements' }) {
     setLoading(true)
     setError('')
     try {
-      const [clientRows, serviceRows, ownerRows, engagementRows] = await Promise.all([
+      const [clientRows, serviceRows, ownerRows, portfolioRows] = await Promise.all([
         operatingSpine.listClientsAndBrands(),
         operatingSpine.listServices(),
         operatingSpine.listOwners(),
-        operatingSpine.listEngagements(),
+        operatingSpine.getPortfolioSnapshot(),
       ])
       setClients(clientRows || [])
       setServices(serviceRows || [])
       setOwners(ownerRows || [])
-      setEngagements(engagementRows || [])
+      setPortfolioSnapshot(portfolioRows || { engagements: [], workItems: [], stages: [] })
     } catch (loadError) {
       setError(loadError.message)
     } finally {
@@ -196,7 +192,7 @@ export default function OperatingSpine({ initialView = 'engagements' }) {
         {error && <div className="mt-5 rounded-xl border border-red-900/60 bg-red-950/50 px-4 py-3 text-sm text-red-300">{error}</div>}
         {notice && <div className="mt-5 rounded-xl border border-emerald-900/60 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">{notice}</div>}
 
-        {view === 'engagements' && <EngagementDirectory engagements={engagements} onOpen={openEngagement} />}
+        {view === 'engagements' && <PortfolioDashboard snapshot={portfolioSnapshot} owners={ownerOptions} onOpen={openEngagement} onRefresh={loadAll} supportNote="Partial journeys supported." />}
         {view === 'clients' && <ClientRegistry clients={clients} onNewBrand={clientId => { setBrandForm({ ...INITIAL_BRAND, clientId }); setModal('brand') }} />}
         {view === 'services' && <ServiceCatalogue services={services} />}
       </div>
@@ -206,14 +202,6 @@ export default function OperatingSpine({ initialView = 'engagements' }) {
       {modal === 'engagement' && <Modal title="Compose engagement" onClose={() => setModal('')} wide><EngagementComposer form={engagementForm} setForm={setEngagementForm} clients={clients} brands={availableBrands} services={services} owners={ownerOptions} chooseClient={chooseClient} toggleService={toggleService} setServiceOwner={setServiceOwner} addAsset={addAsset} updateAsset={updateAsset} removeAsset={removeAsset} onSubmit={createEngagement} saving={saving} /></Modal>}
     </div>
   )
-}
-
-function EngagementDirectory({ engagements, onOpen }) {
-  return <section className="mt-6">
-    <div className="grid gap-3 sm:grid-cols-3"><Metric label="Engagements" value={engagements.length} /><Metric label="Active services" value={engagements.reduce((sum, item) => sum + (item.engagement_services?.filter(service => service.status === 'active').length || 0), 0)} /><Metric label="Partial journeys supported" value="Yes" /></div>
-    <div className="mt-6 grid gap-4 xl:grid-cols-2">{engagements.map(engagement => <button key={engagement.id} onClick={() => onOpen(engagement.id)} className="rounded-2xl border border-white/[0.07] bg-[#0e111a]/80 p-5 text-left transition hover:border-violet-500/30"><div className="flex items-start justify-between gap-4"><div><p className="text-xs text-violet-400">{engagement.agency_clients?.name} · {engagement.brands?.name}</p><h2 className="mt-1 text-lg font-semibold">{engagement.name}</h2></div><Badge>{labelize(engagement.status)}</Badge></div><p className="mt-3 line-clamp-2 text-sm text-slate-500">{engagement.objective || 'No objective recorded yet.'}</p><div className="mt-4 flex flex-wrap gap-2">{engagement.engagement_services?.map(item => <span key={item.id} className="rounded-full bg-white/[0.05] px-2.5 py-1 text-[11px] text-slate-300">{item.service_catalog?.name}</span>)}</div><p className="mt-4 text-xs text-slate-600">Target {formatDate(engagement.target_date)}</p></button>)}</div>
-    {!engagements.length && <Empty text="No canonical engagements yet. Create one by selecting a client, brand, and any combination of services." />}
-  </section>
 }
 
 function ClientRegistry({ clients, onNewBrand }) {
