@@ -88,7 +88,10 @@ test('W7 repeats cross-organisation isolation under authenticated RLS and remain
     'organization_a_engagement_visible', 'organization_b_engagement_hidden',
     'organization_a_work_visible', 'organization_b_work_hidden',
     'organization_a_stage_visible', 'organization_b_stage_hidden',
+    'new_artifact_version_has_only_its_own_field_values',
   ]) assert.match(verification, new RegExp(check))
+  assert.match(verification, /artifact_version_two_id[\s\S]*field_value' = 'new-only-value'/)
+  assert.match(verification, /version\.content::text not like '%old-only-value%'/)
   assert.match(verification, /set local role authenticated/)
   assert.match(verification, /request\.jwt\.claims/)
   assert.match(verification, /rollback;/)
