@@ -45,6 +45,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/artifact-relations/index.ts"
 
+[functions.artifact-approvals]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/artifact-approvals/index.ts"
+
 [functions.development-studio]
 enabled = true
 verify_jwt = true

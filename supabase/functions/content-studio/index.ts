@@ -124,6 +124,12 @@ async function approveArtifact(admin: Client, body: Json, actorId: string) {
     throw Object.assign(new Error('Content artifact version not found'), { status: 404 })
   }
   await requireContentEngagement(admin, artifact.engagement_id)
+  const { data: pendingRequest, error: requestError } = await admin.from('artifact_approval_requests')
+    .select('id').eq('artifact_version_id', version.id).eq('status', 'pending').maybeSingle()
+  if (requestError) throw requestError
+  if (pendingRequest) {
+    throw Object.assign(new Error('This version is governed by a pending multi-approver request'), { status: 409 })
+  }
   const { data: approval, error } = await admin.from('artifact_approvals').insert({
     organization_id: ORGANIZATION_ID, artifact_id: artifact.id, artifact_version_id: version.id,
     engagement_id: artifact.engagement_id, notes: text(body.notes, 2000), approved_by: actorId,
