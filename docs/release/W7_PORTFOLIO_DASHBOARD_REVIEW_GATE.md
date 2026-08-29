@@ -28,11 +28,13 @@
 - Each source table already has organization-scoped RLS for authenticated team members.
 - The client rollup accepts child rows only when both `engagement_id` and `organization_id` match a visible engagement.
 - `supabase/verify_w7_portfolio_dashboard.sql` creates two rollback-only organizations, switches to the organization-A user under the `authenticated` role, and checks that organization-B engagements, work, and stages are all invisible.
+- The same rollback verifier creates two immutable versions of one artifact and proves that selecting the second version by its exact ID returns only the second version's field values, never the first version's values.
 
 ## Review checks
 
 - [ ] One portfolio row appears per engagement visible to the requesting team member.
 - [ ] Organization-B fixtures are absent from all three W7 reads when authenticated as organization A.
+- [ ] A new version of the same artifact cannot surface the previous version's field values against the new version ID.
 - [ ] Open, blocked, incomplete-stage, automation, and summary counts are correct.
 - [ ] All three risk badges follow the fixed definitions above.
 - [ ] Clicking or keyboard-opening a row uses the existing engagement workspace.

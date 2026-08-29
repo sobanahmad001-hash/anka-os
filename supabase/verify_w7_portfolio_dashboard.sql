@@ -5,7 +5,10 @@ create temporary table w7_fixture (
   organization_a_id uuid not null,
   organization_b_id uuid not null,
   engagement_a_id uuid not null,
-  engagement_b_id uuid not null
+  engagement_b_id uuid not null,
+  artifact_id uuid not null,
+  artifact_version_one_id uuid not null,
+  artifact_version_two_id uuid not null
 ) on commit drop;
 
 grant select on w7_fixture to authenticated;
@@ -23,6 +26,9 @@ declare
   v_engagement_b_id uuid := gen_random_uuid();
   v_catalog_a_id uuid := gen_random_uuid();
   v_catalog_b_id uuid := gen_random_uuid();
+  v_artifact_id uuid := gen_random_uuid();
+  v_artifact_version_one_id uuid := gen_random_uuid();
+  v_artifact_version_two_id uuid := gen_random_uuid();
 begin
   select membership.user_id, membership.organization_id
   into v_actor_id, v_organization_a_id
@@ -74,9 +80,33 @@ begin
     (v_organization_a_id, v_engagement_a_id, v_catalog_a_id, 'W7 visible stage', 'content', 'delivery', 0, 'blocked'),
     (v_organization_b_id, v_engagement_b_id, v_catalog_b_id, 'W7 hidden stage', 'content', 'delivery', 0, 'blocked');
 
+  insert into public.artifacts (
+    id, organization_id, brand_id, engagement_id, artifact_type, title, created_by
+  ) values (
+    v_artifact_id, v_organization_a_id, v_brand_a_id, v_engagement_a_id,
+    'discovery', 'W7 version-isolation fixture', v_actor_id
+  );
+
+  insert into public.artifact_versions (
+    id, organization_id, artifact_id, version_number, parent_version_id,
+    content, content_checksum, change_summary, created_by
+  ) values
+    (
+      v_artifact_version_one_id, v_organization_a_id, v_artifact_id, 1, null,
+      '{"marker":"w7-version-one","field_value":"old-only-value"}'::jsonb,
+      repeat('a', 64), 'W7 version one', v_actor_id
+    ),
+    (
+      v_artifact_version_two_id, v_organization_a_id, v_artifact_id, 2,
+      v_artifact_version_one_id,
+      '{"marker":"w7-version-two","field_value":"new-only-value"}'::jsonb,
+      repeat('b', 64), 'W7 version two', v_actor_id
+    );
+
   insert into w7_fixture values (
     v_actor_id, v_organization_a_id, v_organization_b_id,
-    v_engagement_a_id, v_engagement_b_id
+    v_engagement_a_id, v_engagement_b_id, v_artifact_id,
+    v_artifact_version_one_id, v_artifact_version_two_id
   );
 end;
 $$;
@@ -126,6 +156,18 @@ from (
     not exists (
       select 1 from public.engagement_stage_instances stage, w7_fixture fixture
       where stage.engagement_id = fixture.engagement_b_id
+    )
+  union all
+  select 'new_artifact_version_has_only_its_own_field_values',
+    exists (
+      select 1
+      from public.artifact_versions version, w7_fixture fixture
+      where version.id = fixture.artifact_version_two_id
+        and version.artifact_id = fixture.artifact_id
+        and version.parent_version_id = fixture.artifact_version_one_id
+        and version.content ->> 'marker' = 'w7-version-two'
+        and version.content ->> 'field_value' = 'new-only-value'
+        and version.content::text not like '%old-only-value%'
     )
 ) checks
 order by check_name;
