@@ -8,6 +8,7 @@ import {
   connectorLabel,
 } from '../config/connectorCatalog.js'
 import { integrations } from '../data/integrationRepository.js'
+import ContentCustomFieldSettings from '../components/ContentCustomFieldSettings.jsx'
 
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20'
 const BUTTON = 'rounded-xl border border-slate-700 px-3.5 py-2 text-sm font-medium text-slate-200 transition hover:border-purple-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50'
@@ -230,6 +231,8 @@ export default function Settings() {
       <main className="mx-auto max-w-7xl space-y-6 px-6 py-6">
         {error && <div className="rounded-xl border border-red-900/60 bg-red-950/50 px-4 py-3 text-sm text-red-300">{error}</div>}
         {message && <div className="rounded-xl border border-emerald-900/60 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">{message}</div>}
+
+        <ContentCustomFieldSettings />
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {Object.entries(CONNECTOR_CATALOG).map(([id, connector]) => {
