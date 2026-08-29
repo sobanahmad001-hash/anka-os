@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { OPERATING_DEPARTMENTS } from '../data/operatingSpineRepository.js'
 import {
   artifactRoute,
+  buildWorkloadRows,
   buildWorkItemRelations,
   EMPTY_WORK_ITEM,
   filterAndSortWorkItems,
@@ -13,10 +14,14 @@ import {
   WORK_ITEM_PRIORITIES,
   WORK_ITEM_STATUSES,
   WORK_ITEM_TYPES,
+  UNASSIGNED_WORK_ITEM_FILTER,
 } from '../data/workItems.js'
+import { artifactRelations } from '../data/artifactRelationsRepository.js'
 import { workItems } from '../data/workItemsRepository.js'
 import AutomationRulesPanel from './AutomationRulesPanel.jsx'
+import WorkItemConnections from './WorkItemConnections.jsx'
 import { WorkCalendarView, WorkTimelineView } from './WorkCalendarTimeline.jsx'
+import WorkloadView from './WorkloadView.jsx'
 
 const INPUT = 'w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none focus:border-violet-500/60'
 const LABEL = 'mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500'
@@ -42,6 +47,9 @@ export default function WorkItemsPanel({ workspace, owners, onRefresh }) {
   const [moving, setMoving] = useState(false)
   const [draggedItemId, setDraggedItemId] = useState('')
   const [dependencyCandidate, setDependencyCandidate] = useState('')
+  const [artifactRelationRows, setArtifactRelationRows] = useState([])
+  const [artifactRelationsLoading, setArtifactRelationsLoading] = useState(false)
+  const [artifactRelationsError, setArtifactRelationsError] = useState('')
   const [error, setError] = useState('')
 
   const loadItems = useCallback(async () => {
@@ -58,8 +66,23 @@ export default function WorkItemsPanel({ workspace, owners, onRefresh }) {
 
   useEffect(() => { loadItems() }, [loadItems])
 
+  useEffect(() => {
+    let active = true
+    const artifactId = editor?.linked_artifact_id
+    setArtifactRelationRows([])
+    setArtifactRelationsError('')
+    if (!artifactId) { setArtifactRelationsLoading(false); return () => { active = false } }
+    setArtifactRelationsLoading(true)
+    artifactRelations.list(artifactId)
+      .then(rows => { if (active) setArtifactRelationRows(rows || []) })
+      .catch(reason => { if (active) setArtifactRelationsError(reason.message) })
+      .finally(() => { if (active) setArtifactRelationsLoading(false) })
+    return () => { active = false }
+  }, [editor?.linked_artifact_id])
+
   const visibleItems = useMemo(() => filterAndSortWorkItems(items, filters, sort), [items, filters, sort])
   const boardColumns = useMemo(() => groupWorkItemsForBoard(visibleItems), [visibleItems])
+  const workloadRows = useMemo(() => buildWorkloadRows(visibleItems, owners), [visibleItems, owners])
   const relations = useMemo(() => buildWorkItemRelations(items, dependencies), [items, dependencies])
   const versionsByArtifact = useMemo(() => {
     const result = new Map()
@@ -71,6 +94,11 @@ export default function WorkItemsPanel({ workspace, owners, onRefresh }) {
 
   function toggleSort(key) {
     setSort(current => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }))
+  }
+
+  function openAssigneeView(assignee, targetView) {
+    setFilters(current => ({ ...current, assignee }))
+    setView(targetView)
   }
 
   function openNew(parentWorkItemId = '') {
@@ -157,15 +185,16 @@ export default function WorkItemsPanel({ workspace, owners, onRefresh }) {
   const editorSubtasks = editor?.id ? relations.subtasksByParent.get(editor.id) || [] : []
   const editorBlockedBy = editor?.id ? relations.blockedByByItem.get(editor.id) || [] : []
   const editorBlocks = editor?.id ? relations.blocksByItem.get(editor.id) || [] : []
+  const editorParent = editor?.parent_work_item_id ? relations.itemById.get(editor.parent_work_item_id) || null : null
   const parentOptions = items.filter(item => item.id !== editor?.id && !item.parent_work_item_id)
   const dependencyOptions = items.filter(item => item.id !== editor?.id && !editorBlockedBy.some(dependency => dependency.id === item.id))
 
   return <section className="mt-7 space-y-5">
-    <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-xl font-semibold">Work</h2><p className="mt-1 text-sm text-slate-500">One engagement queue with its fixed organization automation library.</p></div><div className="flex items-center gap-3"><div aria-label="Work view" className="flex flex-wrap rounded-xl border border-white/10 bg-black/20 p-1">{[['list', 'List'], ['board', 'Board'], ['calendar', 'Calendar'], ['timeline', 'Timeline'], ['automations', 'Automations']].map(([value, label]) => <button key={value} type="button" aria-pressed={view === value} onClick={() => setView(value)} className={`rounded-lg px-3 py-2 text-xs font-semibold ${view === value ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-white'}`}>{label}</button>)}</div><button onClick={() => openNew()} className="rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold">New work item</button></div></div>
+    <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-xl font-semibold">Work</h2><p className="mt-1 text-sm text-slate-500">One engagement queue with its fixed organization automation library.</p></div><div className="flex items-center gap-3"><div aria-label="Work view" className="flex flex-wrap rounded-xl border border-white/10 bg-black/20 p-1">{[['list', 'List'], ['board', 'Board'], ['calendar', 'Calendar'], ['timeline', 'Timeline'], ['workload', 'Workload'], ['automations', 'Automations']].map(([value, label]) => <button key={value} type="button" aria-pressed={view === value} onClick={() => setView(value)} className={`rounded-lg px-3 py-2 text-xs font-semibold ${view === value ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-white'}`}>{label}</button>)}</div><button onClick={() => openNew()} className="rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold">New work item</button></div></div>
     {error && <div className="rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">{error}</div>}
     {view !== 'automations' && <div className="grid gap-3 rounded-2xl border border-white/[0.07] bg-[#0e111a]/80 p-4 sm:grid-cols-2 xl:grid-cols-5">
       <Filter label="Status" value={filters.status} onChange={status => setFilters({ ...filters, status })} options={WORK_ITEM_STATUSES} />
-      <Filter label="Assignee" value={filters.assignee} onChange={assignee => setFilters({ ...filters, assignee })} options={owners.map(owner => ({ value: owner.id, label: owner.label }))} />
+      <Filter label="Assignee" value={filters.assignee} onChange={assignee => setFilters({ ...filters, assignee })} options={[...owners.map(owner => ({ value: owner.id, label: owner.label })), { value: UNASSIGNED_WORK_ITEM_FILTER, label: 'Unassigned' }]} />
       <Filter label="Department" value={filters.department} onChange={department => setFilters({ ...filters, department })} options={OPERATING_DEPARTMENTS.map(item => ({ value: item.id, label: item.name }))} />
       <Filter label="Priority" value={filters.priority} onChange={priority => setFilters({ ...filters, priority })} options={WORK_ITEM_PRIORITIES} />
       <Filter label="Due date" value={filters.due} onChange={due => setFilters({ ...filters, due })} options={[{ value: 'overdue', label: 'Overdue' }, { value: 'next_7_days', label: 'Next 7 days' }, { value: 'no_due_date', label: 'No due date' }]} />
@@ -176,13 +205,14 @@ export default function WorkItemsPanel({ workspace, owners, onRefresh }) {
       </tr></thead><tbody>{visibleItems.map(item => <tr key={item.id} onClick={() => openItem(item)} className="cursor-pointer border-t border-white/[0.06] hover:bg-white/[0.025]"><td className="px-4 py-3"><div className="flex flex-wrap items-center gap-2"><p className="font-medium text-white">{item.title}</p>{item.automation_flagged_at && <AutomationBadge />}</div><p className="mt-1 line-clamp-1 text-xs text-slate-600">{item.parent_work_item_id ? 'Subtask · ' : ''}{labelize(item.work_item_type)}{item.description ? ` · ${item.description}` : ''}</p></td><td className="px-4 py-3"><Status value={item.status} /></td><td className="px-4 py-3 text-slate-300">{labelize(item.priority)}</td><td className="px-4 py-3 text-slate-400">{ownerLabel(owners, item.assignee_id)}</td><td className="px-4 py-3 text-slate-400">{labelize(item.department_id) || 'Shared'}</td><td className="px-4 py-3 text-slate-400">{item.due_date || 'Not set'}</td></tr>)}</tbody></table>
       {!loading && !visibleItems.length && <div className="py-16 text-center text-sm text-slate-500">No work items match this view.</div>}
       {loading && <div className="py-16 text-center text-sm text-slate-500">Loading work items…</div>}
-    </div> : view === 'board' ? <WorkItemsBoard columns={boardColumns} relations={relations} owners={owners} artifacts={workspace.workItemArtifacts || []} loading={loading} moving={moving} draggedItemId={draggedItemId} onDragStart={setDraggedItemId} onMove={moveWorkItem} onMoveWithinColumn={moveWithinColumn} onOpen={openItem} /> : view === 'calendar' ? <WorkCalendarView items={visibleItems} loading={loading} onOpen={openItem} /> : view === 'timeline' ? <WorkTimelineView items={visibleItems} dependencies={dependencies} loading={loading} onOpen={openItem} /> : <AutomationRulesPanel organizationId={workspace.engagement.organization_id} />}
+    </div> : view === 'board' ? <WorkItemsBoard columns={boardColumns} relations={relations} owners={owners} artifacts={workspace.workItemArtifacts || []} loading={loading} moving={moving} draggedItemId={draggedItemId} onDragStart={setDraggedItemId} onMove={moveWorkItem} onMoveWithinColumn={moveWithinColumn} onOpen={openItem} /> : view === 'calendar' ? <WorkCalendarView items={visibleItems} loading={loading} onOpen={openItem} /> : view === 'timeline' ? <WorkTimelineView items={visibleItems} dependencies={dependencies} loading={loading} onOpen={openItem} /> : view === 'workload' ? <WorkloadView rows={workloadRows} loading={loading} onFilter={openAssigneeView} /> : <AutomationRulesPanel organizationId={workspace.engagement.organization_id} />}
     {editor && <div className="fixed inset-0 z-50 flex justify-end bg-black/75"><form onSubmit={save} className="h-full w-full max-w-2xl overflow-y-auto border-l border-white/10 bg-[#111520] p-6"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-400">Work item detail</p><div className="mt-1 flex items-center gap-2"><h2 className="text-xl font-semibold">{editor.id ? 'Edit work item' : 'Create work item'}</h2>{editor.automation_flagged_at && <AutomationBadge />}</div></div><button type="button" onClick={() => setEditor(null)} className="text-sm text-slate-500 hover:text-white">Close</button></div>
       <div className="mt-6 grid gap-4 sm:grid-cols-2"><div className="sm:col-span-2"><Field label="Title"><input required className={INPUT} value={editor.title} onChange={e => setEditor({ ...editor, title: e.target.value })} /></Field></div><div className="sm:col-span-2"><Field label="Description"><textarea rows="4" className={INPUT} value={editor.description} onChange={e => setEditor({ ...editor, description: e.target.value })} /></Field></div>
       <Field label="Type"><Select value={editor.work_item_type} onChange={work_item_type => setEditor({ ...editor, work_item_type })} options={WORK_ITEM_TYPES} /></Field><Field label="Priority"><Select value={editor.priority} onChange={priority => setEditor({ ...editor, priority })} options={WORK_ITEM_PRIORITIES} /></Field><Field label="Status"><Select value={editor.status} onChange={status => setEditor({ ...editor, status })} options={WORK_ITEM_STATUSES} /></Field><Field label="Department"><Select allowEmpty emptyLabel="Shared / no department" value={editor.department_id || ''} onChange={department_id => setEditor({ ...editor, department_id })} options={OPERATING_DEPARTMENTS.map(item => ({ value: item.id, label: item.name }))} /></Field>
       <Field label="Assignee"><Select allowEmpty emptyLabel="Unassigned" value={editor.assignee_id || ''} onChange={assignee_id => setEditor({ ...editor, assignee_id })} options={owners.map(owner => ({ value: owner.id, label: owner.label }))} /></Field><Field label="Parent work item"><Select allowEmpty emptyLabel="Top-level work item" value={editor.parent_work_item_id || ''} onChange={parent_work_item_id => setEditor({ ...editor, parent_work_item_id })} options={parentOptions.map(item => ({ value: item.id, label: item.title }))} /></Field><Field label="Position"><input type="number" min="0" className={INPUT} value={editor.position} onChange={e => setEditor({ ...editor, position: e.target.value })} /></Field><Field label="Start date"><input type="date" className={INPUT} value={editor.start_date || ''} onChange={e => setEditor({ ...editor, start_date: e.target.value })} /></Field><Field label="Due date"><input type="date" min={editor.start_date || undefined} className={INPUT} value={editor.due_date || ''} onChange={e => setEditor({ ...editor, due_date: e.target.value })} /></Field>
       <div className="sm:col-span-2 border-t border-white/[0.07] pt-5"><p className="text-sm font-semibold">Optional references</p><p className="mt-1 text-xs text-slate-500">References are storage-only in W1. They never change artifact or stage status.</p></div><Field label="Linked artifact"><Select allowEmpty emptyLabel="No linked artifact" value={editor.linked_artifact_id || ''} onChange={linked_artifact_id => setEditor({ ...editor, linked_artifact_id, linked_artifact_version_id: '' })} options={(workspace.workItemArtifacts || []).map(artifact => ({ value: artifact.id, label: `${artifact.title} · ${labelize(artifact.artifact_type)}` }))} /></Field><Field label="Artifact version"><Select allowEmpty emptyLabel="No specific version" value={editor.linked_artifact_version_id || ''} onChange={linked_artifact_version_id => setEditor({ ...editor, linked_artifact_version_id })} options={artifactVersions.map(version => ({ value: version.id, label: `Version ${version.version_number}` }))} /></Field><div className="sm:col-span-2"><Field label="Linked journey stage"><Select allowEmpty emptyLabel="No linked stage" value={editor.linked_engagement_stage_instance_id || ''} onChange={linked_engagement_stage_instance_id => setEditor({ ...editor, linked_engagement_stage_instance_id })} options={workspace.stages.map(stage => ({ value: stage.id, label: `${stage.name} · ${labelize(stage.accountable_department_id)}` }))} /></Field></div></div>
       {linkedArtifact && <a href={artifactRoute(linkedArtifact.artifact_type)} className="mt-5 block rounded-xl border border-violet-500/20 bg-violet-500/5 p-4 text-sm text-violet-300 hover:border-violet-400"><span className="font-semibold">{linkedArtifact.title}</span><span className="ml-2 text-xs text-slate-500">Open its department workspace →</span></a>}
+      {editor.id && <WorkItemConnections parent={editorParent} subtasks={editorSubtasks} blockedBy={editorBlockedBy} blocks={editorBlocks} linkedArtifact={linkedArtifact} artifactRelations={artifactRelationRows} relationsLoading={artifactRelationsLoading} relationsError={artifactRelationsError} onOpen={openItem} />}
       {editor.id && <div className="mt-6 grid gap-4 border-t border-white/[0.07] pt-6 sm:grid-cols-2"><RelationPanel title="Subtasks" action={<button type="button" onClick={() => openNew(editor.id)} className="text-xs font-semibold text-violet-300">Add subtask</button>}>{editorSubtasks.length ? editorSubtasks.map(item => <RelationRow key={item.id} item={item} onOpen={() => openItem(item)} />) : <RelationEmpty text="No subtasks" />}</RelationPanel><RelationPanel title="Blocked by">{editorBlockedBy.length ? editorBlockedBy.map(item => <RelationRow key={item.id} item={item} onOpen={() => openItem(item)} onRemove={() => removeDependency(editor.id, item.id)} />) : <RelationEmpty text="No blocking dependencies" />}<div className="mt-3 flex gap-2"><select aria-label="Dependency work item" value={dependencyCandidate} onChange={event => setDependencyCandidate(event.target.value)} className={`${INPUT} min-w-0`}><option value="">Choose work item</option>{dependencyOptions.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select><button type="button" disabled={saving || !dependencyCandidate} onClick={addDependency} className="rounded-xl border border-violet-500/30 px-3 text-xs font-semibold text-violet-300 disabled:opacity-30">Add</button></div></RelationPanel><div className="sm:col-span-2"><RelationPanel title="Blocks">{editorBlocks.length ? editorBlocks.map(item => <RelationRow key={item.id} item={item} onOpen={() => openItem(item)} onRemove={() => removeDependency(item.id, editor.id)} />) : <RelationEmpty text="This item does not block other work" />}</RelationPanel></div></div>}
       <div className="mt-7 flex items-center justify-between gap-3">{editor.id ? <button type="button" disabled={saving} onClick={remove} className="rounded-xl border border-red-800/60 px-4 py-2.5 text-sm font-semibold text-red-300 disabled:opacity-50">Remove from work list</button> : <span />}<button disabled={saving || !editor.title.trim()} className="rounded-xl bg-violet-500 px-5 py-2.5 text-sm font-semibold disabled:opacity-40">{saving ? 'Saving…' : 'Save work item'}</button></div>
     </form></div>}
