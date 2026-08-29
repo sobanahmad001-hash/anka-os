@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import DepartmentChat from '../components/DepartmentChat.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
+import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'
 import ContentCustomFieldsPanel from '../components/ContentCustomFieldsPanel.jsx'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import {
@@ -89,13 +90,13 @@ export default function ContentStudio() {
         {[['artifacts', 'Artifact workspace'], ['chat', 'Shared Department Chat']].map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-amber-400 text-amber-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>)}
       </nav>
       {loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Content Studio…</div> : !workspace ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Activate a Content service on an engagement to begin.</div> : tab === 'artifacts' ? (
-        <ArtifactWorkspace workspace={workspace} type={type} setType={setType} saving={saving} act={act} />
+        <ArtifactWorkspace workspace={workspace} type={type} setType={setType} saving={saving} act={act} onRefresh={() => loadWorkspace(engagementId)} />
       ) : <DepartmentChat departmentId="content" engagement={workspace.engagement} artifactTypes={CONTENT_ARTIFACT_TYPES} artifactDefinitions={CONTENT_ARTIFACT_FORMS} artifactForType={artifactForType} stageForType={artifactType => bestContentStage(workspace.stages, artifactType)} onPropose={contentStudio.proposeArtifact} onCreated={() => loadWorkspace(engagementId)} />}
     </main>
   </div>
 }
 
-function ArtifactWorkspace({ workspace, type, setType, saving, act }) {
+function ArtifactWorkspace({ workspace, type, setType, saving, act, onRefresh }) {
   const artifact = workspace.artifacts.find(item => item.artifact_type === type)
   const versions = workspace.versions.filter(item => item.artifact_id === artifact?.id)
   const latest = latestVersion(versions)
@@ -107,11 +108,11 @@ function ArtifactWorkspace({ workspace, type, setType, saving, act }) {
       const itemApproval = approvalForVersion(workspace.approvals, itemLatest?.id)
       return <button key={id} onClick={() => setType(id)} className={`w-full rounded-2xl border p-4 text-left ${type === id ? 'border-amber-500/60 bg-amber-950/20' : 'border-slate-800 bg-slate-900/70 hover:border-slate-700'}`}><div className="flex items-start justify-between gap-3"><p className="font-semibold text-white">{definition.label}</p><span className={`rounded-full px-2.5 py-1 text-[10px] uppercase ${itemApproval ? 'bg-emerald-950 text-emerald-300' : itemLatest ? 'bg-amber-950 text-amber-300' : 'bg-slate-950 text-slate-500'}`}>{itemApproval ? 'Approved' : itemLatest ? 'Draft' : 'Missing'}</span></div><p className="mt-2 text-xs leading-5 text-slate-500">{definition.description}</p></button>
     })}</section>
-    <ArtifactForm key={`${type}:${latest?.id || 'new'}`} workspace={workspace} type={type} artifact={artifact} versions={versions} latest={latest} approval={approval} saving={saving} act={act} />
+    <ArtifactForm key={`${type}:${latest?.id || 'new'}`} workspace={workspace} type={type} artifact={artifact} versions={versions} latest={latest} approval={approval} saving={saving} act={act} onRefresh={onRefresh} />
   </div>
 }
 
-function ArtifactForm({ workspace, type, artifact, versions, latest, approval, saving, act }) {
+function ArtifactForm({ workspace, type, artifact, versions, latest, approval, saving, act, onRefresh }) {
   const definition = CONTENT_ARTIFACT_FORMS[type]
   const [form, setForm] = useState(contentArtifactEditor(type, latest?.content))
   const [summary, setSummary] = useState(latest ? `Revision from version ${latest.version_number}` : 'Initial Content Studio version')
@@ -142,8 +143,8 @@ function ArtifactForm({ workspace, type, artifact, versions, latest, approval, s
     <div className="mt-6 space-y-5">{definition.fields.map(field => <ArtifactField key={field.key} field={field} value={form[field.key]} onChange={value => setForm(current => ({ ...current, [field.key]: value }))} />)}</div>
     <div className="mt-6 grid gap-4 md:grid-cols-2"><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Change summary<input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={summary} onChange={event => setSummary(event.target.value)} /></label><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Data classification<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={classification} onChange={event => setClassification(event.target.value)}><option>internal</option><option>confidential</option><option>public</option><option>restricted</option></select></label></div>
     <label className="mt-4 flex items-start gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300"><input type="checkbox" className="mt-1" checked={aiSafe} onChange={event => setAiSafe(event.target.checked)} /><span>Explicitly allow this exact version to be included in approved AI context. Restricted versions remain excluded.</span></label>
-    <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-800 pt-5">{latest && !approval && <button type="button" disabled={saving} onClick={() => act(() => contentStudio.approveArtifact(latest.id), `${definition.label} exact version approved.`)} className={BUTTON}>Approve version {latest.version_number}</button>}<button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : latest ? 'Create new version' : 'Save first version'}</button></div>
-  </form><ContentCustomFieldsPanel artifactType={type} versions={versions} initialVersionId={latest?.id} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="content" theme="amber" regionsByVersion={regionsByVersion} /></div>
+    <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-800 pt-5"><button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : latest ? 'Create new version' : 'Save first version'}</button></div>
+  </form><ArtifactApprovalPanel version={latest} approval={approval} theme="amber" onSingleApprove={() => act(() => contentStudio.approveArtifact(latest.id), `${definition.label} exact version approved.`)} onChanged={onRefresh} /><ContentCustomFieldsPanel artifactType={type} versions={versions} initialVersionId={latest?.id} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="content" theme="amber" regionsByVersion={regionsByVersion} /></div>
 }
 
 function ArtifactField({ field, value, onChange }) {

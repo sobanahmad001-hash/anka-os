@@ -9,6 +9,7 @@ import {
   latestArtifactVersion,
 } from '../data/developmentStudio.js'
 import { developmentStudio } from '../data/developmentStudioRepository.js'
+import ArtifactApprovalPanel from './ArtifactApprovalPanel.jsx'
 import ArtifactRelationsPanel from './ArtifactRelationsPanel.jsx'
 
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20'
@@ -44,7 +45,7 @@ export default function DevelopmentTrackingPanel({ workspace, onRefresh }) {
       <div className="mt-4 grid gap-4 xl:grid-cols-3">{stages.map(stage => <StageCard key={`${stage.id}:${stage.status}:${stage.team_notes}`} stage={stage} saving={saving} onSave={(status, notes) => act(() => developmentStudio.updateStage({ stage_id: stage.id, status, notes }), `${stage.name} tracking updated.`)} />)}</div>
       {!stages.length && <div className="mt-4 rounded-2xl border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500">No Development stage was instantiated for this engagement.</div>}
     </section>
-    <ArtifactPanel workspace={workspace} stages={stages} saving={saving} act={act} />
+    <ArtifactPanel workspace={workspace} stages={stages} saving={saving} act={act} onRefresh={onRefresh} />
   </div>
 }
 
@@ -59,7 +60,7 @@ function StageCard({ stage, saving, onSave }) {
   </form>
 }
 
-function ArtifactPanel({ workspace, stages, saving, act }) {
+function ArtifactPanel({ workspace, stages, saving, act, onRefresh }) {
   const [type, setType] = useState('technical_brief')
   const artifact = workspace.developmentArtifacts.find(item => item.artifact_type === type)
   const latest = latestArtifactVersion(workspace.developmentArtifactVersions, artifact?.id)
@@ -71,12 +72,12 @@ function ArtifactPanel({ workspace, stages, saving, act }) {
         const itemLatest = latestArtifactVersion(workspace.developmentArtifactVersions, item?.id)
         return <button key={id} onClick={() => setType(id)} className={`w-full rounded-2xl border p-4 text-left ${type === id ? 'border-blue-500/60 bg-blue-950/20' : 'border-slate-800 bg-slate-900/70 hover:border-slate-700'}`}><div className="flex items-start justify-between gap-3"><p className="font-semibold text-white">{DEVELOPMENT_ARTIFACTS[id].label}</p><span className={`rounded-full px-2.5 py-1 text-[10px] uppercase ${itemLatest ? 'bg-blue-950 text-blue-300' : 'bg-slate-950 text-slate-500'}`}>{itemLatest ? `v${itemLatest.version_number}` : 'Missing'}</span></div><p className="mt-2 text-xs leading-5 text-slate-500">{DEVELOPMENT_ARTIFACTS[id].description}</p></button>
       })}</div>
-      <ArtifactForm key={`${type}:${latest?.id || 'new'}`} workspace={workspace} stages={stages} type={type} artifact={artifact} latest={latest} saving={saving} act={act} />
+      <ArtifactForm key={`${type}:${latest?.id || 'new'}`} workspace={workspace} stages={stages} type={type} artifact={artifact} latest={latest} saving={saving} act={act} onRefresh={onRefresh} />
     </div>
   </section>
 }
 
-function ArtifactForm({ workspace, stages, type, artifact, latest, saving, act }) {
+function ArtifactForm({ workspace, stages, type, artifact, latest, saving, act, onRefresh }) {
   const definition = DEVELOPMENT_ARTIFACTS[type]
   const [title, setTitle] = useState(artifact?.title || `${definition.label} — ${workspace.engagement.name}`)
   const [notes, setNotes] = useState(latest?.content?.notes || '')
@@ -102,6 +103,7 @@ function ArtifactForm({ workspace, stages, type, artifact, latest, saving, act }
     }), `${definition.label} saved as a new immutable version.`)
   }
 
+  const approval = workspace.artifactApprovals?.find(item => item.artifact_version_id === latest?.id)
   return <div><form onSubmit={save} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
     <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-400">Immutable internal record</p><h3 className="mt-1 text-xl font-semibold">{definition.label}</h3><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">{definition.description}</p></div><span className="text-xs text-slate-500">{latest ? `Current version ${latest.version_number}` : 'No version yet'}</span></div>
     <div className="mt-6 grid gap-4 md:grid-cols-2"><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Title<input required maxLength="240" className={`${INPUT} mt-2 normal-case tracking-normal`} value={title} onChange={event => setTitle(event.target.value)} /></label><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Linked stage<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={stageId} onChange={event => setStageId(event.target.value)}><option value="">Engagement only</option>{stages.map(stage => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select></label></div>
@@ -109,5 +111,5 @@ function ArtifactForm({ workspace, stages, type, artifact, latest, saving, act }
     <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Checklist<span className="ml-2 font-normal normal-case tracking-normal text-slate-600">One item per line</span><textarea rows="5" className={`${INPUT} mt-2 normal-case tracking-normal`} value={checklist} onChange={event => setChecklist(event.target.value)} /></label>
     <div className="mt-4 grid gap-4 md:grid-cols-2"><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Change summary<input required maxLength="1000" className={`${INPUT} mt-2 normal-case tracking-normal`} value={summary} onChange={event => setSummary(event.target.value)} /></label><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Classification<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={classification} onChange={event => setClassification(event.target.value)}><option>internal</option><option>confidential</option><option>restricted</option><option>public</option></select></label></div>
     <div className="mt-6 flex items-center justify-between gap-4 border-t border-slate-800 pt-5"><p className="text-xs text-slate-600">AI context is disabled for Development tracking artifacts.</p><button disabled={saving || (!notes.trim() && !checklist.trim())} className={PRIMARY}>{saving ? 'Saving…' : latest ? 'Create new version' : 'Save first version'}</button></div>
-  </form><ArtifactRelationsPanel artifact={artifact} /></div>
+  </form><ArtifactApprovalPanel version={latest} approval={approval} theme="blue" onChanged={onRefresh} /><ArtifactRelationsPanel artifact={artifact} /></div>
 }

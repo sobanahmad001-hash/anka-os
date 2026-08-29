@@ -12,6 +12,7 @@ import {
 import { marketingStudio } from '../data/marketingStudioRepository.js'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
+import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'
 
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
 const BUTTON = 'rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-emerald-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50'
@@ -133,7 +134,7 @@ export default function MarketingStudio() {
         ) : tab === 'campaigns' ? (
           <Campaigns workspace={workspace} campaignId={campaignId} setCampaignId={setCampaignId} selected={selectedCampaign} saving={saving} act={act} />
         ) : tab === 'artifacts' ? (
-          <Artifacts workspace={workspace} campaign={selectedCampaign} saving={saving} act={act} setTab={setTab} />
+          <Artifacts workspace={workspace} campaign={selectedCampaign} saving={saving} act={act} setTab={setTab} onRefresh={() => loadWorkspace(engagementId, campaignId)} />
         ) : (
           <Analytics engagementId={engagementId} />
         )}
@@ -186,7 +187,7 @@ function Campaigns({ workspace, campaignId, setCampaignId, selected, saving, act
   </div>
 }
 
-function Artifacts({ workspace, campaign, saving, act, setTab }) {
+function Artifacts({ workspace, campaign, saving, act, setTab, onRefresh }) {
   const [type, setType] = useState('channel_strategy')
   const links = campaign ? workspace.links.filter(item => item.campaign_id === campaign.id) : []
   const artifact = workspace.artifacts.find(item => links.some(link => link.artifact_id === item.id) && item.artifact_type === type)
@@ -216,8 +217,8 @@ function Artifacts({ workspace, campaign, saving, act, setTab }) {
     })}</section>
     <div><form onSubmit={save} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6"><div className="flex flex-wrap justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Immutable artifact</p><h2 className="mt-1 text-xl font-semibold">{definition.label}</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">{definition.description}</p></div><div className="text-right text-xs text-slate-500"><p>{latest ? `Version ${latest.version_number}` : 'No version yet'}</p><p className={approval ? 'mt-1 text-emerald-400' : 'mt-1 text-amber-400'}>{approval ? 'Exact version approved' : 'Approval pending'}</p></div></div>
       <div className="mt-6 grid gap-4 md:grid-cols-2">{definition.fields.map(([key, label, kind]) => <div key={key} className={kind === 'textarea' || kind === 'list' ? 'md:col-span-2' : ''}><Field label={label} hint={kind === 'list' ? 'One item per line' : ''}>{kind === 'textarea' || kind === 'list' ? <textarea required className={`${INPUT} min-h-28`} value={form[key] || ''} onChange={event => setForm({ ...form, [key]: event.target.value })} /> : <input required type={kind} className={INPUT} value={form[key] || ''} onChange={event => setForm({ ...form, [key]: event.target.value })} />}</Field></div>)}</div>
-      <div className="mt-6 flex flex-wrap items-center justify-end gap-3 border-t border-slate-800 pt-5">{latest && !approval && <button type="button" disabled={saving} onClick={() => act(() => marketingStudio.approveArtifact(latest.id), `${definition.label} exact version approved.`, campaign.id)} className={BUTTON}>Approve version {latest.version_number}</button>}<button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : latest ? 'Create new version' : 'Save first version'}</button></div>
-    </form><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="marketing" theme="emerald" /></div>
+      <div className="mt-6 flex flex-wrap items-center justify-end gap-3 border-t border-slate-800 pt-5"><button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : latest ? 'Create new version' : 'Save first version'}</button></div>
+    </form><ArtifactApprovalPanel version={latest} approval={approval} theme="emerald" singleApprovalLabel={`Approve version ${latest?.version_number}`} onSingleApprove={() => act(() => marketingStudio.approveArtifact(latest.id), `${definition.label} exact version approved.`, campaign.id)} onChanged={onRefresh} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="marketing" theme="emerald" /></div>
   </div>
 }
 
