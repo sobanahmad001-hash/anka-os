@@ -1,6 +1,13 @@
 export const WORK_ITEM_TYPES = Object.freeze(['task', 'bug', 'request'])
 export const WORK_ITEM_PRIORITIES = Object.freeze(['low', 'medium', 'high', 'urgent'])
 export const WORK_ITEM_STATUSES = Object.freeze(['not_started', 'in_progress', 'blocked', 'done'])
+export const AUTOMATION_TRIGGER_TYPES = Object.freeze([
+  'work_item_status_changed',
+  'artifact_approved',
+  'design_direction_released',
+  'due_date_arrived',
+])
+export const AUTOMATION_ACTION_TYPES = Object.freeze(['move_status', 'notify_assignee'])
 export const WORK_ITEM_BOARD_COLUMNS = Object.freeze([
   Object.freeze({ value: 'not_started', label: 'Not Started' }),
   Object.freeze({ value: 'in_progress', label: 'In Progress' }),
