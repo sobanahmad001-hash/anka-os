@@ -1,4 +1,5 @@
-import { directionSchema, directionsAreDistinct, hasWorkshopAuthority, sha256, similarity } from './index.ts'
+import { directionSchema, directionsAreDistinct, generateOpenAiImage, hasWorkshopAuthority, mediaPrompt,
+  mediaStoragePath, sha256, similarity, VIDEO_UNAVAILABLE_MESSAGE } from './index.ts'
 
 function assert(value: unknown, message = 'Expected value to be truthy') {
   if (!value) throw new Error(message)
@@ -50,4 +51,28 @@ Deno.test('an invited cross-functional reviewer may request promotion but not De
   assert.equal(hasWorkshopAuthority(reviewer, 'promote_direction_experiment'), true)
   assert.equal(hasWorkshopAuthority(reviewer, 'list_experiment_reviewers'), true)
   assert.equal(hasWorkshopAuthority(reviewer, 'create_direction_revision'), false)
+})
+
+Deno.test('media defaults come from the exact direction version and storage stays version scoped', () => {
+  assert.equal(mediaPrompt({ imagery_direction: 'Documentary portraits', creative_thesis: 'Human expertise, made visible' }, ''),
+    'Documentary portraits\n\nHuman expertise, made visible')
+  assert.equal(mediaPrompt({ imagery_direction: 'Ignored' }, 'Explicit campaign key visual'), 'Explicit campaign key visual')
+  assert(mediaStoragePath('version-1', 'asset-1').endsWith('/version-1/asset-1.png'))
+})
+
+Deno.test('OpenAI image adapter uses the registered model and decodes the returned image', async () => {
+  let requestBody: Record<string, unknown> = {}
+  const bytes = await generateOpenAiImage('secret', 'registered-image-model', 'Create a key visual', async (_url, init) => {
+    requestBody = JSON.parse(String(init?.body || '{}'))
+    return new Response(JSON.stringify({ data: [{ b64_json: btoa('png') }] }), { status: 200 })
+  })
+  assert.equal(requestBody.model, 'registered-image-model')
+  assert.equal(requestBody.prompt, 'Create a key visual')
+  assert.equal(new TextDecoder().decode(bytes), 'png')
+})
+
+Deno.test('video placeholder is explicit and signing is available to invited reviewers', () => {
+  assert.equal(VIDEO_UNAVAILABLE_MESSAGE,
+    'Video generation is not yet configured. An API key and provider need to be added before this works.')
+  assert.equal(hasWorkshopAuthority({ role: 'contributor', department_id: 'marketing' }, 'sign_media_assets'), true)
 })

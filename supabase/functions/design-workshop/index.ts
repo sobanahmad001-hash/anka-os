@@ -4,6 +4,9 @@ type Client = ReturnType<typeof createClient<any>>
 type Json = Record<string, unknown>
 
 const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
+const MEDIA_BUCKET = 'design-generated-media'
+const OPENAI_IMAGES_URL = 'https://api.openai.com/v1/images/generations'
+export const VIDEO_UNAVAILABLE_MESSAGE = 'Video generation is not yet configured. An API key and provider need to be added before this works.'
 const ARTIFACT_TYPES = new Set(['discovery', 'vision', 'audience'])
 const OUTPUT_FAMILIES = new Set(['brand_identity', 'website_design', 'marketing_asset', 'video_motion'])
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
@@ -120,14 +123,14 @@ async function requireUser(req: Request, url: string, anonKey: string, admin: Cl
   const { data: membership } = await admin.from('organization_memberships').select('organization_id, role, department_id')
     .eq('organization_id', ORGANIZATION_ID).eq('user_id', user.id).eq('member_kind', 'team').eq('status', 'active').maybeSingle()
   if (!membership) throw new Error('Active team membership required')
-  return { user, membership }
+  return { user, membership, userClient }
 }
 
 export function hasWorkshopAuthority(membership: Json, action: string) {
   const role = String(membership.role || ''); const department = String(membership.department_id || '')
   if (LEADER_ROLES.has(role)) return true
   if (action === 'release_direction') return department === 'design' && role === 'department_manager'
-  if (action === 'promote_direction_experiment' || action === 'list_experiment_reviewers') return true
+  if (action === 'promote_direction_experiment' || action === 'list_experiment_reviewers' || action === 'sign_media_assets') return true
   return department === 'design'
 }
 
@@ -135,6 +138,23 @@ function uniqueIds(value: unknown) {
   return Array.isArray(value)
     ? [...new Set(value.map(item => text(item, 80)).filter(Boolean))].slice(0, 50)
     : []
+}
+
+function supportsOutput(model: Json, outputType: string) {
+  return Array.isArray(model.supported_output_types)
+    && model.supported_output_types.includes(outputType)
+}
+
+export function mediaPrompt(content: Json, requested: unknown) {
+  const explicit = text(requested, 6000)
+  if (explicit) return explicit
+  const imagery = text(content.imagery_direction, 3000)
+  const thesis = text(content.creative_thesis, 3000)
+  return text([imagery, thesis].filter(Boolean).join('\n\n'), 6000)
+}
+
+export function mediaStoragePath(versionId: string, assetId: string) {
+  return `${ORGANIZATION_ID}/${versionId}/${assetId}.png`
 }
 
 async function insertEvent(admin: Client, engagementId: string, eventType: string, actorId: string,
@@ -170,6 +190,9 @@ async function createSession(admin: Client, body: Json, actorId: string) {
   const { data: models, error: modelError } = await admin.from('design_model_registry').select('*')
     .eq('organization_id', ORGANIZATION_ID).eq('is_active', true).in('id', modelIds)
   if (modelError || models?.length !== modelIds.length) throw new Error('One or more selected models are unavailable')
+  if (models.some(model => !supportsOutput(model, 'design_direction'))) {
+    throw new Error('Direction sessions require models registered for design direction output')
+  }
   const { data: artifacts, error: artifactError } = await admin.from('artifacts').select('*')
     .eq('organization_id', ORGANIZATION_ID).eq('engagement_id', engagementId).eq('brand_id', brandId)
     .in('artifact_type', [...ARTIFACT_TYPES])
@@ -313,6 +336,9 @@ async function generateDirections(admin: Client, body: Json, actorId: string) {
   if (modelError || !models?.length) throw new Error('Selected models are unavailable')
   const modelById = new Map(models.map(item => [item.id, item]))
   const orderedModels = selections.map(item => modelById.get(item.model_registry_id)).filter(Boolean)
+  if (orderedModels.length !== selections.length || orderedModels.some(model => !supportsOutput(model, 'design_direction'))) {
+    throw new Error('One or more selected models no longer support design direction output')
+  }
   if (orderedModels.some(model => model.provider !== 'openai')) throw new Error('No installed adapter exists for one selected provider')
   const { credential } = await resolveOpenAi(admin, session.engagement_id)
   await admin.from('design_workshop_sessions').update({ status: 'generating' }).eq('id', session.id)
@@ -341,6 +367,115 @@ async function generateDirections(admin: Client, body: Json, actorId: string) {
     await admin.from('design_workshop_sessions').update({ status: 'generation_failed' }).eq('id', session.id)
     throw error
   }
+}
+
+async function loadPermittedDirectionVersion(userClient: Client, directionVersionId: string) {
+  const { data: version, error: versionError } = await userClient.from('design_direction_versions').select('*')
+    .eq('id', directionVersionId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  if (versionError) throw versionError
+  if (!version) throw new Error('Direction version not found or not visible to this reviewer')
+  const { data: direction, error: directionError } = await userClient.from('design_directions').select('id, session_id')
+    .eq('id', version.direction_id).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  if (directionError) throw directionError
+  const { data: session, error: sessionError } = direction
+    ? await userClient.from('design_workshop_sessions').select('id, engagement_id').eq('id', direction.session_id)
+      .eq('organization_id', ORGANIZATION_ID).maybeSingle()
+    : { data: null, error: null }
+  if (sessionError) throw sessionError
+  if (!direction || !session) throw new Error('Direction version has no accessible Workshop session')
+  return { version, direction, session }
+}
+
+export async function generateOpenAiImage(credential: string, modelId: string, prompt: string,
+  fetcher: typeof fetch = fetch) {
+  const apiResponse = await fetcher(OPENAI_IMAGES_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${credential}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: modelId, prompt }),
+  })
+  const result = await apiResponse.json() as Json
+  if (!apiResponse.ok) {
+    const apiError = result.error && typeof result.error === 'object' ? result.error as Json : {}
+    throw new Error(text(apiError.message, 1000) || 'OpenAI image generation failed')
+  }
+  const first = Array.isArray(result.data) ? result.data[0] as Json | undefined : undefined
+  const encoded = text(first?.b64_json, 20_000_000)
+  if (!encoded) throw new Error('OpenAI image generation returned no image data')
+  const binary = atob(encoded)
+  const bytes = Uint8Array.from(binary, character => character.charCodeAt(0))
+  if (bytes.byteLength > 10 * 1024 * 1024) throw new Error('Generated image exceeds the 10 MB storage limit')
+  return bytes
+}
+
+async function generateImage(admin: Client, userClient: Client, body: Json, actorId: string) {
+  const directionVersionId = text(body.direction_version_id, 80)
+  const modelRegistryId = text(body.model_registry_id, 80)
+  const { version, session } = await loadPermittedDirectionVersion(userClient, directionVersionId)
+  const prompt = mediaPrompt((version.content as Json) || {}, body.prompt)
+  if (!prompt) throw new Error('Add an image prompt or complete the direction imagery and creative thesis')
+  const { data: model, error: modelError } = await admin.from('design_model_registry').select('*')
+    .eq('id', modelRegistryId).eq('organization_id', ORGANIZATION_ID).eq('is_active', true).maybeSingle()
+  if (modelError) throw modelError
+  if (!model || !supportsOutput(model, 'image')) throw new Error('Select an active image-capable model from the Design registry')
+  if (model.provider !== 'openai') throw new Error('No installed image adapter exists for the selected provider')
+  const { credential } = await resolveOpenAi(admin, session.engagement_id)
+  const { data: asset, error: assetError } = await admin.from('design_media_assets').insert({
+    organization_id: ORGANIZATION_ID, design_direction_version_id: version.id,
+    media_type: 'image', status: 'generating', model_registry_id: model.id,
+    provider: model.provider, prompt, generated_by: actorId,
+  }).select('*').single()
+  if (assetError) throw assetError
+  const storagePath = mediaStoragePath(version.id, asset.id)
+  let uploaded = false
+  try {
+    const bytes = await generateOpenAiImage(credential, model.model_id, prompt)
+    const { error: uploadError } = await admin.storage.from(MEDIA_BUCKET).upload(storagePath, bytes, {
+      contentType: 'image/png', upsert: false,
+    })
+    if (uploadError) throw uploadError
+    uploaded = true
+    const { data: ready, error: readyError } = await admin.from('design_media_assets').update({
+      status: 'ready', storage_path: storagePath, failure_reason: '',
+    }).eq('id', asset.id).eq('organization_id', ORGANIZATION_ID).select('*').single()
+    if (readyError) throw readyError
+    return ready
+  } catch (error) {
+    if (uploaded) await admin.storage.from(MEDIA_BUCKET).remove([storagePath])
+    const failureReason = error instanceof Error ? error.message.slice(0, 2000) : 'Image generation failed'
+    const { data: failed } = await admin.from('design_media_assets').update({
+      status: 'failed', storage_path: null, failure_reason: failureReason,
+    }).eq('id', asset.id).eq('organization_id', ORGANIZATION_ID).select('*').single()
+    return failed || { ...asset, status: 'failed', failure_reason: failureReason }
+  }
+}
+
+async function createVideoPlaceholder(admin: Client, userClient: Client, body: Json, actorId: string) {
+  const directionVersionId = text(body.direction_version_id, 80)
+  const { version } = await loadPermittedDirectionVersion(userClient, directionVersionId)
+  const prompt = mediaPrompt((version.content as Json) || {}, body.prompt)
+  if (!prompt) throw new Error('Add a video prompt or complete the direction imagery and creative thesis')
+  const { data, error } = await admin.from('design_media_assets').insert({
+    organization_id: ORGANIZATION_ID, design_direction_version_id: version.id,
+    media_type: 'video', status: 'unavailable', prompt,
+    failure_reason: VIDEO_UNAVAILABLE_MESSAGE, generated_by: actorId,
+  }).select('*').single()
+  if (error) throw error
+  return data
+}
+
+async function signMediaAssets(admin: Client, userClient: Client, body: Json) {
+  const assetIds = uniqueIds(body.asset_ids)
+  if (!assetIds.length) return { signed_urls: {}, expires_in: 300 }
+  const { data: assets, error } = await userClient.from('design_media_assets').select('id, storage_path')
+    .in('id', assetIds).eq('media_type', 'image').eq('status', 'ready')
+  if (error) throw error
+  const signable = (assets || []).filter(asset => asset.storage_path)
+  if (!signable.length) return { signed_urls: {}, expires_in: 300 }
+  const { data: signed, error: signedError } = await admin.storage.from(MEDIA_BUCKET)
+    .createSignedUrls(signable.map(asset => asset.storage_path), 300)
+  if (signedError) throw signedError
+  const signedUrls = Object.fromEntries(signable.map((asset, index) => [asset.id, signed?.[index]?.signedUrl || null]))
+  return { signed_urls: signedUrls, expires_in: 300 }
 }
 
 async function validateExperimentReviewers(admin: Client, reviewerIds: string[], actorId: string) {
@@ -465,7 +600,7 @@ async function handler(req: Request) {
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
     if (!url || !anonKey || !serviceKey) throw new Error('Supabase function configuration is incomplete')
     const admin = createClient(url, serviceKey, { auth: { persistSession: false } })
-    const { user, membership } = await requireUser(req, url, anonKey, admin)
+    const { user, membership, userClient } = await requireUser(req, url, anonKey, admin)
     const body = await req.json() as Json
     const action = text(body.action, 80)
     const actions: Record<string, () => Promise<unknown>> = {
@@ -476,6 +611,9 @@ async function handler(req: Request) {
       promote_direction_experiment: () => promoteDirectionExperiment(admin, body, user.id),
       select_direction: () => selectDirection(admin, body, user.id),
       release_direction: () => releaseDirection(admin, body, user.id),
+      generate_image: () => generateImage(admin, userClient, body, user.id),
+      create_video_placeholder: () => createVideoPlaceholder(admin, userClient, body, user.id),
+      sign_media_assets: () => signMediaAssets(admin, userClient, body),
     }
     if (!actions[action]) return response({ error: 'Unsupported action' }, 400)
     if (!hasWorkshopAuthority(membership as Json, action)) return response({ error: 'Your department role cannot perform this action' }, 403)

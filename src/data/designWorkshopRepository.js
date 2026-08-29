@@ -47,11 +47,22 @@ export const designWorkshop = Object.freeze({
           dataOrThrow(supabase.from('design_direction_versions').select('*').in('direction_id', directions.map(item => item.id)).eq('is_experimental', true).order('version_number')),
         ])
       : [[], []]
+    const visibleDirectionVersionIds = [...directionVersions, ...experimentalDirectionVersions].map(item => item.id)
+    const mediaAssets = visibleDirectionVersionIds.length
+      ? await dataOrThrow(supabase.from('design_media_assets').select('*')
+          .in('design_direction_version_id', visibleDirectionVersionIds).order('created_at', { ascending: false }))
+      : []
+    const readyImageIds = mediaAssets.filter(item => item.media_type === 'image' && item.status === 'ready').map(item => item.id)
+    const signedMedia = readyImageIds.length
+      ? await invoke('sign_media_assets', { asset_ids: readyImageIds })
+      : { signed_urls: {}, expires_in: 300 }
     return {
       engagement, stages, artifacts, versions, approvals, models, sessions,
       contextVersions: directionData[0], modelSelections: directionData[1], runs: directionData[2],
       directions, selections: directionData[4], releases: directionData[5], directionVersions,
       experimentalDirectionVersions, experimentReviewers,
+      mediaAssets: mediaAssets.map(item => ({ ...item, signed_url: signedMedia?.signed_urls?.[item.id] || null })),
+      mediaUrlExpiresIn: signedMedia?.expires_in || 300,
     }
   },
 
@@ -69,4 +80,10 @@ export const designWorkshop = Object.freeze({
     session_id: sessionId, direction_version_id: directionVersionId, notes,
   }),
   releaseDirection: (sessionId, releaseNotes = '') => invoke('release_direction', { session_id: sessionId, release_notes: releaseNotes }),
+  generateImage: (directionVersionId, modelRegistryId, prompt) => invoke('generate_image', {
+    direction_version_id: directionVersionId, model_registry_id: modelRegistryId, prompt,
+  }),
+  createVideoPlaceholder: (directionVersionId, prompt) => invoke('create_video_placeholder', {
+    direction_version_id: directionVersionId, prompt,
+  }),
 })
