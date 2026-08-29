@@ -5,6 +5,8 @@ export const OPERATING_DEPARTMENTS = Object.freeze([
   Object.freeze({ id: 'marketing', name: 'Marketing' }),
 ])
 
+const DEVELOPMENT_ARTIFACT_TYPES = Object.freeze(['technical_brief', 'launch_checklist'])
+
 function required(value, label) {
   if (!value || typeof value !== 'string' || !value.trim()) {
     throw new TypeError(`${label} is required`)
@@ -165,7 +167,7 @@ export function createOperatingSpineRepository(client) {
 
     async getEngagement(engagementId) {
       required(engagementId, 'engagementId')
-      const [engagement, services, stages, dependencies, prerequisites, assets, events, connectors] = await Promise.all([
+      const [engagement, services, stages, dependencies, prerequisites, assets, events, connectors, developmentArtifacts, developmentArtifactVersions] = await Promise.all([
         dataOrThrow(client.from('engagements').select('*, agency_clients(*), brands(*)').eq('id', engagementId).single()),
         dataOrThrow(client.from('engagement_services').select('*, service_catalog(*)').eq('engagement_id', engagementId).order('activated_at')),
         dataOrThrow(client.from('engagement_stage_instances').select('*').eq('engagement_id', engagementId).order('position')),
@@ -174,8 +176,13 @@ export function createOperatingSpineRepository(client) {
         dataOrThrow(client.from('engagement_assets').select('*').eq('engagement_id', engagementId).order('created_at')),
         dataOrThrow(client.from('engagement_events').select('*').eq('engagement_id', engagementId).order('occurred_at')),
         dataOrThrow(client.from('integration_connection_engagements').select('*, integration_connections(provider, display_name, status)').eq('engagement_id', engagementId)),
+        dataOrThrow(client.from('artifacts').select('*').eq('engagement_id', engagementId).in('artifact_type', DEVELOPMENT_ARTIFACT_TYPES).order('created_at')),
+        dataOrThrow(client.from('artifact_versions').select('*, artifacts!inner(engagement_id, artifact_type)').eq('artifacts.engagement_id', engagementId).in('artifacts.artifact_type', DEVELOPMENT_ARTIFACT_TYPES).order('version_number')),
       ])
-      return { engagement, services, stages, dependencies, prerequisites, assets, events, connectors }
+      return {
+        engagement, services, stages, dependencies, prerequisites, assets, events, connectors,
+        developmentArtifacts, developmentArtifactVersions,
+      }
     },
   })
 }
