@@ -165,6 +165,27 @@ export function createOperatingSpineRepository(client) {
       )
     },
 
+    async getPortfolioSnapshot() {
+      const [engagements, workItems, stages] = await Promise.all([
+        dataOrThrow(
+          client.from('engagements')
+            .select('id, organization_id, client_id, brand_id, name, engagement_type, status, lead_owner_id, start_date, target_date, agency_clients(name), brands(name)')
+            .order('target_date', { ascending: true, nullsFirst: false })
+            .order('name')
+        ),
+        dataOrThrow(
+          client.from('work_items')
+            .select('id, organization_id, engagement_id, status, automation_flagged_at, deleted_at')
+            .is('deleted_at', null)
+        ),
+        dataOrThrow(
+          client.from('engagement_stage_instances')
+            .select('id, organization_id, engagement_id, status')
+        ),
+      ])
+      return { engagements, workItems, stages }
+    },
+
     async getEngagement(engagementId) {
       required(engagementId, 'engagementId')
       const [engagement, services, stages, dependencies, prerequisites, assets, events, connectors, developmentArtifacts, developmentArtifactVersions, workItemArtifacts, workItemArtifactVersions] = await Promise.all([
