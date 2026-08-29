@@ -11,15 +11,18 @@ create temporary table d2_runtime_checks (
 do $$
 declare
   v_organization_id uuid;
-  v_direction_id uuid;
-  v_parent_id uuid;
+  v_engagement_id uuid;
+  v_brand_id uuid;
+  v_session_id uuid := gen_random_uuid();
+  v_direction_id uuid := gen_random_uuid();
+  v_parent_id uuid := gen_random_uuid();
   v_creator_id uuid;
-  v_invited_id uuid;
-  v_denied_id uuid;
+  v_invited_id uuid := gen_random_uuid();
+  v_denied_id uuid := gen_random_uuid();
   v_experiment_id uuid := gen_random_uuid();
   v_promoted_id uuid := gen_random_uuid();
   v_comment_id uuid := gen_random_uuid();
-  v_next_version integer;
+  v_next_version integer := 2;
   v_checksum text := encode(digest(gen_random_uuid()::text, 'sha256'), 'hex');
   v_signature text := encode(digest(gen_random_uuid()::text, 'sha256'), 'hex');
   v_content jsonb := jsonb_build_object(
@@ -28,25 +31,19 @@ declare
   );
   v_count integer;
 begin
-  select version.organization_id, version.direction_id, version.id,
-    version.version_number + 1
-  into v_organization_id, v_direction_id, v_parent_id, v_next_version
-  from public.design_direction_versions version
-  where not version.is_experimental
-  order by version.created_at
+  select engagement.organization_id, engagement.id, engagement.brand_id, membership.user_id
+  into v_organization_id, v_engagement_id, v_brand_id, v_creator_id
+  from public.engagements engagement
+  join public.organization_memberships membership
+    on membership.organization_id = engagement.organization_id
+   and membership.member_kind = 'team'
+   and membership.status = 'active'
+  join public.brands brand
+    on brand.id = engagement.brand_id
+   and brand.organization_id = engagement.organization_id
   limit 1;
 
-  select members[1], members[2], members[3]
-  into v_creator_id, v_invited_id, v_denied_id
-  from (
-    select array_agg(membership.user_id order by membership.created_at) members
-    from public.organization_memberships membership
-    where membership.organization_id = v_organization_id
-      and membership.member_kind = 'team'
-      and membership.status = 'active'
-  ) roster;
-
-  if v_parent_id is null or v_denied_id is null then
+  if v_creator_id is null then
     insert into d2_runtime_checks values
       ('uninvited_experiment_hidden', false),
       ('uninvited_proofing_hidden', false),
@@ -55,6 +52,44 @@ begin
       ('promotion_created_immutable_child', false);
     return;
   end if;
+
+  -- The live project may not yet contain three team members or any generated
+  -- directions. Create complete synthetic principals and direction lineage;
+  -- the enclosing transaction rolls every fixture back.
+  insert into auth.users (id) values (v_invited_id), (v_denied_id);
+
+  insert into public.organization_memberships (
+    organization_id, user_id, member_kind, role, department_id, status
+  ) values
+    (v_organization_id, v_invited_id, 'team', 'contributor', 'marketing', 'active'),
+    (v_organization_id, v_denied_id, 'team', 'contributor', 'development', 'active');
+
+  insert into public.design_workshop_sessions (
+    id, organization_id, engagement_id, brand_id, output_family,
+    output_brief, designer_instructions, context_manifest, context_checksum,
+    status, created_by
+  ) values (
+    v_session_id, v_organization_id, v_engagement_id, v_brand_id,
+    'brand_identity', '{}'::jsonb, 'D2 rollback-only verification fixture',
+    '{}'::jsonb, encode(digest(gen_random_uuid()::text, 'sha256'), 'hex'),
+    'comparison', v_creator_id
+  );
+
+  insert into public.design_directions (
+    id, organization_id, session_id, direction_slot
+  ) values (v_direction_id, v_organization_id, v_session_id, 1);
+
+  insert into public.design_direction_versions (
+    id, organization_id, direction_id, version_number, content,
+    content_checksum, distinctness_signature, created_by,
+    is_experimental, experiment_visibility
+  ) values (
+    v_parent_id, v_organization_id, v_direction_id, 1,
+    jsonb_build_object('title', 'D2 mainline control', 'rationale', 'Visible to every active team member.'),
+    encode(digest(gen_random_uuid()::text, 'sha256'), 'hex'),
+    encode(digest(gen_random_uuid()::text, 'sha256'), 'hex'),
+    v_creator_id, false, null
+  );
 
   insert into public.design_direction_versions (
     id, organization_id, direction_id, version_number, parent_version_id,
