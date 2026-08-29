@@ -3,7 +3,7 @@ import { namedKey } from '../_shared/googleOAuthTokens.ts'
 
 type Json = Record<string, unknown>
 
-const ACTIONS = new Set(['save', 'delete'])
+const ACTIONS = new Set(['save', 'delete', 'add_dependency', 'remove_dependency'])
 const WORK_ITEM_TYPES = new Set(['task', 'bug', 'request'])
 const PRIORITIES = new Set(['low', 'medium', 'high', 'urgent'])
 const STATUSES = new Set(['not_started', 'in_progress', 'blocked', 'done'])
@@ -63,6 +63,7 @@ export function normalizeWorkItemInput(input: Json) {
     p_start_date: startDate,
     p_due_date: dueDate,
     p_position: Math.max(0, Number.isInteger(input.position) ? Number(input.position) : 0),
+    p_parent_work_item_id: optionalId(input.parentWorkItemId),
   }
 }
 
@@ -94,6 +95,19 @@ export async function handleRequest(request: Request) {
     const action = text(body.action, 20)
     if (!ACTIONS.has(action)) return response({ error: 'Unsupported action' }, 400)
     const { admin, user } = await requireContext(request)
+    if (action === 'add_dependency' || action === 'remove_dependency') {
+      const workItemId = optionalId(body.workItemId)
+      const dependsOnWorkItemId = optionalId(body.dependsOnWorkItemId)
+      if (!workItemId || !dependsOnWorkItemId) return response({ error: 'Both work items are required' }, 400)
+      const functionName = action === 'add_dependency' ? 'save_work_item_dependency' : 'remove_work_item_dependency'
+      const { data, error } = await admin.rpc(functionName, {
+        p_work_item_id: workItemId,
+        p_depends_on_work_item_id: dependsOnWorkItemId,
+        p_actor_id: user.id,
+      })
+      if (error) throw error
+      return response({ data })
+    }
     if (action === 'delete') {
       const workItemId = optionalId(body.workItemId)
       if (!workItemId) return response({ error: 'Work item is required' }, 400)

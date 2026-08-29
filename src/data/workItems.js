@@ -23,6 +23,7 @@ export const EMPTY_WORK_ITEM = Object.freeze({
   linked_artifact_id: '',
   linked_artifact_version_id: '',
   linked_engagement_stage_instance_id: '',
+  parent_work_item_id: '',
   start_date: '',
   due_date: '',
   position: 0,
@@ -78,9 +79,39 @@ export function workItemSaveInput(item, engagementId, overrides = {}) {
     linkedArtifactId: next.linked_artifact_id || null,
     linkedArtifactVersionId: next.linked_artifact_version_id || null,
     linkedEngagementStageInstanceId: next.linked_engagement_stage_instance_id || null,
+    parentWorkItemId: next.parent_work_item_id || null,
     startDate: next.start_date || null,
     dueDate: next.due_date || null,
     position: Math.max(0, Number(next.position || 0)),
+  }
+}
+
+export function buildWorkItemRelations(items, dependencies) {
+  const itemById = new Map((items || []).map(item => [item.id, item]))
+  const subtasksByParent = new Map()
+  const blockedByByItem = new Map()
+  const blocksByItem = new Map()
+
+  for (const item of items || []) {
+    if (item.parent_work_item_id && itemById.has(item.parent_work_item_id)) {
+      subtasksByParent.set(item.parent_work_item_id, [...(subtasksByParent.get(item.parent_work_item_id) || []), item])
+    }
+  }
+  for (const dependency of dependencies || []) {
+    const workItem = itemById.get(dependency.work_item_id)
+    const dependsOn = itemById.get(dependency.depends_on_work_item_id)
+    if (!workItem || !dependsOn) continue
+    blockedByByItem.set(workItem.id, [...(blockedByByItem.get(workItem.id) || []), dependsOn])
+    blocksByItem.set(dependsOn.id, [...(blocksByItem.get(dependsOn.id) || []), workItem])
+  }
+
+  return {
+    itemById,
+    subtasksByParent,
+    blockedByByItem,
+    blocksByItem,
+    openSubtaskCount: workItemId => (subtasksByParent.get(workItemId) || []).filter(item => item.status !== 'done').length,
+    unresolvedDependencyCount: workItemId => (blockedByByItem.get(workItemId) || []).filter(item => item.status !== 'done').length,
   }
 }
 

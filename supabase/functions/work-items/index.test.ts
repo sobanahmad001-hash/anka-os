@@ -19,6 +19,7 @@ Deno.test('normalizes the fixed W1 work item fields', () => {
     workItemType: 'task',
     priority: 'high',
     status: 'in_progress',
+    parentWorkItemId: 'parent-1',
     assigneeId: '',
     startDate: '2026-08-29',
     dueDate: '2026-08-30',
@@ -27,6 +28,7 @@ Deno.test('normalizes the fixed W1 work item fields', () => {
   equal(input.p_title, 'Prepare launch QA')
   equal(input.p_assignee_id, null)
   equal(input.p_position, 0)
+  equal(input.p_parent_work_item_id, 'parent-1')
 })
 
 Deno.test('rejects unsupported vocabulary and impossible date ranges', () => {
