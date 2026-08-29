@@ -16,6 +16,7 @@ declare
   v_content_artifact_id uuid := gen_random_uuid();
   v_campaign_artifact_id uuid := gen_random_uuid();
   v_content_version_id uuid := gen_random_uuid();
+  v_content_version_2_id uuid := gen_random_uuid();
   v_campaign_version_id uuid := gen_random_uuid();
   v_number_def_id uuid;
   v_select_def_id uuid;
@@ -103,9 +104,34 @@ begin
       and value = '1250'::jsonb
   ));
 
+  -- Create the next artifact version only after version 1 has a custom-field
+  -- value. D5 must not copy that separate metadata row to the new version.
+  insert into public.artifact_versions (
+    id, organization_id, artifact_id, version_number, parent_version_id,
+    content, content_checksum, created_by
+  ) values (
+    v_content_version_2_id, v_organization_id, v_content_artifact_id, 2,
+    v_content_version_id, '{"kind":"content","revision":2}'::jsonb,
+    encode(digest('d5-content-v2-' || gen_random_uuid(), 'sha256'), 'hex'), v_actor_id
+  );
+  insert into d5_runtime_checks values ('new_version_custom_fields_start_empty',
+    exists (
+      select 1 from public.artifact_custom_field_values
+      where artifact_version_id = v_content_version_id
+        and field_def_id = v_number_def_id
+        and value = '1250'::jsonb
+    )
+    and not exists (
+      select 1 from public.artifact_custom_field_values
+      where artifact_version_id = v_content_version_2_id
+    )
+  );
+
   insert into d5_runtime_checks values ('custom_value_write_does_not_approve', not exists (
     select 1 from public.artifact_approvals
-    where artifact_version_id in (v_content_version_id, v_campaign_version_id)
+    where artifact_version_id in (
+      v_content_version_id, v_content_version_2_id, v_campaign_version_id
+    )
   ));
 
   insert into d5_runtime_checks values ('starter_content_fields_seeded', (

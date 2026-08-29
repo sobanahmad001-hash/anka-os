@@ -23,7 +23,7 @@
 - [ ] Select definitions require unique, non-empty options; non-select definitions reject options.
 - [ ] Number fields reject text and single-select fields reject values outside their options.
 - [ ] A `content` definition cannot be assigned to a `campaign_brief` version.
-- [ ] Values are stored on an exact version and are not copied when another version is created.
+- [ ] After version 1 receives a custom-field value, creating version 2 leaves version 2 with zero `artifact_custom_field_values` rows.
 - [ ] Custom-field writes do not insert, update, or delete `artifact_approvals`.
 - [ ] Team members can read their organization definitions and values through RLS.
 - [ ] Anonymous users cannot access either table and authenticated browser clients cannot write them directly.
@@ -52,4 +52,4 @@ After applying D5 to an isolated review database, run the rollback-safe verifier
 
 Every JSON result must be `true`, especially `number_field_rejects_text`,
 `single_select_rejects_unknown_option`, `content_field_rejects_campaign_brief_version`,
-and `custom_value_write_does_not_approve`.
+`new_version_custom_fields_start_empty`, and `custom_value_write_does_not_approve`.

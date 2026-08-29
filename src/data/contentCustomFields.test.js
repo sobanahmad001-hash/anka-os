@@ -43,6 +43,9 @@ test('database validation rejects malformed and cross-type values', () => {
   assert.match(verification, /number_field_rejects_text/)
   assert.match(verification, /single_select_rejects_unknown_option/)
   assert.match(verification, /content_field_rejects_campaign_brief_version/)
+  assert.match(verification, /new_version_custom_fields_start_empty/)
+  assert.match(verification, /artifact_version_id = v_content_version_2_id/)
+  assert.match(verification, /not exists \([\s\S]*artifact_custom_field_values[\s\S]*v_content_version_2_id/)
 })
 
 test('RLS exposes organization reads but browser writes stay closed', () => {
