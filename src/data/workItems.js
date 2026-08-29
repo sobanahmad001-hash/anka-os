@@ -115,6 +115,121 @@ export function buildWorkItemRelations(items, dependencies) {
   }
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function utcDate(value) {
+  if (!value) return null
+  const date = new Date(`${value}T00:00:00Z`)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function isoDate(date) {
+  return date.toISOString().slice(0, 10)
+}
+
+function addUtcDays(date, days) {
+  return new Date(date.getTime() + (days * DAY_MS))
+}
+
+function mondayOnOrBefore(date) {
+  const day = date.getUTCDay() || 7
+  return addUtcDays(date, 1 - day)
+}
+
+export function buildWorkItemCalendar(items, anchorDate = new Date(), mode = 'month') {
+  const safeAnchor = new Date(Date.UTC(anchorDate.getUTCFullYear(), anchorDate.getUTCMonth(), anchorDate.getUTCDate()))
+  const periodStart = mode === 'week'
+    ? mondayOnOrBefore(safeAnchor)
+    : mondayOnOrBefore(new Date(Date.UTC(safeAnchor.getUTCFullYear(), safeAnchor.getUTCMonth(), 1)))
+  const dayCount = mode === 'week' ? 7 : 42
+  const days = Array.from({ length: dayCount }, (_, index) => {
+    const date = addUtcDays(periodStart, index)
+    return { date: isoDate(date), inMonth: date.getUTCMonth() === safeAnchor.getUTCMonth(), items: [] }
+  })
+  const dayByDate = new Map(days.map(day => [day.date, day]))
+  const noDueDate = []
+
+  for (const item of items || []) {
+    const due = utcDate(item.due_date)
+    if (!due) {
+      noDueDate.push(item)
+      continue
+    }
+    const start = utcDate(item.start_date) || due
+    const first = start <= due ? start : due
+    for (let cursor = first; cursor <= due; cursor = addUtcDays(cursor, 1)) {
+      const day = dayByDate.get(isoDate(cursor))
+      if (day) day.items.push({ item, isStart: isoDate(cursor) === isoDate(first), isDue: isoDate(cursor) === item.due_date })
+    }
+  }
+
+  return { days, noDueDate, periodStart: isoDate(periodStart), mode }
+}
+
+export function orderWorkItemsWithSubtasks(items) {
+  const source = items || []
+  const itemById = new Map(source.map(item => [item.id, item]))
+  const children = new Map()
+  for (const item of source) {
+    if (item.parent_work_item_id && itemById.has(item.parent_work_item_id)) {
+      children.set(item.parent_work_item_id, [...(children.get(item.parent_work_item_id) || []), item])
+    }
+  }
+  const result = []
+  const seen = new Set()
+  for (const item of source) {
+    if (item.parent_work_item_id && itemById.has(item.parent_work_item_id)) continue
+    result.push({ item, depth: 0 })
+    seen.add(item.id)
+    for (const child of children.get(item.id) || []) {
+      result.push({ item: child, depth: 1 })
+      seen.add(child.id)
+    }
+  }
+  for (const item of source) if (!seen.has(item.id)) result.push({ item, depth: 0 })
+  return result
+}
+
+export function buildWorkItemTimeline(items, dependencies) {
+  const ordered = orderWorkItemsWithSubtasks(items)
+  const scheduled = ordered.filter(({ item }) => item.start_date || item.due_date)
+  const unscheduled = ordered.filter(({ item }) => !item.start_date && !item.due_date)
+  const dates = scheduled.flatMap(({ item }) => [utcDate(item.start_date), utcDate(item.due_date)]).filter(Boolean)
+  const today = new Date(); today.setUTCHours(0, 0, 0, 0)
+  const rangeStart = dates.length ? new Date(Math.min(...dates.map(date => date.getTime()))) : today
+  let rangeEnd = dates.length ? new Date(Math.max(...dates.map(date => date.getTime()))) : addUtcDays(today, 13)
+  if (rangeEnd <= rangeStart) rangeEnd = addUtcDays(rangeStart, 6)
+  const totalDays = Math.max(1, Math.round((rangeEnd - rangeStart) / DAY_MS) + 1)
+  const itemById = new Map(scheduled.map(({ item }) => [item.id, item]))
+  const rowById = new Map()
+  const rows = scheduled.map(({ item, depth }, index) => {
+    const start = utcDate(item.start_date)
+    const due = utcDate(item.due_date)
+    const first = start && due ? new Date(Math.min(start.getTime(), due.getTime())) : start || due
+    const last = start && due ? new Date(Math.max(start.getTime(), due.getTime())) : due || start
+    const left = Math.max(0, Math.round((first - rangeStart) / DAY_MS)) / totalDays * 100
+    const spanDays = start && due ? Math.max(1, Math.round((last - first) / DAY_MS) + 1) : 0
+    const width = spanDays ? Math.max(1.4, spanDays / totalDays * 100) : 0
+    const row = { item, depth, index, left, width, point: !(start && due) }
+    rowById.set(item.id, row)
+    return row
+  })
+  const links = (dependencies || []).flatMap(dependency => {
+    const workItem = rowById.get(dependency.work_item_id)
+    const dependsOn = rowById.get(dependency.depends_on_work_item_id)
+    if (!workItem || !dependsOn || !itemById.has(workItem.item.id) || !itemById.has(dependsOn.item.id)) return []
+    return [{
+      workItemId: workItem.item.id,
+      dependsOnWorkItemId: dependsOn.item.id,
+      fromRow: workItem.index,
+      toRow: dependsOn.index,
+      fromX: workItem.left,
+      toX: dependsOn.left + (dependsOn.width || 0),
+    }]
+  })
+  return { rows, unscheduled, links, rangeStart: isoDate(rangeStart), rangeEnd: isoDate(rangeEnd), totalDays }
+}
+
 export function groupWorkItemsForBoard(items) {
   const columns = Object.fromEntries(WORK_ITEM_STATUSES.map(status => [status, []]))
   for (const item of items || []) {
