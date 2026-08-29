@@ -62,6 +62,20 @@ test('D3 rollup is bidirectional, live, and has no cached summary', () => {
   assert.doesNotMatch(`${migration}\n${repository}`, /related_count|incoming_count|outgoing_count|cached_rollup/)
 })
 
+test('W6 connection rollup drops a relation when an endpoint is not visible', () => {
+  const hiddenTarget = {
+    id: 'hidden', source_artifact_id: 'current', target_artifact_id: 'restricted', relation_type: 'feeds_into',
+    source: { id: 'current', title: 'Visible source' }, target: null,
+  }
+  const hiddenSource = {
+    id: 'hidden-source', source_artifact_id: 'restricted', target_artifact_id: 'current', relation_type: 'derived_from',
+    source: null, target: { id: 'current', title: 'Visible target' },
+  }
+  assert.deepEqual(splitArtifactRelations('current', [hiddenTarget, hiddenSource]), { outgoing: [], incoming: [] })
+  assert.match(read('src/components/WorkItemConnections.jsx'), /splitArtifactRelations/)
+  assert.match(verification, /inaccessible_target_hidden_from_rollup/)
+})
+
 test('D3 exposes one reusable artifact-detail relation panel across department surfaces', () => {
   assert.match(panel, /Used in \/ related/)
   assert.match(panel, /This artifact relates to/)

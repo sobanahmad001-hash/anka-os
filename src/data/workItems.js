@@ -1,6 +1,8 @@
 export const WORK_ITEM_TYPES = Object.freeze(['task', 'bug', 'request'])
 export const WORK_ITEM_PRIORITIES = Object.freeze(['low', 'medium', 'high', 'urgent'])
 export const WORK_ITEM_STATUSES = Object.freeze(['not_started', 'in_progress', 'blocked', 'done'])
+export const WORKLOAD_OPEN_ITEM_THRESHOLD = 8
+export const UNASSIGNED_WORK_ITEM_FILTER = '__unassigned__'
 export const AUTOMATION_TRIGGER_TYPES = Object.freeze([
   'work_item_status_changed',
   'artifact_approved',
@@ -50,7 +52,8 @@ export function filterAndSortWorkItems(items, filters = {}, sort = {}, today = n
   const sevenDayDate = sevenDays.toISOString().slice(0, 10)
   const filtered = (items || []).filter(item => {
     if (filters.status && item.status !== filters.status) return false
-    if (filters.assignee && item.assignee_id !== filters.assignee) return false
+    if (filters.assignee === UNASSIGNED_WORK_ITEM_FILTER && item.assignee_id) return false
+    if (filters.assignee && filters.assignee !== UNASSIGNED_WORK_ITEM_FILTER && item.assignee_id !== filters.assignee) return false
     if (filters.department && item.department_id !== filters.department) return false
     if (filters.priority && item.priority !== filters.priority) return false
     if (filters.due === 'overdue' && (!item.due_date || item.due_date >= date || item.status === 'done')) return false
@@ -69,6 +72,40 @@ export function filterAndSortWorkItems(items, filters = {}, sort = {}, today = n
     if (rightValue == null || rightValue === '') return -1
     return String(leftValue).localeCompare(String(rightValue), undefined, { numeric: true }) * direction
   })
+}
+
+export function buildWorkloadRows(items, owners = [], threshold = WORKLOAD_OPEN_ITEM_THRESHOLD) {
+  const ownerById = new Map(owners.map(owner => [owner.id, owner]))
+  const groups = new Map()
+
+  for (const item of items || []) {
+    const assigneeId = item.assignee_id || UNASSIGNED_WORK_ITEM_FILTER
+    const current = groups.get(assigneeId) || {
+      assigneeId,
+      label: assigneeId === UNASSIGNED_WORK_ITEM_FILTER
+        ? 'Unassigned'
+        : ownerById.get(assigneeId)?.label || 'Unknown member',
+      not_started: 0,
+      in_progress: 0,
+      blocked: 0,
+      done: 0,
+      total: 0,
+      open: 0,
+    }
+    if (WORK_ITEM_STATUSES.includes(item.status)) current[item.status] += 1
+    current.total += 1
+    if (item.status !== 'done') current.open += 1
+    groups.set(assigneeId, current)
+  }
+
+  return [...groups.values()]
+    .map(row => ({ ...row, overAllocated: row.assigneeId !== UNASSIGNED_WORK_ITEM_FILTER && row.open > threshold }))
+    .sort((left, right) => {
+      if (left.assigneeId === UNASSIGNED_WORK_ITEM_FILTER) return 1
+      if (right.assigneeId === UNASSIGNED_WORK_ITEM_FILTER) return -1
+      if (left.overAllocated !== right.overAllocated) return left.overAllocated ? -1 : 1
+      return right.open - left.open || left.label.localeCompare(right.label)
+    })
 }
 
 export function workItemSaveInput(item, engagementId, overrides = {}) {

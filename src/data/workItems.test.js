@@ -7,10 +7,13 @@ import {
   buildWorkItemCalendar,
   buildWorkItemRelations,
   buildWorkItemTimeline,
+  buildWorkloadRows,
   filterAndSortWorkItems,
   groupWorkItemsForBoard,
   planWorkItemBoardMove,
   workItemSaveInput,
+  UNASSIGNED_WORK_ITEM_FILTER,
+  WORKLOAD_OPEN_ITEM_THRESHOLD,
   WORK_ITEM_BOARD_COLUMNS,
 } from './workItems.js'
 
@@ -20,6 +23,9 @@ const w3Verification = readFileSync(new URL('../../supabase/verify_2026082908124
 const functionSource = readFileSync(new URL('../../supabase/functions/work-items/index.ts', import.meta.url), 'utf8')
 const panel = readFileSync(new URL('../components/WorkItemsPanel.jsx', import.meta.url), 'utf8')
 const calendarTimeline = readFileSync(new URL('../components/WorkCalendarTimeline.jsx', import.meta.url), 'utf8')
+const workload = readFileSync(new URL('../components/WorkloadView.jsx', import.meta.url), 'utf8')
+const connectionPicture = readFileSync(new URL('../components/WorkItemConnections.jsx', import.meta.url), 'utf8')
+const artifactRepository = readFileSync(new URL('./artifactRelationsRepository.js', import.meta.url), 'utf8')
 const repository = readFileSync(new URL('./workItemsRepository.js', import.meta.url), 'utf8')
 const operatingSpine = readFileSync(new URL('../apps/OperatingSpine.jsx', import.meta.url), 'utf8')
 const migrationNames = readdirSync(new URL('../../supabase/migrations/', import.meta.url))
@@ -201,4 +207,45 @@ test('W4 reuses the existing read path and detail panel without adding a migrati
   assert.match(repository, /\.eq\(['"]engagement_id['"], engagementId\)[\s\S]*\.is\(['"]deleted_at['"], null\)/)
   assert.doesNotMatch(calendarTimeline, /supabase|workItems\.(save|remove|addDependency|removeDependency)|insert\(|update\(|upsert\(|delete\(/i)
   assert.equal(migrationNames.some(name => /calendar|timeline/i.test(name)), false)
+})
+
+test('W6 workload groups visible engagement items by assignee with a fixed open-item threshold', () => {
+  const overloaded = Array.from({ length: WORKLOAD_OPEN_ITEM_THRESHOLD + 1 }, (_, index) => ({ id: `a-${index}`, assignee_id: 'a', status: index === 0 ? 'blocked' : 'in_progress' }))
+  const rows = buildWorkloadRows([
+    ...overloaded,
+    { id: 'b-open', assignee_id: 'b', status: 'not_started' },
+    { id: 'b-done', assignee_id: 'b', status: 'done' },
+    { id: 'unassigned', assignee_id: null, status: 'blocked' },
+  ], [{ id: 'a', label: 'Ada Owner' }, { id: 'b', label: 'Ben Owner' }])
+
+  assert.equal(rows[0].label, 'Ada Owner')
+  assert.equal(rows[0].open, 9)
+  assert.equal(rows[0].blocked, 1)
+  assert.equal(rows[0].overAllocated, true)
+  assert.equal(rows.find(row => row.assigneeId === 'b').done, 1)
+  assert.equal(rows.at(-1).assigneeId, UNASSIGNED_WORK_ITEM_FILTER)
+  assert.equal(rows.at(-1).overAllocated, false)
+})
+
+test('W6 assignee drill-down reuses the existing List and Board filter path, including unassigned work', () => {
+  const items = [
+    { id: 'assigned', assignee_id: 'a', status: 'in_progress', position: 1 },
+    { id: 'unassigned', assignee_id: null, status: 'not_started', position: 2 },
+  ]
+  assert.deepEqual(filterAndSortWorkItems(items, { assignee: 'a' }).map(item => item.id), ['assigned'])
+  assert.deepEqual(filterAndSortWorkItems(items, { assignee: UNASSIGNED_WORK_ITEM_FILTER }).map(item => item.id), ['unassigned'])
+  assert.match(panel, /setFilters\(current => \(\{ \.\.\.current, assignee \}\)\)/)
+  assert.match(panel, /setView\(targetView\)/)
+  assert.match(workload, /onFilter\(row\.assigneeId, 'list'\)/)
+  assert.match(workload, /onFilter\(row\.assigneeId, 'board'\)/)
+})
+
+test('W6 consolidates parent, subtasks, dependencies, and RLS-filtered artifact relations without a write path', () => {
+  for (const label of ['Parent', 'Subtasks', 'Blocked by', 'Blocks', 'Linked artifact and its relations']) assert.match(connectionPicture, new RegExp(label))
+  assert.match(panel, /artifactRelations\.list\(artifactId\)/)
+  assert.match(connectionPicture, /splitArtifactRelations/)
+  assert.match(connectionPicture, /This artifact has no other visible relations/)
+  assert.match(artifactRepository, /\.from\('artifact_relations'\)[\s\S]*\.select\(relationSelect\)/)
+  assert.doesNotMatch(`${workload}\n${connectionPicture}`, /supabase|workItems\.(save|remove|addDependency|removeDependency)|\.insert\(|\.update\(|\.upsert\(|\.delete\(/i)
+  assert.equal(migrationNames.some(name => /workload|relationship/i.test(name)), false)
 })
