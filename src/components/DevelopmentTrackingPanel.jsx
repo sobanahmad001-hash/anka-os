@@ -9,6 +9,7 @@ import {
   latestArtifactVersion,
 } from '../data/developmentStudio.js'
 import { developmentStudio } from '../data/developmentStudioRepository.js'
+import ArtifactRelationsPanel from './ArtifactRelationsPanel.jsx'
 
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20'
 const PRIMARY = 'rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50'
@@ -101,12 +102,12 @@ function ArtifactForm({ workspace, stages, type, artifact, latest, saving, act }
     }), `${definition.label} saved as a new immutable version.`)
   }
 
-  return <form onSubmit={save} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+  return <div><form onSubmit={save} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
     <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-400">Immutable internal record</p><h3 className="mt-1 text-xl font-semibold">{definition.label}</h3><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">{definition.description}</p></div><span className="text-xs text-slate-500">{latest ? `Current version ${latest.version_number}` : 'No version yet'}</span></div>
     <div className="mt-6 grid gap-4 md:grid-cols-2"><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Title<input required maxLength="240" className={`${INPUT} mt-2 normal-case tracking-normal`} value={title} onChange={event => setTitle(event.target.value)} /></label><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Linked stage<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={stageId} onChange={event => setStageId(event.target.value)}><option value="">Engagement only</option>{stages.map(stage => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select></label></div>
     <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Notes<textarea rows="6" maxLength="12000" className={`${INPUT} mt-2 normal-case tracking-normal`} value={notes} onChange={event => setNotes(event.target.value)} placeholder="Record the concise technical or launch context." /></label>
     <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Checklist<span className="ml-2 font-normal normal-case tracking-normal text-slate-600">One item per line</span><textarea rows="5" className={`${INPUT} mt-2 normal-case tracking-normal`} value={checklist} onChange={event => setChecklist(event.target.value)} /></label>
     <div className="mt-4 grid gap-4 md:grid-cols-2"><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Change summary<input required maxLength="1000" className={`${INPUT} mt-2 normal-case tracking-normal`} value={summary} onChange={event => setSummary(event.target.value)} /></label><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Classification<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={classification} onChange={event => setClassification(event.target.value)}><option>internal</option><option>confidential</option><option>restricted</option><option>public</option></select></label></div>
     <div className="mt-6 flex items-center justify-between gap-4 border-t border-slate-800 pt-5"><p className="text-xs text-slate-600">AI context is disabled for Development tracking artifacts.</p><button disabled={saving || (!notes.trim() && !checklist.trim())} className={PRIMARY}>{saving ? 'Saving…' : latest ? 'Create new version' : 'Save first version'}</button></div>
-  </form>
+  </form><ArtifactRelationsPanel artifact={artifact} /></div>
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import DepartmentChat from '../components/DepartmentChat.jsx'
+import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import {
   CONTENT_ARTIFACT_FORMS,
@@ -141,7 +142,7 @@ function ArtifactForm({ workspace, type, artifact, versions, latest, approval, s
     <div className="mt-6 grid gap-4 md:grid-cols-2"><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Change summary<input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={summary} onChange={event => setSummary(event.target.value)} /></label><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Data classification<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={classification} onChange={event => setClassification(event.target.value)}><option>internal</option><option>confidential</option><option>public</option><option>restricted</option></select></label></div>
     <label className="mt-4 flex items-start gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300"><input type="checkbox" className="mt-1" checked={aiSafe} onChange={event => setAiSafe(event.target.checked)} /><span>Explicitly allow this exact version to be included in approved AI context. Restricted versions remain excluded.</span></label>
     <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-800 pt-5">{latest && !approval && <button type="button" disabled={saving} onClick={() => act(() => contentStudio.approveArtifact(latest.id), `${definition.label} exact version approved.`)} className={BUTTON}>Approve version {latest.version_number}</button>}<button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : latest ? 'Create new version' : 'Save first version'}</button></div>
-  </form><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="content" theme="amber" regionsByVersion={regionsByVersion} /></div>
+  </form><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="content" theme="amber" regionsByVersion={regionsByVersion} /></div>
 }
 
 function ArtifactField({ field, value, onChange }) {
