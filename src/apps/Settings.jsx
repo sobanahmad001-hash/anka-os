@@ -22,6 +22,7 @@ function initialForm(provider = 'openai') {
     department_ids: [...connector.departments],
     owner: '', repo: '', file_key: '', username: '',
     model_id: provider === 'openai' ? 'gpt-5.6-terra' : '',
+    property_id: '', site_url: '', customer_id: '', login_customer_id: '',
   }
 }
 
@@ -42,6 +43,7 @@ export default function Settings() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testingId, setTestingId] = useState('')
+  const [reportingDrafts, setReportingDrafts] = useState({})
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
@@ -50,6 +52,10 @@ export default function Settings() {
     try {
       const result = await integrations.list()
       setConnections(result.connections || [])
+      setReportingDrafts(Object.fromEntries((result.connections || []).filter(connection => CONNECTOR_CATALOG[connection.provider]?.authMode === 'oauth').map(connection => [connection.id, {
+        property_id: connection.public_config?.property_id || '', site_url: connection.public_config?.site_url || '',
+        customer_id: connection.public_config?.customer_id || '', login_customer_id: connection.public_config?.login_customer_id || '',
+      }])))
       setCanManage(Boolean(result.can_manage))
     } catch (loadError) {
       setError(loadError.message)
@@ -153,11 +159,30 @@ export default function Settings() {
         connection_id: existingConnection?.id || null,
         display_name: source.display_name,
         department_ids: source.department_ids,
+        public_config: {
+          property_id: source.public_config?.property_id || source.property_id,
+          site_url: source.public_config?.site_url || source.site_url,
+          customer_id: source.public_config?.customer_id || source.customer_id,
+          login_customer_id: source.public_config?.login_customer_id || source.login_customer_id,
+        },
         return_path: '/settings',
       })
       window.location.assign(result.authorize_url)
     } catch (authorizeError) {
       setError(authorizeError.message)
+      setSaving(false)
+    }
+  }
+
+  async function saveGoogleReporting(connection) {
+    setSaving(true); setMessage(''); setError('')
+    try {
+      await integrations.configureGoogleReporting(connection.id, reportingDrafts[connection.id] || {})
+      setMessage(`${connection.display_name} reporting scope saved.`)
+      await loadConnections()
+    } catch (saveError) {
+      setError(saveError.message)
+    } finally {
       setSaving(false)
     }
   }
@@ -232,6 +257,7 @@ export default function Settings() {
                   <article key={connection.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium text-white">{connection.display_name}</p><p className="mt-1 text-xs text-slate-500">{connectorLabel(connection.provider)} · {isOAuth ? (connection.status === 'verified' ? connection.public_config?.authorized_email || 'Google account authorised' : 'Google authorisation required') : connection.secret_configured ? 'Secret configured' : 'Secret missing'}</p></div><Status value={connection.status} /></div>
                     <div className="mt-3 flex flex-wrap gap-2">{(connection.department_ids || []).map((departmentId) => <span key={departmentId} className="rounded-full bg-slate-900 px-2.5 py-1 text-[11px] text-slate-400">{DEPARTMENT_LABELS[departmentId]}</span>)}</div>
+                    {canManage && isOAuth && <div className="mt-4 rounded-xl border border-slate-800 bg-slate-900/60 p-3"><GoogleReportingFields provider={connection.provider} value={reportingDrafts[connection.id] || {}} onChange={value => setReportingDrafts(current => ({ ...current, [connection.id]: value }))} /><button type="button" disabled={saving} onClick={() => saveGoogleReporting(connection)} className={`${BUTTON} mt-3`}>Save reporting scope</button></div>}
                     <div className="mt-4 flex flex-wrap gap-2">
                       {canManage && isOAuth && <button type="button" disabled={saving} onClick={(event) => authorizeGoogle(event, connection)} className={BUTTON}>{connection.status === 'verified' ? 'Reauthorise Google' : 'Continue authorisation'}</button>}
                       {canManage && isOAuth && connection.status === 'verified' && <button type="button" disabled={saving} onClick={() => disconnectGoogle(connection)} className={BUTTON}>Disconnect Google</button>}
@@ -254,6 +280,7 @@ export default function Settings() {
               <form onSubmit={authorizeGoogle} className="mt-5 space-y-4">
                 <div className="rounded-xl border border-blue-900/60 bg-blue-950/30 p-4 text-sm leading-6 text-blue-200">Anka OS will open Google’s consent screen and request only the read/reporting permission needed for this connector. Offline access lets scheduled reporting continue after you close the browser. Tokens are encrypted before storage and are never returned to this page.</div>
                 <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Connection name<input required value={form.display_name} onChange={(event) => setForm({ ...form, display_name: event.target.value })} className={`${INPUT} mt-2 normal-case tracking-normal`} placeholder={`Primary ${selected.shortLabel} connection`} /></label>
+                <GoogleReportingFields provider={form.provider} value={form} onChange={value => setForm({ ...form, ...value })} />
                 <fieldset><legend className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Department access</legend><div className="mt-2 grid grid-cols-2 gap-2">{selected.departments.map((departmentId) => <label key={departmentId} className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-300"><input type="checkbox" checked={form.department_ids.includes(departmentId)} onChange={() => toggleDepartment(departmentId)} />{DEPARTMENT_LABELS[departmentId]}</label>)}</div></fieldset>
                 {form.provider === 'google_ads' && <p className="rounded-xl border border-amber-900/60 bg-amber-950/30 p-3 text-xs leading-5 text-amber-200">Google Ads reporting also requires Anka Sphere’s Google Ads developer token and an approved API access level. Account authorisation can be completed first.</p>}
                 <button disabled={saving} className="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-purple-500 disabled:opacity-50">{saving ? 'Preparing Google…' : 'Continue to Google'}</button>
@@ -277,4 +304,11 @@ export default function Settings() {
       </main>
     </div>
   )
+}
+
+function GoogleReportingFields({ provider, value, onChange }) {
+  if (provider === 'google_analytics') return <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">GA4 property ID<input required inputMode="numeric" value={value.property_id || ''} onChange={event => onChange({ ...value, property_id: event.target.value.replace(/[^0-9]/g, '') })} className={`${INPUT} mt-2 font-mono normal-case tracking-normal`} placeholder="123456789" /></label>
+  if (provider === 'google_search_console') return <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Search Console property<input required value={value.site_url || ''} onChange={event => onChange({ ...value, site_url: event.target.value })} className={`${INPUT} mt-2 font-mono normal-case tracking-normal`} placeholder="sc-domain:example.com" /></label>
+  if (provider === 'google_ads') return <div className="grid gap-3 md:grid-cols-2"><label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Customer ID<input required inputMode="numeric" value={value.customer_id || ''} onChange={event => onChange({ ...value, customer_id: event.target.value.replace(/[^0-9-]/g, '') })} className={`${INPUT} mt-2 font-mono normal-case tracking-normal`} placeholder="123-456-7890" /></label><label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Manager ID (optional)<input inputMode="numeric" value={value.login_customer_id || ''} onChange={event => onChange({ ...value, login_customer_id: event.target.value.replace(/[^0-9-]/g, '') })} className={`${INPUT} mt-2 font-mono normal-case tracking-normal`} /></label></div>
+  return null
 }

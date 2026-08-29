@@ -20,6 +20,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/design-workshop/index.ts"
 
+[functions.marketing-studio]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/marketing-studio/index.ts"
+
 [functions.invite-client-contact]
 enabled = true
 verify_jwt = true

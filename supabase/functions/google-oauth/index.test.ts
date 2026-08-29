@@ -12,6 +12,7 @@ import {
   pkceChallenge,
   randomToken,
   safeDepartmentIds,
+  safeReportingConfig,
   sha256,
 } from './index.ts'
 
@@ -23,6 +24,15 @@ Deno.test('Google connector departments are restricted by provider', () => {
     Error,
     'Select valid departments',
   )
+})
+
+Deno.test('reporting resource identifiers are provider-specific and non-secret', () => {
+  assertEquals(safeReportingConfig('google_analytics', { property_id: 'properties/123456789' }), { property_id: '123456789' })
+  assertEquals(safeReportingConfig('google_search_console', { site_url: 'sc-domain:Example.com' }), { site_url: 'sc-domain:example.com' })
+  assertEquals(safeReportingConfig('google_ads', { customer_id: '123-456-7890', login_customer_id: '' }), {
+    customer_id: '1234567890', login_customer_id: '',
+  })
+  assertThrows(() => safeReportingConfig('google_ads', { customer_id: 'bad' }), Error, '10-digit')
 })
 
 Deno.test('OAuth state and PKCE verifier use high-entropy URL-safe values', async () => {

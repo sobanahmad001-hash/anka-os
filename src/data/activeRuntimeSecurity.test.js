@@ -11,10 +11,10 @@ test('legacy provider screens are not imported into the active runtime', () => {
   }
 })
 
-test('legacy specialist URLs safely redirect to canonical workshops', () => {
+test('legacy specialist URLs safely redirect to canonical department surfaces', () => {
   assert.match(app, /path="sphere\/figma" element={<Navigate to="\/sphere\/design"/)
   assert.match(app, /path="sphere\/wp-sites" element={<Navigate to="\/sphere\/delivery"/)
-  assert.match(app, /path="sphere\/campaigns" element={<Navigate to="\/sphere\/marketing"/)
+  assert.match(app, /path="sphere\/campaigns" element={<Navigate to="\/sphere\/marketing\/studio"/)
 })
 
 test('navigation exposes only canonical delivery surfaces', () => {

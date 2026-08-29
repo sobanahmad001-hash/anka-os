@@ -14,6 +14,7 @@ const connectorCatalog = readFileSync(new URL('../config/connectorCatalog.js', i
 const oauthMigration = readFileSync(new URL('../../supabase/migrations/20260827010000_google_oauth_connector_credentials.sql', import.meta.url), 'utf8')
 const oauthIndexMigration = readFileSync(new URL('../../supabase/migrations/20260827013000_index_google_oauth_foreign_keys.sql', import.meta.url), 'utf8')
 const googleOauth = readFileSync(new URL('../../supabase/functions/google-oauth/index.ts', import.meta.url), 'utf8')
+const googleTokens = readFileSync(new URL('../../supabase/functions/_shared/googleOAuthTokens.ts', import.meta.url), 'utf8')
 const integrationRepository = readFileSync(new URL('./integrationRepository.js', import.meta.url), 'utf8')
 
 test('integration metadata is RLS-protected and browser writes are unavailable', () => {
@@ -93,7 +94,7 @@ test('Google OAuth tokens and single-use state remain server-only', () => {
   assert.doesNotMatch(oauthMigration, /grant (select|insert|update|delete|all) on public\.integration_oauth_(sessions|credentials) to authenticated/)
   assert.match(oauthIndexMigration, /integration_oauth_sessions\(connection_id, organization_id\)/)
   assert.match(oauthIndexMigration, /integration_oauth_credentials\(connection_id, organization_id\)/)
-  assert.match(googleOauth, /AES-GCM/)
+  assert.match(googleTokens, /AES-GCM/)
   assert.match(googleOauth, /state_hash: await sha256\(state\)/)
   assert.match(googleOauth, /code_challenge_method: 'S256'/)
   assert.match(googleOauth, /consumed_at/)
