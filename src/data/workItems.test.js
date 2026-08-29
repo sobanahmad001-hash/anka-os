@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
   artifactRoute,
+  buildWorkItemCalendar,
   buildWorkItemRelations,
+  buildWorkItemTimeline,
   filterAndSortWorkItems,
   groupWorkItemsForBoard,
   planWorkItemBoardMove,
@@ -17,8 +19,10 @@ const w3Migration = readFileSync(new URL('../../supabase/migrations/202608290812
 const w3Verification = readFileSync(new URL('../../supabase/verify_20260829081243_work_item_dependencies_subtasks.sql', import.meta.url), 'utf8')
 const functionSource = readFileSync(new URL('../../supabase/functions/work-items/index.ts', import.meta.url), 'utf8')
 const panel = readFileSync(new URL('../components/WorkItemsPanel.jsx', import.meta.url), 'utf8')
+const calendarTimeline = readFileSync(new URL('../components/WorkCalendarTimeline.jsx', import.meta.url), 'utf8')
 const repository = readFileSync(new URL('./workItemsRepository.js', import.meta.url), 'utf8')
 const operatingSpine = readFileSync(new URL('../apps/OperatingSpine.jsx', import.meta.url), 'utf8')
+const migrationNames = readdirSync(new URL('../../supabase/migrations/', import.meta.url))
 
 test('filters and sorts the flat W1 list without board semantics', () => {
   const items = [
@@ -89,12 +93,12 @@ test('the migration enforces membership, soft deletion, RLS, and atomic audit wr
   assert.doesNotMatch(migration, /update public\.artifacts|update public\.artifact_versions|update public\.engagement_stage_instances/)
 })
 
-test('the engagement-level UI contains all W1 filters and no later-phase surface', () => {
+test('the engagement-level UI retains all W1 filters and excludes unrelated later-phase surfaces', () => {
   assert.match(operatingSpine, />Work<\/button>/)
   for (const label of ['Status', 'Assignee', 'Department', 'Priority', 'Due date']) assert.match(panel, new RegExp(`label="${label}"`))
   assert.match(panel, /Work item detail/)
   assert.match(panel, /References are storage-only in W1/)
-  assert.doesNotMatch(panel, /Calendar|Timeline|Automation|Custom field/i)
+  assert.doesNotMatch(panel, /Automation|Custom field/i)
   assert.doesNotMatch(functionSource, /openai|anthropic|notification|webhook|auto.?status/i)
   assert.doesNotMatch(migration, /parent_work_item_id|custom_fields|automation_rules/)
 })
@@ -143,7 +147,7 @@ test('W3 UI adds text relations and card indicators while preserving the W2 move
   assert.match(panel, /workItems\.addDependency/)
   assert.match(panel, /workItems\.removeDependency/)
   assert.match(panel, /onMoveWithinColumn/)
-  assert.doesNotMatch(panel, /dependency graph|auto.?block|calendar|timeline/i)
+  assert.doesNotMatch(panel, /dependency graph|auto.?block/i)
 })
 
 test('W2 adds an accessible board without a new backend write path', () => {
@@ -155,4 +159,46 @@ test('W2 adds an accessible board without a new backend write path', () => {
   assert.match(panel, /workItems\.save\(workItemSaveInput/)
   assert.match(repository, /\.is\(['"]deleted_at['"], null\)/)
   assert.doesNotMatch(panel, /supabase\.from\(['"]work_items['"]\).*\.(insert|update|upsert|delete)/s)
+})
+
+test('W4 calendar uses the filtered items for full date ranges and a visible no-due list', () => {
+  const items = [
+    { id: 'range', title: 'Range', start_date: '2026-08-03', due_date: '2026-08-05', status: 'in_progress' },
+    { id: 'due', title: 'Due only', start_date: null, due_date: '2026-08-04', status: 'not_started' },
+    { id: 'none', title: 'No due date', start_date: '2026-08-02', due_date: null, status: 'not_started' },
+  ]
+  const month = buildWorkItemCalendar(items, new Date('2026-08-15T00:00:00Z'), 'month')
+  const augustFourth = month.days.find(day => day.date === '2026-08-04')
+  assert.deepEqual(augustFourth.items.map(entry => entry.item.id), ['range', 'due'])
+  assert.equal(augustFourth.items.find(entry => entry.item.id === 'range').isStart, false)
+  assert.equal(month.days.find(day => day.date === '2026-08-05').items[0].isDue, true)
+  assert.deepEqual(month.noDueDate.map(item => item.id), ['none'])
+  assert.equal(buildWorkItemCalendar(items, new Date('2026-08-04T00:00:00Z'), 'week').days.length, 7)
+})
+
+test('W4 timeline renders ranges, real single-date points, unscheduled items, nesting, and dependency links', () => {
+  const items = [
+    { id: 'parent', title: 'Parent', parent_work_item_id: null, start_date: '2026-08-01', due_date: '2026-08-05' },
+    { id: 'child', title: 'Child', parent_work_item_id: 'parent', start_date: null, due_date: '2026-08-03' },
+    { id: 'unscheduled', title: 'Unscheduled', parent_work_item_id: null, start_date: null, due_date: null },
+  ]
+  const timeline = buildWorkItemTimeline(items, [{ work_item_id: 'parent', depends_on_work_item_id: 'child' }])
+  assert.deepEqual(timeline.rows.map(row => [row.item.id, row.depth]), [['parent', 0], ['child', 1]])
+  assert.equal(timeline.rows[0].point, false)
+  assert.ok(timeline.rows[0].width > 0)
+  assert.equal(timeline.rows[1].point, true)
+  assert.deepEqual(timeline.unscheduled.map(entry => entry.item.id), ['unscheduled'])
+  assert.deepEqual(timeline.links.map(link => [link.workItemId, link.dependsOnWorkItemId]), [['parent', 'child']])
+})
+
+test('W4 reuses the existing read path and detail panel without adding a migration or mutation surface', () => {
+  assert.match(panel, /items=\{visibleItems\}/)
+  assert.match(panel, /WorkCalendarView/)
+  assert.match(panel, /WorkTimelineView/)
+  assert.match(calendarTimeline, /onOpen\(item\)/)
+  assert.match(calendarTimeline, /Read-only dependency connectors/)
+  assert.match(calendarTimeline, /edit dates in work-item detail/i)
+  assert.match(repository, /\.eq\(['"]engagement_id['"], engagementId\)[\s\S]*\.is\(['"]deleted_at['"], null\)/)
+  assert.doesNotMatch(calendarTimeline, /supabase|workItems\.(save|remove|addDependency|removeDependency)|insert\(|update\(|upsert\(|delete\(/i)
+  assert.equal(migrationNames.some(name => /calendar|timeline/i.test(name)), false)
 })
