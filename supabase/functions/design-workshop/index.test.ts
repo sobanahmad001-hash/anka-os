@@ -44,3 +44,10 @@ Deno.test('design release preserves accountable human authority', () => {
   assert.equal(hasWorkshopAuthority({ role: 'member', department_id: 'design' }, 'release_direction'), false)
   assert.equal(hasWorkshopAuthority({ role: 'department_manager', department_id: 'design' }, 'release_direction'), true)
 })
+
+Deno.test('an invited cross-functional reviewer may request promotion but not Design authoring', () => {
+  const reviewer = { role: 'contributor', department_id: 'marketing' }
+  assert.equal(hasWorkshopAuthority(reviewer, 'promote_direction_experiment'), true)
+  assert.equal(hasWorkshopAuthority(reviewer, 'list_experiment_reviewers'), true)
+  assert.equal(hasWorkshopAuthority(reviewer, 'create_direction_revision'), false)
+})

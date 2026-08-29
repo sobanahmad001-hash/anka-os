@@ -127,7 +127,14 @@ export function hasWorkshopAuthority(membership: Json, action: string) {
   const role = String(membership.role || ''); const department = String(membership.department_id || '')
   if (LEADER_ROLES.has(role)) return true
   if (action === 'release_direction') return department === 'design' && role === 'department_manager'
+  if (action === 'promote_direction_experiment' || action === 'list_experiment_reviewers') return true
   return department === 'design'
+}
+
+function uniqueIds(value: unknown) {
+  return Array.isArray(value)
+    ? [...new Set(value.map(item => text(item, 80)).filter(Boolean))].slice(0, 50)
+    : []
 }
 
 async function insertEvent(admin: Client, engagementId: string, eventType: string, actorId: string,
@@ -336,23 +343,77 @@ async function generateDirections(admin: Client, body: Json, actorId: string) {
   }
 }
 
+async function validateExperimentReviewers(admin: Client, reviewerIds: string[], actorId: string) {
+  const invited = reviewerIds.filter(id => id !== actorId)
+  if (!invited.length) return []
+  const { data, error } = await admin.from('organization_memberships').select('user_id')
+    .eq('organization_id', ORGANIZATION_ID).eq('member_kind', 'team').eq('status', 'active').in('user_id', invited)
+  if (error) throw error
+  if (data?.length !== invited.length) throw new Error('Every experiment reviewer must be an active team member')
+  return invited
+}
+
+async function insertDirectionVersion(admin: Client, directionId: string, parent: any, content: Json,
+  actorId: string, isExperimental: boolean, experimentVisibility: string[] | null) {
+  const { data: latest, error: latestError } = await admin.from('design_direction_versions').select('version_number')
+    .eq('direction_id', directionId).order('version_number', { ascending: false }).limit(1).single()
+  if (latestError) throw latestError
+  const checksum = await sha256(stableJson(content))
+  const { data: version, error } = await admin.from('design_direction_versions').insert({
+    organization_id: ORGANIZATION_ID, direction_id: directionId, version_number: latest.version_number + 1,
+    parent_version_id: parent.id, content, content_checksum: checksum,
+    distinctness_signature: await sha256(directionText(content).toLowerCase()), created_by: actorId,
+    is_experimental: isExperimental, experiment_visibility: isExperimental ? experimentVisibility : null,
+  }).select('*').single()
+  if (error) throw error
+  return version
+}
+
 async function createDirectionRevision(admin: Client, body: Json, actorId: string) {
   const directionId = text(body.direction_id, 80)
   const { data: direction } = await admin.from('design_directions').select('id, session_id')
     .eq('id', directionId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
   if (!direction) throw new Error('Direction not found')
-  const { data: latest } = await admin.from('design_direction_versions').select('*').eq('direction_id', direction.id)
-    .order('version_number', { ascending: false }).limit(1).single()
+  const parentId = text(body.parent_version_id, 80)
+  const { data: parent } = await admin.from('design_direction_versions').select('id, direction_id, is_experimental')
+    .eq('id', parentId).eq('direction_id', direction.id).maybeSingle()
+  if (!parent) throw new Error('Parent direction version not found')
+  if (parent.is_experimental) throw new Error('Use the dedicated promotion action for an experimental version')
   const content = body.content && typeof body.content === 'object' && !Array.isArray(body.content) ? body.content as Json : null
   if (!content || !text(content.title) || !text(content.rationale)) throw new Error('A complete direction revision is required')
-  const checksum = await sha256(stableJson(content))
-  const { data: version, error } = await admin.from('design_direction_versions').insert({
-    organization_id: ORGANIZATION_ID, direction_id: direction.id, version_number: latest.version_number + 1,
-    parent_version_id: latest.id, content, content_checksum: checksum,
-    distinctness_signature: await sha256(directionText(content).toLowerCase()), created_by: actorId,
-  }).select('*').single()
+  const isExperimental = body.is_experimental === true
+  const reviewers = isExperimental
+    ? await validateExperimentReviewers(admin, uniqueIds(body.experiment_visibility), actorId)
+    : null
+  return insertDirectionVersion(admin, direction.id, parent, content, actorId, isExperimental, reviewers)
+}
+
+async function listExperimentReviewers(admin: Client, membership: Json) {
+  const role = text(membership.role, 60)
+  if (text(membership.department_id, 60) !== 'design' && !LEADER_ROLES.has(role)) return []
+  const { data: memberships, error } = await admin.from('organization_memberships').select('user_id, role, department_id')
+    .eq('organization_id', ORGANIZATION_ID).eq('member_kind', 'team').eq('status', 'active').order('department_id')
   if (error) throw error
-  return version
+  const ids = (memberships || []).map(item => item.user_id)
+  const { data: profiles, error: profileError } = ids.length
+    ? await admin.from('profiles').select('id, full_name').in('id', ids)
+    : { data: [], error: null }
+  if (profileError) throw profileError
+  const names = new Map((profiles || []).map(item => [item.id, item.full_name]))
+  return (memberships || []).map(item => ({ ...item, full_name: names.get(item.user_id) || 'Team member' }))
+}
+
+async function promoteDirectionExperiment(admin: Client, body: Json, actorId: string) {
+  const versionId = text(body.direction_version_id, 80)
+  const { data: experiment, error } = await admin.from('design_direction_versions').select('*')
+    .eq('id', versionId).eq('organization_id', ORGANIZATION_ID).eq('is_experimental', true).maybeSingle()
+  if (error) throw error
+  if (!experiment) throw new Error('Experimental direction version not found')
+  const invited = Array.isArray(experiment.experiment_visibility) ? experiment.experiment_visibility : []
+  if (experiment.created_by !== actorId && !invited.includes(actorId)) {
+    throw new Error('Only the experiment creator or an invited reviewer can promote it')
+  }
+  return insertDirectionVersion(admin, experiment.direction_id, experiment, experiment.content, actorId, false, null)
 }
 
 async function selectDirection(admin: Client, body: Json, actorId: string) {
@@ -360,7 +421,8 @@ async function selectDirection(admin: Client, body: Json, actorId: string) {
   const { data: session } = await admin.from('design_workshop_sessions').select('id, engagement_id')
     .eq('id', sessionId).eq('organization_id', ORGANIZATION_ID).eq('status', 'comparison').maybeSingle()
   if (!session) throw new Error('Session is not ready for selection')
-  const { data: version } = await admin.from('design_direction_versions').select('id, direction_id').eq('id', versionId).maybeSingle()
+  const { data: version } = await admin.from('design_direction_versions').select('id, direction_id').eq('id', versionId)
+    .eq('is_experimental', false).maybeSingle()
   const { data: direction } = version
     ? await admin.from('design_directions').select('id').eq('id', version.direction_id).eq('session_id', session.id).maybeSingle()
     : { data: null }
@@ -382,7 +444,7 @@ async function releaseDirection(admin: Client, body: Json, actorId: string) {
     : { data: null }
   if (!session || !selection) throw new Error('A human-selected direction is required before release')
   const { data: version } = await admin.from('design_direction_versions').select('id, direction_id')
-    .eq('id', selection.direction_version_id).maybeSingle()
+    .eq('id', selection.direction_version_id).eq('is_experimental', false).maybeSingle()
   if (!version) throw new Error('Selected direction version is unavailable')
   const { data: release, error } = await admin.from('design_direction_releases').insert({
     organization_id: ORGANIZATION_ID, engagement_id: session.engagement_id, session_id: session.id,
@@ -410,6 +472,8 @@ async function handler(req: Request) {
       create_session: () => createSession(admin, body, user.id),
       generate_directions: () => generateDirections(admin, body, user.id),
       create_direction_revision: () => createDirectionRevision(admin, body, user.id),
+      list_experiment_reviewers: () => listExperimentReviewers(admin, membership as Json),
+      promote_direction_experiment: () => promoteDirectionExperiment(admin, body, user.id),
       select_direction: () => selectDirection(admin, body, user.id),
       release_direction: () => releaseDirection(admin, body, user.id),
     }
