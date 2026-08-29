@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import DepartmentChat from '../components/DepartmentChat.jsx'
+import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import {
   CONTENT_ARTIFACT_FORMS,
   CONTENT_ARTIFACT_TYPES,
@@ -104,11 +105,11 @@ function ArtifactWorkspace({ workspace, type, setType, saving, act }) {
       const itemApproval = approvalForVersion(workspace.approvals, itemLatest?.id)
       return <button key={id} onClick={() => setType(id)} className={`w-full rounded-2xl border p-4 text-left ${type === id ? 'border-amber-500/60 bg-amber-950/20' : 'border-slate-800 bg-slate-900/70 hover:border-slate-700'}`}><div className="flex items-start justify-between gap-3"><p className="font-semibold text-white">{definition.label}</p><span className={`rounded-full px-2.5 py-1 text-[10px] uppercase ${itemApproval ? 'bg-emerald-950 text-emerald-300' : itemLatest ? 'bg-amber-950 text-amber-300' : 'bg-slate-950 text-slate-500'}`}>{itemApproval ? 'Approved' : itemLatest ? 'Draft' : 'Missing'}</span></div><p className="mt-2 text-xs leading-5 text-slate-500">{definition.description}</p></button>
     })}</section>
-    <ArtifactForm key={`${type}:${latest?.id || 'new'}`} workspace={workspace} type={type} artifact={artifact} latest={latest} approval={approval} saving={saving} act={act} />
+    <ArtifactForm key={`${type}:${latest?.id || 'new'}`} workspace={workspace} type={type} artifact={artifact} versions={versions} latest={latest} approval={approval} saving={saving} act={act} />
   </div>
 }
 
-function ArtifactForm({ workspace, type, artifact, latest, approval, saving, act }) {
+function ArtifactForm({ workspace, type, artifact, versions, latest, approval, saving, act }) {
   const definition = CONTENT_ARTIFACT_FORMS[type]
   const [form, setForm] = useState(contentArtifactEditor(type, latest?.content))
   const [summary, setSummary] = useState(latest ? `Revision from version ${latest.version_number}` : 'Initial Content Studio version')
@@ -126,13 +127,21 @@ function ArtifactForm({ workspace, type, artifact, latest, approval, saving, act
     }), `${definition.label} saved as a new immutable version.`)
   }
 
-  return <form onSubmit={save} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+  const regionsByVersion = type === 'website_architecture' ? Object.fromEntries(versions.map(version => [
+    version.id,
+    (version.content?.pages || []).map(page => ({
+      value: `page:${page.path || page.page_name}`,
+      label: `${page.page_name}${page.path ? ` (${page.path})` : ''}`,
+    })),
+  ])) : {}
+
+  return <div><form onSubmit={save} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
     <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Canonical immutable artifact</p><h2 className="mt-1 text-2xl font-semibold">{definition.label}</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">{definition.description}</p></div><div className="text-right text-xs text-slate-500"><p>{latest ? `Version ${latest.version_number}` : 'No version yet'}</p><p className={approval ? 'mt-1 text-emerald-400' : 'mt-1 text-amber-400'}>{approval ? 'Exact version approved' : 'Approval pending'}</p></div></div>
     <div className="mt-6 space-y-5">{definition.fields.map(field => <ArtifactField key={field.key} field={field} value={form[field.key]} onChange={value => setForm(current => ({ ...current, [field.key]: value }))} />)}</div>
     <div className="mt-6 grid gap-4 md:grid-cols-2"><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Change summary<input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={summary} onChange={event => setSummary(event.target.value)} /></label><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Data classification<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={classification} onChange={event => setClassification(event.target.value)}><option>internal</option><option>confidential</option><option>public</option><option>restricted</option></select></label></div>
     <label className="mt-4 flex items-start gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300"><input type="checkbox" className="mt-1" checked={aiSafe} onChange={event => setAiSafe(event.target.checked)} /><span>Explicitly allow this exact version to be included in approved AI context. Restricted versions remain excluded.</span></label>
     <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-800 pt-5">{latest && !approval && <button type="button" disabled={saving} onClick={() => act(() => contentStudio.approveArtifact(latest.id), `${definition.label} exact version approved.`)} className={BUTTON}>Approve version {latest.version_number}</button>}<button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : latest ? 'Create new version' : 'Save first version'}</button></div>
-  </form>
+  </form><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="content" theme="amber" regionsByVersion={regionsByVersion} /></div>
 }
 
 function ArtifactField({ field, value, onChange }) {

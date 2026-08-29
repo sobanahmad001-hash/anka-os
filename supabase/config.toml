@@ -35,6 +35,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/department-chat/index.ts"
 
+[functions.proofing-layer]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/proofing-layer/index.ts"
+
 [functions.invite-client-contact]
 enabled = true
 verify_jwt = true
