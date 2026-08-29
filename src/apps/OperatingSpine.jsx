@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import DevelopmentTrackingPanel from '../components/DevelopmentTrackingPanel.jsx'
+import WorkItemsPanel from '../components/WorkItemsPanel.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { OPERATING_DEPARTMENTS } from '../data/operatingSpineRepository.js'
 import { operatingSpine } from '../data/operatingSpine.js'
@@ -169,7 +170,7 @@ export default function OperatingSpine({ initialView = 'engagements' }) {
 
   if (loading) return <div className="flex h-full items-center justify-center"><div className="h-9 w-9 animate-spin rounded-full border-2 border-slate-800 border-t-violet-500" /></div>
 
-  if (workspace) return <EngagementWorkspace workspace={workspace} onRefresh={() => openEngagement(workspace.engagement.id, { quiet: true })} onBack={() => setWorkspace(null)} />
+  if (workspace) return <EngagementWorkspace workspace={workspace} owners={ownerOptions} onRefresh={() => openEngagement(workspace.engagement.id, { quiet: true })} onBack={() => setWorkspace(null)} />
 
   return (
     <div className="h-full overflow-y-auto text-white">
@@ -223,7 +224,7 @@ function ServiceCatalogue({ services }) {
   return <section className="mt-6 grid gap-5 xl:grid-cols-2">{OPERATING_DEPARTMENTS.map(department => <article key={department.id} className="rounded-2xl border border-white/[0.07] bg-[#0e111a]/80 p-5"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-400">{department.name}</p><div className="mt-4 grid gap-2">{services.filter(service => service.department_id === department.id).map(service => <div key={service.id} className="rounded-xl border border-white/[0.06] bg-white/[0.025] p-3"><p className="text-sm font-semibold">{service.name}</p><p className="mt-1 text-xs leading-5 text-slate-500">{service.description}</p></div>)}</div></article>)}</section>
 }
 
-function EngagementWorkspace({ workspace, onRefresh, onBack }) {
+function EngagementWorkspace({ workspace, owners, onRefresh, onBack }) {
   const [tab, setTab] = useState('overview')
   const stageById = new Map(workspace.stages.map(stage => [stage.id, stage]))
   const hasDevelopment = workspace.services.some(item => item.status === 'active' && item.service_catalog?.department_id === 'development')
@@ -232,8 +233,8 @@ function EngagementWorkspace({ workspace, onRefresh, onBack }) {
     <button onClick={onBack} className="text-sm text-slate-500 hover:text-white">← Back to engagements</button>
     <header className="mt-5 flex flex-wrap items-start justify-between gap-5"><div><p className="text-xs text-violet-400">{workspace.engagement.agency_clients?.name} · {workspace.engagement.brands?.name}</p><h1 className="mt-1 text-3xl font-semibold">{workspace.engagement.name}</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">{workspace.engagement.objective || 'No objective recorded.'}</p></div><Badge>{labelize(workspace.engagement.status)}</Badge></header>
     <div className="mt-7 grid gap-3 sm:grid-cols-4"><Metric label="Services" value={workspace.services.length} /><Metric label="Journey stages" value={workspace.stages.length} /><Metric label="Dependencies" value={workspace.dependencies.length} /><Metric label="Scoped connectors" value={workspace.connectors.length} /></div>
-    <nav className="mt-7 flex gap-2 border-b border-white/[0.07]"><button onClick={() => setTab('overview')} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === 'overview' ? 'border-violet-400 text-white' : 'border-transparent text-slate-500'}`}>Overview</button>{hasDevelopment && <button onClick={() => setTab('development')} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === 'development' ? 'border-blue-400 text-blue-300' : 'border-transparent text-slate-500'}`}>Development</button>}</nav>
-    {tab === 'development' && hasDevelopment ? <DevelopmentTrackingPanel workspace={workspace} onRefresh={onRefresh} /> : <div className="mt-7 grid gap-6 xl:grid-cols-[1.4fr_1fr]">
+    <nav className="mt-7 flex gap-2 border-b border-white/[0.07]"><button onClick={() => setTab('overview')} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === 'overview' ? 'border-violet-400 text-white' : 'border-transparent text-slate-500'}`}>Overview</button><button onClick={() => setTab('work')} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === 'work' ? 'border-violet-400 text-white' : 'border-transparent text-slate-500'}`}>Work</button>{hasDevelopment && <button onClick={() => setTab('development')} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === 'development' ? 'border-blue-400 text-blue-300' : 'border-transparent text-slate-500'}`}>Development</button>}</nav>
+    {tab === 'work' ? <WorkItemsPanel workspace={workspace} owners={owners} onRefresh={onRefresh} /> : tab === 'development' && hasDevelopment ? <DevelopmentTrackingPanel workspace={workspace} onRefresh={onRefresh} /> : <div className="mt-7 grid gap-6 xl:grid-cols-[1.4fr_1fr]">
       <section className="rounded-2xl border border-white/[0.07] bg-[#0e111a]/80 p-5"><h2 className="font-semibold">Instantiated journey</h2><p className="mt-1 text-xs text-slate-500">Only selected service stages and unresolved short prerequisites appear.</p><div className="mt-5 space-y-3">{workspace.stages.map((stage, index) => { const blockers = workspace.dependencies.filter(item => item.stage_instance_id === stage.id).map(item => stageById.get(item.depends_on_stage_instance_id)?.name).filter(Boolean); return <div key={stage.id} className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-4"><div className="flex items-center gap-3"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-500/15 text-xs font-semibold text-violet-300">{index + 1}</span><div className="flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-medium">{stage.name}</p>{stage.stage_kind === 'short_prerequisite' && <Badge>Short prerequisite</Badge>}</div><p className="mt-1 text-xs text-slate-500">{labelize(stage.accountable_department_id)} · {labelize(stage.status)}</p>{blockers.length > 0 && <p className="mt-2 text-xs text-amber-300">Depends on: {blockers.join(', ')}</p>}</div></div></div> })}</div></section>
       <div className="space-y-6"><Panel title="Activated services">{workspace.services.map(item => <Record key={item.id} title={item.service_catalog?.name} note={`${labelize(item.service_catalog?.department_id)} · ${labelize(item.status)}`} />)}</Panel><Panel title="Prerequisite record">{workspace.prerequisites.length ? workspace.prerequisites.map(item => <Record key={item.id} title={labelize(item.prerequisite_key)} note={`${labelize(item.satisfaction_method)} · ${labelize(item.status)}`} />) : <p className="text-sm text-slate-500">No additional prerequisite was required.</p>}</Panel><Panel title="Existing assets">{workspace.assets.length ? workspace.assets.map(item => <Record key={item.id} title={item.name} note={labelize(item.asset_kind)} />) : <p className="text-sm text-slate-500">No assets supplied.</p>}</Panel><Panel title="Audit trail">{workspace.events.map(item => <Record key={item.id} title={labelize(item.event_type)} note={new Date(item.occurred_at).toLocaleString()} />)}</Panel></div>
     </div>}
