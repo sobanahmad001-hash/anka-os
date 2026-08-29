@@ -1,6 +1,12 @@
 export const WORK_ITEM_TYPES = Object.freeze(['task', 'bug', 'request'])
 export const WORK_ITEM_PRIORITIES = Object.freeze(['low', 'medium', 'high', 'urgent'])
 export const WORK_ITEM_STATUSES = Object.freeze(['not_started', 'in_progress', 'blocked', 'done'])
+export const WORK_ITEM_BOARD_COLUMNS = Object.freeze([
+  Object.freeze({ value: 'not_started', label: 'Not Started' }),
+  Object.freeze({ value: 'in_progress', label: 'In Progress' }),
+  Object.freeze({ value: 'blocked', label: 'Blocked' }),
+  Object.freeze({ value: 'done', label: 'Done' }),
+])
 
 const PRIORITY_ORDER = Object.freeze({ urgent: 0, high: 1, medium: 2, low: 3 })
 const STATUS_ORDER = Object.freeze({ blocked: 0, in_progress: 1, not_started: 2, done: 3 })
@@ -55,4 +61,70 @@ export function filterAndSortWorkItems(items, filters = {}, sort = {}, today = n
     if (rightValue == null || rightValue === '') return -1
     return String(leftValue).localeCompare(String(rightValue), undefined, { numeric: true }) * direction
   })
+}
+
+export function workItemSaveInput(item, engagementId, overrides = {}) {
+  const next = { ...item, ...overrides }
+  return {
+    workItemId: next.id || null,
+    engagementId,
+    title: next.title,
+    description: next.description,
+    workItemType: next.work_item_type,
+    priority: next.priority,
+    status: next.status,
+    assigneeId: next.assignee_id || null,
+    departmentId: next.department_id || null,
+    linkedArtifactId: next.linked_artifact_id || null,
+    linkedArtifactVersionId: next.linked_artifact_version_id || null,
+    linkedEngagementStageInstanceId: next.linked_engagement_stage_instance_id || null,
+    startDate: next.start_date || null,
+    dueDate: next.due_date || null,
+    position: Math.max(0, Number(next.position || 0)),
+  }
+}
+
+export function groupWorkItemsForBoard(items) {
+  const columns = Object.fromEntries(WORK_ITEM_STATUSES.map(status => [status, []]))
+  for (const item of items || []) {
+    if (columns[item.status]) columns[item.status].push(item)
+  }
+  for (const status of WORK_ITEM_STATUSES) {
+    columns[status].sort((left, right) => Number(left.position || 0) - Number(right.position || 0) || String(left.created_at || left.id).localeCompare(String(right.created_at || right.id)))
+  }
+  return columns
+}
+
+export function planWorkItemBoardMove(items, workItemId, targetStatus, beforeWorkItemId = null) {
+  if (!WORK_ITEM_STATUSES.includes(targetStatus)) return []
+  const moved = (items || []).find(item => item.id === workItemId)
+  if (!moved) return []
+
+  const columns = groupWorkItemsForBoard(items)
+  const targetItems = columns[targetStatus].filter(item => item.id !== workItemId)
+  const targetIndex = beforeWorkItemId
+    ? targetItems.findIndex(item => item.id === beforeWorkItemId)
+    : targetItems.length
+  const insertionIndex = targetIndex < 0 ? targetItems.length : targetIndex
+  const previous = targetItems[insertionIndex - 1]
+  const next = targetItems[insertionIndex]
+  const previousPosition = previous ? Number(previous.position || 0) : null
+  const nextPosition = next ? Number(next.position || 0) : null
+
+  let position
+  if (previousPosition == null && nextPosition == null) position = 0
+  else if (previousPosition == null && nextPosition > 0) position = Math.floor(nextPosition / 2)
+  else if (nextPosition == null) position = previousPosition + 1000
+  else if (nextPosition - previousPosition > 1) position = previousPosition + Math.floor((nextPosition - previousPosition) / 2)
+
+  if (position != null) {
+    if (moved.status === targetStatus && Number(moved.position || 0) === position) return []
+    return [{ ...moved, status: targetStatus, position }]
+  }
+
+  const reordered = [...targetItems]
+  reordered.splice(insertionIndex, 0, { ...moved, status: targetStatus })
+  return reordered
+    .map((item, index) => ({ ...item, status: targetStatus, position: (index + 1) * 1000 }))
+    .filter(item => item.id === moved.id || item.status !== (items.find(existing => existing.id === item.id)?.status) || item.position !== Number(items.find(existing => existing.id === item.id)?.position || 0))
 }
