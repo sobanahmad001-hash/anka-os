@@ -24,6 +24,14 @@ export const workItems = Object.freeze({
       .order('position')
       .order('created_at')
   ),
+  listDependencies: workItemIds => workItemIds.length ? dataOrThrow(
+    supabase.from('work_item_dependencies')
+      .select('*')
+      .in('work_item_id', workItemIds)
+      .order('created_at')
+  ) : Promise.resolve([]),
   save: input => invoke('save', input),
   remove: workItemId => invoke('delete', { workItemId }),
+  addDependency: (workItemId, dependsOnWorkItemId) => invoke('add_dependency', { workItemId, dependsOnWorkItemId }),
+  removeDependency: (workItemId, dependsOnWorkItemId) => invoke('remove_dependency', { workItemId, dependsOnWorkItemId }),
 })
