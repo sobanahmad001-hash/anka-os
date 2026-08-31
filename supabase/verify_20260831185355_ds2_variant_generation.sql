@@ -176,7 +176,7 @@ begin
     context_checksum, status, created_by
   ) values (
     v_other_session_id, v_organization_id, v_engagement_id, v_brand_id, v_other_engagement_service_id,
-    'brand_system', '{}'::jsonb, 'DS2 wrong-service verifier', '{}'::jsonb,
+    'brand_identity', '{}'::jsonb, 'DS2 wrong-service verifier', '{}'::jsonb,
     repeat('d', 64), 'released', v_actor_id
   );
 
