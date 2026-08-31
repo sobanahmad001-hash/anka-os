@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.1",
+    "fflate": "0.8.2",
     "pngjs": "7.0.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
