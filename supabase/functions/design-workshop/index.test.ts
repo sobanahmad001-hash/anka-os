@@ -263,7 +263,7 @@ Deno.test('OpenAI image adapter receives the variant provider canvas through the
 })
 
 Deno.test('variant image processing exports and verifies the exact declared PNG dimensions', async () => {
-  const encoded = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+  const encoded = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII='
   const source = Uint8Array.from(atob(encoded), character => character.charCodeAt(0))
   const output = await cropResizePng(source, 728, 90)
   assert.equal(pngDimensions(output).width, 728)

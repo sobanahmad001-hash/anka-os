@@ -1,5 +1,6 @@
+import { Buffer } from 'node:buffer'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
-import { Image } from 'npm:imagescript@1.3.0'
+import { PNG } from 'npm:pngjs@7.0.0'
 import { compileApprovedArtifactContext, stableJson } from '../_shared/approvedArtifactContext.ts'
 
 type Client = ReturnType<typeof createClient<any>>
@@ -483,8 +484,33 @@ export async function cropResizePng(bytes: Uint8Array, width: number, height: nu
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 4096 || height > 4096) {
     throw new Error('Target image dimensions are invalid')
   }
-  const source = await Image.decode(bytes)
-  const output = await source.cover(width, height).encode(6)
+  const declaredSource = pngDimensions(bytes)
+  if (declaredSource.width > 4096 || declaredSource.height > 4096 || declaredSource.width * declaredSource.height > 16_777_216) {
+    throw new Error('Generated PNG dimensions exceed the processing limit')
+  }
+  const source = PNG.sync.read(Buffer.from(bytes))
+  const targetRatio = width / height
+  const sourceRatio = source.width / source.height
+  const cropWidth = sourceRatio > targetRatio ? source.height * targetRatio : source.width
+  const cropHeight = sourceRatio > targetRatio ? source.height : source.width / targetRatio
+  const cropX = (source.width - cropWidth) / 2
+  const cropY = (source.height - cropHeight) / 2
+  const outputPng = new PNG({ width, height })
+
+  for (let targetY = 0; targetY < height; targetY += 1) {
+    const sourceY = Math.min(source.height - 1, Math.floor(cropY + ((targetY + 0.5) * cropHeight / height)))
+    for (let targetX = 0; targetX < width; targetX += 1) {
+      const sourceX = Math.min(source.width - 1, Math.floor(cropX + ((targetX + 0.5) * cropWidth / width)))
+      const sourceOffset = (sourceY * source.width + sourceX) * 4
+      const targetOffset = (targetY * width + targetX) * 4
+      outputPng.data[targetOffset] = source.data[sourceOffset]
+      outputPng.data[targetOffset + 1] = source.data[sourceOffset + 1]
+      outputPng.data[targetOffset + 2] = source.data[sourceOffset + 2]
+      outputPng.data[targetOffset + 3] = source.data[sourceOffset + 3]
+    }
+  }
+
+  const output = new Uint8Array(PNG.sync.write(outputPng, { deflateLevel: 6 }))
   const actual = pngDimensions(output)
   if (actual.width !== width || actual.height !== height) {
     throw new Error(`Generated PNG is ${actual.width}x${actual.height}; expected ${width}x${height}`)
@@ -522,7 +548,9 @@ async function generateImageForTarget(admin: Client, input: {
     : contentRequestMediaStoragePath(input.contentRequestId!, asset.id)
   let uploaded = false
   try {
-    let bytes = await generateOpenAiImage(credential, model.model_id, input.prompt, input.providerSize)
+    let bytes = input.providerSize
+      ? await generateOpenAiImage(credential, model.model_id, input.prompt, input.providerSize)
+      : await generateOpenAiImage(credential, model.model_id, input.prompt)
     const hasTargetDimensions = input.targetWidth !== undefined || input.targetHeight !== undefined
     if (hasTargetDimensions) {
       if (input.targetWidth === undefined || input.targetHeight === undefined) {
