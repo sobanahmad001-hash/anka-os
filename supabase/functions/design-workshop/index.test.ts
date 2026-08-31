@@ -1,4 +1,4 @@
-import { directionSchema, directionsAreDistinct, generateOpenAiImage, hasWorkshopAuthority, mediaPrompt,
+import { designEventLink, directionSchema, directionsAreDistinct, generateOpenAiImage, hasWorkshopAuthority, mediaPrompt,
   mediaStoragePath, sha256, similarity, VIDEO_UNAVAILABLE_MESSAGE } from './index.ts'
 import { compileApprovedArtifactContext } from '../_shared/approvedArtifactContext.ts'
 
@@ -116,4 +116,14 @@ Deno.test('video placeholder is explicit and signing is available to invited rev
   assert.equal(VIDEO_UNAVAILABLE_MESSAGE,
     'Video generation is not yet configured. An API key and provider need to be added before this works.')
   assert.equal(hasWorkshopAuthority({ role: 'contributor', department_id: 'marketing' }, 'sign_media_assets'), true)
+})
+
+Deno.test('event-linked sessions use one exact identity and keep ordinary sessions optional', () => {
+  const link = designEventLink('session-1', 'event-1', 'actor-1')
+  assert.equal(link.id, 'session-1')
+  assert.equal(link.external_event_id, 'event-1')
+  assert.equal(link.organization_id, '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25')
+  assert.equal(link.content_type, 'design_asset')
+  assert.equal(link.linked_work_item_id, null)
+  assert.equal(link.status, 'in_progress')
 })

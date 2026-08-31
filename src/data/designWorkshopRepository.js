@@ -39,6 +39,8 @@ export const designWorkshop = Object.freeze({
       invoke('list_experiment_reviewers'),
     ])
     const sessionIds = sessions.map(item => item.id)
+    const externalEvents = await dataOrThrow(supabase.from('external_events').select('id, event_name, event_category, start_date, end_date')
+      .eq('brand_id', engagement.brand_id).order('start_date').order('event_name'))
     const directionData = sessionIds.length ? await Promise.all([
       dataOrThrow(supabase.from('design_workshop_context_versions').select('*').in('session_id', sessionIds)),
       dataOrThrow(supabase.from('design_workshop_model_selections').select('*, design_model_registry(*)').in('session_id', sessionIds).order('position')),
@@ -71,7 +73,7 @@ export const designWorkshop = Object.freeze({
     const architectureVersion = versions.filter(item => item.artifact_id === architectureArtifact?.id)
       .sort((left, right) => right.version_number - left.version_number)[0]
     return {
-      engagement, stages, artifacts, versions, approvals, models, sessions,
+      engagement, stages, artifacts, versions, approvals, models, sessions, externalEvents,
       contextVersions: directionData[0], modelSelections: directionData[1], runs: directionData[2],
       directions, selections: directionData[4], releases: directionData[5], directionVersions,
       experimentalDirectionVersions, experimentReviewers,

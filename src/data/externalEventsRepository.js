@@ -22,9 +22,16 @@ export const externalEvents = Object.freeze({
     .eq('brand_id', brandId).is('deleted_at', null).order('created_at', { ascending: false })),
   list: brandId => dataOrThrow(supabase.from('external_events').select('*')
     .eq('brand_id', brandId).order('start_date').order('event_name')),
-  listLinks: eventId => dataOrThrow(supabase.from('content_event_links')
-    .select('*, work_items(id, title, status, deleted_at)').eq('external_event_id', eventId)
-    .order('content_type').order('created_at')),
+  async listLinks(eventId) {
+    const links = await dataOrThrow(supabase.from('content_event_links')
+      .select('*, work_items(id, title, status, deleted_at)').eq('external_event_id', eventId)
+      .order('content_type').order('created_at'))
+    const sessionIds = links.filter(link => link.content_type === 'design_asset').map(link => link.id)
+    const sessions = sessionIds.length ? await dataOrThrow(supabase.from('design_workshop_sessions')
+      .select('id, engagement_id, output_family, status').in('id', sessionIds)) : []
+    const sessionsById = new Map(sessions.map(session => [session.id, session]))
+    return links.map(link => ({ ...link, design_workshop_session: sessionsById.get(link.id) || null }))
+  },
   listDue: brandId => dataOrThrow(supabase.from('content_event_links_due').select('*')
     .eq('brand_id', brandId).order('due_date').order('event_start_date')),
   saveEvent: input => invoke(input.eventId ? 'update_event' : 'create_event', input),
