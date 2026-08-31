@@ -67,7 +67,7 @@ async function requireContext(request: Request) {
   if (!membership || membership.status !== 'active' || membership.member_kind !== 'team') {
     throw Object.assign(new Error('Active team membership required'), { status: 403 })
   }
-  return { admin, user, membership }
+  return { userClient, admin, user, membership }
 }
 
 export async function requireContentEngagement(admin: Client, engagementId: string) {
@@ -96,7 +96,7 @@ async function safeStage(admin: Client, engagementId: string, stageId: unknown) 
   return stage.id
 }
 
-async function saveArtifact(admin: Client, body: Json, actorId: string) {
+async function saveArtifact(userClient: Client, admin: Client, body: Json, actorId: string) {
   const engagementId = text(body.engagement_id, 80)
   const artifactType = text(body.artifact_type, 60)
   if (!CONTENT_ARTIFACT_TYPE_SET.has(artifactType)) throw new Error('Unsupported Content artifact')
@@ -109,7 +109,7 @@ async function saveArtifact(admin: Client, body: Json, actorId: string) {
     artifactId: text(body.artifact_id, 80) || null, artifactType,
     title: text(body.title, 240), content: body.content,
     changeSummary: text(body.change_summary, 1000), aiUseAllowed: body.ai_use_allowed === true,
-    dataClassification: classification, actorId, source: 'manual',
+    dataClassification: classification, actorId, source: 'manual', visibilityClient: userClient,
   })
 }
 
@@ -179,14 +179,14 @@ export async function handleRequest(request: Request) {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (request.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
   try {
-    const { admin, user, membership } = await requireContext(request)
+    const { userClient, admin, user, membership } = await requireContext(request)
     const body = await request.json() as Json
     const action = text(body.action, 60)
     if (!hasContentAuthority(membership, action)) {
       return response({ error: action === 'approve_artifact'
         ? 'Content manager approval required' : 'Content department access required' }, 403)
     }
-    if (action === 'save_artifact') return response({ data: await saveArtifact(admin, body, user.id) })
+    if (action === 'save_artifact') return response({ data: await saveArtifact(userClient, admin, body, user.id) })
     if (action === 'approve_artifact') return response({ data: await approveArtifact(admin, body, user.id) })
     if (action === 'create_custom_field_definition') {
       return response({ data: await createCustomFieldDefinition(admin, body, user.id) })

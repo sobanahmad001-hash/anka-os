@@ -72,7 +72,7 @@ async function requireContext(request: Request) {
   if (!membership || membership.status !== 'active' || membership.member_kind !== 'team') {
     throw Object.assign(new Error('Active team membership required'), { status: 403 })
   }
-  return { admin, user, membership }
+  return { userClient, admin, user, membership }
 }
 
 async function requireContentEngagement(admin: Client, engagementId: string) {
@@ -140,7 +140,7 @@ async function safeStage(admin: Client, engagementId: string, stageId: unknown) 
   return stage.id
 }
 
-async function proposeArtifact(admin: Client, body: Json, actorId: string, fetcher: typeof fetch = fetch) {
+async function proposeArtifact(userClient: Client, admin: Client, body: Json, actorId: string, fetcher: typeof fetch = fetch) {
   const startedAt = Date.now()
   const engagementId = text(body.engagement_id, 80)
   const artifactType = text(body.artifact_type, 60)
@@ -218,7 +218,7 @@ ${JSON.stringify({ engagement, active_content_services: services, approved_artif
     title: text(body.title, 240) || `${artifactType.replaceAll('_', ' ')} chat draft`,
     content, changeSummary: text(body.change_summary, 1000) || 'Draft proposed via Shared Department Chat',
     aiUseAllowed: false, dataClassification: 'internal', actorId,
-    source: 'department_chat', aiRunId: run.id,
+    source: 'department_chat', aiRunId: run.id, visibilityClient: userClient,
   })
   return { ...saved, content, ai_run_id: run.id, model: provider.model, connector_connection_id: provider.connectorId }
 }
@@ -227,7 +227,7 @@ export async function handleRequest(request: Request) {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (request.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
   try {
-    const { admin, user, membership } = await requireContext(request)
+    const { userClient, admin, user, membership } = await requireContext(request)
     const body = await request.json() as Json
     const departmentId = text(body.department_id, 40)
     if (departmentId !== 'content') return response({ error: 'Content is the only enabled department in this phase' }, 400)
@@ -235,7 +235,7 @@ export async function handleRequest(request: Request) {
       return response({ error: 'This department chat is restricted to its team and organization leadership' }, 403)
     }
     if (text(body.action, 60) !== 'propose_artifact') return response({ error: 'Unsupported action' }, 400)
-    return response({ data: await proposeArtifact(admin, body, user.id) })
+    return response({ data: await proposeArtifact(userClient, admin, body, user.id) })
   } catch (error) {
     const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : 400
     return response({ error: error instanceof Error ? error.message : 'Unexpected Department Chat error' },

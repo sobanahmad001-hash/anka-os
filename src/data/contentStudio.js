@@ -31,25 +31,26 @@ export const CONTENT_ARTIFACT_FORMS = Object.freeze({
     ]),
   }),
   website_architecture: Object.freeze({
-    label: 'Website architecture', description: 'Structured sitemap, page inventory, page goals, audiences, and calls to action.',
+    label: 'Website architecture', description: 'Structured sitemap with page hierarchy, type, and purpose.',
     fields: Object.freeze([
-      { key: 'site_goal', label: 'Overall website goal', kind: 'textarea' },
-      { key: 'navigation_principles', label: 'Navigation principles', kind: 'list' },
       { key: 'pages', label: 'Page inventory', kind: 'records', addLabel: 'Add page', recordFields: [
-        ['page_name', 'Page name', 'text'], ['path', 'Path', 'text'], ['page_goal', 'Page goal', 'textarea'],
-        ['primary_audience', 'Primary audience', 'text'], ['primary_cta', 'Primary CTA', 'text'],
+        ['slug', 'Page slug', 'text'], ['title', 'Page title', 'text'],
+        ['parent_slug', 'Parent page', 'parent_slug'],
+        ['page_type', 'Page type', 'select', ['hub', 'service', 'supporting']],
+        ['purpose', 'Page purpose', 'textarea'],
       ] },
     ]),
   }),
   keyword_strategy: Object.freeze({
-    label: 'Keyword strategy', description: 'Service, search-demand, and brand-identity keyword lenses mapped to pages.',
+    label: 'SEO and keyword planning', description: 'Industry, brand, and volume keywords linked to sitemap pages.',
     fields: Object.freeze([
-      { key: 'strategy_summary', label: 'Strategy summary', kind: 'textarea' },
-      { key: 'page_keywords', label: 'Page keyword map', kind: 'records', addLabel: 'Add page mapping', recordFields: [
-        ['page_path', 'Page path', 'text'], ['service_keywords', 'Service/product keywords', 'list'],
-        ['search_demand_keywords', 'Search-demand keywords', 'list'], ['brand_identity_keywords', 'Brand/identity keywords', 'list'],
+      { key: 'keywords', label: 'Keyword-to-page map', kind: 'records', addLabel: 'Add keyword', recordFields: [
+        ['term', 'Keyword term', 'text'],
+        ['category', 'Category', 'select', ['industry', 'brand', 'volume']],
+        ['search_volume', 'Search volume', 'number'],
+        ['target_page_slug', 'Target sitemap page', 'target_page_slug'],
+        ['notes', 'Notes', 'textarea_optional'],
       ] },
-      { key: 'measurement_notes', label: 'Measurement and review notes', kind: 'list' },
     ]),
   }),
   content: Object.freeze({
@@ -114,7 +115,12 @@ export function serializeContentArtifact(type, editor) {
     const value = editor[field.key]
     if (field.kind === 'list') return [field.key, lines(value)]
     if (field.kind === 'records') return [field.key, (value || []).map(record => Object.fromEntries(
-      field.recordFields.map(([key, , kind]) => [key, kind === 'list' ? commaList(record[key]) : String(record[key] || '').trim()]),
+      field.recordFields.map(([key, , kind]) => {
+        if (kind === 'list') return [key, commaList(record[key])]
+        if (kind === 'number') return [key, Number(record[key])]
+        if (kind === 'parent_slug') return [key, String(record[key] || '').trim() || null]
+        return [key, String(record[key] || '').trim()]
+      }),
     ))]
     return [field.key, String(value || '').trim()]
   }))

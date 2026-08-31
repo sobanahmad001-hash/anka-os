@@ -29,17 +29,19 @@ test('Content vocabulary migration is an isolated additive CHECK change', () => 
   assert.equal((migration.match(/alter table public\./g) || []).length, 4)
 })
 
-test('website architecture and three-lens keyword strategy serialize as structured records', () => {
+test('RP2 sitemap and keyword-to-page content serialize as structured records', () => {
   const architecture = serializeContentArtifact('website_architecture', {
-    site_goal: 'Convert', navigation_principles: 'Clear\nPredictable',
-    pages: [{ page_name: 'Home', path: '/', page_goal: 'Orient', primary_audience: 'Buyer', primary_cta: 'Book' }],
+    pages: [{ slug: 'home', title: 'Homepage', parent_slug: '', page_type: 'hub', purpose: 'Orient' }],
   })
-  assert.equal(architecture.pages[0].path, '/')
+  assert.deepEqual(architecture.pages[0], {
+    slug: 'home', title: 'Homepage', parent_slug: null, page_type: 'hub', purpose: 'Orient',
+  })
   const keywords = serializeContentArtifact('keyword_strategy', {
-    strategy_summary: 'Intent map', measurement_notes: 'Review quarterly',
-    page_keywords: [{ page_path: '/', service_keywords: 'strategy, consulting', search_demand_keywords: 'agency', brand_identity_keywords: 'Anka' }],
+    keywords: [{ term: 'strategy agency', category: 'industry', search_volume: '1200', target_page_slug: 'home', notes: '' }],
   })
-  assert.deepEqual(keywords.page_keywords[0].service_keywords, ['strategy', 'consulting'])
+  assert.deepEqual(keywords.keywords[0], {
+    term: 'strategy agency', category: 'industry', search_volume: 1200, target_page_slug: 'home', notes: '',
+  })
 })
 
 test('stage selection remains within the Content department', () => {
