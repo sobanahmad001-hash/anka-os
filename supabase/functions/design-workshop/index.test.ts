@@ -1,5 +1,6 @@
-import { designEventLink, directionSchema, directionsAreDistinct, generateOpenAiImage, hasWorkshopAuthority, mediaPrompt,
-  mediaStoragePath, sha256, similarity, VIDEO_UNAVAILABLE_MESSAGE } from './index.ts'
+import { createSession, designEventLink, directionSchema, directionsAreDistinct, generateOpenAiImage, hasWorkshopAuthority, mediaPrompt,
+  mediaStoragePath, outputFamilyForService, requireActiveDesignService, sha256, similarity,
+  VIDEO_UNAVAILABLE_MESSAGE } from './index.ts'
 import { compileApprovedArtifactContext } from '../_shared/approvedArtifactContext.ts'
 
 function assert(value: unknown, message = 'Expected value to be truthy') {
@@ -18,6 +19,113 @@ assert.throws = (callback: () => unknown) => {
 Deno.test('Content members cannot call Design Workshop actions after authoring relocation', () => {
   assert.equal(hasWorkshopAuthority({ role: 'member', department_id: 'content' }, 'create_session'), false)
   assert.equal(hasWorkshopAuthority({ role: 'department_manager', department_id: 'content' }, 'generate_directions'), false)
+})
+
+Deno.test('all eight Design services derive a compatible display family', () => {
+  const expected = {
+    brand_visual_identity: 'brand_identity', design_systems: 'brand_identity',
+    website_ux_ui: 'website_design', campaign_creative: 'marketing_asset',
+    social_assets: 'marketing_asset', advertising_assets: 'marketing_asset',
+    video_concepts_storyboards: 'video_motion', visual_production: 'marketing_asset',
+  }
+  for (const [slug, family] of Object.entries(expected)) assert.equal(outputFamilyForService(slug), family)
+  assert.throws(() => outputFamilyForService('content_strategy'))
+})
+
+Deno.test('session service validation accepts active Design service and rejects inactive service', async () => {
+  class Query {
+    constructor(private row: Record<string, unknown> | null) {}
+    select() { return this }
+    eq() { return this }
+    async maybeSingle() { return { data: this.row, error: null } }
+  }
+  const active = {
+    id: 'active-service', engagement_id: 'engagement-1', status: 'active',
+    service_catalog: { slug: 'brand_visual_identity', department_id: 'design', is_active: true },
+  }
+  const accepted = await requireActiveDesignService({ from: () => new Query(active) } as never, 'engagement-1', 'active-service')
+  assert.equal(accepted.outputFamily, 'brand_identity')
+
+  const inactive = { ...active, id: 'inactive-service', status: 'planned' }
+  let rejected = false
+  try {
+    await requireActiveDesignService({ from: () => new Query(inactive) } as never, 'engagement-1', 'inactive-service')
+  } catch (error) {
+    rejected = error instanceof Error && error.message.includes('not active')
+  }
+  assert(rejected, 'Expected inactive engagement service to be rejected')
+})
+
+Deno.test('session creation combines active service enforcement with optional event linking without regressing core families', async () => {
+  const inserted: Record<string, unknown[]> = {}
+  const artifacts = ['discovery', 'vision', 'audience'].map(type => ({
+    id: `${type}-artifact`, organization_id: 'org-1', engagement_id: 'engagement-1',
+    brand_id: 'brand-1', artifact_type: type,
+  }))
+  const approvals = artifacts.map((artifact, index) => ({
+    id: `${artifact.artifact_type}-approval`, artifact_id: artifact.id,
+    artifact_version_id: `${artifact.artifact_type}-version`, approved_at: `2026-08-3${index + 1}T00:00:00Z`,
+  }))
+  const versions = artifacts.map(artifact => ({
+    id: `${artifact.artifact_type}-version`, version_number: 1,
+    content_checksum: `${artifact.artifact_type}-checksum`, content: { approved: artifact.artifact_type },
+    ai_use_allowed: true, data_classification: 'internal',
+  }))
+
+  class Query {
+    private insertedValue: unknown = null
+    constructor(private table: string, private fixtures: Record<string, unknown[]>) {}
+    select() { return this }
+    eq() { return this }
+    in() { return this }
+    order() { return this }
+    delete() { return this }
+    insert(value: unknown) {
+      this.insertedValue = value
+      inserted[this.table] = [...(inserted[this.table] || []), value]
+      return this
+    }
+    async maybeSingle() { return { data: this.fixtures[this.table]?.[0] || null, error: null } }
+    async single() {
+      const value = this.insertedValue as Record<string, unknown>
+      return { data: { ...value, id: value.id || 'generated-session' }, error: null }
+    }
+    then(resolve: (value: unknown) => unknown) {
+      return Promise.resolve(resolve({ data: this.insertedValue ? this.insertedValue : this.fixtures[this.table] || [], error: null }))
+    }
+  }
+
+  for (const [serviceSlug, expectedFamily, externalEventId] of [
+    ['brand_visual_identity', 'brand_identity', 'event-1'],
+    ['campaign_creative', 'marketing_asset', null],
+  ] as const) {
+    const fixtures: Record<string, unknown[]> = {
+      engagements: [{ id: 'engagement-1', brand_id: 'brand-1', engagement_type: 'project' }],
+      external_events: externalEventId ? [{ id: externalEventId }] : [],
+      engagement_services: [{
+        id: `${serviceSlug}-engagement-service`, engagement_id: 'engagement-1', status: 'active',
+        service_catalog: { slug: serviceSlug, department_id: 'design', is_active: true },
+      }],
+      design_model_registry: [{ id: 'model-1', is_active: true, supported_output_types: ['design_direction'] }],
+      artifacts, artifact_approvals: approvals, artifact_versions: versions,
+    }
+    const admin = { from: (table: string) => new Query(table, fixtures) }
+    const session = await createSession(admin as never, {
+      engagement_id: 'engagement-1', brand_id: 'brand-1',
+      engagement_service_id: `${serviceSlug}-engagement-service`,
+      model_registry_ids: ['model-1'], output_brief: { goal: 'Combined regression test' },
+      designer_instructions: 'Use approved context only.', instructions_safe_for_ai: true,
+      external_event_id: externalEventId,
+    }, 'actor-1')
+    assert.equal(session.engagement_service_id, `${serviceSlug}-engagement-service`)
+    assert.equal(session.output_family, expectedFamily)
+  }
+
+  const eventLinks = inserted.content_event_links || []
+  assert.equal(eventLinks.length, 1)
+  const linked = eventLinks[0] as Record<string, unknown>
+  assert.equal(linked.external_event_id, 'event-1')
+  assert.equal(linked.content_type, 'design_asset')
 })
 
 Deno.test('direction schema is strict and includes traceable recommendation fields', () => {

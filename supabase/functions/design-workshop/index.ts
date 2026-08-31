@@ -9,7 +9,16 @@ const MEDIA_BUCKET = 'design-generated-media'
 const OPENAI_IMAGES_URL = 'https://api.openai.com/v1/images/generations'
 export const VIDEO_UNAVAILABLE_MESSAGE = 'Video generation is not yet configured. An API key and provider need to be added before this works.'
 const ARTIFACT_TYPES = new Set(['discovery', 'vision', 'audience'])
-const OUTPUT_FAMILIES = new Set(['brand_identity', 'website_design', 'marketing_asset', 'video_motion'])
+const SERVICE_OUTPUT_FAMILIES = new Map([
+  ['brand_visual_identity', 'brand_identity'],
+  ['design_systems', 'brand_identity'],
+  ['website_ux_ui', 'website_design'],
+  ['campaign_creative', 'marketing_asset'],
+  ['social_assets', 'marketing_asset'],
+  ['advertising_assets', 'marketing_asset'],
+  ['video_concepts_storyboards', 'video_motion'],
+  ['visual_production', 'marketing_asset'],
+])
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 const LANES = [
   { key: 'clarity', direction: 'Restrained, editorial and trust-led. Prioritise clarity, hierarchy and disciplined use of brand equity.' },
@@ -178,11 +187,31 @@ async function validateScope(admin: Client, engagementId: string, brandId: strin
   return engagement
 }
 
-async function createSession(admin: Client, body: Json, actorId: string) {
+export function outputFamilyForService(serviceSlug: unknown) {
+  const outputFamily = SERVICE_OUTPUT_FAMILIES.get(text(serviceSlug, 80))
+  if (!outputFamily) throw new Error('Unsupported Design service')
+  return outputFamily
+}
+
+export async function requireActiveDesignService(admin: Client, engagementId: string, engagementServiceId: string) {
+  if (!engagementServiceId) throw new Error('Select an active Design service')
+  const { data: service, error } = await admin.from('engagement_services')
+    .select('id, engagement_id, status, service_catalog!inner(id, slug, name, department_id, is_active)')
+    .eq('id', engagementServiceId).eq('organization_id', ORGANIZATION_ID).eq('engagement_id', engagementId)
+    .eq('status', 'active').eq('service_catalog.department_id', 'design')
+    .eq('service_catalog.is_active', true).maybeSingle()
+  if (error) throw error
+  const catalog = Array.isArray(service?.service_catalog) ? service.service_catalog[0] : service?.service_catalog
+  if (!service || service.status !== 'active' || catalog?.department_id !== 'design' || catalog?.is_active !== true) {
+    throw new Error('The selected Design service is not active on this engagement')
+  }
+  return { service, catalog, outputFamily: outputFamilyForService(catalog.slug) }
+}
+
+export async function createSession(admin: Client, body: Json, actorId: string) {
   const engagementId = text(body.engagement_id, 80); const brandId = text(body.brand_id, 80)
   const stageId = text(body.engagement_stage_instance_id, 80) || null
-  const outputFamily = text(body.output_family, 60)
-  if (!OUTPUT_FAMILIES.has(outputFamily)) throw new Error('Unsupported output family')
+  const engagementServiceId = text(body.engagement_service_id, 80)
   await validateScope(admin, engagementId, brandId, stageId)
   const externalEventId = text(body.external_event_id, 80) || null
   if (externalEventId) {
@@ -190,6 +219,7 @@ async function createSession(admin: Client, body: Json, actorId: string) {
       .eq('id', externalEventId).eq('organization_id', ORGANIZATION_ID).eq('brand_id', brandId).maybeSingle()
     if (externalEventError || !externalEvent) throw new Error('The selected external event is outside this brand')
   }
+  const { outputFamily } = await requireActiveDesignService(admin, engagementId, engagementServiceId)
   const modelIds = Array.isArray(body.model_registry_ids)
     ? [...new Set(body.model_registry_ids.map(value => text(value, 80)).filter(Boolean))].slice(0, 3) : []
   if (!modelIds.length) throw new Error('Select at least one registered model')
@@ -216,7 +246,8 @@ async function createSession(admin: Client, body: Json, actorId: string) {
   const sessionId = crypto.randomUUID()
   const { data: session, error: sessionError } = await admin.from('design_workshop_sessions').insert({
     id: sessionId, organization_id: ORGANIZATION_ID, engagement_id: engagementId, brand_id: brandId,
-    engagement_stage_instance_id: stageId, output_family: outputFamily, output_brief: outputBrief,
+    engagement_stage_instance_id: stageId, engagement_service_id: engagementServiceId,
+    output_family: outputFamily, output_brief: outputBrief,
     designer_instructions: designerInstructions, context_manifest: contextManifest,
     context_checksum: checksum, created_by: actorId,
   }).select('*').single()
