@@ -146,6 +146,53 @@ export function approvalForVersion(approvals = [], versionId) {
   return approvals.find(item => item.artifact_version_id === versionId) || null
 }
 
+function pagePath(page) {
+  return String(page?.page_path || page?.path || '').trim()
+}
+
+function approvedVersionForArtifact(workspace, artifact) {
+  if (!artifact) return null
+  const approval = [...(workspace.approvals || [])]
+    .filter(item => item.artifact_id === artifact.id)
+    .sort((left, right) => new Date(right.approved_at) - new Date(left.approved_at))[0]
+  return (workspace.versions || []).find(version => version.id === approval?.artifact_version_id) || null
+}
+
+export function buildContentPageTracking(workspace) {
+  const artifacts = workspace?.artifacts || []
+  const versions = workspace?.versions || []
+  const tasks = workspace?.contentTasks || []
+  const architectureArtifact = artifacts.find(item => item.artifact_type === 'website_architecture')
+  const contentArtifact = artifacts.find(item => item.artifact_type === 'content')
+  const approvedArchitecture = approvedVersionForArtifact(workspace || {}, architectureArtifact)
+  const latestContent = latestVersion(versions.filter(version => version.artifact_id === contentArtifact?.id))
+  const contentPages = Array.isArray(latestContent?.content?.pages) ? latestContent.content.pages : []
+  const architecturePages = Array.isArray(approvedArchitecture?.content?.pages) ? approvedArchitecture.content.pages : []
+  const sourcePages = contentPages.length ? contentPages : architecturePages
+  const source = contentPages.length ? 'content' : 'website_architecture'
+  const taskByPath = new Map(tasks.map(task => [String(task.linked_page_path || '').trim(), task]))
+  const sourcePaths = new Set(sourcePages.map(pagePath).filter(Boolean))
+  const rows = sourcePages.map(page => {
+    const path = pagePath(page)
+    const architecturePage = architecturePages.find(candidate => pagePath(candidate) === path)
+    return {
+      pagePath: path,
+      pageName: architecturePage?.page_name || page.page_name || path,
+      task: taskByPath.get(path) || null,
+      mismatch: !taskByPath.has(path),
+    }
+  })
+  const staleTasks = tasks.filter(task => !sourcePaths.has(String(task.linked_page_path || '').trim()))
+  return {
+    source,
+    rows,
+    staleTasks,
+    approvedArchitecture,
+    canGenerate: Boolean(approvedArchitecture && sourcePages.length && tasks.length === 0),
+    hasMismatch: rows.some(row => row.mismatch) || staleTasks.length > 0,
+  }
+}
+
 export function bestContentStage(stages = [], type = '') {
   const terms = {
     discovery: ['discovery'], vision: ['vision', 'identity'], audience: ['audience'],

@@ -11,6 +11,7 @@ import {
   CONTENT_ARTIFACT_TYPES,
   approvalForVersion,
   bestContentStage,
+  buildContentPageTracking,
   contentArtifactEditor,
   latestVersion,
   newContentRecord,
@@ -147,7 +148,26 @@ function ArtifactForm({ workspace, type, artifact, versions, latest, approval, s
     <div className="mt-6 grid gap-4 md:grid-cols-2"><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Change summary<input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={summary} onChange={event => setSummary(event.target.value)} /></label><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Data classification<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={classification} onChange={event => setClassification(event.target.value)}><option>internal</option><option>confidential</option><option>public</option><option>restricted</option></select></label></div>
     <label className="mt-4 flex items-start gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300"><input type="checkbox" className="mt-1" checked={aiSafe} onChange={event => setAiSafe(event.target.checked)} /><span>Explicitly allow this exact version to be included in approved AI context. Restricted versions remain excluded.</span></label>
     <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-800 pt-5"><button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : latest ? 'Create new version' : 'Save first version'}</button></div>
-  </form><ArtifactApprovalPanel version={latest} approval={approval} theme="amber" onSingleApprove={() => act(() => contentStudio.approveArtifact(latest.id), `${definition.label} exact version approved.`)} onChanged={onRefresh} /><ContentCustomFieldsPanel artifactType={type} versions={versions} initialVersionId={latest?.id} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="content" theme="amber" regionsByVersion={regionsByVersion} /></div>
+  </form><ArtifactApprovalPanel version={latest} approval={approval} theme="amber" onSingleApprove={() => act(() => contentStudio.approveArtifact(latest.id), `${definition.label} exact version approved.`)} onChanged={onRefresh} />{['website_architecture', 'content'].includes(type) && <ContentPageTrackingPanel workspace={workspace} saving={saving} act={act} />}<ContentCustomFieldsPanel artifactType={type} versions={versions} initialVersionId={latest?.id} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="content" theme="amber" regionsByVersion={regionsByVersion} /></div>
+}
+
+function ContentPageTrackingPanel({ workspace, saving, act }) {
+  const tracking = buildContentPageTracking(workspace)
+  const generated = workspace.contentTasks || []
+  async function generate() {
+    await act(
+      () => contentStudio.generateContentTasks(workspace.engagement.id),
+      'Content tasks generated from the approved sitemap.',
+    )
+  }
+  return <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+    <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Content-per-page tracking</p><h3 className="mt-1 text-xl font-semibold">Website content status</h3><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">One explicit task per page, linked to the canonical Content artifact and its exact page path. Later sitemap changes are flagged for manual reconciliation.</p></div><div className="flex flex-wrap gap-2"><Link to="/sphere/engagements" className={BUTTON}>Open Work board</Link>{!generated.length && <button type="button" disabled={saving || !tracking.canGenerate} onClick={generate} className={PRIMARY}>{saving ? 'Generating…' : 'Generate content tasks from sitemap'}</button>}</div></div>
+    {!tracking.approvedArchitecture && <p className="mt-5 rounded-xl border border-amber-900/60 bg-amber-950/30 p-4 text-sm text-amber-200">Approve an exact Website architecture version before generating content tasks.</p>}
+    {tracking.hasMismatch && generated.length > 0 && <p className="mt-5 rounded-xl border border-amber-900/60 bg-amber-950/30 p-4 text-sm text-amber-200">The current page list and generated tasks no longer match. Reconcile the differences manually; Anka OS has not created or removed tasks automatically.</p>}
+    {tracking.rows.length > 0 ? <div className="mt-5 overflow-x-auto rounded-xl border border-slate-800"><table className="w-full min-w-[620px] text-left text-sm"><thead className="bg-slate-950/70 text-[10px] uppercase tracking-[0.12em] text-slate-500"><tr><th className="px-4 py-3">Page</th><th className="px-4 py-3">Page path</th><th className="px-4 py-3">Status</th></tr></thead><tbody>{tracking.rows.map(row => <tr key={row.pagePath} className="border-t border-slate-800"><td className="px-4 py-3 font-medium text-white">{row.pageName}</td><td className="px-4 py-3 font-mono text-xs text-slate-400">{row.pagePath}</td><td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase ${row.task?.status === 'done' ? 'bg-emerald-950 text-emerald-300' : row.task?.status === 'blocked' ? 'bg-red-950 text-red-300' : row.task ? 'bg-blue-950 text-blue-300' : 'bg-amber-950 text-amber-300'}`}>{row.task?.status?.replaceAll('_', ' ') || 'Task missing'}</span></td></tr>)}</tbody></table></div> : <p className="mt-5 rounded-xl border border-dashed border-slate-700 p-6 text-center text-sm text-slate-500">Add pages to the approved Website architecture to begin tracking.</p>}
+    {tracking.staleTasks.length > 0 && <div className="mt-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-400">Tasks for removed or renamed pages</p><div className="mt-2 flex flex-wrap gap-2">{tracking.staleTasks.map(task => <span key={task.id} className="rounded-full bg-amber-950 px-3 py-1 text-xs text-amber-200">{task.linked_page_path} · {task.status.replaceAll('_', ' ')}</span>)}</div></div>}
+    <p className="mt-4 text-xs text-slate-600">Page source: {tracking.source === 'content' ? 'latest Content draft' : 'approved Website architecture'} · {generated.length} generated task{generated.length === 1 ? '' : 's'}</p>
+  </section>
 }
 
 function ArtifactField({ field, value, pageSlugs, onChange }) {

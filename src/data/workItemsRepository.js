@@ -35,6 +35,7 @@ export const workItems = Object.freeze({
   addDependency: (workItemId, dependsOnWorkItemId) => invoke('add_dependency', { workItemId, dependsOnWorkItemId }),
   removeDependency: (workItemId, dependsOnWorkItemId) => invoke('remove_dependency', { workItemId, dependsOnWorkItemId }),
   acknowledgeAutomationFlag: workItemId => invoke('acknowledge_automation_flag', { workItemId }),
+  generateContentTasks: engagementId => invoke('generate_content_tasks', { engagementId }),
   listAutomationRules: organizationId => dataOrThrow(
     supabase.from('automation_rules')
       .select('*')
