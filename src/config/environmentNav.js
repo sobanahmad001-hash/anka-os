@@ -21,6 +21,7 @@ export const environmentNav = [
       // Core - visible to all authorized team members
       { label: 'My Work', path: '/sphere/my-work', dept: null },
       { label: 'Engagements', path: '/sphere/engagements', dept: null },
+      { label: 'Sphere Events', path: '/sphere/events', dept: null },
       { label: 'Clients & Brands', path: '/sphere/clients', dept: null },
       { label: 'Client Portal', path: '/sphere/portal', dept: null },
       { label: 'Reports & Records', path: '/sphere/reports', dept: null },
