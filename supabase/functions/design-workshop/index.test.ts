@@ -122,7 +122,7 @@ Deno.test('event-linked sessions use one exact identity and keep ordinary sessio
   const link = designEventLink('session-1', 'event-1', 'actor-1')
   assert.equal(link.id, 'session-1')
   assert.equal(link.external_event_id, 'event-1')
-  assert.equal(link.organization_id, '00000000-0000-0000-0000-000000000001')
+  assert.equal(link.organization_id, '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25')
   assert.equal(link.content_type, 'design_asset')
   assert.equal(link.linked_work_item_id, null)
   assert.equal(link.status, 'in_progress')
