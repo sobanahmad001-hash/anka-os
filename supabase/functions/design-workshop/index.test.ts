@@ -1,5 +1,6 @@
 import { createSession, designEventLink, directionSchema, directionsAreDistinct, generateOpenAiImage, hasWorkshopAuthority, mediaPrompt,
-  mediaStoragePath, outputFamilyForService, requireActiveDesignService, sha256, similarity,
+  contentRequestMediaStoragePath, mediaStoragePath, mediaTargetColumns, outputFamilyForService,
+  requireActiveDesignService, sha256, similarity,
   VIDEO_UNAVAILABLE_MESSAGE } from './index.ts'
 import { compileApprovedArtifactContext } from '../_shared/approvedArtifactContext.ts'
 
@@ -128,6 +129,14 @@ Deno.test('session creation combines active service enforcement with optional ev
   assert.equal(linked.content_type, 'design_asset')
 })
 
+Deno.test('CP1 grants Content only its request-scoped media actions', () => {
+  const member = { role: 'member', department_id: 'content' }
+  assert.equal(hasWorkshopAuthority(member, 'generate_content_request_image'), true)
+  assert.equal(hasWorkshopAuthority(member, 'create_content_request_video_placeholder'), true)
+  assert.equal(hasWorkshopAuthority(member, 'generate_image'), false)
+  assert.equal(hasWorkshopAuthority(member, 'create_session'), false)
+})
+
 Deno.test('direction schema is strict and includes traceable recommendation fields', () => {
   const format = directionSchema()
   assert.equal(format.type, 'json_schema')
@@ -207,6 +216,15 @@ Deno.test('media defaults come from the exact direction version and storage stay
     'Documentary portraits\n\nHuman expertise, made visible')
   assert.equal(mediaPrompt({ imagery_direction: 'Ignored' }, 'Explicit campaign key visual'), 'Explicit campaign key visual')
   assert(mediaStoragePath('version-1', 'asset-1').endsWith('/version-1/asset-1.png'))
+  assert.equal(mediaTargetColumns('version-1', null).design_direction_version_id, 'version-1')
+  assert.equal('content_request_id' in mediaTargetColumns('version-1', null), false)
+})
+
+Deno.test('content-request media uses the same private bucket namespace with exactly one target', () => {
+  assert(contentRequestMediaStoragePath('request-1', 'asset-1').endsWith('/content-requests/request-1/asset-1.png'))
+  assert.equal(mediaTargetColumns(null, 'request-1').content_request_id, 'request-1')
+  assert.throws(() => mediaTargetColumns(null, null))
+  assert.throws(() => mediaTargetColumns('version-1', 'request-1'))
 })
 
 Deno.test('OpenAI image adapter uses the registered model and decodes the returned image', async () => {
