@@ -146,8 +146,12 @@ export function approvalForVersion(approvals = [], versionId) {
   return approvals.find(item => item.artifact_version_id === versionId) || null
 }
 
-function pagePath(page) {
-  return String(page?.page_path || page?.path || '').trim()
+function contentPageKey(page) {
+  return String(page?.page_path || '').trim()
+}
+
+function architecturePageSlug(page) {
+  return String(page?.slug || '').trim()
 }
 
 function approvedVersionForArtifact(workspace, artifact) {
@@ -171,13 +175,14 @@ export function buildContentPageTracking(workspace) {
   const sourcePages = contentPages.length ? contentPages : architecturePages
   const source = contentPages.length ? 'content' : 'website_architecture'
   const taskByPath = new Map(tasks.map(task => [String(task.linked_page_path || '').trim(), task]))
-  const sourcePaths = new Set(sourcePages.map(pagePath).filter(Boolean))
+  const pageKey = source === 'content' ? contentPageKey : architecturePageSlug
+  const sourcePaths = new Set(sourcePages.map(pageKey).filter(Boolean))
   const rows = sourcePages.map(page => {
-    const path = pagePath(page)
-    const architecturePage = architecturePages.find(candidate => pagePath(candidate) === path)
+    const path = pageKey(page)
+    const architecturePage = architecturePages.find(candidate => architecturePageSlug(candidate) === path)
     return {
       pagePath: path,
-      pageName: architecturePage?.page_name || page.page_name || path,
+      pageTitle: architecturePage?.title || path,
       task: taskByPath.get(path) || null,
       mismatch: !taskByPath.has(path),
     }

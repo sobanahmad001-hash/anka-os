@@ -82,6 +82,7 @@ declare
   v_content_version public.artifact_versions;
   v_after public.work_items;
   v_pages jsonb;
+  v_uses_content_pages boolean := false;
   v_page_count integer;
   v_content_artifact_count integer;
   v_position_base integer;
@@ -188,6 +189,7 @@ begin
     and jsonb_typeof(v_content_version.content -> 'pages') = 'array'
     and jsonb_array_length(v_content_version.content -> 'pages') > 0 then
     v_pages := v_content_version.content -> 'pages';
+    v_uses_content_pages := true;
   else
     v_pages := v_architecture_version.content -> 'pages';
   end if;
@@ -206,32 +208,36 @@ begin
   if exists (
     select 1
     from jsonb_array_elements(v_pages) page
-    where trim(coalesce(page ->> 'page_path', page ->> 'path', '')) = ''
+    where trim(coalesce(
+      case when v_uses_content_pages then page ->> 'page_path' else page ->> 'slug' end,
+      ''
+    )) = ''
   ) then
-    raise exception 'Every source page requires a page path.';
+    raise exception 'Every source page requires its canonical page key.';
   end if;
 
   if (
-    select count(distinct trim(coalesce(page ->> 'page_path', page ->> 'path')))
+    select count(distinct trim(
+      case when v_uses_content_pages then page ->> 'page_path' else page ->> 'slug' end
+    ))
     from jsonb_array_elements(v_pages) page
   ) <> v_page_count then
-    raise exception 'Source page paths must be unique.';
+    raise exception 'Source page keys must be unique.';
   end if;
 
   -- Content drafts must still map exactly to the approved sitemap so titles and
-  -- page identities cannot be joined by an ambiguous slug or array position.
-  if v_content_version.id is not null and v_pages = v_content_version.content -> 'pages'
+  -- page identities cannot be joined by a legacy path alias or array position.
+  if v_uses_content_pages
     and exists (
       select 1
       from jsonb_array_elements(v_pages) content_page
       where not exists (
         select 1
         from jsonb_array_elements(v_architecture_version.content -> 'pages') architecture_page
-        where trim(coalesce(architecture_page ->> 'page_path', architecture_page ->> 'path', ''))
-          = trim(coalesce(content_page ->> 'page_path', content_page ->> 'path', ''))
+        where trim(architecture_page ->> 'slug') = trim(content_page ->> 'page_path')
       )
     ) then
-    raise exception 'Content page paths do not match the approved website architecture.';
+    raise exception 'Content page paths do not match approved website architecture slugs.';
   end if;
 
   select coalesce(max(work_item.position), 0) into v_position_base
@@ -244,14 +250,16 @@ begin
     with source_pages as (
       select
         page.ordinality,
-        trim(coalesce(page.value ->> 'page_path', page.value ->> 'path')) as page_path,
-        trim(coalesce(page.value ->> 'page_name', '')) as source_page_name
+        trim(case
+          when v_uses_content_pages then page.value ->> 'page_path'
+          else page.value ->> 'slug'
+        end) as page_key
       from jsonb_array_elements(v_pages) with ordinality as page(value, ordinality)
     ),
     architecture_pages as (
       select
-        trim(coalesce(page ->> 'page_path', page ->> 'path')) as page_path,
-        trim(coalesce(page ->> 'page_name', '')) as page_name
+        trim(page ->> 'slug') as slug,
+        trim(page ->> 'title') as title
       from jsonb_array_elements(v_architecture_version.content -> 'pages') page
     )
     insert into public.work_items (
@@ -264,19 +272,18 @@ begin
       v_engagement.id,
       v_engagement.brand_id,
       'content',
-      left(coalesce(nullif(architecture_page.page_name, ''),
-        nullif(source_page.source_page_name, ''), source_page.page_path), 240),
-      left('Write and review website content for ' || source_page.page_path || '.', 20000),
+      left(coalesce(nullif(architecture_page.title, ''), source_page.page_key), 240),
+      left('Write and review website content for ' || source_page.page_key || '.', 20000),
       'task',
       'medium',
       'not_started',
       p_actor_id,
       v_content_artifact.id,
-      source_page.page_path,
+      source_page.page_key,
       v_position_base + (source_page.ordinality::integer * 1000)
     from source_pages source_page
     left join architecture_pages architecture_page
-      on architecture_page.page_path = source_page.page_path
+      on architecture_page.slug = source_page.page_key
     order by source_page.ordinality
     returning *
   loop
@@ -311,10 +318,10 @@ grant execute on function public.generate_content_page_work_items(uuid, uuid)
   to service_role;
 
 comment on column public.work_items.linked_page_path is
-  'Optional exact page_path inside the linked content artifact; RP3 uses it for one task per website page.';
+  'Optional canonical website page key inside the linked content artifact; RP3 stores the approved architecture slug here.';
 comment on function public.generate_content_page_work_items(uuid, uuid) is
   'Explicit one-time RP3 action. Requires active team membership and an approved website architecture, then links one work item per page to the engagement content artifact.';
 comment on function private.guard_work_item_page_link() is
-  'Keeps a generated page task attached to its original Content artifact and exact page_path while allowing normal status and assignment edits.';
+  'Keeps a generated page task attached to its original Content artifact and canonical page key while allowing normal status and assignment edits.';
 
 commit;

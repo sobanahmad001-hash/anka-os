@@ -53,9 +53,9 @@ begin
       'site_goal', 'Verify RP3',
       'navigation_principles', jsonb_build_array('Clear paths'),
       'pages', jsonb_build_array(
-        jsonb_build_object('page_name', 'Home', 'path', '/', 'page_goal', 'Welcome', 'primary_audience', 'Buyers', 'primary_cta', 'Explore'),
-        jsonb_build_object('page_name', 'Properties', 'path', '/properties', 'page_goal', 'Browse', 'primary_audience', 'Buyers', 'primary_cta', 'View properties'),
-        jsonb_build_object('page_name', 'Contact', 'path', '/contact', 'page_goal', 'Enquire', 'primary_audience', 'Buyers', 'primary_cta', 'Contact')
+        jsonb_build_object('slug', 'home', 'title', 'Homepage', 'parent_slug', null, 'page_type', 'hub', 'purpose', 'Orient visitors'),
+        jsonb_build_object('slug', 'properties', 'title', 'Properties', 'parent_slug', 'home', 'page_type', 'service', 'purpose', 'Present listings'),
+        jsonb_build_object('slug', 'contact', 'title', 'Contact', 'parent_slug', 'home', 'page_type', 'supporting', 'purpose', 'Capture enquiries')
       )
     ),
     repeat('a', 64), 'RP3 verification sitemap', v_actor_id
@@ -85,17 +85,17 @@ begin
     where item.linked_artifact_id <> v_content_artifact_id
       or item.linked_page_path is null
   ) then
-    raise exception 'Generated tasks are not linked to the content artifact and page path.';
+    raise exception 'Generated tasks are not linked to the content artifact and page key.';
   end if;
 
   if (select array_agg(item.linked_page_path order by item.position) from unnest(v_generated) item)
-    <> array['/', '/properties', '/contact']::text[] then
-    raise exception 'Generated page paths do not preserve sitemap order.';
+    <> array['home', 'properties', 'contact']::text[] then
+    raise exception 'Generated page slugs do not preserve sitemap order.';
   end if;
 
   begin
     update public.work_items
-    set linked_page_path = '/silently-renamed'
+    set linked_page_path = 'silently-renamed'
     where id = (v_generated[1]).id;
     raise exception 'Generated page identity unexpectedly changed.';
   exception

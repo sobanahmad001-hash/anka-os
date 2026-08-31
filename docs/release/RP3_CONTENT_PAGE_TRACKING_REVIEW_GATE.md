@@ -9,18 +9,18 @@
 
 ## Dependency note
 
-RP2 was not merged into the branch base when RP3 was built. The accepted Content Studio model already stores Website architecture pages as `content.pages[]` records with `path`; RP3 accepts both `path` and `page_path` at the database boundary so the parallel RP2 work can land without guessing by slug or array position. Review must still re-check the final RP2 shape before merging RP3.
+RP3 is rebased onto RP2 PR #40 (`d9947a9`). Website architecture pages use the final `{ slug, title, parent_slug, page_type, purpose }` shape. RP3 uses `slug` as the canonical architecture page key and `title` as its display label. When a Content draft exists, its unchanged `page_path` value must match an approved architecture `slug` exactly; no legacy `path` or `page_name` fallback remains.
 
 ## Required code and schema review
 
 - [ ] The migration adds exactly one column to an existing table and no new table.
-- [ ] The partial unique index allows at most one generated task for each content artifact and page path, including after soft deletion.
-- [ ] The page-link guard keeps generated tasks attached to their original Content artifact and exact page path while ordinary status, assignment, and scheduling edits remain available.
+- [ ] The partial unique index allows at most one generated task for each content artifact and canonical page key, including after soft deletion.
+- [ ] The page-link guard keeps generated tasks attached to their original Content artifact and canonical page key while ordinary status, assignment, and scheduling edits remain available.
 - [ ] The generator is `SECURITY INVOKER`, has an empty `search_path`, is revoked from `public`, `anon`, and `authenticated`, and is granted only to `service_role`.
 - [ ] The generator repeats W1's active-team-membership check.
 - [ ] An exact approved Website architecture version is required.
 - [ ] The latest Content draft supplies page records when present; otherwise the approved Website architecture supplies them.
-- [ ] Content page paths must map exactly to the approved architecture, with no slug matching or array-position matching.
+- [ ] Architecture fallback reads `slug`/`title`; Content draft `page_path` values map exactly to architecture `slug`, with no legacy-field or array-position matching.
 - [ ] A transaction advisory lock and the uniqueness rule prevent double-click duplication.
 - [ ] Every generated work item uses `not_started`, department `content`, the one real Content artifact ID, and its exact `linked_page_path`.
 - [ ] One normal `work_item_created` audit event is written for every generated task.
@@ -48,11 +48,11 @@ Expected: all unit tests pass, production build succeeds, changed-source lint ha
 
 ## Database verification - approval required before execution
 
-`supabase/verify_20260831101608_rp3_content_page_tracking.sql` is rollback-only and exercises a three-page sitemap, exact artifact/path linkage, preserved ordering, immutable page identity, and duplicate-generation rejection. Do not run it against project `fhoxaogfjszftoqtnbav` until explicit approval is given.
+`supabase/verify_20260831101608_rp3_content_page_tracking.sql` is rollback-only and exercises a three-page sitemap using RP2's real record shape, exact artifact/page-key linkage, preserved ordering, immutable page identity, and duplicate-generation rejection. Do not run it against project `fhoxaogfjszftoqtnbav` until explicit approval is given.
 
 ## Release hold
 
 - [ ] PR reviewed against actual code, migration, and rollback verification script.
-- [ ] RP2 final page shape re-checked.
+- [x] RP2 final page shape re-checked against merged commit `d9947a9`.
 - [ ] No live database verification without explicit approval.
 - [ ] No merge or production deployment before sign-off.

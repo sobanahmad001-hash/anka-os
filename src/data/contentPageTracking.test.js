@@ -19,9 +19,9 @@ function workspace({ contentPages = [], tasks = [] } = {}) {
     ],
     versions: [
       { id: 'architecture-v1', artifact_id: 'architecture', version_number: 1, content: { pages: [
-        { page_name: 'Home', path: '/' },
-        { page_name: 'Properties', path: '/properties' },
-        { page_name: 'Contact', path: '/contact' },
+        { slug: 'home', title: 'Homepage', parent_slug: null, page_type: 'hub', purpose: 'Orient visitors' },
+        { slug: 'properties', title: 'Properties', parent_slug: 'home', page_type: 'service', purpose: 'Present listings' },
+        { slug: 'contact', title: 'Contact', parent_slug: 'home', page_type: 'supporting', purpose: 'Capture enquiries' },
       ] } },
       ...(contentPages.length ? [{ id: 'content-v1', artifact_id: 'content', version_number: 1, content: { pages: contentPages } }] : []),
     ],
@@ -42,20 +42,25 @@ test('RP3 migration adds only page addressing plus a service-role generation fun
   assert.match(migration, /create function private\.guard_work_item_page_link/)
   assert.match(migration, /Generated content task page links cannot be changed automatically/)
   assert.match(migration, /linked_artifact_id, linked_page_path, position/)
+  assert.match(migration, /architecture_page ->> 'slug'/)
+  assert.match(migration, /content_page ->> 'page_path'/)
+  assert.match(migration, /page ->> 'title'/)
+  assert.doesNotMatch(migration, /architecture_page ->> '(?:page_path|path)'/)
+  assert.doesNotMatch(migration, /page_name/)
   assert.match(migration, /revoke all on function public\.generate_content_page_work_items[\s\S]*from public, anon, authenticated/)
   assert.match(migration, /grant execute on function public\.generate_content_page_work_items[\s\S]*to service_role/)
   assert.doesNotMatch(migration, /create table|alter table public\.artifacts|alter table public\.artifact_versions|enable row level security/i)
 })
 
-test('generation is explicit, uses exact paths, rejects reruns, and has a three-page rollback verification', () => {
+test('generation is explicit, uses exact page keys, rejects reruns, and has a three-page rollback verification', () => {
   assert.match(edge, /action === 'generate_content_tasks'/)
   assert.match(edge, /admin\.rpc\('generate_content_page_work_items'/)
   assert.match(repository, /generateContentTasks/)
   assert.match(studio, /Generate content tasks from sitemap/)
   assert.match(migration, /Content page tasks have already been generated/)
-  assert.match(migration, /Content page paths do not match the approved website architecture/)
+  assert.match(migration, /Content page paths do not match approved website architecture slugs/)
   assert.match(verification, /cardinality\(v_generated\) <> 3/)
-  assert.match(verification, /array\['\/', '\/properties', '\/contact'\]/)
+  assert.match(verification, /array\['home', 'properties', 'contact'\]/)
   assert.match(verification, /rollback;/)
 })
 
@@ -63,29 +68,29 @@ test('status tracking uses the approved sitemap before content exists', () => {
   const tracking = buildContentPageTracking(workspace())
   assert.equal(tracking.source, 'website_architecture')
   assert.equal(tracking.canGenerate, true)
-  assert.deepEqual(tracking.rows.map(row => [row.pageName, row.pagePath, row.task]), [
-    ['Home', '/', null],
-    ['Properties', '/properties', null],
-    ['Contact', '/contact', null],
+  assert.deepEqual(tracking.rows.map(row => [row.pageTitle, row.pagePath, row.task]), [
+    ['Homepage', 'home', null],
+    ['Properties', 'properties', null],
+    ['Contact', 'contact', null],
   ])
 })
 
 test('status tracking prefers content page records and flags later sitemap mismatches without syncing', () => {
   const tracking = buildContentPageTracking(workspace({
-    contentPages: [{ page_path: '/' }, { page_path: '/properties' }, { page_path: '/about' }],
+    contentPages: [{ page_path: 'home' }, { page_path: 'properties' }, { page_path: 'about' }],
     tasks: [
-      { id: 'home', linked_page_path: '/', status: 'done' },
-      { id: 'properties', linked_page_path: '/properties', status: 'in_progress' },
-      { id: 'contact', linked_page_path: '/contact', status: 'not_started' },
+      { id: 'home', linked_page_path: 'home', status: 'done' },
+      { id: 'properties', linked_page_path: 'properties', status: 'in_progress' },
+      { id: 'contact', linked_page_path: 'contact', status: 'not_started' },
     ],
   }))
   assert.equal(tracking.source, 'content')
   assert.equal(tracking.canGenerate, false)
   assert.equal(tracking.hasMismatch, true)
   assert.deepEqual(tracking.rows.map(row => [row.pagePath, row.task?.status || null]), [
-    ['/', 'done'], ['/properties', 'in_progress'], ['/about', null],
+    ['home', 'done'], ['properties', 'in_progress'], ['about', null],
   ])
-  assert.deepEqual(tracking.staleTasks.map(task => task.linked_page_path), ['/contact'])
+  assert.deepEqual(tracking.staleTasks.map(task => task.linked_page_path), ['contact'])
   assert.match(studio, /reconcile the differences manually/i)
   assert.doesNotMatch(studio, /auto.?sync|auto.?delete/i)
 })
