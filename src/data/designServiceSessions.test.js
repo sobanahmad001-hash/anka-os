@@ -42,7 +42,9 @@ test('all eight seeded Design services retain the current three-direction flow',
   assert.match(edge, /for \(let index = 0; index < LANES\.length; index \+= 1\)/)
   assert.match(edge, /direction_slot: index \+ 1/)
   assert.match(ui, /Generate three directions/)
-  assert.doesNotMatch(edge, /variant generation|storyboard sequence|design system library|production handoff/i)
+  // DS1 keeps the three-direction flow for every Design service. Later phases may
+  // add downstream workflows, but must not replace that shared generation path.
+  assert.doesNotMatch(edge, /storyboard sequence|design system library|production handoff/i)
 })
 
 test('the UI and repository expose active engagement services instead of an output-family picker', () => {

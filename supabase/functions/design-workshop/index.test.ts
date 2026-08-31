@@ -1,6 +1,7 @@
-import { createSession, designEventLink, directionSchema, directionsAreDistinct, generateOpenAiImage, hasWorkshopAuthority, mediaPrompt,
-  contentRequestMediaStoragePath, mediaStoragePath, mediaTargetColumns, outputFamilyForService,
-  requireActiveDesignService, sha256, similarity,
+import { contentRequestMediaStoragePath, createSession, cropResizePng, designEventLink, directionSchema,
+  directionsAreDistinct, generateOpenAiImage, hasWorkshopAuthority, mediaPrompt, mediaStoragePath,
+  mediaTargetColumns, outputFamilyForService, pngDimensions, requireActiveDesignService,
+  requireReleasedVariantSource, runIndependentVariantJobs, sha256, similarity, variantFormatSpec, variantPrompt,
   VIDEO_UNAVAILABLE_MESSAGE } from './index.ts'
 import { compileApprovedArtifactContext } from '../_shared/approvedArtifactContext.ts'
 
@@ -235,7 +236,83 @@ Deno.test('OpenAI image adapter uses the registered model and decodes the return
   })
   assert.equal(requestBody.model, 'registered-image-model')
   assert.equal(requestBody.prompt, 'Create a key visual')
+  assert.equal('size' in requestBody, false)
   assert.equal(new TextDecoder().decode(bytes), 'png')
+})
+
+Deno.test('variant formats use verified platform targets and supported provider canvases', () => {
+  assert.equal(variantFormatSpec('square_1x1').providerSize, '1024x1024')
+  assert.equal(variantFormatSpec('story_9x16').providerSize, '1024x1536')
+  assert.equal(variantFormatSpec('landscape_1_91x1').providerSize, '1536x1024')
+  assert.equal(variantFormatSpec('banner_728x90').width, 728)
+  assert.equal(variantFormatSpec('banner_300x250').height, 250)
+  assert.equal(variantFormatSpec('portrait_4x5').height, 1350)
+  assert.throws(() => variantFormatSpec('landscape_16x9'))
+  const prompt = variantPrompt({ imagery_direction: 'Human-led editorial photography', creative_thesis: 'Trusted guidance' }, 'banner_728x90')
+  assert(prompt.includes('728x90px'))
+  assert(prompt.includes('already-approved creative direction'))
+})
+
+Deno.test('OpenAI image adapter receives the variant provider canvas through the shared pipeline', async () => {
+  let requestBody: Record<string, unknown> = {}
+  await generateOpenAiImage('secret', 'registered-image-model', 'Adapt the released direction', '1024x1536', async (_url, init) => {
+    requestBody = JSON.parse(String(init?.body || '{}'))
+    return new Response(JSON.stringify({ data: [{ b64_json: btoa('png') }] }), { status: 200 })
+  })
+  assert.equal(requestBody.size, '1024x1536')
+})
+
+Deno.test('variant image processing exports and verifies the exact declared PNG dimensions', async () => {
+  const encoded = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+  const source = Uint8Array.from(atob(encoded), character => character.charCodeAt(0))
+  const output = await cropResizePng(source, 728, 90)
+  assert.equal(pngDimensions(output).width, 728)
+  assert.equal(pngDimensions(output).height, 90)
+})
+
+Deno.test('variant source validation rejects drafts and non-variant services', async () => {
+  class Query {
+    constructor(private row: Record<string, unknown> | null) {}
+    select() { return this }
+    eq() { return this }
+    async maybeSingle() { return { data: this.row, error: null } }
+  }
+  const userFixtures: Record<string, Record<string, unknown>> = {
+    design_direction_versions: { id: 'version-1', direction_id: 'direction-1', content: { imagery_direction: 'Approved imagery' } },
+    design_directions: { id: 'direction-1', session_id: 'session-1' },
+    design_workshop_sessions: { id: 'session-1', engagement_id: 'engagement-1', engagement_service_id: 'service-1' },
+  }
+  const userClient = { from: (table: string) => new Query(userFixtures[table] || null) }
+  const admin = (released: boolean, slug = 'social_assets') => ({ from: (table: string) => new Query(
+    table === 'design_direction_releases' ? (released ? { id: 'release-1', direction_version_id: 'version-1' } : null)
+      : table === 'engagement_services' ? { id: 'service-1', service_catalog: { slug } } : null,
+  ) })
+
+  let draftRejected = false
+  try { await requireReleasedVariantSource(admin(false) as never, userClient as never, 'version-1') } catch (error) {
+    draftRejected = error instanceof Error && error.message.includes('released direction version')
+  }
+  assert(draftRejected, 'Expected an unreleased source to be rejected')
+  const accepted = await requireReleasedVariantSource(admin(true) as never, userClient as never, 'version-1')
+  assert.equal(accepted.serviceSlug, 'social_assets')
+  let serviceRejected = false
+  try { await requireReleasedVariantSource(admin(true, 'brand_visual_identity') as never, userClient as never, 'version-1') } catch (error) {
+    serviceRejected = error instanceof Error && error.message.includes('Social Assets and Advertising Assets')
+  }
+  assert(serviceRejected, 'Expected a non-variant Design service to be rejected')
+})
+
+Deno.test('one failed variant does not block sibling formats in the same request', async () => {
+  const attempted: string[] = []
+  const results = await runIndependentVariantJobs(['square_1x1', 'story_9x16', 'banner_300x250'], async format => {
+    attempted.push(format)
+    if (format === 'story_9x16') throw new Error('provider rejected only this format')
+    return { variant_format: format, status: 'ready' }
+  })
+  assert.equal(attempted.length, 3)
+  assert.equal((results[0] as Record<string, unknown>).status, 'ready')
+  assert.equal((results[1] as Record<string, unknown>).status, 'failed')
+  assert.equal((results[2] as Record<string, unknown>).status, 'ready')
 })
 
 Deno.test('video placeholder is explicit and signing is available to invited reviewers', () => {

@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
+import { Image } from 'npm:imagescript@1.3.0'
 import { compileApprovedArtifactContext, stableJson } from '../_shared/approvedArtifactContext.ts'
 
 type Client = ReturnType<typeof createClient<any>>
@@ -18,6 +19,15 @@ const SERVICE_OUTPUT_FAMILIES = new Map([
   ['advertising_assets', 'marketing_asset'],
   ['video_concepts_storyboards', 'video_motion'],
   ['visual_production', 'marketing_asset'],
+])
+const VARIANT_SERVICE_SLUGS = new Set(['social_assets', 'advertising_assets'])
+const VARIANT_FORMATS = new Map([
+  ['square_1x1', { label: 'Square 1:1', width: 1080, height: 1080, providerSize: '1024x1024' }],
+  ['story_9x16', { label: 'Story / Reel 9:16', width: 1080, height: 1920, providerSize: '1024x1536' }],
+  ['landscape_1_91x1', { label: 'Landscape 1.91:1', width: 1200, height: 628, providerSize: '1536x1024' }],
+  ['banner_728x90', { label: 'Leaderboard 728x90', width: 728, height: 90, providerSize: '1536x1024' }],
+  ['banner_300x250', { label: 'Medium rectangle 300x250', width: 300, height: 250, providerSize: '1024x1024' }],
+  ['portrait_4x5', { label: 'Portrait 4:5', width: 1080, height: 1350, providerSize: '1024x1536' }],
 ])
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 const LANES = [
@@ -155,6 +165,23 @@ export function mediaPrompt(content: Json, requested: unknown) {
   const imagery = text(content.imagery_direction, 3000)
   const thesis = text(content.creative_thesis, 3000)
   return text([imagery, thesis].filter(Boolean).join('\n\n'), 6000)
+}
+
+export function variantFormatSpec(value: unknown) {
+  const format = text(value, 80)
+  const spec = VARIANT_FORMATS.get(format)
+  if (!spec) throw new Error('Unsupported variant format')
+  return { format, ...spec }
+}
+
+export function variantPrompt(content: Json, format: unknown) {
+  const spec = variantFormatSpec(format)
+  const source = mediaPrompt(content, '')
+  if (!source) throw new Error('The released direction has no imagery direction or creative thesis to adapt')
+  return text(`${source}\n\nCreate a faithful format variant of this already-approved creative direction. `
+    + `Target format: ${spec.label}; target canvas: ${spec.width}x${spec.height}px. `
+    + 'Preserve the concept, brand cues, message hierarchy, and essential subject matter. Recompose rather than inventing a new concept. '
+    + 'Keep all critical text, logos, faces, and calls to action inside a conservative safe area for the target placement.', 6000)
 }
 
 export function mediaStoragePath(versionId: string, assetId: string) {
@@ -409,7 +436,7 @@ async function loadPermittedDirectionVersion(userClient: Client, directionVersio
     .eq('id', version.direction_id).eq('organization_id', ORGANIZATION_ID).maybeSingle()
   if (directionError) throw directionError
   const { data: session, error: sessionError } = direction
-    ? await userClient.from('design_workshop_sessions').select('id, engagement_id').eq('id', direction.session_id)
+    ? await userClient.from('design_workshop_sessions').select('id, engagement_id, engagement_service_id').eq('id', direction.session_id)
       .eq('organization_id', ORGANIZATION_ID).maybeSingle()
     : { data: null, error: null }
   if (sessionError) throw sessionError
@@ -418,11 +445,13 @@ async function loadPermittedDirectionVersion(userClient: Client, directionVersio
 }
 
 export async function generateOpenAiImage(credential: string, modelId: string, prompt: string,
-  fetcher: typeof fetch = fetch) {
-  const apiResponse = await fetcher(OPENAI_IMAGES_URL, {
+  sizeOrFetcher?: string | typeof fetch, fetcher: typeof fetch = fetch) {
+  const size = typeof sizeOrFetcher === 'string' ? sizeOrFetcher : null
+  const request = typeof sizeOrFetcher === 'function' ? sizeOrFetcher : fetcher
+  const apiResponse = await request(OPENAI_IMAGES_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${credential}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: modelId, prompt }),
+    body: JSON.stringify({ model: modelId, prompt, ...(size ? { size } : {}) }),
   })
   const result = await apiResponse.json() as Json
   if (!apiResponse.ok) {
@@ -438,6 +467,32 @@ export async function generateOpenAiImage(credential: string, modelId: string, p
   return bytes
 }
 
+export function pngDimensions(bytes: Uint8Array) {
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10]
+  if (bytes.byteLength < 24 || signature.some((value, index) => bytes[index] !== value)) {
+    throw new Error('Generated image is not a valid PNG')
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const width = view.getUint32(16)
+  const height = view.getUint32(20)
+  if (!width || !height) throw new Error('Generated PNG has invalid dimensions')
+  return { width, height }
+}
+
+export async function cropResizePng(bytes: Uint8Array, width: number, height: number) {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 4096 || height > 4096) {
+    throw new Error('Target image dimensions are invalid')
+  }
+  const source = await Image.decode(bytes)
+  const output = await source.cover(width, height).encode(6)
+  const actual = pngDimensions(output)
+  if (actual.width !== width || actual.height !== height) {
+    throw new Error(`Generated PNG is ${actual.width}x${actual.height}; expected ${width}x${height}`)
+  }
+  if (output.byteLength > 10 * 1024 * 1024) throw new Error('Processed image exceeds the 10 MB storage limit')
+  return output
+}
+
 async function generateImageForTarget(admin: Client, input: {
   directionVersionId: string | null
   contentRequestId: string | null
@@ -445,6 +500,9 @@ async function generateImageForTarget(admin: Client, input: {
   modelRegistryId: string
   prompt: string
   actorId: string
+  providerSize?: string
+  targetWidth?: number
+  targetHeight?: number
 }) {
   const { data: model, error: modelError } = await admin.from('design_model_registry').select('*')
     .eq('id', input.modelRegistryId).eq('organization_id', ORGANIZATION_ID).eq('is_active', true).maybeSingle()
@@ -464,7 +522,14 @@ async function generateImageForTarget(admin: Client, input: {
     : contentRequestMediaStoragePath(input.contentRequestId!, asset.id)
   let uploaded = false
   try {
-    const bytes = await generateOpenAiImage(credential, model.model_id, input.prompt)
+    let bytes = await generateOpenAiImage(credential, model.model_id, input.prompt, input.providerSize)
+    const hasTargetDimensions = input.targetWidth !== undefined || input.targetHeight !== undefined
+    if (hasTargetDimensions) {
+      if (input.targetWidth === undefined || input.targetHeight === undefined) {
+        throw new Error('Both target image dimensions are required')
+      }
+      bytes = await cropResizePng(bytes, input.targetWidth, input.targetHeight)
+    }
     const { error: uploadError } = await admin.storage.from(MEDIA_BUCKET).upload(storagePath, bytes, {
       contentType: 'image/png', upsert: false,
     })
@@ -478,9 +543,10 @@ async function generateImageForTarget(admin: Client, input: {
   } catch (error) {
     if (uploaded) await admin.storage.from(MEDIA_BUCKET).remove([storagePath])
     const failureReason = error instanceof Error ? error.message.slice(0, 2000) : 'Image generation failed'
-    const { data: failed } = await admin.from('design_media_assets').update({
+    const { data: failed, error: failedError } = await admin.from('design_media_assets').update({
       status: 'failed', storage_path: null, failure_reason: failureReason,
     }).eq('id', asset.id).eq('organization_id', ORGANIZATION_ID).select('*').single()
+    if (failedError) throw new Error(`Image generation failed and its asset status could not be recorded: ${failedError.message}`)
     return failed || { ...asset, status: 'failed', failure_reason: failureReason }
   }
 }
@@ -525,6 +591,84 @@ async function generateContentRequestImage(admin: Client, userClient: Client, bo
     modelRegistryId: text(body.model_registry_id, 80),
     prompt,
     actorId,
+  })
+}
+
+export async function requireReleasedVariantSource(admin: Client, userClient: Client, directionVersionId: string) {
+  const source = await loadPermittedDirectionVersion(userClient, directionVersionId)
+  const { data: release, error: releaseError } = await admin.from('design_direction_releases').select('id, direction_version_id')
+    .eq('organization_id', ORGANIZATION_ID).eq('direction_version_id', source.version.id).maybeSingle()
+  if (releaseError) throw releaseError
+  if (!release) throw new Error('Variants can only be generated from a released direction version')
+  const { data: engagementService, error: serviceError } = await admin.from('engagement_services')
+    .select('id, service_catalog!inner(slug)')
+    .eq('id', source.session.engagement_service_id).eq('organization_id', ORGANIZATION_ID)
+    .eq('engagement_id', source.session.engagement_id).maybeSingle()
+  if (serviceError) throw serviceError
+  const catalog = Array.isArray(engagementService?.service_catalog)
+    ? engagementService.service_catalog[0] : engagementService?.service_catalog
+  if (!engagementService || !VARIANT_SERVICE_SLUGS.has(text(catalog?.slug, 80))) {
+    throw new Error('Variants are available only for Social Assets and Advertising Assets sessions')
+  }
+  return { ...source, release, serviceSlug: catalog.slug }
+}
+
+export async function runIndependentVariantJobs(formats: string[], processor: (format: string) => Promise<unknown>) {
+  const results = []
+  for (const format of formats) {
+    try {
+      results.push(await processor(format))
+    } catch (error) {
+      results.push({ variant_format: format, status: 'failed', error: error instanceof Error ? error.message : 'Variant generation failed' })
+    }
+  }
+  return results
+}
+
+async function generateVariants(admin: Client, userClient: Client, body: Json, actorId: string) {
+  const directionVersionId = text(body.source_direction_version_id, 80)
+  const requestedFormats = [...new Set(strings(body.variant_formats, 6))]
+  if (!requestedFormats.length) throw new Error('Select at least one variant format')
+  requestedFormats.forEach(variantFormatSpec)
+  const source = await requireReleasedVariantSource(admin, userClient, directionVersionId)
+
+  return runIndependentVariantJobs(requestedFormats, async format => {
+    const spec = variantFormatSpec(format)
+    const prompt = variantPrompt((source.version.content as Json) || {}, format)
+    const { data: variant, error: variantError } = await admin.from('design_direction_variants').insert({
+      organization_id: ORGANIZATION_ID, source_direction_version_id: source.version.id,
+      variant_format: format, status: 'pending', created_by: actorId,
+    }).select('*').single()
+    if (variantError) throw variantError
+    try {
+      const { error: generatingError } = await admin.from('design_direction_variants').update({ status: 'generating' })
+        .eq('id', variant.id).eq('organization_id', ORGANIZATION_ID)
+      if (generatingError) throw generatingError
+      const asset = await generateImageForTarget(admin, {
+        directionVersionId: source.version.id,
+        contentRequestId: null,
+        engagementId: source.session.engagement_id,
+        modelRegistryId: text(body.model_registry_id, 80),
+        prompt,
+        actorId,
+        providerSize: spec.providerSize,
+        targetWidth: spec.width,
+        targetHeight: spec.height,
+      })
+      const status = asset?.status === 'ready' ? 'ready' : 'failed'
+      const { data: finished, error: finishError } = await admin.from('design_direction_variants').update({
+        status, design_media_asset_id: asset?.id || null,
+      }).eq('id', variant.id).eq('organization_id', ORGANIZATION_ID).select('*').single()
+      if (finishError) throw finishError
+      return { ...finished, media_asset: asset }
+    } catch (error) {
+      const { error: failedStatusError } = await admin.from('design_direction_variants').update({ status: 'failed' })
+        .eq('id', variant.id).eq('organization_id', ORGANIZATION_ID)
+      if (failedStatusError) {
+        throw new Error(`Variant generation failed and its status could not be recorded: ${failedStatusError.message}`)
+      }
+      throw error
+    }
   })
 }
 
@@ -704,6 +848,7 @@ async function handler(req: Request) {
       select_direction: () => selectDirection(admin, body, user.id),
       release_direction: () => releaseDirection(admin, body, user.id),
       generate_image: () => generateImage(admin, userClient, body, user.id),
+      generate_variants: () => generateVariants(admin, userClient, body, user.id),
       create_video_placeholder: () => createVideoPlaceholder(admin, userClient, body, user.id),
       generate_content_request_image: () => generateContentRequestImage(admin, userClient, body, user.id),
       create_content_request_video_placeholder: () => createContentRequestVideoPlaceholder(admin, userClient, body, user.id),
