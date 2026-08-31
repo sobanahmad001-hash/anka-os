@@ -76,6 +76,7 @@ create policy "Team can read backlink targets"
 
 revoke all on public.backlink_targets from anon, authenticated;
 grant select on public.backlink_targets to authenticated;
+revoke all on public.backlink_targets from service_role;
 grant select, insert, update on public.backlink_targets to service_role;
 
 comment on table public.backlink_targets is

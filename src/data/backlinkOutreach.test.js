@@ -25,6 +25,7 @@ test('MK4 adds one tenant-safe canonical backlink target table', () => {
   assert.match(migration, /is_team_organization_member\(organization_id\)/)
   assert.match(migration, /revoke all on public\.backlink_targets from anon, authenticated/)
   assert.match(migration, /grant select on public\.backlink_targets to authenticated/)
+  assert.match(migration, /revoke all on public\.backlink_targets from service_role/)
   assert.match(migration, /grant select, insert, update on public\.backlink_targets to service_role/)
   assert.doesNotMatch(migration, /grant all on public\.backlink_targets/)
   assert.doesNotMatch(migration, /grant (?:insert|update|delete|all)[\s\S]{0,120}to authenticated/)
