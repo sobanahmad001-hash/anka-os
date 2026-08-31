@@ -31,7 +31,7 @@ create table public.content_queue_entries (
     on delete set null (fulfilled_by_request_id),
   unique (id, organization_id),
   check (
-    (status = 'actioned' and fulfilled_by_request_id is not null)
+    status = 'actioned'
     or (status in ('planned', 'skipped') and fulfilled_by_request_id is null)
   )
 );
@@ -106,8 +106,13 @@ begin
       old.brief_template, old.linked_event_id, old.created_by, old.created_at) then
     raise exception 'Queue planning fields are immutable after creation.';
   end if;
-  if old.status <> 'planned' and row(new.status, new.fulfilled_by_request_id)
-    is distinct from row(old.status, old.fulfilled_by_request_id) then
+  if old.status <> 'planned'
+    and not (
+      old.status = 'actioned' and new.status = 'actioned'
+      and old.fulfilled_by_request_id is not null and new.fulfilled_by_request_id is null
+    )
+    and row(new.status, new.fulfilled_by_request_id)
+      is distinct from row(old.status, old.fulfilled_by_request_id) then
     raise exception 'Actioned and skipped queue entries are terminal.';
   end if;
   return new;

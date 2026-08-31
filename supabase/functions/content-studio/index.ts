@@ -134,6 +134,21 @@ export function validateContentRequestInput(body: Json) {
   }
 }
 
+export function validateQueueEntryInput(body: Json) {
+  const brandId = text(body.brand_id, 80)
+  const plannedDate = text(body.planned_date, 10)
+  const format = text(body.format, 40)
+  const briefTemplate = text(body.brief_template, 12000)
+  const linkedEventId = text(body.linked_event_id, 80) || null
+  if (!brandId) throw new Error('Content queue entries require a brand')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(plannedDate)
+    || Number.isNaN(Date.parse(`${plannedDate}T00:00:00Z`))) {
+    throw new Error('Content queue entries require a valid planned date')
+  }
+  if (!CONTENT_REQUEST_FORMATS.has(format)) throw new Error('Unsupported content queue format')
+  return { brandId, plannedDate, format, briefTemplate, linkedEventId }
+}
+
 export function figmaHandoffUrl(contentRequestId: string, appUrl = Deno.env.get('ANKA_APP_URL') || 'https://anka-os.vercel.app') {
   const requestId = text(contentRequestId, 80)
   if (!requestId) throw new Error('Content request is required')
@@ -235,6 +250,52 @@ async function createContentRequest(admin: Client, body: Json, actorId: string) 
     p_create_event_link: input.createEventLink,
     p_event_content_type: input.eventContentType,
     p_lead_time_days: input.leadTimeDays,
+  })
+  if (error) throw error
+  return data
+}
+
+async function createQueueEntry(admin: Client, body: Json, actorId: string) {
+  const input = validateQueueEntryInput(body)
+  const { data, error } = await admin.from('content_queue_entries').insert({
+    organization_id: ORGANIZATION_ID,
+    brand_id: input.brandId,
+    planned_date: input.plannedDate,
+    format: input.format,
+    brief_template: input.briefTemplate,
+    linked_event_id: input.linkedEventId,
+    created_by: actorId,
+  }).select('*').single()
+  if (error) throw error
+  return data
+}
+
+async function actionQueueEntry(admin: Client, body: Json, actorId: string) {
+  const queueEntryId = text(body.queue_entry_id, 80)
+  const outputPath = text(body.output_path, 40)
+  if (!queueEntryId) throw new Error('Content queue entry is required')
+  if (!CONTENT_REQUEST_OUTPUT_PATHS.has(outputPath)) throw new Error('Unsupported content request output path')
+  const { data, error } = await admin.rpc('action_content_queue_entry', {
+    p_organization_id: ORGANIZATION_ID,
+    p_queue_entry_id: queueEntryId,
+    p_output_path: outputPath,
+    p_actor_id: actorId,
+  })
+  if (error) throw error
+  if (outputPath !== 'figma_handoff') return data
+  const request = data?.request as Json | undefined
+  const handoff = await ensureFigmaHandoff(admin, {
+    content_request_id: request?.id,
+  })
+  return { ...data, figma_handoff: handoff }
+}
+
+async function skipQueueEntry(admin: Client, body: Json) {
+  const queueEntryId = text(body.queue_entry_id, 80)
+  if (!queueEntryId) throw new Error('Content queue entry is required')
+  const { data, error } = await admin.rpc('skip_content_queue_entry', {
+    p_organization_id: ORGANIZATION_ID,
+    p_queue_entry_id: queueEntryId,
   })
   if (error) throw error
   return data
@@ -415,6 +476,15 @@ export async function handleRequest(request: Request) {
     if (action === 'save_artifact') return response({ data: await saveArtifact(userClient, admin, body, user.id) })
     if (action === 'create_content_request') {
       return response({ data: await createContentRequest(admin, body, user.id) })
+    }
+    if (action === 'create_queue_entry') {
+      return response({ data: await createQueueEntry(admin, body, user.id) })
+    }
+    if (action === 'action_queue_entry') {
+      return response({ data: await actionQueueEntry(admin, body, user.id) })
+    }
+    if (action === 'skip_queue_entry') {
+      return response({ data: await skipQueueEntry(admin, body) })
     }
     if (action === 'ensure_figma_handoff') {
       return response({ data: await ensureFigmaHandoff(admin, body) })
