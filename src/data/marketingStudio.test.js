@@ -101,6 +101,7 @@ test('MK3 hierarchy is tenant-consistent, indexed, constrained, and browser read
     'mk3_keyword_rls_isolation', 'mk3_snapshot_rls_isolation',
     'mk3_metrics_view_rls_isolation',
   ]) assert.match(mk3Verifier, new RegExp(isolationCheck))
+  assert.doesNotMatch(mk3Verifier, /insert into mk3_runtime_checks values \(\s*\('/)
 })
 
 test('MK3 derives performance ratios safely without storing duplicate metric columns', () => {
