@@ -16,6 +16,19 @@ async function invoke(action, input = {}) {
 }
 
 export const marketingStudio = Object.freeze({
+  async listBrands() {
+    return dataOrThrow(supabase.from('brands')
+      .select('id, name, status')
+      .order('name'))
+  },
+
+  async listBacklinkTargets(brandId) {
+    return dataOrThrow(supabase.from('backlink_targets')
+      .select('*')
+      .eq('brand_id', brandId)
+      .order('created_at', { ascending: false }))
+  },
+
   async listEngagements() {
     const rows = await dataOrThrow(supabase.from('engagements')
       .select('id, name, brand_id, status, agency_clients(name), brands(name), engagement_services!inner(id, service_catalog!inner(name, department_id))')
@@ -41,6 +54,8 @@ export const marketingStudio = Object.freeze({
 
   createCampaign: (engagementId, campaign) => invoke('create_campaign', { engagement_id: engagementId, campaign }),
   updateCampaign: (campaignId, campaign) => invoke('update_campaign', { campaign_id: campaignId, campaign }),
+  createBacklinkTarget: (brandId, target) => invoke('create_backlink_target', { brand_id: brandId, target }),
+  updateBacklinkTarget: (targetId, target) => invoke('update_backlink_target', { target_id: targetId, target }),
   saveArtifact: input => invoke('save_artifact', input),
   approveArtifact: (artifactVersionId, notes = '') => invoke('approve_artifact', { artifact_version_id: artifactVersionId, notes }),
   analytics: (engagementId, startDate, endDate) => invoke('analytics_dashboard', {

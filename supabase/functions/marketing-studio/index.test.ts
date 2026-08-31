@@ -1,8 +1,10 @@
 import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.14'
 import {
   fetchReadOnlyGoogleReport,
+  handleRequest,
   hasMarketingAuthority,
   safeDateRange,
+  validateBacklinkTarget,
   validateCampaign,
   validateMarketingArtifact,
 } from './index.ts'
@@ -19,6 +21,81 @@ Deno.test('campaign planning validates dates, channels, and informational budget
   assertEquals(campaign.planned_budget, 2500)
   assertEquals(campaign.currency_code, 'USD')
   assertThrows(() => validateCampaign({ name: 'Risk', planned_channels: ['paid'], planned_budget: -1 }), Error, 'non-negative')
+})
+
+Deno.test('backlink targets preserve unknown metrics and validate URLs, scores, and enums', () => {
+  const target = validateBacklinkTarget({
+    site_name: 'Local property guild', site_url: 'HTTPS://Example.COM/directory/',
+    domain_authority: '', estimated_traffic: null, relevance_score: 91,
+    link_type: 'membership', cost_type: 'paid', outreach_status: 'contacted',
+  })
+  assertEquals(target.site_url, 'https://example.com/directory')
+  assertEquals(target.domain_authority, null)
+  assertEquals(target.estimated_traffic, null)
+  assertEquals(target.relevance_score, 91)
+  assertThrows(() => validateBacklinkTarget({ site_name: 'Bad URL', site_url: 'ftp://example.com' }), Error, 'HTTP or HTTPS')
+  assertThrows(() => validateBacklinkTarget({ site_name: 'Bad host', site_url: 'https://...' }), Error, 'HTTP or HTTPS')
+  assertThrows(() => validateBacklinkTarget({ site_name: 'Bad score', relevance_score: 101 }), Error, 'between 0 and 100')
+  assertThrows(() => validateBacklinkTarget({ site_name: 'Bad status', outreach_status: 'emailed' }), Error, 'Unsupported')
+})
+
+function backlinkServerPath(membership: Record<string, unknown>) {
+  const writes: Array<Record<string, unknown>> = []
+  let clientCount = 0
+  const userClient = {
+    auth: { getUser: async () => ({ data: { user: { id: 'actor-id' } }, error: null }) },
+  }
+  const admin = {
+    from(table: string) {
+      let inserted: Record<string, unknown> | null = null
+      const builder = {
+        select() { return builder },
+        eq() { return builder },
+        insert(value: Record<string, unknown>) { inserted = value; writes.push(value); return builder },
+        async maybeSingle() {
+          if (table === 'organization_memberships') return { data: membership, error: null }
+          if (table === 'brands') return { data: { id: 'brand-id', organization_id: membership.organization_id, name: 'Brand' }, error: null }
+          return { data: null, error: null }
+        },
+        async single() {
+          return { data: { id: 'target-id', ...inserted }, error: null }
+        },
+      }
+      return builder
+    },
+  }
+  const factory = () => clientCount++ === 0 ? userClient : admin
+  return { factory: factory as never, writes }
+}
+
+async function createBacklinkThroughServer(membership: Record<string, unknown>) {
+  const path = backlinkServerPath(membership)
+  const request = new Request('https://functions.example/marketing-studio', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer caller-jwt', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'create_backlink_target', brand_id: 'brand-id',
+      target: { site_name: 'Industry journal', site_url: 'https://journal.example.com' },
+    }),
+  })
+  const response = await handleRequest(request, {
+    createClient: path.factory,
+    environment: { supabaseUrl: 'https://project.supabase.co', publishableKey: 'publishable', secretKey: 'secret' },
+  })
+  return { response, writes: path.writes }
+}
+
+Deno.test('handleRequest permits Marketing and leadership backlink writes and denies unrelated departments', async () => {
+  const base = { organization_id: '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25', status: 'active', member_kind: 'team' }
+  const marketing = await createBacklinkThroughServer({ ...base, role: 'contributor', department_id: 'marketing' })
+  const leadership = await createBacklinkThroughServer({ ...base, role: 'operations_admin', department_id: null })
+  const unrelated = await createBacklinkThroughServer({ ...base, role: 'contributor', department_id: 'design' })
+  assertEquals(marketing.response.status, 200)
+  assertEquals(marketing.writes.length, 1)
+  assertEquals(leadership.response.status, 200)
+  assertEquals(leadership.writes.length, 1)
+  assertEquals(unrelated.response.status, 403)
+  assertEquals(unrelated.writes.length, 0)
 })
 
 Deno.test('marketing report preserves source, period, insight, and recommended action', () => {

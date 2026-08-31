@@ -12,6 +12,9 @@ const GOOGLE_PROVIDERS = new Set(['google_analytics', 'google_search_console', '
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 const MANAGER_ROLES = new Set(['department_manager'])
 const CAMPAIGN_STATUSES = new Set(['draft', 'planned', 'active', 'paused', 'completed', 'cancelled'])
+const BACKLINK_STATUSES = new Set(['not_started', 'contacted', 'in_discussion', 'secured', 'declined'])
+const BACKLINK_LINK_TYPES = new Set(['membership', 'partnership', 'editorial', 'guest_post'])
+const BACKLINK_COST_TYPES = new Set(['free', 'paid', 'both'])
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -127,15 +130,90 @@ export function validateCampaign(value: unknown) {
   }
 }
 
-async function requireContext(request: Request) {
+function optionalText(value: unknown, max: number) {
+  const result = text(value, max)
+  return result || null
+}
+
+function optionalNumber(value: unknown, label: string, minimum = 0, maximum: number | null = null) {
+  if (value === '' || value === null || value === undefined) return null
+  const result = Number(value)
+  if (!Number.isFinite(result) || result < minimum || (maximum !== null && result > maximum)) {
+    throw new Error(maximum === null
+      ? `${label} must be a non-negative number`
+      : `${label} must be between ${minimum} and ${maximum}`)
+  }
+  return result
+}
+
+function optionalSiteUrl(value: unknown) {
+  const raw = optionalText(value, 2048)
+  if (!raw) return null
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch {
+    throw new Error('Site URL must be a valid HTTP or HTTPS URL')
+  }
+  const validHostname = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/i
+  if (!['http:', 'https:'].includes(parsed.protocol) || !validHostname.test(parsed.hostname)
+    || parsed.username || parsed.password) {
+    throw new Error('Site URL must be a valid HTTP or HTTPS URL')
+  }
+  parsed.hash = ''
+  parsed.hostname = parsed.hostname.toLowerCase()
+  if ((parsed.protocol === 'http:' && parsed.port === '80') || (parsed.protocol === 'https:' && parsed.port === '443')) {
+    parsed.port = ''
+  }
+  if (parsed.pathname.length > 1) parsed.pathname = parsed.pathname.replace(/\/+$/, '')
+  return parsed.toString()
+}
+
+export function validateBacklinkTarget(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Backlink target details are required')
+  }
+  const input = value as Json
+  const siteName = text(input.site_name, 240)
+  const linkType = optionalText(input.link_type, 40)
+  const costType = optionalText(input.cost_type, 20)
+  const outreachStatus = text(input.outreach_status, 40) || 'not_started'
+  if (!siteName) throw new Error('Site name is required')
+  if (linkType && !BACKLINK_LINK_TYPES.has(linkType)) throw new Error('Unsupported backlink link type')
+  if (costType && !BACKLINK_COST_TYPES.has(costType)) throw new Error('Unsupported backlink cost type')
+  if (!BACKLINK_STATUSES.has(outreachStatus)) throw new Error('Unsupported backlink outreach status')
+  return {
+    site_name: siteName,
+    site_url: optionalSiteUrl(input.site_url),
+    industry_category: optionalText(input.industry_category, 160),
+    domain_authority: optionalNumber(input.domain_authority, 'Domain authority', 0, 100),
+    estimated_traffic: optionalNumber(input.estimated_traffic, 'Estimated traffic'),
+    relevance_score: optionalNumber(input.relevance_score, 'Relevance score', 0, 100),
+    link_type: linkType,
+    cost_type: costType,
+    outreach_status: outreachStatus,
+    notes: optionalText(input.notes, 20000),
+  }
+}
+
+type RequestDependencies = {
+  createClient?: typeof createClient
+  environment?: { supabaseUrl: string; publishableKey: string; secretKey: string }
+}
+
+async function requireContext(
+  request: Request,
+  clientFactory: typeof createClient = createClient,
+  environment?: RequestDependencies['environment'],
+) {
   const authorization = request.headers.get('Authorization') || ''
   if (!authorization.startsWith('Bearer ')) throw Object.assign(new Error('Authentication required'), { status: 401 })
-  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
-  const publishableKey = namedKey('SUPABASE_PUBLISHABLE_KEYS', 'SUPABASE_ANON_KEY')
-  const secretKey = namedKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY')
+  const supabaseUrl = environment?.supabaseUrl ?? Deno.env.get('SUPABASE_URL') ?? ''
+  const publishableKey = environment?.publishableKey ?? namedKey('SUPABASE_PUBLISHABLE_KEYS', 'SUPABASE_ANON_KEY')
+  const secretKey = environment?.secretKey ?? namedKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY')
   if (!supabaseUrl || !publishableKey || !secretKey) throw new Error('Function environment is incomplete')
-  const userClient = createClient(supabaseUrl, publishableKey, { global: { headers: { Authorization: authorization } } })
-  const admin = createClient(supabaseUrl, secretKey, { auth: { persistSession: false, autoRefreshToken: false } })
+  const userClient = clientFactory(supabaseUrl, publishableKey, { global: { headers: { Authorization: authorization } } })
+  const admin = clientFactory(supabaseUrl, secretKey, { auth: { persistSession: false, autoRefreshToken: false } })
   const { data: { user }, error } = await userClient.auth.getUser()
   if (error || !user) throw Object.assign(new Error('Authentication required'), { status: 401 })
   const { data: membership } = await admin.from('organization_memberships')
@@ -158,6 +236,13 @@ async function requireMarketingEngagement(admin: Client, engagementId: string) {
     throw Object.assign(new Error('This engagement has no active Marketing service'), { status: 409 })
   }
   return engagement
+}
+
+async function requireBrand(admin: Client, brandId: string) {
+  const { data: brand, error } = await admin.from('brands').select('id, organization_id, name')
+    .eq('id', brandId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  if (error || !brand) throw Object.assign(new Error('Brand not found'), { status: 404 })
+  return brand
 }
 
 async function recordEvent(admin: Client, engagementId: string, actorId: string, eventType: string, payload: Json) {
@@ -199,6 +284,34 @@ async function updateCampaign(admin: Client, body: Json, actorId: string) {
     record_type: 'marketing_campaign', record_id: data.id, action: 'updated',
     previous_status: existing.status, status: data.status,
   })
+  return data
+}
+
+async function createBacklinkTarget(admin: Client, body: Json, actorId: string) {
+  const brandId = text(body.brand_id, 80)
+  const brand = await requireBrand(admin, brandId)
+  const target = validateBacklinkTarget(body.target)
+  const { data, error } = await admin.from('backlink_targets').insert({
+    organization_id: ORGANIZATION_ID,
+    brand_id: brand.id,
+    ...target,
+    created_by: actorId,
+  }).select('*').single()
+  if (error) throw error
+  return data
+}
+
+async function updateBacklinkTarget(admin: Client, body: Json) {
+  const targetId = text(body.target_id, 80)
+  const { data: existing, error: existingError } = await admin.from('backlink_targets')
+    .select('id, brand_id').eq('id', targetId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  if (existingError) throw existingError
+  if (!existing) throw Object.assign(new Error('Backlink target not found'), { status: 404 })
+  await requireBrand(admin, existing.brand_id)
+  const target = validateBacklinkTarget(body.target)
+  const { data, error } = await admin.from('backlink_targets').update(target)
+    .eq('id', existing.id).eq('organization_id', ORGANIZATION_ID).select('*').single()
+  if (error) throw error
   return data
 }
 
@@ -388,11 +501,16 @@ async function analyticsDashboard(admin: Client, body: Json) {
   return { engagement_id: engagement.id, brand_id: engagement.brand_id, period, reports }
 }
 
-export async function handleRequest(request: Request) {
+export async function handleRequest(
+  request: Request,
+  dependencies: RequestDependencies = {},
+) {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (request.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
   try {
-    const { admin, user, membership } = await requireContext(request)
+    const { admin, user, membership } = await requireContext(
+      request, dependencies.createClient, dependencies.environment,
+    )
     const body = await request.json() as Json
     const action = text(body.action, 60)
     if (!hasMarketingAuthority(membership, action)) {
@@ -400,6 +518,8 @@ export async function handleRequest(request: Request) {
     }
     if (action === 'create_campaign') return response({ data: await createCampaign(admin, body, user.id) })
     if (action === 'update_campaign') return response({ data: await updateCampaign(admin, body, user.id) })
+    if (action === 'create_backlink_target') return response({ data: await createBacklinkTarget(admin, body, user.id) })
+    if (action === 'update_backlink_target') return response({ data: await updateBacklinkTarget(admin, body) })
     if (action === 'save_artifact') return response({ data: await saveArtifact(admin, body, user.id) })
     if (action === 'approve_artifact') return response({ data: await approveArtifact(admin, body, user.id) })
     if (action === 'analytics_dashboard') return response({ data: await analyticsDashboard(admin, body) })
@@ -411,4 +531,4 @@ export async function handleRequest(request: Request) {
   }
 }
 
-if (import.meta.main) Deno.serve(handleRequest)
+if (import.meta.main) Deno.serve((request) => handleRequest(request))

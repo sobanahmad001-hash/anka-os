@@ -9,6 +9,14 @@ import {
   latestVersion,
   lines,
 } from '../data/marketingStudio.js'
+import {
+  BACKLINK_COST_TYPES,
+  BACKLINK_LINK_TYPES,
+  BACKLINK_STATUSES,
+  backlinkTargetEditor,
+  blankBacklinkTarget,
+  filterBacklinkTargets,
+} from '../data/backlinkOutreach.js'
 import { marketingStudio } from '../data/marketingStudioRepository.js'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
@@ -44,6 +52,8 @@ function Notice({ error, message }) {
 
 export default function MarketingStudio() {
   const [engagements, setEngagements] = useState([])
+  const [brands, setBrands] = useState([])
+  const [backlinkBrandId, setBacklinkBrandId] = useState('')
   const [engagementId, setEngagementId] = useState('')
   const [workspace, setWorkspace] = useState(null)
   const [campaignId, setCampaignId] = useState('')
@@ -71,9 +81,11 @@ export default function MarketingStudio() {
 
   useEffect(() => {
     let active = true
-    marketingStudio.listEngagements().then(rows => {
+    Promise.all([marketingStudio.listEngagements(), marketingStudio.listBrands()]).then(([rows, brandRows]) => {
       if (!active) return
       setEngagements(rows || [])
+      setBrands(brandRows || [])
+      setBacklinkBrandId(brandRows?.[0]?.id || '')
       const first = rows?.[0]?.id || ''
       setEngagementId(first)
       if (first) loadWorkspace(first)
@@ -106,7 +118,7 @@ export default function MarketingStudio() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-400">Marketing department</p>
             <h1 className="mt-1 text-3xl font-semibold tracking-tight">Marketing Studio</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Plan campaigns, version accountable marketing artifacts, and inspect live read-only performance from engagement-approved Google connections.</p>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Plan campaigns, maintain backlink outreach research, version accountable marketing artifacts, and inspect live read-only performance.</p>
           </div>
           <Link to="/sphere/marketing" className={BUTTON}>Open Marketing work queue</Link>
         </div>
@@ -124,12 +136,14 @@ export default function MarketingStudio() {
         </section>
 
         <nav className="flex gap-2 overflow-x-auto border-b border-slate-800">
-          {[['campaigns', 'Campaigns'], ['artifacts', 'Artifacts'], ['analytics', 'Live analytics']].map(([id, label]) => (
+          {[['campaigns', 'Campaigns'], ['backlinks', 'Backlink outreach'], ['artifacts', 'Artifacts'], ['analytics', 'Live analytics']].map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-emerald-400 text-emerald-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>
           ))}
         </nav>
 
-        {loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Marketing Studio…</div> : !workspace ? (
+        {loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Marketing Studio…</div> : tab === 'backlinks' ? (
+          <BacklinkOutreach brands={brands} brandId={backlinkBrandId} setBrandId={setBacklinkBrandId} />
+        ) : !workspace ? (
           <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Select an engagement with a Marketing service to begin.</div>
         ) : tab === 'campaigns' ? (
           <Campaigns workspace={workspace} campaignId={campaignId} setCampaignId={setCampaignId} selected={selectedCampaign} saving={saving} act={act} />
@@ -185,6 +199,105 @@ function Campaigns({ workspace, campaignId, setCampaignId, selected, saving, act
       <div className="mt-6 flex items-center justify-between gap-4 border-t border-slate-800 pt-5"><p className="text-xs leading-5 text-slate-500">This record coordinates work only. No field or action can alter Google Ads spend.</p><button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : creating ? 'Create campaign' : 'Save changes'}</button></div>
     </form>
   </div>
+}
+
+function BacklinkOutreach({ brands, brandId, setBrandId }) { // eslint-disable-line no-unused-vars
+  const [targets, setTargets] = useState([])
+  const [selectedId, setSelectedId] = useState('')
+  const [creating, setCreating] = useState(true)
+  const [form, setForm] = useState(blankBacklinkTarget())
+  const [filters, setFilters] = useState({ outreach_status: '', link_type: '', cost_type: '', minimum_relevance: '', minimum_authority: '' })
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const visibleTargets = useMemo(() => filterBacklinkTargets(targets, filters), [targets, filters])
+
+  async function loadTargets(nextBrandId = brandId) {
+    if (!nextBrandId) { setTargets([]); return }
+    setLoading(true); setError('')
+    try { setTargets(await marketingStudio.listBacklinkTargets(nextBrandId)) }
+    catch (loadError) { setError(loadError.message) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => {
+    setSelectedId(''); setCreating(true); setForm(blankBacklinkTarget()); setMessage('')
+    if (!brandId) { setTargets([]); return undefined }
+    let active = true
+    setLoading(true); setError('')
+    marketingStudio.listBacklinkTargets(brandId)
+      .then(rows => { if (active) setTargets(rows) })
+      .catch(loadError => { if (active) setError(loadError.message) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [brandId])
+
+  function editTarget(target) {
+    setSelectedId(target.id); setCreating(false); setForm(backlinkTargetEditor(target)); setMessage('')
+  }
+
+  async function submit(event) {
+    event.preventDefault(); setSaving(true); setError(''); setMessage('')
+    try {
+      const result = creating
+        ? await marketingStudio.createBacklinkTarget(brandId, form)
+        : await marketingStudio.updateBacklinkTarget(selectedId, form)
+      setSelectedId(result.id); setCreating(false); setForm(backlinkTargetEditor(result))
+      setMessage(creating ? 'Backlink target added.' : 'Backlink target updated.')
+      await loadTargets(brandId)
+    } catch (saveError) { setError(saveError.message) }
+    finally { setSaving(false) }
+  }
+
+  if (!brands.length) return <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Create a brand before recording backlink opportunities.</div>
+
+  return <div className="space-y-6">
+    <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+      <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Manual research log</p><h2 className="mt-1 text-xl font-semibold">Backlink outreach</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Qualify opportunities and track human outreach. This area does not scrape sites, send messages, or verify backlinks.</p></div><Field label="Brand"><select className={`${INPUT} min-w-64`} value={brandId} onChange={event => setBrandId(event.target.value)}>{brands.map(brand => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select></Field></div>
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <Field label="Status"><select className={INPUT} value={filters.outreach_status} onChange={event => setFilters({ ...filters, outreach_status: event.target.value })}><option value="">All statuses</option>{BACKLINK_STATUSES.map(value => <option key={value} value={value}>{titleize(value)}</option>)}</select></Field>
+        <Field label="Link type"><select className={INPUT} value={filters.link_type} onChange={event => setFilters({ ...filters, link_type: event.target.value })}><option value="">All link types</option>{BACKLINK_LINK_TYPES.map(value => <option key={value} value={value}>{titleize(value)}</option>)}</select></Field>
+        <Field label="Cost type"><select className={INPUT} value={filters.cost_type} onChange={event => setFilters({ ...filters, cost_type: event.target.value })}><option value="">All cost types</option>{BACKLINK_COST_TYPES.map(value => <option key={value} value={value}>{titleize(value)}</option>)}</select></Field>
+        <Field label="Minimum relevance"><input type="number" min="0" max="100" step="0.01" className={INPUT} value={filters.minimum_relevance} onChange={event => setFilters({ ...filters, minimum_relevance: event.target.value })} /></Field>
+        <Field label="Minimum authority"><input type="number" min="0" max="100" step="0.01" className={INPUT} value={filters.minimum_authority} onChange={event => setFilters({ ...filters, minimum_authority: event.target.value })} /></Field>
+      </div>
+    </section>
+
+    <Notice error={error} message={message} />
+    <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
+      <section className="space-y-3">
+        <button type="button" onClick={() => { setCreating(true); setSelectedId(''); setForm(blankBacklinkTarget()); setMessage('') }} className={`${PRIMARY} w-full`}>New backlink target</button>
+        {loading ? <div className="rounded-2xl border border-slate-800 p-8 text-center text-sm text-slate-500">Loading targets…</div> : visibleTargets.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500">No targets match these filters.</div> : visibleTargets.map(target => <button type="button" key={target.id} onClick={() => editTarget(target)} className={`w-full rounded-2xl border p-4 text-left ${selectedId === target.id && !creating ? 'border-emerald-500/60 bg-emerald-950/20' : 'border-slate-800 bg-slate-900/70 hover:border-slate-700'}`}>
+          <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold text-white">{target.site_name}</p><p className="mt-1 truncate text-xs text-slate-500">{target.site_url || 'URL not recorded'} · {target.industry_category || 'Uncategorised'}</p></div><span className="shrink-0 rounded-full bg-slate-950 px-2.5 py-1 text-[10px] uppercase text-slate-400">{titleize(target.outreach_status)}</span></div>
+          <div className="mt-4 grid grid-cols-3 gap-2 text-xs"><Metric label="Relevance" value={target.relevance_score} /><Metric label="Authority" value={target.domain_authority} /><Metric label="Traffic" value={target.estimated_traffic} /></div>
+          <p className="mt-3 text-[11px] text-slate-600">{target.link_type ? titleize(target.link_type) : 'Link type unknown'} · {target.cost_type ? titleize(target.cost_type) : 'Cost unknown'}</p>
+        </button>)}
+      </section>
+
+      <form onSubmit={submit} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">{creating ? 'Research opportunity' : 'Target detail'}</p><h2 className="mt-1 text-xl font-semibold">{creating ? 'Add backlink target' : form.site_name}</h2></div>{!creating && <span className="rounded-full bg-slate-950 px-3 py-1.5 text-xs text-slate-400">Historical record retained</span>}</div>
+        <div className="mt-6 grid gap-4 md:grid-cols-2">
+          <Field label="Site name"><input required maxLength="240" className={INPUT} value={form.site_name} onChange={event => setForm({ ...form, site_name: event.target.value })} /></Field>
+          <Field label="Site URL" hint="Optional HTTP or HTTPS URL"><input type="url" maxLength="2048" className={INPUT} value={form.site_url} onChange={event => setForm({ ...form, site_url: event.target.value })} /></Field>
+          <Field label="Industry category"><input maxLength="160" className={INPUT} value={form.industry_category} onChange={event => setForm({ ...form, industry_category: event.target.value })} /></Field>
+          <Field label="Outreach status"><select className={INPUT} value={form.outreach_status} onChange={event => setForm({ ...form, outreach_status: event.target.value })}>{BACKLINK_STATUSES.map(value => <option key={value} value={value}>{titleize(value)}</option>)}</select></Field>
+          <Field label="Domain authority" hint="0–100; blank means unknown"><input type="number" min="0" max="100" step="0.01" className={INPUT} value={form.domain_authority} onChange={event => setForm({ ...form, domain_authority: event.target.value })} /></Field>
+          <Field label="Relevance score" hint="0–100; blank means unknown"><input type="number" min="0" max="100" step="0.01" className={INPUT} value={form.relevance_score} onChange={event => setForm({ ...form, relevance_score: event.target.value })} /></Field>
+          <Field label="Estimated traffic" hint="Blank means unknown"><input type="number" min="0" step="0.01" className={INPUT} value={form.estimated_traffic} onChange={event => setForm({ ...form, estimated_traffic: event.target.value })} /></Field>
+          <Field label="Link type"><select className={INPUT} value={form.link_type} onChange={event => setForm({ ...form, link_type: event.target.value })}><option value="">Unknown</option>{BACKLINK_LINK_TYPES.map(value => <option key={value} value={value}>{titleize(value)}</option>)}</select></Field>
+          <Field label="Cost type"><select className={INPUT} value={form.cost_type} onChange={event => setForm({ ...form, cost_type: event.target.value })}><option value="">Unknown</option>{BACKLINK_COST_TYPES.map(value => <option key={value} value={value}>{titleize(value)}</option>)}</select></Field>
+          <div className="md:col-span-2"><Field label="Notes" hint="Operational context only"><textarea maxLength="20000" className={`${INPUT} min-h-32`} value={form.notes} onChange={event => setForm({ ...form, notes: event.target.value })} /></Field></div>
+        </div>
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-slate-800 pt-5"><p className="text-xs leading-5 text-slate-500">Secured and declined targets stay in the log and remain filterable.</p><button disabled={saving || !brandId} className={PRIMARY}>{saving ? 'Saving…' : creating ? 'Add target' : 'Save changes'}</button></div>
+      </form>
+    </div>
+  </div>
+}
+
+function Metric({ label, value }) { // eslint-disable-line no-unused-vars
+  const known = value !== null && value !== undefined && value !== ''
+  return <div className="rounded-lg bg-slate-950 px-2.5 py-2"><p className="text-[9px] uppercase tracking-[0.1em] text-slate-600">{label}</p><p className="mt-1 font-semibold text-slate-300">{known ? Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}</p></div>
 }
 
 function Artifacts({ workspace, campaign, saving, act, setTab, onRefresh }) {
