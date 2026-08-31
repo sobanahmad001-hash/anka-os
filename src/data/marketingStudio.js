@@ -54,6 +54,10 @@ export function adPerformanceMetrics(snapshot = {}) {
   }
 }
 
+export function campaignAfterDeletion(campaigns = [], deletedCampaignId = '') {
+  return campaigns.find(campaign => campaign.id !== deletedCampaignId) || null
+}
+
 export function blankMarketingArtifact(type) {
   return Object.fromEntries((MARKETING_ARTIFACT_FORMS[type]?.fields || []).map(([key, , kind]) => [key, kind === 'list' ? [] : '']))
 }

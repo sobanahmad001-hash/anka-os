@@ -6,6 +6,14 @@ create temporary table mk3_runtime_checks (
 );
 grant select, insert on mk3_runtime_checks to authenticated;
 
+create temporary table mk3_fixture_ids (
+  campaign_id uuid not null,
+  group_id uuid not null,
+  keyword_id uuid not null,
+  snapshot_id uuid not null
+);
+grant select on mk3_fixture_ids to authenticated;
+
 insert into mk3_runtime_checks values
   ('mk3_tables_exist', (
     select count(*) = 4
@@ -98,6 +106,8 @@ declare
   group_id uuid := gen_random_uuid();
   second_group_id uuid := gen_random_uuid();
   connection_id uuid := gen_random_uuid();
+  keyword_id uuid := gen_random_uuid();
+  snapshot_id uuid := gen_random_uuid();
 begin
   select id into owner_id from auth.users order by created_at limit 1;
   if owner_id is null then
@@ -129,20 +139,20 @@ begin
   values
     (group_id, other_org_id, campaign_id, 'Core services', 'draft', owner_id),
     (second_group_id, other_org_id, campaign_id, 'Brand terms', 'active', owner_id);
-  insert into public.ad_group_keywords(organization_id, ad_group_id, keyword, match_type, is_negative, created_by)
+  insert into public.ad_group_keywords(id, organization_id, ad_group_id, keyword, match_type, is_negative, created_by)
   values
-    (other_org_id, group_id, 'digital agency', 'phrase', false, owner_id),
-    (other_org_id, group_id, 'free', 'broad', true, owner_id),
-    (other_org_id, second_group_id, 'anka sphere', 'exact', false, owner_id);
+    (keyword_id, other_org_id, group_id, 'digital agency', 'phrase', false, owner_id),
+    (gen_random_uuid(), other_org_id, group_id, 'free', 'broad', true, owner_id),
+    (gen_random_uuid(), other_org_id, second_group_id, 'anka sphere', 'exact', false, owner_id);
 
   insert into public.ad_campaign_performance_snapshots(
-    organization_id, ad_campaign_id, snapshot_date, impressions, clicks,
+    id, organization_id, ad_campaign_id, snapshot_date, impressions, clicks,
     cost, conversions, provider_connection_id, external_campaign_id, created_by
   )
   values
-    (other_org_id, campaign_id, current_date - 1, 0, 0, 0, 0,
+    (gen_random_uuid(), other_org_id, campaign_id, current_date - 1, 0, 0, 0, 0,
       connection_id, '123456789', owner_id),
-    (other_org_id, campaign_id, current_date, 100, 10, 25, 2,
+    (snapshot_id, other_org_id, campaign_id, current_date, 100, 10, 25, 2,
       connection_id, '123456789', owner_id);
   insert into public.ad_campaign_performance_snapshots(
     organization_id, ad_campaign_id, snapshot_date, impressions, clicks,
@@ -151,6 +161,9 @@ begin
     other_org_id, campaign_id, current_date, 999, 999, 999, 999,
     connection_id, '123456789', owner_id
   ) on conflict (ad_campaign_id, snapshot_date) do nothing;
+
+  insert into mk3_fixture_ids(campaign_id, group_id, keyword_id, snapshot_id)
+  values (campaign_id, group_id, keyword_id, snapshot_id);
 
   insert into mk3_runtime_checks values
     ('mk3_hierarchy_round_trip', (
@@ -187,9 +200,26 @@ select set_config(
 );
 set local role authenticated;
 insert into mk3_runtime_checks values (
-  'mk3_cross_organization_rows_hidden',
-  (select count(*) = 0 from public.ad_campaigns where campaign_name = 'Search launch')
-);
+  ('mk3_campaign_rls_isolation', not exists (
+    select 1 from public.ad_campaigns
+    where id = (select campaign_id from mk3_fixture_ids)
+  )),
+  ('mk3_ad_group_rls_isolation', not exists (
+    select 1 from public.ad_groups
+    where id = (select group_id from mk3_fixture_ids)
+  )),
+  ('mk3_keyword_rls_isolation', not exists (
+    select 1 from public.ad_group_keywords
+    where id = (select keyword_id from mk3_fixture_ids)
+  )),
+  ('mk3_snapshot_rls_isolation', not exists (
+    select 1 from public.ad_campaign_performance_snapshots
+    where id = (select snapshot_id from mk3_fixture_ids)
+  )),
+  ('mk3_metrics_view_rls_isolation', not exists (
+    select 1 from public.ad_campaign_performance_metrics
+    where id = (select snapshot_id from mk3_fixture_ids)
+  ));
 reset role;
 
 select check_name, passed from mk3_runtime_checks order by check_name;

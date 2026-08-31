@@ -20,6 +20,20 @@ Deno.test('Marketing authority keeps approval manager-controlled', () => {
   assertEquals(hasMarketingAuthority({ role: 'executive', department_id: null }, 'analytics_dashboard'), true)
 })
 
+Deno.test('non-Marketing members cannot execute any MK3 write action', () => {
+  const writeActions = [
+    'create_ad_campaign', 'update_ad_campaign', 'delete_ad_campaign',
+    'save_ad_group', 'delete_ad_group', 'save_ad_keyword', 'delete_ad_keyword',
+    'import_ad_campaign_performance',
+  ]
+  for (const action of writeActions) {
+    assertEquals(hasMarketingAuthority({ role: 'contributor', department_id: 'content' }, action), false)
+    assertEquals(hasMarketingAuthority({ role: 'department_manager', department_id: 'design' }, action), false)
+    assertEquals(hasMarketingAuthority({ role: 'contributor', department_id: 'marketing' }, action), true)
+    assertEquals(hasMarketingAuthority({ role: 'operations_admin', department_id: null }, action), true)
+  }
+})
+
 Deno.test('campaign planning validates dates, channels, and informational budget', () => {
   const campaign = validateCampaign({ name: 'Launch', planned_channels: ['search', 'email'], planned_budget: '2500', currency_code: 'usd', status: 'planned' })
   assertEquals(campaign.planned_budget, 2500)

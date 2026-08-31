@@ -8,6 +8,7 @@ import {
   CAMPAIGN_STATUSES,
   MARKETING_ARTIFACT_FORMS,
   blankMarketingArtifact,
+  campaignAfterDeletion,
   defaultReportingPeriod,
   latestVersion,
   lines,
@@ -374,8 +375,13 @@ function AdCampaignTracking({ workspace, saving, act }) {
 
   async function removeCampaign() {
     if (!selected || !window.confirm(`Delete the local planning record “${selected.campaign_name}” and its local descendants? Google Ads will not be changed.`)) return
+    const nextCampaign = campaignAfterDeletion(workspace.adCampaigns, selected.id)
     const result = await act(() => marketingStudio.deleteAdCampaign(workspace.engagement.id, selected.id), 'Local ad campaign planning record deleted.')
-    if (result) { setSelectedId(''); setCreating(workspace.adCampaigns.length <= 1); setForm(blankAdCampaign()) }
+    if (result) {
+      setSelectedId(nextCampaign?.id || '')
+      setCreating(!nextCampaign)
+      setForm(editAdCampaign(nextCampaign))
+    }
   }
 
   async function saveGroup(event) {
@@ -427,8 +433,10 @@ function AdCampaignTracking({ workspace, saving, act }) {
           const summary = campaignSnapshots.at(-1)
           return <button key={campaign.id} onClick={() => { setCreating(false); setSelectedId(campaign.id) }} className={`w-full rounded-2xl border p-4 text-left ${!creating && selectedId === campaign.id ? 'border-emerald-500/60 bg-emerald-950/20' : 'border-slate-800 bg-slate-900/70'}`}>
             <div className="flex justify-between gap-3"><span className="font-semibold">{campaign.campaign_name}</span><span className="text-[10px] uppercase text-slate-500">{campaign.status}</span></div>
-            <p className="mt-2 text-xs text-slate-500">{titleize(campaign.campaign_type)} · {campaign.daily_budget == null ? 'No daily budget' : `${campaign.daily_budget}/day`}</p>
-            <p className="mt-2 text-[11px] text-slate-600">{summary ? `${metric(summary.clicks)} clicks · ${metric(summary.cost, 'money')} cost` : 'No imported performance'}</p>
+            <p className="mt-2 text-xs text-slate-500">{titleize(campaign.campaign_type)} · Daily {campaign.daily_budget == null ? '—' : metric(campaign.daily_budget, 'money')} · Total {campaign.total_budget == null ? '—' : metric(campaign.total_budget, 'money')}</p>
+            <p className="mt-1 text-[11px] text-slate-600">{campaign.start_date || 'No start'} → {campaign.end_date || 'No end'}</p>
+            <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{campaign.goal || 'No campaign goal recorded.'}</p>
+            <p className="mt-2 text-[11px] leading-5 text-slate-600">{summary ? `${summary.snapshot_date} · ${metric(summary.impressions)} impressions · ${metric(summary.clicks)} clicks · ${metric(summary.cost, 'money')} cost · ${metric(summary.conversions)} conversions` : 'No imported performance'}</p>
           </button>
         })}
       </section>

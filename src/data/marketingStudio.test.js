@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-import { MARKETING_ARTIFACT_FORMS, adPerformanceMetrics, blankMarketingArtifact, defaultReportingPeriod } from './marketingStudio.js'
+import { MARKETING_ARTIFACT_FORMS, adPerformanceMetrics, blankMarketingArtifact, campaignAfterDeletion, defaultReportingPeriod } from './marketingStudio.js'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const read = path => readFileSync(`${root}${path}`, 'utf8')
@@ -96,6 +96,11 @@ test('MK3 hierarchy is tenant-consistent, indexed, constrained, and browser read
   assert.doesNotMatch(mk3Migration, /grant (?:insert|update|delete|all)[\s\S]{0,250}to authenticated/)
   assert.match(mk3Migration, /unique \(ad_campaign_id, snapshot_date\)/)
   assert.match(mk3Verifier, /rollback;/)
+  for (const isolationCheck of [
+    'mk3_campaign_rls_isolation', 'mk3_ad_group_rls_isolation',
+    'mk3_keyword_rls_isolation', 'mk3_snapshot_rls_isolation',
+    'mk3_metrics_view_rls_isolation',
+  ]) assert.match(mk3Verifier, new RegExp(isolationCheck))
 })
 
 test('MK3 derives performance ratios safely without storing duplicate metric columns', () => {
@@ -114,7 +119,10 @@ test('MK3 provider import is idempotent and contains no Google Ads mutation path
   assert.match(edge, /fetchGoogleAdsCampaignSnapshot/)
   assert.match(edge, /googleAds:searchStream/)
   assert.match(edge, /onConflict: 'ad_campaign_id,snapshot_date', ignoreDuplicates: true/)
-  assert.doesNotMatch(edge, /mutateCampaigns|campaignBudgets:mutate|adGroups:mutate|adGroupCriteria:mutate|MutateOperation/)
+  const googleAdsUrls = [...edge.matchAll(/https:\/\/googleads\.googleapis\.com\/[^`'"\s]+/g)].map(match => match[0])
+  assert.equal(googleAdsUrls.length, 2)
+  assert(googleAdsUrls.every(url => url.endsWith('/googleAds:searchStream')))
+  assert.doesNotMatch(edge, /\bmutat(?:e|es|ed|ing|ion|ions)\w*|\boperations\s*:/i)
   assert.doesNotMatch(googleOauth, /\/auth\/adwords[\s\S]*\/auth\/adwords/)
 })
 
@@ -125,4 +133,16 @@ test('MK3 UI exposes local structure, targeting, positive and negative keywords,
   assert.match(ui, /Negative keyword/)
   assert.match(ui, /Dated performance snapshots/)
   assert.match(ui, /must still be executed in Google Ads/)
+  for (const summaryField of ['Daily', 'Total', 'No start', 'No end', 'No campaign goal recorded', 'impressions', 'conversions']) {
+    assert.match(ui, new RegExp(summaryField))
+  }
+})
+
+test('MK3 deletion selection preserves the next surviving campaign', () => {
+  const campaigns = [{ id: 'first' }, { id: 'second' }, { id: 'third' }]
+  assert.equal(campaignAfterDeletion(campaigns, 'first')?.id, 'second')
+  assert.equal(campaignAfterDeletion(campaigns, 'second')?.id, 'first')
+  assert.equal(campaignAfterDeletion([{ id: 'only' }], 'only'), null)
+  assert.match(ui, /campaignAfterDeletion\(workspace\.adCampaigns, selected\.id\)/)
+  assert.match(ui, /setSelectedId\(nextCampaign\?\.id \|\| ''\)/)
 })
