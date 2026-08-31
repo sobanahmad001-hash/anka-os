@@ -3,6 +3,7 @@ import {
   fetchReadOnlyGoogleReport,
   hasMarketingAuthority,
   safeDateRange,
+  validateBacklinkTarget,
   validateCampaign,
   validateMarketingArtifact,
 } from './index.ts'
@@ -19,6 +20,27 @@ Deno.test('campaign planning validates dates, channels, and informational budget
   assertEquals(campaign.planned_budget, 2500)
   assertEquals(campaign.currency_code, 'USD')
   assertThrows(() => validateCampaign({ name: 'Risk', planned_channels: ['paid'], planned_budget: -1 }), Error, 'non-negative')
+})
+
+Deno.test('backlink targets preserve unknown metrics and validate URLs, scores, and enums', () => {
+  const target = validateBacklinkTarget({
+    site_name: 'Local property guild', site_url: 'HTTPS://Example.COM/directory/',
+    domain_authority: '', estimated_traffic: null, relevance_score: 91,
+    link_type: 'membership', cost_type: 'paid', outreach_status: 'contacted',
+  })
+  assertEquals(target.site_url, 'https://example.com/directory')
+  assertEquals(target.domain_authority, null)
+  assertEquals(target.estimated_traffic, null)
+  assertEquals(target.relevance_score, 91)
+  assertThrows(() => validateBacklinkTarget({ site_name: 'Bad URL', site_url: 'ftp://example.com' }), Error, 'HTTP or HTTPS')
+  assertThrows(() => validateBacklinkTarget({ site_name: 'Bad score', relevance_score: 101 }), Error, 'between 0 and 100')
+  assertThrows(() => validateBacklinkTarget({ site_name: 'Bad status', outreach_status: 'emailed' }), Error, 'Unsupported')
+})
+
+Deno.test('backlink writes allow Marketing and leadership but deny unrelated departments', () => {
+  assertEquals(hasMarketingAuthority({ role: 'contributor', department_id: 'marketing' }, 'create_backlink_target'), true)
+  assertEquals(hasMarketingAuthority({ role: 'operations_admin', department_id: null }, 'update_backlink_target'), true)
+  assertEquals(hasMarketingAuthority({ role: 'contributor', department_id: 'design' }, 'create_backlink_target'), false)
 })
 
 Deno.test('marketing report preserves source, period, insight, and recommended action', () => {
