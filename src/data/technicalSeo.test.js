@@ -73,6 +73,6 @@ test('audit trend is chronological and derives visible values from snapshots', (
 })
 
 test('rollback verifier covers history, hierarchy, provenance, live view, and isolation', () => {
-  for (const check of ['historical_snapshots_preserved', 'latest_health_is_live', 'mixed_provenance_preserved', 'hierarchy_cycle_rejected', 'cross_brand_parent_rejected', 'table_and_view_cross_org_isolation']) assert.match(verifier, new RegExp(check))
+  for (const check of ['historical_snapshots_preserved', 'latest_health_is_live', 'mixed_provenance_preserved', 'hierarchy_cycle_rejected', 'cross_brand_parent_rejected', 'table_and_view_cross_org_isolation', 'audit_table_cross_org_isolation']) assert.match(verifier, new RegExp(check))
   assert.match(verifier, /rollback;/)
 })

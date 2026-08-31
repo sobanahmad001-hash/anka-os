@@ -22,11 +22,14 @@ declare
   v_hidden_brand_id uuid := gen_random_uuid();
   v_hidden_actor_id uuid := gen_random_uuid();
   v_hidden_page_id uuid := gen_random_uuid();
+  v_hidden_audit_id uuid := gen_random_uuid();
   v_rejected boolean;
   v_visible_pages integer;
   v_hidden_pages integer;
   v_visible_health integer;
   v_hidden_health integer;
+  v_visible_audits integer;
+  v_hidden_audits integer;
 begin
   select brand.organization_id, brand.id, brand.client_id, membership.user_id
   into v_organization_id, v_brand_id, v_client_id, v_actor_id
@@ -104,6 +107,13 @@ begin
   values (v_hidden_brand_id, v_other_organization_id, v_other_client_id, 'MK2 hidden brand', v_hidden_actor_id);
   insert into public.tracked_pages (id, organization_id, brand_id, page_url, page_type, created_by)
   values (v_hidden_page_id, v_other_organization_id, v_hidden_brand_id, 'https://hidden.example/page', 'other', v_hidden_actor_id);
+  insert into public.tracked_page_audits (
+    id, organization_id, tracked_page_id, audit_date, indexed, index_status,
+    issues, source_type, created_by
+  ) values (
+    v_hidden_audit_id, v_other_organization_id, v_hidden_page_id, current_date,
+    false, 'excluded', array['hidden_issue'], 'manual', v_hidden_actor_id
+  );
 
   perform set_config('request.jwt.claims', jsonb_build_object('sub', v_actor_id, 'role', 'authenticated')::text, true);
   set local role authenticated;
@@ -111,9 +121,13 @@ begin
   select count(*) into v_hidden_pages from public.tracked_pages where id = v_hidden_page_id;
   select count(*) into v_visible_health from public.tracked_page_current_health where tracked_page_id = v_child_id;
   select count(*) into v_hidden_health from public.tracked_page_current_health where tracked_page_id = v_hidden_page_id;
+  select count(*) into v_visible_audits from public.tracked_page_audits where tracked_page_id = v_child_id;
+  select count(*) into v_hidden_audits from public.tracked_page_audits where tracked_page_id = v_hidden_page_id;
   reset role;
   insert into mk2_runtime_checks values ('table_and_view_cross_org_isolation',
     v_visible_pages = 1 and v_hidden_pages = 0 and v_visible_health = 1 and v_hidden_health = 0);
+  insert into mk2_runtime_checks values ('audit_table_cross_org_isolation',
+    v_visible_audits = 2 and v_hidden_audits = 0);
 end;
 $$;
 
