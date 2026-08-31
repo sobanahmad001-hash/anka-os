@@ -1,5 +1,6 @@
 import { assertEquals, assertThrows } from 'jsr:@std/assert@1.0.14'
-import { brandBriefInput, compiledBrandStatement, customFieldDefinitionInput, hasContentAuthority } from './index.ts'
+import { brandBriefInput, compiledBrandStatement, customFieldDefinitionInput, hasContentAuthority,
+  figmaHandoffUrl, validateContentRequestInput } from './index.ts'
 import { CHAT_CONTENT_ARTIFACT_TYPE_SET, CONTENT_ARTIFACT_TYPES, contentArtifactResponseFormat, validateContentArtifact } from '../_shared/contentArtifacts.ts'
 
 Deno.test('Content authority keeps exact-version approval manager-controlled', () => {
@@ -7,6 +8,59 @@ Deno.test('Content authority keeps exact-version approval manager-controlled', (
   assertEquals(hasContentAuthority({ role: 'contributor', department_id: 'content' }, 'approve_artifact'), false)
   assertEquals(hasContentAuthority({ role: 'department_manager', department_id: 'content' }, 'approve_artifact'), true)
   assertEquals(hasContentAuthority({ role: 'executive', department_id: null }, 'approve_artifact'), true)
+})
+
+Deno.test('CP1 validates linked and unlinked project requests without client-type assumptions', () => {
+  const routine = validateContentRequestInput({
+    mode: 'project', engagement_id: 'engagement-1', brand_id: 'brand-1',
+    output_path: 'internal_engine', format: 'single_image', brief: 'Routine service post',
+  })
+  assertEquals(routine.linkedEventId, null)
+  assertEquals(routine.createEventLink, false)
+  const eventPost = validateContentRequestInput({
+    mode: 'project', engagement_id: 'engagement-1', brand_id: 'brand-1', linked_event_id: 'event-1',
+    output_path: 'figma_handoff', format: 'carousel_stories', brief: 'Conference carousel',
+    create_event_link: true, event_content_type: 'social', lead_time_days: 10,
+  })
+  assertEquals(eventPost.linkedEventId, 'event-1')
+  assertEquals(eventPost.createEventLink, true)
+  assertEquals(eventPost.leadTimeDays, 10)
+})
+
+Deno.test('CP1 rejects event-plan linking without an event and unsupported formats', () => {
+  assertThrows(() => validateContentRequestInput({
+    mode: 'project', output_path: 'internal_engine', format: 'single_image', brief: 'Post',
+    create_event_link: true,
+  }), Error, 'Select an event')
+  assertThrows(() => validateContentRequestInput({
+    mode: 'project', output_path: 'internal_engine', format: 'speculative_format', brief: 'Post',
+  }), Error, 'format')
+})
+
+Deno.test('CP2 reuses CP1 validation for branded and unbranded general requests', () => {
+  const unbranded = validateContentRequestInput({
+    mode: 'general', engagement_id: null, brand_id: null,
+    output_path: 'internal_engine', format: 'reel', brief: 'A fast general reel request',
+  })
+  assertEquals(unbranded.mode, 'general')
+  assertEquals(unbranded.engagementId, null)
+  assertEquals(unbranded.brandId, null)
+
+  const branded = validateContentRequestInput({
+    mode: 'general', engagement_id: null, brand_id: 'brand-1',
+    output_path: 'figma_handoff', format: 'carousel', brief: 'A branded carousel request',
+  })
+  assertEquals(branded.mode, 'general')
+  assertEquals(branded.engagementId, null)
+  assertEquals(branded.brandId, 'brand-1')
+})
+
+Deno.test('CP3 creates only a stable authenticated in-app handoff route', () => {
+  assertEquals(
+    figmaHandoffUrl('request-1', 'https://anka.example/base?old=1#fragment'),
+    'https://anka.example/sphere/content/requests/request-1/figma-handoff',
+  )
+  assertThrows(() => figmaHandoffUrl('request-1', 'ftp://anka.example'), Error, 'HTTP or HTTPS')
 })
 
 Deno.test('eight chat artifacts and the compiled brand statement use strict validation', () => {

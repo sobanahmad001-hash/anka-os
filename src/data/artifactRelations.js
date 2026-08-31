@@ -24,10 +24,12 @@ export function relationTypeLabel(value) {
 
 export function artifactSurfacePath(artifact) {
   if (!artifact?.id) return '/sphere/engagements'
+  if (artifact.artifact_type === 'design_system') return `/sphere/design/systems?artifact=${encodeURIComponent(artifact.id)}`
   return `/sphere/artifacts/${artifact.id}`
 }
 
 export function owningWorkspacePath(artifact) {
+  if (artifact?.artifact_type === 'design_system') return '/sphere/design/systems'
   if (CONTENT_TYPES.has(artifact?.artifact_type)) return '/sphere/content/studio'
   if (MARKETING_TYPES.has(artifact?.artifact_type)) return '/sphere/marketing/studio'
   if (DEVELOPMENT_TYPES.has(artifact?.artifact_type)) return '/sphere/engagements'

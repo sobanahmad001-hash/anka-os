@@ -30,22 +30,32 @@ async function invokeWordPressExport(action, input = {}) {
 export const designWorkshop = Object.freeze({
   async listEngagements() {
     return dataOrThrow(supabase.from('engagements')
-      .select('id, name, brand_id, status, agency_clients(name), brands(name), engagement_services(id, service_catalog(name, department_id))')
+      .select('id, name, brand_id, status, agency_clients(name), brands(name), engagement_services!inner(id, status, service_catalog!inner(name, department_id, is_active))')
+      .eq('engagement_services.status', 'active')
+      .eq('engagement_services.service_catalog.department_id', 'design')
+      .eq('engagement_services.service_catalog.is_active', true)
       .order('updated_at', { ascending: false }))
   },
 
   async load(engagementId) {
-    const [engagement, stages, artifacts, versions, approvals, models, sessions, experimentReviewers] = await Promise.all([
+    const [engagement, stages, artifacts, versions, approvals, models, designServices, sessions, experimentReviewers] = await Promise.all([
       dataOrThrow(supabase.from('engagements').select('*, agency_clients(name), brands(name)').eq('id', engagementId).single()),
       dataOrThrow(supabase.from('engagement_stage_instances').select('*').eq('engagement_id', engagementId).order('position')),
       dataOrThrow(supabase.from('artifacts').select('*').eq('engagement_id', engagementId).order('created_at')),
       dataOrThrow(supabase.from('artifact_versions').select('*, artifacts!inner(engagement_id)').eq('artifacts.engagement_id', engagementId).order('version_number')),
       dataOrThrow(supabase.from('artifact_approvals').select('*').eq('engagement_id', engagementId).order('approved_at')),
       dataOrThrow(supabase.from('design_model_registry').select('*').eq('is_active', true).order('display_name')),
+      dataOrThrow(supabase.from('engagement_services')
+        .select('id, engagement_id, service_id, status, service_catalog!inner(id, name, slug, department_id, is_active)')
+        .eq('engagement_id', engagementId).eq('status', 'active')
+        .eq('service_catalog.department_id', 'design').eq('service_catalog.is_active', true)
+        .order('activated_at')),
       dataOrThrow(supabase.from('design_workshop_sessions').select('*').eq('engagement_id', engagementId).order('created_at', { ascending: false })),
       invoke('list_experiment_reviewers'),
     ])
     const sessionIds = sessions.map(item => item.id)
+    const externalEvents = await dataOrThrow(supabase.from('external_events').select('id, event_name, event_category, start_date, end_date')
+      .eq('brand_id', engagement.brand_id).order('start_date').order('event_name'))
     const directionData = sessionIds.length ? await Promise.all([
       dataOrThrow(supabase.from('design_workshop_context_versions').select('*').in('session_id', sessionIds)),
       dataOrThrow(supabase.from('design_workshop_model_selections').select('*, design_model_registry(*)').in('session_id', sessionIds).order('position')),
@@ -83,7 +93,7 @@ export const designWorkshop = Object.freeze({
     const architectureVersion = versions.filter(item => item.artifact_id === architectureArtifact?.id)
       .sort((left, right) => right.version_number - left.version_number)[0]
     return {
-      engagement, stages, artifacts, versions, approvals, models, sessions,
+      engagement, stages, artifacts, versions, approvals, models, designServices, sessions, externalEvents,
       contextVersions: directionData[0], modelSelections: directionData[1], runs: directionData[2],
       directions, selections: directionData[4], releases: directionData[5], directionVersions,
       experimentalDirectionVersions, experimentReviewers,

@@ -9,7 +9,16 @@ const MEDIA_BUCKET = 'design-generated-media'
 const OPENAI_IMAGES_URL = 'https://api.openai.com/v1/images/generations'
 export const VIDEO_UNAVAILABLE_MESSAGE = 'Video generation is not yet configured. An API key and provider need to be added before this works.'
 const ARTIFACT_TYPES = new Set(['discovery', 'vision', 'audience'])
-const OUTPUT_FAMILIES = new Set(['brand_identity', 'website_design', 'marketing_asset', 'video_motion'])
+const SERVICE_OUTPUT_FAMILIES = new Map([
+  ['brand_visual_identity', 'brand_identity'],
+  ['design_systems', 'brand_identity'],
+  ['website_ux_ui', 'website_design'],
+  ['campaign_creative', 'marketing_asset'],
+  ['social_assets', 'marketing_asset'],
+  ['advertising_assets', 'marketing_asset'],
+  ['video_concepts_storyboards', 'video_motion'],
+  ['visual_production', 'marketing_asset'],
+])
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 const LANES = [
   { key: 'clarity', direction: 'Restrained, editorial and trust-led. Prioritise clarity, hierarchy and disciplined use of brand equity.' },
@@ -122,6 +131,9 @@ export function hasWorkshopAuthority(membership: Json, action: string) {
   const role = String(membership.role || ''); const department = String(membership.department_id || '')
   if (LEADER_ROLES.has(role)) return true
   if (action === 'release_direction') return department === 'design' && role === 'department_manager'
+  if (action === 'generate_content_request_image' || action === 'create_content_request_video_placeholder') {
+    return department === 'content'
+  }
   if (action === 'promote_direction_experiment' || action === 'list_experiment_reviewers' || action === 'sign_media_assets') return true
   return department === 'design'
 }
@@ -149,6 +161,27 @@ export function mediaStoragePath(versionId: string, assetId: string) {
   return `${ORGANIZATION_ID}/${versionId}/${assetId}.png`
 }
 
+export function designEventLink(sessionId: string, externalEventId: string, actorId: string) {
+  return {
+    id: sessionId, organization_id: ORGANIZATION_ID, external_event_id: externalEventId,
+    content_type: 'design_asset', linked_work_item_id: null, lead_time_days: 0,
+    status: 'in_progress', created_by: actorId,
+  }
+}
+
+export function contentRequestMediaStoragePath(contentRequestId: string, assetId: string) {
+  return `${ORGANIZATION_ID}/content-requests/${contentRequestId}/${assetId}.png`
+}
+
+export function mediaTargetColumns(directionVersionId: string | null, contentRequestId: string | null) {
+  if ((directionVersionId === null) === (contentRequestId === null)) {
+    throw new Error('Exactly one media target is required')
+  }
+  return directionVersionId
+    ? { design_direction_version_id: directionVersionId }
+    : { content_request_id: contentRequestId }
+}
+
 async function insertEvent(admin: Client, engagementId: string, eventType: string, actorId: string,
   recordType: string, recordId: string, versionId: string, action: string) {
   const { error } = await admin.from('engagement_events').insert({
@@ -170,12 +203,39 @@ async function validateScope(admin: Client, engagementId: string, brandId: strin
   return engagement
 }
 
-async function createSession(admin: Client, body: Json, actorId: string) {
+export function outputFamilyForService(serviceSlug: unknown) {
+  const outputFamily = SERVICE_OUTPUT_FAMILIES.get(text(serviceSlug, 80))
+  if (!outputFamily) throw new Error('Unsupported Design service')
+  return outputFamily
+}
+
+export async function requireActiveDesignService(admin: Client, engagementId: string, engagementServiceId: string) {
+  if (!engagementServiceId) throw new Error('Select an active Design service')
+  const { data: service, error } = await admin.from('engagement_services')
+    .select('id, engagement_id, status, service_catalog!inner(id, slug, name, department_id, is_active)')
+    .eq('id', engagementServiceId).eq('organization_id', ORGANIZATION_ID).eq('engagement_id', engagementId)
+    .eq('status', 'active').eq('service_catalog.department_id', 'design')
+    .eq('service_catalog.is_active', true).maybeSingle()
+  if (error) throw error
+  const catalog = Array.isArray(service?.service_catalog) ? service.service_catalog[0] : service?.service_catalog
+  if (!service || service.status !== 'active' || catalog?.department_id !== 'design' || catalog?.is_active !== true) {
+    throw new Error('The selected Design service is not active on this engagement')
+  }
+  return { service, catalog, outputFamily: outputFamilyForService(catalog.slug) }
+}
+
+export async function createSession(admin: Client, body: Json, actorId: string) {
   const engagementId = text(body.engagement_id, 80); const brandId = text(body.brand_id, 80)
   const stageId = text(body.engagement_stage_instance_id, 80) || null
-  const outputFamily = text(body.output_family, 60)
-  if (!OUTPUT_FAMILIES.has(outputFamily)) throw new Error('Unsupported output family')
+  const engagementServiceId = text(body.engagement_service_id, 80)
   await validateScope(admin, engagementId, brandId, stageId)
+  const externalEventId = text(body.external_event_id, 80) || null
+  if (externalEventId) {
+    const { data: externalEvent, error: externalEventError } = await admin.from('external_events').select('id')
+      .eq('id', externalEventId).eq('organization_id', ORGANIZATION_ID).eq('brand_id', brandId).maybeSingle()
+    if (externalEventError || !externalEvent) throw new Error('The selected external event is outside this brand')
+  }
+  const { outputFamily } = await requireActiveDesignService(admin, engagementId, engagementServiceId)
   const modelIds = Array.isArray(body.model_registry_ids)
     ? [...new Set(body.model_registry_ids.map(value => text(value, 80)).filter(Boolean))].slice(0, 3) : []
   if (!modelIds.length) throw new Error('Select at least one registered model')
@@ -199,9 +259,11 @@ async function createSession(admin: Client, body: Json, actorId: string) {
     throw new Error('Designer instructions must be present and explicitly safe for AI use')
   }
   const checksum = await sha256(stableJson(contextManifest))
+  const sessionId = crypto.randomUUID()
   const { data: session, error: sessionError } = await admin.from('design_workshop_sessions').insert({
-    organization_id: ORGANIZATION_ID, engagement_id: engagementId, brand_id: brandId,
-    engagement_stage_instance_id: stageId, output_family: outputFamily, output_brief: outputBrief,
+    id: sessionId, organization_id: ORGANIZATION_ID, engagement_id: engagementId, brand_id: brandId,
+    engagement_stage_instance_id: stageId, engagement_service_id: engagementServiceId,
+    output_family: outputFamily, output_brief: outputBrief,
     designer_instructions: designerInstructions, context_manifest: contextManifest,
     context_checksum: checksum, created_by: actorId,
   }).select('*').single()
@@ -216,6 +278,11 @@ async function createSession(admin: Client, body: Json, actorId: string) {
       organization_id: ORGANIZATION_ID, session_id: session.id, model_registry_id: id, position: index + 1,
     })))
     if (selectionError) throw selectionError
+    if (externalEventId) {
+      const { error: linkError } = await admin.from('content_event_links')
+        .insert(designEventLink(session.id, externalEventId, actorId))
+      if (linkError) throw linkError
+    }
   } catch (error) {
     await admin.from('design_workshop_sessions').delete().eq('id', session.id)
     throw error
@@ -371,28 +438,33 @@ export async function generateOpenAiImage(credential: string, modelId: string, p
   return bytes
 }
 
-async function generateImage(admin: Client, userClient: Client, body: Json, actorId: string) {
-  const directionVersionId = text(body.direction_version_id, 80)
-  const modelRegistryId = text(body.model_registry_id, 80)
-  const { version, session } = await loadPermittedDirectionVersion(userClient, directionVersionId)
-  const prompt = mediaPrompt((version.content as Json) || {}, body.prompt)
-  if (!prompt) throw new Error('Add an image prompt or complete the direction imagery and creative thesis')
+async function generateImageForTarget(admin: Client, input: {
+  directionVersionId: string | null
+  contentRequestId: string | null
+  engagementId: string
+  modelRegistryId: string
+  prompt: string
+  actorId: string
+}) {
   const { data: model, error: modelError } = await admin.from('design_model_registry').select('*')
-    .eq('id', modelRegistryId).eq('organization_id', ORGANIZATION_ID).eq('is_active', true).maybeSingle()
+    .eq('id', input.modelRegistryId).eq('organization_id', ORGANIZATION_ID).eq('is_active', true).maybeSingle()
   if (modelError) throw modelError
   if (!model || !supportsOutput(model, 'image')) throw new Error('Select an active image-capable model from the Design registry')
   if (model.provider !== 'openai') throw new Error('No installed image adapter exists for the selected provider')
-  const { credential } = await resolveOpenAi(admin, session.engagement_id)
+  const { credential } = await resolveOpenAi(admin, input.engagementId)
   const { data: asset, error: assetError } = await admin.from('design_media_assets').insert({
-    organization_id: ORGANIZATION_ID, design_direction_version_id: version.id,
+    organization_id: ORGANIZATION_ID,
+    ...mediaTargetColumns(input.directionVersionId, input.contentRequestId),
     media_type: 'image', status: 'generating', model_registry_id: model.id,
-    provider: model.provider, prompt, generated_by: actorId,
+    provider: model.provider, prompt: input.prompt, generated_by: input.actorId,
   }).select('*').single()
   if (assetError) throw assetError
-  const storagePath = mediaStoragePath(version.id, asset.id)
+  const storagePath = input.directionVersionId
+    ? mediaStoragePath(input.directionVersionId, asset.id)
+    : contentRequestMediaStoragePath(input.contentRequestId!, asset.id)
   let uploaded = false
   try {
-    const bytes = await generateOpenAiImage(credential, model.model_id, prompt)
+    const bytes = await generateOpenAiImage(credential, model.model_id, input.prompt)
     const { error: uploadError } = await admin.storage.from(MEDIA_BUCKET).upload(storagePath, bytes, {
       contentType: 'image/png', upsert: false,
     })
@@ -413,6 +485,49 @@ async function generateImage(admin: Client, userClient: Client, body: Json, acto
   }
 }
 
+async function generateImage(admin: Client, userClient: Client, body: Json, actorId: string) {
+  const directionVersionId = text(body.direction_version_id, 80)
+  const { version, session } = await loadPermittedDirectionVersion(userClient, directionVersionId)
+  const prompt = mediaPrompt((version.content as Json) || {}, body.prompt)
+  if (!prompt) throw new Error('Add an image prompt or complete the direction imagery and creative thesis')
+  return generateImageForTarget(admin, {
+    directionVersionId: version.id,
+    contentRequestId: null,
+    engagementId: session.engagement_id,
+    modelRegistryId: text(body.model_registry_id, 80),
+    prompt,
+    actorId,
+  })
+}
+
+async function loadPermittedContentRequest(userClient: Client, contentRequestId: string) {
+  const { data: request, error } = await userClient.from('content_requests')
+    .select('id, organization_id, engagement_id, brand_id, output_path, mode, brief')
+    .eq('id', contentRequestId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  if (error) throw error
+  if (!request || request.mode !== 'project' || !request.engagement_id) {
+    throw new Error('Project content request not found or not visible')
+  }
+  if (request.output_path !== 'internal_engine') {
+    throw new Error('Only internal-engine requests can generate media')
+  }
+  return request
+}
+
+async function generateContentRequestImage(admin: Client, userClient: Client, body: Json, actorId: string) {
+  const request = await loadPermittedContentRequest(userClient, text(body.content_request_id, 80))
+  const prompt = text(body.prompt, 6000) || text(request.brief, 6000)
+  if (!prompt) throw new Error('Add an image prompt or complete the content request brief')
+  return generateImageForTarget(admin, {
+    directionVersionId: null,
+    contentRequestId: request.id,
+    engagementId: request.engagement_id,
+    modelRegistryId: text(body.model_registry_id, 80),
+    prompt,
+    actorId,
+  })
+}
+
 async function createVideoPlaceholder(admin: Client, userClient: Client, body: Json, actorId: string) {
   const directionVersionId = text(body.direction_version_id, 80)
   const { version } = await loadPermittedDirectionVersion(userClient, directionVersionId)
@@ -420,6 +535,19 @@ async function createVideoPlaceholder(admin: Client, userClient: Client, body: J
   if (!prompt) throw new Error('Add a video prompt or complete the direction imagery and creative thesis')
   const { data, error } = await admin.from('design_media_assets').insert({
     organization_id: ORGANIZATION_ID, design_direction_version_id: version.id,
+    media_type: 'video', status: 'unavailable', prompt,
+    failure_reason: VIDEO_UNAVAILABLE_MESSAGE, generated_by: actorId,
+  }).select('*').single()
+  if (error) throw error
+  return data
+}
+
+async function createContentRequestVideoPlaceholder(admin: Client, userClient: Client, body: Json, actorId: string) {
+  const request = await loadPermittedContentRequest(userClient, text(body.content_request_id, 80))
+  const prompt = text(body.prompt, 6000) || text(request.brief, 6000)
+  if (!prompt) throw new Error('Add a video prompt or complete the content request brief')
+  const { data, error } = await admin.from('design_media_assets').insert({
+    organization_id: ORGANIZATION_ID, content_request_id: request.id,
     media_type: 'video', status: 'unavailable', prompt,
     failure_reason: VIDEO_UNAVAILABLE_MESSAGE, generated_by: actorId,
   }).select('*').single()
@@ -577,6 +705,8 @@ async function handler(req: Request) {
       release_direction: () => releaseDirection(admin, body, user.id),
       generate_image: () => generateImage(admin, userClient, body, user.id),
       create_video_placeholder: () => createVideoPlaceholder(admin, userClient, body, user.id),
+      generate_content_request_image: () => generateContentRequestImage(admin, userClient, body, user.id),
+      create_content_request_video_placeholder: () => createContentRequestVideoPlaceholder(admin, userClient, body, user.id),
       sign_media_assets: () => signMediaAssets(admin, userClient, body),
     }
     if (!actions[action]) return response({ error: 'Unsupported action' }, 400)

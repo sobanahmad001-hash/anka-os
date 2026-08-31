@@ -21,6 +21,7 @@ export const environmentNav = [
       // Core - visible to all authorized team members
       { label: 'My Work', path: '/sphere/my-work', dept: null },
       { label: 'Engagements', path: '/sphere/engagements', dept: null },
+      { label: 'Sphere Events', path: '/sphere/events', dept: null },
       { label: 'Clients & Brands', path: '/sphere/clients', dept: null },
       { label: 'Client Portal', path: '/sphere/portal', dept: null },
       { label: 'Reports & Records', path: '/sphere/reports', dept: null },
@@ -34,6 +35,7 @@ export const environmentNav = [
       { label: 'Design', path: null, dept: 'design', isHeader: true },
       { label: 'Design Workspace', path: '/sphere/design', dept: 'design' },
       { label: 'Design Workshop', path: '/sphere/design/workshop', dept: 'design' },
+      { label: 'Design Systems', path: '/sphere/design/systems', dept: 'design' },
 
       // Development dept (WordPress focused)
       { label: 'Development', path: null, dept: 'development', isHeader: true },
@@ -43,6 +45,7 @@ export const environmentNav = [
       { label: 'Marketing', path: null, dept: 'marketing', isHeader: true },
       { label: 'Marketing Workshop', path: '/sphere/marketing', dept: 'marketing' },
       { label: 'Marketing Studio', path: '/sphere/marketing/studio', dept: 'marketing' },
+      { label: 'Technical SEO', path: '/sphere/marketing/seo', dept: 'marketing' },
     ],
   },
 ]

@@ -12,6 +12,12 @@ const MANAGER_ROLES = new Set(['department_manager'])
 const CLASSIFICATIONS = new Set(['internal', 'confidential', 'public', 'restricted'])
 const CUSTOM_FIELD_TYPES = new Set(['text', 'number', 'date', 'single_select', 'multi_select', 'checkbox'])
 const BRAND_STATEMENT_SOURCE_TYPES = ['discovery', 'vision', 'audience']
+const CONTENT_REQUEST_MODES = new Set(['project', 'general'])
+const CONTENT_REQUEST_OUTPUT_PATHS = new Set(['internal_engine', 'figma_handoff'])
+const CONTENT_REQUEST_FORMATS = new Set([
+  'reel', 'carousel', 'single_image', 'stories',
+  'carousel_stories', 'reel_carousel', 'web_design_element',
+])
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -97,6 +103,48 @@ export function hasContentAuthority(membership: Json, action: string) {
   return true
 }
 
+export function validateContentRequestInput(body: Json) {
+  const mode = text(body.mode, 20) || 'project'
+  const outputPath = text(body.output_path, 40)
+  const format = text(body.format, 40)
+  const brief = text(body.brief, 12000)
+  const linkedEventId = text(body.linked_event_id, 80) || null
+  const createEventLink = body.create_event_link === true
+  const eventContentType = text(body.event_content_type, 20) || 'social'
+  const leadTimeDays = Number(body.lead_time_days ?? 0)
+  if (!CONTENT_REQUEST_MODES.has(mode)) throw new Error('Unsupported content request mode')
+  if (!CONTENT_REQUEST_OUTPUT_PATHS.has(outputPath)) throw new Error('Unsupported content request output path')
+  if (!CONTENT_REQUEST_FORMATS.has(format)) throw new Error('Unsupported content request format')
+  if (!brief) throw new Error('Content request brief is required')
+  if (createEventLink && !linkedEventId) throw new Error('Select an event before adding it to the event plan')
+  if (!['social', 'blog'].includes(eventContentType)) throw new Error('Event-plan content type must be social or blog')
+  if (!Number.isInteger(leadTimeDays) || leadTimeDays < 0) throw new Error('Lead time must be a non-negative whole number')
+  return {
+    mode,
+    engagementId: text(body.engagement_id, 80) || null,
+    brandId: text(body.brand_id, 80) || null,
+    linkedEventId,
+    outputPath,
+    format,
+    brief,
+    queueEntryId: text(body.queue_entry_id, 80) || null,
+    createEventLink,
+    eventContentType,
+    leadTimeDays,
+  }
+}
+
+export function figmaHandoffUrl(contentRequestId: string, appUrl = Deno.env.get('ANKA_APP_URL') || 'https://anka-os.vercel.app') {
+  const requestId = text(contentRequestId, 80)
+  if (!requestId) throw new Error('Content request is required')
+  const url = new URL(appUrl)
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('ANKA_APP_URL must use HTTP or HTTPS')
+  url.pathname = `/sphere/content/requests/${encodeURIComponent(requestId)}/figma-handoff`
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
 export function customFieldDefinitionInput(body: Json) {
   const artifactType = text(body.artifact_type, 60)
   const name = text(body.name, 80)
@@ -160,6 +208,63 @@ async function safeStage(admin: Client, engagementId: string, stageId: unknown) 
     throw new Error('Content stage does not match this engagement')
   }
   return stage.id
+}
+
+async function createContentRequest(admin: Client, body: Json, actorId: string) {
+  const input = validateContentRequestInput(body)
+  let engagementId = input.engagementId
+  let brandId = input.brandId
+  if (input.mode === 'project') {
+    if (!engagementId) throw new Error('Project content requests require an engagement')
+    const engagement = await requireContentEngagement(admin, engagementId)
+    brandId = engagement.brand_id
+  } else {
+    engagementId = null
+  }
+  const { data, error } = await admin.rpc('create_content_request', {
+    p_organization_id: ORGANIZATION_ID,
+    p_mode: input.mode,
+    p_engagement_id: engagementId,
+    p_brand_id: brandId,
+    p_linked_event_id: input.linkedEventId,
+    p_output_path: input.outputPath,
+    p_format: input.format,
+    p_brief: input.brief,
+    p_queue_entry_id: input.queueEntryId,
+    p_actor_id: actorId,
+    p_create_event_link: input.createEventLink,
+    p_event_content_type: input.eventContentType,
+    p_lead_time_days: input.leadTimeDays,
+  })
+  if (error) throw error
+  return data
+}
+
+async function ensureFigmaHandoff(admin: Client, body: Json) {
+  const contentRequestId = text(body.content_request_id, 80)
+  if (!contentRequestId) throw new Error('Content request is required')
+  const { data: request, error: requestError } = await admin.from('content_requests')
+    .select('id, organization_id, engagement_id, output_path')
+    .eq('id', contentRequestId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  if (requestError || !request) throw Object.assign(new Error('Content request not found'), { status: 404 })
+  if (request.output_path !== 'figma_handoff') {
+    throw Object.assign(new Error('Only Figma-handoff requests can receive a handoff URL'), { status: 409 })
+  }
+  if (request.engagement_id) await requireContentEngagement(admin, request.engagement_id)
+  const { data: existing, error: existingError } = await admin.from('content_request_assets')
+    .select('id, content_request_id, figma_handoff_url, created_at')
+    .eq('organization_id', ORGANIZATION_ID).eq('content_request_id', request.id)
+    .not('figma_handoff_url', 'is', null).order('created_at').limit(1).maybeSingle()
+  if (existingError) throw existingError
+  if (existing) return existing
+  const { data, error } = await admin.from('content_request_assets').insert({
+    id: request.id,
+    organization_id: ORGANIZATION_ID,
+    content_request_id: request.id,
+    figma_handoff_url: figmaHandoffUrl(request.id),
+  }).select('id, content_request_id, figma_handoff_url, created_at').single()
+  if (error) throw error
+  return data
 }
 
 async function saveArtifact(userClient: Client, admin: Client, body: Json, actorId: string) {
@@ -308,6 +413,12 @@ export async function handleRequest(request: Request) {
         ? 'Content manager approval required' : 'Content department access required' }, 403)
     }
     if (action === 'save_artifact') return response({ data: await saveArtifact(userClient, admin, body, user.id) })
+    if (action === 'create_content_request') {
+      return response({ data: await createContentRequest(admin, body, user.id) })
+    }
+    if (action === 'ensure_figma_handoff') {
+      return response({ data: await ensureFigmaHandoff(admin, body) })
+    }
     if (action === 'save_brand_brief') return response({ data: await saveBrandBrief(admin, body, user.id) })
     if (action === 'generate_brand_statement') {
       return response({ data: await generateBrandStatement(userClient, admin, body, user.id) })

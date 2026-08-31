@@ -3,6 +3,7 @@ import {
   createArtifactRelation,
   loadReadablePair,
   relationInput,
+  requireReleasedDesignSystemTarget,
   requireRelationTeamMembership,
 } from '../_shared/artifactRelations.ts'
 import { namedKey } from '../_shared/googleOAuthTokens.ts'
@@ -23,7 +24,7 @@ function text(value: unknown, max = 240) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
 }
 
-export { loadReadablePair, relationInput }
+export { loadReadablePair, relationInput, requireReleasedDesignSystemTarget }
 
 async function requireContext(request: Request) {
   const authorization = request.headers.get('Authorization') || ''

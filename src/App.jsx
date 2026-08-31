@@ -10,8 +10,11 @@ const AgencyCommandCenter = lazy(() => import('./apps/AgencyCommandCenter'))
 const UserManagement = lazy(() => import('./apps/UserManagement'))
 const OperatingSpine = lazy(() => import('./apps/OperatingSpine'))
 const DesignWorkshop = lazy(() => import('./apps/DesignWorkshop'))
+const DesignSystems = lazy(() => import('./apps/DesignSystems'))
 const MarketingStudio = lazy(() => import('./apps/MarketingStudio'))
+const TechnicalSeoTracking = lazy(() => import('./apps/TechnicalSeoTracking'))
 const ContentStudio = lazy(() => import('./apps/ContentStudio'))
+const FigmaHandoff = lazy(() => import('./apps/FigmaHandoff'))
 const ArtifactDetail = lazy(() => import('./apps/ArtifactDetail'))
 const DepartmentWorkshop = lazy(() => import('./apps/DepartmentWorkshop'))
 const MyWork = lazy(() => import('./apps/MyWork'))
@@ -19,6 +22,7 @@ const AnkaSpherePortal = lazy(() => import('./apps/AnkaSpherePortal'))
 const AnkaAssistant = lazy(() => import('./apps/AnkaAssistant'))
 const LivingProductDocument = lazy(() => import('./apps/LivingProductDocument'))
 const ReportsAndRecords = lazy(() => import('./apps/ReportsAndRecords'))
+const ExternalEvents = lazy(() => import('./apps/ExternalEvents'))
 
 function RouteFallback() {
   return (
@@ -67,15 +71,19 @@ export default function App() {
         <Route path="sphere/my-work" element={<MyWork />} />
         <Route path="sphere/content" element={<DepartmentWorkshop departmentId="content" />} />
         <Route path="sphere/content/studio" element={<ContentStudio />} />
+        <Route path="sphere/content/requests/:requestId/figma-handoff" element={<FigmaHandoff />} />
         <Route path="sphere/artifacts/:artifactId" element={<ArtifactDetail />} />
         <Route path="sphere/design" element={<DepartmentWorkshop departmentId="design" />} />
         <Route path="sphere/design/workshop" element={<DesignWorkshop />} />
+        <Route path="sphere/design/systems" element={<DesignSystems />} />
         <Route path="sphere/marketing" element={<DepartmentWorkshop departmentId="marketing" />} />
         <Route path="sphere/marketing/studio" element={<MarketingStudio />} />
+        <Route path="sphere/marketing/seo" element={<TechnicalSeoTracking />} />
         <Route path="sphere/delivery" element={<DepartmentWorkshop departmentId="development" />} />
         <Route path="sphere/clients" element={<OperatingSpine initialView="clients" />} />
         <Route path="sphere/portal" element={<AnkaSpherePortal />} />
         <Route path="sphere/reports" element={<ReportsAndRecords />} />
+        <Route path="sphere/events" element={<ExternalEvents />} />
         <Route path="sphere/team-board" element={<Navigate to="/sphere/my-work" replace />} />
         <Route path="sphere/figma" element={<Navigate to="/sphere/design" replace />} />
         <Route path="sphere/assets" element={<Navigate to="/sphere/design" replace />} />
@@ -86,7 +94,7 @@ export default function App() {
         <Route path="sphere/performance" element={<Navigate to="/sphere/delivery" replace />} />
         <Route path="sphere/campaigns" element={<Navigate to="/sphere/marketing/studio" replace />} />
         <Route path="sphere/calendar" element={<Navigate to="/sphere/marketing" replace />} />
-        <Route path="sphere/seo" element={<Navigate to="/sphere/marketing" replace />} />
+        <Route path="sphere/seo" element={<Navigate to="/sphere/marketing/seo" replace />} />
 
         {/* ANKA ASSISTANT */}
         <Route path="assistant" element={featureFlags.aiAssistance ? <AnkaAssistant /> : <Navigate to="/sphere/engagements" replace />} />

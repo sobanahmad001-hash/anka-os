@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import DepartmentChat from '../components/DepartmentChat.jsx'
+import ContentRequestPanel from '../components/ContentRequestPanel.jsx'
+import GeneralContentRequestsPanel from '../components/GeneralContentRequestsPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'
 import ContentCustomFieldsPanel from '../components/ContentCustomFieldsPanel.jsx'
@@ -26,17 +28,23 @@ import {
   serializeContentArtifact,
 } from '../data/contentStudio.js'
 import { contentStudio } from '../data/contentStudioRepository.js'
+import { blogLinksForMonth, relatedRecord } from '../data/contentDesignEventLinking.js'
 
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20'
 const BUTTON = 'rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-amber-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50'
 const PRIMARY = 'rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50'
 
 export default function ContentStudio() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedBrandId = searchParams.get('brand') || ''
+  const requestedEngagementId = searchParams.get('engagement') || ''
+  const originLinkId = searchParams.get('eventLink') || ''
   const [engagements, setEngagements] = useState([])
   const [engagementId, setEngagementId] = useState('')
   const [workspace, setWorkspace] = useState(null)
   const [type, setType] = useState('discovery')
-  const [tab, setTab] = useState('artifacts')
+  const requestedTab = searchParams.get('tab') || ''
+  const [tab, setTab] = useState(['general', 'calendar'].includes(requestedTab) ? requestedTab : 'artifacts')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -55,7 +63,9 @@ export default function ContentStudio() {
     contentStudio.listEngagements().then(rows => {
       if (!active) return
       setEngagements(rows || [])
-      const first = rows?.[0]?.id || ''
+      const requested = rows?.find(item => item.id === requestedEngagementId)
+        || rows?.find(item => item.brand_id === requestedBrandId)
+      const first = requested?.id || rows?.[0]?.id || ''
       setEngagementId(first)
       if (first) loadWorkspace(first)
       else setLoading(false)
@@ -78,28 +88,68 @@ export default function ContentStudio() {
 
   const artifactForType = artifactType => workspace?.artifacts.find(item => item.artifact_type === artifactType) || null
 
+  useEffect(() => {
+    const originLink = workspace?.blogEventLinks?.find(link => link.id === originLinkId)
+    if (!originLink || originLink.status !== 'in_progress') return
+    const contentArtifact = workspace.artifacts.find(item => item.artifact_type === 'content')
+    const currentVersion = latestVersion(workspace.versions.filter(version => version.artifact_id === contentArtifact?.id))
+    if (!approvalForVersion(workspace.approvals, currentVersion?.id)) return
+    let active = true
+    contentStudio.updateBlogEventLink(originLink, 'ready')
+      .then(() => { if (active) setWorkspace(current => ({ ...current, blogEventLinks: current.blogEventLinks.map(link => link.id === originLink.id ? { ...link, status: 'ready' } : link) })) })
+      .catch(reason => { if (active) setError(reason.message) })
+    return () => { active = false }
+  }, [workspace, originLinkId])
+
+  async function updateBlogLink(link, status, success) {
+    await act(() => contentStudio.updateBlogEventLink(link, status), success)
+  }
+
+  async function openBlogDraft(link) {
+    await updateBlogLink(link, 'in_progress', 'Blog draft started from the shared event plan.')
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.set('brand', workspace.engagement.brand_id)
+    nextParams.set('eventLink', link.id)
+    nextParams.set('tab', 'artifacts')
+    setSearchParams(nextParams, { replace: true })
+    setType('content')
+    setTab('artifacts')
+  }
+
+  function selectTab(nextTab) {
+    setTab(nextTab)
+    const nextParams = new URLSearchParams(searchParams)
+    if (nextTab === 'artifacts') nextParams.delete('tab')
+    else nextParams.set('tab', nextTab)
+    setSearchParams(nextParams, { replace: true })
+  }
+
   return <div className="h-full overflow-y-auto bg-slate-950 text-white">
     <header className="border-b border-slate-800 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.12),transparent_36%)] px-6 py-6">
       <div className="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-5">
         <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-400">Content department</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">Content Studio</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Build the approved context and structured content system that Design, Development, and Marketing consume.</p></div>
-        <Link to="/sphere/content" className={BUTTON}>Open Content work queue</Link>
+        <div className="flex flex-wrap gap-3"><button type="button" onClick={() => selectTab('general')} className={PRIMARY}>Make a post / reel</button><Link to="/sphere/content" className={BUTTON}>Open Content work queue</Link></div>
       </div>
     </header>
     <main className="mx-auto max-w-7xl space-y-6 px-6 py-6">
       {(error || message) && <div className={`rounded-xl border px-4 py-3 text-sm ${error ? 'border-red-900/60 bg-red-950/40 text-red-300' : 'border-emerald-900/60 bg-emerald-950/30 text-emerald-300'}`}>{error || message}</div>}
-      <section className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+      {tab !== 'general' && <section className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
         <label className="min-w-72 flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Content engagement
           <select value={engagementId} onChange={event => { setEngagementId(event.target.value); loadWorkspace(event.target.value) }} className={`${INPUT} mt-2 normal-case tracking-normal`}>
             {engagements.map(item => <option key={item.id} value={item.id}>{item.name} · {item.brands?.name || 'Brand'}</option>)}
           </select>
         </label>
         {workspace?.engagement && <div className="rounded-xl bg-slate-950 px-4 py-3 text-sm text-slate-400"><span className="font-semibold text-white">{workspace.engagement.brands?.name}</span><span className="mx-2 text-slate-700">/</span>{workspace.engagement.agency_clients?.name}</div>}
-      </section>
+      </section>}
       <nav className="flex gap-2 overflow-x-auto border-b border-slate-800">
-        {[['artifacts', 'Artifact workspace'], ['brand', 'Brief & brand statement'], ['chat', 'Shared Department Chat']].map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-amber-400 text-amber-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>)}
+        {[['general', 'General requests'], ['artifacts', 'Artifact workspace'], ['requests', 'Content requests'], ['calendar', 'Blog calendar'], ['brand', 'Brief & brand statement'], ['chat', 'Shared Department Chat']].map(([id, label]) => <button type="button" key={id} onClick={() => selectTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-amber-400 text-amber-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>)}
       </nav>
-      {loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Content Studio…</div> : !workspace ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Activate a Content service on an engagement to begin.</div> : tab === 'artifacts' ? (
-        <ArtifactWorkspace workspace={workspace} type={type} setType={setType} saving={saving} act={act} onRefresh={() => loadWorkspace(engagementId)} />
+      {tab === 'general' ? <GeneralContentRequestsPanel /> : loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Content Studio…</div> : !workspace ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Activate a Content service on an engagement to begin, or use General requests without an engagement.</div> : tab === 'artifacts' ? (
+        <ArtifactWorkspace workspace={workspace} type={type} setType={setType} saving={saving} act={act} onRefresh={() => loadWorkspace(engagementId)} originLinkId={originLinkId} />
+      ) : tab === 'calendar' ? (
+        <BlogCalendarPanel workspace={workspace} saving={saving} originLinkId={originLinkId} onStart={openBlogDraft} onPublish={link => updateBlogLink(link, 'published', 'Approved blog content marked as published.')} />
+      ) : tab === 'requests' ? (
+        <ContentRequestPanel engagement={workspace.engagement} />
       ) : tab === 'brand' ? (
         <BrandBriefWorkspace workspace={workspace} saving={saving} act={act} onRefresh={() => loadWorkspace(engagementId)} />
       ) : <DepartmentChat departmentId="content" engagement={workspace.engagement} artifactTypes={CONTENT_ARTIFACT_TYPES} artifactDefinitions={CONTENT_ARTIFACT_FORMS} artifactForType={artifactForType} stageForType={artifactType => bestContentStage(workspace.stages, artifactType)} onPropose={contentStudio.proposeArtifact} onCreated={() => loadWorkspace(engagementId)} />}
@@ -197,7 +247,15 @@ function ListField({ label, value, onChange }) {
   return <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{label}<span className="ml-2 font-normal normal-case tracking-normal text-slate-600">One item per line</span><textarea rows="4" className={`${INPUT} mt-2 normal-case tracking-normal`} value={value || ''} onChange={event => onChange(event.target.value)} /></label>
 }
 
-function ArtifactWorkspace({ workspace, type, setType, saving, act, onRefresh }) {
+function BlogCalendarPanel({ workspace, saving, originLinkId, onStart, onPublish }) {
+  const originLink = workspace.blogEventLinks?.find(link => link.id === originLinkId)
+  const initialMonth = relatedRecord(originLink?.external_events)?.start_date?.slice(0, 7) || new Date().toISOString().slice(0, 7)
+  const [month, setMonth] = useState(initialMonth)
+  const links = useMemo(() => blogLinksForMonth(workspace.blogEventLinks, month), [workspace.blogEventLinks, month])
+  return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Shared MK1 event infrastructure</p><h2 className="mt-1 text-2xl font-semibold">Blog calendar</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">This is a filtered Content view over existing event links. It does not maintain a separate blog-calendar table.</p></div><input aria-label="Blog calendar month" type="month" className={`${INPUT} max-w-52`} value={month} onChange={event => setMonth(event.target.value)} /></div><div className="mt-6 grid gap-4 lg:grid-cols-2">{links.map(link => { const externalEvent = relatedRecord(link.external_events); const active = link.id === originLinkId; return <article key={link.id} className={`rounded-2xl border p-4 ${active ? 'border-amber-500/60 bg-amber-950/20' : 'border-slate-800 bg-slate-950/50'}`}><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-400">{externalEvent?.start_date || 'Date unavailable'}</p><h3 className="mt-1 font-semibold text-white">{externalEvent?.event_name || 'External event'}</h3></div><span className="rounded-full bg-slate-900 px-2.5 py-1 text-[10px] font-semibold uppercase text-slate-300">{link.status.replaceAll('_', ' ')}</span></div><p className="mt-3 text-xs text-slate-500">Lead time {link.lead_time_days} days · {externalEvent?.event_category?.replaceAll('_', ' ') || 'event'}</p><div className="mt-4 flex flex-wrap gap-2">{link.status !== 'published' && <button type="button" disabled={saving} onClick={() => onStart(link)} className={PRIMARY}>{link.status === 'planned' ? 'Start blog draft' : 'Open blog draft'}</button>}{link.status === 'ready' && <button type="button" disabled={saving} onClick={() => onPublish(link)} className={BUTTON}>Mark released / published</button>}</div>{active && <p className="mt-3 text-xs text-amber-300">This event is the active origin for the Content artifact workflow.</p>}</article> })}{!links.length && <div className="rounded-2xl border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500 lg:col-span-2">No blog event links in this month. Add one from Sphere Events.</div>}</div></section>
+}
+
+function ArtifactWorkspace({ workspace, type, setType, saving, act, onRefresh, originLinkId }) {
   const artifact = workspace.artifacts.find(item => item.artifact_type === type)
   const versions = workspace.versions.filter(item => item.artifact_id === artifact?.id)
   const latest = latestVersion(versions)
@@ -209,26 +267,31 @@ function ArtifactWorkspace({ workspace, type, setType, saving, act, onRefresh })
       const itemApproval = approvalForVersion(workspace.approvals, itemLatest?.id)
       return <button key={id} onClick={() => setType(id)} className={`w-full rounded-2xl border p-4 text-left ${type === id ? 'border-amber-500/60 bg-amber-950/20' : 'border-slate-800 bg-slate-900/70 hover:border-slate-700'}`}><div className="flex items-start justify-between gap-3"><p className="font-semibold text-white">{definition.label}</p><span className={`rounded-full px-2.5 py-1 text-[10px] uppercase ${itemApproval ? 'bg-emerald-950 text-emerald-300' : itemLatest ? 'bg-amber-950 text-amber-300' : 'bg-slate-950 text-slate-500'}`}>{itemApproval ? 'Approved' : itemLatest ? 'Draft' : 'Missing'}</span></div><p className="mt-2 text-xs leading-5 text-slate-500">{definition.description}</p></button>
     })}</section>
-    <ArtifactForm key={`${type}:${latest?.id || 'new'}`} workspace={workspace} type={type} artifact={artifact} versions={versions} latest={latest} approval={approval} saving={saving} act={act} onRefresh={onRefresh} />
+    <ArtifactForm key={`${type}:${latest?.id || 'new'}`} workspace={workspace} type={type} artifact={artifact} versions={versions} latest={latest} approval={approval} saving={saving} act={act} onRefresh={onRefresh} originLinkId={originLinkId} />
   </div>
 }
 
-function ArtifactForm({ workspace, type, artifact, versions, latest, approval, saving, act, onRefresh }) {
+function ArtifactForm({ workspace, type, artifact, versions, latest, approval, saving, act, onRefresh, originLinkId }) {
   const definition = CONTENT_ARTIFACT_FORMS[type]
   const [form, setForm] = useState(contentArtifactEditor(type, latest?.content))
   const [summary, setSummary] = useState(latest ? `Revision from version ${latest.version_number}` : 'Initial Content Studio version')
   const [classification, setClassification] = useState(latest?.data_classification || 'internal')
   const [aiSafe, setAiSafe] = useState(latest?.ai_use_allowed || false)
+  const originLink = type === 'content' ? workspace.blogEventLinks?.find(link => link.id === originLinkId) : null
 
   async function save(event) {
     event.preventDefault()
-    await act(() => contentStudio.saveArtifact({
+    await act(async () => {
+      const result = await contentStudio.saveArtifact({
       engagement_id: workspace.engagement.id, artifact_id: artifact?.id || null,
       engagement_stage_instance_id: bestContentStage(workspace.stages, type)?.id || null,
       artifact_type: type, title: artifact?.title || `${definition.label} artifact`,
       content: serializeContentArtifact(type, form), change_summary: summary,
       data_classification: classification, ai_use_allowed: aiSafe,
-    }), result => {
+      })
+      if (originLink) await contentStudio.updateBlogEventLink(originLink, 'in_progress')
+      return result
+    }, result => {
       const warning = result?.warnings?.[0]
       return warning ? `${definition.label} saved as a new immutable version. ${warning}` : `${definition.label} saved as a new immutable version.`
     })
@@ -248,7 +311,7 @@ function ArtifactForm({ workspace, type, artifact, versions, latest, approval, s
     <div className="mt-6 grid gap-4 md:grid-cols-2"><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Change summary<input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={summary} onChange={event => setSummary(event.target.value)} /></label><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Data classification<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={classification} onChange={event => setClassification(event.target.value)}><option>internal</option><option>confidential</option><option>public</option><option>restricted</option></select></label></div>
     <label className="mt-4 flex items-start gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300"><input type="checkbox" className="mt-1" checked={aiSafe} onChange={event => setAiSafe(event.target.checked)} /><span>Explicitly allow this exact version to be included in approved AI context. Restricted versions remain excluded.</span></label>
     <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-800 pt-5"><button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : latest ? 'Create new version' : 'Save first version'}</button></div>
-  </form><ArtifactApprovalPanel version={latest} approval={approval} theme="amber" onSingleApprove={() => act(() => contentStudio.approveArtifact(latest.id), `${definition.label} exact version approved.`)} onChanged={onRefresh} />{['website_architecture', 'content'].includes(type) && <ContentPageTrackingPanel workspace={workspace} saving={saving} act={act} />}<ContentCustomFieldsPanel artifactType={type} versions={versions} initialVersionId={latest?.id} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="content" theme="amber" regionsByVersion={regionsByVersion} /></div>
+  </form><ArtifactApprovalPanel version={latest} approval={approval} theme="amber" onSingleApprove={() => act(async () => { const result = await contentStudio.approveArtifact(latest.id); if (originLink) await contentStudio.updateBlogEventLink(originLink, 'ready'); return result }, `${definition.label} exact version approved.${originLink ? ' The originating blog event is ready.' : ''}`)} onChanged={onRefresh} />{['website_architecture', 'content'].includes(type) && <ContentPageTrackingPanel workspace={workspace} saving={saving} act={act} />}<ContentCustomFieldsPanel artifactType={type} versions={versions} initialVersionId={latest?.id} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="content" theme="amber" regionsByVersion={regionsByVersion} /></div>
 }
 
 function ContentPageTrackingPanel({ workspace, saving, act }) {

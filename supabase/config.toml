@@ -20,6 +20,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/design-workshop/index.ts"
 
+[functions.design-systems]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/design-systems/index.ts"
+
 [functions.website-page-designs]
 enabled = true
 verify_jwt = true
@@ -34,6 +39,11 @@ entrypoint = "./functions/wordpress-export/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/marketing-studio/index.ts"
+
+[functions.technical-seo]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/technical-seo/index.ts"
 
 [functions.content-studio]
 enabled = true
@@ -69,6 +79,11 @@ entrypoint = "./functions/development-studio/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/work-items/index.ts"
+
+[functions.external-events]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/external-events/index.ts"
 
 [functions.invite-client-contact]
 enabled = true

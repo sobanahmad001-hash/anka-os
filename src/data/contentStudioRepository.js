@@ -17,6 +17,13 @@ async function invoke(functionName, action, input = {}) {
   return data?.data
 }
 
+async function listBlogEventLinks(brandId) {
+  return dataOrThrow(supabase.from('content_event_links')
+    .select('*, external_events!inner(id, brand_id, event_name, event_category, start_date, end_date), work_items(id, title, status, deleted_at)')
+    .eq('content_type', 'blog').eq('external_events.brand_id', brandId)
+    .order('created_at'))
+}
+
 export const contentStudio = Object.freeze({
   async listEngagements() {
     return dataOrThrow(supabase.from('engagements')
@@ -45,8 +52,9 @@ export const contentStudio = Object.freeze({
       ? await dataOrThrow(supabase.from('artifact_approvals').select('*').in('artifact_id', sourceArtifactIds)
           .order('approved_at', { ascending: false }))
       : []
+    const blogEventLinks = await listBlogEventLinks(engagement.brand_id)
     return { engagement, stages, artifacts, versions, approvals, contentTasks,
-      brandBrief, brandSourceArtifacts, brandSourceApprovals }
+      brandBrief, brandSourceArtifacts, brandSourceApprovals, blogEventLinks }
   },
 
   saveArtifact: input => invoke('content-studio', 'save_artifact', input),
@@ -54,6 +62,10 @@ export const contentStudio = Object.freeze({
   generateBrandStatement: input => invoke('content-studio', 'generate_brand_statement', input),
   approveArtifact: (artifactVersionId, notes = '') => invoke('content-studio', 'approve_artifact', {
     artifact_version_id: artifactVersionId, notes,
+  }),
+  updateBlogEventLink: (link, status) => invoke('external-events', 'update_link', {
+    linkId: link.id, contentType: 'blog', leadTimeDays: link.lead_time_days,
+    linkedWorkItemId: link.linked_work_item_id, status,
   }),
   generateContentTasks: engagementId => invoke('work-items', 'generate_content_tasks', { engagementId }),
   proposeArtifact: input => invoke('department-chat', 'propose_artifact', {
