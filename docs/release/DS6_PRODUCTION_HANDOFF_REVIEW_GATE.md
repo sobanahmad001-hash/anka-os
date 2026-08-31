@@ -2,13 +2,16 @@
 
 ## Stack and dependency boundary
 
-DS6 is intentionally stacked on DS2 PR #52 because production packages must include
-design_direction_variants, which is not yet on main. Review this PR against the
-DS2 branch. After DS2 merges, rebase DS6 onto current main and rerun every check
-before changing the PR base.
-
-DS5 is being built independently. At implementation start its worktree contained no
-committed changes, and DS6 does not create a design-system library.
+DS2 PR #52, DS5 PR #56, and DS3 PR #65 are merged. DS6 was rebased onto main at
+`46b55710a4aaf6403c2e22ab5fd63a4988f637f1` before review, so released variants,
+the Design Systems Library, multi-page flows, repeated session creation, and the
+WordPress export path are all part of the real base. Rebase conflicts were limited to
+shared integration surfaces: `package.json`, `src/apps/DesignWorkshop.jsx`,
+`src/data/designWorkshopRepository.js`, `supabase/config.toml`, and
+`.github/workflows/ci.yml`. Each resolution preserves the complete main behavior and
+adds only the DS6 package query, released-only panel, production-handoff function
+registration, deployment entry, and CI coverage. DS6 still does not change the shared
+Design Workshop Edge Function or Design Systems Library behavior.
 
 ## Included
 
@@ -42,6 +45,17 @@ committed changes, and DS6 does not create a design-system library.
 6. Confirm download access uses createSignedUrl with a 300-second expiry.
 7. Confirm the diff contains no change to the Design Workshop Edge Function.
 8. Run the rollback-safe verifier only after explicit approval.
+
+## Recorded verification after DS3 rebase
+
+- Merge-base: exact main `46b55710a4aaf6403c2e22ab5fd63a4988f637f1`.
+- Node suite: 309 passed, 0 failed.
+- Full Edge Function Deno suite: 99 passed, 0 failed.
+- Deno frozen type-check: 32 function and test files passed.
+- Lint: 0 errors; 279 existing repository warnings.
+- Production build: 341 modules transformed successfully.
+- `git diff --check origin/main...HEAD`: clean.
+- `supabase/functions/design-workshop/index.ts`: no diff from main.
 
 No merge, production migration, Edge Function deployment, or frontend deployment is
 authorized by this implementation PR.
