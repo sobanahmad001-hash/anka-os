@@ -607,10 +607,11 @@ export async function requireReleasedVariantSource(admin: Client, userClient: Cl
   if (serviceError) throw serviceError
   const catalog = Array.isArray(engagementService?.service_catalog)
     ? engagementService.service_catalog[0] : engagementService?.service_catalog
-  if (!engagementService || !VARIANT_SERVICE_SLUGS.has(text(catalog?.slug, 80))) {
+  const serviceSlug = text(catalog?.slug, 80)
+  if (!engagementService || !VARIANT_SERVICE_SLUGS.has(serviceSlug)) {
     throw new Error('Variants are available only for Social Assets and Advertising Assets sessions')
   }
-  return { ...source, release, serviceSlug: catalog.slug }
+  return { ...source, release, serviceSlug }
 }
 
 export async function runIndependentVariantJobs(formats: string[], processor: (format: string) => Promise<unknown>) {
