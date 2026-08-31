@@ -38,6 +38,21 @@ export const MARKETING_ARTIFACT_FORMS = Object.freeze({
 })
 
 export const CAMPAIGN_STATUSES = Object.freeze(['draft', 'planned', 'active', 'paused', 'completed', 'cancelled'])
+export const AD_CAMPAIGN_TYPES = Object.freeze(['search', 'app', 'display', 'other'])
+export const AD_STRUCTURE_STATUSES = Object.freeze(['draft', 'active', 'paused', 'ended'])
+export const AD_MATCH_TYPES = Object.freeze(['broad', 'phrase', 'exact'])
+
+export function adPerformanceMetrics(snapshot = {}) {
+  const impressions = Number(snapshot.impressions) || 0
+  const clicks = Number(snapshot.clicks) || 0
+  const cost = Number(snapshot.cost) || 0
+  const conversions = Number(snapshot.conversions) || 0
+  return {
+    ctr: impressions ? clicks / impressions : null,
+    cpc: clicks ? cost / clicks : null,
+    cost_per_conversion: conversions ? cost / conversions : null,
+  }
+}
 
 export function blankMarketingArtifact(type) {
   return Object.fromEntries((MARKETING_ARTIFACT_FORMS[type]?.fields || []).map(([key, , kind]) => [key, kind === 'list' ? [] : '']))

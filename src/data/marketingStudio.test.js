@@ -3,12 +3,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-import { MARKETING_ARTIFACT_FORMS, blankMarketingArtifact, defaultReportingPeriod } from './marketingStudio.js'
+import { MARKETING_ARTIFACT_FORMS, adPerformanceMetrics, blankMarketingArtifact, defaultReportingPeriod } from './marketingStudio.js'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const read = path => readFileSync(`${root}${path}`, 'utf8')
 const typeMigration = read('supabase/migrations/20260827190000_marketing_shared_type_extensions.sql')
 const schemaMigration = read('supabase/migrations/20260827200000_marketing_campaigns.sql')
+const mk3Migration = read('supabase/migrations/20260831124544_mk3_ad_campaign_tracking.sql')
+const mk3Verifier = read('supabase/verify_20260831124544_mk3_ad_campaign_tracking.sql')
 const edge = read('supabase/functions/marketing-studio/index.ts')
 const googleOauth = read('supabase/functions/google-oauth/index.ts')
 const googleTokens = read('supabase/functions/_shared/googleOAuthTokens.ts')
@@ -79,4 +81,48 @@ test('reporting period defaults to 28 completed days', () => {
 test('out-of-scope publishing, client portal, and Development Studio work are absent', () => {
   assert.doesNotMatch(edge, /facebook|instagram|tiktok|client_portal|wordpress|ad_spend_transaction/i)
   assert.doesNotMatch(ui, /publish to|launch ads|change budget|Client Portal exposure/i)
+})
+
+test('MK3 hierarchy is tenant-consistent, indexed, constrained, and browser read-only', () => {
+  for (const table of ['ad_campaigns', 'ad_groups', 'ad_group_keywords', 'ad_campaign_performance_snapshots']) {
+    assert.match(mk3Migration, new RegExp(`create table public\\.${table}`))
+    assert.match(mk3Migration, new RegExp(`alter table public\\.${table} enable row level security`))
+  }
+  assert.match(mk3Migration, /foreign key \(brand_id, organization_id\)/)
+  assert.match(mk3Migration, /foreign key \(ad_campaign_id, organization_id\)/)
+  assert.match(mk3Migration, /foreign key \(ad_group_id, organization_id\)/)
+  assert.match(mk3Migration, /is_team_organization_member\(organization_id\)/)
+  assert.match(mk3Migration, /revoke all[\s\S]*from anon, authenticated/)
+  assert.doesNotMatch(mk3Migration, /grant (?:insert|update|delete|all)[\s\S]{0,250}to authenticated/)
+  assert.match(mk3Migration, /unique \(ad_campaign_id, snapshot_date\)/)
+  assert.match(mk3Verifier, /rollback;/)
+})
+
+test('MK3 derives performance ratios safely without storing duplicate metric columns', () => {
+  assert.deepEqual(adPerformanceMetrics({ impressions: 100, clicks: 10, cost: 25, conversions: 2 }), {
+    ctr: 0.1, cpc: 2.5, cost_per_conversion: 12.5,
+  })
+  assert.deepEqual(adPerformanceMetrics({ impressions: 0, clicks: 0, cost: 0, conversions: 0 }), {
+    ctr: null, cpc: null, cost_per_conversion: null,
+  })
+  const tableBody = mk3Migration.match(/create table public\.ad_campaign_performance_snapshots \(([\s\S]*?)\n\);/)?.[1] || ''
+  assert.doesNotMatch(tableBody, /\bctr\b|\bcpc\b|cost_per_conversion/)
+  assert.match(mk3Migration, /create view public\.ad_campaign_performance_metrics[\s\S]*security_invoker = true/)
+})
+
+test('MK3 provider import is idempotent and contains no Google Ads mutation path', () => {
+  assert.match(edge, /fetchGoogleAdsCampaignSnapshot/)
+  assert.match(edge, /googleAds:searchStream/)
+  assert.match(edge, /onConflict: 'ad_campaign_id,snapshot_date', ignoreDuplicates: true/)
+  assert.doesNotMatch(edge, /mutateCampaigns|campaignBudgets:mutate|adGroups:mutate|adGroupCriteria:mutate|MutateOperation/)
+  assert.doesNotMatch(googleOauth, /\/auth\/adwords[\s\S]*\/auth\/adwords/)
+})
+
+test('MK3 UI exposes local structure, targeting, positive and negative keywords, and dated trends', () => {
+  assert.match(ui, /Ad campaign tracking/)
+  assert.match(ui, /Planning mirror only/)
+  assert.match(ui, /Location targeting/)
+  assert.match(ui, /Negative keyword/)
+  assert.match(ui, /Dated performance snapshots/)
+  assert.match(ui, /must still be executed in Google Ads/)
 })
