@@ -30,6 +30,21 @@ export function newContentRequest(engagement) {
   }
 }
 
+export function newGeneralContentRequest() {
+  return {
+    mode: 'general',
+    engagement_id: '',
+    brand_id: '',
+    linked_event_id: '',
+    output_path: 'internal_engine',
+    format: 'single_image',
+    brief: '',
+    create_event_link: false,
+    event_content_type: 'social',
+    lead_time_days: 0,
+  }
+}
+
 export function serializeContentRequest(form) {
   const linkedEventId = String(form.linked_event_id || '').trim() || null
   return {
@@ -44,6 +59,22 @@ export function serializeContentRequest(form) {
     create_event_link: Boolean(linkedEventId && form.create_event_link),
     event_content_type: form.event_content_type || 'social',
     lead_time_days: Number(form.lead_time_days || 0),
+  }
+}
+
+export function serializeGeneralContentRequest(form) {
+  return {
+    mode: 'general',
+    engagement_id: null,
+    brand_id: String(form.brand_id || '').trim() || null,
+    linked_event_id: null,
+    output_path: form.output_path,
+    format: form.format,
+    brief: String(form.brief || '').trim(),
+    queue_entry_id: null,
+    create_event_link: false,
+    event_content_type: 'social',
+    lead_time_days: 0,
   }
 }
 
