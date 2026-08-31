@@ -13,6 +13,13 @@ async function invoke(action, input = {}) {
   return data?.data
 }
 
+async function invokePageDesigns(action, input = {}) {
+  const { data, error } = await supabase.functions.invoke('website-page-designs', { body: { action, ...input } })
+  if (error) throw new Error(error.message || 'Website page design function failed')
+  if (data?.error) throw new Error(data.error)
+  return data?.data
+}
+
 export const designWorkshop = Object.freeze({
   async listEngagements() {
     return dataOrThrow(supabase.from('engagements')
@@ -48,14 +55,21 @@ export const designWorkshop = Object.freeze({
         ])
       : [[], []]
     const visibleDirectionVersionIds = [...directionVersions, ...experimentalDirectionVersions].map(item => item.id)
-    const mediaAssets = visibleDirectionVersionIds.length
-      ? await dataOrThrow(supabase.from('design_media_assets').select('*')
-          .in('design_direction_version_id', visibleDirectionVersionIds).order('created_at', { ascending: false }))
-      : []
+    const [mediaAssets, pageDesigns] = visibleDirectionVersionIds.length
+      ? await Promise.all([
+          dataOrThrow(supabase.from('design_media_assets').select('*')
+            .in('design_direction_version_id', visibleDirectionVersionIds).order('created_at', { ascending: false })),
+          dataOrThrow(supabase.from('website_page_designs').select('*')
+            .in('design_direction_version_id', visibleDirectionVersionIds).order('created_at', { ascending: false })),
+        ])
+      : [[], []]
     const readyImageIds = mediaAssets.filter(item => item.media_type === 'image' && item.status === 'ready').map(item => item.id)
     const signedMedia = readyImageIds.length
       ? await invoke('sign_media_assets', { asset_ids: readyImageIds })
       : { signed_urls: {}, expires_in: 300 }
+    const architectureArtifact = artifacts.find(item => item.artifact_type === 'website_architecture')
+    const architectureVersion = versions.filter(item => item.artifact_id === architectureArtifact?.id)
+      .sort((left, right) => right.version_number - left.version_number)[0]
     return {
       engagement, stages, artifacts, versions, approvals, models, sessions,
       contextVersions: directionData[0], modelSelections: directionData[1], runs: directionData[2],
@@ -63,6 +77,8 @@ export const designWorkshop = Object.freeze({
       experimentalDirectionVersions, experimentReviewers,
       mediaAssets: mediaAssets.map(item => ({ ...item, signed_url: signedMedia?.signed_urls?.[item.id] || null })),
       mediaUrlExpiresIn: signedMedia?.expires_in || 300,
+      pageDesigns,
+      architecturePages: Array.isArray(architectureVersion?.content?.pages) ? architectureVersion.content.pages : [],
     }
   },
 
@@ -85,5 +101,14 @@ export const designWorkshop = Object.freeze({
   }),
   createVideoPlaceholder: (directionVersionId, prompt) => invoke('create_video_placeholder', {
     direction_version_id: directionVersionId, prompt,
+  }),
+  generatePageDesign: (directionVersionId, slug, modelRegistryId) => invokePageDesigns('generate', {
+    design_direction_version_id: directionVersionId, slug, model_registry_id: modelRegistryId,
+  }),
+  submitPageDesignReview: websitePageDesignId => invokePageDesigns('submit_review', {
+    website_page_design_id: websitePageDesignId,
+  }),
+  approvePageDesign: websitePageDesignId => invokePageDesigns('approve', {
+    website_page_design_id: websitePageDesignId,
   }),
 })
