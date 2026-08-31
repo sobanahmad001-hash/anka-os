@@ -8,7 +8,7 @@ import { latestWordPressExportJob, wordpressSeoRows } from './wordpressExport.js
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, '../..')
 const read = relative => fs.readFileSync(path.join(root, relative), 'utf8')
-const migration = read('supabase/migrations/20260831123316_rp5_native_wordpress_export.sql')
+const migration = read('supabase/migrations/20260831151956_rp5_native_wordpress_export.sql')
 const edge = read('supabase/functions/wordpress-export/index.ts')
 const theme = read('supabase/functions/wordpress-export/theme.ts')
 const verification = read('supabase/verify_20260831123316_rp5_native_wordpress_export.sql')
