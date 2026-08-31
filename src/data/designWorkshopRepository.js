@@ -72,14 +72,16 @@ export const designWorkshop = Object.freeze({
         ])
       : [[], []]
     const visibleDirectionVersionIds = [...directionVersions, ...experimentalDirectionVersions].map(item => item.id)
-    const [mediaAssets, pageDesigns] = visibleDirectionVersionIds.length
+    const [mediaAssets, pageDesigns, variants] = visibleDirectionVersionIds.length
       ? await Promise.all([
           dataOrThrow(supabase.from('design_media_assets').select('*')
             .in('design_direction_version_id', visibleDirectionVersionIds).order('created_at', { ascending: false })),
           dataOrThrow(supabase.from('website_page_designs').select('*')
             .in('design_direction_version_id', visibleDirectionVersionIds).order('created_at', { ascending: false })),
+          dataOrThrow(supabase.from('design_direction_variants').select('*')
+            .in('source_direction_version_id', visibleDirectionVersionIds).order('created_at', { ascending: false })),
         ])
-      : [[], []]
+      : [[], [], []]
     const wordpressExportJobs = pageDesigns.length
       ? await dataOrThrow(supabase.from('wordpress_export_jobs').select('*')
         .in('website_page_design_id', pageDesigns.map(item => item.id))
@@ -98,6 +100,7 @@ export const designWorkshop = Object.freeze({
       directions, selections: directionData[4], releases: directionData[5], directionVersions,
       experimentalDirectionVersions, experimentReviewers,
       mediaAssets: mediaAssets.map(item => ({ ...item, signed_url: signedMedia?.signed_urls?.[item.id] || null })),
+      variants,
       mediaUrlExpiresIn: signedMedia?.expires_in || 300,
       pageDesigns,
       wordpressExportJobs,
@@ -121,6 +124,11 @@ export const designWorkshop = Object.freeze({
   releaseDirection: (sessionId, releaseNotes = '') => invoke('release_direction', { session_id: sessionId, release_notes: releaseNotes }),
   generateImage: (directionVersionId, modelRegistryId, prompt) => invoke('generate_image', {
     direction_version_id: directionVersionId, model_registry_id: modelRegistryId, prompt,
+  }),
+  generateVariants: (sourceDirectionVersionId, modelRegistryId, variantFormats) => invoke('generate_variants', {
+    source_direction_version_id: sourceDirectionVersionId,
+    model_registry_id: modelRegistryId,
+    variant_formats: variantFormats,
   }),
   createVideoPlaceholder: (directionVersionId, prompt) => invoke('create_video_placeholder', {
     direction_version_id: directionVersionId, prompt,
