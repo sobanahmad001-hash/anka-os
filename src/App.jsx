@@ -19,6 +19,7 @@ const AnkaSpherePortal = lazy(() => import('./apps/AnkaSpherePortal'))
 const AnkaAssistant = lazy(() => import('./apps/AnkaAssistant'))
 const LivingProductDocument = lazy(() => import('./apps/LivingProductDocument'))
 const ReportsAndRecords = lazy(() => import('./apps/ReportsAndRecords'))
+const ExternalEvents = lazy(() => import('./apps/ExternalEvents'))
 
 function RouteFallback() {
   return (
@@ -76,6 +77,7 @@ export default function App() {
         <Route path="sphere/clients" element={<OperatingSpine initialView="clients" />} />
         <Route path="sphere/portal" element={<AnkaSpherePortal />} />
         <Route path="sphere/reports" element={<ReportsAndRecords />} />
+        <Route path="sphere/events" element={<ExternalEvents />} />
         <Route path="sphere/team-board" element={<Navigate to="/sphere/my-work" replace />} />
         <Route path="sphere/figma" element={<Navigate to="/sphere/design" replace />} />
         <Route path="sphere/assets" element={<Navigate to="/sphere/design" replace />} />

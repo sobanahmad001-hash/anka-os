@@ -65,6 +65,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/work-items/index.ts"
 
+[functions.external-events]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/external-events/index.ts"
+
 [functions.invite-client-contact]
 enabled = true
 verify_jwt = true
