@@ -14,6 +14,18 @@ async function invoke(functionName, action, input = {}) {
 }
 
 export const contentRequests = Object.freeze({
+  async loadGeneral() {
+    // CP1's RLS policy limits both reads to the caller's active organization.
+    const [requests, brands] = await Promise.all([
+      dataOrThrow(supabase.from('content_requests')
+        .select('id, organization_id, brand_id, mode, output_path, format, brief, status, created_at')
+        .eq('mode', 'general').order('created_at', { ascending: false })),
+      dataOrThrow(supabase.from('brands')
+        .select('id, organization_id, name, status').eq('status', 'active').order('name')),
+    ])
+    return { requests, brands }
+  },
+
   async loadProject(engagement) {
     if (!engagement?.id || !engagement?.brand_id) return { requests: [], assets: [], events: [], models: [] }
     const [requests, events, models] = await Promise.all([

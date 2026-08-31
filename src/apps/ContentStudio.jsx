@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 
 import DepartmentChat from '../components/DepartmentChat.jsx'
 import ContentRequestPanel from '../components/ContentRequestPanel.jsx'
+import GeneralContentRequestsPanel from '../components/GeneralContentRequestsPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'
 import ContentCustomFieldsPanel from '../components/ContentCustomFieldsPanel.jsx'
@@ -42,7 +43,8 @@ export default function ContentStudio() {
   const [engagementId, setEngagementId] = useState('')
   const [workspace, setWorkspace] = useState(null)
   const [type, setType] = useState('discovery')
-  const [tab, setTab] = useState(searchParams.get('tab') === 'calendar' ? 'calendar' : 'artifacts')
+  const requestedTab = searchParams.get('tab') || ''
+  const [tab, setTab] = useState(['general', 'calendar'].includes(requestedTab) ? requestedTab : 'artifacts')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -114,27 +116,35 @@ export default function ContentStudio() {
     setTab('artifacts')
   }
 
+  function selectTab(nextTab) {
+    setTab(nextTab)
+    const nextParams = new URLSearchParams(searchParams)
+    if (nextTab === 'artifacts') nextParams.delete('tab')
+    else nextParams.set('tab', nextTab)
+    setSearchParams(nextParams, { replace: true })
+  }
+
   return <div className="h-full overflow-y-auto bg-slate-950 text-white">
     <header className="border-b border-slate-800 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.12),transparent_36%)] px-6 py-6">
       <div className="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-5">
         <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-400">Content department</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">Content Studio</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Build the approved context and structured content system that Design, Development, and Marketing consume.</p></div>
-        <Link to="/sphere/content" className={BUTTON}>Open Content work queue</Link>
+        <div className="flex flex-wrap gap-3"><button type="button" onClick={() => selectTab('general')} className={PRIMARY}>Make a post / reel</button><Link to="/sphere/content" className={BUTTON}>Open Content work queue</Link></div>
       </div>
     </header>
     <main className="mx-auto max-w-7xl space-y-6 px-6 py-6">
       {(error || message) && <div className={`rounded-xl border px-4 py-3 text-sm ${error ? 'border-red-900/60 bg-red-950/40 text-red-300' : 'border-emerald-900/60 bg-emerald-950/30 text-emerald-300'}`}>{error || message}</div>}
-      <section className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+      {tab !== 'general' && <section className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
         <label className="min-w-72 flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Content engagement
           <select value={engagementId} onChange={event => { setEngagementId(event.target.value); loadWorkspace(event.target.value) }} className={`${INPUT} mt-2 normal-case tracking-normal`}>
             {engagements.map(item => <option key={item.id} value={item.id}>{item.name} · {item.brands?.name || 'Brand'}</option>)}
           </select>
         </label>
         {workspace?.engagement && <div className="rounded-xl bg-slate-950 px-4 py-3 text-sm text-slate-400"><span className="font-semibold text-white">{workspace.engagement.brands?.name}</span><span className="mx-2 text-slate-700">/</span>{workspace.engagement.agency_clients?.name}</div>}
-      </section>
+      </section>}
       <nav className="flex gap-2 overflow-x-auto border-b border-slate-800">
-        {[['artifacts', 'Artifact workspace'], ['requests', 'Content requests'], ['calendar', 'Blog calendar'], ['brand', 'Brief & brand statement'], ['chat', 'Shared Department Chat']].map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-amber-400 text-amber-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>)}
+        {[['general', 'General requests'], ['artifacts', 'Artifact workspace'], ['requests', 'Content requests'], ['calendar', 'Blog calendar'], ['brand', 'Brief & brand statement'], ['chat', 'Shared Department Chat']].map(([id, label]) => <button type="button" key={id} onClick={() => selectTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-amber-400 text-amber-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>)}
       </nav>
-      {loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Content Studio…</div> : !workspace ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Activate a Content service on an engagement to begin.</div> : tab === 'artifacts' ? (
+      {tab === 'general' ? <GeneralContentRequestsPanel /> : loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Content Studio…</div> : !workspace ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Activate a Content service on an engagement to begin, or use General requests without an engagement.</div> : tab === 'artifacts' ? (
         <ArtifactWorkspace workspace={workspace} type={type} setType={setType} saving={saving} act={act} onRefresh={() => loadWorkspace(engagementId)} originLinkId={originLinkId} />
       ) : tab === 'calendar' ? (
         <BlogCalendarPanel workspace={workspace} saving={saving} originLinkId={originLinkId} onStart={openBlogDraft} onPublish={link => updateBlogLink(link, 'published', 'Approved blog content marked as published.')} />

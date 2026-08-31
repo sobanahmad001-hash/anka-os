@@ -37,6 +37,24 @@ Deno.test('CP1 rejects event-plan linking without an event and unsupported forma
   }), Error, 'format')
 })
 
+Deno.test('CP2 reuses CP1 validation for branded and unbranded general requests', () => {
+  const unbranded = validateContentRequestInput({
+    mode: 'general', engagement_id: null, brand_id: null,
+    output_path: 'internal_engine', format: 'reel', brief: 'A fast general reel request',
+  })
+  assertEquals(unbranded.mode, 'general')
+  assertEquals(unbranded.engagementId, null)
+  assertEquals(unbranded.brandId, null)
+
+  const branded = validateContentRequestInput({
+    mode: 'general', engagement_id: null, brand_id: 'brand-1',
+    output_path: 'figma_handoff', format: 'carousel', brief: 'A branded carousel request',
+  })
+  assertEquals(branded.mode, 'general')
+  assertEquals(branded.engagementId, null)
+  assertEquals(branded.brandId, 'brand-1')
+})
+
 Deno.test('eight chat artifacts and the compiled brand statement use strict validation', () => {
   assertEquals(CONTENT_ARTIFACT_TYPES.length, 9)
   assertEquals(CHAT_CONTENT_ARTIFACT_TYPE_SET.size, 8)
