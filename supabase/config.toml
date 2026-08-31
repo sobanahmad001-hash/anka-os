@@ -25,6 +25,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/website-page-designs/index.ts"
 
+[functions.wordpress-export]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/wordpress-export/index.ts"
+
 [functions.marketing-studio]
 enabled = true
 verify_jwt = true
