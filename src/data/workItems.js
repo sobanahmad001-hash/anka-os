@@ -30,6 +30,7 @@ export const EMPTY_WORK_ITEM = Object.freeze({
   assignee_id: '',
   department_id: '',
   linked_artifact_id: '',
+  linked_page_path: '',
   linked_artifact_version_id: '',
   linked_engagement_stage_instance_id: '',
   parent_work_item_id: '',
@@ -56,6 +57,7 @@ export function filterAndSortWorkItems(items, filters = {}, sort = {}, today = n
     if (filters.assignee && filters.assignee !== UNASSIGNED_WORK_ITEM_FILTER && item.assignee_id !== filters.assignee) return false
     if (filters.department && item.department_id !== filters.department) return false
     if (filters.priority && item.priority !== filters.priority) return false
+    if (filters.pagePath && item.linked_page_path !== filters.pagePath) return false
     if (filters.due === 'overdue' && (!item.due_date || item.due_date >= date || item.status === 'done')) return false
     if (filters.due === 'next_7_days' && (!item.due_date || item.due_date < date || item.due_date > sevenDayDate)) return false
     if (filters.due === 'no_due_date' && item.due_date) return false

@@ -3,7 +3,10 @@ import { namedKey } from '../_shared/googleOAuthTokens.ts'
 
 type Json = Record<string, unknown>
 
-const ACTIONS = new Set(['save', 'delete', 'add_dependency', 'remove_dependency', 'acknowledge_automation_flag'])
+const ACTIONS = new Set([
+  'save', 'delete', 'add_dependency', 'remove_dependency',
+  'acknowledge_automation_flag', 'generate_content_tasks',
+])
 const WORK_ITEM_TYPES = new Set(['task', 'bug', 'request'])
 const PRIORITIES = new Set(['low', 'medium', 'high', 'urgent'])
 const STATUSES = new Set(['not_started', 'in_progress', 'blocked', 'done'])
@@ -95,6 +98,16 @@ export async function handleRequest(request: Request) {
     const action = text(body.action, 40)
     if (!ACTIONS.has(action)) return response({ error: 'Unsupported action' }, 400)
     const { admin, user } = await requireContext(request)
+    if (action === 'generate_content_tasks') {
+      const engagementId = optionalId(body.engagementId)
+      if (!engagementId) return response({ error: 'Engagement is required' }, 400)
+      const { data, error } = await admin.rpc('generate_content_page_work_items', {
+        p_engagement_id: engagementId,
+        p_actor_id: user.id,
+      })
+      if (error) throw error
+      return response({ data })
+    }
     if (action === 'acknowledge_automation_flag') {
       const workItemId = optionalId(body.workItemId)
       if (!workItemId) return response({ error: 'Work item is required' }, 400)
