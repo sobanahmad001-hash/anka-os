@@ -14,7 +14,7 @@ const PRIMARY = 'rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-
 
 export default function GeneralContentRequestsPanel() {
   const [form, setForm] = useState(() => newGeneralContentRequest())
-  const [workspace, setWorkspace] = useState({ requests: [], brands: [] })
+  const [workspace, setWorkspace] = useState({ requests: [], brands: [], handoffs: [] })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -33,10 +33,14 @@ export default function GeneralContentRequestsPanel() {
     event.preventDefault()
     setSaving(true); setError(''); setMessage('')
     try {
-      await contentRequests.create(serializeGeneralContentRequest(form))
+      const result = await contentRequests.create(serializeGeneralContentRequest(form))
+      if (form.output_path === 'figma_handoff') {
+        if (!result?.request?.id) throw new Error('The content request was not returned after creation')
+        await contentRequests.ensureFigmaHandoff(result.request.id)
+      }
       setMessage(form.output_path === 'internal_engine'
         ? 'General request saved. Automatic media generation remains project-only for now.'
-        : 'General request saved. CP3 will add the Figma handoff page workflow.')
+        : 'General request saved and its authenticated Figma reference page is ready.')
       setForm(newGeneralContentRequest())
       await load()
     } catch (reason) { setError(reason.message) }
@@ -55,7 +59,7 @@ export default function GeneralContentRequestsPanel() {
         <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">What do you need?<textarea required rows="8" className={`${INPUT} mt-2 normal-case tracking-normal`} value={form.brief} onChange={event => setForm(current => ({ ...current, brief: event.target.value }))} placeholder="Example: A short reel announcing the September offer, with a direct hook and clear call to action." /></label>
         <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Format<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={form.format} onChange={event => setForm(current => ({ ...current, format: event.target.value }))}>{CONTENT_REQUEST_FORMATS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Output path<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={form.output_path} onChange={event => setForm(current => ({ ...current, output_path: event.target.value }))}>{CONTENT_REQUEST_OUTPUT_PATHS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        <p className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-xs leading-5 text-slate-400">This phase records and tracks the request only. Internal generation remains project-only, and CP3 owns Figma reference-page generation.</p>
+        <p className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-xs leading-5 text-slate-400">Internal generation remains project-only. CP3 owns Figma reference-page generation and stores the authenticated page URL on the request.</p>
         <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Brand <span className="normal-case font-normal tracking-normal text-slate-600">(optional)</span><select className={`${INPUT} mt-2 normal-case tracking-normal`} value={form.brand_id} onChange={event => setForm(current => ({ ...current, brand_id: event.target.value }))}><option value="">No brand selected</option>{workspace.brands.map(brand => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select></label>
       </div>
       <div className="mt-6 flex justify-end border-t border-slate-800 pt-5"><button disabled={saving || loading} className={PRIMARY}>{saving ? 'Saving…' : 'Create general request'}</button></div>
@@ -63,7 +67,7 @@ export default function GeneralContentRequestsPanel() {
 
     <section className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Organisation-wide</p><h2 className="mt-1 text-2xl font-semibold">General requests</h2><p className="mt-2 text-sm text-slate-500">A flat list, newest first. Access remains controlled by CP1 organisation RLS.</p></div><button type="button" onClick={load} disabled={loading} className={BUTTON}>{loading ? 'Loading…' : 'Refresh'}</button></div>
-      {loading ? <div className="rounded-2xl border border-slate-800 p-12 text-center text-sm text-slate-500">Loading general requests…</div> : workspace.requests.length ? workspace.requests.map(request => <article key={request.id} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-400">{request.format.replaceAll('_', ' ')}</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">{request.brief}</p></div><span className="rounded-full bg-slate-950 px-2.5 py-1 text-[10px] font-semibold uppercase text-slate-300">{request.status.replaceAll('_', ' ')}</span></div><div className="mt-4 flex flex-wrap gap-2 text-[11px] text-slate-500"><span>{brandNames.get(request.brand_id) || 'No brand'}</span><span>·</span><span>{request.output_path === 'internal_engine' ? 'Anka OS request' : 'Figma handoff'}</span><span>·</span><span>{new Date(request.created_at).toLocaleString()}</span></div></article>) : <div className="rounded-2xl border border-dashed border-slate-700 p-12 text-center text-sm text-slate-500">No general content requests yet.</div>}
+      {loading ? <div className="rounded-2xl border border-slate-800 p-12 text-center text-sm text-slate-500">Loading general requests…</div> : workspace.requests.length ? workspace.requests.map(request => { const handoff = workspace.handoffs.find(item => item.content_request_id === request.id); return <article key={request.id} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-400">{request.format.replaceAll('_', ' ')}</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">{request.brief}</p></div><span className="rounded-full bg-slate-950 px-2.5 py-1 text-[10px] font-semibold uppercase text-slate-300">{request.status.replaceAll('_', ' ')}</span></div><div className="mt-4 flex flex-wrap gap-2 text-[11px] text-slate-500"><span>{brandNames.get(request.brand_id) || 'No brand'}</span><span>·</span><span>{request.output_path === 'internal_engine' ? 'Anka OS request' : 'Figma handoff'}</span><span>·</span><span>{new Date(request.created_at).toLocaleString()}</span></div>{handoff && <a href={handoff.figma_handoff_url} className="mt-4 inline-block text-sm font-semibold text-amber-300 hover:text-amber-200">Open authenticated Figma reference →</a>}</article> }) : <div className="rounded-2xl border border-dashed border-slate-700 p-12 text-center text-sm text-slate-500">No general content requests yet.</div>}
     </section>
   </div>
 }

@@ -134,6 +134,17 @@ export function validateContentRequestInput(body: Json) {
   }
 }
 
+export function figmaHandoffUrl(contentRequestId: string, appUrl = Deno.env.get('ANKA_APP_URL') || 'https://anka-os.vercel.app') {
+  const requestId = text(contentRequestId, 80)
+  if (!requestId) throw new Error('Content request is required')
+  const url = new URL(appUrl)
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('ANKA_APP_URL must use HTTP or HTTPS')
+  url.pathname = `/sphere/content/requests/${encodeURIComponent(requestId)}/figma-handoff`
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
 export function customFieldDefinitionInput(body: Json) {
   const artifactType = text(body.artifact_type, 60)
   const name = text(body.name, 80)
@@ -225,6 +236,33 @@ async function createContentRequest(admin: Client, body: Json, actorId: string) 
     p_event_content_type: input.eventContentType,
     p_lead_time_days: input.leadTimeDays,
   })
+  if (error) throw error
+  return data
+}
+
+async function ensureFigmaHandoff(admin: Client, body: Json) {
+  const contentRequestId = text(body.content_request_id, 80)
+  if (!contentRequestId) throw new Error('Content request is required')
+  const { data: request, error: requestError } = await admin.from('content_requests')
+    .select('id, organization_id, engagement_id, output_path')
+    .eq('id', contentRequestId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  if (requestError || !request) throw Object.assign(new Error('Content request not found'), { status: 404 })
+  if (request.output_path !== 'figma_handoff') {
+    throw Object.assign(new Error('Only Figma-handoff requests can receive a handoff URL'), { status: 409 })
+  }
+  if (request.engagement_id) await requireContentEngagement(admin, request.engagement_id)
+  const { data: existing, error: existingError } = await admin.from('content_request_assets')
+    .select('id, content_request_id, figma_handoff_url, created_at')
+    .eq('organization_id', ORGANIZATION_ID).eq('content_request_id', request.id)
+    .not('figma_handoff_url', 'is', null).order('created_at').limit(1).maybeSingle()
+  if (existingError) throw existingError
+  if (existing) return existing
+  const { data, error } = await admin.from('content_request_assets').insert({
+    id: request.id,
+    organization_id: ORGANIZATION_ID,
+    content_request_id: request.id,
+    figma_handoff_url: figmaHandoffUrl(request.id),
+  }).select('id, content_request_id, figma_handoff_url, created_at').single()
   if (error) throw error
   return data
 }
@@ -377,6 +415,9 @@ export async function handleRequest(request: Request) {
     if (action === 'save_artifact') return response({ data: await saveArtifact(userClient, admin, body, user.id) })
     if (action === 'create_content_request') {
       return response({ data: await createContentRequest(admin, body, user.id) })
+    }
+    if (action === 'ensure_figma_handoff') {
+      return response({ data: await ensureFigmaHandoff(admin, body) })
     }
     if (action === 'save_brand_brief') return response({ data: await saveBrandBrief(admin, body, user.id) })
     if (action === 'generate_brand_statement') {

@@ -1,6 +1,6 @@
 import { assertEquals, assertThrows } from 'jsr:@std/assert@1.0.14'
 import { brandBriefInput, compiledBrandStatement, customFieldDefinitionInput, hasContentAuthority,
-  validateContentRequestInput } from './index.ts'
+  figmaHandoffUrl, validateContentRequestInput } from './index.ts'
 import { CHAT_CONTENT_ARTIFACT_TYPE_SET, CONTENT_ARTIFACT_TYPES, contentArtifactResponseFormat, validateContentArtifact } from '../_shared/contentArtifacts.ts'
 
 Deno.test('Content authority keeps exact-version approval manager-controlled', () => {
@@ -53,6 +53,14 @@ Deno.test('CP2 reuses CP1 validation for branded and unbranded general requests'
   assertEquals(branded.mode, 'general')
   assertEquals(branded.engagementId, null)
   assertEquals(branded.brandId, 'brand-1')
+})
+
+Deno.test('CP3 creates only a stable authenticated in-app handoff route', () => {
+  assertEquals(
+    figmaHandoffUrl('request-1', 'https://anka.example/base?old=1#fragment'),
+    'https://anka.example/sphere/content/requests/request-1/figma-handoff',
+  )
+  assertThrows(() => figmaHandoffUrl('request-1', 'ftp://anka.example'), Error, 'HTTP or HTTPS')
 })
 
 Deno.test('eight chat artifacts and the compiled brand statement use strict validation', () => {
