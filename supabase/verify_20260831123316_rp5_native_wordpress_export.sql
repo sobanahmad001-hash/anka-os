@@ -202,6 +202,20 @@ select jsonb_build_object(
     select relrowsecurity from pg_class
     where oid = 'public.wordpress_export_jobs'::regclass
   ),
+  'composite_design_fk_is_indexed', exists (
+    select 1
+    from pg_index index_definition
+    where index_definition.indexrelid = to_regclass(
+      'public.idx_wordpress_export_jobs_design_organization'
+    )
+      and (
+        select array_agg(attribute.attname order by key_position.ordinality)
+        from unnest(index_definition.indkey) with ordinality as key_position(attnum, ordinality)
+        join pg_attribute attribute
+          on attribute.attrelid = index_definition.indrelid
+         and attribute.attnum = key_position.attnum
+      ) = array['website_page_design_id', 'organization_id']::name[]
+  ),
   'browser_is_read_only',
     has_table_privilege('authenticated', 'public.wordpress_export_jobs', 'select')
     and not has_table_privilege('authenticated', 'public.wordpress_export_jobs', 'insert, update, delete')
