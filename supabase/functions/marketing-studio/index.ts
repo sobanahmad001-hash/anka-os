@@ -155,7 +155,9 @@ function optionalSiteUrl(value: unknown) {
   } catch {
     throw new Error('Site URL must be a valid HTTP or HTTPS URL')
   }
-  if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password) {
+  const validHostname = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/i
+  if (!['http:', 'https:'].includes(parsed.protocol) || !validHostname.test(parsed.hostname)
+    || parsed.username || parsed.password) {
     throw new Error('Site URL must be a valid HTTP or HTTPS URL')
   }
   parsed.hash = ''
@@ -194,15 +196,24 @@ export function validateBacklinkTarget(value: unknown) {
   }
 }
 
-async function requireContext(request: Request) {
+type RequestDependencies = {
+  createClient?: typeof createClient
+  environment?: { supabaseUrl: string; publishableKey: string; secretKey: string }
+}
+
+async function requireContext(
+  request: Request,
+  clientFactory: typeof createClient = createClient,
+  environment?: RequestDependencies['environment'],
+) {
   const authorization = request.headers.get('Authorization') || ''
   if (!authorization.startsWith('Bearer ')) throw Object.assign(new Error('Authentication required'), { status: 401 })
-  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
-  const publishableKey = namedKey('SUPABASE_PUBLISHABLE_KEYS', 'SUPABASE_ANON_KEY')
-  const secretKey = namedKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY')
+  const supabaseUrl = environment?.supabaseUrl ?? Deno.env.get('SUPABASE_URL') ?? ''
+  const publishableKey = environment?.publishableKey ?? namedKey('SUPABASE_PUBLISHABLE_KEYS', 'SUPABASE_ANON_KEY')
+  const secretKey = environment?.secretKey ?? namedKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY')
   if (!supabaseUrl || !publishableKey || !secretKey) throw new Error('Function environment is incomplete')
-  const userClient = createClient(supabaseUrl, publishableKey, { global: { headers: { Authorization: authorization } } })
-  const admin = createClient(supabaseUrl, secretKey, { auth: { persistSession: false, autoRefreshToken: false } })
+  const userClient = clientFactory(supabaseUrl, publishableKey, { global: { headers: { Authorization: authorization } } })
+  const admin = clientFactory(supabaseUrl, secretKey, { auth: { persistSession: false, autoRefreshToken: false } })
   const { data: { user }, error } = await userClient.auth.getUser()
   if (error || !user) throw Object.assign(new Error('Authentication required'), { status: 401 })
   const { data: membership } = await admin.from('organization_memberships')
@@ -490,11 +501,16 @@ async function analyticsDashboard(admin: Client, body: Json) {
   return { engagement_id: engagement.id, brand_id: engagement.brand_id, period, reports }
 }
 
-export async function handleRequest(request: Request) {
+export async function handleRequest(
+  request: Request,
+  dependencies: RequestDependencies = {},
+) {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (request.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
   try {
-    const { admin, user, membership } = await requireContext(request)
+    const { admin, user, membership } = await requireContext(
+      request, dependencies.createClient, dependencies.environment,
+    )
     const body = await request.json() as Json
     const action = text(body.action, 60)
     if (!hasMarketingAuthority(membership, action)) {

@@ -18,7 +18,7 @@ create table public.backlink_targets (
       or (
         site_url = trim(site_url)
         and length(site_url) between 10 and 2048
-        and site_url ~* '^https?://[^[:space:]]+$'
+        and site_url ~* '^https?://([[:alnum:]]([[:alnum:]-]{0,61}[[:alnum:]])?[.])+[[:alpha:]]([[:alnum:]-]{0,61}[[:alnum:]])?(:[0-9]{1,5})?(/[^[:space:]?#]*)?([?][^[:space:]#]*)?(#[^[:space:]]*)?$'
       )
     ),
   industry_category text
@@ -76,7 +76,7 @@ create policy "Team can read backlink targets"
 
 revoke all on public.backlink_targets from anon, authenticated;
 grant select on public.backlink_targets to authenticated;
-grant all on public.backlink_targets to service_role;
+grant select, insert, update on public.backlink_targets to service_role;
 
 comment on table public.backlink_targets is
   'Brand-scoped manual backlink research and outreach status. It does not send messages, scrape sites, or verify backlinks.';

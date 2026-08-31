@@ -25,6 +25,8 @@ test('MK4 adds one tenant-safe canonical backlink target table', () => {
   assert.match(migration, /is_team_organization_member\(organization_id\)/)
   assert.match(migration, /revoke all on public\.backlink_targets from anon, authenticated/)
   assert.match(migration, /grant select on public\.backlink_targets to authenticated/)
+  assert.match(migration, /grant select, insert, update on public\.backlink_targets to service_role/)
+  assert.doesNotMatch(migration, /grant all on public\.backlink_targets/)
   assert.doesNotMatch(migration, /grant (?:insert|update|delete|all)[\s\S]{0,120}to authenticated/)
 })
 
@@ -39,6 +41,7 @@ test('MK4 database validation and indexes cover the specified research model', (
   assert.match(migration, /domain_authority between 0 and 100/)
   assert.match(migration, /relevance_score between 0 and 100/)
   assert.match(migration, /estimated_traffic is null or estimated_traffic >= 0/)
+  assert.match(migration, /\[\[:alnum:\]\][\s\S]*\[\.\][\s\S]*\[\[:alpha:\]\]/)
   assert.match(migration, /lower\(rtrim\(site_url, '\/'\)\)/)
   assert.match(migration, /idx_backlink_targets_brand_status/)
   assert.match(migration, /idx_backlink_targets_created_by/)
@@ -81,10 +84,11 @@ test('Marketing Studio provides brand filtering, qualification fields, and histo
 test('rollback verifier returns named lifecycle, validation, tenant, and privilege checks', () => {
   for (const check of [
     'unknown_metrics_remain_null', 'all_statuses_and_history_remain_queryable',
-    'malformed_url_rejected', 'negative_traffic_rejected', 'out_of_range_score_rejected',
+    'malformed_url_rejected', 'malformed_host_url_rejected', 'negative_traffic_rejected', 'out_of_range_score_rejected',
     'unsupported_enum_rejected', 'duplicate_normalized_url_rejected',
-    'cross_organization_rows_hidden', 'browser_is_read_only',
+    'cross_organization_rows_hidden', 'browser_is_read_only', 'server_write_boundary_is_minimum_privilege',
   ]) assert.match(verification, new RegExp(`'${check}'`))
   assert.match(verification, /jsonb_object_agg\(check_name, passed\)/)
+  assert.match(verification, /'https:\/\/\.\.\.'/)
   assert.match(verification, /rollback;/)
 })

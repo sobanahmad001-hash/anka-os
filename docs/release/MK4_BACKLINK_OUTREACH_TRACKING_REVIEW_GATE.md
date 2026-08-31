@@ -14,8 +14,9 @@
 - [ ] HTTP/HTTPS URL validation, non-negative traffic, enum checks, and normalized per-brand URL uniqueness are enforced in PostgreSQL.
 - [ ] The brand/status, normalized URL, and `created_by` query paths are indexed.
 - [ ] RLS allows authenticated active team members to read only their organization through `public.is_team_organization_member`.
-- [ ] `anon` has no table privileges and `authenticated` has SELECT only.
+- [ ] `anon` has no table privileges, `authenticated` has SELECT only, and `service_role` has only SELECT/INSERT/UPDATE.
 - [ ] Service-role writes follow caller JWT validation and allow only active Marketing team members or organization leadership.
+- [ ] Deno tests exercise those three roles through `handleRequest`, not only through the authority helper.
 
 ## Required experience review
 

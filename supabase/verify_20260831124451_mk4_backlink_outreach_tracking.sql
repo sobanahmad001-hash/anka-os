@@ -34,6 +34,7 @@ begin
       ('unknown_metrics_remain_null', false),
       ('all_statuses_and_history_remain_queryable', false),
       ('malformed_url_rejected', false),
+      ('malformed_host_url_rejected', false),
       ('negative_traffic_rejected', false),
       ('out_of_range_score_rejected', false),
       ('unsupported_enum_rejected', false),
@@ -86,6 +87,16 @@ begin
     v_passed := true;
   end;
   insert into mk4_runtime_checks values ('malformed_url_rejected', v_passed);
+
+  v_passed := false;
+  begin
+    insert into public.backlink_targets (
+      organization_id, brand_id, site_name, site_url, created_by
+    ) values (v_organization_id, v_brand_id, 'Malformed host', 'https://...', v_actor_id);
+  exception when check_violation then
+    v_passed := true;
+  end;
+  insert into mk4_runtime_checks values ('malformed_host_url_rejected', v_passed);
 
   v_passed := false;
   begin
@@ -168,6 +179,9 @@ select jsonb_build_object(
     has_table_privilege('authenticated', 'public.backlink_targets', 'select')
     and not has_table_privilege('authenticated', 'public.backlink_targets', 'insert, update, delete')
     and not has_table_privilege('anon', 'public.backlink_targets', 'select, insert, update, delete'),
+  'server_write_boundary_is_minimum_privilege',
+    has_table_privilege('service_role', 'public.backlink_targets', 'select, insert, update')
+    and not has_table_privilege('service_role', 'public.backlink_targets', 'delete, truncate, references, trigger'),
   'required_indexes_exist',
     to_regclass('public.idx_backlink_targets_brand_status') is not null
     and to_regclass('public.idx_backlink_targets_brand_normalized_url') is not null
