@@ -42,7 +42,7 @@ export const EMPTY_WORK_ITEM = Object.freeze({
 export function artifactRoute(artifactType) {
   if (['technical_brief', 'launch_checklist'].includes(artifactType)) return '/sphere/engagements'
   if (['campaign_messaging', 'scripts', 'channel_strategy', 'campaign_brief', 'measurement_plan', 'marketing_report'].includes(artifactType)) return '/sphere/marketing/studio'
-  if (['content', 'website_architecture', 'keyword_strategy', 'audience', 'discovery', 'vision'].includes(artifactType)) return '/sphere/content/studio'
+  if (['content', 'website_architecture', 'keyword_strategy', 'audience', 'discovery', 'vision', 'brand_statement'].includes(artifactType)) return '/sphere/content/studio'
   return '/sphere/design/workshop'
 }
 

@@ -5,11 +5,14 @@ type Json = Record<string, unknown>
 type AdminClient = { from: (table: string) => any }
 
 export const CONTENT_ARTIFACT_TYPES = Object.freeze([
-  'discovery', 'vision', 'audience', 'website_architecture',
+  'discovery', 'vision', 'audience', 'brand_statement', 'website_architecture',
   'keyword_strategy', 'content', 'campaign_messaging', 'scripts',
 ])
 
 export const CONTENT_ARTIFACT_TYPE_SET = new Set(CONTENT_ARTIFACT_TYPES)
+export const CHAT_CONTENT_ARTIFACT_TYPE_SET = new Set(
+  CONTENT_ARTIFACT_TYPES.filter(type => type !== 'brand_statement'),
+)
 
 function text(value: unknown, max = 8000) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
@@ -138,6 +141,26 @@ export function validateContentArtifact(type: string, value: unknown): Json {
     desired_response: requiredText(input, 'desired_response'),
     accessibility_considerations: requiredList(input, 'accessibility_considerations'),
   }
+  if (type === 'brand_statement') {
+    const sourceManifest = input.source_manifest
+    if (!sourceManifest || typeof sourceManifest !== 'object' || Array.isArray(sourceManifest)) {
+      throw new Error('source manifest is required')
+    }
+    const priceTier = text(input.price_tier, 20)
+    if (!['', 'value', 'mid', 'premium'].includes(priceTier)) throw new Error('price tier is invalid')
+    return {
+      statement: requiredText(input, 'statement'),
+      target_market: requiredText(input, 'target_market'),
+      price_tier: priceTier,
+      positioning: requiredText(input, 'positioning'),
+      value_proposition: requiredText(input, 'value_proposition'),
+      audience_summary: requiredText(input, 'audience_summary'),
+      operating_principles: list(input.operating_principles),
+      proof_points: list(input.proof_points),
+      competitor_references: list(input.competitor_references),
+      source_manifest: sourceManifest as Json,
+    }
+  }
   if (type === 'website_architecture') return { pages: websitePages(input.pages) }
   if (type === 'keyword_strategy') return { keywords: keywordRecords(input.keywords) }
   if (type === 'content') return {
@@ -174,7 +197,7 @@ function objectArray(properties: Json) {
 }
 
 export function contentArtifactResponseFormat(type: string) {
-  if (!CONTENT_ARTIFACT_TYPE_SET.has(type)) throw new Error('Unsupported Content artifact')
+  if (!CHAT_CONTENT_ARTIFACT_TYPE_SET.has(type)) throw new Error('Unsupported Content chat artifact')
   const simple: Record<string, Json> = {
     discovery: { summary: stringSchema(), objectives: listSchema(), offers: listSchema(), evidence: listSchema(), constraints: listSchema() },
     vision: { vision_statement: stringSchema(), positioning: stringSchema(), value_proposition: stringSchema(), values: listSchema(), voice_principles: listSchema() },
@@ -231,7 +254,7 @@ export async function createContentArtifactVersion(admin: AdminClient, input: {
   aiUseAllowed: boolean
   dataClassification: string
   actorId: string
-  source: 'manual' | 'department_chat'
+  source: 'manual' | 'department_chat' | 'brand_brief_compilation'
   aiRunId?: string | null
   visibilityClient: AdminClient
 }) {

@@ -11,6 +11,7 @@ const eventMigration = read('supabase/migrations/20260827160000_engagement_event
 const migration = read('supabase/migrations/20260827170000_artifacts_design_workshop.sql')
 const graphqlBoundaryMigration = read('supabase/migrations/20260827180000_reassert_graphql_boundary.sql')
 const edge = read('supabase/functions/design-workshop/index.ts')
+const compiler = read('supabase/functions/_shared/approvedArtifactContext.ts')
 const ui = read('src/apps/DesignWorkshop.jsx')
 
 test('audit vocabulary exception is an isolated additive CHECK change', () => {
@@ -56,10 +57,11 @@ test('Design inputs now use the structured Content Studio form definitions', () 
 })
 
 test('workshop compiles exact approved artifact content and enforces AI safety', () => {
-  assert.match(edge, /Approved \$\{type\} context is required/)
-  assert.match(edge, /version\.ai_use_allowed/)
-  assert.match(edge, /version\.data_classification === 'restricted'/)
-  assert.match(edge, /artifact_version_id: version\.id[\s\S]*approval_id: approval\.id[\s\S]*content_checksum: version\.content_checksum[\s\S]*content: version\.content/)
+  assert.match(edge, /compileApprovedArtifactContext/)
+  assert.match(compiler, /Approved \$\{artifactType\} context is required/)
+  assert.match(compiler, /version\.ai_use_allowed/)
+  assert.match(compiler, /version\.data_classification === 'restricted'/)
+  assert.match(compiler, /artifact_version_id: version\.id[\s\S]*approval_id: approval\.id[\s\S]*content_checksum: version\.content_checksum[\s\S]*content: version\.content/)
   assert.match(migration, /primary key \(session_id, artifact_type\)/)
 })
 

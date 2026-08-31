@@ -6,7 +6,7 @@ export const ARTIFACT_RELATION_TYPES = Object.freeze([
 ])
 
 const CONTENT_TYPES = new Set([
-  'discovery', 'vision', 'audience', 'website_architecture',
+  'discovery', 'vision', 'audience', 'brand_statement', 'website_architecture',
   'keyword_strategy', 'content', 'campaign_messaging', 'scripts',
 ])
 const MARKETING_TYPES = new Set([

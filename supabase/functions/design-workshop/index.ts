@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
+import { compileApprovedArtifactContext, stableJson } from '../_shared/approvedArtifactContext.ts'
 
 type Client = ReturnType<typeof createClient<any>>
 type Json = Record<string, unknown>
@@ -27,15 +28,6 @@ const response = (body: Json, status = 200) => new Response(JSON.stringify(body)
 export async function sha256(value: string) {
   const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
   return [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('')
-}
-
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
-  if (value && typeof value === 'object') {
-    return `{${Object.entries(value as Json).sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(',')}}`
-  }
-  return JSON.stringify(value)
 }
 
 function text(value: unknown, max = 4000) {
@@ -193,46 +185,18 @@ async function createSession(admin: Client, body: Json, actorId: string) {
   if (models.some(model => !supportsOutput(model, 'design_direction'))) {
     throw new Error('Direction sessions require models registered for design direction output')
   }
-  const { data: artifacts, error: artifactError } = await admin.from('artifacts').select('*')
-    .eq('organization_id', ORGANIZATION_ID).eq('engagement_id', engagementId).eq('brand_id', brandId)
-    .in('artifact_type', [...ARTIFACT_TYPES])
-  if (artifactError) throw artifactError
-  const artifactIds = (artifacts || []).map(item => item.id)
-  const { data: approvals, error: approvalError } = artifactIds.length
-    ? await admin.from('artifact_approvals').select('*').in('artifact_id', artifactIds).order('approved_at', { ascending: false })
-    : { data: [], error: null }
-  if (approvalError) throw approvalError
-  const versionIds = (approvals || []).map(item => item.artifact_version_id)
-  const { data: versions, error: versionError } = versionIds.length
-    ? await admin.from('artifact_versions').select('*').in('id', versionIds)
-    : { data: [], error: null }
-  if (versionError) throw versionError
-  const versionById = new Map((versions || []).map(item => [item.id, item]))
-  const artifactById = new Map((artifacts || []).map(item => [item.id, item]))
-  const selected: Array<{ artifact: any; approval: any; version: any }> = []
-  for (const type of ARTIFACT_TYPES) {
-    const approval = (approvals || []).find(item => artifactById.get(item.artifact_id)?.artifact_type === type)
-    const artifact = approval ? artifactById.get(approval.artifact_id) : null
-    const version = approval ? versionById.get(approval.artifact_version_id) : null
-    if (!artifact || !version) throw new Error(`Approved ${type} context is required`)
-    if (!version.ai_use_allowed || version.data_classification === 'restricted') {
-      throw new Error(`Approved ${type} context is not authorised for AI use`)
-    }
-    selected.push({ artifact, approval, version })
-  }
+  const { selected, manifest: contextManifest } = await compileApprovedArtifactContext(admin, {
+    organizationId: ORGANIZATION_ID,
+    engagementId,
+    brandId,
+    artifactTypes: [...ARTIFACT_TYPES],
+    requireAiSafe: true,
+  })
   const outputBrief = body.output_brief && typeof body.output_brief === 'object' && !Array.isArray(body.output_brief)
     ? body.output_brief as Json : {}
   const designerInstructions = text(body.designer_instructions, 6000)
   if (!designerInstructions || body.instructions_safe_for_ai !== true) {
     throw new Error('Designer instructions must be present and explicitly safe for AI use')
-  }
-  const contextManifest = {
-    schema_version: 1, engagement_id: engagementId, brand_id: brandId,
-    artifacts: Object.fromEntries(selected.map(({ artifact, approval, version }) => [artifact.artifact_type, {
-      artifact_id: artifact.id, artifact_version_id: version.id, version_number: version.version_number,
-      approval_id: approval.id, approved_at: approval.approved_at, content_checksum: version.content_checksum,
-      content: version.content,
-    }])),
   }
   const checksum = await sha256(stableJson(contextManifest))
   const { data: session, error: sessionError } = await admin.from('design_workshop_sessions').insert({

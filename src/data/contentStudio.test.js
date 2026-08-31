@@ -56,10 +56,12 @@ test('Design Workshop has no Content artifact authoring or approval entry point'
   const ui = read('src/apps/DesignWorkshop.jsx')
   const repository = read('src/data/designWorkshopRepository.js')
   const edge = read('supabase/functions/design-workshop/index.ts')
+  const compiler = read('supabase/functions/_shared/approvedArtifactContext.ts')
   assert.doesNotMatch(ui, /ArtifactModal|Complete form|Create revision|Approve exact version/)
   assert.doesNotMatch(repository, /saveArtifact|approveArtifact/)
   assert.doesNotMatch(edge, /save_artifact|approve_artifact/)
-  assert.match(edge, /Approved \$\{type\} context is required/)
+  assert.match(edge, /compileApprovedArtifactContext/)
+  assert.match(compiler, /Approved \$\{artifactType\} context is required/)
 })
 
 test('Shared Department Chat has no business connector or external mutation path', () => {

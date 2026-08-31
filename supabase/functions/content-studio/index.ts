@@ -1,5 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { CONTENT_ARTIFACT_TYPE_SET, createContentArtifactVersion } from '../_shared/contentArtifacts.ts'
+import { compileApprovedArtifactContext } from '../_shared/approvedArtifactContext.ts'
 import { namedKey } from '../_shared/googleOAuthTokens.ts'
 
 type Client = ReturnType<typeof createClient<any>>
@@ -10,6 +11,7 @@ const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 const MANAGER_ROLES = new Set(['department_manager'])
 const CLASSIFICATIONS = new Set(['internal', 'confidential', 'public', 'restricted'])
 const CUSTOM_FIELD_TYPES = new Set(['text', 'number', 'date', 'single_select', 'multi_select', 'checkbox'])
+const BRAND_STATEMENT_SOURCE_TYPES = ['discovery', 'vision', 'audience']
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -21,6 +23,70 @@ const response = (body: Json, status = 200) => new Response(JSON.stringify(body)
 
 function text(value: unknown, max = 4000) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
+}
+
+function textList(value: unknown, maxItems = 40, maxLength = 500) {
+  return Array.isArray(value)
+    ? value.map(item => text(item, maxLength)).filter(Boolean).slice(0, maxItems)
+    : []
+}
+
+export function brandBriefInput(body: Json) {
+  const priceTier = text(body.price_tier, 20)
+  if (!['', 'value', 'mid', 'premium'].includes(priceTier)) throw new Error('Unsupported price tier')
+  const rawBrief = text(body.raw_brief, 50000)
+  if (!rawBrief) throw new Error('Raw brief is required')
+  return {
+    target_market: text(body.target_market, 4000),
+    price_tier: priceTier,
+    operating_principles: textList(body.operating_principles),
+    competitor_references: textList(body.competitor_references),
+    raw_brief: rawBrief,
+  }
+}
+
+export function compiledBrandStatement(brief: Json, contextManifest: Json) {
+  const artifacts = contextManifest.artifacts && typeof contextManifest.artifacts === 'object'
+    ? contextManifest.artifacts as Json : {}
+  const contentFor = (type: string) => {
+    const record = artifacts[type]
+    return record && typeof record === 'object' && !Array.isArray(record)
+      && (record as Json).content && typeof (record as Json).content === 'object'
+      ? (record as Json).content as Json : {}
+  }
+  const discovery = contentFor('discovery')
+  const vision = contentFor('vision')
+  const audience = contentFor('audience')
+  const targetMarket = text(brief.target_market, 4000) || text(audience.primary_audience, 4000)
+  const positioning = text(vision.positioning, 8000)
+  const valueProposition = text(vision.value_proposition, 8000)
+  const statement = [positioning, valueProposition].filter(Boolean).join(' ')
+  return {
+    statement,
+    target_market: targetMarket,
+    price_tier: text(brief.price_tier, 20),
+    positioning,
+    value_proposition: valueProposition,
+    audience_summary: [text(audience.primary_audience, 4000), text(audience.desired_response, 4000)]
+      .filter(Boolean).join(' — '),
+    operating_principles: textList(brief.operating_principles).length
+      ? textList(brief.operating_principles)
+      : textList(vision.values),
+    proof_points: textList(discovery.evidence),
+    competitor_references: textList(brief.competitor_references),
+    source_manifest: {
+      ...contextManifest,
+      brand_brief: {
+        id: brief.id,
+        updated_at: brief.updated_at,
+        target_market: brief.target_market,
+        price_tier: brief.price_tier,
+        operating_principles: brief.operating_principles,
+        competitor_references: brief.competitor_references,
+        raw_brief: brief.raw_brief,
+      },
+    },
+  }
 }
 
 export function hasContentAuthority(membership: Json, action: string) {
@@ -113,6 +179,61 @@ async function saveArtifact(userClient: Client, admin: Client, body: Json, actor
   })
 }
 
+async function saveBrandBrief(admin: Client, body: Json, actorId: string) {
+  const engagement = await requireContentEngagement(admin, text(body.engagement_id, 80))
+  const input = brandBriefInput(body)
+  const { data: existing, error: existingError } = await admin.from('brand_briefs').select('id')
+    .eq('organization_id', ORGANIZATION_ID).eq('brand_id', engagement.brand_id).maybeSingle()
+  if (existingError) throw existingError
+  if (existing) {
+    const { data, error } = await admin.from('brand_briefs').update({
+      ...input, updated_at: new Date().toISOString(),
+    }).eq('id', existing.id).eq('organization_id', ORGANIZATION_ID).select('*').single()
+    if (error) throw error
+    return data
+  }
+  const { data, error } = await admin.from('brand_briefs').insert({
+    organization_id: ORGANIZATION_ID, brand_id: engagement.brand_id,
+    ...input, created_by: actorId,
+  }).select('*').single()
+  if (error) throw error
+  return data
+}
+
+async function generateBrandStatement(userClient: Client, admin: Client, body: Json, actorId: string) {
+  const engagement = await requireContentEngagement(admin, text(body.engagement_id, 80))
+  const stageId = await safeStage(admin, engagement.id, body.engagement_stage_instance_id)
+  const { data: brief, error: briefError } = await admin.from('brand_briefs').select('*')
+    .eq('organization_id', ORGANIZATION_ID).eq('brand_id', engagement.brand_id).maybeSingle()
+  if (briefError) throw briefError
+  if (!brief) throw new Error('Save the brand brief before generating a brand statement')
+  const { manifest } = await compileApprovedArtifactContext(admin, {
+    organizationId: ORGANIZATION_ID,
+    brandId: engagement.brand_id,
+    artifactTypes: BRAND_STATEMENT_SOURCE_TYPES,
+  })
+  const { data: existingArtifact, error: artifactError } = await admin.from('artifacts').select('id')
+    .eq('organization_id', ORGANIZATION_ID).eq('engagement_id', engagement.id)
+    .eq('brand_id', engagement.brand_id).eq('artifact_type', 'brand_statement')
+    .order('created_at').limit(1).maybeSingle()
+  if (artifactError) throw artifactError
+  return createContentArtifactVersion(admin, {
+    organizationId: ORGANIZATION_ID,
+    engagement,
+    stageId,
+    artifactId: existingArtifact?.id || null,
+    artifactType: 'brand_statement',
+    title: 'Brand statement',
+    content: compiledBrandStatement(brief, manifest as Json),
+    changeSummary: 'Compiled from the current brand brief and latest approved Discovery, Vision, and Audience versions.',
+    aiUseAllowed: false,
+    dataClassification: 'internal',
+    actorId,
+    source: 'brand_brief_compilation',
+    visibilityClient: userClient,
+  })
+}
+
 async function approveArtifact(admin: Client, body: Json, actorId: string) {
   const versionId = text(body.artifact_version_id, 80)
   const { data: version, error: versionError } = await admin.from('artifact_versions')
@@ -187,6 +308,10 @@ export async function handleRequest(request: Request) {
         ? 'Content manager approval required' : 'Content department access required' }, 403)
     }
     if (action === 'save_artifact') return response({ data: await saveArtifact(userClient, admin, body, user.id) })
+    if (action === 'save_brand_brief') return response({ data: await saveBrandBrief(admin, body, user.id) })
+    if (action === 'generate_brand_statement') {
+      return response({ data: await generateBrandStatement(userClient, admin, body, user.id) })
+    }
     if (action === 'approve_artifact') return response({ data: await approveArtifact(admin, body, user.id) })
     if (action === 'create_custom_field_definition') {
       return response({ data: await createCustomFieldDefinition(admin, body, user.id) })
