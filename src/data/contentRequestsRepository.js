@@ -23,11 +23,17 @@ export const contentRequests = Object.freeze({
       dataOrThrow(supabase.from('brands')
         .select('id, organization_id, name, status').eq('status', 'active').order('name')),
     ])
-    return { requests, brands }
+    const requestIds = requests.map(request => request.id)
+    const handoffs = requestIds.length
+      ? await dataOrThrow(supabase.from('content_request_assets')
+          .select('id, content_request_id, figma_handoff_url, created_at')
+          .in('content_request_id', requestIds).not('figma_handoff_url', 'is', null).order('created_at'))
+      : []
+    return { requests, brands, handoffs }
   },
 
   async loadProject(engagement) {
-    if (!engagement?.id || !engagement?.brand_id) return { requests: [], assets: [], events: [], models: [] }
+    if (!engagement?.id || !engagement?.brand_id) return { requests: [], assets: [], handoffs: [], events: [], models: [] }
     const [requests, events, models] = await Promise.all([
       dataOrThrow(supabase.from('content_requests').select('*')
         .eq('mode', 'project').eq('engagement_id', engagement.id).order('created_at', { ascending: false })),
@@ -37,10 +43,14 @@ export const contentRequests = Object.freeze({
         .eq('is_active', true).contains('supported_output_types', ['image']).order('display_name')),
     ])
     const requestIds = requests.map(request => request.id)
-    const scopedAssets = requestIds.length
-      ? await dataOrThrow(supabase.from('design_media_assets').select('*')
-          .in('content_request_id', requestIds).order('created_at', { ascending: false }))
-      : []
+    const [scopedAssets, handoffs] = requestIds.length
+      ? await Promise.all([
+          dataOrThrow(supabase.from('design_media_assets').select('*')
+            .in('content_request_id', requestIds).order('created_at', { ascending: false })),
+          dataOrThrow(supabase.from('content_request_assets').select('id, content_request_id, figma_handoff_url, created_at')
+            .in('content_request_id', requestIds).not('figma_handoff_url', 'is', null).order('created_at')),
+        ])
+      : [[], []]
     const readyIds = scopedAssets.filter(asset => asset.media_type === 'image' && asset.status === 'ready')
       .map(asset => asset.id)
     const signed = readyIds.length
@@ -50,6 +60,7 @@ export const contentRequests = Object.freeze({
       requests,
       events,
       models,
+      handoffs,
       assets: scopedAssets.map(asset => ({
         ...asset,
         signed_url: signed?.signed_urls?.[asset.id] || null,
@@ -58,6 +69,9 @@ export const contentRequests = Object.freeze({
   },
 
   create: input => invoke('content-studio', 'create_content_request', input),
+  ensureFigmaHandoff: contentRequestId => invoke('content-studio', 'ensure_figma_handoff', {
+    content_request_id: contentRequestId,
+  }),
   generateImage: (contentRequestId, modelRegistryId, prompt) => invoke(
     'design-workshop', 'generate_content_request_image', {
       content_request_id: contentRequestId,
