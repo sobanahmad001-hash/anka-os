@@ -86,7 +86,8 @@ test('rollback verifier returns named lifecycle, validation, tenant, and privile
     'unknown_metrics_remain_null', 'all_statuses_and_history_remain_queryable',
     'malformed_url_rejected', 'malformed_host_url_rejected', 'negative_traffic_rejected', 'out_of_range_score_rejected',
     'unsupported_enum_rejected', 'duplicate_normalized_url_rejected',
-    'cross_organization_rows_hidden', 'browser_is_read_only', 'server_write_boundary_is_minimum_privilege',
+    'authenticated_direct_write_rejected', 'cross_organization_rows_hidden',
+    'browser_is_read_only', 'server_write_boundary_is_minimum_privilege',
   ]) assert.match(verification, new RegExp(`'${check}'`))
   assert.match(verification, /jsonb_object_agg\(check_name, passed\)/)
   assert.match(verification, /'https:\/\/\.\.\.'/)

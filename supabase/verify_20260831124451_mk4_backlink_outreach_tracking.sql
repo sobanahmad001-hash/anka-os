@@ -39,6 +39,7 @@ begin
       ('out_of_range_score_rejected', false),
       ('unsupported_enum_rejected', false),
       ('duplicate_normalized_url_rejected', false),
+      ('authenticated_direct_write_rejected', false),
       ('cross_organization_rows_hidden', false);
     return;
   end if;
@@ -159,10 +160,23 @@ begin
     'sub', v_unrelated_user_id, 'role', 'authenticated'
   )::text, true);
   set local role authenticated;
+
+  v_passed := false;
+  begin
+    insert into public.backlink_targets (
+      organization_id, brand_id, site_name, created_by
+    ) values (
+      v_organization_id, v_brand_id, 'Unauthorized browser write', v_unrelated_user_id
+    );
+  exception when insufficient_privilege then
+    v_passed := true;
+  end;
+
   select count(*) into v_count
   from public.backlink_targets where id = v_target_id;
   reset role;
 
+  insert into mk4_runtime_checks values ('authenticated_direct_write_rejected', v_passed);
   insert into mk4_runtime_checks values ('cross_organization_rows_hidden', v_count = 0);
 end;
 $$;

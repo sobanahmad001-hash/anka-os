@@ -15,6 +15,7 @@
 - [ ] The brand/status, normalized URL, and `created_by` query paths are indexed.
 - [ ] RLS allows authenticated active team members to read only their organization through `public.is_team_organization_member`.
 - [ ] `anon` has no table privileges, `authenticated` has SELECT only, and `service_role` has only SELECT/INSERT/UPDATE.
+- [ ] The rollback verifier executes and rejects an authenticated direct insert, in addition to checking the exact grants.
 - [ ] Service-role writes follow caller JWT validation and allow only active Marketing team members or organization leadership.
 - [ ] Deno tests exercise those three roles through `handleRequest`, not only through the authority helper.
 
