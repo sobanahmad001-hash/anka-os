@@ -1,10 +1,14 @@
 import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.14'
 import {
   fetchReadOnlyGoogleReport,
+  fetchGoogleAdsCampaignSnapshot,
   handleRequest,
   hasMarketingAuthority,
   safeDateRange,
   validateBacklinkTarget,
+  validateAdCampaign,
+  validateAdGroup,
+  validateAdKeyword,
   validateCampaign,
   validateMarketingArtifact,
 } from './index.ts'
@@ -14,6 +18,20 @@ Deno.test('Marketing authority keeps approval manager-controlled', () => {
   assertEquals(hasMarketingAuthority({ role: 'contributor', department_id: 'marketing' }, 'approve_artifact'), false)
   assertEquals(hasMarketingAuthority({ role: 'department_manager', department_id: 'marketing' }, 'approve_artifact'), true)
   assertEquals(hasMarketingAuthority({ role: 'executive', department_id: null }, 'analytics_dashboard'), true)
+})
+
+Deno.test('non-Marketing members cannot execute any MK3 write action', () => {
+  const writeActions = [
+    'create_ad_campaign', 'update_ad_campaign', 'delete_ad_campaign',
+    'save_ad_group', 'delete_ad_group', 'save_ad_keyword', 'delete_ad_keyword',
+    'import_ad_campaign_performance',
+  ]
+  for (const action of writeActions) {
+    assertEquals(hasMarketingAuthority({ role: 'contributor', department_id: 'content' }, action), false)
+    assertEquals(hasMarketingAuthority({ role: 'department_manager', department_id: 'design' }, action), false)
+    assertEquals(hasMarketingAuthority({ role: 'contributor', department_id: 'marketing' }, action), true)
+    assertEquals(hasMarketingAuthority({ role: 'operations_admin', department_id: null }, action), true)
+  }
 })
 
 Deno.test('campaign planning validates dates, channels, and informational budget', () => {
@@ -137,4 +155,40 @@ Deno.test('Google Ads reporting never falls back to a mutating endpoint', async 
   )
   assertEquals(called, 'https://googleads.googleapis.com/v24/customers/1234567890/googleAds:searchStream')
   await assertRejects(() => fetchReadOnlyGoogleReport('unknown', 'token', {}, { start: '2026-08-01', end: '2026-08-27' }))
+})
+
+Deno.test('MK3 planning validators enforce hierarchy vocabulary and complete provider identity', () => {
+  const campaign = validateAdCampaign({
+    campaign_name: 'Brand search', campaign_type: 'search', status: 'draft',
+    daily_budget: '25', location_targeting: ['Karachi'],
+  })
+  assertEquals(campaign.daily_budget, 25)
+  assertEquals(validateAdGroup({ name: 'Services', status: 'active' }), { name: 'Services', status: 'active' })
+  assertEquals(validateAdKeyword({ keyword: 'digital agency', match_type: 'phrase', is_negative: false }), {
+    keyword: 'digital agency', match_type: 'phrase', is_negative: false,
+  })
+  assertThrows(() => validateAdCampaign({ campaign_name: 'Broken', campaign_type: 'search', provider_connection_id: 'x' }), Error, 'supplied together')
+  assertThrows(() => validateAdKeyword({ keyword: 'x', match_type: 'unsupported' }), Error, 'Unsupported')
+})
+
+Deno.test('MK3 snapshot reader issues one reporting-only query and maps provider metrics', async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = []
+  const fetcher = (async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), init })
+    return new Response(JSON.stringify([{ results: [{
+      campaign: { id: '987654321' }, segments: { date: '2026-08-30' },
+      metrics: { impressions: '100', clicks: '10', costMicros: '25000000', conversions: '2' },
+    }] }]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }) as typeof fetch
+  const snapshot = await fetchGoogleAdsCampaignSnapshot(
+    'token', { customer_id: '1234567890' }, '987654321', '2026-08-30', fetcher,
+    { googleAdsDeveloperToken: 'developer-token' },
+  )
+  assertEquals(snapshot, { snapshot_date: '2026-08-30', impressions: 100, clicks: 10, cost: 25, conversions: 2 })
+  assertEquals(calls[0].url, 'https://googleads.googleapis.com/v24/customers/1234567890/googleAds:searchStream')
+  assertEquals(calls[0].init?.method, 'POST')
+  const body = String(calls[0].init?.body)
+  assertEquals(/campaign\.id = 987654321/.test(body), true)
+  assertEquals(/segments\.date = '2026-08-30'/.test(body), true)
+  assertEquals(/mutate|create|update|remove|pause|enable/i.test(calls[0].url + body), false)
 })

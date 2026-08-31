@@ -15,6 +15,9 @@ const CAMPAIGN_STATUSES = new Set(['draft', 'planned', 'active', 'paused', 'comp
 const BACKLINK_STATUSES = new Set(['not_started', 'contacted', 'in_discussion', 'secured', 'declined'])
 const BACKLINK_LINK_TYPES = new Set(['membership', 'partnership', 'editorial', 'guest_post'])
 const BACKLINK_COST_TYPES = new Set(['free', 'paid', 'both'])
+const AD_CAMPAIGN_TYPES = new Set(['search', 'app', 'display', 'other'])
+const AD_STRUCTURE_STATUSES = new Set(['draft', 'active', 'paused', 'ended'])
+const AD_MATCH_TYPES = new Set(['broad', 'phrase', 'exact'])
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -196,6 +199,70 @@ export function validateBacklinkTarget(value: unknown) {
   }
 }
 
+function relatedObject(value: unknown): Json | null {
+  const candidate = Array.isArray(value) ? value[0] : value
+  return candidate && typeof candidate === 'object' && !Array.isArray(candidate) ? candidate as Json : null
+}
+
+function googleId(value: unknown, length: number | null, label: string) {
+  const result = text(value, 40).replaceAll('-', '')
+  if (!result) return null
+  const pattern = length ? new RegExp(`^[0-9]{${length}}$`) : /^[0-9]+$/
+  if (!pattern.test(result)) throw new Error(`${label} must contain ${length ? `${length} ` : ''}digits`)
+  return result
+}
+
+export function validateAdCampaign(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Ad campaign details are required')
+  const input = value as Json
+  const campaignName = text(input.campaign_name, 180)
+  const campaignType = text(input.campaign_type, 20)
+  const status = text(input.status, 20) || 'draft'
+  const startDate = safeDate(input.start_date)
+  const endDate = safeDate(input.end_date)
+  const providerConnectionId = text(input.provider_connection_id, 80) || null
+  const externalAccountId = googleId(input.external_account_id, 10, 'External account ID')
+  const externalCampaignId = googleId(input.external_campaign_id, null, 'External campaign ID')
+  if (!campaignName) throw new Error('Campaign name is required')
+  if (!AD_CAMPAIGN_TYPES.has(campaignType)) throw new Error('Unsupported ad campaign type')
+  if (!AD_STRUCTURE_STATUSES.has(status)) throw new Error('Unsupported ad campaign status')
+  if (startDate && endDate && startDate > endDate) throw new Error('Campaign end date cannot precede its start date')
+  const identityParts = [providerConnectionId, externalAccountId, externalCampaignId].filter(Boolean).length
+  if (identityParts !== 0 && identityParts !== 3) {
+    throw new Error('Connection, external account ID, and external campaign ID must be supplied together')
+  }
+  return {
+    campaign_name: campaignName, campaign_type: campaignType, status,
+    daily_budget: optionalNumber(input.daily_budget, 'Daily budget'),
+    total_budget: optionalNumber(input.total_budget, 'Total budget'),
+    start_date: startDate, end_date: endDate, goal: text(input.goal, 2000),
+    location_targeting: strings(input.location_targeting, 50),
+    audience_segment: text(input.audience_segment, 2000),
+    provider_connection_id: providerConnectionId,
+    external_account_id: externalAccountId, external_campaign_id: externalCampaignId,
+  }
+}
+
+export function validateAdGroup(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Ad group details are required')
+  const input = value as Json
+  const name = text(input.name, 180)
+  const status = text(input.status, 20) || 'draft'
+  if (!name) throw new Error('Ad group name is required')
+  if (!AD_STRUCTURE_STATUSES.has(status)) throw new Error('Unsupported ad group status')
+  return { name, status }
+}
+
+export function validateAdKeyword(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Keyword details are required')
+  const input = value as Json
+  const keyword = text(input.keyword, 500)
+  const matchType = text(input.match_type, 20)
+  if (!keyword) throw new Error('Keyword is required')
+  if (!AD_MATCH_TYPES.has(matchType)) throw new Error('Unsupported keyword match type')
+  return { keyword, match_type: matchType, is_negative: input.is_negative === true }
+}
+
 type RequestDependencies = {
   createClient?: typeof createClient
   environment?: { supabaseUrl: string; publishableKey: string; secretKey: string }
@@ -243,6 +310,34 @@ async function requireBrand(admin: Client, brandId: string) {
     .eq('id', brandId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
   if (error || !brand) throw Object.assign(new Error('Brand not found'), { status: 404 })
   return brand
+}
+
+async function requireGoogleAdsConnection(admin: Client, engagementId: string, connectionId: string) {
+  const { data: mapping, error } = await admin.from('integration_connection_engagements')
+    .select('connection_id, integration_connections!inner(id, provider, display_name, public_config, status, archived_at)')
+    .eq('organization_id', ORGANIZATION_ID).eq('engagement_id', engagementId)
+    .eq('department_id', 'marketing').eq('connection_id', connectionId).maybeSingle()
+  const connection = relatedObject(mapping?.integration_connections)
+  if (error || !connection || connection.provider !== 'google_ads' || connection.status !== 'verified' || connection.archived_at) {
+    throw Object.assign(new Error('A verified Google Ads connection mapped to this engagement is required'), { status: 409 })
+  }
+  return connection
+}
+
+async function listGoogleAdsConnections(admin: Client, engagementId: string) {
+  await requireMarketingEngagement(admin, engagementId)
+  const { data: mappings, error } = await admin.from('integration_connection_engagements')
+    .select('connection_id, integration_connections!inner(id, provider, display_name, public_config, status, archived_at)')
+    .eq('organization_id', ORGANIZATION_ID).eq('engagement_id', engagementId)
+    .eq('department_id', 'marketing')
+  if (error) throw error
+  return (mappings || []).map(item => relatedObject(item.integration_connections)).filter((connection): connection is Json =>
+    connection !== null &&
+    connection.provider === 'google_ads' && connection.status === 'verified' && !connection.archived_at
+  ).map(connection => ({
+    id: connection.id, display_name: connection.display_name,
+    customer_id: text((connection.public_config as Json | null)?.customer_id, 24),
+  }))
 }
 
 async function recordEvent(admin: Client, engagementId: string, actorId: string, eventType: string, payload: Json) {
@@ -301,6 +396,30 @@ async function createBacklinkTarget(admin: Client, body: Json, actorId: string) 
   return data
 }
 
+async function requireAdCampaign(admin: Client, campaignId: string) {
+  const { data, error } = await admin.from('ad_campaigns').select('*')
+    .eq('id', campaignId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  if (error || !data) throw Object.assign(new Error('Ad campaign not found'), { status: 404 })
+  return data
+}
+
+async function createAdCampaign(admin: Client, body: Json, actorId: string) {
+  const engagement = await requireMarketingEngagement(admin, text(body.engagement_id, 80))
+  const campaign = validateAdCampaign(body.campaign)
+  if (campaign.provider_connection_id) {
+    const connection = await requireGoogleAdsConnection(admin, engagement.id, campaign.provider_connection_id)
+    const configuredCustomerId = text((connection.public_config as Json | null)?.customer_id, 24)
+    if (configuredCustomerId && configuredCustomerId !== campaign.external_account_id) {
+      throw new Error('External account ID does not match the selected Google Ads connection')
+    }
+  }
+  const { data, error } = await admin.from('ad_campaigns').insert({
+    organization_id: ORGANIZATION_ID, brand_id: engagement.brand_id, ...campaign, created_by: actorId,
+  }).select('*').single()
+  if (error) throw error
+  return data
+}
+
 async function updateBacklinkTarget(admin: Client, body: Json) {
   const targetId = text(body.target_id, 80)
   const { data: existing, error: existingError } = await admin.from('backlink_targets')
@@ -313,6 +432,102 @@ async function updateBacklinkTarget(admin: Client, body: Json) {
     .eq('id', existing.id).eq('organization_id', ORGANIZATION_ID).select('*').single()
   if (error) throw error
   return data
+}
+
+async function updateAdCampaign(admin: Client, body: Json) {
+  const existing = await requireAdCampaign(admin, text(body.ad_campaign_id, 80))
+  const engagement = await requireMarketingEngagement(admin, text(body.engagement_id, 80))
+  if (engagement.brand_id !== existing.brand_id) throw new Error('Ad campaign does not belong to this engagement brand')
+  const campaign = validateAdCampaign(body.campaign)
+  if (campaign.provider_connection_id) {
+    const connection = await requireGoogleAdsConnection(admin, engagement.id, campaign.provider_connection_id)
+    const configuredCustomerId = text((connection.public_config as Json | null)?.customer_id, 24)
+    if (configuredCustomerId && configuredCustomerId !== campaign.external_account_id) {
+      throw new Error('External account ID does not match the selected Google Ads connection')
+    }
+  }
+  const { data, error } = await admin.from('ad_campaigns').update(campaign)
+    .eq('id', existing.id).eq('organization_id', ORGANIZATION_ID).select('*').single()
+  if (error) throw error
+  return data
+}
+
+async function deleteAdCampaign(admin: Client, body: Json) {
+  const existing = await requireAdCampaign(admin, text(body.ad_campaign_id, 80))
+  const engagement = await requireMarketingEngagement(admin, text(body.engagement_id, 80))
+  if (engagement.brand_id !== existing.brand_id) throw new Error('Ad campaign does not belong to this engagement brand')
+  const { error } = await admin.from('ad_campaigns').delete().eq('id', existing.id).eq('organization_id', ORGANIZATION_ID)
+  if (error) throw error
+  return { id: existing.id }
+}
+
+async function saveAdGroup(admin: Client, body: Json, actorId: string) {
+  const campaign = await requireAdCampaign(admin, text(body.ad_campaign_id, 80))
+  const engagement = await requireMarketingEngagement(admin, text(body.engagement_id, 80))
+  if (engagement.brand_id !== campaign.brand_id) throw new Error('Ad campaign does not belong to this engagement brand')
+  const values = validateAdGroup(body.ad_group)
+  const groupId = text(body.ad_group_id, 80)
+  if (!groupId) {
+    const { data, error } = await admin.from('ad_groups').insert({
+      organization_id: ORGANIZATION_ID, ad_campaign_id: campaign.id, ...values, created_by: actorId,
+    }).select('*').single()
+    if (error) throw error
+    return data
+  }
+  const { data: existing } = await admin.from('ad_groups').select('id, ad_campaign_id')
+    .eq('id', groupId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  if (!existing || existing.ad_campaign_id !== campaign.id) throw new Error('Ad group does not belong to this campaign')
+  const { data, error } = await admin.from('ad_groups').update(values).eq('id', groupId).select('*').single()
+  if (error) throw error
+  return data
+}
+
+async function deleteAdGroup(admin: Client, body: Json) {
+  const groupId = text(body.ad_group_id, 80)
+  const { data: group } = await admin.from('ad_groups').select('id, ad_campaign_id, ad_campaigns!inner(brand_id)')
+    .eq('id', groupId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  const engagement = await requireMarketingEngagement(admin, text(body.engagement_id, 80))
+  if (!group || relatedObject(group.ad_campaigns)?.brand_id !== engagement.brand_id) throw new Error('Ad group not found for this brand')
+  const { error } = await admin.from('ad_groups').delete().eq('id', group.id)
+  if (error) throw error
+  return { id: group.id }
+}
+
+async function saveAdKeyword(admin: Client, body: Json, actorId: string) {
+  const groupId = text(body.ad_group_id, 80)
+  const { data: group } = await admin.from('ad_groups')
+    .select('id, ad_campaign_id, ad_campaigns!inner(brand_id)')
+    .eq('id', groupId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  const engagement = await requireMarketingEngagement(admin, text(body.engagement_id, 80))
+  if (!group || relatedObject(group.ad_campaigns)?.brand_id !== engagement.brand_id) throw new Error('Ad group not found for this brand')
+  const values = validateAdKeyword(body.keyword)
+  const keywordId = text(body.keyword_id, 80)
+  if (!keywordId) {
+    const { data, error } = await admin.from('ad_group_keywords').insert({
+      organization_id: ORGANIZATION_ID, ad_group_id: group.id, ...values, created_by: actorId,
+    }).select('*').single()
+    if (error) throw error
+    return data
+  }
+  const { data: existing } = await admin.from('ad_group_keywords').select('id, ad_group_id')
+    .eq('id', keywordId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  if (!existing || existing.ad_group_id !== group.id) throw new Error('Keyword does not belong to this ad group')
+  const { data, error } = await admin.from('ad_group_keywords').update(values).eq('id', keywordId).select('*').single()
+  if (error) throw error
+  return data
+}
+
+async function deleteAdKeyword(admin: Client, body: Json) {
+  const keywordId = text(body.keyword_id, 80)
+  const { data: keyword } = await admin.from('ad_group_keywords')
+    .select('id, ad_groups!inner(ad_campaigns!inner(brand_id))')
+    .eq('id', keywordId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  const engagement = await requireMarketingEngagement(admin, text(body.engagement_id, 80))
+  const brandId = relatedObject(relatedObject(keyword?.ad_groups)?.ad_campaigns)?.brand_id
+  if (!keyword || brandId !== engagement.brand_id) throw new Error('Keyword not found for this brand')
+  const { error } = await admin.from('ad_group_keywords').delete().eq('id', keyword.id)
+  if (error) throw error
+  return { id: keyword.id }
 }
 
 async function saveArtifact(admin: Client, body: Json, actorId: string) {
@@ -474,6 +689,74 @@ export async function fetchReadOnlyGoogleReport(
   }
 }
 
+export async function fetchGoogleAdsCampaignSnapshot(
+  token: string,
+  config: Json,
+  externalCampaignId: string,
+  snapshotDate: string,
+  fetcher: typeof fetch = fetch,
+  serverSecrets: { googleAdsDeveloperToken?: string } = {},
+) {
+  const customerId = googleId(config.customer_id, 10, 'Google Ads customer ID')
+  const campaignId = googleId(externalCampaignId, null, 'External campaign ID')
+  const date = safeDate(snapshotDate, true) as string
+  if (!customerId || !campaignId) throw new Error('Google Ads campaign identity is incomplete')
+  const developerToken = serverSecrets.googleAdsDeveloperToken ?? Deno.env.get('GOOGLE_ADS_DEVELOPER_TOKEN')
+  if (!developerToken) throw new Error('Google Ads developer token is not configured')
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'developer-token': developerToken,
+  }
+  const loginCustomerId = googleId(config.login_customer_id, 10, 'Google Ads manager ID')
+  if (loginCustomerId) headers['login-customer-id'] = loginCustomerId
+  const query = `SELECT campaign.id, segments.date, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM campaign WHERE campaign.id = ${campaignId} AND segments.date = '${date}' LIMIT 1`
+  const result = await fetcher(`https://googleads.googleapis.com/v24/customers/${customerId}/googleAds:searchStream`, {
+    method: 'POST', headers, body: JSON.stringify({ query }), signal: AbortSignal.timeout(15_000),
+  })
+  const data = await result.json()
+  if (!result.ok) throw Object.assign(new Error('Google Ads reporting request failed'), { code: `HTTP_${result.status}` })
+  const row = (Array.isArray(data) ? data : []).flatMap((batch: any) => batch.results || [])[0]
+  if (!row) throw Object.assign(new Error('No finalized Google Ads metrics were returned for this campaign and date'), { status: 404 })
+  return {
+    snapshot_date: date,
+    impressions: normalizedMetric(row.metrics?.impressions),
+    clicks: normalizedMetric(row.metrics?.clicks),
+    cost: normalizedMetric(row.metrics?.costMicros) / 1_000_000,
+    conversions: Math.round(normalizedMetric(row.metrics?.conversions)),
+  }
+}
+
+async function importAdCampaignPerformance(admin: Client, body: Json, actorId: string) {
+  const campaign = await requireAdCampaign(admin, text(body.ad_campaign_id, 80))
+  const engagement = await requireMarketingEngagement(admin, text(body.engagement_id, 80))
+  if (engagement.brand_id !== campaign.brand_id) throw new Error('Ad campaign does not belong to this engagement brand')
+  if (!campaign.provider_connection_id || !campaign.external_campaign_id || !campaign.external_account_id) {
+    throw new Error('Link this planning campaign to its Google Ads identity before importing performance')
+  }
+  const connection = await requireGoogleAdsConnection(admin, engagement.id, campaign.provider_connection_id)
+  const config = (connection.public_config || {}) as Json
+  if (text(config.customer_id, 24) !== campaign.external_account_id) {
+    throw new Error('Campaign account identity no longer matches the selected connection')
+  }
+  const token = await googleAccessToken(admin, campaign.provider_connection_id, 'google_ads')
+  const snapshot = await fetchGoogleAdsCampaignSnapshot(
+    token, config, campaign.external_campaign_id, text(body.snapshot_date, 10),
+  )
+  const insert = {
+    organization_id: ORGANIZATION_ID, ad_campaign_id: campaign.id,
+    provider_connection_id: campaign.provider_connection_id,
+    external_campaign_id: campaign.external_campaign_id, created_by: actorId, ...snapshot,
+  }
+  const { data: created, error } = await admin.from('ad_campaign_performance_snapshots')
+    .upsert(insert, { onConflict: 'ad_campaign_id,snapshot_date', ignoreDuplicates: true })
+    .select('*').maybeSingle()
+  if (error) throw error
+  if (created) return { snapshot: created, imported: true }
+  const { data: existing, error: existingError } = await admin.from('ad_campaign_performance_snapshots')
+    .select('*').eq('ad_campaign_id', campaign.id).eq('snapshot_date', snapshot.snapshot_date).single()
+  if (existingError) throw existingError
+  return { snapshot: existing, imported: false }
+}
+
 async function analyticsDashboard(admin: Client, body: Json) {
   const engagementId = text(body.engagement_id, 80)
   const engagement = await requireMarketingEngagement(admin, engagementId)
@@ -513,13 +796,22 @@ export async function handleRequest(
     )
     const body = await request.json() as Json
     const action = text(body.action, 60)
-    if (!hasMarketingAuthority(membership, action)) {
+    if (action !== 'list_google_ads_connections' && !hasMarketingAuthority(membership, action)) {
       return response({ error: action === 'approve_artifact' ? 'Marketing manager approval required' : 'Marketing department access required' }, 403)
     }
     if (action === 'create_campaign') return response({ data: await createCampaign(admin, body, user.id) })
     if (action === 'update_campaign') return response({ data: await updateCampaign(admin, body, user.id) })
     if (action === 'create_backlink_target') return response({ data: await createBacklinkTarget(admin, body, user.id) })
     if (action === 'update_backlink_target') return response({ data: await updateBacklinkTarget(admin, body) })
+    if (action === 'list_google_ads_connections') return response({ data: await listGoogleAdsConnections(admin, text(body.engagement_id, 80)) })
+    if (action === 'create_ad_campaign') return response({ data: await createAdCampaign(admin, body, user.id) })
+    if (action === 'update_ad_campaign') return response({ data: await updateAdCampaign(admin, body) })
+    if (action === 'delete_ad_campaign') return response({ data: await deleteAdCampaign(admin, body) })
+    if (action === 'save_ad_group') return response({ data: await saveAdGroup(admin, body, user.id) })
+    if (action === 'delete_ad_group') return response({ data: await deleteAdGroup(admin, body) })
+    if (action === 'save_ad_keyword') return response({ data: await saveAdKeyword(admin, body, user.id) })
+    if (action === 'delete_ad_keyword') return response({ data: await deleteAdKeyword(admin, body) })
+    if (action === 'import_ad_campaign_performance') return response({ data: await importAdCampaignPerformance(admin, body, user.id) })
     if (action === 'save_artifact') return response({ data: await saveArtifact(admin, body, user.id) })
     if (action === 'approve_artifact') return response({ data: await approveArtifact(admin, body, user.id) })
     if (action === 'analytics_dashboard') return response({ data: await analyticsDashboard(admin, body) })

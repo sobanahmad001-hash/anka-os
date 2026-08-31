@@ -2,9 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import {
+  AD_CAMPAIGN_TYPES,
+  AD_MATCH_TYPES,
+  AD_STRUCTURE_STATUSES,
   CAMPAIGN_STATUSES,
   MARKETING_ARTIFACT_FORMS,
   blankMarketingArtifact,
+  campaignAfterDeletion,
   defaultReportingPeriod,
   latestVersion,
   lines,
@@ -136,7 +140,7 @@ export default function MarketingStudio() {
         </section>
 
         <nav className="flex gap-2 overflow-x-auto border-b border-slate-800">
-          {[['campaigns', 'Campaigns'], ['backlinks', 'Backlink outreach'], ['artifacts', 'Artifacts'], ['analytics', 'Live analytics']].map(([id, label]) => (
+          {[['campaigns', 'Campaigns'], ['ad-tracking', 'Ad campaign tracking'], ['backlinks', 'Backlink outreach'], ['artifacts', 'Artifacts'], ['analytics', 'Live analytics']].map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-emerald-400 text-emerald-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>
           ))}
         </nav>
@@ -147,6 +151,8 @@ export default function MarketingStudio() {
           <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Select an engagement with a Marketing service to begin.</div>
         ) : tab === 'campaigns' ? (
           <Campaigns workspace={workspace} campaignId={campaignId} setCampaignId={setCampaignId} selected={selectedCampaign} saving={saving} act={act} />
+        ) : tab === 'ad-tracking' ? (
+          <AdCampaignTracking workspace={workspace} saving={saving} act={act} />
         ) : tab === 'artifacts' ? (
           <Artifacts workspace={workspace} campaign={selectedCampaign} saving={saving} act={act} setTab={setTab} onRefresh={() => loadWorkspace(engagementId, campaignId)} />
         ) : (
@@ -295,9 +301,184 @@ function BacklinkOutreach({ brands, brandId, setBrandId }) { // eslint-disable-l
   </div>
 }
 
+function blankAdCampaign() {
+  return {
+    campaign_name: '', campaign_type: 'search', status: 'draft', daily_budget: '', total_budget: '',
+    start_date: '', end_date: '', goal: '', location_targeting: '', audience_segment: '',
+    provider_connection_id: '', external_account_id: '', external_campaign_id: '',
+  }
+}
+
+function editAdCampaign(campaign) {
+  if (!campaign) return blankAdCampaign()
+  return { ...campaign, location_targeting: (campaign.location_targeting || []).join('\n') }
+}
+
+function metric(value, kind = 'number') {
+  if (value === null || value === undefined) return '—'
+  if (kind === 'percent') return `${(Number(value) * 100).toFixed(2)}%`
+  if (kind === 'money') return Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })
+}
+
+function AdCampaignTracking({ workspace, saving, act }) {
+  const [selectedId, setSelectedId] = useState(workspace.adCampaigns[0]?.id || '')
+  const [creating, setCreating] = useState(workspace.adCampaigns.length === 0)
+  const selected = useMemo(() => workspace.adCampaigns.find(item => item.id === selectedId) || null, [workspace.adCampaigns, selectedId])
+  const [form, setForm] = useState(editAdCampaign(selected))
+  const [groupId, setGroupId] = useState('')
+  const [groupForm, setGroupForm] = useState({ name: '', status: 'draft' })
+  const [keywordId, setKeywordId] = useState('')
+  const [keywordForm, setKeywordForm] = useState({ keyword: '', match_type: 'phrase', is_negative: false })
+  const [snapshotDate, setSnapshotDate] = useState(new Date().toISOString().slice(0, 10))
+
+  const groups = useMemo(() => workspace.adGroups.filter(item => item.ad_campaign_id === selected?.id), [workspace.adGroups, selected?.id])
+  const selectedGroup = useMemo(() => groups.find(item => item.id === groupId) || null, [groups, groupId])
+  const keywords = useMemo(() => workspace.adKeywords.filter(item => item.ad_group_id === selectedGroup?.id), [workspace.adKeywords, selectedGroup?.id])
+  const snapshots = useMemo(() => workspace.adSnapshots.filter(item => item.ad_campaign_id === selected?.id), [workspace.adSnapshots, selected?.id])
+  const latest = snapshots.at(-1)
+
+  useEffect(() => {
+    if (selectedId && !workspace.adCampaigns.some(item => item.id === selectedId)) {
+      setSelectedId(workspace.adCampaigns[0]?.id || '')
+    }
+  }, [workspace.adCampaigns, selectedId])
+  useEffect(() => { if (!creating) setForm(editAdCampaign(selected)) }, [selected, creating])
+  useEffect(() => {
+    const first = groups[0]
+    if (!groups.some(item => item.id === groupId)) {
+      setGroupId(first?.id || '')
+      setGroupForm(first ? { name: first.name, status: first.status } : { name: '', status: 'draft' })
+    }
+  }, [groups, groupId])
+  useEffect(() => {
+    if (selectedGroup) setGroupForm({ name: selectedGroup.name, status: selectedGroup.status })
+    setKeywordId(''); setKeywordForm({ keyword: '', match_type: 'phrase', is_negative: false })
+  }, [selectedGroup])
+
+  async function saveCampaign(event) {
+    event.preventDefault()
+    const payload = { ...form, location_targeting: lines(form.location_targeting) }
+    const result = await act(
+      () => creating
+        ? marketingStudio.createAdCampaign(workspace.engagement.id, payload)
+        : marketingStudio.updateAdCampaign(workspace.engagement.id, selected.id, payload),
+      creating ? 'Google Ads planning campaign created.' : 'Google Ads planning campaign updated.',
+    )
+    if (result) { setSelectedId(result.id); setCreating(false) }
+  }
+
+  function selectConnection(connectionId) {
+    const connection = workspace.googleAdsConnections.find(item => item.id === connectionId)
+    setForm({ ...form, provider_connection_id: connectionId, external_account_id: connection?.customer_id || '', external_campaign_id: connectionId ? form.external_campaign_id : '' })
+  }
+
+  async function removeCampaign() {
+    if (!selected || !window.confirm(`Delete the local planning record “${selected.campaign_name}” and its local descendants? Google Ads will not be changed.`)) return
+    const nextCampaign = campaignAfterDeletion(workspace.adCampaigns, selected.id)
+    const result = await act(() => marketingStudio.deleteAdCampaign(workspace.engagement.id, selected.id), 'Local ad campaign planning record deleted.')
+    if (result) {
+      setSelectedId(nextCampaign?.id || '')
+      setCreating(!nextCampaign)
+      setForm(editAdCampaign(nextCampaign))
+    }
+  }
+
+  async function saveGroup(event) {
+    event.preventDefault()
+    const result = await act(
+      () => marketingStudio.saveAdGroup(workspace.engagement.id, selected.id, groupId, groupForm),
+      groupId ? 'Ad group planning record updated.' : 'Ad group planning record created.',
+    )
+    if (result) setGroupId(result.id)
+  }
+
+  async function removeGroup() {
+    if (!selectedGroup || !window.confirm(`Delete local ad group “${selectedGroup.name}” and its keywords?`)) return
+    const result = await act(() => marketingStudio.deleteAdGroup(workspace.engagement.id, selectedGroup.id), 'Local ad group deleted.')
+    if (result) { setGroupId(''); setGroupForm({ name: '', status: 'draft' }) }
+  }
+
+  async function saveKeyword(event) {
+    event.preventDefault()
+    const result = await act(
+      () => marketingStudio.saveAdKeyword(workspace.engagement.id, selectedGroup.id, keywordId, keywordForm),
+      keywordId ? 'Keyword planning record updated.' : 'Keyword planning record added.',
+    )
+    if (result) { setKeywordId(''); setKeywordForm({ keyword: '', match_type: 'phrase', is_negative: false }) }
+  }
+
+  async function removeKeyword(id) {
+    await act(() => marketingStudio.deleteAdKeyword(workspace.engagement.id, id), 'Keyword planning record deleted.')
+  }
+
+  async function importSnapshot() {
+    const result = await act(
+      () => marketingStudio.importAdPerformance(workspace.engagement.id, selected.id, snapshotDate),
+      'Read-only Google Ads performance import completed.',
+    )
+    if (result && !result.imported) window.alert('That campaign/date snapshot already exists. The immutable original was kept.')
+  }
+
+  return <div className="space-y-6">
+    <div className="rounded-2xl border border-amber-700/50 bg-amber-950/25 p-5 text-sm leading-6 text-amber-100">
+      <p className="font-semibold">Planning mirror only</p>
+      <p className="mt-1 text-amber-200/80">Campaign, budget, status, ad group, and keyword changes made here are local planning records. They must still be executed in Google Ads. The only provider action below is a read-only performance import.</p>
+    </div>
+    <div className="grid gap-6 xl:grid-cols-[320px_1fr]">
+      <section className="space-y-3">
+        <button onClick={() => { setCreating(true); setSelectedId(''); setForm(blankAdCampaign()) }} className={`${PRIMARY} w-full`}>New Google Ads plan</button>
+        {workspace.adCampaigns.map(campaign => {
+          const campaignSnapshots = workspace.adSnapshots.filter(item => item.ad_campaign_id === campaign.id)
+          const summary = campaignSnapshots.at(-1)
+          return <button key={campaign.id} onClick={() => { setCreating(false); setSelectedId(campaign.id) }} className={`w-full rounded-2xl border p-4 text-left ${!creating && selectedId === campaign.id ? 'border-emerald-500/60 bg-emerald-950/20' : 'border-slate-800 bg-slate-900/70'}`}>
+            <div className="flex justify-between gap-3"><span className="font-semibold">{campaign.campaign_name}</span><span className="text-[10px] uppercase text-slate-500">{campaign.status}</span></div>
+            <p className="mt-2 text-xs text-slate-500">{titleize(campaign.campaign_type)} · Daily {campaign.daily_budget == null ? '—' : metric(campaign.daily_budget, 'money')} · Total {campaign.total_budget == null ? '—' : metric(campaign.total_budget, 'money')}</p>
+            <p className="mt-1 text-[11px] text-slate-600">{campaign.start_date || 'No start'} → {campaign.end_date || 'No end'}</p>
+            <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{campaign.goal || 'No campaign goal recorded.'}</p>
+            <p className="mt-2 text-[11px] leading-5 text-slate-600">{summary ? `${summary.snapshot_date} · ${metric(summary.impressions)} impressions · ${metric(summary.clicks)} clicks · ${metric(summary.cost, 'money')} cost · ${metric(summary.conversions)} conversions` : 'No imported performance'}</p>
+          </button>
+        })}
+      </section>
+      <section className="space-y-6">
+        <form onSubmit={saveCampaign} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Google Ads planning</p><h2 className="mt-1 text-xl font-semibold">{creating ? 'Create campaign structure' : selected?.campaign_name}</h2></div>{selected && !creating && <button type="button" onClick={removeCampaign} className="text-xs font-semibold text-red-400 hover:text-red-300">Delete local plan</button>}</div>
+          <div className="mt-6 grid gap-4 md:grid-cols-2">
+            <Field label="Campaign name"><input required className={INPUT} value={form.campaign_name} onChange={event => setForm({ ...form, campaign_name: event.target.value })} /></Field>
+            <Field label="Campaign type"><select className={INPUT} value={form.campaign_type} onChange={event => setForm({ ...form, campaign_type: event.target.value })}>{AD_CAMPAIGN_TYPES.map(value => <option key={value}>{value}</option>)}</select></Field>
+            <Field label="Status"><select className={INPUT} value={form.status} onChange={event => setForm({ ...form, status: event.target.value })}>{AD_STRUCTURE_STATUSES.map(value => <option key={value}>{value}</option>)}</select></Field>
+            <Field label="Audience segment"><input className={INPUT} value={form.audience_segment} onChange={event => setForm({ ...form, audience_segment: event.target.value })} /></Field>
+            <Field label="Daily budget"><input type="number" min="0" step="0.01" className={INPUT} value={form.daily_budget ?? ''} onChange={event => setForm({ ...form, daily_budget: event.target.value })} /></Field>
+            <Field label="Total budget"><input type="number" min="0" step="0.01" className={INPUT} value={form.total_budget ?? ''} onChange={event => setForm({ ...form, total_budget: event.target.value })} /></Field>
+            <Field label="Start date"><input type="date" className={INPUT} value={form.start_date || ''} onChange={event => setForm({ ...form, start_date: event.target.value })} /></Field>
+            <Field label="End date"><input type="date" className={INPUT} value={form.end_date || ''} onChange={event => setForm({ ...form, end_date: event.target.value })} /></Field>
+            <div className="md:col-span-2"><Field label="Goal"><textarea className={`${INPUT} min-h-20`} value={form.goal} onChange={event => setForm({ ...form, goal: event.target.value })} /></Field></div>
+            <div className="md:col-span-2"><Field label="Location targeting" hint="One location per line"><textarea className={`${INPUT} min-h-20`} value={form.location_targeting} onChange={event => setForm({ ...form, location_targeting: event.target.value })} /></Field></div>
+            <Field label="Verified Google Ads connection"><select className={INPUT} value={form.provider_connection_id || ''} onChange={event => selectConnection(event.target.value)}><option value="">Planning only — not linked</option>{workspace.googleAdsConnections.map(item => <option key={item.id} value={item.id}>{item.display_name}</option>)}</select></Field>
+            <Field label="External campaign ID"><input inputMode="numeric" disabled={!form.provider_connection_id} className={INPUT} value={form.external_campaign_id || ''} onChange={event => setForm({ ...form, external_campaign_id: event.target.value.replace(/\D/g, '') })} /></Field>
+          </div>
+          <div className="mt-6 flex justify-end border-t border-slate-800 pt-5"><button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : creating ? 'Create local plan' : 'Save local changes'}</button></div>
+        </form>
+
+        {selected && !creating && <>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <form onSubmit={saveGroup} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="flex justify-between"><h3 className="font-semibold">Ad groups</h3><button type="button" onClick={() => { setGroupId(''); setGroupForm({ name: '', status: 'draft' }) }} className="text-xs text-emerald-400">New group</button></div><div className="mt-4 flex flex-wrap gap-2">{groups.map(group => <button type="button" key={group.id} onClick={() => { setGroupId(group.id); setGroupForm({ name: group.name, status: group.status }) }} className={`rounded-full border px-3 py-1.5 text-xs ${groupId === group.id ? 'border-emerald-500 text-emerald-300' : 'border-slate-700 text-slate-400'}`}>{group.name}</button>)}</div><div className="mt-4 grid gap-3"><Field label="Group name"><input required className={INPUT} value={groupForm.name} onChange={event => setGroupForm({ ...groupForm, name: event.target.value })} /></Field><Field label="Status"><select className={INPUT} value={groupForm.status} onChange={event => setGroupForm({ ...groupForm, status: event.target.value })}>{AD_STRUCTURE_STATUSES.map(value => <option key={value}>{value}</option>)}</select></Field><div className="flex justify-end gap-3">{selectedGroup && <button type="button" onClick={removeGroup} className="text-xs text-red-400">Delete</button>}<button disabled={saving} className={BUTTON}>{groupId ? 'Update group' : 'Add group'}</button></div></div></form>
+            <form onSubmit={saveKeyword} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><h3 className="font-semibold">Keywords</h3>{!selectedGroup ? <p className="mt-4 text-sm text-slate-500">Select or create an ad group first.</p> : <><div className="mt-4 max-h-40 space-y-2 overflow-auto">{keywords.map(item => <div key={item.id} className="flex items-center gap-2 rounded-xl bg-slate-950 px-3 py-2 text-xs"><button type="button" onClick={() => { setKeywordId(item.id); setKeywordForm({ keyword: item.keyword, match_type: item.match_type, is_negative: item.is_negative }) }} className="min-w-0 flex-1 truncate text-left text-slate-300">{item.keyword}</button><span className={item.is_negative ? 'text-red-400' : 'text-emerald-400'}>{item.is_negative ? 'Negative' : 'Positive'}</span><span className="text-slate-600">{item.match_type}</span><button type="button" onClick={() => removeKeyword(item.id)} className="text-red-500">×</button></div>)}</div><div className="mt-4 grid gap-3"><Field label="Keyword"><input required className={INPUT} value={keywordForm.keyword} onChange={event => setKeywordForm({ ...keywordForm, keyword: event.target.value })} /></Field><div className="grid grid-cols-2 gap-3"><Field label="Match"><select className={INPUT} value={keywordForm.match_type} onChange={event => setKeywordForm({ ...keywordForm, match_type: event.target.value })}>{AD_MATCH_TYPES.map(value => <option key={value}>{value}</option>)}</select></Field><label className="flex items-end gap-2 pb-3 text-xs text-slate-400"><input type="checkbox" checked={keywordForm.is_negative} onChange={event => setKeywordForm({ ...keywordForm, is_negative: event.target.checked })} /> Negative keyword</label></div><div className="flex justify-end"><button disabled={saving} className={BUTTON}>{keywordId ? 'Update keyword' : 'Add keyword'}</button></div></div></>}</form>
+          </div>
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="flex flex-wrap items-end gap-4"><div className="mr-auto"><h3 className="font-semibold">Dated performance snapshots</h3><p className="mt-1 text-sm text-slate-500">Append-only reporting history from the linked Google Ads campaign.</p></div><Field label="Snapshot date"><input type="date" className={INPUT} value={snapshotDate} onChange={event => setSnapshotDate(event.target.value)} /></Field><button type="button" disabled={saving || !selected.provider_connection_id} onClick={importSnapshot} className={PRIMARY}>Import read-only metrics</button></div>{latest && <div className="mt-5 grid gap-3 sm:grid-cols-3"><MetricCard label="CTR" value={metric(latest.ctr, 'percent')} /><MetricCard label="CPC" value={metric(latest.cpc, 'money')} /><MetricCard label="Cost / conversion" value={metric(latest.cost_per_conversion, 'money')} /></div>}<div className="mt-5 overflow-x-auto"><table className="w-full min-w-[760px] text-left text-xs"><thead className="text-slate-500"><tr>{['Date', 'Impressions', 'Clicks', 'Cost', 'Conversions', 'CTR', 'CPC', 'Cost / conversion'].map(label => <th key={label} className="border-b border-slate-800 px-3 py-2">{label}</th>)}</tr></thead><tbody>{snapshots.map(row => <tr key={row.id} className="text-slate-300"><td className="px-3 py-2">{row.snapshot_date}</td><td className="px-3 py-2">{metric(row.impressions)}</td><td className="px-3 py-2">{metric(row.clicks)}</td><td className="px-3 py-2">{metric(row.cost, 'money')}</td><td className="px-3 py-2">{metric(row.conversions)}</td><td className="px-3 py-2">{metric(row.ctr, 'percent')}</td><td className="px-3 py-2">{metric(row.cpc, 'money')}</td><td className="px-3 py-2">{metric(row.cost_per_conversion, 'money')}</td></tr>)}</tbody></table>{snapshots.length === 0 && <p className="py-8 text-center text-sm text-slate-500">No snapshots imported yet.</p>}</div></section>
+        </>}
+      </section>
+    </div>
+  </div>
+}
+
 function Metric({ label, value }) { // eslint-disable-line no-unused-vars
   const known = value !== null && value !== undefined && value !== ''
   return <div className="rounded-lg bg-slate-950 px-2.5 py-2"><p className="text-[9px] uppercase tracking-[0.1em] text-slate-600">{label}</p><p className="mt-1 font-semibold text-slate-300">{known ? Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}</p></div>
+}
+
+function MetricCard({ label, value }) {
+  return <div className="rounded-xl bg-slate-950 p-4"><p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">{label}</p><p className="mt-1 text-xl font-semibold">{value}</p></div>
 }
 
 function Artifacts({ workspace, campaign, saving, act, setTab, onRefresh }) {
