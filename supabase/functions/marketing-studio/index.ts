@@ -531,4 +531,4 @@ export async function handleRequest(
   }
 }
 
-if (import.meta.main) Deno.serve(handleRequest)
+if (import.meta.main) Deno.serve((request) => handleRequest(request))
