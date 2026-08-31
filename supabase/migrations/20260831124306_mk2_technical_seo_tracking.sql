@@ -158,6 +158,7 @@ create policy "Team can read organization tracked page audits"
 revoke all on public.tracked_pages, public.tracked_page_audits from anon, authenticated;
 grant select on public.tracked_pages, public.tracked_page_audits to authenticated;
 grant select, insert, update, delete on public.tracked_pages to service_role;
+revoke update, delete on public.tracked_page_audits from service_role;
 grant select, insert on public.tracked_page_audits to service_role;
 
 create view public.tracked_page_current_health
