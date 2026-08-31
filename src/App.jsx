@@ -11,6 +11,7 @@ const UserManagement = lazy(() => import('./apps/UserManagement'))
 const OperatingSpine = lazy(() => import('./apps/OperatingSpine'))
 const DesignWorkshop = lazy(() => import('./apps/DesignWorkshop'))
 const MarketingStudio = lazy(() => import('./apps/MarketingStudio'))
+const TechnicalSeoTracking = lazy(() => import('./apps/TechnicalSeoTracking'))
 const ContentStudio = lazy(() => import('./apps/ContentStudio'))
 const ArtifactDetail = lazy(() => import('./apps/ArtifactDetail'))
 const DepartmentWorkshop = lazy(() => import('./apps/DepartmentWorkshop'))
@@ -73,6 +74,7 @@ export default function App() {
         <Route path="sphere/design/workshop" element={<DesignWorkshop />} />
         <Route path="sphere/marketing" element={<DepartmentWorkshop departmentId="marketing" />} />
         <Route path="sphere/marketing/studio" element={<MarketingStudio />} />
+        <Route path="sphere/marketing/seo" element={<TechnicalSeoTracking />} />
         <Route path="sphere/delivery" element={<DepartmentWorkshop departmentId="development" />} />
         <Route path="sphere/clients" element={<OperatingSpine initialView="clients" />} />
         <Route path="sphere/portal" element={<AnkaSpherePortal />} />
@@ -88,7 +90,7 @@ export default function App() {
         <Route path="sphere/performance" element={<Navigate to="/sphere/delivery" replace />} />
         <Route path="sphere/campaigns" element={<Navigate to="/sphere/marketing/studio" replace />} />
         <Route path="sphere/calendar" element={<Navigate to="/sphere/marketing" replace />} />
-        <Route path="sphere/seo" element={<Navigate to="/sphere/marketing" replace />} />
+        <Route path="sphere/seo" element={<Navigate to="/sphere/marketing/seo" replace />} />
 
         {/* ANKA ASSISTANT */}
         <Route path="assistant" element={featureFlags.aiAssistance ? <AnkaAssistant /> : <Navigate to="/sphere/engagements" replace />} />

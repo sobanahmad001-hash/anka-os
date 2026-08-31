@@ -30,6 +30,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/marketing-studio/index.ts"
 
+[functions.technical-seo]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/technical-seo/index.ts"
+
 [functions.content-studio]
 enabled = true
 verify_jwt = true
