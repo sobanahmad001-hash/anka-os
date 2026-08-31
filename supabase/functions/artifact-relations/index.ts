@@ -1,10 +1,15 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
+import {
+  createArtifactRelation,
+  loadReadablePair,
+  relationInput,
+  requireRelationTeamMembership,
+} from '../_shared/artifactRelations.ts'
 import { namedKey } from '../_shared/googleOAuthTokens.ts'
 
 type Client = ReturnType<typeof createClient<any>>
 type Json = Record<string, unknown>
 
-const RELATION_TYPES = new Set(['feeds_into', 'derived_from', 'referenced_by'])
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -18,32 +23,7 @@ function text(value: unknown, max = 240) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
 }
 
-export function relationInput(input: Json) {
-  const sourceArtifactId = text(input.source_artifact_id, 80)
-  const targetArtifactId = text(input.target_artifact_id, 80)
-  const relationType = text(input.relation_type, 40)
-  if (!sourceArtifactId || !targetArtifactId) throw new Error('Select both relation artifacts')
-  if (sourceArtifactId === targetArtifactId) throw new Error('An artifact cannot relate to itself')
-  if (!RELATION_TYPES.has(relationType)) throw new Error('Unsupported relation type')
-  return { sourceArtifactId, targetArtifactId, relationType }
-}
-
-export async function loadReadablePair(userClient: Client, sourceArtifactId: string, targetArtifactId: string) {
-  const { data, error } = await userClient.from('artifacts')
-    .select('id, organization_id, title, artifact_type, engagement_id')
-    .in('id', [sourceArtifactId, targetArtifactId])
-  if (error) throw error
-  const rows = data || []
-  const source = rows.find((artifact: Json) => artifact.id === sourceArtifactId)
-  const target = rows.find((artifact: Json) => artifact.id === targetArtifactId)
-  if (!source || !target) {
-    throw Object.assign(new Error('Both artifacts must be visible before they can be related'), { status: 404 })
-  }
-  if (source.organization_id !== target.organization_id) {
-    throw Object.assign(new Error('Artifacts must belong to the same organization'), { status: 409 })
-  }
-  return { source, target, organizationId: String(source.organization_id) }
-}
+export { loadReadablePair, relationInput }
 
 async function requireContext(request: Request) {
   const authorization = request.headers.get('Authorization') || ''
@@ -65,30 +45,8 @@ async function requireContext(request: Request) {
   return { userClient, admin, user }
 }
 
-async function requireTeamMembership(admin: Client, organizationId: string, userId: string) {
-  const { data, error } = await admin.from('organization_memberships')
-    .select('id')
-    .eq('organization_id', organizationId)
-    .eq('user_id', userId)
-    .eq('member_kind', 'team')
-    .eq('status', 'active')
-    .maybeSingle()
-  if (error || !data) throw Object.assign(new Error('Active team membership required'), { status: 403 })
-}
-
 async function createRelation(userClient: Client, admin: Client, body: Json, actorId: string) {
-  const input = relationInput(body)
-  const pair = await loadReadablePair(userClient, input.sourceArtifactId, input.targetArtifactId)
-  await requireTeamMembership(admin, pair.organizationId, actorId)
-  const { data, error } = await admin.from('artifact_relations').insert({
-    organization_id: pair.organizationId,
-    source_artifact_id: input.sourceArtifactId,
-    target_artifact_id: input.targetArtifactId,
-    relation_type: input.relationType,
-    created_by: actorId,
-  }).select('*').single()
-  if (error) throw error
-  return data
+  return createArtifactRelation(userClient, admin, body, actorId)
 }
 
 async function deleteRelation(userClient: Client, admin: Client, body: Json, actorId: string) {
@@ -97,7 +55,7 @@ async function deleteRelation(userClient: Client, admin: Client, body: Json, act
   const { data: relation, error } = await userClient.from('artifact_relations')
     .select('*').eq('id', relationId).maybeSingle()
   if (error || !relation) throw Object.assign(new Error('Artifact relation is unavailable'), { status: 404 })
-  await requireTeamMembership(admin, String(relation.organization_id), actorId)
+  await requireRelationTeamMembership(admin, String(relation.organization_id), actorId)
   const { error: deleteError } = await admin.from('artifact_relations')
     .delete().eq('id', relation.id).eq('organization_id', relation.organization_id)
   if (deleteError) throw deleteError

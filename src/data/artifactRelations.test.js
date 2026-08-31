@@ -11,6 +11,7 @@ const read = relative => fs.readFileSync(path.join(root, relative), 'utf8')
 const migration = read('supabase/migrations/20260829083706_artifact_relations.sql')
 const verification = read('supabase/verify_20260829083706_artifact_relations.sql')
 const edge = read('supabase/functions/artifact-relations/index.ts')
+const sharedRelation = read('supabase/functions/_shared/artifactRelations.ts')
 const repository = read('src/data/artifactRelationsRepository.js')
 const panel = read('src/components/ArtifactRelationsPanel.jsx')
 
@@ -37,9 +38,9 @@ test('D3 relation reads require both endpoint artifacts and keep browser writes 
 })
 
 test('D3 write path checks artifact readability and never mutates an existing table', () => {
-  assert.match(edge, /loadReadablePair\(userClient/)
-  assert.match(edge, /Both artifacts must be visible/)
-  assert.match(edge, /\.from\('artifact_relations'\)\.insert/)
+  assert.match(sharedRelation, /loadReadablePair\(/)
+  assert.match(sharedRelation, /Both artifacts must be visible/)
+  assert.match(sharedRelation, /\.from\('artifact_relations'\)\.insert/)
   assert.match(edge, /\.from\('artifact_relations'\)[\s\S]*\.delete\(\)/)
   assert.doesNotMatch(edge, /\.from\('(artifacts|artifact_versions|artifact_approvals|artifact_version_comments)'\)\.(insert|update|upsert|delete)/)
 })

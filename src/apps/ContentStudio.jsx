@@ -58,7 +58,7 @@ export default function ContentStudio() {
     setSaving(true); setError(''); setMessage('')
     try {
       const result = await callback()
-      setMessage(success)
+      setMessage(typeof success === 'function' ? success(result) : success)
       await loadWorkspace(engagementId)
       return result
     } catch (reason) {
@@ -127,32 +127,40 @@ function ArtifactForm({ workspace, type, artifact, versions, latest, approval, s
       artifact_type: type, title: artifact?.title || `${definition.label} artifact`,
       content: serializeContentArtifact(type, form), change_summary: summary,
       data_classification: classification, ai_use_allowed: aiSafe,
-    }), `${definition.label} saved as a new immutable version.`)
+    }), result => {
+      const warning = result?.warnings?.[0]
+      return warning ? `${definition.label} saved as a new immutable version. ${warning}` : `${definition.label} saved as a new immutable version.`
+    })
   }
 
   const regionsByVersion = type === 'website_architecture' ? Object.fromEntries(versions.map(version => [
     version.id,
     (version.content?.pages || []).map(page => ({
-      value: `page:${page.path || page.page_name}`,
-      label: `${page.page_name}${page.path ? ` (${page.path})` : ''}`,
+      value: `page:${page.slug}`,
+      label: `${page.title}${page.slug ? ` (${page.slug})` : ''}`,
     })),
   ])) : {}
 
   return <div><form onSubmit={save} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
     <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Canonical immutable artifact</p><h2 className="mt-1 text-2xl font-semibold">{definition.label}</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">{definition.description}</p></div><div className="text-right text-xs text-slate-500"><p>{latest ? `Version ${latest.version_number}` : 'No version yet'}</p><p className={approval ? 'mt-1 text-emerald-400' : 'mt-1 text-amber-400'}>{approval ? 'Exact version approved' : 'Approval pending'}</p></div></div>
-    <div className="mt-6 space-y-5">{definition.fields.map(field => <ArtifactField key={field.key} field={field} value={form[field.key]} onChange={value => setForm(current => ({ ...current, [field.key]: value }))} />)}</div>
+    <div className="mt-6 space-y-5">{definition.fields.map(field => <ArtifactField key={field.key} field={field} value={form[field.key]} pageSlugs={(workspace.versions.filter(version => version.artifact_id === workspace.artifacts.find(item => item.artifact_type === 'website_architecture')?.id).sort((left, right) => right.version_number - left.version_number)[0]?.content?.pages || []).map(page => page.slug)} onChange={value => setForm(current => ({ ...current, [field.key]: value }))} />)}</div>
     <div className="mt-6 grid gap-4 md:grid-cols-2"><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Change summary<input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={summary} onChange={event => setSummary(event.target.value)} /></label><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Data classification<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={classification} onChange={event => setClassification(event.target.value)}><option>internal</option><option>confidential</option><option>public</option><option>restricted</option></select></label></div>
     <label className="mt-4 flex items-start gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300"><input type="checkbox" className="mt-1" checked={aiSafe} onChange={event => setAiSafe(event.target.checked)} /><span>Explicitly allow this exact version to be included in approved AI context. Restricted versions remain excluded.</span></label>
     <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-800 pt-5"><button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : latest ? 'Create new version' : 'Save first version'}</button></div>
   </form><ArtifactApprovalPanel version={latest} approval={approval} theme="amber" onSingleApprove={() => act(() => contentStudio.approveArtifact(latest.id), `${definition.label} exact version approved.`)} onChanged={onRefresh} /><ContentCustomFieldsPanel artifactType={type} versions={versions} initialVersionId={latest?.id} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="content" theme="amber" regionsByVersion={regionsByVersion} /></div>
 }
 
-function ArtifactField({ field, value, onChange }) {
-  if (field.kind === 'records') return <div><div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{field.label}</p><button type="button" className={BUTTON} onClick={() => onChange([...(value || []), newContentRecord(field)])}>{field.addLabel}</button></div><div className="mt-3 space-y-4">{(value || []).map((record, index) => <RecordEditor key={index} index={index} field={field} record={record} onChange={next => onChange(value.map((item, itemIndex) => itemIndex === index ? next : item))} onRemove={() => onChange(value.filter((_, itemIndex) => itemIndex !== index))} />)}{!(value || []).length && <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-sm text-slate-500">Add at least one structured record.</div>}</div></div>
+function ArtifactField({ field, value, pageSlugs, onChange }) {
+  if (field.kind === 'records') return <div><div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{field.label}</p><button type="button" className={BUTTON} onClick={() => onChange([...(value || []), newContentRecord(field)])}>{field.addLabel}</button></div><div className="mt-3 space-y-4">{(value || []).map((record, index) => <RecordEditor key={index} index={index} field={field} records={value} pageSlugs={pageSlugs} record={record} onChange={next => onChange(value.map((item, itemIndex) => itemIndex === index ? next : item))} onRemove={() => onChange(value.filter((_, itemIndex) => itemIndex !== index))} />)}{!(value || []).length && <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-sm text-slate-500">Add at least one structured record.</div>}</div></div>
   const textarea = field.kind === 'textarea' || field.kind === 'list'
   return <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{field.label}{field.kind === 'list' && <span className="ml-2 font-normal normal-case tracking-normal text-slate-600">One item per line</span>}{textarea ? <textarea required rows={field.kind === 'list' ? 4 : 5} className={`${INPUT} mt-2 normal-case tracking-normal`} value={value || ''} onChange={event => onChange(event.target.value)} /> : <input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={value || ''} onChange={event => onChange(event.target.value)} />}</label>
 }
 
-function RecordEditor({ index, field, record, onChange, onRemove }) {
-  return <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4"><div className="mb-4 flex items-center justify-between"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-400">{field.label} {index + 1}</p><button type="button" onClick={onRemove} className="text-xs font-semibold text-red-300">Remove</button></div><div className="grid gap-4 md:grid-cols-2">{field.recordFields.map(([key, label, kind]) => <label key={key} className={`text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 ${kind === 'textarea' || kind === 'list' ? 'md:col-span-2' : ''}`}>{label}{kind === 'list' && <span className="ml-2 font-normal normal-case tracking-normal">Comma separated</span>}{kind === 'textarea' ? <textarea required rows="4" className={`${INPUT} mt-2 normal-case tracking-normal`} value={record[key] || ''} onChange={event => onChange({ ...record, [key]: event.target.value })} /> : <input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={Array.isArray(record[key]) ? record[key].join(', ') : record[key] || ''} onChange={event => onChange({ ...record, [key]: event.target.value })} />}</label>)}</div></div>
+function RecordEditor({ index, field, records, pageSlugs, record, onChange, onRemove }) {
+  return <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4"><div className="mb-4 flex items-center justify-between"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-400">{field.label} {index + 1}</p><button type="button" onClick={onRemove} className="text-xs font-semibold text-red-300">Remove</button></div><div className="grid gap-4 md:grid-cols-2">{field.recordFields.map(([key, label, kind, options]) => {
+    const wide = kind === 'textarea' || kind === 'textarea_optional' || kind === 'list'
+    const required = kind !== 'parent_slug' && kind !== 'textarea_optional'
+    const choices = kind === 'parent_slug' ? records.map(item => item.slug).filter(slug => slug && slug !== record.slug) : kind === 'target_page_slug' ? pageSlugs : options
+    return <label key={key} className={`text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 ${wide ? 'md:col-span-2' : ''}`}>{label}{kind === 'list' && <span className="ml-2 font-normal normal-case tracking-normal">Comma separated</span>}{kind === 'textarea' || kind === 'textarea_optional' ? <textarea required={required} rows="4" className={`${INPUT} mt-2 normal-case tracking-normal`} value={record[key] || ''} onChange={event => onChange({ ...record, [key]: event.target.value })} /> : kind === 'select' || (choices || []).length ? <select required={required} className={`${INPUT} mt-2 normal-case tracking-normal`} value={record[key] || ''} onChange={event => onChange({ ...record, [key]: event.target.value })}><option value="">{required ? 'Select one' : 'No parent page'}</option>{(choices || []).map(choice => <option key={choice} value={choice}>{choice}</option>)}</select> : <input required={required} type={kind === 'number' ? 'number' : 'text'} min={kind === 'number' ? '0' : undefined} step={kind === 'number' ? '1' : undefined} className={`${INPUT} mt-2 normal-case tracking-normal`} value={Array.isArray(record[key]) ? record[key].join(', ') : record[key] || ''} onChange={event => onChange({ ...record, [key]: event.target.value })} />}</label>
+  })}</div></div>
 }

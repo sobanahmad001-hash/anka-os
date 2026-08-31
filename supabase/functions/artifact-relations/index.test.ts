@@ -1,10 +1,13 @@
 import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.14'
 import { loadReadablePair, relationInput } from './index.ts'
 
-Deno.test('D3 accepts only the three descriptive relation types', () => {
+Deno.test('D3 relation input accepts descriptive links and RP2 page targeting', () => {
   assertEquals(relationInput({
     source_artifact_id: 'source', target_artifact_id: 'target', relation_type: 'feeds_into',
   }), { sourceArtifactId: 'source', targetArtifactId: 'target', relationType: 'feeds_into' })
+  assertEquals(relationInput({
+    source_artifact_id: 'keywords', target_artifact_id: 'architecture', relation_type: 'targets_page',
+  }).relationType, 'targets_page')
   assertThrows(() => relationInput({
     source_artifact_id: 'source', target_artifact_id: 'target', relation_type: 'blocks',
   }), Error, 'Unsupported')

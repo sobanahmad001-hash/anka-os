@@ -1,4 +1,5 @@
 import { sha256 } from './googleOAuthTokens.ts'
+import { createArtifactRelation } from './artifactRelations.ts'
 
 type Json = Record<string, unknown>
 type AdminClient = { from: (table: string) => any }
@@ -30,6 +31,73 @@ function requiredList(input: Json, key: string, maxItems = 80) {
   const value = list(input[key], maxItems)
   if (!value.length) throw new Error(`${key.replaceAll('_', ' ')} is required`)
   return value
+}
+
+function requiredNullableText(input: Json, key: string, max = 240) {
+  if (!Object.hasOwn(input, key)) throw new Error(`${key.replaceAll('_', ' ')} is required`)
+  if (input[key] === null) return null
+  const value = text(input[key], max)
+  if (!value) throw new Error(`${key.replaceAll('_', ' ')} must be text or null`)
+  return value
+}
+
+function websitePages(value: unknown) {
+  if (!Array.isArray(value) || !value.length) throw new Error('At least one website page is required')
+  const pages = value.slice(0, 200).map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error(`Website page ${index + 1} is invalid`)
+    }
+    const page = item as Json
+    const pageType = requiredText(page, 'page_type', 40)
+    if (!['hub', 'service', 'supporting'].includes(pageType)) {
+      throw new Error(`page type in website page ${index + 1} must be hub, service, or supporting`)
+    }
+    return {
+      slug: requiredText(page, 'slug', 240),
+      title: requiredText(page, 'title', 240),
+      parent_slug: requiredNullableText(page, 'parent_slug', 240),
+      page_type: pageType,
+      purpose: requiredText(page, 'purpose', 1200),
+    }
+  })
+  const slugs = pages.map(page => page.slug)
+  if (new Set(slugs).size !== slugs.length) throw new Error('Website page slugs must be unique')
+  const knownSlugs = new Set(slugs)
+  for (const page of pages) {
+    if (page.parent_slug === page.slug) throw new Error(`parent slug for ${page.slug} must reference another page`)
+    if (page.parent_slug && !knownSlugs.has(page.parent_slug)) {
+      throw new Error(`parent slug ${page.parent_slug} does not reference a page in this website architecture`)
+    }
+  }
+  return pages
+}
+
+function keywordRecords(value: unknown) {
+  if (!Array.isArray(value) || !value.length) throw new Error('At least one keyword is required')
+  return value.slice(0, 500).map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error(`Keyword ${index + 1} is invalid`)
+    }
+    const keyword = item as Json
+    const category = requiredText(keyword, 'category', 40)
+    if (!['industry', 'brand', 'volume'].includes(category)) {
+      throw new Error(`category in keyword ${index + 1} must be industry, brand, or volume`)
+    }
+    const searchVolume = keyword.search_volume
+    if (typeof searchVolume !== 'number' || !Number.isSafeInteger(searchVolume) || searchVolume < 0) {
+      throw new Error(`search volume in keyword ${index + 1} must be a non-negative integer`)
+    }
+    if (!Object.hasOwn(keyword, 'notes') || typeof keyword.notes !== 'string') {
+      throw new Error(`notes is required in keyword ${index + 1}`)
+    }
+    return {
+      term: requiredText(keyword, 'term', 500),
+      category,
+      search_volume: searchVolume,
+      target_page_slug: requiredText(keyword, 'target_page_slug', 240),
+      notes: text(keyword.notes, 2000),
+    }
+  })
 }
 
 function records(value: unknown, fields: Array<[string, 'text' | 'list']>, maxItems = 80) {
@@ -70,22 +138,8 @@ export function validateContentArtifact(type: string, value: unknown): Json {
     desired_response: requiredText(input, 'desired_response'),
     accessibility_considerations: requiredList(input, 'accessibility_considerations'),
   }
-  if (type === 'website_architecture') return {
-    site_goal: requiredText(input, 'site_goal'),
-    navigation_principles: requiredList(input, 'navigation_principles'),
-    pages: records(input.pages, [
-      ['page_name', 'text'], ['path', 'text'], ['page_goal', 'text'],
-      ['primary_audience', 'text'], ['primary_cta', 'text'],
-    ]),
-  }
-  if (type === 'keyword_strategy') return {
-    strategy_summary: requiredText(input, 'strategy_summary'),
-    page_keywords: records(input.page_keywords, [
-      ['page_path', 'text'], ['service_keywords', 'list'],
-      ['search_demand_keywords', 'list'], ['brand_identity_keywords', 'list'],
-    ]),
-    measurement_notes: requiredList(input, 'measurement_notes'),
-  }
+  if (type === 'website_architecture') return { pages: websitePages(input.pages) }
+  if (type === 'keyword_strategy') return { keywords: keywordRecords(input.keywords) }
   if (type === 'content') return {
     content_strategy: requiredText(input, 'content_strategy'),
     pages: records(input.pages, [
@@ -109,6 +163,8 @@ export function validateContentArtifact(type: string, value: unknown): Json {
 }
 
 function stringSchema() { return { type: 'string' } }
+function nullableStringSchema() { return { type: ['string', 'null'] } }
+function enumSchema(values: string[]) { return { type: 'string', enum: values } }
 function listSchema() { return { type: 'array', minItems: 1, items: stringSchema() } }
 function objectArray(properties: Json) {
   return {
@@ -124,12 +180,16 @@ export function contentArtifactResponseFormat(type: string) {
     vision: { vision_statement: stringSchema(), positioning: stringSchema(), value_proposition: stringSchema(), values: listSchema(), voice_principles: listSchema() },
     audience: { primary_audience: stringSchema(), segments: listSchema(), motivations: listSchema(), objections: listSchema(), desired_response: stringSchema(), accessibility_considerations: listSchema() },
     website_architecture: {
-      site_goal: stringSchema(), navigation_principles: listSchema(),
-      pages: objectArray({ page_name: stringSchema(), path: stringSchema(), page_goal: stringSchema(), primary_audience: stringSchema(), primary_cta: stringSchema() }),
+      pages: objectArray({
+        slug: stringSchema(), title: stringSchema(), parent_slug: nullableStringSchema(),
+        page_type: enumSchema(['hub', 'service', 'supporting']), purpose: stringSchema(),
+      }),
     },
     keyword_strategy: {
-      strategy_summary: stringSchema(), measurement_notes: listSchema(),
-      page_keywords: objectArray({ page_path: stringSchema(), service_keywords: listSchema(), search_demand_keywords: listSchema(), brand_identity_keywords: listSchema() }),
+      keywords: objectArray({
+        term: stringSchema(), category: enumSchema(['industry', 'brand', 'volume']),
+        search_volume: { type: 'integer', minimum: 0 }, target_page_slug: stringSchema(), notes: stringSchema(),
+      }),
     },
     content: {
       content_strategy: stringSchema(),
@@ -173,8 +233,40 @@ export async function createContentArtifactVersion(admin: AdminClient, input: {
   actorId: string
   source: 'manual' | 'department_chat'
   aiRunId?: string | null
+  visibilityClient: AdminClient
 }) {
   const content = validateContentArtifact(input.artifactType, input.content)
+  const warnings: string[] = []
+  let architectureArtifactId: string | null = null
+  if (input.artifactType === 'keyword_strategy') {
+    const { data: architecture, error: architectureError } = await admin.from('artifacts')
+      .select('id').eq('organization_id', input.organizationId)
+      .eq('engagement_id', input.engagement.id).eq('artifact_type', 'website_architecture')
+      .order('created_at').limit(1).maybeSingle()
+    if (architectureError) throw architectureError
+    architectureArtifactId = architecture?.id || null
+    if (!architectureArtifactId) {
+      warnings.push('No website architecture exists yet, so target page slugs could not be checked or linked.')
+    } else {
+      const { data: architectureVersion, error: versionError } = await admin.from('artifact_versions')
+        .select('content').eq('organization_id', input.organizationId)
+        .eq('artifact_id', architectureArtifactId)
+        .order('version_number', { ascending: false }).limit(1).maybeSingle()
+      if (versionError) throw versionError
+      const pageSlugs = new Set(Array.isArray(architectureVersion?.content?.pages)
+        ? architectureVersion.content.pages.map((page: Json) => text(page.slug, 240)).filter(Boolean)
+        : [])
+      if (!architectureVersion || !pageSlugs.size) {
+        warnings.push('The website architecture has no saved RP2 page list, so target page slugs could not be checked.')
+      } else {
+        const missing = [...new Set((content.keywords as Json[])
+          .map(keyword => String(keyword.target_page_slug)).filter(slug => !pageSlugs.has(slug)))]
+        if (missing.length) {
+          throw new Error(`Target page slug${missing.length === 1 ? '' : 's'} not found in the latest website architecture: ${missing.join(', ')}`)
+        }
+      }
+    }
+  }
   let artifactId = text(input.artifactId, 80)
   let createdArtifact = false
   if (artifactId) {
@@ -225,5 +317,12 @@ export async function createContentArtifactVersion(admin: AdminClient, input: {
     },
   })
   if (eventError) throw eventError
-  return { artifact_id: artifactId, version }
+  if (architectureArtifactId) {
+    await createArtifactRelation(input.visibilityClient, admin, {
+      source_artifact_id: artifactId,
+      target_artifact_id: architectureArtifactId,
+      relation_type: 'targets_page',
+    }, input.actorId, { allowExisting: true })
+  }
+  return { artifact_id: artifactId, version, warnings }
 }

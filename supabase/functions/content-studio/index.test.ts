@@ -12,15 +12,25 @@ Deno.test('Content authority keeps exact-version approval manager-controlled', (
 Deno.test('all eight Content artifacts use strict structured validation', () => {
   assertEquals(CONTENT_ARTIFACT_TYPES.length, 8)
   const architecture = validateContentArtifact('website_architecture', {
-    site_goal: 'Explain and convert', navigation_principles: ['Clear paths'],
-    pages: [{ page_name: 'Home', path: '/', page_goal: 'Orient', primary_audience: 'Buyer', primary_cta: 'Book' }],
+    pages: [{ slug: 'home', title: 'Homepage', parent_slug: null, page_type: 'hub', purpose: 'Orient visitors' }],
   })
-  assertEquals((architecture.pages as Array<Record<string, unknown>>)[0].path, '/')
+  assertEquals((architecture.pages as Array<Record<string, unknown>>)[0].slug, 'home')
   const keywords = validateContentArtifact('keyword_strategy', {
-    strategy_summary: 'Map intent to pages', measurement_notes: ['Review quarterly'],
-    page_keywords: [{ page_path: '/', service_keywords: ['strategy'], search_demand_keywords: ['agency'], brand_identity_keywords: ['Anka'] }],
+    keywords: [{ term: 'strategy agency', category: 'industry', search_volume: 1200, target_page_slug: 'home', notes: '' }],
   })
-  assertEquals((keywords.page_keywords as Array<Record<string, unknown>>)[0].service_keywords, ['strategy'])
+  assertEquals((keywords.keywords as Array<Record<string, unknown>>)[0].target_page_slug, 'home')
+})
+
+Deno.test('RP2 rejects malformed sitemap hierarchy and keyword categories server-side', () => {
+  assertThrows(() => validateContentArtifact('website_architecture', {
+    pages: [{ slug: 'home', title: 'Homepage', parent_slug: null, page_type: 'landing', purpose: 'Orient' }],
+  }), Error, 'page type')
+  assertThrows(() => validateContentArtifact('website_architecture', {
+    pages: [{ slug: 'services', title: 'Services', parent_slug: 'missing', page_type: 'hub', purpose: 'Navigate' }],
+  }), Error, 'does not reference')
+  assertThrows(() => validateContentArtifact('keyword_strategy', {
+    keywords: [{ term: 'agency', category: 'transactional', search_volume: 12, target_page_slug: 'home', notes: '' }],
+  }), Error, 'category')
 })
 
 Deno.test('chat response format is strict and type-specific', () => {

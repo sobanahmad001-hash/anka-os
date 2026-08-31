@@ -2,6 +2,7 @@ export const ARTIFACT_RELATION_TYPES = Object.freeze([
   ['feeds_into', 'Feeds into'],
   ['derived_from', 'Derived from'],
   ['referenced_by', 'Referenced by'],
+  ['targets_page', 'Targets sitemap page'],
 ])
 
 const CONTENT_TYPES = new Set([
