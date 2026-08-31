@@ -219,7 +219,7 @@ insert into mk3_runtime_checks values
   ('mk3_metrics_view_rls_isolation', not exists (
     select 1 from public.ad_campaign_performance_metrics
     where id = (select snapshot_id from mk3_fixture_ids)
-  );
+  ));
 reset role;
 
 select check_name, passed from mk3_runtime_checks order by check_name;
