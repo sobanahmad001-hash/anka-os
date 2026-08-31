@@ -7,7 +7,7 @@ type Json = Record<string, unknown>
 const ACTIONS = new Set(['create_event', 'update_event', 'create_link', 'update_link'])
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 const ALLOWED_DEPARTMENTS = new Set(['content', 'marketing', 'design'])
-const CATEGORIES = new Set(['concert', 'sports', 'festival', 'awards', 'holiday', 'fashion', 'conference', 'other'])
+export const EVENT_CATEGORIES = new Set(['concert', 'sports', 'festival', 'awards', 'holiday', 'fashion', 'conference', 'other'])
 const CONTENT_TYPES = new Set(['blog', 'social', 'email', 'design_asset'])
 const STATUSES = new Set(['planned', 'in_progress', 'ready', 'published'])
 const cors = {
@@ -52,6 +52,32 @@ export function hasEventWriteAuthority(membership: Json) {
     || ALLOWED_DEPARTMENTS.has(text(membership.department_id, 60))
 }
 
+export function validateEventInput(body: Json) {
+  const eventCategory = text(body.eventCategory, 40)
+  const eventName = text(body.eventName, 200)
+  const startDate = date(body.startDate, 'Start date', true)
+  const endDate = date(body.endDate, 'End date')
+  if (!eventName) throw new Error('Event name is required')
+  if (!EVENT_CATEGORIES.has(eventCategory)) throw new Error('Unsupported event category')
+  if (endDate && endDate < startDate!) throw new Error('End date cannot be before start date')
+  const sourceUrl = optionalText(body.sourceUrl)
+  if (sourceUrl) {
+    try {
+      const parsed = new URL(sourceUrl)
+      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error()
+    } catch { throw new Error('Source URL must be a valid HTTP or HTTPS URL') }
+  }
+  return {
+    event_name: eventName,
+    event_category: eventCategory,
+    venue: optionalText(body.venue, 300),
+    location: optionalText(body.location, 300),
+    start_date: startDate,
+    end_date: endDate,
+    source_url: sourceUrl,
+  }
+}
+
 async function requireContext(request: Request) {
   const authorization = request.headers.get('Authorization') || ''
   if (!authorization.startsWith('Bearer ')) throw Object.assign(new Error('Authentication required'), { status: 401 })
@@ -94,25 +120,7 @@ async function saveEvent(userClient: Client, admin: Client, actorId: string, bod
   const brand = await readableBrand(userClient, update ? existing!.brand_id : requiredId(body.brandId, 'Brand'))
   if (existing && existing.organization_id !== brand.organization_id) throw new Error('Event organization mismatch')
   await requireWriter(admin, brand.organization_id, actorId)
-  const category = text(body.category, 40)
-  const eventName = text(body.eventName, 200)
-  const startDate = date(body.startDate, 'Start date', true)
-  const endDate = date(body.endDate, 'End date')
-  if (!eventName) throw new Error('Event name is required')
-  if (!CATEGORIES.has(category)) throw new Error('Unsupported event category')
-  if (endDate && endDate < startDate!) throw new Error('End date cannot be before start date')
-  const sourceUrl = optionalText(body.sourceUrl)
-  if (sourceUrl) {
-    try {
-      const parsed = new URL(sourceUrl)
-      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error()
-    } catch { throw new Error('Source URL must be a valid HTTP or HTTPS URL') }
-  }
-  const payload = {
-    event_name: eventName, category, venue: optionalText(body.venue, 300),
-    location: optionalText(body.location, 300), start_date: startDate,
-    end_date: endDate, source_url: sourceUrl,
-  }
+  const payload = validateEventInput(body)
   const query = update
     ? admin.from('external_events').update(payload).eq('id', existing!.id).eq('organization_id', brand.organization_id)
     : admin.from('external_events').insert({ ...payload, organization_id: brand.organization_id, brand_id: brand.id, created_by: actorId })

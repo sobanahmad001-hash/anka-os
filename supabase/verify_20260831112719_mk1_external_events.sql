@@ -48,7 +48,7 @@ begin
   values (v_other_brand_id, v_other_organization_id, v_other_client_id, 'MK1 isolated brand', v_other_actor_id);
 
   insert into public.external_events (
-    id, organization_id, brand_id, event_name, category, start_date, created_by
+    id, organization_id, brand_id, event_name, event_category, start_date, created_by
   ) values
     (v_event_id, v_organization_id, v_brand_id, 'MK1 visible event', 'conference', current_date + 10, v_actor_id),
     (v_other_event_id, v_other_organization_id, v_other_brand_id, 'MK1 hidden event', 'festival', current_date + 10, v_other_actor_id);

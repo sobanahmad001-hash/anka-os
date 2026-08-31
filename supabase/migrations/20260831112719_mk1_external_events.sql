@@ -11,7 +11,7 @@ create table public.external_events (
   organization_id uuid not null,
   brand_id uuid not null,
   event_name text not null check (length(trim(event_name)) between 1 and 200),
-  category text not null check (category in (
+  event_category text not null check (event_category in (
     'concert', 'sports', 'festival', 'awards', 'holiday', 'fashion', 'conference', 'other'
   )),
   venue text,
@@ -95,7 +95,7 @@ select
   event.brand_id,
   link.external_event_id,
   event.event_name,
-  event.category,
+  event.event_category,
   event.venue,
   event.location,
   event.start_date as event_start_date,
