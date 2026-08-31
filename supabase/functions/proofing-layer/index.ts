@@ -7,7 +7,7 @@ type Json = Record<string, unknown>
 const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 const CONTENT_TYPES = new Set([
-  'discovery', 'vision', 'audience', 'website_architecture',
+  'discovery', 'vision', 'audience', 'brand_statement', 'website_architecture',
   'keyword_strategy', 'content', 'campaign_messaging', 'scripts',
 ])
 const MARKETING_TYPES = new Set([

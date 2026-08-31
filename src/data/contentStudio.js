@@ -201,6 +201,7 @@ export function buildContentPageTracking(workspace) {
 export function bestContentStage(stages = [], type = '') {
   const terms = {
     discovery: ['discovery'], vision: ['vision', 'identity'], audience: ['audience'],
+    brand_statement: ['brand', 'positioning', 'identity'],
     website_architecture: ['architecture'], keyword_strategy: ['keyword'], content: ['content'],
     campaign_messaging: ['campaign', 'messaging'], scripts: ['script'],
   }[type] || []

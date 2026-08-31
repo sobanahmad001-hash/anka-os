@@ -7,6 +7,14 @@ import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'
 import ContentCustomFieldsPanel from '../components/ContentCustomFieldsPanel.jsx'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import {
+  BRAND_STATEMENT_SOURCE_TYPES,
+  BRAND_STATEMENT_TYPE,
+  brandBriefEditor,
+  brandStatementEditor,
+  serializeBrandBrief,
+  serializeBrandStatement,
+} from '../data/brandBrief.js'
+import {
   CONTENT_ARTIFACT_FORMS,
   CONTENT_ARTIFACT_TYPES,
   approvalForVersion,
@@ -88,13 +96,105 @@ export default function ContentStudio() {
         {workspace?.engagement && <div className="rounded-xl bg-slate-950 px-4 py-3 text-sm text-slate-400"><span className="font-semibold text-white">{workspace.engagement.brands?.name}</span><span className="mx-2 text-slate-700">/</span>{workspace.engagement.agency_clients?.name}</div>}
       </section>
       <nav className="flex gap-2 overflow-x-auto border-b border-slate-800">
-        {[['artifacts', 'Artifact workspace'], ['chat', 'Shared Department Chat']].map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-amber-400 text-amber-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>)}
+        {[['artifacts', 'Artifact workspace'], ['brand', 'Brief & brand statement'], ['chat', 'Shared Department Chat']].map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-amber-400 text-amber-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>)}
       </nav>
       {loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Content Studio…</div> : !workspace ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Activate a Content service on an engagement to begin.</div> : tab === 'artifacts' ? (
         <ArtifactWorkspace workspace={workspace} type={type} setType={setType} saving={saving} act={act} onRefresh={() => loadWorkspace(engagementId)} />
+      ) : tab === 'brand' ? (
+        <BrandBriefWorkspace workspace={workspace} saving={saving} act={act} onRefresh={() => loadWorkspace(engagementId)} />
       ) : <DepartmentChat departmentId="content" engagement={workspace.engagement} artifactTypes={CONTENT_ARTIFACT_TYPES} artifactDefinitions={CONTENT_ARTIFACT_FORMS} artifactForType={artifactForType} stageForType={artifactType => bestContentStage(workspace.stages, artifactType)} onPropose={contentStudio.proposeArtifact} onCreated={() => loadWorkspace(engagementId)} />}
     </main>
   </div>
+}
+
+function BrandBriefWorkspace({ workspace, saving, act, onRefresh }) {
+  const [brief, setBrief] = useState(brandBriefEditor(workspace.brandBrief))
+  const artifact = workspace.artifacts.find(item => item.artifact_type === BRAND_STATEMENT_TYPE)
+  const versions = workspace.versions.filter(item => item.artifact_id === artifact?.id)
+  const latest = latestVersion(versions)
+  const approval = approvalForVersion(workspace.approvals, latest?.id)
+
+  async function saveBrief(event) {
+    event.preventDefault()
+    await act(() => contentStudio.saveBrandBrief({ engagement_id: workspace.engagement.id, ...serializeBrandBrief(brief) }), 'Brand brief updated in place.')
+  }
+
+  async function generateStatement() {
+    await act(() => contentStudio.generateBrandStatement({
+      engagement_id: workspace.engagement.id,
+      engagement_stage_instance_id: bestContentStage(workspace.stages, BRAND_STATEMENT_TYPE)?.id || null,
+    }), 'Brand statement compiled as a new immutable version.')
+  }
+
+  const approvedSources = Object.fromEntries(BRAND_STATEMENT_SOURCE_TYPES.map(sourceType => {
+    const sourceIds = workspace.brandSourceArtifacts.filter(item => item.artifact_type === sourceType).map(item => item.id)
+    return [sourceType, workspace.brandSourceApprovals.find(item => sourceIds.includes(item.artifact_id)) || null]
+  }))
+  const ready = Boolean(workspace.brandBrief) && BRAND_STATEMENT_SOURCE_TYPES.every(sourceType => approvedSources[sourceType])
+
+  return <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+    <form onSubmit={saveBrief} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+      <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Mutable brand record</p><h2 className="mt-1 text-2xl font-semibold">Brand brief</h2><p className="mt-2 text-sm leading-6 text-slate-400">Maintain the current commercial and operating context for this brand. Saving updates this one record in place.</p></div>
+      <div className="mt-6 space-y-5">
+        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Target market<textarea rows="4" className={`${INPUT} mt-2 normal-case tracking-normal`} value={brief.target_market} onChange={event => setBrief(current => ({ ...current, target_market: event.target.value }))} /></label>
+        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Price tier<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={brief.price_tier} onChange={event => setBrief(current => ({ ...current, price_tier: event.target.value }))}><option value="">Not specified</option><option value="value">Value</option><option value="mid">Mid-market</option><option value="premium">Premium</option></select></label>
+        <ListField label="Operating principles" value={brief.operating_principles} onChange={value => setBrief(current => ({ ...current, operating_principles: value }))} />
+        <ListField label="Competitor references" value={brief.competitor_references} onChange={value => setBrief(current => ({ ...current, competitor_references: value }))} />
+        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Raw brief<textarea required rows="10" className={`${INPUT} mt-2 normal-case tracking-normal`} value={brief.raw_brief} onChange={event => setBrief(current => ({ ...current, raw_brief: event.target.value }))} /></label>
+      </div>
+      <div className="mt-6 flex items-center justify-between gap-4 border-t border-slate-800 pt-5"><p className="text-xs text-slate-500">{workspace.brandBrief ? `Last updated ${new Date(workspace.brandBrief.updated_at).toLocaleString()}` : 'No brand brief saved yet'}</p><button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : workspace.brandBrief ? 'Update brief' : 'Save brief'}</button></div>
+    </form>
+    <section className="space-y-6">
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Approved source context</p><h2 className="mt-1 text-2xl font-semibold">Compile brand statement</h2><p className="mt-2 text-sm leading-6 text-slate-400">Compilation uses the current saved brief and the latest approved Discovery, Vision, and Audience versions for this brand.</p>
+        <div className="mt-5 grid gap-3 sm:grid-cols-3">{BRAND_STATEMENT_SOURCE_TYPES.map(sourceType => <div key={sourceType} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3"><p className="text-xs font-semibold capitalize text-white">{sourceType}</p><p className={`mt-1 text-[11px] ${approvedSources[sourceType] ? 'text-emerald-400' : 'text-amber-400'}`}>{approvedSources[sourceType] ? 'Approved version ready' : 'Approval required'}</p></div>)}</div>
+        <button type="button" disabled={saving || !ready} onClick={generateStatement} className={`${PRIMARY} mt-5 w-full`}>{saving ? 'Compiling…' : latest ? 'Compile new statement version' : 'Compile brand statement'}</button>
+        {!workspace.brandBrief && <p className="mt-3 text-xs text-amber-300">Save the brand brief first.</p>}
+      </div>
+      {latest ? <BrandStatementReview key={latest.id} workspace={workspace} artifact={artifact} versions={versions} latest={latest} approval={approval} saving={saving} act={act} onRefresh={onRefresh} /> : <div className="rounded-2xl border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500">No compiled brand statement yet.</div>}
+    </section>
+  </div>
+}
+
+function BrandStatementReview({ workspace, artifact, versions, latest, approval, saving, act, onRefresh }) {
+  const [form, setForm] = useState(brandStatementEditor(latest.content))
+  const [summary, setSummary] = useState(`Reviewed from version ${latest.version_number}`)
+
+  async function save(event) {
+    event.preventDefault()
+    await act(() => contentStudio.saveArtifact({
+      engagement_id: workspace.engagement.id, artifact_id: artifact.id,
+      engagement_stage_instance_id: bestContentStage(workspace.stages, BRAND_STATEMENT_TYPE)?.id || null,
+      artifact_type: BRAND_STATEMENT_TYPE, title: artifact.title || 'Brand statement',
+      content: serializeBrandStatement(form, latest.content.source_manifest), change_summary: summary,
+      data_classification: latest.data_classification || 'internal', ai_use_allowed: latest.ai_use_allowed === true,
+    }), 'Brand statement review saved as a new immutable version.')
+  }
+
+  return <div><form onSubmit={save} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+    <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Canonical immutable artifact</p><h3 className="mt-1 text-xl font-semibold">Brand statement review</h3></div><div className="text-right text-xs text-slate-500"><p>Version {latest.version_number}</p><p className={approval ? 'mt-1 text-emerald-400' : 'mt-1 text-amber-400'}>{approval ? 'Exact version approved' : 'Approval pending'}</p></div></div>
+    <div className="mt-6 space-y-5">
+      <TextField label="Brand statement" value={form.statement} onChange={value => setForm(current => ({ ...current, statement: value }))} />
+      <TextField label="Target market" value={form.target_market} onChange={value => setForm(current => ({ ...current, target_market: value }))} />
+      <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Price tier<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={form.price_tier} onChange={event => setForm(current => ({ ...current, price_tier: event.target.value }))}><option value="">Not specified</option><option value="value">Value</option><option value="mid">Mid-market</option><option value="premium">Premium</option></select></label>
+      <TextField label="Positioning" value={form.positioning} onChange={value => setForm(current => ({ ...current, positioning: value }))} />
+      <TextField label="Value proposition" value={form.value_proposition} onChange={value => setForm(current => ({ ...current, value_proposition: value }))} />
+      <TextField label="Audience summary" value={form.audience_summary} onChange={value => setForm(current => ({ ...current, audience_summary: value }))} />
+      <ListField label="Operating principles" value={form.operating_principles} onChange={value => setForm(current => ({ ...current, operating_principles: value }))} />
+      <ListField label="Proof points" value={form.proof_points} onChange={value => setForm(current => ({ ...current, proof_points: value }))} />
+      <ListField label="Competitor references" value={form.competitor_references} onChange={value => setForm(current => ({ ...current, competitor_references: value }))} />
+      <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Change summary<input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={summary} onChange={event => setSummary(event.target.value)} /></label>
+    </div>
+    <div className="mt-6 flex justify-end border-t border-slate-800 pt-5"><button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : 'Save reviewed version'}</button></div>
+  </form><ArtifactApprovalPanel version={latest} approval={approval} theme="amber" onSingleApprove={() => act(() => contentStudio.approveArtifact(latest.id), 'Brand statement exact version approved.')} onChanged={onRefresh} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest.id} department="content" theme="amber" /></div>
+}
+
+function TextField({ label, value, onChange }) {
+  return <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{label}<textarea required rows="4" className={`${INPUT} mt-2 normal-case tracking-normal`} value={value || ''} onChange={event => onChange(event.target.value)} /></label>
+}
+
+function ListField({ label, value, onChange }) {
+  return <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{label}<span className="ml-2 font-normal normal-case tracking-normal text-slate-600">One item per line</span><textarea rows="4" className={`${INPUT} mt-2 normal-case tracking-normal`} value={value || ''} onChange={event => onChange(event.target.value)} /></label>
 }
 
 function ArtifactWorkspace({ workspace, type, setType, saving, act, onRefresh }) {

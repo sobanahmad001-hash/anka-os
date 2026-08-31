@@ -1,5 +1,8 @@
 import { supabase } from '../lib/supabase.js'
 import { CONTENT_ARTIFACT_TYPES } from './contentStudio.js'
+import { BRAND_STATEMENT_SOURCE_TYPES, BRAND_STATEMENT_TYPE } from './brandBrief.js'
+
+const CONTENT_WORKSPACE_TYPES = [...CONTENT_ARTIFACT_TYPES, BRAND_STATEMENT_TYPE]
 
 async function dataOrThrow(query) {
   const { data, error } = await query
@@ -27,15 +30,28 @@ export const contentStudio = Object.freeze({
     const [engagement, stages, artifacts, versions, approvals, contentTasks] = await Promise.all([
       dataOrThrow(supabase.from('engagements').select('*, agency_clients(name), brands(name)').eq('id', engagementId).single()),
       dataOrThrow(supabase.from('engagement_stage_instances').select('*').eq('engagement_id', engagementId).order('position')),
-      dataOrThrow(supabase.from('artifacts').select('*').eq('engagement_id', engagementId).in('artifact_type', CONTENT_ARTIFACT_TYPES).order('created_at')),
-      dataOrThrow(supabase.from('artifact_versions').select('*, artifacts!inner(engagement_id, artifact_type)').eq('artifacts.engagement_id', engagementId).in('artifacts.artifact_type', CONTENT_ARTIFACT_TYPES).order('version_number')),
-      dataOrThrow(supabase.from('artifact_approvals').select('*, artifacts!inner(artifact_type)').eq('engagement_id', engagementId).in('artifacts.artifact_type', CONTENT_ARTIFACT_TYPES).order('approved_at')),
+      dataOrThrow(supabase.from('artifacts').select('*').eq('engagement_id', engagementId).in('artifact_type', CONTENT_WORKSPACE_TYPES).order('created_at')),
+      dataOrThrow(supabase.from('artifact_versions').select('*, artifacts!inner(engagement_id, artifact_type)').eq('artifacts.engagement_id', engagementId).in('artifacts.artifact_type', CONTENT_WORKSPACE_TYPES).order('version_number')),
+      dataOrThrow(supabase.from('artifact_approvals').select('*, artifacts!inner(artifact_type)').eq('engagement_id', engagementId).in('artifacts.artifact_type', CONTENT_WORKSPACE_TYPES).order('approved_at')),
       dataOrThrow(supabase.from('work_items').select('*').eq('engagement_id', engagementId).not('linked_page_path', 'is', null).is('deleted_at', null).order('position')),
     ])
-    return { engagement, stages, artifacts, versions, approvals, contentTasks }
+    const [brandBrief, brandSourceArtifacts] = await Promise.all([
+      dataOrThrow(supabase.from('brand_briefs').select('*').eq('brand_id', engagement.brand_id).maybeSingle()),
+      dataOrThrow(supabase.from('artifacts').select('*').eq('brand_id', engagement.brand_id)
+        .in('artifact_type', BRAND_STATEMENT_SOURCE_TYPES).order('created_at')),
+    ])
+    const sourceArtifactIds = brandSourceArtifacts.map(item => item.id)
+    const brandSourceApprovals = sourceArtifactIds.length
+      ? await dataOrThrow(supabase.from('artifact_approvals').select('*').in('artifact_id', sourceArtifactIds)
+          .order('approved_at', { ascending: false }))
+      : []
+    return { engagement, stages, artifacts, versions, approvals, contentTasks,
+      brandBrief, brandSourceArtifacts, brandSourceApprovals }
   },
 
   saveArtifact: input => invoke('content-studio', 'save_artifact', input),
+  saveBrandBrief: input => invoke('content-studio', 'save_brand_brief', input),
+  generateBrandStatement: input => invoke('content-studio', 'generate_brand_statement', input),
   approveArtifact: (artifactVersionId, notes = '') => invoke('content-studio', 'approve_artifact', {
     artifact_version_id: artifactVersionId, notes,
   }),

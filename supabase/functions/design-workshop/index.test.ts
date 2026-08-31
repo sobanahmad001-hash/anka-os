@@ -1,5 +1,6 @@
 import { directionSchema, directionsAreDistinct, generateOpenAiImage, hasWorkshopAuthority, mediaPrompt,
   mediaStoragePath, sha256, similarity, VIDEO_UNAVAILABLE_MESSAGE } from './index.ts'
+import { compileApprovedArtifactContext } from '../_shared/approvedArtifactContext.ts'
 
 function assert(value: unknown, message = 'Expected value to be truthy') {
   if (!value) throw new Error(message)
@@ -39,6 +40,46 @@ Deno.test('distinctness gate rejects cosmetic duplicates', () => {
 Deno.test('context and output checksums are stable', async () => {
   assert.equal(await sha256('approved-context'), await sha256('approved-context'))
   assert((await sha256('approved-context')).match(/^[a-f0-9]{64}$/))
+})
+
+Deno.test('shared compiler selects the latest approved exact version for every requested type', async () => {
+  const fixtures: Record<string, Array<Record<string, unknown>>> = {
+    artifacts: [
+      { id: 'discovery-artifact', organization_id: 'org-1', brand_id: 'brand-1', artifact_type: 'discovery' },
+      { id: 'vision-artifact', organization_id: 'org-1', brand_id: 'brand-1', artifact_type: 'vision' },
+      { id: 'audience-artifact', organization_id: 'org-1', brand_id: 'brand-1', artifact_type: 'audience' },
+    ],
+    artifact_approvals: [
+      { id: 'discovery-approval-2', artifact_id: 'discovery-artifact', artifact_version_id: 'discovery-v2', approved_at: '2026-08-31T03:00:00Z' },
+      { id: 'vision-approval-3', artifact_id: 'vision-artifact', artifact_version_id: 'vision-v3', approved_at: '2026-08-31T02:00:00Z' },
+      { id: 'audience-approval-4', artifact_id: 'audience-artifact', artifact_version_id: 'audience-v4', approved_at: '2026-08-31T01:00:00Z' },
+      { id: 'discovery-approval-1', artifact_id: 'discovery-artifact', artifact_version_id: 'discovery-v1', approved_at: '2026-08-30T03:00:00Z' },
+    ],
+    artifact_versions: [
+      { id: 'discovery-v1', version_number: 1, content_checksum: 'old', content: { summary: 'Old' }, ai_use_allowed: true, data_classification: 'internal' },
+      { id: 'discovery-v2', version_number: 2, content_checksum: 'd2', content: { summary: 'Current' }, ai_use_allowed: true, data_classification: 'internal' },
+      { id: 'vision-v3', version_number: 3, content_checksum: 'v3', content: { positioning: 'Position' }, ai_use_allowed: true, data_classification: 'internal' },
+      { id: 'audience-v4', version_number: 4, content_checksum: 'a4', content: { primary_audience: 'Audience' }, ai_use_allowed: true, data_classification: 'internal' },
+    ],
+  }
+  class Query {
+    constructor(private rows: Array<Record<string, unknown>>) {}
+    select() { return this }
+    eq() { return this }
+    in() { return this }
+    order() { return this }
+    then(resolve: (value: unknown) => unknown) { return Promise.resolve(resolve({ data: this.rows, error: null })) }
+  }
+  const admin = { from: (table: string) => new Query(fixtures[table] || []) }
+  const result = await compileApprovedArtifactContext(admin, {
+    organizationId: 'org-1', brandId: 'brand-1',
+    artifactTypes: ['discovery', 'vision', 'audience'], requireAiSafe: true,
+  })
+  const artifacts = result.manifest.artifacts as Record<string, Record<string, unknown>>
+  assert.equal(artifacts.discovery.artifact_version_id, 'discovery-v2')
+  assert.equal(artifacts.vision.artifact_version_id, 'vision-v3')
+  assert.equal(artifacts.audience.artifact_version_id, 'audience-v4')
+  assert.equal(result.selected.length, 3)
 })
 
 Deno.test('design release preserves accountable human authority', () => {

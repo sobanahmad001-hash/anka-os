@@ -1,6 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import {
-  CONTENT_ARTIFACT_TYPE_SET,
+  CHAT_CONTENT_ARTIFACT_TYPE_SET,
   contentArtifactResponseFormat,
   createContentArtifactVersion,
   validateContentArtifact,
@@ -145,7 +145,7 @@ async function proposeArtifact(userClient: Client, admin: Client, body: Json, ac
   const engagementId = text(body.engagement_id, 80)
   const artifactType = text(body.artifact_type, 60)
   const prompt = text(body.prompt, 8000)
-  if (!CONTENT_ARTIFACT_TYPE_SET.has(artifactType)) throw new Error('Unsupported Content artifact')
+  if (!CHAT_CONTENT_ARTIFACT_TYPE_SET.has(artifactType)) throw new Error('Unsupported Content artifact')
   if (!prompt) throw new Error('A draft prompt is required')
   if (body.prompt_safe_for_ai !== true) throw new Error('Confirm the prompt is safe to send to the configured model')
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()

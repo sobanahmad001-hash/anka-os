@@ -1,6 +1,6 @@
 import { assertEquals, assertThrows } from 'jsr:@std/assert@1.0.14'
-import { customFieldDefinitionInput, hasContentAuthority } from './index.ts'
-import { CONTENT_ARTIFACT_TYPES, contentArtifactResponseFormat, validateContentArtifact } from '../_shared/contentArtifacts.ts'
+import { brandBriefInput, compiledBrandStatement, customFieldDefinitionInput, hasContentAuthority } from './index.ts'
+import { CHAT_CONTENT_ARTIFACT_TYPE_SET, CONTENT_ARTIFACT_TYPES, contentArtifactResponseFormat, validateContentArtifact } from '../_shared/contentArtifacts.ts'
 
 Deno.test('Content authority keeps exact-version approval manager-controlled', () => {
   assertEquals(hasContentAuthority({ role: 'contributor', department_id: 'content' }, 'save_artifact'), true)
@@ -9,8 +9,10 @@ Deno.test('Content authority keeps exact-version approval manager-controlled', (
   assertEquals(hasContentAuthority({ role: 'executive', department_id: null }, 'approve_artifact'), true)
 })
 
-Deno.test('all eight Content artifacts use strict structured validation', () => {
-  assertEquals(CONTENT_ARTIFACT_TYPES.length, 8)
+Deno.test('eight chat artifacts and the compiled brand statement use strict validation', () => {
+  assertEquals(CONTENT_ARTIFACT_TYPES.length, 9)
+  assertEquals(CHAT_CONTENT_ARTIFACT_TYPE_SET.size, 8)
+  assertEquals(CHAT_CONTENT_ARTIFACT_TYPE_SET.has('brand_statement'), false)
   const architecture = validateContentArtifact('website_architecture', {
     pages: [{ slug: 'home', title: 'Homepage', parent_slug: null, page_type: 'hub', purpose: 'Orient visitors' }],
   })
@@ -31,6 +33,24 @@ Deno.test('RP2 rejects malformed sitemap hierarchy and keyword categories server
   assertThrows(() => validateContentArtifact('keyword_strategy', {
     keywords: [{ term: 'agency', category: 'transactional', search_volume: 12, target_page_slug: 'home', notes: '' }],
   }), Error, 'category')
+})
+
+Deno.test('RP1 normalizes a mutable brief and compiles exact source context', () => {
+  const brief = { id: 'brief-1', updated_at: '2026-08-31T00:00:00Z', target_market: 'Operators',
+    price_tier: 'premium', operating_principles: ['Clarity'], competitor_references: ['Reference A'],
+    raw_brief: 'Build trust before asking for action.' }
+  assertEquals(brandBriefInput(brief).price_tier, 'premium')
+  const statement = compiledBrandStatement(brief, { artifacts: {
+    discovery: { artifact_version_id: 'discovery-v2', content: { evidence: ['Ten-year track record'] } },
+    vision: { artifact_version_id: 'vision-v3', content: { positioning: 'The calm operator.', value_proposition: 'Complex work made clear.', values: ['Care'] } },
+    audience: { artifact_version_id: 'audience-v4', content: { primary_audience: 'Leaders', desired_response: 'Book a workshop' } },
+  } })
+  assertEquals(statement.statement, 'The calm operator. Complex work made clear.')
+  assertEquals((statement.source_manifest as Record<string, unknown>).brand_brief !== undefined, true)
+})
+
+Deno.test('brand statement cannot be generated through Department Chat', () => {
+  assertThrows(() => contentArtifactResponseFormat('brand_statement'), Error, 'chat artifact')
 })
 
 Deno.test('chat response format is strict and type-specific', () => {
