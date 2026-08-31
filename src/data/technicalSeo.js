@@ -17,12 +17,32 @@ export function healthSummary(rows) {
 
 export function filterHealth(rows, filters) {
   return (rows || []).filter(page => {
+    const daysSinceAudit = page.days_since_audit == null ? null : Number(page.days_since_audit)
     if (filters.pageType && page.page_type !== filters.pageType) return false
     if (filters.indexStatus && page.index_status !== filters.indexStatus) return false
     if (filters.attention === 'yes' && !page.needs_attention) return false
     if (filters.attention === 'no' && page.needs_attention) return false
+    if (filters.recency === 'never' && page.latest_audit_id) return false
+    if (filters.recency === 'last_30' && (daysSinceAudit === null || daysSinceAudit > 30)) return false
+    if (filters.recency === 'days_31_90' && (daysSinceAudit === null || daysSinceAudit <= 30 || daysSinceAudit > 90)) return false
+    if (filters.recency === 'over_90' && (daysSinceAudit === null || daysSinceAudit <= 90)) return false
     return true
   })
+}
+
+export function auditTrend(rows) {
+  return [...(rows || [])]
+    .sort((left, right) => String(left.audit_date).localeCompare(String(right.audit_date)))
+    .map(audit => ({
+      id: audit.id,
+      date: audit.audit_date,
+      indexStatus: audit.index_status || 'unknown',
+      issueCount: (audit.issues || []).length,
+      mobile: audit.core_web_vitals_mobile,
+      desktop: audit.core_web_vitals_desktop,
+      schemaValid: audit.schema_valid,
+      sourceType: audit.source_type,
+    }))
 }
 
 export function pageDepth(page, pages) {
