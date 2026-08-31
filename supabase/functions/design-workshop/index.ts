@@ -149,6 +149,14 @@ export function mediaStoragePath(versionId: string, assetId: string) {
   return `${ORGANIZATION_ID}/${versionId}/${assetId}.png`
 }
 
+export function designEventLink(sessionId: string, externalEventId: string, actorId: string) {
+  return {
+    id: sessionId, organization_id: ORGANIZATION_ID, external_event_id: externalEventId,
+    content_type: 'design_asset', linked_work_item_id: null, lead_time_days: 0,
+    status: 'in_progress', created_by: actorId,
+  }
+}
+
 async function insertEvent(admin: Client, engagementId: string, eventType: string, actorId: string,
   recordType: string, recordId: string, versionId: string, action: string) {
   const { error } = await admin.from('engagement_events').insert({
@@ -176,6 +184,12 @@ async function createSession(admin: Client, body: Json, actorId: string) {
   const outputFamily = text(body.output_family, 60)
   if (!OUTPUT_FAMILIES.has(outputFamily)) throw new Error('Unsupported output family')
   await validateScope(admin, engagementId, brandId, stageId)
+  const externalEventId = text(body.external_event_id, 80) || null
+  if (externalEventId) {
+    const { data: externalEvent, error: externalEventError } = await admin.from('external_events').select('id')
+      .eq('id', externalEventId).eq('organization_id', ORGANIZATION_ID).eq('brand_id', brandId).maybeSingle()
+    if (externalEventError || !externalEvent) throw new Error('The selected external event is outside this brand')
+  }
   const modelIds = Array.isArray(body.model_registry_ids)
     ? [...new Set(body.model_registry_ids.map(value => text(value, 80)).filter(Boolean))].slice(0, 3) : []
   if (!modelIds.length) throw new Error('Select at least one registered model')
@@ -199,8 +213,9 @@ async function createSession(admin: Client, body: Json, actorId: string) {
     throw new Error('Designer instructions must be present and explicitly safe for AI use')
   }
   const checksum = await sha256(stableJson(contextManifest))
+  const sessionId = crypto.randomUUID()
   const { data: session, error: sessionError } = await admin.from('design_workshop_sessions').insert({
-    organization_id: ORGANIZATION_ID, engagement_id: engagementId, brand_id: brandId,
+    id: sessionId, organization_id: ORGANIZATION_ID, engagement_id: engagementId, brand_id: brandId,
     engagement_stage_instance_id: stageId, output_family: outputFamily, output_brief: outputBrief,
     designer_instructions: designerInstructions, context_manifest: contextManifest,
     context_checksum: checksum, created_by: actorId,
@@ -216,6 +231,11 @@ async function createSession(admin: Client, body: Json, actorId: string) {
       organization_id: ORGANIZATION_ID, session_id: session.id, model_registry_id: id, position: index + 1,
     })))
     if (selectionError) throw selectionError
+    if (externalEventId) {
+      const { error: linkError } = await admin.from('content_event_links')
+        .insert(designEventLink(session.id, externalEventId, actorId))
+      if (linkError) throw linkError
+    }
   } catch (error) {
     await admin.from('design_workshop_sessions').delete().eq('id', session.id)
     throw error
