@@ -20,6 +20,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/design-workshop/index.ts"
 
+[functions.design-systems]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/design-systems/index.ts"
+
 [functions.website-page-designs]
 enabled = true
 verify_jwt = true

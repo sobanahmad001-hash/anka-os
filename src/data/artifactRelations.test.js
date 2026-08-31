@@ -94,5 +94,5 @@ test('D3 exposes one reusable artifact-detail relation panel across department s
 test('D3 contains no dependency graph or W-series implementation', () => {
   const d3 = `${migration}\n${edge}\n${repository}\n${panel}`
   assert.doesNotMatch(d3, /work_items|work_item_dependencies|cycle detection|recursive query/i)
-  assert.doesNotMatch(d3, /artifact_versions|artifact_approvals|artifact_version_comments/)
+  assert.doesNotMatch(`${migration}\n${edge}`, /artifact_versions|artifact_approvals|artifact_version_comments/)
 })

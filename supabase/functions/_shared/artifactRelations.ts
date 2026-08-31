@@ -55,6 +55,17 @@ export async function requireRelationTeamMembership(
   if (error || !data) throw Object.assign(new Error('Active team membership required'), { status: 403 })
 }
 
+export async function requireReleasedDesignSystemTarget(admin: SupabaseClient, target: Json) {
+  if (target.artifact_type !== 'design_system') return
+  const { data, error } = await admin.from('artifact_approvals')
+    .select('id')
+    .eq('artifact_id', target.id)
+    .limit(1)
+    .maybeSingle()
+  if (error) throw error
+  if (!data) throw Object.assign(new Error('Only a released Design System can be linked'), { status: 409 })
+}
+
 export async function createArtifactRelation(
   userClient: SupabaseClient,
   admin: SupabaseClient,
@@ -65,6 +76,7 @@ export async function createArtifactRelation(
   const relation = relationInput(input)
   const pair = await loadReadablePair(userClient, relation.sourceArtifactId, relation.targetArtifactId)
   await requireRelationTeamMembership(admin, pair.organizationId, actorId)
+  await requireReleasedDesignSystemTarget(admin, pair.target)
 
   if (options.allowExisting) {
     const { data: existing, error: existingError } = await admin.from('artifact_relations')

@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.14'
-import { loadReadablePair, relationInput } from './index.ts'
+import { loadReadablePair, relationInput, requireReleasedDesignSystemTarget } from './index.ts'
 
 Deno.test('D3 relation input accepts descriptive links and RP2 page targeting', () => {
   assertEquals(relationInput({
@@ -49,4 +49,26 @@ Deno.test('D3 permits cross-type endpoints in one organization', async () => {
   assertEquals(pair.organizationId, 'organization')
   assertEquals(pair.source.artifact_type, 'discovery')
   assertEquals(pair.target.artifact_type, 'campaign_brief')
+})
+
+Deno.test('DS5 permits only released design systems as D3 targets', async () => {
+  class Query {
+    constructor(private row: Record<string, unknown> | null) {}
+    select() { return this }
+    eq() { return this }
+    limit() { return this }
+    async maybeSingle() { return { data: this.row, error: null } }
+  }
+  await requireReleasedDesignSystemTarget(
+    { from: () => new Query({ id: 'approval' }) } as never,
+    { id: 'system', artifact_type: 'design_system' },
+  )
+  await assertRejects(
+    () => requireReleasedDesignSystemTarget(
+      { from: () => new Query(null) } as never,
+      { id: 'draft-system', artifact_type: 'design_system' },
+    ),
+    Error,
+    'Only a released Design System can be linked',
+  )
 })

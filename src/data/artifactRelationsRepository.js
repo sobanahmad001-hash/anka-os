@@ -38,6 +38,11 @@ export const artifactRelations = Object.freeze({
     .order('title')
     .limit(250)),
 
+  releasedDesignSystemVersions: () => dataOrThrow(supabase.from('artifact_approvals')
+    .select('artifact_id, artifact_version_id, artifact_versions!inner(version_number), artifacts!inner(artifact_type)')
+    .eq('artifacts.artifact_type', 'design_system')
+    .order('approved_at', { ascending: false })),
+
   create: (sourceArtifactId, targetArtifactId, relationType) => invoke('create_relation', {
     source_artifact_id: sourceArtifactId,
     target_artifact_id: targetArtifactId,
