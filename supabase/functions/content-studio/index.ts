@@ -67,7 +67,7 @@ async function requireContext(request: Request) {
   if (!membership || membership.status !== 'active' || membership.member_kind !== 'team') {
     throw Object.assign(new Error('Active team membership required'), { status: 403 })
   }
-  return { admin, user, membership }
+  return { userClient, admin, user, membership }
 }
 
 export async function requireContentEngagement(admin: Client, engagementId: string) {
