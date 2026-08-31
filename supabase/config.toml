@@ -35,6 +35,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/wordpress-export/index.ts"
 
+[functions.production-handoff]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/production-handoff/index.ts"
+
 [functions.marketing-studio]
 enabled = true
 verify_jwt = true

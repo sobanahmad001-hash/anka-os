@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { OUTPUT_FAMILIES, latestByVersion } from '../data/designWorkshop.js'
 import { designWorkshop } from '../data/designWorkshopRepository.js'
+import { productionHandoffs } from '../data/productionHandoffsRepository.js'
 import { composePageDesignPreview } from '../data/websitePageDesigns.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
+import ProductionHandoffPanel from '../components/ProductionHandoffPanel.jsx'
 
 const INPUT = 'w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-violet-500/60'
 const BUTTON = 'rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40'
@@ -41,7 +43,22 @@ export default function DesignWorkshop() {
 
   function capture(reason) { setError(reason instanceof Error ? reason.message : String(reason)); setBusy('') }
   async function refresh() { setError(''); setBusy('load'); try { setWorkspace(await designWorkshop.load(engagementId)) } catch (reason) { capture(reason) } finally { setBusy('') } }
-  async function act(key, action) { setBusy(key); setError(''); try { await action(); setModal(null); await refresh() } catch (reason) { capture(reason) } finally { setBusy('') } }
+  async function act(key, action) {
+    setBusy(key); setError('')
+    try { await action(); setModal(null); await refresh() }
+    catch (reason) {
+      const message = reason instanceof Error ? reason.message : String(reason)
+      try { setWorkspace(await designWorkshop.load(engagementId)) } catch { /* Keep the action failure primary. */ }
+      setError(message)
+    } finally { setBusy('') }
+  }
+  async function downloadHandoff(packageId) {
+    setBusy(`download-${packageId}`); setError('')
+    try {
+      const signed = await productionHandoffs.signDownload(packageId)
+      window.location.assign(signed.signed_url)
+    } catch (reason) { capture(reason) } finally { setBusy('') }
+  }
 
   if (!engagements.length && !error) return <Shell><Empty title="No Design engagement yet" text="Activate at least one Design service on an engagement before opening the Workshop." /></Shell>
   return <Shell>
@@ -53,7 +70,7 @@ export default function DesignWorkshop() {
     <div className="mt-5 flex gap-2">{[['artifacts', 'Approved Content context'], ['workshop', 'Direction workshop']].map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${tab === id ? 'bg-white text-slate-950' : 'bg-white/5 text-slate-300'}`}>{label}</button>)}</div>
     {busy === 'load' || !workspace ? <div className="py-20 text-center text-sm text-slate-500">Loading exact versions…</div>
       : tab === 'artifacts' ? <ArtifactWorkspace workspace={workspace} />
-        : <WorkshopWorkspace workspace={workspace} focusedSessionId={requestedSessionId} currentUserId={user?.id} onCreateFlow={() => setModal({ kind: 'flow' })} onCreate={() => setModal({ kind: 'session' })} onGenerate={session => act(`generate-${session.id}`, () => designWorkshop.generateDirections(session.id))} onGenerateImage={(version, modelId, prompt) => act(`image-${version.id}`, () => designWorkshop.generateImage(version.id, modelId, prompt))} onGenerateVariants={(versionId, modelId, formats) => act(`variants-${versionId}`, () => designWorkshop.generateVariants(versionId, modelId, formats))} onGenerateVideo={(version, prompt) => act(`video-${version.id}`, () => designWorkshop.createVideoPlaceholder(version.id, prompt))} onGeneratePage={(versionId, slug, modelId) => act('generate-page', () => designWorkshop.generatePageDesign(versionId, slug, modelId))} onSubmitPage={designId => act(`submit-page-${designId}`, () => designWorkshop.submitPageDesignReview(designId))} onApprovePage={designId => act(`approve-page-${designId}`, () => designWorkshop.approvePageDesign(designId))} onExportPage={designId => act(`export-page-${designId}`, () => designWorkshop.exportPageDesign(designId))} onDownloadExport={jobId => act(`download-export-${jobId}`, async () => { const result = await designWorkshop.getWordPressExportDownload(jobId); window.location.assign(result.download_url) })} onRefine={(direction, version) => setModal({ kind: 'refine', direction, version })} onPromote={version => act(`promote-${version.id}`, () => designWorkshop.promoteDirectionExperiment(version.id))} onSelect={(session, version) => act(`select-${version.id}`, () => designWorkshop.selectDirection(session.id, version.id))} onRelease={session => act(`release-${session.id}`, () => designWorkshop.releaseDirection(session.id, 'Released by the accountable human reviewer.'))} busy={busy} />}
+        : <WorkshopWorkspace workspace={workspace} focusedSessionId={requestedSessionId} currentUserId={user?.id} onCreateFlow={() => setModal({ kind: 'flow' })} onCreate={() => setModal({ kind: 'session' })} onGenerate={session => act(`generate-${session.id}`, () => designWorkshop.generateDirections(session.id))} onGenerateImage={(version, modelId, prompt) => act(`image-${version.id}`, () => designWorkshop.generateImage(version.id, modelId, prompt))} onGenerateVariants={(versionId, modelId, formats) => act(`variants-${versionId}`, () => designWorkshop.generateVariants(versionId, modelId, formats))} onGenerateVideo={(version, prompt) => act(`video-${version.id}`, () => designWorkshop.createVideoPlaceholder(version.id, prompt))} onGeneratePage={(versionId, slug, modelId) => act('generate-page', () => designWorkshop.generatePageDesign(versionId, slug, modelId))} onSubmitPage={designId => act(`submit-page-${designId}`, () => designWorkshop.submitPageDesignReview(designId))} onApprovePage={designId => act(`approve-page-${designId}`, () => designWorkshop.approvePageDesign(designId))} onExportPage={designId => act(`export-page-${designId}`, () => designWorkshop.exportPageDesign(designId))} onDownloadExport={jobId => act(`download-export-${jobId}`, async () => { const result = await designWorkshop.getWordPressExportDownload(jobId); window.location.assign(result.download_url) })} onPrepareHandoff={release => act(`handoff-${release.id}`, () => productionHandoffs.create(release.id, engagementId))} onDownloadHandoff={downloadHandoff} onRefine={(direction, version) => setModal({ kind: 'refine', direction, version })} onPromote={version => act(`promote-${version.id}`, () => designWorkshop.promoteDirectionExperiment(version.id))} onSelect={(session, version) => act(`select-${version.id}`, () => designWorkshop.selectDirection(session.id, version.id))} onRelease={session => act(`release-${session.id}`, () => designWorkshop.releaseDirection(session.id, 'Released by the accountable human reviewer.'))} busy={busy} />}
     {modal?.kind === 'flow' && <FlowModal workspace={workspace} busy={busy} onClose={() => setModal(null)} onSave={input => act('create-flow', () => designWorkshop.createPageFlow(input))} />}
     {modal?.kind === 'session' && <SessionModal workspace={workspace} busy={busy} onClose={() => setModal(null)} onSave={input => act('create-session', () => designWorkshop.createSession(input))} />}
     {modal?.kind === 'refine' && <RefineModal {...modal} reviewers={workspace.experimentReviewers || []} currentUserId={user?.id} busy={busy} onClose={() => setModal(null)} onSave={(content, experiment) => act('refine', () => designWorkshop.createDirectionRevision(modal.direction.id, modal.version.id, content, experiment))} />}
@@ -73,7 +90,7 @@ function ArtifactWorkspace({ workspace }) {
   })}</div></div>
 }
 
-function WorkshopWorkspace({ workspace, focusedSessionId, currentUserId, onCreateFlow, onCreate, onGenerate, onGenerateImage, onGenerateVariants, onGenerateVideo, onGeneratePage, onSubmitPage, onApprovePage, onExportPage, onDownloadExport, onRefine, onPromote, onSelect, onRelease, busy }) {
+function WorkshopWorkspace({ workspace, focusedSessionId, currentUserId, onCreateFlow, onCreate, onGenerate, onGenerateImage, onGenerateVariants, onGenerateVideo, onGeneratePage, onSubmitPage, onApprovePage, onExportPage, onDownloadExport, onPrepareHandoff, onDownloadHandoff, onRefine, onPromote, onSelect, onRelease, busy }) {
   const approvedTypes = new Set(workspace.approvals.map(approval => workspace.artifacts.find(item => item.id === approval.artifact_id)?.artifact_type).filter(Boolean))
   const ready = ['discovery', 'vision', 'audience'].every(type => approvedTypes.has(type))
   const [flowSessionId, setFlowSessionId] = useState('')
@@ -91,6 +108,7 @@ function WorkshopWorkspace({ workspace, focusedSessionId, currentUserId, onCreat
     {session && <Panel><h2 className="text-xl font-semibold">Compile approved context</h2><p className="mt-2 text-sm text-slate-400">The session snapshots exact approved Discovery, Vision and Audience versions, then adds an output brief and designer-safe instructions.</p>{createSessionAction}</Panel>}
     {!!directions.length && <div className="grid gap-5 xl:grid-cols-3">{directions.map(direction => { const versions = workspace.directionVersions.filter(item => item.direction_id === direction.id); const version = latestByVersion(versions); const selected = selection?.direction_version_id === version?.id; return <DirectionCard key={direction.id} direction={direction} versions={versions} version={version} models={workspace.models} mediaAssets={workspace.mediaAssets} selected={selected} released={release?.direction_version_id === version?.id} onGenerateImage={(modelId, prompt) => onGenerateImage(version, modelId, prompt)} onGenerateVideo={prompt => onGenerateVideo(version, prompt)} onRefine={() => onRefine(direction, version)} onSelect={() => onSelect(session, version)} canSelect={!selection} busy={busy} /> })}</div>}
     {release && variantEligible && <VariantWorkspace key={release.direction_version_id} workspace={workspace} release={release} onGenerate={onGenerateVariants} busy={busy} />}
+    {release && <ProductionHandoffPanel release={release} packages={workspace.handoffPackages} busy={busy} onPrepare={onPrepareHandoff} onDownload={onDownloadHandoff} />}
     {!!workspace.experimentalDirectionVersions.length && <Panel><div><p className="text-xs font-semibold uppercase tracking-wider text-amber-300">Private experiments</p><h2 className="mt-2 text-xl font-semibold">Experimental versions</h2><p className="mt-2 text-sm text-slate-400">Visible only to each creator and invited reviewers. Experiments stay outside the main history until promoted.</p></div><div className="mt-5 grid gap-4 lg:grid-cols-2">{workspace.experimentalDirectionVersions.map(version => { const direction = directions.find(item => item.id === version.direction_id); const canPromote = version.created_by === currentUserId || (version.experiment_visibility || []).includes(currentUserId); return <ExperimentCard key={version.id} direction={direction} version={version} models={workspace.models} mediaAssets={workspace.mediaAssets} canPromote={canPromote} onGenerateImage={(modelId, prompt) => onGenerateImage(version, modelId, prompt)} onGenerateVideo={prompt => onGenerateVideo(version, prompt)} onPromote={() => onPromote(version)} busy={busy} /> })}</div></Panel>}
     {!!directions.length && <PageDesignWorkspace workspace={workspace} onGenerate={onGeneratePage} onSubmit={onSubmitPage} onApprove={onApprovePage} onExport={onExportPage} onDownload={onDownloadExport} busy={busy} />}
     {selection && !release && <Panel><h3 className="font-semibold">Human selection recorded</h3><p className="mt-2 text-sm text-slate-400">Selection does not equal release. The accountable Design manager must perform the separate release action.</p><button disabled={busy === `release-${session.id}`} onClick={() => onRelease(session)} className={`${BUTTON} mt-4`}>Release selected exact version</button></Panel>}
