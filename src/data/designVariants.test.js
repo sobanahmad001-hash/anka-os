@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(here, '../..')
 const read = relative => fs.readFileSync(path.join(root, relative), 'utf8')
-const migration = read('supabase/migrations/20260831185355_ds2_variant_generation.sql')
+const migration = read('supabase/migrations/20260831205738_ds2_variant_generation.sql')
 const verifier = read('supabase/verify_20260831185355_ds2_variant_generation.sql')
 const edge = read('supabase/functions/design-workshop/index.ts')
 const edgeTest = read('supabase/functions/design-workshop/index.test.ts')
