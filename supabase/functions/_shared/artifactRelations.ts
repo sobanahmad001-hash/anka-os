@@ -36,6 +36,7 @@ export function relationInput(input: Json) {
     targetArtifactId: targetArtifactId || null,
     targetContentRequestId: targetContentRequestId || null,
     relationType,
+  }
 }
 
 async function loadReadableArtifactPair(userClient: SupabaseClient, sourceArtifactId: string, targetArtifactId: string) {
