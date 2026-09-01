@@ -3,7 +3,7 @@ type SupabaseClient = { from: (table: string) => any }
 
 type ResolvedPair = {
   source: Json
-  target: Json | null
+  target: Json
   targetKind: 'artifact' | 'content_request'
   organizationId: string
 }
@@ -61,8 +61,8 @@ async function loadReadableRequestTarget(userClient: SupabaseClient, targetConte
 export async function loadReadablePair(
   userClient: SupabaseClient,
   sourceArtifactId: string,
-  targetArtifactId?: string,
-  targetContentRequestId?: string,
+  targetArtifactId?: string | null,
+  targetContentRequestId?: string | null,
 ): Promise<ResolvedPair> {
   const { data, error } = await userClient.from('artifacts')
     .select('id, organization_id, title, artifact_type, engagement_id')
