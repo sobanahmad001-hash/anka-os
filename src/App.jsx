@@ -10,6 +10,7 @@ const AgencyCommandCenter = lazy(() => import('./apps/AgencyCommandCenter'))
 const UserManagement = lazy(() => import('./apps/UserManagement'))
 const OperatingSpine = lazy(() => import('./apps/OperatingSpine'))
 const DesignWorkshop = lazy(() => import('./apps/DesignWorkshop'))
+const DesignSystems = lazy(() => import('./apps/DesignSystems'))
 const MarketingStudio = lazy(() => import('./apps/MarketingStudio'))
 const TechnicalSeoTracking = lazy(() => import('./apps/TechnicalSeoTracking'))
 const ContentStudio = lazy(() => import('./apps/ContentStudio'))
@@ -74,6 +75,7 @@ export default function App() {
         <Route path="sphere/artifacts/:artifactId" element={<ArtifactDetail />} />
         <Route path="sphere/design" element={<DepartmentWorkshop departmentId="design" />} />
         <Route path="sphere/design/workshop" element={<DesignWorkshop />} />
+        <Route path="sphere/design/systems" element={<DesignSystems />} />
         <Route path="sphere/marketing" element={<DepartmentWorkshop departmentId="marketing" />} />
         <Route path="sphere/marketing/studio" element={<MarketingStudio />} />
         <Route path="sphere/marketing/seo" element={<TechnicalSeoTracking />} />
