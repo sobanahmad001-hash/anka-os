@@ -24,7 +24,7 @@ test('D1 proofing has one table and exactly one organization-consistent target',
 
 test('proofing target shape for CP5 adds content requests', () => {
   assert.match(migrationCp5, /content_request_id/)
-  assert.match(migrationCp5, /artifact_version_comments_content_request_target_fkey/)
+  assert.match(migrationCp5, /artifact_version_comments_content_request_fk/)
   assert.match(migrationCp5, /artifact_version_comments_exactly_one_target/)
   assert.match(migrationCp5, /\+ \(content_request_id is not null\)\:\:integer/)
 })

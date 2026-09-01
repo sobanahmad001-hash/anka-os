@@ -65,15 +65,12 @@ $$;
 
 -- keep existing invocation privileges from the D1 migration for this function path.
 
-  on public.artifact_version_comments;
 drop policy if exists "Team can read exact-version proofing comments"
-  on public.artifact_version_comments;
   on public.artifact_version_comments;
 drop policy if exists "Team can read permitted exact-version proofing comments"
   on public.artifact_version_comments;
 create policy "Team can read permitted exact-version proofing comments"
 on public.artifact_version_comments
-  for select to authenticated
   using (
     public.is_team_organization_member(organization_id)
     and (
@@ -141,7 +138,6 @@ create index if not exists idx_artifact_relations_target_request
   on public.artifact_relations(organization_id, target_content_request_id, created_at desc)
   where target_content_request_id is not null;
 
-  on public.artifact_relations;
 drop policy if exists "Team can read visible artifact relations"
   on public.artifact_relations;
 create policy "Team can read visible artifact relations"
