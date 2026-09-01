@@ -20,13 +20,12 @@ Deno.test('CP5 relation input accepts artifact, content request, and sitemap tar
 })
 
 Deno.test('D3 relation loading blocks hidden endpoints, including request targets', async () => {
+  const source = { id: 'source', organization_id: 'org', title: 'Source', artifact_type: 'discovery', engagement_id: 'engagement' }
   const sourceOnlyClient = {
-    from: () => ({
+    from: (table: string) => ({
       select: () => ({
-        in: async () => ({ data: [
-          { id: 'source', organization_id: 'organization', title: 'Visible', artifact_type: 'discovery', engagement_id: 'engagement' },
-        ], error: null }),
-        eq: async () => ({ data: null, error: null }),
+        eq: () => ({ maybeSingle: async () => ({ data: table === 'artifacts' ? source : null, error: null }) }),
+        in: async () => ({ data: [source], error: null }),
       }),
     }),
   }
@@ -37,18 +36,15 @@ Deno.test('D3 relation loading blocks hidden endpoints, including request target
   )
 
   const requestVisibleClient = {
-    from: () => ({
+    from: (table: string) => ({
       select: () => ({
-        in: async () => ({
-          data: [
-            { id: 'source', organization_id: 'org', title: 'Source', artifact_type: 'discovery', engagement_id: 'engagement' },
-          ],
+        eq: () => ({ maybeSingle: async () => ({
+          data: table === 'artifacts'
+            ? source
+            : { id: 'request-1', organization_id: 'org', status: 'pending', format: 'reel' },
           error: null,
-        }),
-        eq: async () => ({
-          data: { id: 'request-1', organization_id: 'org', status: 'pending', format: 'reel' },
-          error: null,
-        }),
+        }) }),
+        in: async () => ({ data: [source], error: null }),
       }),
     }),
   }
@@ -58,7 +54,6 @@ Deno.test('D3 relation loading blocks hidden endpoints, including request target
   assertEquals(requestPair.targetKind, 'content_request')
   assertEquals(requestPair.organizationId, 'org')
 })
-
 Deno.test('DS5 permits only released design systems as D3 targets', async () => {
   class Query {
     constructor(private row: Record<string, unknown> | null) {}
