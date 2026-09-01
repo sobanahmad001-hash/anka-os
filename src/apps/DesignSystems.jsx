@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
+import DepartmentChat from '../components/DepartmentChat.jsx'
 import {
   cloneDesignSystemContent,
   EMPTY_DESIGN_SYSTEM,
@@ -14,6 +15,7 @@ import { designSystems } from '../data/designSystemsRepository.js'
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-pink-500'
 const SECONDARY = 'rounded-xl border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 hover:border-pink-500 hover:text-white disabled:opacity-40'
 const EMPTY_FORM = { title: '', engagement_service_id: '', change_summary: '', data_classification: 'internal', content: cloneDesignSystemContent() }
+const DESIGN_CHAT_ARTIFACTS = Object.freeze({ design_system: { label: 'Design system' } })
 
 function related(value) {
   return Array.isArray(value) ? value[0] : value
@@ -21,7 +23,8 @@ function related(value) {
 
 export default function DesignSystems() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const [workspace, setWorkspace] = useState({ services: [], artifacts: [], versions: [], approvals: [] })
+  const [workspace, setWorkspace] = useState({ services: [], artifacts: [], versions: [], approvals: [], stages: [] })
+  const [chatServiceId, setChatServiceId] = useState('')
   const [selectedId, setSelectedId] = useState(searchParams.get('artifact') || '')
   const [versionId, setVersionId] = useState('')
   const [form, setForm] = useState(EMPTY_FORM)
@@ -37,6 +40,7 @@ export default function DesignSystems() {
     try {
       const result = await designSystems.loadLibrary()
       setWorkspace(result)
+      setChatServiceId(current => result.services.some(service => service.id === current) ? current : result.services[0]?.id || '')
       const requested = preferredId || searchParams.get('artifact') || selectedId
       const nextId = result.artifacts.some(item => item.id === requested) ? requested : result.artifacts[0]?.id || ''
       setSelectedId(nextId)
@@ -55,6 +59,8 @@ export default function DesignSystems() {
   const latestVersion = latestVersionFor(selectedId, workspace.versions)
   const latestApproval = workspace.approvals.find(item => item.artifact_version_id === latestVersion?.id) || null
   const activeService = workspace.services.find(item => item.engagement_id === selectedArtifact?.engagement_id) || null
+  const chatService = workspace.services.find(item => item.id === chatServiceId) || null
+  const chatEngagement = related(chatService?.engagements)
 
   useEffect(() => {
     if (!selectedArtifact) return
@@ -155,6 +161,11 @@ export default function DesignSystems() {
         <main className="min-w-0 space-y-6">
           {selectedArtifact && viewedVersion && <DesignSystemViewer artifact={selectedArtifact} version={viewedVersion} versions={versions} releasedVersions={releasedVersions} setVersionId={setVersionId} />}
           <DesignSystemEditor form={form} setForm={setForm} services={workspace.services} selectedArtifact={selectedArtifact} activeService={activeService} saving={saving} onSubmit={save} onServiceChanged={serviceChanged} updateItem={updateItem} addItem={addItem} removeItem={removeItem} />
+          <DesignDepartmentChat
+            services={workspace.services} serviceId={chatServiceId} onServiceChange={setChatServiceId}
+            engagement={chatEngagement} artifacts={workspace.artifacts} stages={workspace.stages}
+            onPropose={designSystems.proposeArtifact} onCreated={() => load()}
+          />
           {selectedArtifact && latestVersion && <ArtifactApprovalPanel version={latestVersion} approval={latestApproval} theme="blue" onSingleApprove={activeService ? releaseLatest : null} singleApprovalLabel={`Release version ${latestVersion.version_number}`} onChanged={() => load(selectedId)} />}
           {selectedArtifact && versions.length > 0 && <VersionProofingPanel targetKind="artifact" versions={versions} department="design" theme="violet" />}
           {selectedArtifact && <ArtifactRelationsPanel artifact={selectedArtifact} />}
@@ -162,6 +173,13 @@ export default function DesignSystems() {
       </div>
     </div>
   </div>
+}
+
+function DesignDepartmentChat({ services, serviceId, onServiceChange, engagement, artifacts, stages, onPropose, onCreated }) {
+  return <section className="rounded-2xl border border-violet-900/50 bg-violet-950/10 p-5">
+    <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-violet-300">Design workflow</p><h2 className="mt-1 text-xl font-semibold">Shared Department Chat</h2><p className="mt-1 text-sm text-slate-400">Propose an unapproved Design System draft from this engagement's approved AI-safe context.</p></div><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Design Systems service<select className={`${INPUT} mt-2 min-w-72 normal-case`} value={serviceId} onChange={event => onServiceChange(event.target.value)}><option value="">Select active service</option>{services.map(service => <option key={service.id} value={service.id}>{related(service.engagements)?.name || 'Engagement'} · {related(related(service.engagements)?.brands)?.name || 'Brand'}</option>)}</select></label></div>
+    {engagement ? <div className="mt-5"><DepartmentChat departmentId="design" departmentLabel="Design" engagement={engagement} artifactTypes={['design_system']} artifactDefinitions={DESIGN_CHAT_ARTIFACTS} artifactForType={() => artifacts.find(artifact => artifact.engagement_id === engagement.id && artifact.artifact_type === 'design_system') || null} stageForType={() => stages.find(stage => stage.engagement_id === engagement.id) || null} onPropose={onPropose} onCreated={onCreated} /></div> : <p className="mt-5 rounded-xl border border-amber-800 bg-amber-950/30 px-4 py-3 text-sm text-amber-300">Select an active Design Systems service to start a chat proposal.</p>}
+  </section>
 }
 
 function DesignSystemViewer({ artifact, version, versions, releasedVersions, setVersionId }) {

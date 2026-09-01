@@ -5,6 +5,7 @@ const PRIMARY = 'rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-wh
 
 export default function DepartmentChat({
   departmentId,
+  departmentLabel = departmentId,
   engagement,
   artifactTypes,
   artifactDefinitions,
@@ -63,7 +64,7 @@ export default function DepartmentChat({
         </label>
         <label className="flex items-start gap-3 rounded-xl border border-amber-900/50 bg-amber-950/20 p-4 text-sm leading-6 text-amber-200">
           <input required type="checkbox" className="mt-1" checked={safe} onChange={event => setSafe(event.target.checked)} />
-          <span>I confirm this prompt is safe to send to the engagement-mapped Content model. Restricted artifact versions are never included automatically.</span>
+          <span>I confirm this prompt is safe to send to the engagement-mapped {departmentLabel} model. Restricted artifact versions are never included automatically.</span>
         </label>
         <button disabled={busy || !safe} className={`${PRIMARY} w-full`}>{busy ? 'Creating unapproved draft…' : 'Propose draft artifact'}</button>
       </div>
