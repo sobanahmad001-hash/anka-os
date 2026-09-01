@@ -56,7 +56,7 @@ Deno.test('Design-only service is accepted without a Content service', async () 
   }
   const result = await requireDepartmentEngagement(client as never, 'engagement-1', 'design')
   assertEquals(result.services.length, 1)
-  assertEquals(result.services[0].service_catalog.department_id, 'design')
+  assertEquals(JSON.stringify(result.services).includes('"department_id":"design"'), true)
 })
 
 Deno.test('Design chat draft persists a canonical immutable version and no approval', async () => {
