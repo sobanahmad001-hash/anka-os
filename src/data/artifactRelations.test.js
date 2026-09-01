@@ -54,8 +54,8 @@ test('D3 rollup is bidirectional, live, and has no cached summary', () => {
     source: { id: 'third' }, target: { id: 'current' },
   }]
   assert.deepEqual(splitArtifactRelations('current', rows), {
-    outgoing: [{ ...rows[0], relatedArtifact: rows[0].target }],
-    incoming: [{ ...rows[1], relatedArtifact: rows[1].source }],
+    outgoing: [{ ...rows[0], relatedArtifact: rows[0].target, targetKind: 'artifact' }],
+    incoming: [{ ...rows[1], relatedArtifact: rows[1].source, targetKind: 'artifact' }],
   })
   assert.match(repository, /source:artifacts!artifact_relations_source_artifact_fkey/)
   assert.match(repository, /target:artifacts!artifact_relations_target_artifact_fkey/)

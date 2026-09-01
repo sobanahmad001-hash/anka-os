@@ -64,12 +64,21 @@ export function normalizeCommentPosition(value: unknown) {
 export function exactTarget(input: Json) {
   const artifactVersionId = text(input.artifact_version_id, 80)
   const directionVersionId = text(input.design_direction_version_id, 80)
-  if (Boolean(artifactVersionId) === Boolean(directionVersionId)) {
+  const contentRequestId = text(input.content_request_id, 80)
+  const selected = [
+    artifactVersionId ? 1 : 0,
+    directionVersionId ? 1 : 0,
+    contentRequestId ? 1 : 0,
+  ].reduce((sum, item) => sum + item, 0)
+
+  if (selected !== 1) {
     throw new Error('Select exactly one version target')
   }
+
   return {
     artifactVersionId: artifactVersionId || null,
     directionVersionId: directionVersionId || null,
+    contentRequestId: contentRequestId || null,
   }
 }
 
@@ -106,11 +115,18 @@ async function readableTarget(userClient: Client, input: Json) {
     if (!department) throw Object.assign(new Error('This artifact type is not enabled for proofing'), { status: 409 })
     return { ...target, department, organizationId: version.organization_id }
   }
-  const { data: version, error } = await userClient.from('design_direction_versions')
-    .select('id, organization_id').eq('id', target.directionVersionId)
+  if (target.directionVersionId) {
+    const { data: version, error } = await userClient.from('design_direction_versions')
+      .select('id, organization_id').eq('id', target.directionVersionId)
+      .eq('organization_id', ORGANIZATION_ID).maybeSingle()
+    if (error || !version) throw Object.assign(new Error('Design direction version is unavailable'), { status: 404 })
+    return { ...target, department: 'design', organizationId: version.organization_id }
+  }
+  const { data: request, error } = await userClient.from('content_requests')
+    .select('id, organization_id').eq('id', target.contentRequestId)
     .eq('organization_id', ORGANIZATION_ID).maybeSingle()
-  if (error || !version) throw Object.assign(new Error('Design direction version is unavailable'), { status: 404 })
-  return { ...target, department: 'design', organizationId: version.organization_id }
+  if (error || !request) throw Object.assign(new Error('Content request is unavailable'), { status: 404 })
+  return { ...target, department: 'content', organizationId: request.organization_id }
 }
 
 async function addComment(userClient: Client, admin: Client, body: Json, actorId: string) {
@@ -121,6 +137,7 @@ async function addComment(userClient: Client, admin: Client, body: Json, actorId
     organization_id: target.organizationId,
     artifact_version_id: target.artifactVersionId,
     design_direction_version_id: target.directionVersionId,
+    content_request_id: target.contentRequestId,
     author_id: actorId,
     body: commentBody,
     comment_position: normalizeCommentPosition(body.comment_position),

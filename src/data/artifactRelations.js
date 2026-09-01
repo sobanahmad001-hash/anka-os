@@ -36,15 +36,26 @@ export function owningWorkspacePath(artifact) {
   return '/sphere/engagements'
 }
 
+export function requestSummary(request) {
+  if (!request?.id) return ''
+  const format = String(request.format || '').replaceAll('_', ' ')
+  const status = String(request.status || '').replaceAll('_', ' ')
+  return `${format || 'request'} · ${status || 'pending'}`
+}
+
 export function splitArtifactRelations(artifactId, relations) {
   const outgoing = []
   const incoming = []
   for (const relation of relations || []) {
-    if (relation.source_artifact_id === artifactId && relation.target) {
-      outgoing.push({ ...relation, relatedArtifact: relation.target })
+    if (relation.source_artifact_id === artifactId) {
+      if (relation.target_artifact_id && relation.target) {
+        outgoing.push({ ...relation, relatedArtifact: relation.target, targetKind: 'artifact' })
+      } else if (relation.target_content_request_id && relation.target_request) {
+        outgoing.push({ ...relation, relatedRequest: relation.target_request, targetKind: 'content_request' })
+      }
     }
     if (relation.target_artifact_id === artifactId && relation.source) {
-      incoming.push({ ...relation, relatedArtifact: relation.source })
+      incoming.push({ ...relation, relatedArtifact: relation.source, targetKind: 'artifact' })
     }
   }
   return { outgoing, incoming }

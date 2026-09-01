@@ -1,15 +1,20 @@
 import { assertEquals, assertThrows } from 'jsr:@std/assert@1.0.14'
 import { exactTarget, hasResolveAuthority, normalizeCommentPosition } from './index.ts'
 
-Deno.test('proofing requires exactly one immutable version target', () => {
+Deno.test('proofing requires exactly one immutable version request target', () => {
   assertEquals(exactTarget({ artifact_version_id: 'artifact-version' }), {
-    artifactVersionId: 'artifact-version', directionVersionId: null,
+    artifactVersionId: 'artifact-version', directionVersionId: null, contentRequestId: null,
   })
   assertEquals(exactTarget({ design_direction_version_id: 'direction-version' }), {
-    artifactVersionId: null, directionVersionId: 'direction-version',
+    artifactVersionId: null, directionVersionId: 'direction-version', contentRequestId: null,
+  })
+  assertEquals(exactTarget({ content_request_id: 'request-version' }), {
+    artifactVersionId: null, directionVersionId: null, contentRequestId: 'request-version',
   })
   assertThrows(() => exactTarget({}), Error, 'exactly one')
   assertThrows(() => exactTarget({ artifact_version_id: 'a', design_direction_version_id: 'd' }), Error, 'exactly one')
+  assertThrows(() => exactTarget({ content_request_id: 'r', artifact_version_id: 'a' }), Error, 'exactly one')
+  assertThrows(() => exactTarget({ design_direction_version_id: 'd', content_request_id: 'r' }), Error, 'exactly one')
 })
 
 Deno.test('comment positions accept regions or normalized visual coordinates only', () => {

@@ -16,9 +16,10 @@ async function invoke(action, input = {}) {
 }
 
 const relationSelect = `
-  id, organization_id, source_artifact_id, target_artifact_id, relation_type, created_by, created_at,
+  id, organization_id, source_artifact_id, target_artifact_id, target_content_request_id, relation_type, created_by, created_at,
   source:artifacts!artifact_relations_source_artifact_fkey(id, title, artifact_type, engagement_id),
-  target:artifacts!artifact_relations_target_artifact_fkey(id, title, artifact_type, engagement_id)
+  target:artifacts!artifact_relations_target_artifact_fkey(id, title, artifact_type, engagement_id),
+  target_request:content_requests!artifact_relations_target_content_request_fkey(id, status, format, brief)
 `
 
 export const artifactRelations = Object.freeze({
@@ -31,6 +32,11 @@ export const artifactRelations = Object.freeze({
     .or(`source_artifact_id.eq.${artifactId},target_artifact_id.eq.${artifactId}`)
     .order('created_at')),
 
+  listForRequest: requestId => dataOrThrow(supabase.from('artifact_relations')
+    .select(relationSelect)
+    .eq('target_content_request_id', requestId)
+    .order('created_at')),
+
   candidates: artifact => dataOrThrow(supabase.from('artifacts')
     .select('id, organization_id, title, artifact_type, engagement_id')
     .eq('organization_id', artifact.organization_id)
@@ -38,14 +44,27 @@ export const artifactRelations = Object.freeze({
     .order('title')
     .limit(250)),
 
+  sourceCandidates: ({ organizationId }) => dataOrThrow(supabase.from('artifacts')
+    .select('id, organization_id, title, artifact_type, engagement_id')
+    .eq('organization_id', organizationId)
+    .order('title')
+    .limit(250)),
+
+  requestCandidates: ({ organizationId }) => dataOrThrow(supabase.from('content_requests')
+    .select('id, organization_id, format, status, brief')
+    .eq('organization_id', organizationId)
+    .order('created_at', { ascending: false })
+    .limit(250)),
+
   releasedDesignSystemVersions: () => dataOrThrow(supabase.from('artifact_approvals')
-    .select('artifact_id, artifact_version_id, artifact_versions!inner(version_number), artifacts!inner(artifact_type)')
+    .select('artifact_id, artifact_versions!inner(version_number), artifacts!inner(artifact_type)')
     .eq('artifacts.artifact_type', 'design_system')
     .order('approved_at', { ascending: false })),
 
-  create: (sourceArtifactId, targetArtifactId, relationType) => invoke('create_relation', {
+  create: (sourceArtifactId, targetArtifactId, relationType, targetContentRequestId = '') => invoke('create_relation', {
     source_artifact_id: sourceArtifactId,
-    target_artifact_id: targetArtifactId,
+    ...(targetArtifactId ? { target_artifact_id: targetArtifactId } : {}),
+    ...(targetContentRequestId ? { target_content_request_id: targetContentRequestId } : {}),
     relation_type: relationType,
   }),
 

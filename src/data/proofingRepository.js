@@ -16,12 +16,14 @@ async function invoke(action, input) {
 function targetInput(targetKind, versionId) {
   if (targetKind === 'artifact') return { artifact_version_id: versionId }
   if (targetKind === 'design_direction') return { design_direction_version_id: versionId }
+  if (targetKind === 'content_request') return { content_request_id: versionId }
   throw new Error('Unsupported proofing target')
 }
 
 export const proofing = Object.freeze({
   async list(targetKind, versionId) {
-    const targetColumn = targetKind === 'artifact' ? 'artifact_version_id' : 'design_direction_version_id'
+    const targetColumn = targetKind === 'artifact' ? 'artifact_version_id' : targetKind === 'design_direction'
+      ? 'design_direction_version_id' : 'content_request_id'
     const comments = await dataOrThrow(supabase.from('artifact_version_comments')
       .select('*').eq(targetColumn, versionId).order('created_at'))
     const userIds = [...new Set(comments.flatMap(item => [item.author_id, item.resolved_by]).filter(Boolean))]
