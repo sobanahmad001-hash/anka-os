@@ -48,6 +48,12 @@ test('DS3 loads and groups flow sessions in the Design Workshop', () => {
   assert.match(ui, /page\?\.slug/)
 })
 
+test('DS3 shows a second Design Workshop session creation action when sessions already exist', () => {
+  assert.match(ui, /session\s*&& <Panel><h2 className="text-xl font-semibold">Compile approved context/)
+  assert.match(ui, /!session\s*\? <Panel><h2 className="text-xl font-semibold">Compile approved context/)
+  assert.match(ui, /createSessionAction/)
+})
+
 test('DS3 leaves direction generation, per-direction generation, and direction schema untouched', () => {
   const scoped = edge.slice(edge.indexOf('async function generateOne'), edge.indexOf('async function createDirectionRevision'))
   assert.match(scoped, /async function generateOne/)
