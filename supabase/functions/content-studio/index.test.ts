@@ -1,6 +1,7 @@
 import { assertEquals, assertThrows } from 'jsr:@std/assert@1.0.14'
 import { brandBriefInput, compiledBrandStatement, customFieldDefinitionInput, hasContentAuthority,
-  figmaHandoffUrl, validateContentRequestInput } from './index.ts'
+  figmaHandoffUrl, validateContentRequestInput, validateQueueEntryInput } from './index.ts'
+
 import { CHAT_CONTENT_ARTIFACT_TYPE_SET, CONTENT_ARTIFACT_TYPES, contentArtifactResponseFormat, validateContentArtifact } from '../_shared/contentArtifacts.ts'
 
 Deno.test('Content authority keeps exact-version approval manager-controlled', () => {
@@ -61,6 +62,32 @@ Deno.test('CP3 creates only a stable authenticated in-app handoff route', () => 
     'https://anka.example/sphere/content/requests/request-1/figma-handoff',
   )
   assertThrows(() => figmaHandoffUrl('request-1', 'ftp://anka.example'), Error, 'HTTP or HTTPS')
+})
+
+Deno.test('CP4 validates brand-scoped plans with the exact CP1 format vocabulary', () => {
+  assertEquals(validateQueueEntryInput({
+    brand_id: 'brand-1', planned_date: '2026-09-12', format: 'reel_carousel',
+    brief_template: 'Launch-week paired assets', linked_event_id: 'event-1',
+  }), {
+    brandId: 'brand-1', plannedDate: '2026-09-12', format: 'reel_carousel',
+    briefTemplate: 'Launch-week paired assets', linkedEventId: 'event-1',
+  })
+  assertEquals(validateQueueEntryInput({
+    brand_id: 'brand-1', planned_date: '2026-09-13', format: 'single_image',
+    brief_template: '',
+  }).briefTemplate, '')
+})
+
+Deno.test('CP4 rejects unbranded, malformed-date, and unknown-format plans', () => {
+  assertThrows(() => validateQueueEntryInput({
+    planned_date: '2026-09-12', format: 'reel',
+  }), Error, 'brand')
+  assertThrows(() => validateQueueEntryInput({
+    brand_id: 'brand-1', planned_date: '12/09/2026', format: 'reel',
+  }), Error, 'planned date')
+  assertThrows(() => validateQueueEntryInput({
+    brand_id: 'brand-1', planned_date: '2026-09-12', format: 'podcast',
+  }), Error, 'format')
 })
 
 Deno.test('eight chat artifacts and the compiled brand statement use strict validation', () => {
