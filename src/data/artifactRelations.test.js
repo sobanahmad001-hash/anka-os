@@ -96,3 +96,11 @@ test('D3 contains no dependency graph or W-series implementation', () => {
   assert.doesNotMatch(d3, /work_items|work_item_dependencies|cycle detection|recursive query/i)
   assert.doesNotMatch(`${migration}\n${edge}`, /artifact_versions|artifact_approvals|artifact_version_comments/)
 })
+
+test('CP5 request-target relation creation keeps exactly one target path', () => {
+  assert.match(panel, /await artifactRelations\.create\(/)
+  assert.equal(panel.includes('const targetArtifactId = isRequestTargetMode'), true)
+  assert.equal(panel.includes('const targetContentRequestId = isRequestTargetMode'), true)
+  assert.equal(panel.includes("targetKind === 'artifact' ? targetId : ''"), false)
+  assert.equal(panel.includes('relationType,') && panel.includes('targetContentRequestId'), true)
+})

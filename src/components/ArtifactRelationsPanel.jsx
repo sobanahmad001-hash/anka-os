@@ -115,6 +115,16 @@ export default function ArtifactRelationsPanel({ artifact, requestContext }) {
     if (!targetId) return
 
     const sourceArtifactId = isRequestTargetMode ? targetId : artifact.id
+    const targetArtifactId = isRequestTargetMode
+      ? ''
+      : targetKind === 'artifact'
+        ? targetId
+        : ''
+    const targetContentRequestId = isRequestTargetMode
+      ? requestContext.id
+      : targetKind === 'content_request'
+        ? targetId
+        : ''
 
     setLoading(true)
     setError('')
@@ -122,11 +132,9 @@ export default function ArtifactRelationsPanel({ artifact, requestContext }) {
     try {
       await artifactRelations.create(
         sourceArtifactId,
-        targetKind === 'artifact' ? targetId : '',
+        targetArtifactId,
         relationType,
-        isRequestTargetMode
-          ? requestContext.id
-          : targetKind === 'content_request' ? targetId : '',
+        targetContentRequestId,
       )
       setTargetId('')
       setSearch('')
