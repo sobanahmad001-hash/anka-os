@@ -18,7 +18,7 @@ alter table public.artifact_version_comments
   );
 
 alter table public.artifact_version_comments
-  add constraint if not exists artifact_version_comments_content_request_target_fkey
+  add constraint artifact_version_comments_content_request_fk
     foreign key (content_request_id, organization_id)
       references public.content_requests(id, organization_id) on delete cascade;
 
@@ -65,11 +65,9 @@ $$;
 
 -- keep existing invocation privileges from the D1 migration for this function path.
 
-alter policy if exists "Team can read exact-version proofing comments"
   on public.artifact_version_comments;
 drop policy if exists "Team can read exact-version proofing comments"
   on public.artifact_version_comments;
-alter policy if exists "Team can read permitted exact-version proofing comments"
   on public.artifact_version_comments;
 drop policy if exists "Team can read permitted exact-version proofing comments"
   on public.artifact_version_comments;
@@ -143,7 +141,6 @@ create index if not exists idx_artifact_relations_target_request
   on public.artifact_relations(organization_id, target_content_request_id, created_at desc)
   where target_content_request_id is not null;
 
-alter policy if exists "Team can read visible artifact relations"
   on public.artifact_relations;
 drop policy if exists "Team can read visible artifact relations"
   on public.artifact_relations;

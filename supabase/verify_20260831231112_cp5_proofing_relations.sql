@@ -22,7 +22,7 @@ insert into cp5_checks values
   ('artifact_version_comments_uses_request_fk', exists (
     select 1 from pg_constraint
     where conrelid = 'public.artifact_version_comments'::regclass
-      and conname = 'artifact_version_comments_content_request_target_fkey'
+      and conname = 'artifact_version_comments_content_request_fk'
       and contype = 'f'
   )),
   ('artifact_version_comments_tracks_exactly_one_target_with_requests', exists (
