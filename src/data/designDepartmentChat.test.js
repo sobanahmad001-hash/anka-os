@@ -10,8 +10,8 @@ const designArtifact = read('supabase/functions/_shared/designSystemArtifacts.ts
 const ui = read('src/apps/DesignSystems.jsx')
 const repository = read('src/data/designSystemsRepository.js')
 
-test('UW1 enables only Design alongside the existing Content Department Chat', () => {
-  assert.match(edge, /ENABLED_DEPARTMENTS = new Set\(\['content', 'design'\]\)/)
+test('UW1 keeps Design alongside Content and reconciled Marketing Department Chat', () => {
+  assert.match(edge, /ENABLED_DEPARTMENTS = new Set\(\['content', 'design', 'marketing'\]\)/)
   assert.match(edge, /CHAT_DESIGN_ARTIFACT_TYPE_SET/)
   assert.doesNotMatch(edge, /departmentId !== 'content'/)
   assert.match(designArtifact, /new Set\(\['design_system'\]\)/)

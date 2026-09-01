@@ -15,6 +15,8 @@ const edge = read('supabase/functions/marketing-studio/index.ts')
 const googleOauth = read('supabase/functions/google-oauth/index.ts')
 const googleTokens = read('supabase/functions/_shared/googleOAuthTokens.ts')
 const ui = read('src/apps/MarketingStudio.jsx')
+const chat = read('supabase/functions/department-chat/index.ts')
+const repository = read('src/data/marketingStudioRepository.js')
 const app = read('src/App.jsx')
 const navigation = read('src/config/environmentNav.js')
 
@@ -70,6 +72,17 @@ test('Marketing Studio is a distinct lazy route while the department queue remai
   assert.match(navigation, /Marketing Workshop/)
   assert.match(navigation, /Marketing Studio/)
   assert.match(ui, /campaigns[\s\S]*artifacts[\s\S]*analytics/)
+})
+
+test('UW2 reuses Shared Department Chat for confirmed Marketing planning drafts only', () => {
+  for (const type of ['channel_strategy', 'campaign_brief', 'measurement_plan']) {
+    assert.match(chat, new RegExp(`'${type}'`))
+  }
+  assert.match(chat, /ENABLED_DEPARTMENTS = new Set\(\['content', 'design', 'marketing'\]\)/)
+  assert.match(ui, /Shared Department Chat/)
+  assert.match(repository, /department-chat/)
+  assert.doesNotMatch(chat.match(/CHAT_MARKETING_ARTIFACT_TYPE_SET = new Set\(\[[\s\S]*?\]\)/)?.[0] || '', /marketing_report/)
+  assert.doesNotMatch(chat, /googleads|googleapis|facebook|instagram|tiktok|wordpress|send_email|\/mutate/i)
 })
 
 test('reporting period defaults to 28 completed days', () => {
