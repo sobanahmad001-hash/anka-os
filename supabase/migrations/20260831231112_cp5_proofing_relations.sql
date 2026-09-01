@@ -70,6 +70,7 @@ drop policy if exists "Team can read exact-version proofing comments"
 drop policy if exists "Team can read permitted exact-version proofing comments"
   on public.artifact_version_comments;
 create policy "Team can read permitted exact-version proofing comments"
+  for select to authenticated
 on public.artifact_version_comments
   using (
     public.is_team_organization_member(organization_id)
@@ -97,6 +98,9 @@ on public.artifact_version_comments
 
 alter table public.artifact_relations
   add column if not exists target_content_request_id uuid;
+alter table public.artifact_relations
+  alter column target_artifact_id drop not null;
+
 
 alter table public.artifact_relations
   drop constraint if exists artifact_relations_distinct_artifacts_check;
