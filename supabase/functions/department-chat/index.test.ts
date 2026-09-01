@@ -1,10 +1,15 @@
 import { assertEquals } from 'jsr:@std/assert@1.0.14'
 import {
+  CHAT_MARKETING_ARTIFACT_TYPE_SET,
   ENABLED_DEPARTMENTS,
   createDesignArtifactVersion,
+  createMarketingArtifactVersion,
   departmentChatExternalEndpoint,
   hasDepartmentChatAuthority,
+  isDepartmentChatArtifactType,
+  marketingArtifactResponseFormat,
   outputText,
+  proposeArtifact,
   requireDepartmentEngagement,
 } from './index.ts'
 import {
@@ -20,10 +25,14 @@ Deno.test('Shared Department Chat is department-scoped', () => {
   assertEquals(hasDepartmentChatAuthority({ role: 'contributor', department_id: 'design' }, 'design'), true)
 })
 
-Deno.test('Shared Department Chat enables only Content and Design', () => {
-  assertEquals([...ENABLED_DEPARTMENTS].sort(), ['content', 'design'])
+Deno.test('Shared Department Chat enables Content, Design, and confirmed Marketing planning drafts', () => {
+  assertEquals([...ENABLED_DEPARTMENTS].sort(), ['content', 'design', 'marketing'])
   assertEquals(CHAT_DESIGN_ARTIFACT_TYPE_SET.has('design_system'), true)
   assertEquals(CHAT_DESIGN_ARTIFACT_TYPE_SET.has('design_direction'), false)
+  assertEquals([...CHAT_MARKETING_ARTIFACT_TYPE_SET].sort(), ['campaign_brief', 'channel_strategy', 'measurement_plan'])
+  assertEquals(CHAT_MARKETING_ARTIFACT_TYPE_SET.has('marketing_report'), false)
+  assertEquals(isDepartmentChatArtifactType('marketing', 'measurement_plan'), true)
+  assertEquals(marketingArtifactResponseFormat('measurement_plan').schema.required, ['business_objectives', 'kpis', 'conversions', 'tracking_requirements', 'reporting_cadence'])
 })
 
 Deno.test('Design chat output is the same structured Design System draft accepted by the library', () => {
@@ -95,6 +104,56 @@ Deno.test('Design chat draft persists a canonical immutable version and no appro
   assertEquals(calls[1].value?.ai_use_allowed, false)
   assertEquals(calls[1].value?.data_classification, 'internal')
   assertEquals(calls.some(call => call.table === 'artifact_approvals'), false)
+})
+
+Deno.test('Marketing chat creates an internal, unapproved immutable artifact version', async () => {
+  const writes: Array<{ table: string, value: Record<string, unknown> }> = []
+  const admin = { from(table: string) {
+    const query: any = {
+      insert: (value: Record<string, unknown>) => { writes.push({ table, value }); return query }, select: () => query,
+      single: async () => ({ data: table === 'artifacts' ? { id: 'marketing-artifact' } : { id: 'marketing-version', version_number: 1 }, error: null }),
+      eq: () => query, order: () => query, limit: () => query, maybeSingle: async () => ({ data: null, error: null }),
+    }; return query
+  } }
+  const content = { business_objectives: ['Leads'], kpis: ['MQLs'], conversions: ['Demo'], tracking_requirements: ['GA4'], reporting_cadence: 'Weekly' }
+  const result = await createMarketingArtifactVersion(admin as any, { engagement: { id: 'engagement', brand_id: 'brand' }, artifactId: null, artifactType: 'measurement_plan', title: 'Plan', content, changeSummary: 'Initial draft', actorId: 'member', aiRunId: 'run' })
+  assertEquals(result.artifact_id, 'marketing-artifact')
+  const version = writes.find(write => write.table === 'artifact_versions')?.value
+  assertEquals(version?.content, content)
+  assertEquals(version?.ai_use_allowed, false)
+  assertEquals(version?.data_classification, 'internal')
+  assertEquals(writes.find(write => write.table === 'engagement_events')?.value.event_type, 'artifact_draft_proposed_via_chat')
+  assertEquals(writes.some(write => write.table === 'artifact_approvals'), false)
+})
+
+Deno.test('Marketing proposal completes with only an isolated Marketing service and empty upstream context', async () => {
+  const runWrites: Record<string, unknown>[] = []; let requestBody: Record<string, unknown> | null = null; let savedInput: Record<string, unknown> | null = null
+  const admin = { from(table: string) {
+    let inserting = false
+    const query: any = {
+      select: () => query, eq: () => query, gte: () => query,
+      single: async () => table === 'organizations' ? { data: { settings: {} }, error: null } : { data: { id: 'marketing-run' }, error: null },
+      insert: (value: Record<string, unknown>) => { inserting = true; if (table === 'ai_runs') runWrites.push(value); return query },
+      then: (resolve: (value: unknown) => unknown) => resolve({ count: table === 'ai_runs' && !inserting ? 0 : null, data: null, error: null }),
+    }; return query
+  } }
+  const content = { business_objectives: ['Leads'], kpis: ['MQLs'], conversions: ['Demo'], tracking_requirements: ['GA4'], reporting_cadence: 'Weekly' }
+  const result = await proposeArtifact({} as any, admin as any, { department_id: 'marketing', engagement_id: 'marketing-engagement', artifact_type: 'measurement_plan', prompt: 'Create the plan', prompt_safe_for_ai: true }, 'member', async (_url, init) => {
+    requestBody = JSON.parse(String(init?.body)); return new Response(JSON.stringify({ output_text: JSON.stringify(content), usage: { input_tokens: 10, output_tokens: 20 } }))
+  }, {
+    requireDepartmentEngagement: (async () => ({ engagement: { id: 'marketing-engagement', brand_id: 'brand' }, services: [{ id: 'marketing-service', service_catalog: { department_id: 'marketing' } }] })) as any,
+    safeStage: (async () => null) as any, approvedSafeContext: (async () => []) as any,
+    resolveSingleOpenAiModel: (async () => ({ connectorId: 'marketing-connector', credential: 'test-key', model: 'test-model' })) as any,
+    estimatedCost: () => null,
+    createMarketingArtifactVersion: (async (_admin: unknown, input: unknown) => { savedInput = input as Record<string, unknown>; return { artifact_id: 'marketing-artifact', version: { id: 'marketing-version' }, warnings: [] } }) as any,
+  })
+  const saved = savedInput as unknown as Record<string, unknown>; const request = requestBody as unknown as Record<string, unknown>
+  assertEquals(result.artifact_id, 'marketing-artifact')
+  assertEquals(saved.artifactType, 'measurement_plan')
+  assertEquals(saved.content, content)
+  assertEquals(runWrites[0].context_manifest, { purpose: 'marketing_artifact_draft', department_id: 'marketing', artifact_type: 'measurement_plan', connector_connection_id: 'marketing-connector', approved_artifact_version_ids: [] })
+  assertEquals((request.text as Record<string, unknown>).format, marketingArtifactResponseFormat('measurement_plan'))
+  assertEquals(String(request.instructions).includes('"approved_artifacts":[]'), true)
 })
 
 Deno.test('Shared Department Chat has one external allowlisted model endpoint', () => {

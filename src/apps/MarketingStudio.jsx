@@ -22,6 +22,7 @@ import {
   filterBacklinkTargets,
 } from '../data/backlinkOutreach.js'
 import { marketingStudio } from '../data/marketingStudioRepository.js'
+import DepartmentChat from '../components/DepartmentChat.jsx'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'
@@ -140,7 +141,7 @@ export default function MarketingStudio() {
         </section>
 
         <nav className="flex gap-2 overflow-x-auto border-b border-slate-800">
-          {[['campaigns', 'Campaigns'], ['ad-tracking', 'Ad campaign tracking'], ['backlinks', 'Backlink outreach'], ['artifacts', 'Artifacts'], ['analytics', 'Live analytics']].map(([id, label]) => (
+          {[['campaigns', 'Campaigns'], ['ad-tracking', 'Ad campaign tracking'], ['backlinks', 'Backlink outreach'], ['artifacts', 'Artifacts'], ['chat', 'Shared Department Chat'], ['analytics', 'Live analytics']].map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-emerald-400 text-emerald-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>
           ))}
         </nav>
@@ -155,6 +156,8 @@ export default function MarketingStudio() {
           <AdCampaignTracking workspace={workspace} saving={saving} act={act} />
         ) : tab === 'artifacts' ? (
           <Artifacts workspace={workspace} campaign={selectedCampaign} saving={saving} act={act} setTab={setTab} onRefresh={() => loadWorkspace(engagementId, campaignId)} />
+        ) : tab === 'chat' ? (
+          <DepartmentChat departmentId="marketing" engagement={workspace.engagement} artifactTypes={['channel_strategy', 'campaign_brief', 'measurement_plan']} artifactDefinitions={MARKETING_ARTIFACT_FORMS} artifactForType={artifactType => workspace.artifacts.find(item => item.artifact_type === artifactType)} stageForType={() => null} onPropose={marketingStudio.proposeArtifact} onCreated={() => loadWorkspace(engagementId, campaignId)} />
         ) : (
           <Analytics engagementId={engagementId} />
         )}

@@ -83,6 +83,15 @@ export const marketingStudio = Object.freeze({
   deleteAdKeyword: (engagementId, keywordId) => invoke('delete_ad_keyword', { engagement_id: engagementId, keyword_id: keywordId }),
   importAdPerformance: (engagementId, adCampaignId, snapshotDate) => invoke('import_ad_campaign_performance', { engagement_id: engagementId, ad_campaign_id: adCampaignId, snapshot_date: snapshotDate }),
   saveArtifact: input => invoke('save_artifact', input),
+  proposeArtifact: input => {
+    const { engagement_stage_instance_id: _ignoredStage, ...body } = input
+    return supabase.functions.invoke('department-chat', { body: { action: 'propose_artifact', department_id: 'marketing', ...body } })
+      .then(({ data, error }) => {
+        if (error) throw new Error(error.message || 'Department Chat function failed')
+        if (data?.error) throw new Error(data.error)
+        return data?.data
+      })
+  },
   approveArtifact: (artifactVersionId, notes = '') => invoke('approve_artifact', { artifact_version_id: artifactVersionId, notes }),
   analytics: (engagementId, startDate, endDate) => invoke('analytics_dashboard', {
     engagement_id: engagementId, start_date: startDate, end_date: endDate,
