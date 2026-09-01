@@ -70,8 +70,8 @@ drop policy if exists "Team can read exact-version proofing comments"
 drop policy if exists "Team can read permitted exact-version proofing comments"
   on public.artifact_version_comments;
 create policy "Team can read permitted exact-version proofing comments"
+  on public.artifact_version_comments
   for select to authenticated
-on public.artifact_version_comments
   using (
     public.is_team_organization_member(organization_id)
     and (
