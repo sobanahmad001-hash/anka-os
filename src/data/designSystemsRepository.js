@@ -13,9 +13,18 @@ async function invoke(action, input = {}) {
   return data?.data
 }
 
+async function proposeDepartmentArtifact(input) {
+  const { data, error } = await supabase.functions.invoke('department-chat', {
+    body: { action: 'propose_artifact', department_id: 'design', ...input },
+  })
+  if (error) throw new Error(error.message || 'Department Chat failed')
+  if (data?.error) throw new Error(data.error)
+  return data?.data
+}
+
 export const designSystems = Object.freeze({
   async loadLibrary() {
-    const [services, artifacts, versions, approvals] = await Promise.all([
+    const [services, artifacts, versions, approvals, stages] = await Promise.all([
       dataOrThrow(supabase.from('engagement_services')
         .select('id, engagement_id, status, engagements!inner(id, name, brand_id, status, brands(name), agency_clients(name)), service_catalog!inner(id, name, slug, department_id, is_active)')
         .eq('status', 'active').eq('service_catalog.slug', 'design_systems')
@@ -30,8 +39,11 @@ export const designSystems = Object.freeze({
       dataOrThrow(supabase.from('artifact_approvals')
         .select('*, artifacts!inner(artifact_type)').eq('artifacts.artifact_type', 'design_system')
         .order('approved_at')),
+      dataOrThrow(supabase.from('engagement_stage_instances')
+        .select('id, engagement_id, accountable_department_id, status')
+        .eq('accountable_department_id', 'design').neq('status', 'cancelled')),
     ])
-    return { services, artifacts, versions, approvals }
+    return { services, artifacts, versions, approvals, stages }
   },
 
   save: input => invoke('save_design_system', input),
@@ -40,4 +52,5 @@ export const designSystems = Object.freeze({
     engagement_service_id: engagementServiceId,
     notes,
   }),
+  proposeArtifact: input => proposeDepartmentArtifact(input),
 })
