@@ -124,7 +124,6 @@ alter table public.artifact_relations
     foreign key (target_content_request_id, organization_id)
       references public.content_requests(id, organization_id) on delete cascade;
 
-drop index if exists artifact_relations_unique_link;
 alter table public.artifact_relations
   drop constraint if exists artifact_relations_unique_link;
 create unique index if not exists artifact_relations_unique_artifact_link
