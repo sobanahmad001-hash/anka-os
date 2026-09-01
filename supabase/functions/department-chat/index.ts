@@ -358,7 +358,8 @@ ${JSON.stringify({ engagement, active_department_services: services, approved_ar
       content, changeSummary: text(body.change_summary, 1000) || 'Draft proposed via Shared Department Chat',
       aiUseAllowed: false, dataClassification: 'internal', actorId,
       source: 'department_chat', aiRunId: run.id, visibilityClient: userClient,
-    }) : await (dependencies.createMarketingArtifactVersion || createMarketingArtifactVersion)(admin, {
+    })
+    : await (dependencies.createMarketingArtifactVersion || createMarketingArtifactVersion)(admin, {
       engagement, artifactId: text(body.artifact_id, 80) || null, artifactType,
       title: text(body.title, 240) || `${artifactType.replaceAll('_', ' ')} chat draft`, content,
       changeSummary: text(body.change_summary, 1000) || 'Draft proposed via Shared Department Chat', actorId, aiRunId: run.id,

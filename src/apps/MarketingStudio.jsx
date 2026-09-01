@@ -22,7 +22,7 @@ import {
   filterBacklinkTargets,
 } from '../data/backlinkOutreach.js'
 import { marketingStudio } from '../data/marketingStudioRepository.js'
-import DepartmentChat from '../components/DepartmentChat.jsx'
+import DepartmentChat from '../components/DepartmentChat.jsx' // eslint-disable-line no-unused-vars
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'

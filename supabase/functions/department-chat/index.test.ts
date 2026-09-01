@@ -110,24 +110,33 @@ Deno.test('Marketing chat creates an internal, unapproved immutable artifact ver
   const writes: Array<{ table: string, value: Record<string, unknown> }> = []
   const admin = { from(table: string) {
     const query: any = {
-      insert: (value: Record<string, unknown>) => { writes.push({ table, value }); return query }, select: () => query,
-      single: async () => ({ data: table === 'artifacts' ? { id: 'marketing-artifact' } : { id: 'marketing-version', version_number: 1 }, error: null }),
+      insert: (value: Record<string, unknown>) => { writes.push({ table, value }); return query },
+      select: () => query, single: async () => ({ data: table === 'artifacts' ? { id: 'marketing-artifact' } : { id: 'marketing-version', version_number: 1 }, error: null }),
       eq: () => query, order: () => query, limit: () => query, maybeSingle: async () => ({ data: null, error: null }),
-    }; return query
+    }
+    return query
   } }
-  const content = { business_objectives: ['Leads'], kpis: ['MQLs'], conversions: ['Demo'], tracking_requirements: ['GA4'], reporting_cadence: 'Weekly' }
-  const result = await createMarketingArtifactVersion(admin as any, { engagement: { id: 'engagement', brand_id: 'brand' }, artifactId: null, artifactType: 'measurement_plan', title: 'Plan', content, changeSummary: 'Initial draft', actorId: 'member', aiRunId: 'run' })
+  const content = { business_objectives: ['Increase qualified leads'], kpis: ['MQLs'], conversions: ['Demo request'], tracking_requirements: ['GA4 event'], reporting_cadence: 'Weekly' }
+  const result = await createMarketingArtifactVersion(admin as any, { engagement: { id: 'engagement', brand_id: 'brand' }, artifactId: null, artifactType: 'measurement_plan', title: 'Q4 measurement plan', content, changeSummary: 'Initial draft', actorId: 'member', aiRunId: 'run' })
   assertEquals(result.artifact_id, 'marketing-artifact')
+  const artifact = writes.find(write => write.table === 'artifacts')?.value
   const version = writes.find(write => write.table === 'artifact_versions')?.value
+  const event = writes.find(write => write.table === 'engagement_events')?.value
+  assertEquals(artifact?.artifact_type, 'measurement_plan')
   assertEquals(version?.content, content)
+  assertEquals(version?.version_number, 1)
+  assertEquals(version?.parent_version_id, null)
   assertEquals(version?.ai_use_allowed, false)
   assertEquals(version?.data_classification, 'internal')
-  assertEquals(writes.find(write => write.table === 'engagement_events')?.value.event_type, 'artifact_draft_proposed_via_chat')
+  assertEquals(event?.event_type, 'artifact_draft_proposed_via_chat')
+  assertEquals((event?.payload as Record<string, unknown>).action, 'draft_proposed_via_chat')
   assertEquals(writes.some(write => write.table === 'artifact_approvals'), false)
 })
 
 Deno.test('Marketing proposal completes with only an isolated Marketing service and empty upstream context', async () => {
-  const runWrites: Record<string, unknown>[] = []; let requestBody: Record<string, unknown> | null = null; let savedInput: Record<string, unknown> | null = null
+  const runWrites: Record<string, unknown>[] = []
+  let requestBody: Record<string, unknown> | null = null
+  let savedInput: Record<string, unknown> | null = null
   const admin = { from(table: string) {
     let inserting = false
     const query: any = {
@@ -135,11 +144,13 @@ Deno.test('Marketing proposal completes with only an isolated Marketing service 
       single: async () => table === 'organizations' ? { data: { settings: {} }, error: null } : { data: { id: 'marketing-run' }, error: null },
       insert: (value: Record<string, unknown>) => { inserting = true; if (table === 'ai_runs') runWrites.push(value); return query },
       then: (resolve: (value: unknown) => unknown) => resolve({ count: table === 'ai_runs' && !inserting ? 0 : null, data: null, error: null }),
-    }; return query
+    }
+    return query
   } }
-  const content = { business_objectives: ['Leads'], kpis: ['MQLs'], conversions: ['Demo'], tracking_requirements: ['GA4'], reporting_cadence: 'Weekly' }
-  const result = await proposeArtifact({} as any, admin as any, { department_id: 'marketing', engagement_id: 'marketing-engagement', artifact_type: 'measurement_plan', prompt: 'Create the plan', prompt_safe_for_ai: true }, 'member', async (_url, init) => {
-    requestBody = JSON.parse(String(init?.body)); return new Response(JSON.stringify({ output_text: JSON.stringify(content), usage: { input_tokens: 10, output_tokens: 20 } }))
+  const content = { business_objectives: ['Increase qualified leads'], kpis: ['MQLs'], conversions: ['Demo request'], tracking_requirements: ['GA4 event'], reporting_cadence: 'Weekly' }
+  const result = await proposeArtifact({} as any, admin as any, { department_id: 'marketing', engagement_id: 'marketing-engagement', artifact_type: 'measurement_plan', prompt: 'Create the initial plan', prompt_safe_for_ai: true }, 'member', async (_url: string | URL | Request, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body))
+    return new Response(JSON.stringify({ output_text: JSON.stringify(content), usage: { input_tokens: 10, output_tokens: 20 } }))
   }, {
     requireDepartmentEngagement: (async () => ({ engagement: { id: 'marketing-engagement', brand_id: 'brand' }, services: [{ id: 'marketing-service', service_catalog: { department_id: 'marketing' } }] })) as any,
     safeStage: (async () => null) as any, approvedSafeContext: (async () => []) as any,
@@ -147,13 +158,17 @@ Deno.test('Marketing proposal completes with only an isolated Marketing service 
     estimatedCost: () => null,
     createMarketingArtifactVersion: (async (_admin: unknown, input: unknown) => { savedInput = input as Record<string, unknown>; return { artifact_id: 'marketing-artifact', version: { id: 'marketing-version' }, warnings: [] } }) as any,
   })
-  const saved = savedInput as unknown as Record<string, unknown>; const request = requestBody as unknown as Record<string, unknown>
   assertEquals(result.artifact_id, 'marketing-artifact')
+  assertEquals(result.content, content)
+  const saved = savedInput as unknown as Record<string, unknown>
+  const request = requestBody as unknown as Record<string, unknown>
   assertEquals(saved.artifactType, 'measurement_plan')
   assertEquals(saved.content, content)
+  assertEquals(saved.aiRunId, 'marketing-run')
   assertEquals(runWrites[0].context_manifest, { purpose: 'marketing_artifact_draft', department_id: 'marketing', artifact_type: 'measurement_plan', connector_connection_id: 'marketing-connector', approved_artifact_version_ids: [] })
   assertEquals((request.text as Record<string, unknown>).format, marketingArtifactResponseFormat('measurement_plan'))
   assertEquals(String(request.instructions).includes('"approved_artifacts":[]'), true)
+  assertEquals(String(request.instructions).includes('marketing-service'), true)
 })
 
 Deno.test('Shared Department Chat has one external allowlisted model endpoint', () => {
