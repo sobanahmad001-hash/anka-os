@@ -20,6 +20,13 @@ async function invokePageDesigns(action, input = {}) {
   return data?.data
 }
 
+async function invokeWordPressExport(action, input = {}) {
+  const { data, error } = await supabase.functions.invoke('wordpress-export', { body: { action, ...input } })
+  if (error) throw new Error(error.message || 'WordPress export function failed')
+  if (data?.error) throw new Error(data.error)
+  return data?.data
+}
+
 export const designWorkshop = Object.freeze({
   async listEngagements() {
     return dataOrThrow(supabase.from('engagements')
@@ -75,6 +82,11 @@ export const designWorkshop = Object.freeze({
             .in('source_direction_version_id', visibleDirectionVersionIds).order('created_at', { ascending: false })),
         ])
       : [[], [], []]
+    const wordpressExportJobs = pageDesigns.length
+      ? await dataOrThrow(supabase.from('wordpress_export_jobs').select('*')
+        .in('website_page_design_id', pageDesigns.map(item => item.id))
+        .order('requested_at', { ascending: false }))
+      : []
     const readyImageIds = mediaAssets.filter(item => item.media_type === 'image' && item.status === 'ready').map(item => item.id)
     const signedMedia = readyImageIds.length
       ? await invoke('sign_media_assets', { asset_ids: readyImageIds })
@@ -91,6 +103,7 @@ export const designWorkshop = Object.freeze({
       variants,
       mediaUrlExpiresIn: signedMedia?.expires_in || 300,
       pageDesigns,
+      wordpressExportJobs,
       architecturePages: Array.isArray(architectureVersion?.content?.pages) ? architectureVersion.content.pages : [],
     }
   },
@@ -128,5 +141,11 @@ export const designWorkshop = Object.freeze({
   }),
   approvePageDesign: websitePageDesignId => invokePageDesigns('approve', {
     website_page_design_id: websitePageDesignId,
+  }),
+  exportPageDesign: websitePageDesignId => invokeWordPressExport('export', {
+    website_page_design_id: websitePageDesignId,
+  }),
+  getWordPressExportDownload: wordpressExportJobId => invokeWordPressExport('get_download', {
+    wordpress_export_job_id: wordpressExportJobId,
   }),
 })

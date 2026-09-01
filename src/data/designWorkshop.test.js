@@ -84,6 +84,6 @@ test('selection and release are separate human actions with exact-version audit'
 })
 
 test('out-of-scope product verticals are not imported into the workshop', () => {
-  assert.doesNotMatch(ui, /AnkaSpherePortal|WordPress|campaign publishing|Marketing Studio/)
+  assert.doesNotMatch(ui, /AnkaSpherePortal|campaign publishing|Marketing Studio/)
   assert.doesNotMatch(edge, /portal|wordpress|google_ads|publish/)
 })
