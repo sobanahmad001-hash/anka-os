@@ -1,5 +1,5 @@
 import { assertEquals, assertThrows } from 'jsr:@std/assert@1.0.14'
-import { brandBriefInput, compiledBrandStatement, customFieldDefinitionInput, hasContentAuthority,
+import { brandBriefInput, compiledBrandStatement, customFieldDefinitionInput, handleRequest, hasContentAuthority,
   figmaHandoffUrl, validateContentRequestInput, validateQueueEntryInput } from './index.ts'
 
 import { CHAT_CONTENT_ARTIFACT_TYPE_SET, CONTENT_ARTIFACT_TYPES, contentArtifactResponseFormat, validateContentArtifact } from '../_shared/contentArtifacts.ts'
@@ -162,4 +162,80 @@ Deno.test('D5 rejects invalid custom-field definitions before the database call'
   assertThrows(() => customFieldDefinitionInput({
     artifact_type: 'content', name: 'keyword', field_type: 'text', options: ['unexpected'],
   }), Error, 'Only select')
+})
+
+function isolatedContentServerPath() {
+  const writes: Record<string, Array<Record<string, unknown>>> = {}
+  const tables: string[] = []
+  const organizationId = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
+  class Query {
+    inserted: Record<string, unknown> | null = null
+    constructor(private table: string) {}
+    select() { return this }
+    eq() { return this }
+    order() { return this }
+    limit() { return this }
+    insert(value: Record<string, unknown>) {
+      this.inserted = value
+      writes[this.table] = [...(writes[this.table] || []), value]
+      return this
+    }
+    async maybeSingle() {
+      if (this.table === 'organization_memberships') {
+        return { data: { organization_id: organizationId, role: 'contributor', department_id: 'content', status: 'active', member_kind: 'team' }, error: null }
+      }
+      if (this.table === 'engagements') {
+        return { data: { id: 'content-engagement', organization_id: organizationId, brand_id: 'content-brand', name: 'Content only', status: 'active' }, error: null }
+      }
+      return { data: null, error: null }
+    }
+    async single() {
+      const id = this.table === 'artifacts' ? 'website-content-artifact' : 'website-content-version'
+      return { data: { id, ...this.inserted }, error: null }
+    }
+    then(resolve: (value: unknown) => unknown) {
+      const data = this.table === 'engagement_services'
+        ? [{ id: 'website-content-service', status: 'active', service_catalog: { slug: 'website_content', department_id: 'content' } }]
+        : this.inserted ? [this.inserted] : []
+      return Promise.resolve(resolve({ data, error: null }))
+    }
+  }
+  const admin = { from: (table: string) => { tables.push(table); return new Query(table) } }
+  let clientCount = 0
+  const factory = () => clientCount++ === 0
+    ? { auth: { getUser: async () => ({ data: { user: { id: 'content-actor' } }, error: null }) } }
+    : admin
+  return { factory: factory as never, writes, tables }
+}
+
+Deno.test('UW4 Content saves the website_content service artifact with no brand statement or upstream artifacts', async () => {
+  const path = isolatedContentServerPath()
+  const request = new Request('https://functions.example/content-studio', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer caller-jwt', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'save_artifact', engagement_id: 'content-engagement', artifact_type: 'content',
+      title: 'Website content', change_summary: 'Initial isolated-service website content.',
+      data_classification: 'internal', ai_use_allowed: false,
+      content: {
+        content_strategy: 'Explain the service clearly and invite a consultation.',
+        pages: [{
+          page_path: '/', page_brief: 'Homepage value proposition.', draft_copy: 'Clear expertise for complex work.',
+          meta_title: 'Content only engagement', meta_description: 'A standalone Content service.', primary_cta: 'Book a consultation',
+        }],
+      },
+    }),
+  })
+  const response = await handleRequest(request, {
+    createClient: path.factory,
+    environment: { supabaseUrl: 'https://project.supabase.co', publishableKey: 'publishable', secretKey: 'secret' },
+  })
+  const body = await response.json() as { data?: { artifact_id?: string } }
+  assertEquals(response.status, 200)
+  assertEquals(body.data?.artifact_id, 'website-content-artifact')
+  assertEquals(path.writes.artifacts?.[0]?.artifact_type, 'content')
+  assertEquals(path.writes.artifact_versions?.length, 1)
+  assertEquals(path.writes.engagement_events?.length, 1)
+  assertEquals(path.tables.includes('brand_briefs'), false)
+  assertEquals(path.tables.includes('artifact_approvals'), false)
 })

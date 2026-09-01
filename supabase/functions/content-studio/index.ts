@@ -179,15 +179,24 @@ export function customFieldDefinitionInput(body: Json) {
   return { artifactType, name, fieldType, options: options.length ? options : null }
 }
 
-async function requireContext(request: Request) {
+type RequestDependencies = {
+  createClient?: typeof createClient
+  environment?: { supabaseUrl: string; publishableKey: string; secretKey: string }
+}
+
+async function requireContext(
+  request: Request,
+  clientFactory: typeof createClient = createClient,
+  environment?: RequestDependencies['environment'],
+) {
   const authorization = request.headers.get('Authorization') || ''
   if (!authorization.startsWith('Bearer ')) throw Object.assign(new Error('Authentication required'), { status: 401 })
-  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
-  const publishableKey = namedKey('SUPABASE_PUBLISHABLE_KEYS', 'SUPABASE_ANON_KEY')
-  const secretKey = namedKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY')
+  const supabaseUrl = environment?.supabaseUrl ?? Deno.env.get('SUPABASE_URL') ?? ''
+  const publishableKey = environment?.publishableKey ?? namedKey('SUPABASE_PUBLISHABLE_KEYS', 'SUPABASE_ANON_KEY')
+  const secretKey = environment?.secretKey ?? namedKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY')
   if (!supabaseUrl || !publishableKey || !secretKey) throw new Error('Function environment is incomplete')
-  const userClient = createClient(supabaseUrl, publishableKey, { global: { headers: { Authorization: authorization } } })
-  const admin = createClient(supabaseUrl, secretKey, { auth: { persistSession: false, autoRefreshToken: false } })
+  const userClient = clientFactory(supabaseUrl, publishableKey, { global: { headers: { Authorization: authorization } } })
+  const admin = clientFactory(supabaseUrl, secretKey, { auth: { persistSession: false, autoRefreshToken: false } })
   const { data: { user }, error } = await userClient.auth.getUser()
   if (error || !user) throw Object.assign(new Error('Authentication required'), { status: 401 })
   const { data: membership } = await admin.from('organization_memberships')
@@ -462,11 +471,16 @@ async function saveCustomFieldValue(admin: Client, body: Json, actorId: string) 
   return data
 }
 
-export async function handleRequest(request: Request) {
+export async function handleRequest(
+  request: Request,
+  dependencies: RequestDependencies = {},
+) {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (request.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
   try {
-    const { userClient, admin, user, membership } = await requireContext(request)
+    const { userClient, admin, user, membership } = await requireContext(
+      request, dependencies.createClient, dependencies.environment,
+    )
     const body = await request.json() as Json
     const action = text(body.action, 60)
     if (!hasContentAuthority(membership, action)) {
@@ -508,4 +522,4 @@ export async function handleRequest(request: Request) {
   }
 }
 
-if (import.meta.main) Deno.serve(handleRequest)
+if (import.meta.main) Deno.serve(request => handleRequest(request))

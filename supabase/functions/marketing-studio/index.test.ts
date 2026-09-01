@@ -192,3 +192,73 @@ Deno.test('MK3 snapshot reader issues one reporting-only query and maps provider
   assertEquals(/segments\.date = '2026-08-30'/.test(body), true)
   assertEquals(/mutate|create|update|remove|pause|enable/i.test(calls[0].url + body), false)
 })
+
+function isolatedMarketingServerPath() {
+  const writes: Record<string, Array<Record<string, unknown>>> = {}
+  const tables: string[] = []
+  const organizationId = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
+  class Query {
+    inserted: Record<string, unknown> | null = null
+    constructor(private table: string) {}
+    select() { return this }
+    eq() { return this }
+    order() { return this }
+    limit() { return this }
+    insert(value: Record<string, unknown>) {
+      this.inserted = value
+      writes[this.table] = [...(writes[this.table] || []), value]
+      return this
+    }
+    async maybeSingle() {
+      if (this.table === 'organization_memberships') {
+        return { data: { organization_id: organizationId, role: 'contributor', department_id: 'marketing', status: 'active', member_kind: 'team' }, error: null }
+      }
+      if (this.table === 'engagements') {
+        return { data: { id: 'marketing-engagement', organization_id: organizationId, brand_id: 'marketing-brand', name: 'Marketing only', status: 'active' }, error: null }
+      }
+      return { data: null, error: null }
+    }
+    async single() {
+      return { data: { id: 'standalone-campaign', ...this.inserted }, error: null }
+    }
+    then(resolve: (value: unknown) => unknown) {
+      const data = this.table === 'engagement_services'
+        ? [{ id: 'campaign-service', status: 'active', service_catalog: { slug: 'campaigns', department_id: 'marketing' } }]
+        : this.inserted ? [this.inserted] : []
+      return Promise.resolve(resolve({ data, error: null }))
+    }
+  }
+  const admin = { from: (table: string) => { tables.push(table); return new Query(table) } }
+  let clientCount = 0
+  const factory = () => clientCount++ === 0
+    ? { auth: { getUser: async () => ({ data: { user: { id: 'marketing-actor' } }, error: null }) } }
+    : admin
+  return { factory: factory as never, writes, tables }
+}
+
+Deno.test('UW4 Marketing creates a campaign with only the active campaigns service and no upstream artifacts', async () => {
+  const path = isolatedMarketingServerPath()
+  const request = new Request('https://functions.example/marketing-studio', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer caller-jwt', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'create_campaign', engagement_id: 'marketing-engagement',
+      campaign: {
+        name: 'Standalone launch', objective: 'Generate qualified consultation requests.',
+        planned_channels: ['email', 'search'], planned_budget: 1200, currency_code: 'USD', status: 'draft',
+      },
+    }),
+  })
+  const response = await handleRequest(request, {
+    createClient: path.factory,
+    environment: { supabaseUrl: 'https://project.supabase.co', publishableKey: 'publishable', secretKey: 'secret' },
+  })
+  const body = await response.json() as { data?: { id?: string } }
+  assertEquals(response.status, 200)
+  assertEquals(body.data?.id, 'standalone-campaign')
+  assertEquals(path.writes.marketing_campaigns?.[0]?.engagement_id, 'marketing-engagement')
+  assertEquals(path.writes.marketing_campaigns?.[0]?.brand_id, 'marketing-brand')
+  assertEquals(path.writes.engagement_events?.length, 1)
+  assertEquals(path.tables.includes('artifacts'), false)
+  assertEquals(path.tables.includes('marketing_campaign_artifacts'), false)
+})
