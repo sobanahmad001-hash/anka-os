@@ -168,11 +168,16 @@ function isolatedContentServerPath() {
   const writes: Record<string, Array<Record<string, unknown>>> = {}
   const tables: string[] = []
   const organizationId = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
+  const artifactTypeReads: string[] = []
+  const activeServices = [{ id: 'website-content-service', status: 'active', service_catalog: { slug: 'website_content', department_id: 'content' } }]
   class Query {
     inserted: Record<string, unknown> | null = null
     constructor(private table: string) {}
     select() { return this }
-    eq() { return this }
+    eq(column: string, value: unknown) {
+      if (this.table === 'artifacts' && column === 'artifact_type') artifactTypeReads.push(String(value))
+      return this
+    }
     order() { return this }
     limit() { return this }
     insert(value: Record<string, unknown>) {
@@ -195,7 +200,7 @@ function isolatedContentServerPath() {
     }
     then(resolve: (value: unknown) => unknown) {
       const data = this.table === 'engagement_services'
-        ? [{ id: 'website-content-service', status: 'active', service_catalog: { slug: 'website_content', department_id: 'content' } }]
+        ? activeServices
         : this.inserted ? [this.inserted] : []
       return Promise.resolve(resolve({ data, error: null }))
     }
@@ -205,10 +210,10 @@ function isolatedContentServerPath() {
   const factory = () => clientCount++ === 0
     ? { auth: { getUser: async () => ({ data: { user: { id: 'content-actor' } }, error: null }) } }
     : admin
-  return { factory: factory as never, writes, tables }
+  return { factory: factory as never, writes, tables, artifactTypeReads, activeServices }
 }
 
-Deno.test('UW4 Content saves the website_content service artifact with no brand statement or upstream artifacts', async () => {
+Deno.test('UW4 Content saves website content with only its active service and no upstream artifacts', async () => {
   const path = isolatedContentServerPath()
   const request = new Request('https://functions.example/content-studio', {
     method: 'POST',
@@ -237,5 +242,11 @@ Deno.test('UW4 Content saves the website_content service artifact with no brand 
   assertEquals(path.writes.artifact_versions?.length, 1)
   assertEquals(path.writes.engagement_events?.length, 1)
   assertEquals(path.tables.includes('brand_briefs'), false)
+  assertEquals(path.activeServices.length, 1)
+  assertEquals(path.activeServices[0].service_catalog.slug, 'website_content')
+  for (const artifactType of ['brand_statement', 'discovery', 'vision', 'audience']) {
+    assertEquals(path.artifactTypeReads.includes(artifactType), false)
+  }
+
   assertEquals(path.tables.includes('artifact_approvals'), false)
 })

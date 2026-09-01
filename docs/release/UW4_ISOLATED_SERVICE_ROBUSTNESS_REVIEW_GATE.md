@@ -5,22 +5,23 @@ to merge, deploy, apply migrations, or run a live database verification.
 
 ## Baseline and test setup
 
-- Branch: `feat/uw4-isolated-service-robustness`, created from fresh
-  `origin/main` at `c961904`.
+- Branch: `feat/uw4-isolated-service-robustness`, rebased onto current
+  `origin/main` at `f679c71e46ec2eb0a85f15e091ce7dfd30f6e339`.
 - No migration, schema, RLS, frontend, Design Workshop, or deployment change is
   included.
 - The Content request-level Edge Function test provisions an authenticated
   Content contributor, one active `website_content` service on its engagement,
-  and no brand statement, website architecture, Content/Design artifacts, or
-  other upstream artifacts. It executes `save_artifact` through
+  its required valid engagement brand, but no `brand_statement`, `discovery`,
+  `vision`, or `audience` artifact. It executes `save_artifact` through
   `handleRequest` and verifies the canonical artifact/version and timeline
   event writes.
 - The canonical persisted artifact type for the `website_content` service is
   `content`; the service slug and artifact vocabulary are intentionally
   distinct in the existing operating-spine catalog.
 - The Marketing request-level Edge Function test provisions an authenticated
-  Marketing contributor, one active `campaigns` service, and no Content,
-  Design, or other upstream artifacts. It executes `create_campaign` through
+  Marketing contributor, one active `campaigns` service, and its required valid
+  engagement brand, but no `brand_statement`, `discovery`, `vision`, or
+  `audience` artifact. It executes `create_campaign` through
   `handleRequest` and verifies the campaign and timeline event writes.
 
 ## Observed result and fix decision
@@ -30,8 +31,8 @@ to merge, deploy, apply migrations, or run a live database verification.
   `content` artifact; it did not query `brand_briefs` or `artifact_approvals`.
 - Marketing campaign creation succeeded with the isolated `campaigns` service.
   The real path did not query `artifacts` or `marketing_campaign_artifacts`.
-- No implicit Content, Design, brand-statement, website, or other upstream
-  pipeline dependency was found. Accordingly, no production pipeline behavior
+- No implicit Content, Design, brand-statement, discovery, vision, audience, or
+  other upstream pipeline dependency was found. Accordingly, no production behavior
   was changed or masked.
 - Content Studio now accepts an optional test dependency seam at its existing
   request boundary, matching Marketing Studio's established test pattern. In
@@ -47,11 +48,11 @@ to merge, deploy, apply migrations, or run a live database verification.
   supabase/functions/content-studio/index.test.ts
   supabase/functions/marketing-studio/index.test.ts --allow-env` — 26 passed,
   0 failed.
-- Full Deno: `npx --yes deno test supabase/functions --allow-env` — 97 passed,
+- Full Deno: `npx --yes deno test supabase/functions --allow-env` — 99 passed,
   0 failed.
 - Deno type-check: `npx --yes deno check` over all 20 Edge Function `index.ts`
   files — passed.
-- Node: `npm test` — passed.
+- Node: `npm test` — 289 passed, 0 failed.
 - Lint: `npm run lint` — passed with 268 warnings and 0 errors.
 - Build: `npm run build` — passed.
 - `git diff --check` — passed.

@@ -197,11 +197,16 @@ function isolatedMarketingServerPath() {
   const writes: Record<string, Array<Record<string, unknown>>> = {}
   const tables: string[] = []
   const organizationId = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
+  const artifactTypeReads: string[] = []
+  const activeServices = [{ id: 'campaign-service', status: 'active', service_catalog: { slug: 'campaigns', department_id: 'marketing' } }]
   class Query {
     inserted: Record<string, unknown> | null = null
     constructor(private table: string) {}
     select() { return this }
-    eq() { return this }
+    eq(column: string, value: unknown) {
+      if (this.table === 'artifacts' && column === 'artifact_type') artifactTypeReads.push(String(value))
+      return this
+    }
     order() { return this }
     limit() { return this }
     insert(value: Record<string, unknown>) {
@@ -223,7 +228,7 @@ function isolatedMarketingServerPath() {
     }
     then(resolve: (value: unknown) => unknown) {
       const data = this.table === 'engagement_services'
-        ? [{ id: 'campaign-service', status: 'active', service_catalog: { slug: 'campaigns', department_id: 'marketing' } }]
+        ? activeServices
         : this.inserted ? [this.inserted] : []
       return Promise.resolve(resolve({ data, error: null }))
     }
@@ -233,10 +238,10 @@ function isolatedMarketingServerPath() {
   const factory = () => clientCount++ === 0
     ? { auth: { getUser: async () => ({ data: { user: { id: 'marketing-actor' } }, error: null }) } }
     : admin
-  return { factory: factory as never, writes, tables }
+  return { factory: factory as never, writes, tables, artifactTypeReads, activeServices }
 }
 
-Deno.test('UW4 Marketing creates a campaign with only the active campaigns service and no upstream artifacts', async () => {
+Deno.test('UW4 Marketing creates a campaign with only its active service and no upstream artifacts', async () => {
   const path = isolatedMarketingServerPath()
   const request = new Request('https://functions.example/marketing-studio', {
     method: 'POST',
@@ -260,5 +265,10 @@ Deno.test('UW4 Marketing creates a campaign with only the active campaigns servi
   assertEquals(path.writes.marketing_campaigns?.[0]?.brand_id, 'marketing-brand')
   assertEquals(path.writes.engagement_events?.length, 1)
   assertEquals(path.tables.includes('artifacts'), false)
+  assertEquals(path.activeServices.length, 1)
+  assertEquals(path.activeServices[0].service_catalog.slug, 'campaigns')
+  for (const artifactType of ['brand_statement', 'discovery', 'vision', 'audience']) {
+    assertEquals(path.artifactTypeReads.includes(artifactType), false)
+  }
   assertEquals(path.tables.includes('marketing_campaign_artifacts'), false)
 })
