@@ -78,7 +78,7 @@ test('UW2 reuses Shared Department Chat for confirmed Marketing planning drafts 
   for (const type of ['channel_strategy', 'campaign_brief', 'measurement_plan']) {
     assert.match(chat, new RegExp(`'${type}'`))
   }
-  assert.match(chat, /ENABLED_DEPARTMENTS = new Set\(\['content', 'marketing'\]\)/)
+  assert.match(chat, /ENABLED_DEPARTMENTS = new Set\(\['content', 'design', 'marketing'\]\)/)
   assert.match(ui, /Shared Department Chat/)
   assert.match(repository, /department-chat/)
   assert.doesNotMatch(chat.match(/CHAT_MARKETING_ARTIFACT_TYPE_SET = new Set\(\[[\s\S]*?\]\)/)?.[0] || '', /marketing_report/)
