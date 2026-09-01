@@ -231,6 +231,48 @@ async function validateScope(admin: Client, engagementId: string, brandId: strin
   return engagement
 }
 
+function normalizePageSlug(value: unknown) {
+  return text(value, 200).toLowerCase().replace(/^\/+/, '').replace(/\/+$/, '')
+}
+function extractFlowPages(content: Json) {
+  const rows = Array.isArray(content.pages) ? content.pages : []
+  const pages = new Set<string>()
+  for (const item of rows) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const normalized = normalizePageSlug(text((item as Json).slug, 200))
+    if (normalized) pages.add(normalized)
+  }
+  return pages
+}
+async function architecturePageSlugs(admin: Client, engagementId: string, artifactId: string) {
+  const { data: artifact, error: artifactError } = await admin.from('artifacts').select('id, artifact_type, engagement_id').eq('id', artifactId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  if (artifactError || !artifact || artifact.artifact_type !== 'website_architecture' || artifact.engagement_id !== engagementId) throw new Error('The selected website architecture artifact is unavailable for this engagement')
+  const { data: approvals, error: approvalError } = await admin.from('artifact_approvals').select('artifact_version_id').eq('artifact_id', artifactId).eq('organization_id', ORGANIZATION_ID).order('approved_at', { ascending: false }).limit(1)
+  if (approvalError) throw approvalError
+  const approvedVersionId = approvals?.[0]?.artifact_version_id
+  if (!approvedVersionId) throw new Error('A linked website architecture artifact must have an approved version')
+  const { data: version, error: versionError } = await admin.from('artifact_versions').select('content').eq('id', approvedVersionId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  if (versionError || !version) throw new Error('The approved website architecture version is unavailable')
+  return extractFlowPages(version.content || {})
+}
+async function resolvePageFlow(admin: Client, engagementId: string, pageFlowId: string, pageSlug: string) {
+  const flowId = text(pageFlowId, 80); const rawSlug = text(pageSlug, 200)
+  if (!flowId || !normalizePageSlug(rawSlug)) throw new Error('A page flow requires a non-empty page slug')
+  const { data: flow, error: flowError } = await admin.from('design_page_flows').select('*').eq('id', flowId).eq('organization_id', ORGANIZATION_ID).eq('engagement_id', engagementId).maybeSingle()
+  if (flowError || !flow) throw new Error('The selected page flow is unavailable for this engagement')
+  if (flow.website_architecture_artifact_id && !(await architecturePageSlugs(admin, engagementId, flow.website_architecture_artifact_id)).has(normalizePageSlug(rawSlug))) throw new Error('The selected flow does not contain this page slug')
+}
+async function createPageFlow(admin: Client, body: Json, actorId: string) {
+  const engagementId = text(body.engagement_id, 80); const flowName = text(body.flow_name, 200)
+  const architectureArtifactId = text(body.website_architecture_artifact_id, 80) || null
+  if (!engagementId || !flowName) throw new Error('Engagement and flow name are required')
+  const { data: engagement, error: engagementError } = await admin.from('engagements').select('id').eq('id', engagementId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  if (engagementError || !engagement) throw new Error('Engagement is unavailable')
+  if (architectureArtifactId) await architecturePageSlugs(admin, engagementId, architectureArtifactId)
+  const { data: flow, error: flowError } = await admin.from('design_page_flows').insert({ organization_id: ORGANIZATION_ID, engagement_id: engagementId, website_architecture_artifact_id: architectureArtifactId, flow_name: flowName, created_by: actorId }).select('*').single()
+  if (flowError) throw flowError
+  return flow
+}
 export function outputFamilyForService(serviceSlug: unknown) {
   const outputFamily = SERVICE_OUTPUT_FAMILIES.get(text(serviceSlug, 80))
   if (!outputFamily) throw new Error('Unsupported Design service')
@@ -257,6 +299,9 @@ export async function createSession(admin: Client, body: Json, actorId: string) 
   const stageId = text(body.engagement_stage_instance_id, 80) || null
   const engagementServiceId = text(body.engagement_service_id, 80)
   await validateScope(admin, engagementId, brandId, stageId)
+  const pageFlowId = text(body.flow_id, 80) || null
+  const pageSlug = text(body.page_slug, 200)
+  if (pageFlowId) await resolvePageFlow(admin, engagementId, pageFlowId, pageSlug)
   const externalEventId = text(body.external_event_id, 80) || null
   if (externalEventId) {
     const { data: externalEvent, error: externalEventError } = await admin.from('external_events').select('id')
@@ -288,13 +333,15 @@ export async function createSession(admin: Client, body: Json, actorId: string) 
   }
   const checksum = await sha256(stableJson(contextManifest))
   const sessionId = crypto.randomUUID()
-  const { data: session, error: sessionError } = await admin.from('design_workshop_sessions').insert({
+  const sessionValues: Record<string, unknown> = {
     id: sessionId, organization_id: ORGANIZATION_ID, engagement_id: engagementId, brand_id: brandId,
     engagement_stage_instance_id: stageId, engagement_service_id: engagementServiceId,
     output_family: outputFamily, output_brief: outputBrief,
     designer_instructions: designerInstructions, context_manifest: contextManifest,
     context_checksum: checksum, created_by: actorId,
-  }).select('*').single()
+  }
+  if (pageFlowId) { sessionValues.page_flow_id = pageFlowId; sessionValues.page_slug = pageSlug }
+  const { data: session, error: sessionError } = await admin.from('design_workshop_sessions').insert(sessionValues).select('*').single()
   if (sessionError) throw sessionError
   try {
     const { error: contextError } = await admin.from('design_workshop_context_versions').insert(selected.map(({ artifact, approval, version }) => ({
@@ -869,6 +916,7 @@ async function handler(req: Request) {
     const body = await req.json() as Json
     const action = text(body.action, 80)
     const actions: Record<string, () => Promise<unknown>> = {
+      create_page_flow: () => createPageFlow(admin, body, user.id),
       create_session: () => createSession(admin, body, user.id),
       generate_directions: () => generateDirections(admin, body, user.id),
       create_direction_revision: () => createDirectionRevision(admin, body, user.id),
