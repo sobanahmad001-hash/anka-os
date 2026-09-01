@@ -82,7 +82,7 @@ async function requireContext(request: Request) {
   return { userClient, admin, user, membership }
 }
 
-async function requireDepartmentEngagement(admin: Client, engagementId: string, departmentId: string) {
+export async function requireDepartmentEngagement(admin: Client, engagementId: string, departmentId: string) {
   const { data: engagement, error } = await admin.from('engagements')
     .select('id, organization_id, brand_id, name, objective, status, agency_clients(name), brands(name)')
     .eq('id', engagementId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
@@ -147,7 +147,7 @@ async function safeStage(admin: Client, engagementId: string, stageId: unknown, 
   return stage.id
 }
 
-async function createDesignArtifactVersion(admin: Client, input: {
+export async function createDesignArtifactVersion(admin: Client, input: {
   engagement: { id: string; brand_id: string }
   stageId: string | null
   artifactId: string | null
