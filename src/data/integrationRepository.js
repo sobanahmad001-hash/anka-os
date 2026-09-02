@@ -22,6 +22,11 @@ async function invokeMeta(body) {
 }
 
 export const integrations = Object.freeze({
+  listBrands: async () => {
+    const { data, error } = await supabase.from('brands').select('id, name').order('name')
+    if (error) throw new Error(error.message)
+    return data || []
+  },
   list: (departmentId = null) => invoke({ action: 'list', department_id: departmentId }),
   save: (connection) => invoke({ action: 'save', ...connection }),
   test: (connectionId) => invoke({ action: 'test', connection_id: connectionId }),

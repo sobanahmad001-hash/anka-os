@@ -24,6 +24,7 @@ function initialForm(provider = 'openai') {
     owner: '', repo: '', file_key: '', username: '',
     model_id: provider === 'openai' ? 'gpt-5.6-terra' : '',
     property_id: '', site_url: '', customer_id: '', login_customer_id: '',
+    brand_id: '', facebook_page_id: '', instagram_account_id: '',
   }
 }
 
@@ -39,6 +40,7 @@ function Status({ value }) {
 export default function Settings() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [connections, setConnections] = useState([])
+  const [brands, setBrands] = useState([])
   const [canManage, setCanManage] = useState(false)
   const [form, setForm] = useState(initialForm())
   const [loading, setLoading] = useState(true)
@@ -51,9 +53,10 @@ export default function Settings() {
   async function loadConnections() {
     setError('')
     try {
-      const result = await integrations.list()
+      const [result, brandRows] = await Promise.all([integrations.list(), integrations.listBrands()])
       setConnections(result.connections || [])
-      setReportingDrafts(Object.fromEntries((result.connections || []).filter(connection => CONNECTOR_CATALOG[connection.provider]?.authMode === 'oauth').map(connection => [connection.id, {
+      setBrands(brandRows)
+      setReportingDrafts(Object.fromEntries((result.connections || []).filter(connection => connection.provider?.startsWith('google_')).map(connection => [connection.id, {
         property_id: connection.public_config?.property_id || '', site_url: connection.public_config?.site_url || '',
         customer_id: connection.public_config?.customer_id || '', login_customer_id: connection.public_config?.login_customer_id || '',
       }])))
@@ -77,7 +80,7 @@ export default function Settings() {
       loadConnections()
     } else {
       setMessage('')
-      setError(`Google authorisation was not completed${reason ? ` (${labelize(reason)})` : ''}.`)
+      setError(`${provider === 'meta' ? 'Meta' : 'Google'} authorisation was not completed${reason ? ` (${labelize(reason)})` : ''}.`)
     }
     const next = new URLSearchParams(searchParams)
     for (const key of ['oauth', 'provider', 'reason']) next.delete(key)
@@ -188,6 +191,54 @@ export default function Settings() {
     }
   }
 
+  async function authorizeMeta(event, existingConnection = null) {
+    event?.preventDefault()
+    const source = existingConnection || form
+    if (!source.department_ids?.length) return setError('Select at least one department for this connector.')
+    setSaving(true); setMessage(''); setError('')
+    try {
+      const result = await integrations.startMetaOAuth({
+        connection_id: existingConnection?.id || null,
+        display_name: source.display_name,
+        department_ids: source.department_ids,
+        brand_id: source.public_config?.brand_id || source.brand_id,
+        facebook_page_id: source.public_config?.facebook_page_id || source.facebook_page_id,
+        instagram_account_id: source.public_config?.instagram_account_id || source.instagram_account_id || null,
+        return_path: '/settings',
+      })
+      window.location.assign(result.authorize_url)
+    } catch (authorizeError) {
+      setError(authorizeError.message)
+      setSaving(false)
+    }
+  }
+
+  async function syncMeta(connection) {
+    setSaving(true); setMessage(''); setError('')
+    try {
+      const result = await integrations.syncMetaOrganicMetrics(connection.id)
+      setMessage(`${connection.display_name} synced ${result.synced} organic snapshot${result.synced === 1 ? '' : 's'} for ${result.snapshot_date}.`)
+      await loadConnections()
+    } catch (syncError) {
+      setError(syncError.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function disconnectMeta(connection) {
+    setSaving(true); setMessage(''); setError('')
+    try {
+      await integrations.disconnectMetaOAuth(connection.id)
+      setMessage(`${connection.display_name} was disconnected and its stored Meta token was deleted.`)
+      await loadConnections()
+    } catch (disconnectError) {
+      setError(disconnectError.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function disconnectGoogle(connection) {
     setSaving(true)
     setMessage('')
@@ -256,14 +307,19 @@ export default function Settings() {
               ) : connections.map((connection) => {
                 const connector = CONNECTOR_CATALOG[connection.provider]
                 const isOAuth = connector?.authMode === 'oauth'
+                const isMeta = connection.provider === 'meta'
+                const isGoogleOAuth = isOAuth && !isMeta
                 return (
                   <article key={connection.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium text-white">{connection.display_name}</p><p className="mt-1 text-xs text-slate-500">{connectorLabel(connection.provider)} · {isOAuth ? (connection.status === 'verified' ? connection.public_config?.authorized_email || 'Google account authorised' : 'Google authorisation required') : connection.secret_configured ? 'Secret configured' : 'Secret missing'}</p></div><Status value={connection.status} /></div>
+                    <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium text-white">{connection.display_name}</p><p className="mt-1 text-xs text-slate-500">{connectorLabel(connection.provider)} · {isOAuth ? (connection.status === 'verified' ? (isMeta ? `${connection.public_config?.facebook_page_name || `Page ${connection.public_config?.facebook_page_id}`}${connection.public_config?.instagram_account_id ? ' + Instagram' : ''}` : connection.public_config?.authorized_email || 'Google account authorised') : `${isMeta ? 'Meta' : 'Google'} authorisation required`) : connection.secret_configured ? 'Secret configured' : 'Secret missing'}</p></div><Status value={connection.status} /></div>
                     <div className="mt-3 flex flex-wrap gap-2">{(connection.department_ids || []).map((departmentId) => <span key={departmentId} className="rounded-full bg-slate-900 px-2.5 py-1 text-[11px] text-slate-400">{DEPARTMENT_LABELS[departmentId]}</span>)}</div>
-                    {canManage && isOAuth && <div className="mt-4 rounded-xl border border-slate-800 bg-slate-900/60 p-3"><GoogleReportingFields provider={connection.provider} value={reportingDrafts[connection.id] || {}} onChange={value => setReportingDrafts(current => ({ ...current, [connection.id]: value }))} /><button type="button" disabled={saving} onClick={() => saveGoogleReporting(connection)} className={`${BUTTON} mt-3`}>Save reporting scope</button></div>}
+                    {canManage && isGoogleOAuth && <div className="mt-4 rounded-xl border border-slate-800 bg-slate-900/60 p-3"><GoogleReportingFields provider={connection.provider} value={reportingDrafts[connection.id] || {}} onChange={value => setReportingDrafts(current => ({ ...current, [connection.id]: value }))} /><button type="button" disabled={saving} onClick={() => saveGoogleReporting(connection)} className={`${BUTTON} mt-3`}>Save reporting scope</button></div>}
                     <div className="mt-4 flex flex-wrap gap-2">
-                      {canManage && isOAuth && <button type="button" disabled={saving} onClick={(event) => authorizeGoogle(event, connection)} className={BUTTON}>{connection.status === 'verified' ? 'Reauthorise Google' : 'Continue authorisation'}</button>}
-                      {canManage && isOAuth && connection.status === 'verified' && <button type="button" disabled={saving} onClick={() => disconnectGoogle(connection)} className={BUTTON}>Disconnect Google</button>}
+                      {canManage && isGoogleOAuth && <button type="button" disabled={saving} onClick={(event) => authorizeGoogle(event, connection)} className={BUTTON}>{connection.status === 'verified' ? 'Reauthorise Google' : 'Continue authorisation'}</button>}
+                      {canManage && isGoogleOAuth && connection.status === 'verified' && <button type="button" disabled={saving} onClick={() => disconnectGoogle(connection)} className={BUTTON}>Disconnect Google</button>}
+                      {canManage && isMeta && <button type="button" disabled={saving} onClick={(event) => authorizeMeta(event, connection)} className={BUTTON}>{connection.status === 'verified' ? 'Reauthorise Meta' : 'Continue authorisation'}</button>}
+                      {canManage && isMeta && connection.status === 'verified' && <button type="button" disabled={saving} onClick={() => syncMeta(connection)} className={BUTTON}>Sync yesterday</button>}
+                      {canManage && isMeta && connection.status === 'verified' && <button type="button" disabled={saving} onClick={() => disconnectMeta(connection)} className={BUTTON}>Disconnect Meta</button>}
                       {canManage && !isOAuth && <button type="button" disabled={!connection.secret_configured || testingId === connection.id} onClick={() => testConnection(connection)} className={BUTTON}>{testingId === connection.id ? 'Testing…' : 'Test connection'}</button>}
                       {canManage && !isOAuth && <button type="button" disabled={saving} onClick={() => disableConnection(connection)} className={BUTTON}>Disable</button>}
                     </div>
@@ -280,13 +336,13 @@ export default function Settings() {
                 {selected.availability === 'oauth_planned' ? 'This connector needs a secure OAuth authorisation flow. It is shown in the relevant department now, but Anka OS will not request or store substitute credentials.' : 'This connector is recorded in the product catalogue and will be implemented in a later connector phase.'}
               </div>
             ) : !canManage && !loading ? <p className="mt-4 text-sm leading-6 text-amber-300">Only system owners, operations admins, and executives can configure connectors.</p> : selected.authMode === 'oauth' ? (
-              <form onSubmit={authorizeGoogle} className="mt-5 space-y-4">
-                <div className="rounded-xl border border-blue-900/60 bg-blue-950/30 p-4 text-sm leading-6 text-blue-200">Anka OS will open Google’s consent screen and request only the read/reporting permission needed for this connector. Offline access lets scheduled reporting continue after you close the browser. Tokens are encrypted before storage and are never returned to this page.</div>
+              <form onSubmit={form.provider === 'meta' ? authorizeMeta : authorizeGoogle} className="mt-5 space-y-4">
+                <div className="rounded-xl border border-blue-900/60 bg-blue-950/30 p-4 text-sm leading-6 text-blue-200">{form.provider === 'meta' ? 'Anka OS will open Meta’s consent screen and request only Facebook Page and Instagram organic read/insights permissions. It cannot publish, manage campaigns, or access ads. Tokens are encrypted before storage and are never returned to this page.' : 'Anka OS will open Google’s consent screen and request only the read/reporting permission needed for this connector. Offline access lets scheduled reporting continue after you close the browser. Tokens are encrypted before storage and are never returned to this page.'}</div>
                 <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Connection name<input required value={form.display_name} onChange={(event) => setForm({ ...form, display_name: event.target.value })} className={`${INPUT} mt-2 normal-case tracking-normal`} placeholder={`Primary ${selected.shortLabel} connection`} /></label>
-                <GoogleReportingFields provider={form.provider} value={form} onChange={value => setForm({ ...form, ...value })} />
+                {form.provider === 'meta' ? <MetaReportingFields brands={brands} value={form} onChange={value => setForm({ ...form, ...value })} /> : <GoogleReportingFields provider={form.provider} value={form} onChange={value => setForm({ ...form, ...value })} />}
                 <fieldset><legend className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Department access</legend><div className="mt-2 grid grid-cols-2 gap-2">{selected.departments.map((departmentId) => <label key={departmentId} className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-300"><input type="checkbox" checked={form.department_ids.includes(departmentId)} onChange={() => toggleDepartment(departmentId)} />{DEPARTMENT_LABELS[departmentId]}</label>)}</div></fieldset>
                 {form.provider === 'google_ads' && <p className="rounded-xl border border-amber-900/60 bg-amber-950/30 p-3 text-xs leading-5 text-amber-200">Google Ads reporting also requires Anka Sphere’s Google Ads developer token and an approved API access level. Account authorisation can be completed first.</p>}
-                <button disabled={saving} className="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-purple-500 disabled:opacity-50">{saving ? 'Preparing Google…' : 'Continue to Google'}</button>
+                <button disabled={saving} className="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-purple-500 disabled:opacity-50">{saving ? `Preparing ${form.provider === 'meta' ? 'Meta' : 'Google'}…` : `Continue to ${form.provider === 'meta' ? 'Meta' : 'Google'}`}</button>
               </form>
             ) : (
               <form onSubmit={saveConnection} className="mt-5 space-y-4">
@@ -314,4 +370,12 @@ function GoogleReportingFields({ provider, value, onChange }) {
   if (provider === 'google_search_console') return <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Search Console property<input required value={value.site_url || ''} onChange={event => onChange({ ...value, site_url: event.target.value })} className={`${INPUT} mt-2 font-mono normal-case tracking-normal`} placeholder="sc-domain:example.com" /></label>
   if (provider === 'google_ads') return <div className="grid gap-3 md:grid-cols-2"><label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Customer ID<input required inputMode="numeric" value={value.customer_id || ''} onChange={event => onChange({ ...value, customer_id: event.target.value.replace(/[^0-9-]/g, '') })} className={`${INPUT} mt-2 font-mono normal-case tracking-normal`} placeholder="123-456-7890" /></label><label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Manager ID (optional)<input inputMode="numeric" value={value.login_customer_id || ''} onChange={event => onChange({ ...value, login_customer_id: event.target.value.replace(/[^0-9-]/g, '') })} className={`${INPUT} mt-2 font-mono normal-case tracking-normal`} /></label></div>
   return null
+}
+
+function MetaReportingFields({ brands, value, onChange }) {
+  return <div className="space-y-3">
+    <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Brand<select required value={value.brand_id || ''} onChange={event => onChange({ ...value, brand_id: event.target.value })} className={`${INPUT} mt-2 normal-case tracking-normal`}><option value="">Select a brand</option>{brands.map(brand => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select></label>
+    <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Facebook Page ID<input required inputMode="numeric" value={value.facebook_page_id || ''} onChange={event => onChange({ ...value, facebook_page_id: event.target.value.replace(/[^0-9]/g, '') })} className={`${INPUT} mt-2 font-mono normal-case tracking-normal`} placeholder="123456789012345" /></label>
+    <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Instagram professional account ID (optional)<input inputMode="numeric" value={value.instagram_account_id || ''} onChange={event => onChange({ ...value, instagram_account_id: event.target.value.replace(/[^0-9]/g, '') })} className={`${INPUT} mt-2 font-mono normal-case tracking-normal`} placeholder="Resolved automatically when linked" /></label>
+  </div>
 }

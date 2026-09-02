@@ -95,12 +95,12 @@ export const CONNECTOR_CATALOG = Object.freeze({
   meta: Object.freeze({
     label: 'Meta Business',
     shortLabel: 'Meta',
-    category: 'Social & paid media',
-    description: 'Facebook and Instagram campaign, creative, and engagement reporting.',
+    category: 'Social reporting',
+    description: 'Read-only Facebook Page and Instagram organic reach, impression, and engagement reporting.',
     departments: Object.freeze(['design', 'marketing']),
     authMode: 'oauth',
-    availability: 'planned',
-    capabilities: Object.freeze(['Campaign reporting', 'Creative performance', 'Social insights']),
+    availability: 'available',
+    capabilities: Object.freeze(['Page insights', 'Instagram insights', 'Daily organic snapshots']),
   }),
   anthropic: Object.freeze({
     label: 'Anthropic',
