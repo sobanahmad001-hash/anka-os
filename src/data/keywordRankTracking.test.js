@@ -68,6 +68,7 @@ test('MK6a keeps the daily record immutable by reading an existing snapshot befo
   assert.match(verifier, /count\(distinct pg_get_constraintdef\(constraint_definition\.oid\)\) = 5/)
   assert.match(verifier, /CHECK \(\(\("position" IS NULL\) OR \("position" >= \(1\)::numeric\)\)\)/)
   assert.match(verifier, /CHECK \(\(\(length\(TRIM\(BOTH FROM keyword\)\) >= 1\) AND \(length\(TRIM\(BOTH FROM keyword\)\) <= 200\)\)\)/)
+  assert.match(verifier, /CHECK \(\(target_rank_tier = ANY \(ARRAY\[''top_3''::text, ''top_10''::text, ''top_20''::text\]\)\)\)/)
   assert.doesNotMatch(verifier, /^  \)\r?\n  \),$/m)
 })
 

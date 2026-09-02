@@ -420,7 +420,7 @@ select jsonb_build_object(
         'CHECK (((search_console_clicks IS NULL) OR (search_console_clicks >= 0)))',
         'CHECK (((search_console_impressions IS NULL) OR (search_console_impressions >= 0)))',
         'CHECK (((length(TRIM(BOTH FROM keyword)) >= 1) AND (length(TRIM(BOTH FROM keyword)) <= 200)))',
-        'CHECK ((target_rank_tier = ANY (ARRAY[''top_3''::text, ''top_10''::text, ''top_20''::text)))'
+        'CHECK ((target_rank_tier = ANY (ARRAY[''top_3''::text, ''top_10''::text, ''top_20''::text])))'
       )
   ),
   'mk6a_foreign_key_catalog_mapping_is_exact', (
