@@ -73,10 +73,10 @@ select jsonb_build_object(
       and column_name = 'created_via'
   ),
   'created_via_check_constraint', (
-    select pg_get_constraintdef(constraint.oid)
-    from pg_constraint constraint
-    where constraint.conrelid = 'public.work_items'::regclass
-      and constraint.conname = 'work_items_created_via_check'
+    select pg_get_constraintdef(con.oid)
+    from pg_constraint con
+    where con.conrelid = 'public.work_items'::regclass
+      and con.conname = 'work_items_created_via_check'
   ) like '%ai_chat_proposal%',
   'save_work_item_is_service_role_only',
     has_function_privilege(

@@ -258,6 +258,8 @@ test('UW3 verifier returns every named check and always rolls back', () => {
     'chat_proposal_provenance_persisted',
     'creation_event_records_provenance',
   ]) assert.match(uw3Verification, new RegExp(`'${check}'`))
+  assert.match(uw3Verification, /from pg_constraint con/)
+  assert.doesNotMatch(uw3Verification, /pg_constraint constraint/)
   assert.match(uw3Verification, /jsonb_object_agg\(check_name, passed\)/)
   assert.match(uw3Verification.trim(), /rollback;$/)
   assert.doesNotMatch(uw3Verification, /(^|\n)\s*commit\s*;/i)
