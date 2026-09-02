@@ -56,6 +56,8 @@ test('MK6a keeps the daily record immutable by reading an existing snapshot befo
   assert.doesNotMatch(edge, /from\('keyword_rank_snapshots'\)\.upsert/)
   assert.match(verifier, /v_other_artifact_id/)
   assert.match(verifier, /aclexplode\(coalesce\(attribute\.attacl/)
+  assert.match(verifier, /FOREIGN KEY \(tracked_keyword_id, organization_id\) REFERENCES tracked_keywords/)
+  assert.match(verifier, /array_agg\(pg_get_indexdef/)
 })
 
 test('MK6a includes a rollback-safe verifier for schema, daily snapshots, and isolation', () => {

@@ -350,6 +350,18 @@ select jsonb_build_object(
   ) and exists (
     select 1 from pg_constraint where conrelid = 'public.tracked_keywords'::regclass and contype = 'f'
       and pg_get_constraintdef(oid) like 'FOREIGN KEY (source_artifact_id, organization_id) REFERENCES artifacts(id, organization_id) ON DELETE SET NULL (source_artifact_id)%'
+  ) and exists (
+    select 1 from pg_constraint where conrelid = 'public.tracked_keywords'::regclass and contype = 'f'
+      and pg_get_constraintdef(oid) = 'FOREIGN KEY (brand_id, organization_id) REFERENCES brands(id, organization_id) ON DELETE CASCADE'
+  ) and exists (
+    select 1 from pg_constraint where conrelid = 'public.tracked_keywords'::regclass and contype = 'f'
+      and pg_get_constraintdef(oid) = 'FOREIGN KEY (tracked_page_id, organization_id) REFERENCES tracked_pages(id, organization_id) ON DELETE CASCADE'
+  ) and exists (
+    select 1 from pg_constraint where conrelid = 'public.keyword_rank_snapshots'::regclass and contype = 'f'
+      and pg_get_constraintdef(oid) = 'FOREIGN KEY (tracked_keyword_id, organization_id) REFERENCES tracked_keywords(id, organization_id) ON DELETE CASCADE'
+  ) and exists (
+    select 1 from pg_constraint where conrelid = 'public.tracked_keywords'::regclass and contype = 'f'
+      and pg_get_constraintdef(oid) = 'FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE RESTRICT'
   ),
   'mk6a_indexes_are_all_valid', (
     select count(*) = 5
@@ -358,6 +370,17 @@ select jsonb_build_object(
     where index_definition.indrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
       and index_class.relname in ('idx_tracked_keywords_page_list', 'idx_tracked_keywords_brand_list', 'idx_tracked_keywords_source_artifact_fk', 'idx_keyword_rank_snapshots_keyword_history', 'idx_keyword_rank_snapshots_keyword_fk')
       and index_definition.indisvalid and index_definition.indisready
+  ) and (
+    select array_agg(pg_get_indexdef(index_definition.indexrelid) order by index_class.relname)
+    from pg_index index_definition join pg_class index_class on index_class.oid = index_definition.indexrelid
+    where index_class.relname in ('idx_keyword_rank_snapshots_keyword_fk', 'idx_keyword_rank_snapshots_keyword_history', 'idx_tracked_keywords_brand_list', 'idx_tracked_keywords_page_list', 'idx_tracked_keywords_source_artifact_fk')
+  ) = array[
+    'CREATE INDEX idx_keyword_rank_snapshots_keyword_fk ON public.keyword_rank_snapshots USING btree (tracked_keyword_id, organization_id)',
+    'CREATE INDEX idx_keyword_rank_snapshots_keyword_history ON public.keyword_rank_snapshots USING btree (organization_id, tracked_keyword_id, snapshot_date DESC, fetched_at DESC)',
+    'CREATE INDEX idx_tracked_keywords_brand_list ON public.tracked_keywords USING btree (organization_id, brand_id, active, keyword)',
+    'CREATE INDEX idx_tracked_keywords_page_list ON public.tracked_keywords USING btree (organization_id, tracked_page_id, active, created_at DESC)',
+    'CREATE INDEX idx_tracked_keywords_source_artifact_fk ON public.tracked_keywords USING btree (source_artifact_id, organization_id) WHERE (source_artifact_id IS NOT NULL)'
+  ]
   )
 ) || (select jsonb_object_agg(check_name, passed) from mk6a_runtime_checks);
 
