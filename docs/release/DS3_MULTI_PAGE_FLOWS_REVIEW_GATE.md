@@ -47,7 +47,7 @@ git diff --name-only origin/main...HEAD
 
 ## Recorded verification evidence
 
-- Exact PR head: `358b849438fa181d0bf3d09b0c417646eee3c316`, based on current `origin/main` `99b40714f0ba675114eaf59ba2394efb90153323`.
+- Implementation head independently tested before this documentation-only correction: `358b849438fa181d0bf3d09b0c417646eee3c316`, based on current `origin/main` `99b40714f0ba675114eaf59ba2394efb90153323`.
 - Node suite: 301 passed, 0 failed.
 - Exact CI Edge Function Deno suite: 94 passed, 0 failed.
 - Full Edge Function Deno suite: 96 passed, 0 failed.
@@ -59,7 +59,7 @@ git diff --name-only origin/main...HEAD
 
 ## Final-review acceptance
 
-- The live/reconciled `design_page_flows` schema includes `unique (id, organization_id)` in addition to the original brief's table definition. This is intentionally accepted: it is required for the tenant-safe composite foreign key from `design_workshop_sessions`, is already present in the applied live ledger, and must remain unchanged for reconciliation safety.
+- The live/reconciled `design_page_flows` schema includes `unique (id, organization_id)` in addition to the original brief's table definition. Per the explicit reconciliation instruction, preserve the ledger-matching SQL: this constraint is required for the tenant-safe composite foreign key from `design_workshop_sessions`, is already present in the applied live ledger, and must remain unchanged for reconciliation safety.
 
 After applying the DS3 migration to review DB, run:
 
