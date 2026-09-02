@@ -24,6 +24,8 @@ export const ENABLED_DEPARTMENTS = new Set(['content', 'design', 'marketing'])
 export const CHAT_MARKETING_ARTIFACT_TYPE_SET = new Set([
   'channel_strategy', 'campaign_brief', 'measurement_plan',
 ])
+const WORK_ITEM_TYPES = new Set(['task', 'bug', 'request'])
+const WORK_ITEM_PRIORITIES = new Set(['low', 'medium', 'high', 'urgent'])
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -35,6 +37,11 @@ const response = (body: Json, status = 200) => new Response(JSON.stringify(body)
 
 function text(value: unknown, max = 8000) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
+}
+
+function optionalDate(value: unknown) {
+  const normalized = text(value, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : null
 }
 
 function estimatedCost(inputTokens: number | null, outputTokens: number | null) {
@@ -229,7 +236,9 @@ export async function createMarketingArtifactVersion(admin: Client, input: {
   if (artifactId) {
     const { data: artifact, error } = await admin.from('artifacts').select('id, artifact_type, engagement_id, brand_id').eq('id', artifactId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
     if (error) throw error
-    if (!artifact || artifact.artifact_type !== input.artifactType || artifact.engagement_id !== input.engagement.id || artifact.brand_id !== input.engagement.brand_id) throw new Error('Marketing artifact does not match this engagement and type')
+    if (!artifact || artifact.artifact_type !== input.artifactType || artifact.engagement_id !== input.engagement.id || artifact.brand_id !== input.engagement.brand_id) {
+      throw new Error('Marketing artifact does not match this engagement and type')
+    }
   } else {
     const { data: artifact, error } = await admin.from('artifacts').insert({
       organization_id: ORGANIZATION_ID, engagement_id: input.engagement.id, brand_id: input.engagement.brand_id,
@@ -238,11 +247,13 @@ export async function createMarketingArtifactVersion(admin: Client, input: {
     if (error) throw error
     artifactId = artifact.id; createdArtifact = true
   }
-  const { data: latest, error: latestError } = await admin.from('artifact_versions').select('id, version_number').eq('artifact_id', artifactId).order('version_number', { ascending: false }).limit(1).maybeSingle()
+  const { data: latest, error: latestError } = await admin.from('artifact_versions').select('id, version_number')
+    .eq('artifact_id', artifactId).order('version_number', { ascending: false }).limit(1).maybeSingle()
   if (latestError) throw latestError
   const { data: version, error: versionError } = await admin.from('artifact_versions').insert({
     organization_id: ORGANIZATION_ID, artifact_id: artifactId, version_number: (latest?.version_number || 0) + 1,
-    parent_version_id: latest?.id || null, content, content_checksum: await sha256(stableJson(content)), change_summary: text(input.changeSummary, 1000), ai_use_allowed: false, data_classification: 'internal', created_by: input.actorId,
+    parent_version_id: latest?.id || null, content, content_checksum: await sha256(stableJson(content)), change_summary: text(input.changeSummary, 1000) || 'Initial draft proposed via Shared Department Chat',
+    ai_use_allowed: false, data_classification: 'internal', created_by: input.actorId,
   }).select('*').single()
   if (versionError) { if (createdArtifact) await admin.from('artifacts').delete().eq('id', artifactId); throw versionError }
   const { error: eventError } = await admin.from('engagement_events').insert({
@@ -268,23 +279,23 @@ type ProposalDependencies = {
   estimatedCost?: typeof estimatedCost
 }
 
-export async function proposeArtifact(userClient: Client, admin: Client, body: Json, actorId: string, fetcher: typeof fetch = fetch, dependencies: ProposalDependencies = {}) {
-  const startedAt = Date.now()
-  const engagementId = text(body.engagement_id, 80)
-  const departmentId = text(body.department_id, 40)
-  const artifactType = text(body.artifact_type, 60)
-  const prompt = text(body.prompt, 8000)
-  if (!isDepartmentChatArtifactType(departmentId, artifactType)) throw new Error(`Unsupported ${departmentId} artifact`)
-  if (!prompt) throw new Error('A draft prompt is required')
-  if (body.prompt_safe_for_ai !== true) throw new Error('Confirm the prompt is safe to send to the configured model')
+async function loadDepartmentChatContext(
+  admin: Client,
+  actorId: string,
+  engagementId: string,
+  departmentId: string,
+  dependencies: ProposalDependencies,
+) {
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
   const { count: recentRuns, error: rateError } = await admin.from('ai_runs')
     .select('id', { count: 'exact', head: true }).eq('user_id', actorId).gte('created_at', hourAgo)
   if (rateError) throw rateError
   if ((recentRuns || 0) >= 20) throw Object.assign(new Error('Hourly AI run limit reached. Try again later.'), { status: 429 })
+
   const { data: organization, error: organizationError } = await admin.from('organizations')
     .select('settings').eq('id', ORGANIZATION_ID).single()
   if (organizationError) throw organizationError
+
   const monthlyBudget = Number(organization?.settings?.ai_monthly_budget_microusd)
   if (Number.isFinite(monthlyBudget) && monthlyBudget > 0) {
     const now = new Date()
@@ -298,10 +309,57 @@ export async function proposeArtifact(userClient: Client, admin: Client, body: J
       throw Object.assign(new Error('Organization AI budget has been reached.'), { status: 402 })
     }
   }
+
   const { engagement, services } = await (dependencies.requireDepartmentEngagement || requireDepartmentEngagement)(admin, engagementId, departmentId)
-  const stageId = await (dependencies.safeStage || safeStage)(admin, engagement.id, body.engagement_stage_instance_id, departmentId)
   const context = await (dependencies.approvedSafeContext || approvedSafeContext)(admin, engagement.id)
   const provider = await (dependencies.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(admin, engagement.id, departmentId)
+  return { engagement, services, context, provider }
+}
+
+async function recordDepartmentChatRun(
+  admin: Client,
+  actorId: string,
+  departmentId: string,
+  proposalTarget: 'artifact' | 'work_item',
+  engagementId: string,
+  provider: { connectorId: string; model: string; credential: string },
+  prompt: string,
+  raw: string,
+  outputTokens: number | null,
+  inputTokens: number | null,
+  startedAt: number,
+  context: Json[],
+  contextManifest: Json,
+  dependencies: ProposalDependencies,
+) {
+  const cost = (dependencies.estimatedCost || estimatedCost)(inputTokens, outputTokens)
+  const { data: run, error: runError } = await admin.from('ai_runs').insert({
+    organization_id: ORGANIZATION_ID, engagement_id: engagementId, user_id: actorId,
+    capability: 'writing_support', status: 'completed', provider: 'openai', model: provider.model,
+    input_text: prompt, output_text: raw, context_manifest: {
+      purpose: proposalTarget === 'artifact' ? `${departmentId}_artifact_draft` : `${departmentId}_work_item_draft`,
+      proposal_target: proposalTarget, department_id: departmentId, connector_connection_id: provider.connectorId,
+      approved_artifact_version_ids: context.map(item => item.artifact_version_id),
+      ...contextManifest,
+    }, latency_ms: Date.now() - startedAt,
+    input_tokens: inputTokens, output_tokens: outputTokens, estimated_cost_microusd: cost,
+    human_decision: 'not_applicable',
+  }).select('id').single()
+  if (runError) throw runError
+  return run.id
+}
+
+export async function proposeArtifact(userClient: Client, admin: Client, body: Json, actorId: string, fetcher: typeof fetch = fetch, dependencies: ProposalDependencies = {}) {
+  const startedAt = Date.now()
+  const engagementId = text(body.engagement_id, 80)
+  const departmentId = text(body.department_id, 40)
+  const artifactType = text(body.artifact_type, 60)
+  const prompt = text(body.prompt, 8000)
+  if (!isDepartmentChatArtifactType(departmentId, artifactType)) throw new Error(`Unsupported ${departmentId} artifact`)
+  if (!prompt) throw new Error('A draft prompt is required')
+  if (body.prompt_safe_for_ai !== true) throw new Error('Confirm the prompt is safe to send to the configured model')
+  const { engagement, services, context, provider } = await loadDepartmentChatContext(admin, actorId, engagementId, departmentId, dependencies)
+  const stageId = await (dependencies.safeStage || safeStage)(admin, engagement.id, body.engagement_stage_instance_id, departmentId)
   const systemPrompt = `You are the draft-proposal assistant inside Anka OS Shared Department Chat.
 Produce one structured ${artifactType} draft for the ${departmentId} department.
 The output is an unapproved draft only. Never claim approval, release, publication, deployment, connector action, or client sign-off.
@@ -326,30 +384,34 @@ ${JSON.stringify({ engagement, active_department_services: services, approved_ar
   if (!openAiResponse.ok) throw new Error(result.error?.message || 'OpenAI draft request failed')
   const raw = outputText(result)
   if (!raw) throw new Error('The configured model returned an empty draft')
+  const inputTokens = result.usage?.input_tokens ?? null
+  const outputTokens = result.usage?.output_tokens ?? null
+  const runId = await recordDepartmentChatRun(
+    admin,
+    actorId,
+    departmentId,
+    'artifact',
+    engagement.id,
+    provider,
+    prompt,
+    raw,
+    outputTokens,
+    inputTokens,
+    startedAt,
+    context,
+    { artifact_type: artifactType },
+    dependencies,
+  )
   const content = departmentId === 'content'
     ? validateContentArtifact(artifactType, JSON.parse(raw))
     : departmentId === 'design'
       ? validateDesignSystemArtifact(artifactType, JSON.parse(raw))
       : validateMarketingArtifact(artifactType, JSON.parse(raw))
-  const inputTokens = result.usage?.input_tokens ?? null
-  const outputTokens = result.usage?.output_tokens ?? null
-  const cost = (dependencies.estimatedCost || estimatedCost)(inputTokens, outputTokens)
-  const { data: run, error: runError } = await admin.from('ai_runs').insert({
-    organization_id: ORGANIZATION_ID, engagement_id: engagement.id, user_id: actorId,
-    capability: 'writing_support', status: 'completed', provider: 'openai', model: provider.model,
-    input_text: prompt, output_text: raw, context_manifest: {
-      purpose: `${departmentId}_artifact_draft`, department_id: departmentId, artifact_type: artifactType,
-      connector_connection_id: provider.connectorId, approved_artifact_version_ids: context.map(item => item.artifact_version_id),
-    }, latency_ms: Date.now() - startedAt,
-    input_tokens: inputTokens, output_tokens: outputTokens, estimated_cost_microusd: cost,
-    human_decision: 'not_applicable',
-  }).select('id').single()
-  if (runError) throw runError
   const saved = departmentId === 'design'
     ? await createDesignArtifactVersion(admin, {
       engagement, stageId, artifactId: text(body.artifact_id, 80) || null,
       title: text(body.title, 240) || 'Design system chat draft', content,
-      changeSummary: text(body.change_summary, 1000) || 'Draft proposed via Shared Department Chat', actorId, aiRunId: run.id,
+      changeSummary: text(body.change_summary, 1000) || 'Draft proposed via Shared Department Chat', actorId, aiRunId: runId,
     })
     : departmentId === 'content' ? await createContentArtifactVersion(admin, {
       organizationId: ORGANIZATION_ID, engagement, stageId,
@@ -357,14 +419,110 @@ ${JSON.stringify({ engagement, active_department_services: services, approved_ar
       title: text(body.title, 240) || `${artifactType.replaceAll('_', ' ')} chat draft`,
       content, changeSummary: text(body.change_summary, 1000) || 'Draft proposed via Shared Department Chat',
       aiUseAllowed: false, dataClassification: 'internal', actorId,
-      source: 'department_chat', aiRunId: run.id, visibilityClient: userClient,
+      source: 'department_chat', aiRunId: runId, visibilityClient: userClient,
     })
     : await (dependencies.createMarketingArtifactVersion || createMarketingArtifactVersion)(admin, {
       engagement, artifactId: text(body.artifact_id, 80) || null, artifactType,
       title: text(body.title, 240) || `${artifactType.replaceAll('_', ' ')} chat draft`, content,
-      changeSummary: text(body.change_summary, 1000) || 'Draft proposed via Shared Department Chat', actorId, aiRunId: run.id,
+      changeSummary: text(body.change_summary, 1000) || 'Draft proposed via Shared Department Chat', actorId, aiRunId: runId,
     })
-  return { ...saved, content, ai_run_id: run.id, model: provider.model, connector_connection_id: provider.connectorId }
+  return { ...saved, content, ai_run_id: runId, model: provider.model, connector_connection_id: provider.connectorId }
+}
+
+export async function proposeWorkItem(
+  _userClient: Client,
+  admin: Client,
+  body: Json,
+  actorId: string,
+  fetcher: typeof fetch = fetch,
+  dependencies: ProposalDependencies = {},
+) {
+  const startedAt = Date.now()
+  const engagementId = text(body.engagement_id, 80)
+  const departmentId = text(body.department_id, 40)
+  const prompt = text(body.prompt, 8000)
+  const title = text(body.title, 240)
+  const workItemType = text(body.work_item_type, 20) || 'task'
+  const priority = text(body.priority, 20) || 'medium'
+  if (!departmentId || !ENABLED_DEPARTMENTS.has(departmentId)) throw new Error(`Unsupported ${departmentId} department`)
+  if (!title) throw new Error('A work item title is required')
+  if (!prompt) throw new Error('A work item prompt is required')
+  if (body.prompt_safe_for_ai !== true) throw new Error('Confirm the prompt is safe to send to the configured model')
+  if (!WORK_ITEM_TYPES.has(workItemType)) throw new Error('Unsupported work item type')
+  if (!WORK_ITEM_PRIORITIES.has(priority)) throw new Error('Unsupported priority')
+  const { engagement, context, provider } = await loadDepartmentChatContext(admin, actorId, engagementId, departmentId, dependencies)
+  const systemPrompt = `You are the concise work item draft assistant inside Anka OS Shared Department Chat.
+Draft a short, specific work item description for the ${departmentId} department.
+Use the engagement and approved AI-safe context below. Keep it actionable and internal-team-ready.
+No approvals, connectors, or outside requests.
+
+ENGAGEMENT CONTEXT JSON:
+${JSON.stringify({ engagement, approved_artifacts: context }).slice(0, 70000)}`
+  const openAiResponse = await fetcher(OPENAI_RESPONSES_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${provider.credential}` },
+    body: JSON.stringify({
+      model: provider.model,
+      instructions: systemPrompt,
+      input: prompt,
+      max_output_tokens: 1000,
+      store: false,
+      safety_identifier: await sha256(actorId),
+    }),
+    signal: AbortSignal.timeout(30_000),
+  })
+  const result = await openAiResponse.json() as Json & {
+    error?: { message?: string }, usage?: { input_tokens?: number, output_tokens?: number },
+  }
+  if (!openAiResponse.ok) throw new Error(result.error?.message || 'OpenAI work item request failed')
+  const description = text(outputText(result), 20000)
+  if (!description) throw new Error('The configured model returned an empty work item description')
+  const inputTokens = result.usage?.input_tokens ?? null
+  const outputTokens = result.usage?.output_tokens ?? null
+  const runId = await recordDepartmentChatRun(
+    admin,
+    actorId,
+    departmentId,
+    'work_item',
+    engagement.id,
+    provider,
+    prompt,
+    description,
+    outputTokens,
+    inputTokens,
+    startedAt,
+    context,
+    { work_item_type: workItemType, priority },
+    dependencies,
+  )
+  const { data, error } = await admin.rpc('save_work_item', {
+    p_work_item_id: null,
+    p_engagement_id: engagement.id,
+    p_title: title,
+    p_description: description,
+    p_work_item_type: workItemType,
+    p_priority: priority,
+    p_status: 'not_started',
+    p_assignee_id: null,
+    p_department_id: departmentId,
+    p_linked_artifact_id: null,
+    p_linked_artifact_version_id: null,
+    p_linked_engagement_stage_instance_id: null,
+    p_start_date: null,
+    p_due_date: null,
+    p_position: 0,
+    p_parent_work_item_id: null,
+    p_actor_id: actorId,
+    p_created_via: 'ai_chat_proposal',
+  })
+  if (error) throw error
+  return {
+    ...data,
+    ai_run_id: runId,
+    model: provider.model,
+    connector_connection_id: provider.connectorId,
+    work_item_type: workItemType,
+  }
 }
 
 export async function handleRequest(request: Request) {
@@ -378,8 +536,10 @@ export async function handleRequest(request: Request) {
     if (!hasDepartmentChatAuthority(membership, departmentId)) {
       return response({ error: 'This department chat is restricted to its team and organization leadership' }, 403)
     }
-    if (text(body.action, 60) !== 'propose_artifact') return response({ error: 'Unsupported action' }, 400)
-    return response({ data: await proposeArtifact(userClient, admin, body, user.id) })
+    const action = text(body.action, 60)
+    if (action === 'propose_artifact') return response({ data: await proposeArtifact(userClient, admin, body, user.id) })
+    if (action === 'propose_work_item') return response({ data: await proposeWorkItem(userClient, admin, body, user.id) })
+    return response({ error: 'Unsupported action' }, 400)
   } catch (error) {
     const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : 400
     return response({ error: error instanceof Error ? error.message : 'Unexpected Department Chat error' },

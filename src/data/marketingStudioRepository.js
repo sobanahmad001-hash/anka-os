@@ -92,6 +92,15 @@ export const marketingStudio = Object.freeze({
         return data?.data
       })
   },
+  proposeWorkItem: input => {
+    const { engagement_stage_instance_id: _ignoredStage, ...body } = input
+    return supabase.functions.invoke('department-chat', { body: { action: 'propose_work_item', department_id: 'marketing', ...body } })
+      .then(({ data, error }) => {
+        if (error) throw new Error(error.message || 'Department Chat function failed')
+        if (data?.error) throw new Error(data.error)
+        return data?.data
+      })
+  },
   approveArtifact: (artifactVersionId, notes = '') => invoke('approve_artifact', { artifact_version_id: artifactVersionId, notes }),
   analytics: (engagementId, startDate, endDate) => invoke('analytics_dashboard', {
     engagement_id: engagementId, start_date: startDate, end_date: endDate,

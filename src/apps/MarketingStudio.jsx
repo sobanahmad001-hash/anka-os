@@ -159,7 +159,7 @@ export default function MarketingStudio() {
         ) : tab === 'artifacts' ? (
           <Artifacts workspace={workspace} campaign={selectedCampaign} saving={saving} act={act} setTab={setTab} onRefresh={() => loadWorkspace(engagementId, campaignId)} />
         ) : tab === 'chat' ? (
-          <DepartmentChat departmentId="marketing" engagement={workspace.engagement} artifactTypes={['channel_strategy', 'campaign_brief', 'measurement_plan']} artifactDefinitions={MARKETING_ARTIFACT_FORMS} artifactForType={artifactType => workspace.artifacts.find(item => item.artifact_type === artifactType)} stageForType={() => null} onPropose={marketingStudio.proposeArtifact} onCreated={() => loadWorkspace(engagementId, campaignId)} />
+          <DepartmentChat departmentId="marketing" engagement={workspace.engagement} artifactTypes={['channel_strategy', 'campaign_brief', 'measurement_plan']} artifactDefinitions={MARKETING_ARTIFACT_FORMS} artifactForType={artifactType => workspace.artifacts.find(item => item.artifact_type === artifactType)} stageForType={() => null} onPropose={marketingStudio.proposeArtifact} onProposeWorkItem={marketingStudio.proposeWorkItem} onCreated={() => loadWorkspace(engagementId, campaignId)} />
         ) : (
           <Analytics engagementId={engagementId} />
         )}

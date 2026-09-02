@@ -10,6 +10,7 @@ const ACTIONS = new Set([
 const WORK_ITEM_TYPES = new Set(['task', 'bug', 'request'])
 const PRIORITIES = new Set(['low', 'medium', 'high', 'urgent'])
 const STATUSES = new Set(['not_started', 'in_progress', 'blocked', 'done'])
+const CREATED_VIA = new Set(['manual', 'ai_chat_proposal', 'automation_rule'])
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -49,7 +50,9 @@ export function normalizeWorkItemInput(input: Json) {
   if (!STATUSES.has(status)) throw new Error('Unsupported work item status')
   const startDate = optionalDate(input.startDate)
   const dueDate = optionalDate(input.dueDate)
+  const createdVia = text(input.created_via, 20) || 'manual'
   if (startDate && dueDate && dueDate < startDate) throw new Error('Due date cannot be before start date')
+  if (!CREATED_VIA.has(createdVia)) throw new Error('Unsupported created_via value')
   return {
     p_work_item_id: optionalId(input.workItemId),
     p_engagement_id: engagementId,
@@ -67,6 +70,7 @@ export function normalizeWorkItemInput(input: Json) {
     p_due_date: dueDate,
     p_position: Math.max(0, Number.isInteger(input.position) ? Number(input.position) : 0),
     p_parent_work_item_id: optionalId(input.parentWorkItemId),
+    p_created_via: createdVia,
   }
 }
 

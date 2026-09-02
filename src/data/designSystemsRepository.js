@@ -22,6 +22,15 @@ async function proposeDepartmentArtifact(input) {
   return data?.data
 }
 
+async function proposeDepartmentWorkItem(input) {
+  const { data, error } = await supabase.functions.invoke('department-chat', {
+    body: { action: 'propose_work_item', department_id: 'design', ...input },
+  })
+  if (error) throw new Error(error.message || 'Department Chat failed')
+  if (data?.error) throw new Error(data.error)
+  return data?.data
+}
+
 export const designSystems = Object.freeze({
   async loadLibrary() {
     const [services, artifacts, versions, approvals, stages] = await Promise.all([
@@ -53,4 +62,5 @@ export const designSystems = Object.freeze({
     notes,
   }),
   proposeArtifact: input => proposeDepartmentArtifact(input),
+  proposeWorkItem: input => proposeDepartmentWorkItem(input),
 })

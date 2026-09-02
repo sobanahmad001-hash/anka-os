@@ -35,3 +35,23 @@ Deno.test('rejects unsupported vocabulary and impossible date ranges', () => {
   throws(() => normalizeWorkItemInput({ engagementId: 'e', title: 'Task', status: 'review' }), /Unsupported work item status/)
   throws(() => normalizeWorkItemInput({ engagementId: 'e', title: 'Task', startDate: '2026-09-02', dueDate: '2026-09-01' }), /Due date/)
 })
+
+Deno.test('supports work item created_via provenance normalization and validation', () => {
+  const inputWithDefault = normalizeWorkItemInput({
+    engagementId: 'e',
+    title: 'Task default',
+  })
+  const inputWithAi = normalizeWorkItemInput({
+    engagementId: 'e',
+    title: 'Task from AI',
+    created_via: 'ai_chat_proposal',
+  })
+  const invalidInput = () => normalizeWorkItemInput({
+    engagementId: 'e',
+    title: 'Bad',
+    created_via: 'not_real',
+  })
+  equal(inputWithDefault.p_created_via, 'manual')
+  equal(inputWithAi.p_created_via, 'ai_chat_proposal')
+  throws(invalidInput, /Unsupported created_via/)
+})

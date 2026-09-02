@@ -165,7 +165,7 @@ Deno.test('Marketing proposal completes with only an isolated Marketing service 
   assertEquals(saved.artifactType, 'measurement_plan')
   assertEquals(saved.content, content)
   assertEquals(saved.aiRunId, 'marketing-run')
-  assertEquals(runWrites[0].context_manifest, { purpose: 'marketing_artifact_draft', department_id: 'marketing', artifact_type: 'measurement_plan', connector_connection_id: 'marketing-connector', approved_artifact_version_ids: [] })
+  assertEquals(runWrites[0].context_manifest, { purpose: 'marketing_artifact_draft', proposal_target: 'artifact', department_id: 'marketing', artifact_type: 'measurement_plan', connector_connection_id: 'marketing-connector', approved_artifact_version_ids: [] })
   assertEquals((request.text as Record<string, unknown>).format, marketingArtifactResponseFormat('measurement_plan'))
   assertEquals(String(request.instructions).includes('"approved_artifacts":[]'), true)
   assertEquals(String(request.instructions).includes('marketing-service'), true)
