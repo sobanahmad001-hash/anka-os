@@ -38,7 +38,7 @@ export const designWorkshop = Object.freeze({
   },
 
   async load(engagementId) {
-    const [engagement, stages, artifacts, versions, approvals, models, designServices, sessions, experimentReviewers] = await Promise.all([
+    const [engagement, stages, artifacts, versions, approvals, models, designServices, sessions, pageFlows, experimentReviewers] = await Promise.all([
       dataOrThrow(supabase.from('engagements').select('*, agency_clients(name), brands(name)').eq('id', engagementId).single()),
       dataOrThrow(supabase.from('engagement_stage_instances').select('*').eq('engagement_id', engagementId).order('position')),
       dataOrThrow(supabase.from('artifacts').select('*').eq('engagement_id', engagementId).order('created_at')),
@@ -51,6 +51,7 @@ export const designWorkshop = Object.freeze({
         .eq('service_catalog.department_id', 'design').eq('service_catalog.is_active', true)
         .order('activated_at')),
       dataOrThrow(supabase.from('design_workshop_sessions').select('*').eq('engagement_id', engagementId).order('created_at', { ascending: false })),
+      dataOrThrow(supabase.from('design_page_flows').select('*').eq('engagement_id', engagementId).order('created_at', { ascending: false })),
       invoke('list_experiment_reviewers'),
     ])
     const sessionIds = sessions.map(item => item.id)
@@ -95,7 +96,7 @@ export const designWorkshop = Object.freeze({
     const architectureVersion = versions.filter(item => item.artifact_id === architectureArtifact?.id)
       .sort((left, right) => right.version_number - left.version_number)[0]
     return {
-      engagement, stages, artifacts, versions, approvals, models, designServices, sessions, externalEvents,
+      engagement, stages, artifacts, versions, approvals, models, designServices, sessions, externalEvents, pageFlows,
       contextVersions: directionData[0], modelSelections: directionData[1], runs: directionData[2],
       directions, selections: directionData[4], releases: directionData[5], directionVersions,
       experimentalDirectionVersions, experimentReviewers,
@@ -108,6 +109,7 @@ export const designWorkshop = Object.freeze({
     }
   },
 
+  createPageFlow: input => invoke('create_page_flow', input),
   createSession: input => invoke('create_session', input),
   generateDirections: sessionId => invoke('generate_directions', { session_id: sessionId }),
   createDirectionRevision: (directionId, parentVersionId, content, experiment = {}) => invoke('create_direction_revision', {
