@@ -407,6 +407,10 @@ select jsonb_build_object(
     select count(*) = 5 from pg_constraint constraint_definition
     where constraint_definition.conrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
       and constraint_definition.contype = 'c'
+  ) and (
+    select count(distinct pg_get_constraintdef(constraint_definition.oid)) = 5 from pg_constraint constraint_definition
+    where constraint_definition.conrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
+      and constraint_definition.contype = 'c'
   ) and not exists (
     select 1 from pg_constraint constraint_definition
     where constraint_definition.conrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)

@@ -65,6 +65,7 @@ test('MK6a keeps the daily record immutable by reading an existing snapshot befo
   assert.match(verifier, /'mk6a_primary_keys_are_exact'/)
   assert.match(verifier, /'mk6a_unique_constraints_are_exact'/)
   assert.match(verifier, /'mk6a_check_constraints_are_exact'/)
+  assert.match(verifier, /count\(distinct pg_get_constraintdef\(constraint_definition\.oid\)\) = 5/)
   assert.match(verifier, /CHECK \(\(\("position" IS NULL\) OR \("position" >= \(1\)::numeric\)\)\)/)
   assert.match(verifier, /CHECK \(\(\(length\(TRIM\(BOTH FROM keyword\)\) >= 1\) AND \(length\(TRIM\(BOTH FROM keyword\)\) <= 200\)\)\)/)
   assert.doesNotMatch(verifier, /^  \)\r?\n  \),$/m)
