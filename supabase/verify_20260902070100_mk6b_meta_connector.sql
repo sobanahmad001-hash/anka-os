@@ -289,7 +289,7 @@ cross join unnest(array[
   'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN'
 ]) privilege_type;
 insert into mk6b_expected_table_acl
-select c.relname::text, pg_get_userbyid(c.relowner), privilege_type, true
+select c.relname::text, pg_get_userbyid(c.relowner), privilege_type, false
 from pg_class c
 cross join unnest(array[
   'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN'

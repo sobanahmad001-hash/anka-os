@@ -113,6 +113,8 @@ test('the verifier proves the exact catalog, policy, ACL, FK, and index contract
   assert.doesNotMatch(verifier, /like\s+'%meta%'/i)
   assert.doesNotMatch(verifier, /join roles r on r\.role_oid = x\.grantee/)
   assert.match(verifier, /case when x\.grantee = 0 then 'PUBLIC' else pg_get_userbyid\(x\.grantee\) end/)
+  assert.match(verifier, /select c\.relname::text, pg_get_userbyid\(c\.relowner\), privilege_type, false/)
+  assert.doesNotMatch(verifier, /select c\.relname::text, pg_get_userbyid\(c\.relowner\), privilege_type, true/)
 })
 
 test('the verifier executes every required rollback security outcome', () => {
