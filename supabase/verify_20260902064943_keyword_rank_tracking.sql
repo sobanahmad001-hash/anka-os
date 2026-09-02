@@ -401,6 +401,38 @@ select jsonb_build_object(
     select 1 from pg_constraint constraint_definition
     where constraint_definition.conrelid = 'public.keyword_rank_snapshots'::regclass and constraint_definition.contype = 'u'
       and (select array_agg(attribute.attname order by key_position.ordinality) from unnest(constraint_definition.conkey) with ordinality key_position(attnum, ordinality) join pg_attribute attribute on attribute.attrelid = constraint_definition.conrelid and attribute.attnum = key_position.attnum) = array['id', 'organization_id']::name[]
+  ) and (
+    select array_agg(pg_get_constraintdef(constraint_definition.oid) order by pg_get_constraintdef(constraint_definition.oid))
+    from pg_constraint constraint_definition
+    where constraint_definition.conrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
+      and constraint_definition.contype = 'c'
+  ) = array[
+    'CHECK ((length(TRIM(BOTH FROM keyword)) BETWEEN 1 AND 200))',
+    'CHECK ((position IS NULL) OR (position >= (1)::numeric))',
+    'CHECK ((search_console_clicks IS NULL) OR (search_console_clicks >= 0))',
+    'CHECK ((search_console_impressions IS NULL) OR (search_console_impressions >= 0))',
+    'CHECK ((target_rank_tier = ANY (ARRAY[''top_3''::text, ''top_10''::text, ''top_20''::text])))'
+  ]
+  ),
+  'mk6a_foreign_key_catalog_mapping_is_exact', (
+    select count(*) = 5 and bool_and(convalidated and confupdtype = 'a' and confmatchtype = 's')
+    from pg_constraint foreign_key
+    where foreign_key.contype = 'f'
+      and foreign_key.conrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
+  ) and exists (
+    select 1 from pg_constraint foreign_key
+    where foreign_key.conrelid = 'public.tracked_keywords'::regclass
+      and foreign_key.confrelid = 'public.artifacts'::regclass
+      and foreign_key.conkey = array[(select attnum from pg_attribute where attrelid = 'public.tracked_keywords'::regclass and attname = 'source_artifact_id'), (select attnum from pg_attribute where attrelid = 'public.tracked_keywords'::regclass and attname = 'organization_id')]::smallint[]
+      and foreign_key.confkey = array[(select attnum from pg_attribute where attrelid = 'public.artifacts'::regclass and attname = 'id'), (select attnum from pg_attribute where attrelid = 'public.artifacts'::regclass and attname = 'organization_id')]::smallint[]
+      and foreign_key.confdeltype = 'n'
+      and foreign_key.confdelsetcols = array[(select attnum from pg_attribute where attrelid = 'public.tracked_keywords'::regclass and attname = 'source_artifact_id')]::smallint[]
+  ) and exists (
+    select 1 from pg_constraint foreign_key
+    where foreign_key.conrelid = 'public.keyword_rank_snapshots'::regclass
+      and foreign_key.confrelid = 'public.tracked_keywords'::regclass
+      and foreign_key.confdeltype = 'c'
+      and foreign_key.conkey = array[(select attnum from pg_attribute where attrelid = 'public.keyword_rank_snapshots'::regclass and attname = 'tracked_keyword_id'), (select attnum from pg_attribute where attrelid = 'public.keyword_rank_snapshots'::regclass and attname = 'organization_id')]::smallint[]
   )
 ) || (select jsonb_object_agg(check_name, passed) from mk6a_runtime_checks);
 
