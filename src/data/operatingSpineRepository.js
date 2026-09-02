@@ -188,7 +188,24 @@ export function createOperatingSpineRepository(client) {
 
     async getEngagement(engagementId) {
       required(engagementId, 'engagementId')
-      const [engagement, services, stages, dependencies, prerequisites, assets, events, connectors, developmentArtifacts, developmentArtifactVersions, artifactApprovals, workItemArtifacts, workItemArtifactVersions] = await Promise.all([
+      const [
+        engagement,
+        services,
+        stages,
+        dependencies,
+        prerequisites,
+        assets,
+        events,
+        connectors,
+        developmentArtifacts,
+        developmentArtifactVersions,
+        artifactApprovals,
+        workItemArtifacts,
+        workItemArtifactVersions,
+        contentRequests,
+        workItems,
+        designSessions,
+      ] = await Promise.all([
         dataOrThrow(client.from('engagements').select('*, agency_clients(*), brands(*)').eq('id', engagementId).single()),
         dataOrThrow(client.from('engagement_services').select('*, service_catalog(*)').eq('engagement_id', engagementId).order('activated_at')),
         dataOrThrow(client.from('engagement_stage_instances').select('*').eq('engagement_id', engagementId).order('position')),
@@ -202,10 +219,53 @@ export function createOperatingSpineRepository(client) {
         dataOrThrow(client.from('artifact_approvals').select('*').eq('engagement_id', engagementId).order('approved_at')),
         dataOrThrow(client.from('artifacts').select('*').eq('engagement_id', engagementId).order('created_at')),
         dataOrThrow(client.from('artifact_versions').select('*, artifacts!inner(engagement_id)').eq('artifacts.engagement_id', engagementId).order('version_number')),
+        dataOrThrow(client.from('content_requests').select('id, organization_id, engagement_id, brand_id, mode, status, output_path, format, brief, created_at, queue_entry_id, linked_event_id').eq('engagement_id', engagementId).order('created_at', { ascending: false })),
+        dataOrThrow(client.from('work_items').select('id, title, status, priority, department_id, linked_engagement_stage_instance_id, assignee_id, created_at').eq('engagement_id', engagementId).is('deleted_at', null).order('position')),
+        dataOrThrow(client.from('design_workshop_sessions').select('id').eq('engagement_id', engagementId).order('created_at', { ascending: false })),
       ])
+
+      const queueEntries = engagement?.brand_id
+        ? await dataOrThrow(client.from('content_queue_entries')
+          .select('id, organization_id, brand_id, planned_date, format, status, brief_template, linked_event_id, fulfilled_by_request_id')
+          .eq('brand_id', engagement.brand_id)
+          .order('planned_date', { ascending: false })
+          .order('created_at', { ascending: false }))
+        : []
+
+      const designDirectionIds = designSessions.length ? designSessions.map((session) => session.id) : []
+      const designDirectionRows = designDirectionIds.length
+        ? await dataOrThrow(client.from('design_directions').select('id').in('session_id', designDirectionIds))
+        : []
+      const directionIds = designDirectionRows.map((direction) => direction.id)
+      const designDirectionVersions = directionIds.length
+        ? await dataOrThrow(client.from('design_direction_versions').select('id').in('direction_id', directionIds))
+        : []
+      const designDirectionVersionIds = designDirectionVersions.map((version) => version.id)
+      const pageDesigns = designDirectionVersionIds.length
+        ? await dataOrThrow(client.from('website_page_designs')
+          .select('id, organization_id, design_direction_version_id, slug, status, created_at, updated_at')
+          .in('design_direction_version_id', designDirectionVersionIds)
+          .order('created_at', { ascending: false }))
+        : []
+      const designExportJobs = pageDesigns.length
+        ? await dataOrThrow(client.from('wordpress_export_jobs')
+          .select('id, website_page_design_id, status, provider, requested_at, completed_at, failure_reason')
+          .in('website_page_design_id', pageDesigns.map((item) => item.id))
+          .order('requested_at', { ascending: false }))
+        : []
+
       return {
         engagement, services, stages, dependencies, prerequisites, assets, events, connectors,
         developmentArtifacts, developmentArtifactVersions, artifactApprovals, workItemArtifacts, workItemArtifactVersions,
+        pipeline: {
+          contentRequests,
+          contentQueueEntries: queueEntries,
+          workItems,
+          design: {
+            pageDesigns,
+            wordpressExportJobs: designExportJobs,
+          },
+        },
       }
     },
   })
