@@ -28,6 +28,7 @@
         "npm:eslint-plugin-react-hooks@^5.2.0",
         "npm:eslint-plugin-react-refresh@~0.5.2",
         "npm:eslint@^9.39.4",
+        "npm:fflate@0.8.2",
         "npm:globals@^17.4.0",
         "npm:pngjs@7.0.0",
         "npm:react-dom@^19.2.4",

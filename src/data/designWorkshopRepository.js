@@ -66,6 +66,7 @@ export const designWorkshop = Object.freeze({
       dataOrThrow(supabase.from('design_direction_releases').select('*').in('session_id', sessionIds)),
     ]) : [[], [], [], [], [], []]
     const directions = directionData[3]
+    const releaseIds = directionData[5].map(item => item.id)
     const [directionVersions, experimentalDirectionVersions] = directions.length
       ? await Promise.all([
           dataOrThrow(supabase.from('design_direction_versions').select('*').in('direction_id', directions.map(item => item.id)).eq('is_experimental', false).order('version_number')),
@@ -88,6 +89,20 @@ export const designWorkshop = Object.freeze({
         .in('website_page_design_id', pageDesigns.map(item => item.id))
         .order('requested_at', { ascending: false }))
       : []
+    const handoffPackages = releaseIds.length
+      ? await dataOrThrow(supabase.from('production_handoff_packages').select([
+        'id',
+        'organization_id',
+        'design_direction_release_id',
+        'status',
+        'included_asset_ids',
+        'failure_reason',
+        'requested_by',
+        'created_at',
+        'completed_at',
+      ].join(','))
+        .in('design_direction_release_id', releaseIds).order('created_at', { ascending: false }))
+      : []
     const readyImageIds = mediaAssets.filter(item => item.media_type === 'image' && item.status === 'ready').map(item => item.id)
     const signedMedia = readyImageIds.length
       ? await invoke('sign_media_assets', { asset_ids: readyImageIds })
@@ -102,6 +117,7 @@ export const designWorkshop = Object.freeze({
       experimentalDirectionVersions, experimentReviewers,
       mediaAssets: mediaAssets.map(item => ({ ...item, signed_url: signedMedia?.signed_urls?.[item.id] || null })),
       variants,
+      handoffPackages,
       mediaUrlExpiresIn: signedMedia?.expires_in || 300,
       pageDesigns,
       wordpressExportJobs,
