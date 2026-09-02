@@ -2,7 +2,7 @@
 
 ## Release boundary
 
-- Built on the UW2 main merge point (`f679c71`) in an isolated rebase worktree.
+- Built on the current main merge point (`1a7a44d`) in an isolated rebase worktree.
 - Do not merge, apply the migration, run the live verifier, or deploy before explicit approval.
 - This delivery is design-domain only. It does not touch RP5 or WordPress export artifacts (`supabase/migrations/20260831151956_rp5_native_wordpress_export.sql`, `supabase/verify_20260831151956_rp5_native_wordpress_export.sql`, or `wordpress-export` code paths).
 - Does not alter any Marketing Studio domain tables, functions, or flows.
@@ -38,11 +38,21 @@
 npm test
 npm run lint
 npm run build
-npx deno test --cached-only --no-config supabase/functions/design-workshop/index.test.ts
-npx deno check --cached-only --no-config supabase/functions/design-workshop/index.ts
+npx deno test --cached-only --no-config supabase/functions/*/index.test.ts
+npx deno test --cached-only --no-config supabase/functions
+npx deno check --cached-only --no-config supabase/functions/*/index.ts
 git diff --check origin/main...HEAD
 git diff --name-only origin/main...HEAD
 ```
+
+## Recorded verification evidence
+
+- Node suite: 297 passed, 0 failed.
+- Full Edge Function Deno suite: 96 passed, 0 failed.
+- Focused Design Workshop Deno suite: 21 passed, 0 failed.
+- Lint: 0 errors; 274 existing repository warnings.
+- Production build completed successfully.
+- All 20 Edge Function type checks completed successfully.
 
 After applying the DS3 migration to review DB, run:
 
