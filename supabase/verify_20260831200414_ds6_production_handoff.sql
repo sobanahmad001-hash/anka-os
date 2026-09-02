@@ -53,12 +53,27 @@ insert into ds6_runtime_checks values
   ('handoff_browser_is_read_only', (
     has_table_privilege('authenticated', 'public.production_handoff_packages', 'select')
     and not has_table_privilege(
+      'authenticated', 'public.production_handoff_packages', 'select with grant option'
+    )
+    and not has_table_privilege(
       'authenticated', 'public.production_handoff_packages',
       'insert, update, delete, truncate, references, trigger'
+    )
+    and not has_any_column_privilege(
+      'authenticated', 'public.production_handoff_packages',
+      'insert, update, references'
+    )
+    and not has_any_column_privilege(
+      'authenticated', 'public.production_handoff_packages',
+      'select with grant option'
     )
     and not has_table_privilege(
       'anon', 'public.production_handoff_packages',
       'select, insert, update, delete, truncate, references, trigger'
+    )
+    and not has_any_column_privilege(
+      'anon', 'public.production_handoff_packages',
+      'select, insert, update, references'
     )
   )),
   ('handoff_service_role_is_least_privilege', (
@@ -67,6 +82,17 @@ insert into ds6_runtime_checks values
     and has_table_privilege('service_role', 'public.production_handoff_packages', 'update')
     and not has_table_privilege(
       'service_role', 'public.production_handoff_packages', 'delete, truncate, references, trigger'
+    )
+    and not has_any_column_privilege(
+      'service_role', 'public.production_handoff_packages', 'references'
+    )
+    and not has_table_privilege(
+      'service_role', 'public.production_handoff_packages',
+      'select with grant option, insert with grant option, update with grant option'
+    )
+    and not has_any_column_privilege(
+      'service_role', 'public.production_handoff_packages',
+      'select with grant option, insert with grant option, update with grant option'
     )
   )),
   ('handoff_release_fk_is_composite', exists (
@@ -113,7 +139,10 @@ insert into ds6_runtime_checks values
       and trigger_record.tgfoid =
         'private.enforce_production_handoff_package_transition()'::regprocedure
       and trigger_record.tgtype = 19
-      and trigger_record.tgenabled <> 'D'
+      and trigger_record.tgenabled = 'O'
+      and trigger_record.tgattr = ''::int2vector
+      and trigger_record.tgqual is null
+      and trigger_record.tgnargs = 0
       and not trigger_record.tgisinternal
   )),
   ('handoff_private_transition_function_not_browser_callable', (
@@ -143,6 +172,7 @@ insert into ds6_runtime_checks values
       and index_record.indrelid = 'public.production_handoff_packages'::regclass
       and index_record.indisvalid
       and index_record.indisready
+      and index_record.indislive
       and not index_record.indisunique
       and not index_record.indisprimary
       and not index_record.indisexclusion
