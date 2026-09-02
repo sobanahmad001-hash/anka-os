@@ -15,6 +15,8 @@ declare
   v_actor_id uuid;
   v_page_id uuid := gen_random_uuid();
   v_keyword_id uuid := gen_random_uuid();
+  v_source_artifact_id uuid := gen_random_uuid();
+  v_source_keyword_id uuid := gen_random_uuid();
   v_other_organization_id uuid := gen_random_uuid();
   v_other_client_id uuid := gen_random_uuid();
   v_other_brand_id uuid := gen_random_uuid();
@@ -23,6 +25,12 @@ declare
   v_duplicate_rejected boolean := false;
   v_invalid_tier_rejected boolean := false;
   v_cross_org_page_rejected boolean := false;
+  v_cross_org_brand_rejected boolean := false;
+  v_cross_org_source_rejected boolean := false;
+  v_cross_org_snapshot_rejected boolean := false;
+  v_negative_position_rejected boolean := false;
+  v_negative_clicks_rejected boolean := false;
+  v_negative_impressions_rejected boolean := false;
   v_visible_keywords integer;
   v_hidden_keywords integer;
   v_visible_snapshots integer;
@@ -89,6 +97,24 @@ begin
   end;
   insert into mk6a_runtime_checks values ('target_rank_tier_is_constrained', v_invalid_tier_rejected);
 
+  begin
+    insert into public.keyword_rank_snapshots (organization_id, tracked_keyword_id, snapshot_date, position)
+    values (v_organization_id, v_keyword_id, current_date + 1, -1);
+  exception when check_violation then v_negative_position_rejected := true;
+  end;
+  begin
+    insert into public.keyword_rank_snapshots (organization_id, tracked_keyword_id, snapshot_date, search_console_clicks)
+    values (v_organization_id, v_keyword_id, current_date + 2, -1);
+  exception when check_violation then v_negative_clicks_rejected := true;
+  end;
+  begin
+    insert into public.keyword_rank_snapshots (organization_id, tracked_keyword_id, snapshot_date, search_console_impressions)
+    values (v_organization_id, v_keyword_id, current_date + 3, -1);
+  exception when check_violation then v_negative_impressions_rejected := true;
+  end;
+  insert into mk6a_runtime_checks values
+    ('negative_rank_metrics_are_rejected', v_negative_position_rejected and v_negative_clicks_rejected and v_negative_impressions_rejected);
+
   insert into public.organizations (id, name, slug)
   values (v_other_organization_id, 'MK6a verifier hidden org', 'mk6a-' || substr(v_other_organization_id::text, 1, 8));
   insert into public.agency_clients (id, organization_id, name, created_by)
@@ -111,6 +137,35 @@ begin
   insert into public.keyword_rank_snapshots (
     organization_id, tracked_keyword_id, snapshot_date, position
   ) values (v_other_organization_id, v_other_keyword_id, current_date, 8);
+
+  begin
+    insert into public.tracked_keywords (organization_id, brand_id, tracked_page_id, keyword, created_by)
+    values (v_organization_id, v_other_brand_id, v_page_id, 'cross organization brand', v_actor_id);
+  exception when foreign_key_violation then v_cross_org_brand_rejected := true;
+  end;
+  begin
+    insert into public.tracked_keywords (organization_id, brand_id, tracked_page_id, source_artifact_id, keyword, created_by)
+    values (v_organization_id, v_brand_id, v_page_id, gen_random_uuid(), 'cross organization source', v_actor_id);
+  exception when foreign_key_violation then v_cross_org_source_rejected := true;
+  end;
+  begin
+    insert into public.keyword_rank_snapshots (organization_id, tracked_keyword_id, snapshot_date, position)
+    values (v_organization_id, v_other_keyword_id, current_date + 1, 8);
+  exception when foreign_key_violation then v_cross_org_snapshot_rejected := true;
+  end;
+  insert into mk6a_runtime_checks values
+    ('composite_brand_source_and_snapshot_foreign_keys_reject_cross_org_targets', v_cross_org_brand_rejected and v_cross_org_source_rejected and v_cross_org_snapshot_rejected);
+
+  insert into public.artifacts (id, organization_id, brand_id, artifact_type, title, created_by)
+  values (v_source_artifact_id, v_organization_id, v_brand_id, 'keyword_strategy', 'MK6a verifier keyword source', v_actor_id);
+  insert into public.tracked_keywords (id, organization_id, brand_id, tracked_page_id, source_artifact_id, keyword, created_by)
+  values (v_source_keyword_id, v_organization_id, v_brand_id, v_page_id, v_source_artifact_id, 'source deletion check', v_actor_id);
+  delete from public.artifacts where id = v_source_artifact_id;
+  insert into mk6a_runtime_checks values
+    ('source_artifact_deletion_nulls_only_source_column', (
+      select source_artifact_id is null and organization_id = v_organization_id and brand_id = v_brand_id and tracked_page_id = v_page_id
+      from public.tracked_keywords where id = v_source_keyword_id
+    ));
 
   begin
     insert into public.tracked_keywords (

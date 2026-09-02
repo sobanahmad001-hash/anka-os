@@ -64,6 +64,8 @@ test('MK6a includes a rollback-safe verifier for schema, daily snapshots, and is
     'mk6a_exact_column_types_nullability_and_defaults', 'mk6a_foreign_keys_are_exact_and_validated', 'mk6a_indexes_are_all_valid',
     'null_position_is_honest_not_yet_ranking_state', 'one_snapshot_per_keyword_per_day',
     'target_rank_tier_is_constrained', 'composite_page_foreign_key_rejects_cross_org_target',
+    'negative_rank_metrics_are_rejected', 'composite_brand_source_and_snapshot_foreign_keys_reject_cross_org_targets',
+    'source_artifact_deletion_nulls_only_source_column',
     'authenticated_reads_are_organization_isolated',
   ]) assert.match(verifier, new RegExp(check))
   assert.match(verifier, /rollback;/)
