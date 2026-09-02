@@ -14,6 +14,9 @@ create temporary table ds6_expected_handoff_constraints (
   failure_reason text not null,
   created_at timestamptz not null,
   completed_at timestamptz,
+  constraint ds6_expected_failure_reason_length check (
+    length(failure_reason) <= 2000
+  ),
   constraint ds6_expected_ready_storage check (
     (status = 'ready' and package_storage_path is not null and completed_at is not null and failure_reason = '')
     or
@@ -57,7 +60,7 @@ insert into ds6_runtime_checks values
     )
     and not has_table_privilege(
       'authenticated', 'public.production_handoff_packages',
-      'insert, update, delete, truncate, references, trigger'
+      'insert, update, delete, truncate, references, trigger, maintain'
     )
     and not has_any_column_privilege(
       'authenticated', 'public.production_handoff_packages',
@@ -69,7 +72,7 @@ insert into ds6_runtime_checks values
     )
     and not has_table_privilege(
       'anon', 'public.production_handoff_packages',
-      'select, insert, update, delete, truncate, references, trigger'
+      'select, insert, update, delete, truncate, references, trigger, maintain'
     )
     and not has_any_column_privilege(
       'anon', 'public.production_handoff_packages',
@@ -81,7 +84,8 @@ insert into ds6_runtime_checks values
     and has_table_privilege('service_role', 'public.production_handoff_packages', 'insert')
     and has_table_privilege('service_role', 'public.production_handoff_packages', 'update')
     and not has_table_privilege(
-      'service_role', 'public.production_handoff_packages', 'delete, truncate, references, trigger'
+      'service_role', 'public.production_handoff_packages',
+      'delete, truncate, references, trigger, maintain'
     )
     and not has_any_column_privilege(
       'service_role', 'public.production_handoff_packages', 'references'
@@ -100,8 +104,27 @@ insert into ds6_runtime_checks values
     from pg_constraint constraint_record
     where constraint_record.conrelid = 'public.production_handoff_packages'::regclass
       and constraint_record.contype = 'f'
+      and constraint_record.convalidated
+      and constraint_record.confdeltype = 'c'
       and pg_get_constraintdef(constraint_record.oid)
-        like '%FOREIGN KEY (design_direction_release_id, organization_id)%design_direction_releases(id, organization_id)%'
+        like '%FOREIGN KEY (design_direction_release_id, organization_id)%design_direction_releases(id, organization_id)%ON DELETE CASCADE%'
+  )),
+  ('handoff_failure_reason_is_bounded', exists (
+    select 1
+    from pg_constraint constraint_record
+    where constraint_record.conrelid = 'public.production_handoff_packages'::regclass
+      and constraint_record.conname =
+        'production_handoff_packages_failure_reason_check'
+      and constraint_record.contype = 'c'
+      and constraint_record.convalidated
+      and pg_get_constraintdef(constraint_record.oid, false) = (
+        select pg_get_constraintdef(expected_record.oid, false)
+        from pg_constraint expected_record
+        where expected_record.conrelid =
+            'pg_temp.ds6_expected_handoff_constraints'::regclass
+          and expected_record.conname =
+            'ds6_expected_failure_reason_length'
+      )
   )),
   ('handoff_ready_requires_storage', exists (
     select 1

@@ -100,6 +100,7 @@ test('the DS6 verifier is named, rollback-safe, and never commits', () => {
     'handoff_rls_enabled',
     'handoff_browser_is_read_only',
     'handoff_release_fk_is_composite',
+    'handoff_failure_reason_is_bounded',
     'handoff_bucket_remains_private',
     'handoff_bucket_accepts_zip',
     'handoff_preparing_partial_index_exists',
@@ -110,15 +111,19 @@ test('the DS6 verifier is named, rollback-safe, and never commits', () => {
   }
   assert.doesNotMatch(verifier, /'service_role', 'public\.production_handoff_packages', 'select, insert, update'/)
   assert.match(verifier, /permissive = 'PERMISSIVE'[\s\S]*cmd = 'SELECT'[\s\S]*roles = array\['authenticated'\]::name\[\][\s\S]*qual = 'is_team_organization_member\(organization_id\)'[\s\S]*with_check is null/)
-  assert.match(verifier, /'authenticated', 'public\.production_handoff_packages',[\s\S]*'insert, update, delete, truncate, references, trigger'/)
-  assert.match(verifier, /'anon', 'public\.production_handoff_packages',[\s\S]*'select, insert, update, delete, truncate, references, trigger'/)
+  assert.match(verifier, /'authenticated', 'public\.production_handoff_packages',[\s\S]*'insert, update, delete, truncate, references, trigger, maintain'/)
+  assert.match(verifier, /'anon', 'public\.production_handoff_packages',[\s\S]*'select, insert, update, delete, truncate, references, trigger, maintain'/)
+  assert.match(verifier, /'service_role', 'public\.production_handoff_packages',[\s\S]*'delete, truncate, references, trigger, maintain'/)
   assert.match(verifier, /has_any_column_privilege\([\s\S]*'authenticated', 'public\.production_handoff_packages',[\s\S]*'insert, update, references'/)
   assert.match(verifier, /has_any_column_privilege\([\s\S]*'anon', 'public\.production_handoff_packages',[\s\S]*'select, insert, update, references'/)
   assert.match(verifier, /has_any_column_privilege\([\s\S]*'service_role', 'public\.production_handoff_packages', 'references'/)
   assert.match(verifier, /'select with grant option, insert with grant option, update with grant option'/)
-  assert.equal(verifier.match(/pg_get_constraintdef\(constraint_record\.oid, false\) = \(/g)?.length, 2)
+  assert.equal(verifier.match(/pg_get_constraintdef\(constraint_record\.oid, false\) = \(/g)?.length, 3)
   assert.match(verifier, /ds6_expected_ready_storage/)
   assert.match(verifier, /ds6_expected_storage_scope/)
+  assert.match(verifier, /ds6_expected_failure_reason_length/)
+  assert.match(verifier, /production_handoff_packages_failure_reason_check[\s\S]*constraint_record\.convalidated/)
+  assert.match(verifier, /constraint_record\.confdeltype = 'c'[\s\S]*ON DELETE CASCADE/)
   assert.ok(!verifier.includes('pg_get_constraintdef(constraint_record.oid) like'))
   assert.match(verifier, /tgfoid =[\s\S]*private\.enforce_production_handoff_package_transition\(\)'::regprocedure/)
   assert.match(verifier, /tgtype = 19[\s\S]*tgenabled = 'O'[\s\S]*tgattr = ''::int2vector[\s\S]*tgqual is null[\s\S]*tgnargs = 0/)
