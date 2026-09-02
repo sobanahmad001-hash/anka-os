@@ -381,39 +381,44 @@ select jsonb_build_object(
       'CREATE INDEX idx_tracked_keywords_source_artifact_fk ON public.tracked_keywords USING btree (source_artifact_id, organization_id) WHERE (source_artifact_id IS NOT NULL)'
     ]
   ),
-  'mk6a_primary_unique_and_check_constraints_are_exact', (
+  'mk6a_primary_keys_are_exact', (
     select count(*) = 1 from pg_constraint constraint_definition
     where constraint_definition.conrelid = 'public.tracked_keywords'::regclass
-      and constraint_definition.contype = 'p'
-      and (select array_agg(attribute.attname order by key_position.ordinality) from unnest(constraint_definition.conkey) with ordinality key_position(attnum, ordinality) join pg_attribute attribute on attribute.attrelid = constraint_definition.conrelid and attribute.attnum = key_position.attnum) = array['id']::name[]
+      and constraint_definition.contype = 'p' and pg_get_constraintdef(constraint_definition.oid) = 'PRIMARY KEY (id)'
   ) and (
     select count(*) = 1 from pg_constraint constraint_definition
     where constraint_definition.conrelid = 'public.keyword_rank_snapshots'::regclass
-      and constraint_definition.contype = 'p'
-      and (select array_agg(attribute.attname order by key_position.ordinality) from unnest(constraint_definition.conkey) with ordinality key_position(attnum, ordinality) join pg_attribute attribute on attribute.attrelid = constraint_definition.conrelid and attribute.attnum = key_position.attnum) = array['id']::name[]
+      and constraint_definition.contype = 'p' and pg_get_constraintdef(constraint_definition.oid) = 'PRIMARY KEY (id)'
+  ),
+  'mk6a_unique_constraints_are_exact', (
+    select count(*) = 1 from pg_constraint constraint_definition
+    where constraint_definition.conrelid = 'public.tracked_keywords'::regclass
+      and constraint_definition.contype = 'u' and pg_get_constraintdef(constraint_definition.oid) = 'UNIQUE (id, organization_id)'
   ) and (
     select count(*) = 1 from pg_constraint constraint_definition
-    where constraint_definition.conrelid = 'public.tracked_keywords'::regclass and constraint_definition.contype = 'u'
-      and (select array_agg(attribute.attname order by key_position.ordinality) from unnest(constraint_definition.conkey) with ordinality key_position(attnum, ordinality) join pg_attribute attribute on attribute.attrelid = constraint_definition.conrelid and attribute.attnum = key_position.attnum) = array['id', 'organization_id']::name[]
+    where constraint_definition.conrelid = 'public.keyword_rank_snapshots'::regclass
+      and constraint_definition.contype = 'u' and pg_get_constraintdef(constraint_definition.oid) = 'UNIQUE (tracked_keyword_id, snapshot_date)'
   ) and (
     select count(*) = 2 from pg_constraint constraint_definition
     where constraint_definition.conrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
       and constraint_definition.contype = 'u'
-  ) and not exists (
-    select 1 from pg_constraint constraint_definition
-    where constraint_definition.conrelid = 'public.keyword_rank_snapshots'::regclass and constraint_definition.contype = 'u'
-      and (select array_agg(attribute.attname order by key_position.ordinality) from unnest(constraint_definition.conkey) with ordinality key_position(attnum, ordinality) join pg_attribute attribute on attribute.attrelid = constraint_definition.conrelid and attribute.attnum = key_position.attnum) = array['id', 'organization_id']::name[]
-  ) and (select array_agg(pg_get_constraintdef(constraint_definition.oid) order by pg_get_constraintdef(constraint_definition.oid))
-    from pg_constraint constraint_definition
+  ),
+  'mk6a_check_constraints_are_exact', (
+    select count(*) = 5 from pg_constraint constraint_definition
     where constraint_definition.conrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
       and constraint_definition.contype = 'c'
-  ) = array[
-    'CHECK ((length(TRIM(BOTH FROM keyword)) BETWEEN 1 AND 200))',
-    'CHECK ((position IS NULL) OR (position >= (1)::numeric))',
-    'CHECK ((search_console_clicks IS NULL) OR (search_console_clicks >= 0))',
-    'CHECK ((search_console_impressions IS NULL) OR (search_console_impressions >= 0))',
-    'CHECK ((target_rank_tier = ANY (ARRAY[''top_3''::text, ''top_10''::text, ''top_20''::text])))'
-  ],
+  ) and not exists (
+    select 1 from pg_constraint constraint_definition
+    where constraint_definition.conrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
+      and constraint_definition.contype = 'c'
+      and pg_get_constraintdef(constraint_definition.oid) not in (
+        'CHECK ((("position" IS NULL) OR ("position" >= (1)::numeric)))',
+        'CHECK (((search_console_clicks IS NULL) OR (search_console_clicks >= 0)))',
+        'CHECK (((search_console_impressions IS NULL) OR (search_console_impressions >= 0)))',
+        'CHECK (((length(TRIM(BOTH FROM keyword)) >= 1) AND (length(TRIM(BOTH FROM keyword)) <= 200)))',
+        'CHECK ((target_rank_tier = ANY (ARRAY[''top_3''::text, ''top_10''::text, ''top_20''::text)))'
+      )
+  ),
   'mk6a_foreign_key_catalog_mapping_is_exact', (
     select count(*) = 5 and bool_and(convalidated and confupdtype = 'a' and confmatchtype = 's')
     from pg_constraint foreign_key

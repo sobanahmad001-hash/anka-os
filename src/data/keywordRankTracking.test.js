@@ -62,6 +62,11 @@ test('MK6a keeps the daily record immutable by reading an existing snapshot befo
   assert.match(verifier, /confrelid = 'public\.tracked_pages'::regclass/)
   assert.match(verifier, /confrelid = 'auth\.users'::regclass/)
   assert.match(verifier, /array_agg\(pg_get_indexdef/)
+  assert.match(verifier, /'mk6a_primary_keys_are_exact'/)
+  assert.match(verifier, /'mk6a_unique_constraints_are_exact'/)
+  assert.match(verifier, /'mk6a_check_constraints_are_exact'/)
+  assert.match(verifier, /CHECK \(\(\("position" IS NULL\) OR \("position" >= \(1\)::numeric\)\)\)/)
+  assert.match(verifier, /CHECK \(\(\(length\(TRIM\(BOTH FROM keyword\)\) >= 1\) AND \(length\(TRIM\(BOTH FROM keyword\)\) <= 200\)\)\)/)
   assert.doesNotMatch(verifier, /^  \)\r?\n  \),$/m)
 })
 
@@ -71,7 +76,7 @@ test('MK6a includes a rollback-safe verifier for schema, daily snapshots, and is
     'mk6a_composite_foreign_keys_exist', 'mk6a_snapshots_are_strictly_append_only_for_service_role',
     'mk6a_no_explicit_column_grants_or_grant_options', 'mk6a_columns_match_contract', 'mk6a_constraints_match_contract',
     'mk6a_exact_column_types_nullability_and_defaults', 'mk6a_foreign_keys_are_exact_and_validated', 'mk6a_indexes_are_all_valid',
-    'mk6a_primary_unique_and_check_constraints_are_exact',
+    'mk6a_primary_keys_are_exact', 'mk6a_unique_constraints_are_exact', 'mk6a_check_constraints_are_exact',
     'mk6a_foreign_key_catalog_mapping_is_exact',
     'null_position_is_honest_not_yet_ranking_state', 'one_snapshot_per_keyword_per_day',
     'target_rank_tier_is_constrained', 'composite_page_foreign_key_rejects_cross_org_target',
