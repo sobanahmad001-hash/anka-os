@@ -25,7 +25,9 @@ export default function VersionProofingPanel({
   initialVersionId = '', visualAnchor = null, visualAnchorVersionId = '', onClearVisualAnchor = null,
 }) {
   const { user, profile } = useAuth()
-  const ordered = useMemo(() => [...(versions || [])].sort((a, b) => b.version_number - a.version_number), [versions])
+  const normalizedVersions = Array.isArray(versions) ? versions : []
+  const isContentRequest = targetKind === 'content_request'
+  const ordered = useMemo(() => [...normalizedVersions].sort((a, b) => (isContentRequest ? 0 : (b.version_number - a.version_number))), [isContentRequest, normalizedVersions])
   const [versionId, setVersionId] = useState(initialVersionId || ordered[0]?.id || '')
   const [comments, setComments] = useState([])
   const [body, setBody] = useState('')
@@ -35,8 +37,8 @@ export default function VersionProofingPanel({
   const [error, setError] = useState('')
   const colors = THEMES[theme] || THEMES.amber
   const selected = ordered.find(item => item.id === versionId) || ordered[0] || null
-  const regions = regionsByVersion[selected?.id] || []
-  const activeVisualAnchor = selected?.id === visualAnchorVersionId ? visualAnchor : null
+  const regions = regionsByVersion?.[selected?.id] || []
+  const activeVisualAnchor = isContentRequest || selected?.id === visualAnchorVersionId ? visualAnchor : null
 
   useEffect(() => {
     if (initialVersionId) setVersionId(initialVersionId)
@@ -82,12 +84,12 @@ export default function VersionProofingPanel({
 
   return <section className={`mt-6 rounded-2xl border ${colors.border} bg-slate-950/50 p-5`}>
     <div className="flex flex-wrap items-end justify-between gap-4">
-      <div><p className={`text-xs font-semibold uppercase tracking-[0.14em] ${colors.text}`}>Exact-version proofing</p><h3 className="mt-1 font-semibold text-white">Comments and resolution</h3><p className="mt-1 text-xs leading-5 text-slate-500">Feedback stays on this exact immutable version and never moves to a later revision.</p></div>
-      <label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Version
+      <div><p className={`text-xs font-semibold uppercase tracking-[0.14em] ${colors.text}`}>Exact-version proofing</p><h3 className="mt-1 font-semibold text-white">{isContentRequest ? 'Request comments' : 'Comments and resolution'}</h3><p className="mt-1 text-xs leading-5 text-slate-500">{isContentRequest ? 'Feedback stays on this exact request until it is replaced by a new one.' : 'Feedback stays on this exact immutable version and never moves to a later revision.'}</p></div>
+      {!isContentRequest && <label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Version
         <select value={selected?.id || ''} onChange={event => { setVersionId(event.target.value); setRegion(''); onClearVisualAnchor?.() }} className="ml-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs normal-case text-white">
           {ordered.map(item => <option key={item.id} value={item.id}>Version {item.version_number}</option>)}
         </select>
-      </label>
+      </label>}
     </div>
 
     <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-y border-slate-800 py-3 text-xs text-slate-400"><span>{comments.length} comment{comments.length === 1 ? '' : 's'} · {unresolved} unresolved</span><label className="flex items-center gap-2"><input type="checkbox" checked={unresolvedOnly} onChange={event => setUnresolvedOnly(event.target.checked)} />Unresolved only</label></div>
@@ -98,13 +100,13 @@ export default function VersionProofingPanel({
         <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-300">{comment.body}</p>
         {comment.resolved ? <p className="mt-3 text-xs text-slate-500">Resolved by {personLabel(comment.resolver, comment.resolved_by)} · {new Date(comment.resolved_at).toLocaleString()}</p> : canResolve(comment) && <button type="button" disabled={loading} onClick={() => resolve(comment.id)} className="mt-3 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:border-emerald-500 hover:text-white">Mark resolved</button>}
       </article>)}
-      {!visible.length && !loading && <p className="rounded-xl border border-dashed border-slate-800 py-6 text-center text-sm text-slate-600">{unresolvedOnly ? 'No unresolved comments.' : 'No comments on this version yet.'}</p>}
+      {!visible.length && !loading && <p className="rounded-xl border border-dashed border-slate-800 py-6 text-center text-sm text-slate-600">{unresolvedOnly ? 'No unresolved comments.' : 'No comments on this target yet.'}</p>}
     </div>
 
     <form onSubmit={submit} className="mt-5 border-t border-slate-800 pt-5">
       {!!regions.length && <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Optional page anchor</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" onClick={() => setRegion('')} className={`rounded-lg border px-3 py-1.5 text-xs ${!region ? `${colors.border} ${colors.text}` : 'border-slate-800 text-slate-500'}`}>General</button>{regions.map(item => <button key={item.value} type="button" onClick={() => setRegion(item.value)} className={`rounded-lg border px-3 py-1.5 text-xs ${region === item.value ? `${colors.border} ${colors.text}` : 'border-slate-800 text-slate-500'}`}>{item.label}</button>)}</div></div>}
       {activeVisualAnchor && <div className={`mb-3 rounded-xl border ${colors.border} px-3 py-2 text-xs ${colors.text}`}>Anchored to visual point {Math.round(activeVisualAnchor.x * 100)}%, {Math.round(activeVisualAnchor.y * 100)}%. <button type="button" className="underline" onClick={onClearVisualAnchor}>Use general comment</button></div>}
-      <textarea required rows="3" value={body} onChange={event => setBody(event.target.value)} placeholder="Add immutable feedback for this exact version…" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-3 text-sm text-white outline-none focus:border-slate-500" />
+      <textarea required rows="3" value={body} onChange={event => setBody(event.target.value)} placeholder="Add immutable feedback for this exact target…" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-3 text-sm text-white outline-none focus:border-slate-500" />
       <div className="mt-3 flex items-center justify-between gap-3"><p className="text-[11px] leading-5 text-slate-600">Comments cannot be edited or deleted. Add a correction as a new comment.</p><button disabled={loading || !body.trim()} className={`rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 ${colors.button}`}>{loading ? 'Saving…' : 'Add comment'}</button></div>
     </form>
   </section>

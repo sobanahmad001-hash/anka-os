@@ -54,8 +54,8 @@ test('D3 rollup is bidirectional, live, and has no cached summary', () => {
     source: { id: 'third' }, target: { id: 'current' },
   }]
   assert.deepEqual(splitArtifactRelations('current', rows), {
-    outgoing: [{ ...rows[0], relatedArtifact: rows[0].target }],
-    incoming: [{ ...rows[1], relatedArtifact: rows[1].source }],
+    outgoing: [{ ...rows[0], relatedArtifact: rows[0].target, targetKind: 'artifact' }],
+    incoming: [{ ...rows[1], relatedArtifact: rows[1].source, targetKind: 'artifact' }],
   })
   assert.match(repository, /source:artifacts!artifact_relations_source_artifact_fkey/)
   assert.match(repository, /target:artifacts!artifact_relations_target_artifact_fkey/)
@@ -95,4 +95,12 @@ test('D3 contains no dependency graph or W-series implementation', () => {
   const d3 = `${migration}\n${edge}\n${repository}\n${panel}`
   assert.doesNotMatch(d3, /work_items|work_item_dependencies|cycle detection|recursive query/i)
   assert.doesNotMatch(`${migration}\n${edge}`, /artifact_versions|artifact_approvals|artifact_version_comments/)
+})
+
+test('CP5 request-target relation creation keeps exactly one target path', () => {
+  assert.match(panel, /await artifactRelations\.create\(/)
+  assert.equal(panel.includes('const targetArtifactId = isRequestTargetMode'), true)
+  assert.equal(panel.includes('const targetContentRequestId = isRequestTargetMode'), true)
+  assert.equal(panel.includes("targetKind === 'artifact' ? targetId : ''"), false)
+  assert.equal(panel.includes('relationType,') && panel.includes('targetContentRequestId'), true)
 })

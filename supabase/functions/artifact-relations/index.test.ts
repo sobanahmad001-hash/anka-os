@@ -1,13 +1,16 @@
 import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.14'
 import { loadReadablePair, relationInput, requireReleasedDesignSystemTarget } from './index.ts'
 
-Deno.test('D3 relation input accepts descriptive links and RP2 page targeting', () => {
+Deno.test('CP5 relation input accepts artifact, content request, and sitemap targets', () => {
   assertEquals(relationInput({
     source_artifact_id: 'source', target_artifact_id: 'target', relation_type: 'feeds_into',
-  }), { sourceArtifactId: 'source', targetArtifactId: 'target', relationType: 'feeds_into' })
+  }), { sourceArtifactId: 'source', targetArtifactId: 'target', targetContentRequestId: null, relationType: 'feeds_into' })
   assertEquals(relationInput({
-    source_artifact_id: 'keywords', target_artifact_id: 'architecture', relation_type: 'targets_page',
-  }).relationType, 'targets_page')
+    source_artifact_id: 'keywords', target_content_request_id: 'request-1', relation_type: 'targets_page',
+  }), {
+    sourceArtifactId: 'keywords', targetArtifactId: null,
+    targetContentRequestId: 'request-1', relationType: 'targets_page',
+  })
   assertThrows(() => relationInput({
     source_artifact_id: 'source', target_artifact_id: 'target', relation_type: 'blocks',
   }), Error, 'Unsupported')
@@ -16,14 +19,13 @@ Deno.test('D3 relation input accepts descriptive links and RP2 page targeting', 
   }), Error, 'cannot relate to itself')
 })
 
-Deno.test('D3 refuses a relation when either endpoint is hidden by artifact RLS', async () => {
+Deno.test('D3 relation loading blocks hidden endpoints, including request targets', async () => {
+  const source = { id: 'source', organization_id: 'org', title: 'Source', artifact_type: 'discovery', engagement_id: 'engagement' }
   const sourceOnlyClient = {
-    from: () => ({
+    from: (table: string) => ({
       select: () => ({
-        in: async () => ({ data: [{
-          id: 'source', organization_id: 'organization', title: 'Visible',
-          artifact_type: 'discovery', engagement_id: 'engagement',
-        }], error: null }),
+        eq: () => ({ maybeSingle: async () => ({ data: table === 'artifacts' ? source : null, error: null }) }),
+        in: async () => ({ data: [source], error: null }),
       }),
     }),
   }
@@ -32,25 +34,26 @@ Deno.test('D3 refuses a relation when either endpoint is hidden by artifact RLS'
     Error,
     'Both artifacts must be visible',
   )
-})
 
-Deno.test('D3 permits cross-type endpoints in one organization', async () => {
-  const client = {
-    from: () => ({
+  const requestVisibleClient = {
+    from: (table: string) => ({
       select: () => ({
-        in: async () => ({ data: [
-          { id: 'content', organization_id: 'organization', artifact_type: 'discovery' },
-          { id: 'marketing', organization_id: 'organization', artifact_type: 'campaign_brief' },
-        ], error: null }),
+        eq: () => ({ maybeSingle: async () => ({
+          data: table === 'artifacts'
+            ? source
+            : { id: 'request-1', organization_id: 'org', status: 'pending', format: 'reel' },
+          error: null,
+        }) }),
+        in: async () => ({ data: [source], error: null }),
       }),
     }),
   }
-  const pair = await loadReadablePair(client as never, 'content', 'marketing')
-  assertEquals(pair.organizationId, 'organization')
-  assertEquals(pair.source.artifact_type, 'discovery')
-  assertEquals(pair.target.artifact_type, 'campaign_brief')
+  const requestPair = await loadReadablePair(requestVisibleClient as never, 'source', null, 'request-1')
+  assertEquals(requestPair.source.id, 'source')
+  assertEquals(requestPair.target.id, 'request-1')
+  assertEquals(requestPair.targetKind, 'content_request')
+  assertEquals(requestPair.organizationId, 'org')
 })
-
 Deno.test('DS5 permits only released design systems as D3 targets', async () => {
   class Query {
     constructor(private row: Record<string, unknown> | null) {}
