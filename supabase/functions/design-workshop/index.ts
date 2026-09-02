@@ -86,6 +86,31 @@ export function directionsAreDistinct(directions: Json[], threshold = 0.62) {
   return true
 }
 
+export function isStoryboardSession(session: Json, serviceSlug?: unknown) {
+  return text(serviceSlug, 80) === 'video_concepts_storyboards'
+    || text(session.output_family, 80) === 'video_motion'
+}
+
+export function directionGenerationPrompt(storyboard: boolean, slot: number, frameCount: number,
+  previous: Json[], laneDirection: string) {
+  if (!storyboard) {
+    const differentiation = previous.length
+      ? `Existing directions that this output must be materially different from: ${JSON.stringify(previous.map(item => ({ title: item.title, thesis: item.creative_thesis, principles: item.visual_principles })))}`
+      : 'This is the first direction.'
+    return {
+      instructions: 'You are assisting an accountable designer. Produce one traceable visual design direction, not a final approved asset. Follow the JSON schema exactly. Do not claim approval.',
+      context: `MANDATORY DIRECTION LANE\n${laneDirection}\n\n${differentiation}`,
+    }
+  }
+  const priorFrames = previous.map((content, index) => ({ frame_order: index + 1, content }))
+  return {
+    instructions: 'You are assisting an accountable designer. Produce one traceable storyboard frame in a connected static sequence, not an alternative concept or a final approved asset. Follow the JSON schema exactly. Do not claim approval.',
+    context: `STORYBOARD SEQUENCE\nFRAME ORDER\n${slot} of ${frameCount}\n\nNARRATIVE CONTINUITY\n${priorFrames.length
+      ? `Continue directly from the prior frame content below. Preserve characters, setting, visual language, palette, props, and screen direction while advancing the narrative by one clear beat. Do not restart or propose an alternative concept.\n${JSON.stringify(priorFrames)}`
+      : 'Establish the opening frame and visual language for one connected sequence. Later frames will receive this exact frame content as narrative context.'}`,
+  }
+}
+
 export function directionSchema() {
   const stringArray = { type: 'array', items: { type: 'string' }, minItems: 2, maxItems: 8 }
   return {
@@ -382,34 +407,35 @@ async function resolveOpenAi(admin: Client, engagementId: string) {
 }
 
 async function generateOne(admin: Client, session: any, model: any, lane: typeof LANES[number], slot: number,
-  actorId: string, credential: string, previous: Json[]) {
+  actorId: string, credential: string, previous: Json[], storyboard: boolean) {
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const { data: run, error: runError } = await admin.from('design_generation_runs').insert({
       organization_id: ORGANIZATION_ID, engagement_id: session.engagement_id, session_id: session.id,
       model_registry_id: model.id, provider: model.provider, model_id: model.model_id,
       direction_slot: slot, attempt_number: attempt, status: 'running',
       input_manifest_checksum: session.context_checksum,
-      parameters: { lane: lane.key, structured_output: 'anka_design_direction_v1', store: false }, created_by: actorId,
+      parameters: storyboard
+        ? { sequence_mode: 'storyboard', frame_order: slot, frame_count: LANES.length, structured_output: 'anka_design_direction_v1', store: false }
+        : { lane: lane.key, structured_output: 'anka_design_direction_v1', store: false },
+      created_by: actorId,
     }).select('*').single()
     if (runError) throw runError
     try {
-      const differentiation = previous.length
-        ? `Existing directions that this output must be materially different from: ${JSON.stringify(previous.map(item => ({ title: item.title, thesis: item.creative_thesis, principles: item.visual_principles })))}`
-        : 'This is the first direction.'
+      const prompt = directionGenerationPrompt(storyboard, slot, LANES.length, previous, lane.direction)
       const apiResponse = await fetch('https://api.openai.com/v1/responses', {
         method: 'POST', headers: { Authorization: `Bearer ${credential}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: model.model_id, store: false, safety_identifier: await sha256(actorId),
           metadata: { anka_session_id: session.id, anka_run_id: run.id, direction_slot: String(slot) },
-          instructions: 'You are assisting an accountable designer. Produce one traceable visual design direction, not a final approved asset. Follow the JSON schema exactly. Do not claim approval.',
-          input: `APPROVED CONTEXT MANIFEST\n${JSON.stringify(session.context_manifest)}\n\nOUTPUT FAMILY\n${session.output_family}\n\nOUTPUT BRIEF\n${JSON.stringify(session.output_brief)}\n\nDESIGNER INSTRUCTIONS\n${session.designer_instructions}\n\nMANDATORY DIRECTION LANE\n${lane.direction}\n\n${differentiation}`,
+          instructions: prompt.instructions,
+          input: `APPROVED CONTEXT MANIFEST\n${JSON.stringify(session.context_manifest)}\n\nOUTPUT FAMILY\n${session.output_family}\n\nOUTPUT BRIEF\n${JSON.stringify(session.output_brief)}\n\nDESIGNER INSTRUCTIONS\n${session.designer_instructions}\n\n${prompt.context}`,
           text: { format: directionSchema() }, max_output_tokens: 2600,
         }),
       })
       const result = await apiResponse.json()
       if (!apiResponse.ok) throw new Error(result?.error?.message || 'OpenAI direction generation failed')
       const generated = JSON.parse(outputText(result)) as Json
-      const duplicate = previous.some(item => similarity(item, generated) >= 0.62)
+      const duplicate = !storyboard && previous.some(item => similarity(item, generated) >= 0.62)
       const checksum = await sha256(stableJson(generated))
       await admin.from('design_generation_runs').update({
         status: duplicate ? 'rejected_duplicate' : 'completed', external_response_id: result.id || null,
@@ -432,8 +458,11 @@ async function generateDirections(admin: Client, body: Json, actorId: string) {
   const { data: session } = await admin.from('design_workshop_sessions').select('*')
     .eq('id', sessionId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
   if (!session || !['ready', 'generation_failed'].includes(session.status)) throw new Error('Session is not ready to generate')
+  const storyboard = isStoryboardSession(session)
   const { count } = await admin.from('design_directions').select('id', { count: 'exact', head: true }).eq('session_id', session.id)
-  if (count) throw new Error('This session already has its three comparison directions')
+  if (count) throw new Error(storyboard
+    ? 'This session already has its storyboard frame sequence'
+    : 'This session already has its three comparison directions')
   const { data: selections, error: selectionError } = await admin.from('design_workshop_model_selections').select('*')
     .eq('session_id', session.id).order('position')
   if (selectionError || !selections?.length) throw new Error('Session has no model routing')
@@ -452,9 +481,11 @@ async function generateDirections(admin: Client, body: Json, actorId: string) {
     const outputs: Array<{ generated: Json; runId: string; checksum: string; signature: string }> = []
     for (let index = 0; index < LANES.length; index += 1) {
       outputs.push(await generateOne(admin, session, orderedModels[index % orderedModels.length], LANES[index], index + 1,
-        actorId, credential, outputs.map(item => item.generated)))
+        actorId, credential, outputs.map(item => item.generated), storyboard))
     }
-    if (!directionsAreDistinct(outputs.map(item => item.generated))) throw new Error('Distinctness gate rejected the generated set')
+    if (!storyboard && !directionsAreDistinct(outputs.map(item => item.generated))) {
+      throw new Error('Distinctness gate rejected the generated set')
+    }
     const { data: directions, error: directionError } = await admin.from('design_directions').insert(outputs.map((_, index) => ({
       organization_id: ORGANIZATION_ID, session_id: session.id, direction_slot: index + 1,
     }))).select('*')
