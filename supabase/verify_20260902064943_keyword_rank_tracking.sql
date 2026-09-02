@@ -404,8 +404,7 @@ select jsonb_build_object(
     select 1 from pg_constraint constraint_definition
     where constraint_definition.conrelid = 'public.keyword_rank_snapshots'::regclass and constraint_definition.contype = 'u'
       and (select array_agg(attribute.attname order by key_position.ordinality) from unnest(constraint_definition.conkey) with ordinality key_position(attnum, ordinality) join pg_attribute attribute on attribute.attrelid = constraint_definition.conrelid and attribute.attnum = key_position.attnum) = array['id', 'organization_id']::name[]
-  ) and (
-    select array_agg(pg_get_constraintdef(constraint_definition.oid) order by pg_get_constraintdef(constraint_definition.oid))
+  ) and (select array_agg(pg_get_constraintdef(constraint_definition.oid) order by pg_get_constraintdef(constraint_definition.oid))
     from pg_constraint constraint_definition
     where constraint_definition.conrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
       and constraint_definition.contype = 'c'
@@ -415,8 +414,7 @@ select jsonb_build_object(
     'CHECK ((search_console_clicks IS NULL) OR (search_console_clicks >= 0))',
     'CHECK ((search_console_impressions IS NULL) OR (search_console_impressions >= 0))',
     'CHECK ((target_rank_tier = ANY (ARRAY[''top_3''::text, ''top_10''::text, ''top_20''::text])))'
-  ]
-  ),
+  ],
   'mk6a_foreign_key_catalog_mapping_is_exact', (
     select count(*) = 5 and bool_and(convalidated and confupdtype = 'a' and confmatchtype = 's')
     from pg_constraint foreign_key
