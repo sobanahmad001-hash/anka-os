@@ -4,7 +4,7 @@ import { googleAccessToken, namedKey } from '../_shared/googleOAuthTokens.ts'
 type Client = ReturnType<typeof createClient<any>>
 type Json = Record<string, unknown>
 
-const ACTIONS = new Set(['save_page', 'save_audit', 'inspect_page'])
+const ACTIONS = new Set(['save_page', 'save_audit', 'inspect_page', 'save_keyword', 'fetch_keyword_ranks'])
 const PAGE_TYPES = new Set(['homepage', 'service', 'location', 'event', 'blog', 'other'])
 const INDEX_STATUSES = new Set(['indexed', 'discovered_not_indexed', 'requested', 'excluded'])
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
@@ -163,7 +163,7 @@ async function saveAudit(userClient: Client, admin: Client, actorId: string, bod
   return data
 }
 
-async function searchConsoleConnection(admin: Client, page: Json) {
+export async function searchConsoleConnection(admin: Client, page: Json) {
   const { data: engagements, error } = await admin.from('engagements').select('id')
     .eq('organization_id', page.organization_id).eq('brand_id', page.brand_id)
   if (error) throw error
@@ -179,6 +179,92 @@ async function searchConsoleConnection(admin: Client, page: Json) {
     .eq('provider', 'google_search_console').eq('status', 'verified').is('archived_at', null).in('id', connectionIds).limit(1).maybeSingle()
   if (connectionError || !connection) throw Object.assign(new Error('A verified Search Console connection is required'), { status: 409 })
   return connection
+}
+
+export async function fetchSearchConsoleKeywordRank(
+  token: string,
+  siteUrl: string,
+  pageUrl: string,
+  keyword: string,
+  fetcher: typeof fetch = fetch,
+) {
+  const result = await fetcher(
+    `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+    {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        startDate: new Date(Date.now() - 28 * 86_400_000).toISOString().slice(0, 10),
+        endDate: new Date(Date.now() - 1 * 86_400_000).toISOString().slice(0, 10),
+        dimensions: ['query'], dataState: 'final', rowLimit: 1,
+        dimensionFilterGroups: [{ filters: [
+          { dimension: 'page', operator: 'equals', expression: pageUrl },
+          { dimension: 'query', operator: 'equals', expression: keyword },
+        ] }],
+      }), signal: AbortSignal.timeout(15_000),
+    },
+  )
+  const data = await result.json() as Json
+  if (!result.ok) throw new Error(`Search Console keyword query failed (${result.status})`)
+  const row = Array.isArray(data.rows) ? data.rows[0] as Json | undefined : undefined
+  return {
+    position: typeof row?.position === 'number' && Number.isFinite(row.position) ? row.position : null,
+    clicks: typeof row?.clicks === 'number' && Number.isFinite(row.clicks) ? Math.round(row.clicks) : null,
+    impressions: typeof row?.impressions === 'number' && Number.isFinite(row.impressions) ? Math.round(row.impressions) : null,
+  }
+}
+
+async function saveKeyword(userClient: Client, admin: Client, actorId: string, body: Json) {
+  const page = await readablePage(userClient, id(body.pageId, 'Tracked page'))
+  await requireWriter(admin, page.organization_id, actorId)
+  const keyword = text(body.keyword, 200)
+  if (!keyword) throw new Error('Keyword is required')
+  const tier = text(body.targetRankTier, 20) || null
+  if (tier && !['top_3', 'top_10', 'top_20'].includes(tier)) throw new Error('Unsupported target rank tier')
+  const sourceArtifactId = optionalId(body.sourceArtifactId)
+  if (sourceArtifactId) {
+    const { data: source, error } = await userClient.from('artifacts').select('id, organization_id, brand_id, artifact_type')
+      .eq('id', sourceArtifactId).maybeSingle()
+    if (error || !source || source.organization_id !== page.organization_id || source.brand_id !== page.brand_id || source.artifact_type !== 'keyword_strategy') {
+      throw new Error('Keyword source must be a readable Keyword Strategy artifact for this brand')
+    }
+  }
+  const { data, error } = await admin.from('tracked_keywords').insert({
+    organization_id: page.organization_id, brand_id: page.brand_id, tracked_page_id: page.id, keyword,
+    source_artifact_id: sourceArtifactId, target_rank_tier: tier, created_by: actorId,
+  }).select('*').single()
+  if (error) throw error
+  return data
+}
+
+async function fetchKeywordRanks(userClient: Client, admin: Client, actorId: string, body: Json) {
+  const page = await readablePage(userClient, id(body.pageId, 'Tracked page'))
+  await requireWriter(admin, page.organization_id, actorId)
+  const connection = await searchConsoleConnection(admin, page)
+  const siteUrl = text(connection.public_config?.site_url, 2048)
+  if (!siteUrl) throw new Error('Search Console property is not configured')
+  const token = await googleAccessToken(admin, connection.id, 'google_search_console')
+  const { data: keywords, error: keywordError } = await admin.from('tracked_keywords').select('id, keyword')
+    .eq('organization_id', page.organization_id).eq('tracked_page_id', page.id).eq('active', true)
+  if (keywordError) throw keywordError
+  const snapshotDate = new Date().toISOString().slice(0, 10)
+  const rows = []
+  for (const tracked of keywords || []) {
+    const { data: existing, error: existingError } = await admin.from('keyword_rank_snapshots').select('*')
+      .eq('organization_id', page.organization_id).eq('tracked_keyword_id', tracked.id).eq('snapshot_date', snapshotDate).maybeSingle()
+    if (existingError) throw existingError
+    if (existing) {
+      rows.push(existing)
+      continue
+    }
+    const metrics = await fetchSearchConsoleKeywordRank(token, siteUrl, page.page_url, tracked.keyword)
+    const { data, error } = await admin.from('keyword_rank_snapshots').insert({
+      organization_id: page.organization_id, tracked_keyword_id: tracked.id, snapshot_date: snapshotDate,
+      position: metrics.position, search_console_clicks: metrics.clicks, search_console_impressions: metrics.impressions,
+    }).select('*').single()
+    if (error) throw error
+    rows.push(data)
+  }
+  return rows
 }
 
 export async function fetchUrlInspection(token: string, pageUrl: string, siteUrl: string, fetcher: typeof fetch = fetch) {
@@ -218,7 +304,9 @@ export async function handleRequest(request: Request) {
     const { userClient, admin, user } = await requireContext(request)
     if (action === 'save_page') return response({ data: await savePage(userClient, admin, user.id, body) })
     if (action === 'save_audit') return response({ data: await saveAudit(userClient, admin, user.id, body) })
-    return response({ data: await inspectPage(userClient, admin, user.id, body) })
+    if (action === 'inspect_page') return response({ data: await inspectPage(userClient, admin, user.id, body) })
+    if (action === 'save_keyword') return response({ data: await saveKeyword(userClient, admin, user.id, body) })
+    return response({ data: await fetchKeywordRanks(userClient, admin, user.id, body) })
   } catch (error) {
     const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : 400
     return response({ error: error instanceof Error ? error.message : 'Unexpected technical SEO error' }, Number.isFinite(status) ? status : 400)

@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.14'
-import { fetchUrlInspection, mapInspectionResult, normalizePageUrl } from './index.ts'
+import { fetchSearchConsoleKeywordRank, fetchUrlInspection, mapInspectionResult, normalizePageUrl } from './index.ts'
 
 Deno.test('tracked page URLs are normalized without fragments or trailing slashes', () => {
   assertEquals(normalizePageUrl('https://Example.com/service/#section'), 'https://example.com/service')
@@ -22,4 +22,21 @@ Deno.test('URL Inspection uses the read-only Search Console endpoint', async () 
   assertEquals(url, 'https://searchconsole.googleapis.com/v1/urlInspection/index:inspect')
   assertEquals(JSON.parse(body), { inspectionUrl: 'https://example.com/page', siteUrl: 'sc-domain:example.com', languageCode: 'en-US' })
   await assertRejects(() => fetchUrlInspection('token', 'https://example.com/page', 'sc-domain:example.com', async () => new Response('{}', { status: 403 })))
+})
+
+Deno.test('keyword ranks use the existing read-only Search Analytics endpoint and preserve no-rank results', async () => {
+  let url = ''; let body = ''
+  const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+    url = String(input); body = String(init?.body || '')
+    return new Response(JSON.stringify({ rows: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }) as typeof fetch
+  const empty = await fetchSearchConsoleKeywordRank('token', 'sc-domain:example.com', 'https://example.com/service', 'design agency', fetcher)
+  assertEquals(empty, { position: null, clicks: null, impressions: null })
+  assertEquals(url, 'https://www.googleapis.com/webmasters/v3/sites/sc-domain%3Aexample.com/searchAnalytics/query')
+  const payload = JSON.parse(body)
+  assertEquals(payload.dimensions, ['query'])
+  assertEquals(payload.dimensionFilterGroups[0].filters, [
+    { dimension: 'page', operator: 'equals', expression: 'https://example.com/service' },
+    { dimension: 'query', operator: 'equals', expression: 'design agency' },
+  ])
 })
