@@ -5,6 +5,32 @@ create temporary table ds6_runtime_checks (
   passed boolean not null
 ) on commit drop;
 
+create temporary table ds6_expected_handoff_constraints (
+  id uuid not null,
+  organization_id uuid not null,
+  design_direction_release_id uuid not null,
+  status text not null,
+  package_storage_path text,
+  failure_reason text not null,
+  created_at timestamptz not null,
+  completed_at timestamptz,
+  constraint ds6_expected_ready_storage check (
+    (status = 'ready' and package_storage_path is not null and completed_at is not null and failure_reason = '')
+    or
+    (status = 'failed' and package_storage_path is null and completed_at is not null and length(trim(failure_reason)) > 0)
+    or
+    (status = 'preparing' and package_storage_path is null and completed_at is null and failure_reason = '')
+  ),
+  constraint ds6_expected_storage_scope check (
+    package_storage_path is null
+    or package_storage_path like organization_id::text || '/' || design_direction_release_id::text || '/handoffs/' || id::text || '.zip'
+  )
+) on commit drop;
+
+create index ds6_expected_handoff_preparing
+  on ds6_expected_handoff_constraints(organization_id, created_at)
+  where status = 'preparing';
+
 insert into ds6_runtime_checks values
   ('handoff_table_exists', to_regclass('public.production_handoff_packages') is not null),
   ('handoff_rls_enabled', (
@@ -18,17 +44,21 @@ insert into ds6_runtime_checks values
     where schemaname = 'public'
       and tablename = 'production_handoff_packages'
       and policyname = 'Team can read organization production handoffs'
+      and permissive = 'PERMISSIVE'
       and cmd = 'SELECT'
       and roles = array['authenticated']::name[]
-      and qual like '%is_team_organization_member(organization_id)%'
+      and qual = 'is_team_organization_member(organization_id)'
+      and with_check is null
   )),
   ('handoff_browser_is_read_only', (
     has_table_privilege('authenticated', 'public.production_handoff_packages', 'select')
     and not has_table_privilege(
-      'authenticated', 'public.production_handoff_packages', 'insert, update, delete'
+      'authenticated', 'public.production_handoff_packages',
+      'insert, update, delete, truncate, references, trigger'
     )
     and not has_table_privilege(
-      'anon', 'public.production_handoff_packages', 'select, insert, update, delete'
+      'anon', 'public.production_handoff_packages',
+      'select, insert, update, delete, truncate, references, trigger'
     )
   )),
   ('handoff_service_role_is_least_privilege', (
@@ -53,15 +83,13 @@ insert into ds6_runtime_checks values
     where constraint_record.conrelid = 'public.production_handoff_packages'::regclass
       and constraint_record.conname = 'production_handoff_packages_ready_storage'
       and constraint_record.contype = 'c'
-      and pg_get_constraintdef(constraint_record.oid) like '%status = ''ready''%'
-      and pg_get_constraintdef(constraint_record.oid) like '%package_storage_path IS NOT NULL%'
-      and pg_get_constraintdef(constraint_record.oid) like '%completed_at IS NOT NULL%'
-      and pg_get_constraintdef(constraint_record.oid) like '%failure_reason = ''''%'
-      and pg_get_constraintdef(constraint_record.oid) like '%status = ''failed''%'
-      and pg_get_constraintdef(constraint_record.oid) like '%package_storage_path IS NULL%'
-      and pg_get_constraintdef(constraint_record.oid) like '%length(TRIM(BOTH FROM failure_reason)) > 0%'
-      and pg_get_constraintdef(constraint_record.oid) like '%status = ''preparing''%'
-      and pg_get_constraintdef(constraint_record.oid) like '%completed_at IS NULL%'
+      and pg_get_constraintdef(constraint_record.oid, false) = (
+        select pg_get_constraintdef(expected_record.oid, false)
+        from pg_constraint expected_record
+        where expected_record.conrelid =
+            'pg_temp.ds6_expected_handoff_constraints'::regclass
+          and expected_record.conname = 'ds6_expected_ready_storage'
+      )
   )),
   ('handoff_storage_path_is_scoped', exists (
     select 1
@@ -69,11 +97,13 @@ insert into ds6_runtime_checks values
     where constraint_record.conrelid = 'public.production_handoff_packages'::regclass
       and constraint_record.conname = 'production_handoff_packages_storage_scope'
       and constraint_record.contype = 'c'
-      and pg_get_constraintdef(constraint_record.oid) like '%package_storage_path IS NULL%'
-      and pg_get_constraintdef(constraint_record.oid) like '%organization_id%'
-      and pg_get_constraintdef(constraint_record.oid) like '%design_direction_release_id%'
-      and pg_get_constraintdef(constraint_record.oid) like '%/handoffs/%'
-      and pg_get_constraintdef(constraint_record.oid) like '%.zip%'
+      and pg_get_constraintdef(constraint_record.oid, false) = (
+        select pg_get_constraintdef(expected_record.oid, false)
+        from pg_constraint expected_record
+        where expected_record.conrelid =
+            'pg_temp.ds6_expected_handoff_constraints'::regclass
+          and expected_record.conname = 'ds6_expected_storage_scope'
+      )
   )),
   ('handoff_terminal_transition_trigger_exists', exists (
     select 1
@@ -82,9 +112,8 @@ insert into ds6_runtime_checks values
       and trigger_record.tgname = 'trg_production_handoff_package_transition'
       and trigger_record.tgfoid =
         'private.enforce_production_handoff_package_transition()'::regprocedure
-      and (trigger_record.tgtype & 1) = 1
-      and (trigger_record.tgtype & 2) = 2
-      and (trigger_record.tgtype & 16) = 16
+      and trigger_record.tgtype = 19
+      and trigger_record.tgenabled <> 'D'
       and not trigger_record.tgisinternal
   )),
   ('handoff_private_transition_function_not_browser_callable', (
@@ -107,14 +136,30 @@ insert into ds6_runtime_checks values
   ('handoff_preparing_partial_index_exists', exists (
     select 1
     from pg_index index_record
+    join pg_class index_class on index_class.oid = index_record.indexrelid
+    join pg_am index_method on index_method.oid = index_class.relam
     where index_record.indexrelid =
         'public.idx_production_handoff_packages_preparing'::regclass
       and index_record.indrelid = 'public.production_handoff_packages'::regclass
+      and index_record.indisvalid
+      and index_record.indisready
+      and not index_record.indisunique
+      and not index_record.indisprimary
+      and not index_record.indisexclusion
+      and index_record.indimmediate
+      and index_record.indnkeyatts = 2
+      and index_record.indnatts = 2
+      and index_record.indexprs is null
+      and index_method.amname = 'btree'
+      and pg_get_indexdef(index_record.indexrelid, 1, false) = 'organization_id'
+      and pg_get_indexdef(index_record.indexrelid, 2, false) = 'created_at'
       and index_record.indpred is not null
-      and pg_get_indexdef(index_record.indexrelid)
-        like '%(organization_id, created_at)%'
-      and pg_get_expr(index_record.indpred, index_record.indrelid)
-        = '(status = ''preparing''::text)'
+      and pg_get_expr(index_record.indpred, index_record.indrelid, false) = (
+        select pg_get_expr(expected_index.indpred, expected_index.indrelid, false)
+        from pg_index expected_index
+        where expected_index.indexrelid =
+            'pg_temp.ds6_expected_handoff_preparing'::regclass
+      )
   )),
   ('handoff_bucket_remains_private', exists (
     select 1
