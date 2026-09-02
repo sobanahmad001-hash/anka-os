@@ -366,6 +366,8 @@ insert into mk6b_checks values
     with expected(index_name, table_name, columns, predicate) as (values
       ('idx_meta_oauth_sessions_connection', 'meta_oauth_sessions',
         array['integration_connection_id']::text[], null::text),
+      ('idx_meta_oauth_sessions_brand_org', 'meta_oauth_sessions',
+        array['brand_id', 'organization_id']::text[], null::text),
       ('idx_meta_oauth_sessions_actor', 'meta_oauth_sessions',
         array['actor_id']::text[], null::text),
       ('idx_meta_oauth_sessions_expiry', 'meta_oauth_sessions',
@@ -394,7 +396,7 @@ insert into mk6b_checks values
       union all (select * from expected except select * from actual))
   )),
   ('all_constraint_and_supporting_indexes_live', (
-    select count(*) = 11
+    select count(*) = 12
       and bool_and(indisvalid) and bool_and(indisready) and bool_and(indislive)
     from pg_index
     where indrelid in (

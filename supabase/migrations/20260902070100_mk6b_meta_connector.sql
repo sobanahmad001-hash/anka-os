@@ -109,6 +109,8 @@ create table public.meta_oauth_sessions (
 
 create index idx_meta_oauth_sessions_connection
   on public.meta_oauth_sessions(integration_connection_id);
+create index idx_meta_oauth_sessions_brand_org
+  on public.meta_oauth_sessions(brand_id, organization_id);
 create index idx_meta_oauth_sessions_actor
   on public.meta_oauth_sessions(actor_id);
 create index idx_meta_oauth_sessions_expiry

@@ -137,12 +137,14 @@ test('the verifier executes every required rollback security outcome', () => {
 
 test('the approved constraint and index audit keeps only current consumers', () => {
   assert.match(migration, /meta_performance_snapshots_spend_check check \(spend is null\)/)
-  assert.equal((migration.match(/create index idx_meta_/g) || []).length, 3)
+  assert.equal((migration.match(/create index idx_meta_/g) || []).length, 4)
   assert.match(migration, /idx_meta_oauth_sessions_connection[\s\S]*meta_oauth_sessions\(integration_connection_id\)/)
+  assert.match(migration, /idx_meta_oauth_sessions_brand_org[\s\S]*meta_oauth_sessions\(brand_id, organization_id\)/)
   assert.match(migration, /idx_meta_oauth_sessions_actor[\s\S]*meta_oauth_sessions\(actor_id\)/)
   assert.match(migration, /idx_meta_oauth_sessions_expiry[\s\S]*meta_oauth_sessions\(expires_at\)/)
   assert.doesNotMatch(migration, /idx_meta_performance_snapshots_org_date/)
   assert.doesNotMatch(migration, /idx_meta_connections_organization_brand/)
+  assert.doesNotMatch(migration, /meta_connections\(connected_by\)/)
   assert.doesNotMatch(migration, /idx_meta_oauth_sessions_expiry[\s\S]{0,100}where consumed_at is null/)
   assert.doesNotMatch(migration, /create (or replace )?function|create sequence|create trigger/i)
 })
