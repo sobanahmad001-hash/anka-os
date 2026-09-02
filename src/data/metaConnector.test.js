@@ -41,8 +41,8 @@ test('RLS exposes tenant metadata and snapshots without exposing Meta credential
   assert.match(migration, /grant select \([\s\S]*facebook_page_id[\s\S]*instagram_account_id[\s\S]*\) on public\.meta_connections to authenticated/)
   assert.doesNotMatch(migration, /grant select \([\s\S]*access_token_(ciphertext|iv)[\s\S]*\) on public\.meta_connections to authenticated/)
   assert.match(migration, /revoke all on public\.meta_oauth_sessions from anon, authenticated/)
-  assert.match(verifier, /has_column_privilege\('authenticated', 'public\.meta_connections', 'access_token_ciphertext', 'select'\)/)
-  assert.match(verifier, /mk6b_oauth_sessions_server_only/)
+  assert.match(verifier, /exact_column_acls_via_pg_attribute/)
+  assert.match(verifier, /browser_credentials_sessions_writes_denied_runtime/)
 })
 
 test('Meta permissions and external endpoints remain organic read-only', () => {
@@ -83,4 +83,64 @@ test('the verifier is rollback-safe and fails closed', () => {
   assert.match(verifier, /raise exception 'One or more MK6b verification checks failed'/)
   assert.match(verifier, /rollback;\s*$/)
   assert.doesNotMatch(verifier, /commit;/)
+})
+
+test('the verifier proves the exact catalog, policy, ACL, FK, and index contract', () => {
+  for (const anchor of [
+    'exact_tables_and_relkind',
+    'exact_columns_types_nullability_defaults',
+    'exact_table_constraints',
+    'exact_foreign_keys',
+    'exact_provider_and_event_constraints',
+    'exact_rls_policy_contract',
+    'exact_table_acls_pg17',
+    'exact_column_acls_via_pg_attribute',
+    'no_sequence_or_table_function_acl_surface',
+    'exact_nonconstraint_indexes',
+    'all_constraint_and_supporting_indexes_live',
+  ]) assert.match(verifier, new RegExp(anchor))
+  assert.match(verifier, /aclexplode\(coalesce\(c\.relacl/)
+  assert.match(verifier, /aclexplode\(coalesce\(a\.attacl/)
+  assert.match(verifier, /'MAINTAIN'/)
+  assert.match(verifier, /confupdtype/)
+  assert.match(verifier, /confdeltype/)
+  assert.match(verifier, /confmatchtype/)
+  assert.match(verifier, /confdelsetcols/)
+  assert.doesNotMatch(verifier, /mk6b_expected_meta_(connections|snapshots|sessions)[\s\S]*references (auth|public)\./)
+  assert.match(verifier, /polpermissive[\s\S]*polcmd = 'r'[\s\S]*polwithcheck is null/)
+  assert.match(verifier, /polrelid = 'public\.meta_connections'::regclass[\s\S]*polname = 'Team can read own Meta connection metadata'/)
+  assert.match(verifier, /polrelid = 'public\.meta_performance_snapshots'::regclass[\s\S]*polname = 'Team can read own Meta performance snapshots'/)
+  assert.doesNotMatch(verifier, /like\s+'%meta%'/i)
+  assert.doesNotMatch(verifier, /join roles r on r\.role_oid = x\.grantee/)
+  assert.match(verifier, /case when x\.grantee = 0 then 'PUBLIC' else pg_get_userbyid\(x\.grantee\) end/)
+})
+
+test('the verifier executes every required rollback security outcome', () => {
+  for (const anchor of [
+    'cross_tenant_foreign_keys_reject',
+    'oauth_actor_foreign_key_rejects_unknown_user',
+    'snapshot_idempotency_runtime',
+    'negative_metrics_reject_runtime',
+    'spend_is_always_null_runtime',
+    'rls_tenant_visibility_runtime',
+    'browser_credentials_sessions_writes_denied_runtime',
+    'registry_cascade_runtime',
+    'brand_cascade_runtime',
+  ]) assert.match(verifier, new RegExp(anchor))
+  assert.match(verifier, /set local role authenticated/)
+  assert.match(verifier, /exception when insufficient_privilege/)
+  assert.match(verifier, /exception when foreign_key_violation/)
+  assert.match(verifier, /exception when check_violation/)
+})
+
+test('the approved constraint and index audit keeps only current consumers', () => {
+  assert.match(migration, /meta_performance_snapshots_spend_check check \(spend is null\)/)
+  assert.equal((migration.match(/create index idx_meta_/g) || []).length, 3)
+  assert.match(migration, /idx_meta_oauth_sessions_connection[\s\S]*meta_oauth_sessions\(integration_connection_id\)/)
+  assert.match(migration, /idx_meta_oauth_sessions_actor[\s\S]*meta_oauth_sessions\(actor_id\)/)
+  assert.match(migration, /idx_meta_oauth_sessions_expiry[\s\S]*meta_oauth_sessions\(expires_at\)/)
+  assert.doesNotMatch(migration, /idx_meta_performance_snapshots_org_date/)
+  assert.doesNotMatch(migration, /idx_meta_connections_organization_brand/)
+  assert.doesNotMatch(migration, /idx_meta_oauth_sessions_expiry[\s\S]{0,100}where consumed_at is null/)
+  assert.doesNotMatch(migration, /create (or replace )?function|create sequence|create trigger/i)
 })

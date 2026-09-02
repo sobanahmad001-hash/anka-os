@@ -69,7 +69,7 @@ create table public.meta_performance_snapshots (
   constraint meta_performance_snapshots_reach_check check (reach is null or reach >= 0),
   constraint meta_performance_snapshots_impressions_check check (impressions is null or impressions >= 0),
   constraint meta_performance_snapshots_engagement_check check (engagement is null or engagement >= 0),
-  constraint meta_performance_snapshots_spend_check check (spend is null or spend >= 0),
+  constraint meta_performance_snapshots_spend_check check (spend is null),
   constraint meta_performance_snapshots_daily_unique
     unique (meta_connection_id, snapshot_date, platform),
   constraint meta_performance_snapshots_connection_fk
@@ -107,16 +107,12 @@ create table public.meta_oauth_sessions (
     references public.integration_connections(id, organization_id) on delete cascade
 );
 
-create index idx_meta_connections_organization_brand
-  on public.meta_connections(organization_id, brand_id);
-create index idx_meta_performance_snapshots_org_date
-  on public.meta_performance_snapshots(organization_id, snapshot_date desc);
 create index idx_meta_oauth_sessions_connection
   on public.meta_oauth_sessions(integration_connection_id);
 create index idx_meta_oauth_sessions_actor
   on public.meta_oauth_sessions(actor_id);
 create index idx_meta_oauth_sessions_expiry
-  on public.meta_oauth_sessions(expires_at) where consumed_at is null;
+  on public.meta_oauth_sessions(expires_at);
 
 alter table public.meta_connections enable row level security;
 alter table public.meta_performance_snapshots enable row level security;
