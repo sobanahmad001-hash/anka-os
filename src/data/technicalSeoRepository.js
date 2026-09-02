@@ -22,4 +22,12 @@ export const technicalSeo = Object.freeze({
   savePage: input => invoke('save_page', input),
   saveAudit: input => invoke('save_audit', input),
   inspectPage: pageId => invoke('inspect_page', { pageId }),
+  listKeywords: pageId => dataOrThrow(supabase.from('tracked_keywords').select('*')
+    .eq('tracked_page_id', pageId).order('created_at', { ascending: false })),
+  listRankSnapshots: keywordId => dataOrThrow(supabase.from('keyword_rank_snapshots').select('*')
+    .eq('tracked_keyword_id', keywordId).order('snapshot_date', { ascending: false })),
+  listKeywordSources: brandId => dataOrThrow(supabase.from('artifacts').select('id, title, artifact_type, brand_id')
+    .eq('brand_id', brandId).eq('artifact_type', 'keyword_strategy').order('created_at', { ascending: false })),
+  saveKeyword: input => invoke('save_keyword', input),
+  fetchKeywordRanks: pageId => invoke('fetch_keyword_ranks', { pageId }),
 })
