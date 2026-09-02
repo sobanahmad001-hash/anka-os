@@ -61,7 +61,7 @@ test('MK6a keeps the daily record immutable by reading an existing snapshot befo
   assert.match(verifier, /confrelid = 'public\.tracked_pages'::regclass/)
   assert.match(verifier, /confrelid = 'auth\.users'::regclass/)
   assert.match(verifier, /array_agg\(pg_get_indexdef/)
-  assert.doesNotMatch(verifier, /\n  \)\n  \),\n  'mk6a_primary_unique/)
+  assert.doesNotMatch(verifier, /^  \)\r?\n  \),$/m)
 })
 
 test('MK6a includes a rollback-safe verifier for schema, daily snapshots, and isolation', () => {

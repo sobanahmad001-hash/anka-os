@@ -331,7 +331,6 @@ select jsonb_build_object(
         'idx_tracked_keywords_page_list', 'idx_tracked_keywords_brand_list', 'idx_tracked_keywords_source_artifact_fk',
         'idx_keyword_rank_snapshots_keyword_history', 'idx_keyword_rank_snapshots_keyword_fk'
       )
-  )
   ),
   'mk6a_exact_column_types_nullability_and_defaults', (
     select jsonb_agg(jsonb_build_object('table', rel.relname, 'column', attribute.attname, 'type', format_type(attribute.atttypid, attribute.atttypmod), 'not_null', attribute.attnotnull, 'default', coalesce(pg_get_expr(definition.adbin, definition.adrelid), '')) order by rel.relname, attribute.attnum)
