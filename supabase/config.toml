@@ -111,3 +111,9 @@ enabled = true
 # expiring state value; POST actions still authenticate the caller explicitly.
 verify_jwt = false
 entrypoint = "./functions/google-oauth/index.ts"
+
+[functions.meta-oauth]
+enabled = true
+# Meta's callback has no Supabase JWT; it validates an expiring, one-time state.
+verify_jwt = false
+entrypoint = "./functions/meta-oauth/index.ts"
