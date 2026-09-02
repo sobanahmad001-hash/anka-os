@@ -71,4 +71,7 @@ export const contentStudio = Object.freeze({
   proposeArtifact: input => invoke('department-chat', 'propose_artifact', {
     department_id: 'content', ...input,
   }),
+  proposeWorkItem: input => invoke('department-chat', 'propose_work_item', {
+    department_id: 'content', ...input,
+  }),
 })

@@ -153,7 +153,7 @@ export default function ContentStudio() {
         <ContentRequestPanel engagement={workspace.engagement} />
       ) : tab === 'brand' ? (
         <BrandBriefWorkspace workspace={workspace} saving={saving} act={act} onRefresh={() => loadWorkspace(engagementId)} />
-      ) : <DepartmentChat departmentId="content" engagement={workspace.engagement} artifactTypes={CONTENT_ARTIFACT_TYPES} artifactDefinitions={CONTENT_ARTIFACT_FORMS} artifactForType={artifactForType} stageForType={artifactType => bestContentStage(workspace.stages, artifactType)} onPropose={contentStudio.proposeArtifact} onCreated={() => loadWorkspace(engagementId)} />}
+      ) : <DepartmentChat departmentId="content" engagement={workspace.engagement} artifactTypes={CONTENT_ARTIFACT_TYPES} artifactDefinitions={CONTENT_ARTIFACT_FORMS} artifactForType={artifactForType} stageForType={artifactType => bestContentStage(workspace.stages, artifactType)} onPropose={contentStudio.proposeArtifact} onProposeWorkItem={contentStudio.proposeWorkItem} onCreated={() => loadWorkspace(engagementId)} />}
     </main>
   </div>
 }
