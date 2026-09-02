@@ -6,7 +6,7 @@ to merge, deploy, apply migrations, or run a live database verification.
 ## Baseline and test setup
 
 - Branch: `feat/uw4-isolated-service-robustness`, rebased onto current
-  `origin/main` at `f679c71e46ec2eb0a85f15e091ce7dfd30f6e339`.
+  `origin/main` at `99b40714f0ba675114eaf59ba2394efb90153323`.
 - No migration, schema, RLS, frontend, Design Workshop, or deployment change is
   included.
 - The Content request-level Edge Function test provisions an authenticated
@@ -48,12 +48,12 @@ to merge, deploy, apply migrations, or run a live database verification.
   supabase/functions/content-studio/index.test.ts
   supabase/functions/marketing-studio/index.test.ts --allow-env` — 26 passed,
   0 failed.
-- Full Deno: `npx --yes deno test supabase/functions --allow-env` — 99 passed,
+- Full Deno: `npx --yes deno test supabase/functions --allow-env` — 98 passed,
   0 failed.
 - Deno type-check: `npx --yes deno check` over all 20 Edge Function `index.ts`
   files — passed.
-- Node: `npm test` — 289 passed, 0 failed.
-- Lint: `npm run lint` — passed with 268 warnings and 0 errors.
+- Node: `npm test` — 295 passed, 0 failed.
+- Lint: `npm run lint` — passed with 277 warnings and 0 errors.
 - Build: `npm run build` — passed.
 - `git diff --check` — passed.
 
