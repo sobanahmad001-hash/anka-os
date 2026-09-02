@@ -276,30 +276,30 @@ function PipelineWorkspace({ workspace }) {
       <div className="space-y-6">
         <Panel title="Journey stage status">
           {workspace.stages.length
-            ? workspace.stages.map(stage => <Record key={stage.id} title={stage.name} note={`${labelize(stage.accountable_department_id)} · ${labelize(stage.status)}`} />)
+            ? workspace.stages.map(stage => <Record key={stage.id} title={stage.name} note={`${labelize(stage.accountable_department_id)} · ${labelize(stage.status)}`} to={`/sphere/engagements?engagement=${engagementId}&tab=work`} />)
             : <p className="text-sm text-slate-500">No journey stages are active for this engagement.</p>}
         </Panel>
         <Panel title="Department work item coverage">
           {Object.entries(workItemsByDepartment).length
-            ? Object.entries(workItemsByDepartment).map(([department, count]) => <Record key={department} title={labelize(department)} note={`${count} active item${count === 1 ? '' : 's'}`} />)
+            ? Object.entries(workItemsByDepartment).map(([department, count]) => <Record key={department} title={labelize(department)} note={`${count} active item${count === 1 ? '' : 's'}`} to={`/sphere/engagements?engagement=${engagementId}&tab=work`} />)
             : <p className="text-sm text-slate-500">No active work items recorded against this engagement yet.</p>}
         </Panel>
         {hasContent && <><Panel title="Most recent content requests">
           {contentRequests.slice(0, 4).length
-            ? contentRequests.slice(0, 4).map(item => <Record key={item.id} title={labelize(item.format)} note={`${labelize(item.status)} · ${new Date(item.created_at).toLocaleString()}`} />)
+            ? contentRequests.slice(0, 4).map(item => <Record key={item.id} title={labelize(item.format)} note={`${labelize(item.status)} · ${new Date(item.created_at).toLocaleString()}`} to={`/sphere/content/studio?engagement=${engagementId}`} />)
             : <p className="text-sm text-slate-500">No content requests yet.</p>}
         </Panel><Panel title="Most recent content queue entries">
           {contentQueueEntries.slice(0, 4).length
-            ? contentQueueEntries.slice(0, 4).map(item => <Record key={item.id} title={labelize(item.format)} note={labelize(item.status)} />)
+            ? contentQueueEntries.slice(0, 4).map(item => <Record key={item.id} title={labelize(item.format)} note={labelize(item.status)} to={`/sphere/content/studio?engagement=${engagementId}`} />)
             : <p className="text-sm text-slate-500">No engagement-linked queue entries yet.</p>}
         </Panel></>}
         {hasDesign && <><Panel title="Website page designs">
           {designPages.slice(0, 4).length
-            ? designPages.slice(0, 4).map(item => <Record key={item.id} title={item.slug} note={labelize(item.status)} />)
+            ? designPages.slice(0, 4).map(item => <Record key={item.id} title={item.slug} note={labelize(item.status)} to={`/sphere/design/workshop?engagement=${engagementId}`} />)
             : <p className="text-sm text-slate-500">No website page designs yet.</p>}
         </Panel><Panel title="WordPress export jobs">
           {designExportJobs.slice(0, 4).length
-            ? designExportJobs.slice(0, 4).map(item => <Record key={item.id} title={labelize(item.provider)} note={labelize(item.status)} />)
+            ? designExportJobs.slice(0, 4).map(item => <Record key={item.id} title={labelize(item.provider)} note={labelize(item.status)} to={`/sphere/design/workshop?engagement=${engagementId}`} />)
             : <p className="text-sm text-slate-500">No export jobs yet.</p>}
         </Panel></>}
       </div>
@@ -319,7 +319,6 @@ function ActionLink({ to, text }) { return <Link to={to} className="inline-flex 
 function Field({ label, children }) { return <label><span className={LABEL}>{label}</span>{children}</label> }
 function Metric({ label, value }) { return <div className="rounded-2xl border border-white/[0.07] bg-[#0e111a]/80 p-5"><p className="text-2xl font-semibold">{value}</p><p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">{label}</p></div> }
 function Panel({ title, children }) { return <section className="rounded-2xl border border-white/[0.07] bg-[#0e111a]/80 p-5"><h2 className="font-semibold">{title}</h2><div className="mt-4 space-y-2">{children}</div></section> }
-function Record({ title, note }) { return <div className="rounded-xl border border-white/[0.06] bg-white/[0.025] p-3"><p className="text-sm font-medium">{title}</p><p className="mt-1 text-xs text-slate-600">{note}</p></div> }
+function Record({ title, note, to }) { const content = <><p className="text-sm font-medium">{title}</p><p className="mt-1 text-xs text-slate-600">{note}</p></>; const className = 'block rounded-xl border border-white/[0.06] bg-white/[0.025] p-3 transition hover:border-violet-400/60'; return to ? <Link to={to} className={className}>{content}</Link> : <div className={className}>{content}</div> }
 function Badge({ children }) { return <span className="inline-flex rounded-full bg-violet-500/10 px-2.5 py-1 text-[11px] font-semibold text-violet-300">{children}</span> }
 function Empty({ text }) { return <div className="mt-6 rounded-2xl border border-dashed border-white/10 py-16 text-center text-sm text-slate-500">{text}</div> }
-
