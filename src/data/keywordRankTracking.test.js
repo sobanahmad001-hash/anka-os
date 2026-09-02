@@ -60,7 +60,7 @@ test('MK6a includes a rollback-safe verifier for schema, daily snapshots, and is
   for (const check of [
     'mk6a_tables_exist_and_rls_enabled', 'mk6a_browser_is_read_only', 'mk6a_exact_team_read_policies_exist',
     'mk6a_composite_foreign_keys_exist', 'mk6a_snapshots_are_strictly_append_only_for_service_role',
-    'mk6a_no_column_grants_or_grant_options', 'mk6a_columns_match_contract', 'mk6a_constraints_match_contract',
+    'mk6a_no_explicit_column_grants_or_grant_options', 'mk6a_columns_match_contract', 'mk6a_constraints_match_contract',
     'null_position_is_honest_not_yet_ranking_state', 'one_snapshot_per_keyword_per_day',
     'target_rank_tier_is_constrained', 'composite_page_foreign_key_rejects_cross_org_target',
     'authenticated_reads_are_organization_isolated',

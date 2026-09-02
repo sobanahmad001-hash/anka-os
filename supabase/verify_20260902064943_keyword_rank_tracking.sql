@@ -205,12 +205,13 @@ select jsonb_build_object(
     and not has_table_privilege('service_role', 'public.keyword_rank_snapshots', 'trigger')
     and not has_table_privilege('service_role', 'public.keyword_rank_snapshots', 'maintain')
   ),
-  'mk6a_no_column_grants_or_grant_options', not exists (
+  'mk6a_no_explicit_column_grants_or_grant_options', not exists (
     select 1
-    from information_schema.role_column_grants
-    where table_schema = 'public'
-      and table_name in ('tracked_keywords', 'keyword_rank_snapshots')
-      and grantee in ('anon', 'authenticated', 'service_role')
+    from pg_attribute attribute
+    where attribute.attrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
+      and attribute.attnum > 0
+      and not attribute.attisdropped
+      and attribute.attacl is not null
   ) and not exists (
     select 1
     from information_schema.role_table_grants
@@ -218,7 +219,14 @@ select jsonb_build_object(
       and table_name in ('tracked_keywords', 'keyword_rank_snapshots')
       and grantee in ('anon', 'authenticated', 'service_role')
       and is_grantable = 'YES'
-  ),
+  ) and not has_table_privilege('authenticated', 'public.tracked_keywords', 'select with grant option')
+    and not has_table_privilege('authenticated', 'public.keyword_rank_snapshots', 'select with grant option')
+    and not has_table_privilege('service_role', 'public.tracked_keywords', 'select with grant option')
+    and not has_table_privilege('service_role', 'public.tracked_keywords', 'insert with grant option')
+    and not has_table_privilege('service_role', 'public.tracked_keywords', 'update with grant option')
+    and not has_table_privilege('service_role', 'public.tracked_keywords', 'delete with grant option')
+    and not has_table_privilege('service_role', 'public.keyword_rank_snapshots', 'select with grant option')
+    and not has_table_privilege('service_role', 'public.keyword_rank_snapshots', 'insert with grant option'),
   'mk6a_columns_match_contract', (
     select count(*) = 18
     from information_schema.columns
