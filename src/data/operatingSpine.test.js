@@ -5,8 +5,10 @@ import test from 'node:test'
 import { createOperatingSpineRepository } from './operatingSpineRepository.js'
 
 const migration = readFileSync(new URL('../../supabase/migrations/20260827150000_operating_spine_core.sql', import.meta.url), 'utf8')
+const repository = readFileSync(new URL('./operatingSpineRepository.js', import.meta.url), 'utf8')
 const remediation = readFileSync(new URL('../../supabase/migrations/20260827140000_operating_spine_security_remediation.sql', import.meta.url), 'utf8')
 const app = readFileSync(new URL('../App.jsx', import.meta.url), 'utf8')
+const operatingSpineView = readFileSync(new URL('../apps/OperatingSpine.jsx', import.meta.url), 'utf8')
 const assistantFunction = readFileSync(new URL('../../supabase/functions/ai-chat/index.ts', import.meta.url), 'utf8')
 
 test('Operating Spine keeps Client, Brand, Engagement, and Service as separate relational entities', () => {
@@ -85,3 +87,39 @@ test('engagement composition rejects an empty service selection before calling S
     /At least one service is required/
   )
 })
+
+test('EPV1 adds pipeline aggregates to getEngagement', () => {
+  const expectedReadTables = [
+    'content_requests',
+    'content_queue_entries',
+    'work_items',
+    'design_workshop_sessions',
+    'design_directions',
+    'design_direction_versions',
+    'website_page_designs',
+    'wordpress_export_jobs',
+  ]
+
+  for (const table of expectedReadTables) {
+    assert.ok(repository.includes(`from('${table}')`), `Expected ${table} read in repository`)
+  }
+
+  assert.match(repository, /pipeline:\s*\{[\s\S]*contentRequests/)
+  assert.match(repository, /contentQueueEntries/)
+  assert.match(repository, /workItems/)
+  assert.match(repository, /design:\s*\{[\s\S]*pageDesigns/)
+  assert.match(repository, /wordpressExportJobs/)
+})
+
+test('Engagement workspace renders a pipeline tab and read-only entry points', () => {
+  assert.match(operatingSpineView, /pipeline/i)
+  assert.match(operatingSpineView, /Pipeline snapshot/)
+  assert.match(operatingSpineView, /Open content studio with engagement context/)
+  assert.match(operatingSpineView, /Open design workshop with engagement context/)
+  assert.match(operatingSpineView, /Open marketing studio with engagement context/)
+  assert.match(operatingSpineView, /\/sphere\/content\/studio\?engagement=\$\{engagementId\}/)
+  assert.match(operatingSpineView, /\/sphere\/design\/workshop\?engagement=\$\{engagementId\}/)
+  assert.match(operatingSpineView, /\/sphere\/marketing\/studio\?engagement=\$\{engagementId\}/)
+  assert.match(operatingSpineView, /function PipelineWorkspace\(\{ workspace \}\)/)
+})
+
