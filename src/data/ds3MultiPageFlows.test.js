@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const read = path => readFileSync(`${root}${path}`, 'utf8')
-const migration = read('supabase/migrations/20260901000000_ds3_multi_page_flows.sql')
+const migration = read('supabase/migrations/20260902070040_ds3_multi_page_flows.sql')
 const edge = read('supabase/functions/design-workshop/index.ts')
 const repository = read('src/data/designWorkshopRepository.js')
 const ui = read('src/apps/DesignWorkshop.jsx')
