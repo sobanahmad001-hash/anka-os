@@ -1,5 +1,5 @@
 import { assertEquals, assertThrows } from 'jsr:@std/assert@1.0.14'
-import { brandBriefInput, compiledBrandStatement, customFieldDefinitionInput, hasContentAuthority,
+import { brandBriefInput, compiledBrandStatement, customFieldDefinitionInput, handleRequest, hasContentAuthority,
   figmaHandoffUrl, validateContentRequestInput, validateQueueEntryInput } from './index.ts'
 
 import { CHAT_CONTENT_ARTIFACT_TYPE_SET, CONTENT_ARTIFACT_TYPES, contentArtifactResponseFormat, validateContentArtifact } from '../_shared/contentArtifacts.ts'
@@ -162,4 +162,93 @@ Deno.test('D5 rejects invalid custom-field definitions before the database call'
   assertThrows(() => customFieldDefinitionInput({
     artifact_type: 'content', name: 'keyword', field_type: 'text', options: ['unexpected'],
   }), Error, 'Only select')
+})
+
+function isolatedContentServerPath() {
+  const writes: Record<string, Array<Record<string, unknown>>> = {}
+  const tables: string[] = []
+  const organizationId = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
+  const artifactTypeReads: string[] = []
+  const activeServices = [{ id: 'website-content-service', status: 'active', service_catalog: { slug: 'website_content', department_id: 'content' } }]
+  const originalFetch = globalThis.fetch
+  const originalEnvGet = Deno.env.get
+  const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
+    status, headers: { 'Content-Type': 'application/json' },
+  })
+  Deno.env.get = (name: string) => ({
+    SUPABASE_URL: 'https://isolated-content.example',
+    SUPABASE_ANON_KEY: 'publishable',
+    SUPABASE_SERVICE_ROLE_KEY: 'secret',
+  } as Record<string, string>)[name]
+  globalThis.fetch = async (input: Request | URL | string, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(input, init)
+    const url = new URL(request.url)
+    if (url.pathname === '/auth/v1/user') return json({ id: 'content-actor' })
+    const table = decodeURIComponent(url.pathname.replace('/rest/v1/', ''))
+    tables.push(table)
+    const artifactType = url.searchParams.get('artifact_type')
+    if (table === 'artifacts' && artifactType) artifactTypeReads.push(artifactType.replace(/^eq\./, ''))
+    if (request.method === 'GET') {
+      if (table === 'organization_memberships') {
+        return json([{ organization_id: organizationId, role: 'contributor', department_id: 'content', status: 'active', member_kind: 'team' }])
+      }
+      if (table === 'engagements') {
+        return json([{ id: 'content-engagement', organization_id: organizationId, brand_id: 'content-brand', name: 'Content only', status: 'active' }])
+      }
+      if (table === 'engagement_services') return json(activeServices)
+      if (table === 'artifact_versions') return json([])
+      return json([])
+    }
+    const value = await request.json() as Record<string, unknown>
+    writes[table] = [...(writes[table] || []), value]
+    if (table === 'artifacts') return json({ id: 'website-content-artifact', ...value }, 201)
+    if (table === 'artifact_versions') return json({ id: 'website-content-version', ...value }, 201)
+    return new Response(null, { status: 201 })
+  }
+  return {
+    writes, tables, artifactTypeReads, activeServices,
+    restore() {
+      globalThis.fetch = originalFetch
+      Deno.env.get = originalEnvGet
+    },
+  }
+}
+
+Deno.test('UW4 Content saves website content with only its active service and no upstream artifacts', async () => {
+  const path = isolatedContentServerPath()
+  try {
+    const request = new Request('https://functions.example/content-studio', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer caller-jwt', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'save_artifact', engagement_id: 'content-engagement', artifact_type: 'content',
+        title: 'Website content', change_summary: 'Initial isolated-service website content.',
+        data_classification: 'internal', ai_use_allowed: false,
+        content: {
+          content_strategy: 'Explain the service clearly and invite a consultation.',
+          pages: [{
+            page_path: '/', page_brief: 'Homepage value proposition.', draft_copy: 'Clear expertise for complex work.',
+            meta_title: 'Content only engagement', meta_description: 'A standalone Content service.', primary_cta: 'Book a consultation',
+          }],
+        },
+      }),
+    })
+    const response = await handleRequest(request)
+    const body = await response.json() as { data?: { artifact_id?: string } }
+    assertEquals(response.status, 200)
+    assertEquals(body.data?.artifact_id, 'website-content-artifact')
+    assertEquals(path.writes.artifacts?.[0]?.artifact_type, 'content')
+    assertEquals(path.writes.artifacts?.[0]?.brand_id, 'content-brand')
+    assertEquals(path.writes.artifact_versions?.length, 1)
+    assertEquals(path.writes.engagement_events?.length, 1)
+    assertEquals(path.tables.includes('brand_briefs'), false)
+    assertEquals(path.activeServices.length, 1)
+    assertEquals(path.activeServices[0].service_catalog.slug, 'website_content')
+    for (const artifactType of ['brand_statement', 'discovery', 'vision', 'audience']) {
+      assertEquals(path.artifactTypeReads.includes(artifactType), false)
+    }
+    assertEquals(path.tables.includes('artifact_approvals'), false)
+  } finally {
+    path.restore()
+  }
 })
