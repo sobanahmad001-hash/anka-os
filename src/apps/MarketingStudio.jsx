@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import {
   AD_CAMPAIGN_TYPES,
@@ -56,6 +56,8 @@ function Notice({ error, message }) {
 }
 
 export default function MarketingStudio() {
+  const [searchParams] = useSearchParams()
+  const requestedEngagementId = searchParams.get('engagement') || ''
   const [engagements, setEngagements] = useState([])
   const [brands, setBrands] = useState([])
   const [backlinkBrandId, setBacklinkBrandId] = useState('')
@@ -91,7 +93,7 @@ export default function MarketingStudio() {
       setEngagements(rows || [])
       setBrands(brandRows || [])
       setBacklinkBrandId(brandRows?.[0]?.id || '')
-      const first = rows?.[0]?.id || ''
+      const first = rows?.find(item => item.id === requestedEngagementId)?.id || rows?.[0]?.id || ''
       setEngagementId(first)
       if (first) loadWorkspace(first)
       else setLoading(false)

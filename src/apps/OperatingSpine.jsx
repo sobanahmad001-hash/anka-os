@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import DevelopmentTrackingPanel from '../components/DevelopmentTrackingPanel.jsx'
 import PortfolioDashboard from '../components/PortfolioDashboard.jsx'
 import WorkItemsPanel from '../components/WorkItemsPanel.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { OPERATING_DEPARTMENTS } from '../data/operatingSpineRepository.js'
+import { OPERATING_DEPARTMENTS, pipelineDepartmentFlags } from '../data/operatingSpineRepository.js'
 import { operatingSpine } from '../data/operatingSpine.js'
 
 const INPUT = 'w-full rounded-xl border border-white/10 bg-black/20 px-3.5 py-2.5 text-sm text-white outline-none transition focus:border-violet-500/60 focus:ring-2 focus:ring-violet-500/10'
@@ -22,6 +23,9 @@ const labelize = value => String(value || '').replaceAll('_', ' ').replace(/\b\w
 
 export default function OperatingSpine({ initialView = 'engagements' }) {
   const { user } = useAuth()
+  const [searchParams] = useSearchParams()
+  const requestedEngagementId = searchParams.get('engagement') || ''
+  const requestedWorkspaceTab = searchParams.get('tab') || 'overview'
   const [view, setView] = useState(initialView)
   const [clients, setClients] = useState([])
   const [services, setServices] = useState([])
@@ -37,7 +41,10 @@ export default function OperatingSpine({ initialView = 'engagements' }) {
   const [brandForm, setBrandForm] = useState(INITIAL_BRAND)
   const [engagementForm, setEngagementForm] = useState(INITIAL_ENGAGEMENT)
 
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => {
+    loadAll()
+    if (requestedEngagementId) openEngagement(requestedEngagementId)
+  }, [requestedEngagementId])
 
   const ownerOptions = useMemo(() => owners.map(owner => ({
     id: owner.user_id,
@@ -166,7 +173,7 @@ export default function OperatingSpine({ initialView = 'engagements' }) {
 
   if (loading) return <div className="flex h-full items-center justify-center"><div className="h-9 w-9 animate-spin rounded-full border-2 border-slate-800 border-t-violet-500" /></div>
 
-  if (workspace) return <EngagementWorkspace workspace={workspace} owners={ownerOptions} onRefresh={() => openEngagement(workspace.engagement.id, { quiet: true })} onBack={() => setWorkspace(null)} />
+  if (workspace) return <EngagementWorkspace workspace={workspace} owners={ownerOptions} initialTab={requestedWorkspaceTab} onRefresh={() => openEngagement(workspace.engagement.id, { quiet: true })} onBack={() => setWorkspace(null)} />
 
   return (
     <div className="h-full overflow-y-auto text-white">
@@ -212,8 +219,8 @@ function ServiceCatalogue({ services }) {
   return <section className="mt-6 grid gap-5 xl:grid-cols-2">{OPERATING_DEPARTMENTS.map(department => <article key={department.id} className="rounded-2xl border border-white/[0.07] bg-[#0e111a]/80 p-5"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-400">{department.name}</p><div className="mt-4 grid gap-2">{services.filter(service => service.department_id === department.id).map(service => <div key={service.id} className="rounded-xl border border-white/[0.06] bg-white/[0.025] p-3"><p className="text-sm font-semibold">{service.name}</p><p className="mt-1 text-xs leading-5 text-slate-500">{service.description}</p></div>)}</div></article>)}</section>
 }
 
-function EngagementWorkspace({ workspace, owners, onRefresh, onBack }) {
-  const [tab, setTab] = useState('overview')
+function EngagementWorkspace({ workspace, owners, initialTab = 'overview', onRefresh, onBack }) {
+  const [tab, setTab] = useState(initialTab)
   const stageById = new Map(workspace.stages.map(stage => [stage.id, stage]))
   const hasDevelopment = workspace.services.some(item => item.status === 'active' && item.service_catalog?.department_id === 'development')
 
@@ -221,14 +228,84 @@ function EngagementWorkspace({ workspace, owners, onRefresh, onBack }) {
     <button onClick={onBack} className="text-sm text-slate-500 hover:text-white">← Back to engagements</button>
     <header className="mt-5 flex flex-wrap items-start justify-between gap-5"><div><p className="text-xs text-violet-400">{workspace.engagement.agency_clients?.name} · {workspace.engagement.brands?.name}</p><h1 className="mt-1 text-3xl font-semibold">{workspace.engagement.name}</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">{workspace.engagement.objective || 'No objective recorded.'}</p></div><Badge>{labelize(workspace.engagement.status)}</Badge></header>
     <div className="mt-7 grid gap-3 sm:grid-cols-4"><Metric label="Services" value={workspace.services.length} /><Metric label="Journey stages" value={workspace.stages.length} /><Metric label="Dependencies" value={workspace.dependencies.length} /><Metric label="Scoped connectors" value={workspace.connectors.length} /></div>
-    <nav className="mt-7 flex gap-2 border-b border-white/[0.07]"><button onClick={() => setTab('overview')} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === 'overview' ? 'border-violet-400 text-white' : 'border-transparent text-slate-500'}`}>Overview</button><button onClick={() => setTab('work')} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === 'work' ? 'border-violet-400 text-white' : 'border-transparent text-slate-500'}`}>Work</button>{hasDevelopment && <button onClick={() => setTab('development')} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === 'development' ? 'border-blue-400 text-blue-300' : 'border-transparent text-slate-500'}`}>Development</button>}</nav>
-    {tab === 'work' ? <WorkItemsPanel workspace={workspace} owners={owners} onRefresh={onRefresh} /> : tab === 'development' && hasDevelopment ? <DevelopmentTrackingPanel workspace={workspace} onRefresh={onRefresh} /> : <div className="mt-7 grid gap-6 xl:grid-cols-[1.4fr_1fr]">
+    <nav className="mt-7 flex gap-2 border-b border-white/[0.07]">
+      <button onClick={() => setTab('overview')} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === 'overview' ? 'border-violet-400 text-white' : 'border-transparent text-slate-500'}`}>Overview</button>
+      <button onClick={() => setTab('pipeline')} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === 'pipeline' ? 'border-violet-400 text-white' : 'border-transparent text-slate-500'}`}>Pipeline</button>
+      <button onClick={() => setTab('work')} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === 'work' ? 'border-violet-400 text-white' : 'border-transparent text-slate-500'}`}>Work</button>
+      {hasDevelopment && <button onClick={() => setTab('development')} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === 'development' ? 'border-blue-400 text-blue-300' : 'border-transparent text-slate-500'}`}>Development</button>}
+    </nav>
+    {tab === 'pipeline' ? <PipelineWorkspace workspace={workspace} /> : tab === 'work' ? <WorkItemsPanel workspace={workspace} owners={owners} onRefresh={onRefresh} /> : tab === 'development' && hasDevelopment ? <DevelopmentTrackingPanel workspace={workspace} onRefresh={onRefresh} /> : <div className="mt-7 grid gap-6 xl:grid-cols-[1.4fr_1fr]">
       <section className="rounded-2xl border border-white/[0.07] bg-[#0e111a]/80 p-5"><h2 className="font-semibold">Instantiated journey</h2><p className="mt-1 text-xs text-slate-500">Only selected service stages and unresolved short prerequisites appear.</p><div className="mt-5 space-y-3">{workspace.stages.map((stage, index) => { const blockers = workspace.dependencies.filter(item => item.stage_instance_id === stage.id).map(item => stageById.get(item.depends_on_stage_instance_id)?.name).filter(Boolean); return <div key={stage.id} className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-4"><div className="flex items-center gap-3"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-500/15 text-xs font-semibold text-violet-300">{index + 1}</span><div className="flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-medium">{stage.name}</p>{stage.stage_kind === 'short_prerequisite' && <Badge>Short prerequisite</Badge>}</div><p className="mt-1 text-xs text-slate-500">{labelize(stage.accountable_department_id)} · {labelize(stage.status)}</p>{blockers.length > 0 && <p className="mt-2 text-xs text-amber-300">Depends on: {blockers.join(', ')}</p>}</div></div></div> })}</div></section>
       <div className="space-y-6"><Panel title="Activated services">{workspace.services.map(item => <Record key={item.id} title={item.service_catalog?.name} note={`${labelize(item.service_catalog?.department_id)} · ${labelize(item.status)}`} />)}</Panel><Panel title="Prerequisite record">{workspace.prerequisites.length ? workspace.prerequisites.map(item => <Record key={item.id} title={labelize(item.prerequisite_key)} note={`${labelize(item.satisfaction_method)} · ${labelize(item.status)}`} />) : <p className="text-sm text-slate-500">No additional prerequisite was required.</p>}</Panel><Panel title="Existing assets">{workspace.assets.length ? workspace.assets.map(item => <Record key={item.id} title={item.name} note={labelize(item.asset_kind)} />) : <p className="text-sm text-slate-500">No assets supplied.</p>}</Panel><Panel title="Audit trail">{workspace.events.map(item => <Record key={item.id} title={labelize(item.event_type)} note={new Date(item.occurred_at).toLocaleString()} />)}</Panel></div>
     </div>}
   </div></div>
 }
 
+function PipelineWorkspace({ workspace }) {
+  const contentRequests = workspace.pipeline?.contentRequests || []
+  const contentQueueEntries = workspace.pipeline?.contentQueueEntries || []
+  const workItems = workspace.pipeline?.workItems || []
+  const designPages = workspace.pipeline?.design?.pageDesigns || []
+  const designExportJobs = workspace.pipeline?.design?.wordpressExportJobs || []
+  const engagementId = workspace.engagement.id
+  const { content: hasContent, design: hasDesign, marketing: hasMarketing } = pipelineDepartmentFlags(workspace.services)
+  const workItemsByDepartment = workItems.reduce((acc, item) => {
+    const department = item.department_id || 'unassigned'
+    acc[department] = (acc[department] || 0) + 1
+    return acc
+  }, {})
+
+  return (
+    <div className="mt-7 grid gap-6 xl:grid-cols-[1.2fr_1fr]">
+      <section className="rounded-2xl border border-white/[0.07] bg-[#0e111a]/80 p-5">
+        <h2 className="font-semibold">Pipeline snapshot</h2>
+        <p className="mt-1 text-xs text-slate-500">Read-only visibility into cross-department touchpoints tied to this engagement.</p>
+        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <Metric label="Journey stages" value={workspace.stages.length} />
+          {hasContent && <><Metric label="Content requests" value={contentRequests.length} /><Metric label="Content queue entries" value={contentQueueEntries.length} /></>}
+          <Metric label="Work items" value={workItems.length} />
+          {hasDesign && <><Metric label="Design pages" value={designPages.length} /><Metric label="Design exports" value={designExportJobs.length} /></>}
+        </div>
+        <div className="mt-6 grid gap-3">
+          {hasContent && <ActionLink to={`/sphere/content/studio?engagement=${engagementId}`} text="Open content studio with engagement context" />}
+          {hasDesign && <ActionLink to={`/sphere/design/workshop?engagement=${engagementId}`} text="Open design workshop with engagement context" />}
+          {hasMarketing && <ActionLink to={`/sphere/marketing/studio?engagement=${engagementId}`} text="Open marketing studio with engagement context" />}
+          <ActionLink to={`/sphere/engagements?engagement=${engagementId}&tab=work`} text="Open engagement work items" />
+        </div>
+      </section>
+      <div className="space-y-6">
+        <Panel title="Journey stage status">
+          {workspace.stages.length
+            ? workspace.stages.map(stage => <Record key={stage.id} title={stage.name} note={`${labelize(stage.accountable_department_id)} · ${labelize(stage.status)}`} to={`/sphere/engagements?engagement=${engagementId}&tab=work`} />)
+            : <p className="text-sm text-slate-500">No journey stages are active for this engagement.</p>}
+        </Panel>
+        <Panel title="Department work item coverage">
+          {Object.entries(workItemsByDepartment).length
+            ? Object.entries(workItemsByDepartment).map(([department, count]) => <Record key={department} title={labelize(department)} note={`${count} active item${count === 1 ? '' : 's'}`} to={`/sphere/engagements?engagement=${engagementId}&tab=work`} />)
+            : <p className="text-sm text-slate-500">No active work items recorded against this engagement yet.</p>}
+        </Panel>
+        {hasContent && <><Panel title="Most recent content requests">
+          {contentRequests.slice(0, 4).length
+            ? contentRequests.slice(0, 4).map(item => <Record key={item.id} title={labelize(item.format)} note={`${labelize(item.status)} · ${new Date(item.created_at).toLocaleString()}`} to={`/sphere/content/studio?engagement=${engagementId}`} />)
+            : <p className="text-sm text-slate-500">No content requests yet.</p>}
+        </Panel><Panel title="Most recent content queue entries">
+          {contentQueueEntries.slice(0, 4).length
+            ? contentQueueEntries.slice(0, 4).map(item => <Record key={item.id} title={labelize(item.format)} note={labelize(item.status)} to={`/sphere/content/studio?engagement=${engagementId}`} />)
+            : <p className="text-sm text-slate-500">No engagement-linked queue entries yet.</p>}
+        </Panel></>}
+        {hasDesign && <><Panel title="Website page designs">
+          {designPages.slice(0, 4).length
+            ? designPages.slice(0, 4).map(item => <Record key={item.id} title={item.slug} note={labelize(item.status)} to={`/sphere/design/workshop?engagement=${engagementId}`} />)
+            : <p className="text-sm text-slate-500">No website page designs yet.</p>}
+        </Panel><Panel title="WordPress export jobs">
+          {designExportJobs.slice(0, 4).length
+            ? designExportJobs.slice(0, 4).map(item => <Record key={item.id} title={labelize(item.provider)} note={labelize(item.status)} to={`/sphere/design/workshop?engagement=${engagementId}`} />)
+            : <p className="text-sm text-slate-500">No export jobs yet.</p>}
+        </Panel></>}
+      </div>
+    </div>
+  )
+}
 function ClientForm({ form, setForm, onSubmit, saving }) { return <form onSubmit={onSubmit} className="grid gap-4 sm:grid-cols-2"><Field label="Client name"><input required className={INPUT} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field><Field label="Legal name"><input className={INPUT} value={form.legalName} onChange={e => setForm({ ...form, legalName: e.target.value })} /></Field><Field label="Primary email"><input type="email" className={INPUT} value={form.primaryEmail} onChange={e => setForm({ ...form, primaryEmail: e.target.value })} /></Field><Field label="Website"><input type="url" className={INPUT} value={form.websiteUrl} onChange={e => setForm({ ...form, websiteUrl: e.target.value })} /></Field><Field label="Industry"><input className={INPUT} value={form.industry} onChange={e => setForm({ ...form, industry: e.target.value })} /></Field><Field label="First brand"><input required className={INPUT} value={form.brandName} onChange={e => setForm({ ...form, brandName: e.target.value })} /></Field><div className="sm:col-span-2"><Field label="Brand description"><textarea rows="3" className={INPUT} value={form.brandDescription} onChange={e => setForm({ ...form, brandDescription: e.target.value })} /></Field></div><button disabled={saving} className="sm:col-span-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold disabled:opacity-50">Create client and brand</button></form> }
 
 function BrandForm({ form, setForm, clients, onSubmit, saving }) { return <form onSubmit={onSubmit} className="space-y-4"><Field label="Client"><select required className={INPUT} value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}><option value="">Select client</option>{clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}</select></Field><Field label="Brand name"><input required className={INPUT} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field><Field label="Website"><input type="url" className={INPUT} value={form.websiteUrl} onChange={e => setForm({ ...form, websiteUrl: e.target.value })} /></Field><Field label="Description"><textarea rows="3" className={INPUT} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></Field><button disabled={saving} className="w-full rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold disabled:opacity-50">Add brand</button></form> }
@@ -238,9 +315,10 @@ function EngagementComposer({ form, setForm, clients, brands, services, owners, 
 }
 
 function Modal({ title, onClose, children, wide = false }) { return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"><div className={`max-h-[92vh] w-full overflow-y-auto rounded-2xl border border-white/10 bg-[#111520] p-6 shadow-2xl ${wide ? 'max-w-6xl' : 'max-w-2xl'}`}><div className="mb-6 flex items-center justify-between gap-4"><h2 className="text-xl font-semibold">{title}</h2><button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-white">Close</button></div>{children}</div></div> }
+function ActionLink({ to, text }) { return <Link to={to} className="inline-flex rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-violet-400 hover:text-white">{text} →</Link> }
 function Field({ label, children }) { return <label><span className={LABEL}>{label}</span>{children}</label> }
 function Metric({ label, value }) { return <div className="rounded-2xl border border-white/[0.07] bg-[#0e111a]/80 p-5"><p className="text-2xl font-semibold">{value}</p><p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">{label}</p></div> }
 function Panel({ title, children }) { return <section className="rounded-2xl border border-white/[0.07] bg-[#0e111a]/80 p-5"><h2 className="font-semibold">{title}</h2><div className="mt-4 space-y-2">{children}</div></section> }
-function Record({ title, note }) { return <div className="rounded-xl border border-white/[0.06] bg-white/[0.025] p-3"><p className="text-sm font-medium">{title}</p><p className="mt-1 text-xs text-slate-600">{note}</p></div> }
+function Record({ title, note, to }) { const content = <><p className="text-sm font-medium">{title}</p><p className="mt-1 text-xs text-slate-600">{note}</p></>; const className = 'block rounded-xl border border-white/[0.06] bg-white/[0.025] p-3 transition hover:border-violet-400/60'; return to ? <Link to={to} className={className}>{content}</Link> : <div className={className}>{content}</div> }
 function Badge({ children }) { return <span className="inline-flex rounded-full bg-violet-500/10 px-2.5 py-1 text-[11px] font-semibold text-violet-300">{children}</span> }
 function Empty({ text }) { return <div className="mt-6 rounded-2xl border border-dashed border-white/10 py-16 text-center text-sm text-slate-500">{text}</div> }
