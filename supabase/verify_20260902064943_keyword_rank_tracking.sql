@@ -381,7 +381,6 @@ select jsonb_build_object(
     'CREATE INDEX idx_tracked_keywords_page_list ON public.tracked_keywords USING btree (organization_id, tracked_page_id, active, created_at DESC)',
     'CREATE INDEX idx_tracked_keywords_source_artifact_fk ON public.tracked_keywords USING btree (source_artifact_id, organization_id) WHERE (source_artifact_id IS NOT NULL)'
   ]
-  )
   ),
   'mk6a_primary_unique_and_check_constraints_are_exact', (
     select count(*) = 1 from pg_constraint constraint_definition
