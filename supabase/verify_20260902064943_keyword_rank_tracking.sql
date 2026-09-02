@@ -382,6 +382,26 @@ select jsonb_build_object(
     'CREATE INDEX idx_tracked_keywords_source_artifact_fk ON public.tracked_keywords USING btree (source_artifact_id, organization_id) WHERE (source_artifact_id IS NOT NULL)'
   ]
   )
+  ),
+  'mk6a_primary_unique_and_check_constraints_are_exact', (
+    select count(*) = 1 from pg_constraint constraint_definition
+    where constraint_definition.conrelid = 'public.tracked_keywords'::regclass
+      and constraint_definition.contype = 'p'
+      and (select array_agg(attribute.attname order by key_position.ordinality) from unnest(constraint_definition.conkey) with ordinality key_position(attnum, ordinality) join pg_attribute attribute on attribute.attrelid = constraint_definition.conrelid and attribute.attnum = key_position.attnum) = array['id']::name[]
+  ) and (
+    select count(*) = 1 from pg_constraint constraint_definition
+    where constraint_definition.conrelid = 'public.keyword_rank_snapshots'::regclass
+      and constraint_definition.contype = 'p'
+      and (select array_agg(attribute.attname order by key_position.ordinality) from unnest(constraint_definition.conkey) with ordinality key_position(attnum, ordinality) join pg_attribute attribute on attribute.attrelid = constraint_definition.conrelid and attribute.attnum = key_position.attnum) = array['id']::name[]
+  ) and (
+    select count(*) = 1 from pg_constraint constraint_definition
+    where constraint_definition.conrelid = 'public.tracked_keywords'::regclass and constraint_definition.contype = 'u'
+      and (select array_agg(attribute.attname order by key_position.ordinality) from unnest(constraint_definition.conkey) with ordinality key_position(attnum, ordinality) join pg_attribute attribute on attribute.attrelid = constraint_definition.conrelid and attribute.attnum = key_position.attnum) = array['id', 'organization_id']::name[]
+  ) and not exists (
+    select 1 from pg_constraint constraint_definition
+    where constraint_definition.conrelid = 'public.keyword_rank_snapshots'::regclass and constraint_definition.contype = 'u'
+      and (select array_agg(attribute.attname order by key_position.ordinality) from unnest(constraint_definition.conkey) with ordinality key_position(attnum, ordinality) join pg_attribute attribute on attribute.attrelid = constraint_definition.conrelid and attribute.attnum = key_position.attnum) = array['id', 'organization_id']::name[]
+  )
 ) || (select jsonb_object_agg(check_name, passed) from mk6a_runtime_checks);
 
 rollback;

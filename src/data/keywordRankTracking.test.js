@@ -66,6 +66,7 @@ test('MK6a includes a rollback-safe verifier for schema, daily snapshots, and is
     'mk6a_composite_foreign_keys_exist', 'mk6a_snapshots_are_strictly_append_only_for_service_role',
     'mk6a_no_explicit_column_grants_or_grant_options', 'mk6a_columns_match_contract', 'mk6a_constraints_match_contract',
     'mk6a_exact_column_types_nullability_and_defaults', 'mk6a_foreign_keys_are_exact_and_validated', 'mk6a_indexes_are_all_valid',
+    'mk6a_primary_unique_and_check_constraints_are_exact',
     'null_position_is_honest_not_yet_ranking_state', 'one_snapshot_per_keyword_per_day',
     'target_rank_tier_is_constrained', 'composite_page_foreign_key_rejects_cross_org_target',
     'negative_rank_metrics_are_rejected', 'composite_brand_source_and_snapshot_foreign_keys_reject_cross_org_targets',
