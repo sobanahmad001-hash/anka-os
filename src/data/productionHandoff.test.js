@@ -102,8 +102,18 @@ test('the DS6 verifier is named, rollback-safe, and never commits', () => {
     'handoff_release_fk_is_composite',
     'handoff_bucket_remains_private',
     'handoff_bucket_accepts_zip',
+    'handoff_preparing_partial_index_exists',
     'non_release_package_rejected',
   ]) assert.match(verifier, new RegExp(check))
+  for (const privilege of ['select', 'insert', 'update']) {
+    assert.match(verifier, new RegExp(`has_table_privilege\\(\\s*'service_role', 'public\\.production_handoff_packages', '${privilege}'\\s*\\)`))
+  }
+  assert.doesNotMatch(verifier, /'service_role', 'public\.production_handoff_packages', 'select, insert, update'/)
+  assert.match(verifier, /and cmd = 'SELECT'[\s\S]*and roles = array\['authenticated'\]::name\[\]/)
+  assert.match(verifier, /tgfoid =[\s\S]*private\.enforce_production_handoff_package_transition\(\)'::regprocedure/)
+  assert.match(verifier, /tgtype & 2[\s\S]*tgtype & 16/)
+  assert.match(verifier, /'service_role', 'private\.enforce_production_handoff_package_transition\(\)', 'execute'/)
+  assert.match(verifier, /idx_production_handoff_packages_preparing[\s\S]*indpred is not null[\s\S]*status = ''preparing''::text/)
   assert.match(verifier, /rollback;\s*$/)
   assert.doesNotMatch(verifier, /\bcommit\s*;/i)
 })
