@@ -261,6 +261,33 @@ select jsonb_build_object(
         'idx_keyword_rank_snapshots_keyword_history', 'idx_keyword_rank_snapshots_keyword_fk'
       )
   )
+  ),
+  'mk6a_exact_column_types_nullability_and_defaults', (
+    select jsonb_agg(jsonb_build_object('table', rel.relname, 'column', attribute.attname, 'type', format_type(attribute.atttypid, attribute.atttypmod), 'not_null', attribute.attnotnull, 'default', coalesce(pg_get_expr(definition.adbin, definition.adrelid), '')) order by rel.relname, attribute.attnum)
+    from pg_attribute attribute
+    join pg_class rel on rel.oid = attribute.attrelid
+    left join pg_attrdef definition on definition.adrelid = attribute.attrelid and definition.adnum = attribute.attnum
+    where attribute.attrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
+      and attribute.attnum > 0 and not attribute.attisdropped
+  ) = '[{"table":"keyword_rank_snapshots","column":"id","type":"uuid","not_null":true,"default":"gen_random_uuid()"},{"table":"keyword_rank_snapshots","column":"organization_id","type":"uuid","not_null":true,"default":""},{"table":"keyword_rank_snapshots","column":"tracked_keyword_id","type":"uuid","not_null":true,"default":""},{"table":"keyword_rank_snapshots","column":"snapshot_date","type":"date","not_null":true,"default":""},{"table":"keyword_rank_snapshots","column":"position","type":"numeric","not_null":false,"default":""},{"table":"keyword_rank_snapshots","column":"search_console_clicks","type":"integer","not_null":false,"default":""},{"table":"keyword_rank_snapshots","column":"search_console_impressions","type":"integer","not_null":false,"default":""},{"table":"keyword_rank_snapshots","column":"fetched_at","type":"timestamp with time zone","not_null":true,"default":"now()"},{"table":"tracked_keywords","column":"id","type":"uuid","not_null":true,"default":"gen_random_uuid()"},{"table":"tracked_keywords","column":"organization_id","type":"uuid","not_null":true,"default":""},{"table":"tracked_keywords","column":"brand_id","type":"uuid","not_null":true,"default":""},{"table":"tracked_keywords","column":"tracked_page_id","type":"uuid","not_null":true,"default":""},{"table":"tracked_keywords","column":"keyword","type":"text","not_null":true,"default":""},{"table":"tracked_keywords","column":"source_artifact_id","type":"uuid","not_null":false,"default":""},{"table":"tracked_keywords","column":"target_rank_tier","type":"text","not_null":false,"default":""},{"table":"tracked_keywords","column":"active","type":"boolean","not_null":true,"default":"true"},{"table":"tracked_keywords","column":"created_by","type":"uuid","not_null":true,"default":""},{"table":"tracked_keywords","column":"created_at","type":"timestamp with time zone","not_null":true,"default":"now()"}]'::jsonb,
+  'mk6a_foreign_keys_are_exact_and_validated', (
+    select count(*) = 5
+    from pg_constraint foreign_key
+    where foreign_key.contype = 'f'
+      and foreign_key.conrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
+      and foreign_key.convalidated
+  ) and exists (
+    select 1 from pg_constraint where conrelid = 'public.tracked_keywords'::regclass and contype = 'f'
+      and pg_get_constraintdef(oid) like 'FOREIGN KEY (source_artifact_id, organization_id) REFERENCES artifacts(id, organization_id) ON DELETE SET NULL (source_artifact_id)%'
+  ),
+  'mk6a_indexes_are_all_valid', (
+    select count(*) = 5
+    from pg_index index_definition
+    join pg_class index_class on index_class.oid = index_definition.indexrelid
+    where index_definition.indrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
+      and index_class.relname in ('idx_tracked_keywords_page_list', 'idx_tracked_keywords_brand_list', 'idx_tracked_keywords_source_artifact_fk', 'idx_keyword_rank_snapshots_keyword_history', 'idx_keyword_rank_snapshots_keyword_fk')
+      and index_definition.indisvalid and index_definition.indisready
+  )
 ) || (select jsonb_object_agg(check_name, passed) from mk6a_runtime_checks);
 
 rollback;
