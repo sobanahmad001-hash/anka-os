@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const read = relative => readFileSync(new URL(relative, import.meta.url), 'utf8')
-const migration = read('../../supabase/migrations/20260902065946_mk6b_meta_connector.sql')
-const verifier = read('../../supabase/verify_20260902065946_mk6b_meta_connector.sql')
+const migration = read('../../supabase/migrations/20260902070100_mk6b_meta_connector.sql')
+const verifier = read('../../supabase/verify_20260902070100_mk6b_meta_connector.sql')
 const edge = read('../../supabase/functions/meta-oauth/index.ts')
 const sharedTokens = read('../../supabase/functions/_shared/googleOAuthTokens.ts')
 const repository = read('./integrationRepository.js')
