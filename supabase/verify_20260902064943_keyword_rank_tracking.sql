@@ -278,7 +278,7 @@ select jsonb_build_object(
   'mk6a_no_explicit_column_grants_or_grant_options', not exists (
     select 1
     from pg_attribute attribute
-    cross join lateral aclexplode(coalesce(attribute.attacl, '{}'::aclitem[])) acl
+    cross join lateral aclexplode(attribute.attacl) acl
     where attribute.attrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
       and attribute.attnum > 0
       and not attribute.attisdropped
