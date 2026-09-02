@@ -89,3 +89,7 @@ select jsonb_build_object(
       'public.save_work_item(uuid,uuid,text,text,text,text,text,uuid,text,uuid,uuid,uuid,date,date,integer,uuid,uuid,text)',
       'EXECUTE'
     )
+) || (select jsonb_object_agg(check_name, passed) from uw3_runtime_checks)
+  as uw3_work_item_chat_proposals_verification;
+
+rollback;

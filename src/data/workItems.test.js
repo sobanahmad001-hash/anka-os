@@ -20,6 +20,7 @@ import {
 const migration = readFileSync(new URL('../../supabase/migrations/20260829071335_work_item_core.sql', import.meta.url), 'utf8')
 const w3Migration = readFileSync(new URL('../../supabase/migrations/20260829081243_work_item_dependencies_subtasks.sql', import.meta.url), 'utf8')
 const w3Verification = readFileSync(new URL('../../supabase/verify_20260829081243_work_item_dependencies_subtasks.sql', import.meta.url), 'utf8')
+const uw3Verification = readFileSync(new URL('../../supabase/verify_20260902000000_uw3_work_item_chat_proposals.sql', import.meta.url), 'utf8')
 const functionSource = readFileSync(new URL('../../supabase/functions/work-items/index.ts', import.meta.url), 'utf8')
 const panel = readFileSync(new URL('../components/WorkItemsPanel.jsx', import.meta.url), 'utf8')
 const calendarTimeline = readFileSync(new URL('../components/WorkCalendarTimeline.jsx', import.meta.url), 'utf8')
@@ -248,4 +249,16 @@ test('W6 consolidates parent, subtasks, dependencies, and RLS-filtered artifact 
   assert.match(artifactRepository, /\.from\('artifact_relations'\)[\s\S]*\.select\(relationSelect\)/)
   assert.doesNotMatch(`${workload}\n${connectionPicture}`, /supabase|workItems\.(save|remove|addDependency|removeDependency)|\.insert\(|\.update\(|\.upsert\(|\.delete\(/i)
   assert.equal(migrationNames.some(name => /workload|relationship/i.test(name)), false)
+})
+test('UW3 verifier returns every named check and always rolls back', () => {
+  for (const check of [
+    'created_via_column_default_and_not_null',
+    'created_via_check_constraint',
+    'save_work_item_is_service_role_only',
+    'chat_proposal_provenance_persisted',
+    'creation_event_records_provenance',
+  ]) assert.match(uw3Verification, new RegExp(`'${check}'`))
+  assert.match(uw3Verification, /jsonb_object_agg\(check_name, passed\)/)
+  assert.match(uw3Verification.trim(), /rollback;$/)
+  assert.doesNotMatch(uw3Verification, /(^|\n)\s*commit\s*;/i)
 })
