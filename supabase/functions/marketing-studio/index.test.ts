@@ -140,6 +140,9 @@ Deno.test('Google reporting adapter calls only the approved read-report endpoint
   ])
   assertEquals(calls.every(call => call.init?.method === 'POST'), true)
   assertEquals(calls.every(call => !/mutate|upload|delete|create/i.test(call.url)), true)
+  const searchConsoleBody = JSON.parse(String(calls[1].init?.body))
+  assertEquals(searchConsoleBody.dimensions, ['date'])
+  assertEquals(searchConsoleBody.rowLimit, 366)
 })
 
 Deno.test('Google Ads reporting never falls back to a mutating endpoint', async () => {

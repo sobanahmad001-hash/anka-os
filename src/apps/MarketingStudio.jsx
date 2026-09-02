@@ -22,6 +22,7 @@ import {
   filterBacklinkTargets,
 } from '../data/backlinkOutreach.js'
 import { marketingStudio } from '../data/marketingStudioRepository.js'
+import { loadPerformanceDashboard } from '../data/performanceDashboardRepository.js'
 import DepartmentChat from '../components/DepartmentChat.jsx' // eslint-disable-line no-unused-vars
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
@@ -143,7 +144,7 @@ export default function MarketingStudio() {
         </section>
 
         <nav className="flex gap-2 overflow-x-auto border-b border-slate-800">
-          {[['campaigns', 'Campaigns'], ['ad-tracking', 'Ad campaign tracking'], ['backlinks', 'Backlink outreach'], ['artifacts', 'Artifacts'], ['chat', 'Shared Department Chat'], ['analytics', 'Live analytics']].map(([id, label]) => (
+          {[['campaigns', 'Campaigns'], ['ad-tracking', 'Ad campaign tracking'], ['backlinks', 'Backlink outreach'], ['artifacts', 'Artifacts'], ['chat', 'Shared Department Chat'], ['analytics', 'Performance dashboard']].map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-emerald-400 text-emerald-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>
           ))}
         </nav>
@@ -161,7 +162,7 @@ export default function MarketingStudio() {
         ) : tab === 'chat' ? (
           <DepartmentChat departmentId="marketing" engagement={workspace.engagement} artifactTypes={['channel_strategy', 'campaign_brief', 'measurement_plan']} artifactDefinitions={MARKETING_ARTIFACT_FORMS} artifactForType={artifactType => workspace.artifacts.find(item => item.artifact_type === artifactType)} stageForType={() => null} onPropose={marketingStudio.proposeArtifact} onProposeWorkItem={marketingStudio.proposeWorkItem} onCreated={() => loadWorkspace(engagementId, campaignId)} />
         ) : (
-          <Analytics engagementId={engagementId} />
+          <Analytics engagementId={engagementId} brand={{ id: workspace.engagement.brand_id, name: workspace.engagement.brands?.name || 'Brand', organization_id: workspace.engagement.organization_id }} />
         )}
       </main>
     </div>
@@ -521,26 +522,105 @@ function Artifacts({ workspace, campaign, saving, act, setTab, onRefresh }) {
   </div>
 }
 
-function Analytics({ engagementId }) {
+function Analytics({ engagementId, brand }) {
   const initial = useMemo(() => defaultReportingPeriod(), [])
   const [period, setPeriod] = useState(initial)
   const [dashboard, setDashboard] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  useEffect(() => { setDashboard(null); setError('') }, [engagementId, brand.id])
   async function load() {
     setLoading(true); setError('')
-    try { setDashboard(await marketingStudio.analytics(engagementId, period.start, period.end)) }
+    try { setDashboard(await loadPerformanceDashboard({ engagementId, brand, period })) }
     catch (loadError) { setError(loadError.message) }
     finally { setLoading(false) }
   }
-  return <section className="space-y-5"><div className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="mr-auto"><h2 className="font-semibold">Live read-only analytics</h2><p className="mt-1 max-w-2xl text-sm leading-6 text-slate-400">Queries only verified Google connections mapped to this engagement and Marketing. Nothing here can edit campaigns, properties, sites, or spend.</p></div><Field label="From"><input type="date" className={INPUT} value={period.start} onChange={event => setPeriod({ ...period, start: event.target.value })} /></Field><Field label="To"><input type="date" className={INPUT} value={period.end} onChange={event => setPeriod({ ...period, end: event.target.value })} /></Field><button onClick={load} disabled={loading} className={PRIMARY}>{loading ? 'Reading Google…' : 'Load live data'}</button></div>
+  return <section className="space-y-5"><div className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="mr-auto"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">{brand.name}</p><h2 className="mt-1 font-semibold">Unified performance dashboard</h2><p className="mt-1 max-w-2xl text-sm leading-6 text-slate-400">Live, read-only reporting across organic visibility, technical health, paid campaigns, and Meta. Every section reads its existing source; no rollup is stored.</p></div><Field label="From"><input type="date" className={INPUT} value={period.start} onChange={event => setPeriod({ ...period, start: event.target.value })} /></Field><Field label="To"><input type="date" className={INPUT} value={period.end} onChange={event => setPeriod({ ...period, end: event.target.value })} /></Field><button onClick={load} disabled={loading} className={PRIMARY}>{loading ? 'Loading sources…' : 'Load dashboard'}</button></div>
     {error && <Notice error={error} />}
-    {!dashboard ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">No placeholder data is shown. Load the selected period to request real connector data.</div> : dashboard.reports.length === 0 ? <div className="rounded-2xl border border-amber-900/50 bg-amber-950/20 p-6 text-sm text-amber-200">No verified Google reporting connector is mapped to this engagement. Configure and map one in the Connector Centre.</div> : <div className="grid gap-5 xl:grid-cols-2">{dashboard.reports.map(report => <ReportCard key={report.connection_id} report={report} />)}</div>}
+    {!dashboard ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Choose a period to read the brand's current source data. Missing connectors will appear as calm empty states, not fabricated metrics.</div> : <PerformanceSections dashboard={dashboard} />}
   </section>
 }
 
-function ReportCard({ report }) {
-  return <article className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70"><div className="border-b border-slate-800 p-5"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">{titleize(report.provider)}</p><h3 className="mt-1 font-semibold text-white">{report.connection_name}</h3></div>{report.error ? <p className="p-5 text-sm text-amber-300">{report.error}</p> : <><div className="grid grid-cols-2 gap-px bg-slate-800">{Object.entries(report.totals || {}).map(([key, value]) => <div key={key} className="bg-slate-900 p-4"><p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">{titleize(key)}</p><p className="mt-1 text-xl font-semibold text-white">{typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : value}</p></div>)}</div><div className="max-h-64 overflow-auto p-4"><pre className="whitespace-pre-wrap text-xs leading-5 text-slate-500">{JSON.stringify((report.rows || []).slice(0, 12), null, 2)}</pre></div></>}</article>
+function PerformanceSections({ dashboard }) {
+  const { organic, technical, paid, social } = dashboard
+  return <div className="space-y-5">
+    {dashboard.source_errors.map(source => <div key={`${source.provider}-${source.connection_name}`} className="rounded-xl border border-amber-900/50 bg-amber-950/20 px-4 py-3 text-sm text-amber-200">{source.connection_name || titleize(source.provider)} could not be read: {source.error}</div>)}
+    <div className="grid gap-5 xl:grid-cols-2">
+      <DashboardSection eyebrow="Organic visibility" title="Search and site activity" available={organic.available} empty="No Search Console, GA4, or tracked-keyword data is available for this brand.">
+        <MetricGrid items={[
+          ['GSC clicks', organic.gsc.connected ? metric(organic.gsc.clicks) : 'Not connected'],
+          ['GSC impressions', organic.gsc.connected ? metric(organic.gsc.impressions) : 'Not connected'],
+          ['GA4 sessions', organic.ga4.connected ? metric(organic.ga4.sessions) : 'Not connected'],
+          ['GA4 active users', organic.ga4.connected ? metric(organic.ga4.active_users) : 'Not connected'],
+        ]} />
+        <TrendChart points={organic.gsc.trend} series={[['clicks', 'Clicks', '#34d399'], ['impressions', 'Impressions', '#38bdf8']]} />
+        <div className="grid grid-cols-2 gap-3 border-t border-slate-800 pt-4 sm:grid-cols-4">
+          <CompactMetric label="Tracked keywords" value={organic.keywords.tracked} />
+          <CompactMetric label="Top 10" value={organic.keywords.top_10} />
+          <CompactMetric label="Average position" value={organic.keywords.average_position === null ? '—' : metric(organic.keywords.average_position)} />
+          <CompactMetric label="Improved" value={organic.keywords.improved} />
+        </div>
+        {organic.keywords.no_rank_data > 0 && <p className="text-xs text-slate-500">{organic.keywords.no_rank_data} tracked keyword{organic.keywords.no_rank_data === 1 ? '' : 's'} has no Search Console rank data yet.</p>}
+      </DashboardSection>
+
+      <DashboardSection eyebrow="Technical health" title="Pages needing attention" available={technical.available} empty="No tracked pages exist for this brand yet.">
+        <MetricGrid items={[
+          ['Tracked pages', metric(technical.tracked_pages)],
+          ['Pages with open issues', metric(technical.pages_with_open_issues)],
+          ['Open issues', metric(technical.open_issues)],
+          ['Need attention', metric(technical.needs_attention)],
+        ]} />
+        <div className="space-y-2">
+          {technical.pages.slice(0, 5).map(page => <div key={page.id} className="flex items-center gap-3 rounded-xl bg-slate-950 px-3 py-2.5 text-xs"><span className="min-w-0 flex-1 truncate text-slate-300">{page.page_url}</span><span className="shrink-0 text-amber-300">{page.open_issue_count} issue{page.open_issue_count === 1 ? '' : 's'}</span></div>)}
+          {technical.pages.length === 0 && <p className="rounded-xl bg-slate-950 px-3 py-4 text-center text-xs text-emerald-300">No tracked page currently needs attention.</p>}
+          {technical.pages.length > 5 && <p className="text-xs text-slate-500">And {technical.pages.length - 5} more page{technical.pages.length - 5 === 1 ? '' : 's'} needing attention.</p>}
+        </div>
+      </DashboardSection>
+
+      <DashboardSection eyebrow="Paid performance" title="Google Ads snapshots" available={paid.available} empty="No Google Ads planning campaign exists for this brand.">
+        <MetricGrid items={[
+          ['Spend (account currency)', metric(paid.spend, 'money')], ['Impressions', metric(paid.impressions)],
+          ['Clicks', metric(paid.clicks)], ['Conversions', metric(paid.conversions)],
+        ]} />
+        <TrendChart points={paid.trend} series={[['cost', 'Spend', '#fbbf24'], ['conversions', 'Conversions', '#a78bfa']]} />
+        <p className="text-xs text-slate-500">{paid.active_campaigns} active of {paid.campaigns} tracked campaign{paid.campaigns === 1 ? '' : 's'} · CTR {metric(paid.ctr, 'percent')}</p>
+      </DashboardSection>
+
+      <DashboardSection eyebrow="Social performance" title="Meta organic snapshots" available={social.available} empty="No Meta connection exists for this brand.">
+        <MetricGrid items={[
+          ['Reach', metric(social.reach)], ['Impressions', metric(social.impressions)],
+          ['Engagement', metric(social.engagement)], ['Engagement rate', metric(social.engagement_rate, 'percent')],
+        ]} />
+        <TrendChart points={social.trend} series={[['reach', 'Reach', '#fb7185'], ['engagement', 'Engagement', '#c084fc']]} />
+        <p className="text-xs text-slate-500">{social.connections} Meta connection{social.connections === 1 ? '' : 's'} · {social.platforms.length ? social.platforms.map(titleize).join(' + ') : 'No dated snapshots in this period'}</p>
+      </DashboardSection>
+    </div>
+  </div>
+}
+
+function DashboardSection({ eyebrow, title, available, empty, children }) {
+  return <article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="mb-5 flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">{eyebrow}</p><h3 className="mt-1 font-semibold text-white">{title}</h3></div><span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${available ? 'bg-emerald-950 text-emerald-300' : 'bg-slate-950 text-slate-500'}`}>{available ? 'Available' : 'No source'}</span></div>{available ? <div className="space-y-4">{children}</div> : <div className="rounded-xl border border-dashed border-slate-700 px-4 py-10 text-center text-sm leading-6 text-slate-500">{empty}</div>}</article>
+}
+
+function MetricGrid({ items }) {
+  return <div className="grid grid-cols-2 gap-3">{items.map(([label, value]) => <div key={label} className="rounded-xl bg-slate-950 p-3"><p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">{label}</p><p className="mt-1 text-lg font-semibold text-white">{value}</p></div>)}</div>
+}
+
+function CompactMetric({ label, value }) {
+  return <div><p className="text-[10px] uppercase tracking-[0.1em] text-slate-600">{label}</p><p className="mt-1 text-sm font-semibold text-slate-200">{value}</p></div>
+}
+
+function TrendChart({ points, series }) {
+  if (points.length < 2) return <div className="rounded-xl border border-dashed border-slate-800 px-4 py-6 text-center text-xs text-slate-600">A simple time series appears after two dated snapshots.</div>
+  const width = 520
+  const height = 130
+  const paths = series.map(([field, label, color]) => {
+    const values = points.map(point => Number(point[field]) || 0)
+    const max = Math.max(...values, 1)
+    const coordinates = values.map((value, index) => `${(index / (values.length - 1)) * width},${height - (value / max) * (height - 12)}`).join(' ')
+    return { field, label, color, coordinates }
+  })
+  return <div className="rounded-xl bg-slate-950 p-3"><div className="mb-2 flex flex-wrap gap-4">{paths.map(path => <span key={path.field} className="flex items-center gap-1.5 text-[10px] text-slate-500"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: path.color }} />{path.label}</span>)}<span className="ml-auto text-[10px] text-slate-700">Each line uses its own scale</span></div><svg viewBox={`0 0 ${width} ${height}`} className="h-32 w-full" role="img" aria-label={`${series.map(item => item[1]).join(' and ')} trend from ${points[0].date} to ${points.at(-1).date}`}><line x1="0" y1={height - 1} x2={width} y2={height - 1} stroke="#1e293b" />{paths.map(path => <polyline key={path.field} fill="none" stroke={path.color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" points={path.coordinates} />)}</svg><div className="flex justify-between text-[10px] text-slate-700"><span>{points[0].date}</span><span>{points.at(-1).date}</span></div></div>
 }
 
 function Field({ label, hint, children }) {

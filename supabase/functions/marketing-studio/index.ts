@@ -636,7 +636,7 @@ export async function fetchReadOnlyGoogleReport(
     const siteUrl = text(config.site_url, 500)
     if (!siteUrl) throw new Error('Search Console property is not configured')
     url = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`
-    requestBody = { startDate: period.start, endDate: period.end, dimensions: ['query'], rowLimit: 25, dataState: 'final' }
+    requestBody = { startDate: period.start, endDate: period.end, dimensions: ['date'], rowLimit: 366, dataState: 'final' }
   } else if (provider === 'google_ads') {
     const customerId = text(config.customer_id, 24)
     if (!/^\d{10}$/.test(customerId)) throw new Error('Google Ads customer ID is not configured')
@@ -673,7 +673,7 @@ export async function fetchReadOnlyGoogleReport(
         clicks: normalizedMetric(sum.clicks) + normalizedMetric(row.clicks),
         impressions: normalizedMetric(sum.impressions) + normalizedMetric(row.impressions),
       }), { clicks: 0, impressions: 0 }),
-      rows: rows.map((row: any) => ({ query: row.keys?.[0] || '', clicks: normalizedMetric(row.clicks), impressions: normalizedMetric(row.impressions), ctr: normalizedMetric(row.ctr), position: normalizedMetric(row.position) })),
+      rows: rows.map((row: any) => ({ date: row.keys?.[0] || '', clicks: normalizedMetric(row.clicks), impressions: normalizedMetric(row.impressions), ctr: normalizedMetric(row.ctr), position: normalizedMetric(row.position) })),
     }
   }
   const batches = Array.isArray(data) ? data : []
