@@ -9,7 +9,7 @@ set local statement_timeout = '60s';
 -- No browser storage policy is added; package downloads are server-signed only.
 update storage.buckets
 set public = false,
-    file_size_limit = greatest(coalesce(file_size_limit, 0), 52428800),
+    file_size_limit = greatest(coalesce(file_size_limit, 0), 33554432),
     allowed_mime_types = (
       select array_agg(distinct mime_type order by mime_type)
       from unnest(
@@ -33,7 +33,6 @@ create table public.production_handoff_packages (
   completed_at timestamptz,
   foreign key (design_direction_release_id, organization_id)
     references public.design_direction_releases(id, organization_id) on delete cascade,
-  unique (id, organization_id),
   constraint production_handoff_packages_ready_storage check (
     (status = 'ready' and package_storage_path is not null and completed_at is not null and failure_reason = '')
     or

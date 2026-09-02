@@ -89,7 +89,7 @@ insert into ds6_runtime_checks values
     from storage.buckets
     where id = 'design-generated-media'
       and 'application/zip' = any(allowed_mime_types)
-      and file_size_limit >= 52428800
+      and file_size_limit >= 33554432
   ));
 
 do $$

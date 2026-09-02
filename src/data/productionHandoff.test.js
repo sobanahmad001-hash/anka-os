@@ -20,6 +20,7 @@ const workshop = read('src/apps/DesignWorkshop.jsx')
 test('DS6 adds one organization-scoped package table with composite release ownership and RLS', () => {
   assert.match(migration, /create table public\.production_handoff_packages/)
   assert.match(migration, /foreign key \(design_direction_release_id, organization_id\)[\s\S]*references public\.design_direction_releases\(id, organization_id\) on delete cascade/)
+  assert.doesNotMatch(migration, /unique \(id, organization_id\)/)
   assert.match(migration, /alter table public\.production_handoff_packages enable row level security/)
   assert.match(migration, /public\.is_team_organization_member\(organization_id\)/)
   assert.match(migration, /revoke all on public\.production_handoff_packages from anon, authenticated/)
@@ -60,6 +61,9 @@ test('missing or incomplete sources record a terminal failed package rather than
 test('the private package is available only through a short-lived signed URL', () => {
   assert.match(edge, /createSignedUrl\(packageRow\.package_storage_path, SIGNED_URL_TTL_SECONDS\)/)
   assert.match(edge, /const SIGNED_URL_TTL_SECONDS = 300/)
+  assert.match(edge, /const MAX_PACKAGE_BYTES = 32 \* 1024 \* 1024/)
+  assert.match(migration, /file_size_limit = greatest\(coalesce\(file_size_limit, 0\), 33554432\)/)
+  assert.match(verifier, /file_size_limit >= 33554432/)
   assert.match(migration, /where id = 'design-generated-media'/)
   assert.match(migration, /public = false/)
   assert.doesNotMatch(migration, /storage\.objects[\s\S]*create policy/i)

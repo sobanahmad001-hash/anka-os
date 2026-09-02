@@ -2,10 +2,11 @@
 
 ## Stack and dependency boundary
 
-DS2 PR #52, DS5 PR #56, and DS3 PR #65 are merged. DS6 was rebased onto main at
-`46b55710a4aaf6403c2e22ab5fd63a4988f637f1` before review, so released variants,
-the Design Systems Library, multi-page flows, repeated session creation, and the
-WordPress export path are all part of the real base. Rebase conflicts were limited to
+DS2 PR #52, DS5 PR #56, DS3 PR #65, and UW3 PR #69 are merged. DS6 was rebased
+onto main at `ff87ba1ec66bdc9fa74a25fd1aa2dbc4046edb41` before review, so released
+variants, the Design Systems Library, multi-page flows, repeated session creation,
+the WordPress export path, and current work-item proposals are all part of the real
+base. The original DS3 rebase conflicts were limited to
 shared integration surfaces: `package.json`, `src/apps/DesignWorkshop.jsx`,
 `src/data/designWorkshopRepository.js`, `supabase/config.toml`, and
 `.github/workflows/ci.yml`. Each resolution preserves the complete main behavior and
@@ -22,6 +23,10 @@ Design Workshop Edge Function or Design Systems Library behavior.
 - ZIP packaging of exact release metadata, exact direction-version content, ready
   direction media, and ready DS2 variants.
 - Reuse of the private design-generated-media bucket.
+- A 32 MiB package ceiling derived from live release media rather than a convention:
+  the current release is 4,894,933 bytes across three assets, the largest observed
+  asset is 2,641,284 bytes, and nine assets at that observed maximum total about
+  22.7 MiB. The ceiling leaves about 41% headroom while remaining well below 50 MiB.
 - Five-minute signed download URLs.
 - A released-direction handoff panel in Design Workshop.
 
@@ -46,12 +51,14 @@ Design Workshop Edge Function or Design Systems Library behavior.
 7. Confirm the diff contains no change to the Design Workshop Edge Function.
 8. Run the rollback-safe verifier only after explicit approval.
 
-## Recorded verification after DS3 rebase
+## Recorded verification after current-main rebase
 
-- Merge-base: exact main `46b55710a4aaf6403c2e22ab5fd63a4988f637f1`.
-- Node suite: 309 passed, 0 failed.
-- Full Edge Function Deno suite: 99 passed, 0 failed.
-- Deno frozen type-check: 32 function and test files passed.
+- Merge-base: exact main `ff87ba1ec66bdc9fa74a25fd1aa2dbc4046edb41`.
+- Node suite: 311 passed, 0 failed.
+- Focused DS6 suite: 9 passed, 0 failed.
+- Full Edge Function Deno suite and frozen type-check passed before the UW3-only
+  mainline rebase. Deno is unavailable on this Windows host, so exact-head Deno
+  verification is delegated to required PR CI.
 - Lint: 0 errors; 279 existing repository warnings.
 - Production build: 341 modules transformed successfully.
 - `git diff --check origin/main...HEAD`: clean.

@@ -22,7 +22,7 @@ type Variant = {
 const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
 const MEDIA_BUCKET = 'design-generated-media'
 const SIGNED_URL_TTL_SECONDS = 300
-const MAX_PACKAGE_BYTES = 50 * 1024 * 1024
+const MAX_PACKAGE_BYTES = 32 * 1024 * 1024
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -125,7 +125,7 @@ export async function buildProductionArchive(
       throw new Error(`Source asset ${asset.id} is not a valid PNG object`)
     }
     sourceBytes += bytes.byteLength
-    if (sourceBytes > MAX_PACKAGE_BYTES) throw new Error('Production handoff sources exceed the 50 MB package limit')
+    if (sourceBytes > MAX_PACKAGE_BYTES) throw new Error('Production handoff sources exceed the 32 MiB package limit')
     const archivePath = variant
       ? `variants/${variant.variant_format}-${asset.id}${extension(asset.storage_path)}`
       : `assets/${asset.id}${extension(asset.storage_path)}`
@@ -292,7 +292,7 @@ async function createPackage(admin: Client, userClient: Client, body: Json, acto
       return new Uint8Array(await data.arrayBuffer())
     })
     if (archive.bytes.byteLength > MAX_PACKAGE_BYTES) {
-      throw new Error('Production handoff ZIP exceeds the 50 MB package limit')
+      throw new Error('Production handoff ZIP exceeds the 32 MiB package limit')
     }
     const { error: uploadError } = await admin.storage.from(MEDIA_BUCKET).upload(
       storagePath,
