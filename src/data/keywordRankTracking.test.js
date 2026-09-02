@@ -20,7 +20,9 @@ test('MK6a tables are tenant-safe, append-only, and read-only to the browser', (
   assert.match(migration, /unique \(tracked_keyword_id, snapshot_date\)/)
   assert.match(migration, /enable row level security/)
   assert.match(migration, /is_team_organization_member\(organization_id\)/)
-  assert.match(migration, /revoke update, delete on public\.keyword_rank_snapshots from service_role/)
+  assert.match(migration, /revoke all privileges on public\.tracked_keywords, public\.keyword_rank_snapshots from anon, authenticated, service_role/)
+  assert.match(migration, /grant select, insert on public\.keyword_rank_snapshots to service_role/)
+  assert.doesNotMatch(migration, /keyword_rank_snapshots[\s\S]{0,500}unique \(id, organization_id\)/)
   assert.doesNotMatch(migration, /grant (insert|update|delete|all)[\s\S]{0,160}to authenticated/i)
 })
 
@@ -56,8 +58,9 @@ test('MK6a keeps the daily record immutable by reading an existing snapshot befo
 
 test('MK6a includes a rollback-safe verifier for schema, daily snapshots, and isolation', () => {
   for (const check of [
-    'mk6a_tables_exist_and_rls_enabled', 'mk6a_browser_is_read_only', 'mk6a_team_read_policies_exist',
-    'mk6a_composite_foreign_keys_exist', 'mk6a_snapshots_are_append_only_for_service_role',
+    'mk6a_tables_exist_and_rls_enabled', 'mk6a_browser_is_read_only', 'mk6a_exact_team_read_policies_exist',
+    'mk6a_composite_foreign_keys_exist', 'mk6a_snapshots_are_strictly_append_only_for_service_role',
+    'mk6a_no_column_grants_or_grant_options', 'mk6a_columns_match_contract', 'mk6a_constraints_match_contract',
     'null_position_is_honest_not_yet_ranking_state', 'one_snapshot_per_keyword_per_day',
     'target_rank_tier_is_constrained', 'composite_page_foreign_key_rejects_cross_org_target',
     'authenticated_reads_are_organization_isolated',

@@ -38,7 +38,6 @@ create table public.keyword_rank_snapshots (
   foreign key (tracked_keyword_id, organization_id)
     references public.tracked_keywords(id, organization_id) on delete cascade,
   unique (tracked_keyword_id, snapshot_date),
-  unique (id, organization_id),
   check (position is null or position >= 1),
   check (search_console_clicks is null or search_console_clicks >= 0),
   check (search_console_impressions is null or search_console_impressions >= 0)
@@ -67,10 +66,14 @@ create policy "Team can read organization keyword rank snapshots"
   on public.keyword_rank_snapshots for select to authenticated
   using (public.is_team_organization_member(organization_id));
 
-revoke all on public.tracked_keywords, public.keyword_rank_snapshots from anon, authenticated;
+-- Start each browser and service role table ACL from an explicit zero baseline.
+revoke all privileges on public.tracked_keywords, public.keyword_rank_snapshots from anon, authenticated, service_role;
+revoke all privileges (id, organization_id, brand_id, tracked_page_id, keyword, source_artifact_id, target_rank_tier, active, created_by, created_at)
+  on public.tracked_keywords from anon, authenticated, service_role;
+revoke all privileges (id, organization_id, tracked_keyword_id, snapshot_date, position, search_console_clicks, search_console_impressions, fetched_at)
+  on public.keyword_rank_snapshots from anon, authenticated, service_role;
 grant select on public.tracked_keywords, public.keyword_rank_snapshots to authenticated;
 grant select, insert, update, delete on public.tracked_keywords to service_role;
-revoke update, delete on public.keyword_rank_snapshots from service_role;
 grant select, insert on public.keyword_rank_snapshots to service_role;
 
 commit;

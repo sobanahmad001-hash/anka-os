@@ -144,19 +144,39 @@ select jsonb_build_object(
   'mk6a_browser_is_read_only', (
     select bool_and(
       has_table_privilege('authenticated', oid, 'select')
-      and not has_table_privilege('authenticated', oid, 'insert, update, delete')
-      and not has_table_privilege('anon', oid, 'select, insert, update, delete')
+      and not has_table_privilege('authenticated', oid, 'insert')
+      and not has_table_privilege('authenticated', oid, 'update')
+      and not has_table_privilege('authenticated', oid, 'delete')
+      and not has_table_privilege('authenticated', oid, 'truncate')
+      and not has_table_privilege('authenticated', oid, 'references')
+      and not has_table_privilege('authenticated', oid, 'trigger')
+      and not has_table_privilege('authenticated', oid, 'maintain')
+      and not has_table_privilege('anon', oid, 'select')
+      and not has_table_privilege('anon', oid, 'insert')
+      and not has_table_privilege('anon', oid, 'update')
+      and not has_table_privilege('anon', oid, 'delete')
+      and not has_table_privilege('anon', oid, 'truncate')
+      and not has_table_privilege('anon', oid, 'references')
+      and not has_table_privilege('anon', oid, 'trigger')
+      and not has_table_privilege('anon', oid, 'maintain')
     )
     from pg_class
     where oid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
   ),
-  'mk6a_team_read_policies_exist', (
-    select count(*) = 2
+  'mk6a_exact_team_read_policies_exist', (
+    select count(*) = 2 and count(distinct tablename) = 2
     from pg_policies
     where schemaname = 'public'
       and tablename in ('tracked_keywords', 'keyword_rank_snapshots')
       and cmd = 'SELECT'
+      and permissive = 'PERMISSIVE'
+      and with_check is null
       and qual like '%is_team_organization_member(organization_id)%'
+  ) and not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename in ('tracked_keywords', 'keyword_rank_snapshots')
+      and (cmd <> 'SELECT' or permissive <> 'PERMISSIVE' or roles <> array['authenticated']::name[] or with_check is not null or qual not like '%is_team_organization_member(organization_id)%')
   ),
   'mk6a_composite_foreign_keys_exist', (
     select count(*) = 4
@@ -165,9 +185,74 @@ select jsonb_build_object(
       and conrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
       and array_length(conkey, 1) = 2
   ),
-  'mk6a_snapshots_are_append_only_for_service_role',
-    has_table_privilege('service_role', 'public.keyword_rank_snapshots', 'select, insert')
-    and not has_table_privilege('service_role', 'public.keyword_rank_snapshots', 'update, delete')
+  'mk6a_service_role_acl_is_deliberate', (
+    has_table_privilege('service_role', 'public.tracked_keywords', 'select')
+    and has_table_privilege('service_role', 'public.tracked_keywords', 'insert')
+    and has_table_privilege('service_role', 'public.tracked_keywords', 'update')
+    and has_table_privilege('service_role', 'public.tracked_keywords', 'delete')
+    and not has_table_privilege('service_role', 'public.tracked_keywords', 'truncate')
+    and not has_table_privilege('service_role', 'public.tracked_keywords', 'references')
+    and not has_table_privilege('service_role', 'public.tracked_keywords', 'trigger')
+    and not has_table_privilege('service_role', 'public.tracked_keywords', 'maintain')
+  ),
+  'mk6a_snapshots_are_strictly_append_only_for_service_role', (
+    has_table_privilege('service_role', 'public.keyword_rank_snapshots', 'select')
+    and has_table_privilege('service_role', 'public.keyword_rank_snapshots', 'insert')
+    and not has_table_privilege('service_role', 'public.keyword_rank_snapshots', 'update')
+    and not has_table_privilege('service_role', 'public.keyword_rank_snapshots', 'delete')
+    and not has_table_privilege('service_role', 'public.keyword_rank_snapshots', 'truncate')
+    and not has_table_privilege('service_role', 'public.keyword_rank_snapshots', 'references')
+    and not has_table_privilege('service_role', 'public.keyword_rank_snapshots', 'trigger')
+    and not has_table_privilege('service_role', 'public.keyword_rank_snapshots', 'maintain')
+  ),
+  'mk6a_no_column_grants_or_grant_options', not exists (
+    select 1
+    from information_schema.role_column_grants
+    where table_schema = 'public'
+      and table_name in ('tracked_keywords', 'keyword_rank_snapshots')
+      and grantee in ('anon', 'authenticated', 'service_role')
+  ) and not exists (
+    select 1
+    from information_schema.role_table_grants
+    where table_schema = 'public'
+      and table_name in ('tracked_keywords', 'keyword_rank_snapshots')
+      and grantee in ('anon', 'authenticated', 'service_role')
+      and is_grantable = 'YES'
+  ),
+  'mk6a_columns_match_contract', (
+    select count(*) = 18
+    from information_schema.columns
+    where table_schema = 'public'
+      and (
+        (table_name = 'tracked_keywords' and column_name in ('id', 'organization_id', 'brand_id', 'tracked_page_id', 'keyword', 'source_artifact_id', 'target_rank_tier', 'active', 'created_by', 'created_at'))
+        or (table_name = 'keyword_rank_snapshots' and column_name in ('id', 'organization_id', 'tracked_keyword_id', 'snapshot_date', 'position', 'search_console_clicks', 'search_console_impressions', 'fetched_at'))
+      )
+  ) and (
+    select count(*) = 18
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name in ('tracked_keywords', 'keyword_rank_snapshots')
+  ),
+  'mk6a_constraints_match_contract', (
+    select count(*) = 2
+    from pg_constraint
+    where conrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
+      and contype = 'u'
+      and pg_get_constraintdef(oid) in ('UNIQUE (id, organization_id)', 'UNIQUE (tracked_keyword_id, snapshot_date)')
+  ) and (
+    select count(*) = 2
+    from pg_constraint
+    where conrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
+      and contype = 'p'
+  ) and (
+    select count(*) = 5
+    from pg_indexes
+    where schemaname = 'public'
+      and indexname in (
+        'idx_tracked_keywords_page_list', 'idx_tracked_keywords_brand_list', 'idx_tracked_keywords_source_artifact_fk',
+        'idx_keyword_rank_snapshots_keyword_history', 'idx_keyword_rank_snapshots_keyword_fk'
+      )
+  )
 ) || (select jsonb_object_agg(check_name, passed) from mk6a_runtime_checks);
 
 rollback;
