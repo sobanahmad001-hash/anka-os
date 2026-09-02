@@ -47,12 +47,19 @@ git diff --name-only origin/main...HEAD
 
 ## Recorded verification evidence
 
-- Node suite: 297 passed, 0 failed.
+- Exact PR head: `358b849438fa181d0bf3d09b0c417646eee3c316`, based on current `origin/main` `99b40714f0ba675114eaf59ba2394efb90153323`.
+- Node suite: 301 passed, 0 failed.
+- Exact CI Edge Function Deno suite: 94 passed, 0 failed.
 - Full Edge Function Deno suite: 96 passed, 0 failed.
-- Focused Design Workshop Deno suite: 21 passed, 0 failed.
-- Lint: 0 errors; 274 existing repository warnings.
+- Lint: 0 errors; 278 existing repository warnings.
 - Production build completed successfully.
 - All 20 Edge Function type checks completed successfully.
+- Exact migration dry-run is up to date with no migrations to apply. The remote ledger and reconciled migration file have the matching SHA-256 `24e62bcbe84c1c1ebb47c32017a0587650613bde6d99739d590064d977150822`.
+- The rollback-safe verifier and independent persisted-schema query each returned all eight named checks as `true`.
+
+## Final-review acceptance
+
+- The live/reconciled `design_page_flows` schema includes `unique (id, organization_id)` in addition to the original brief's table definition. This is intentionally accepted: it is required for the tenant-safe composite foreign key from `design_workshop_sessions`, is already present in the applied live ledger, and must remain unchanged for reconciliation safety.
 
 After applying the DS3 migration to review DB, run:
 
