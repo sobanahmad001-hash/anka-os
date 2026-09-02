@@ -74,6 +74,14 @@ test('handoff controls appear only after release and reuse the Workshop read mod
   assert.match(ui, /nothing is edited, regenerated, or published/)
 })
 
+test('only a failed production handoff refreshes the Workshop after an action error', () => {
+  const ordinaryAction = "async function act(key, action) { setBusy(key); setError(''); try { await action(); setModal(null); await refresh() } catch (reason) { capture(reason) } finally { setBusy('') } }"
+  assert.ok(workshop.includes(ordinaryAction))
+  assert.equal(workshop.match(/setWorkspace\(await designWorkshop\.load\(engagementId\)\)/g)?.length, 2)
+  assert.match(workshop, /async function prepareHandoff\(release\)[\s\S]*setWorkspace\(await designWorkshop\.load\(engagementId\)\)[\s\S]*Keep the packaging failure primary/)
+  assert.match(workshop, /onPrepareHandoff=\{prepareHandoff\}/)
+})
+
 test('DS6 makes no change inside the shared Design Workshop generation function', () => {
   assert.doesNotMatch(designEdge, /production[_-]handoff|create_package|sign_package/i)
   for (const functionName of ['createSession', 'generateDirections', 'generateOne', 'directionSchema']) {
