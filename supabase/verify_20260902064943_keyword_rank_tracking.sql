@@ -56,9 +56,6 @@ begin
     'https://mk6a-' || substr(v_page_id::text, 1, 8) || '.example/',
     'service', v_actor_id
   );
-  insert into public.artifacts (id, organization_id, brand_id, artifact_type, title, created_by)
-  values (v_other_artifact_id, v_other_organization_id, v_other_brand_id, 'keyword_strategy', 'MK6a verifier hidden source', v_actor_id);
-
   insert into public.tracked_keywords (
     id, organization_id, brand_id, tracked_page_id, keyword, target_rank_tier, created_by
   ) values (
@@ -124,6 +121,8 @@ begin
   values (v_other_client_id, v_other_organization_id, 'MK6a verifier hidden client', v_actor_id);
   insert into public.brands (id, organization_id, client_id, name, created_by)
   values (v_other_brand_id, v_other_organization_id, v_other_client_id, 'MK6a verifier hidden brand', v_actor_id);
+  insert into public.artifacts (id, organization_id, brand_id, artifact_type, title, created_by)
+  values (v_other_artifact_id, v_other_organization_id, v_other_brand_id, 'keyword_strategy', 'MK6a verifier hidden source', v_actor_id);
   insert into public.tracked_pages (
     id, organization_id, brand_id, page_url, page_type, created_by
   ) values (
@@ -231,6 +230,18 @@ select jsonb_build_object(
       and with_check is null
       and policyname in ('Team can read organization tracked keywords', 'Team can read organization keyword rank snapshots')
       and qual in ('is_team_organization_member(organization_id)', '(is_team_organization_member(organization_id))')
+  ) and exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'tracked_keywords'
+      and policyname = 'Team can read organization tracked keywords'
+      and cmd = 'SELECT' and permissive = 'PERMISSIVE' and roles = array['authenticated']::name[]
+      and with_check is null and qual in ('is_team_organization_member(organization_id)', '(is_team_organization_member(organization_id))')
+  ) and exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'keyword_rank_snapshots'
+      and policyname = 'Team can read organization keyword rank snapshots'
+      and cmd = 'SELECT' and permissive = 'PERMISSIVE' and roles = array['authenticated']::name[]
+      and with_check is null and qual in ('is_team_organization_member(organization_id)', '(is_team_organization_member(organization_id))')
   ) and not exists (
     select 1 from pg_policies
     where schemaname = 'public'
