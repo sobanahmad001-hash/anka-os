@@ -89,7 +89,8 @@ select jsonb_build_object(
     select 1 from pg_constraint
     where conrelid = 'public.design_workshop_sessions'::regclass
       and conname = 'design_workshop_sessions_flow_requires_slug'
-      and pg_get_constraintdef(oid) ilike '%page_flow_id IS NULL OR page_slug IS NOT NULL%'
+      and trim(regexp_replace(lower(pg_get_constraintdef(oid)), '[()[:space:]]+', ' ', 'g'))
+        = 'check page_flow_id is null or page_slug is not null'
   )
 ) || (select jsonb_object_agg(check_name, passed) from ds3_checks);
 
