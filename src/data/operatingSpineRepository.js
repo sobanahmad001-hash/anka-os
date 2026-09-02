@@ -7,6 +7,19 @@ export const OPERATING_DEPARTMENTS = Object.freeze([
 
 const DEVELOPMENT_ARTIFACT_TYPES = Object.freeze(['technical_brief', 'launch_checklist'])
 
+export function pipelineDepartmentFlags(services = []) {
+  const activeDepartments = new Set(
+    services
+      .filter((service) => service.status === 'active')
+      .map((service) => service.service_catalog?.department_id)
+      .filter(Boolean)
+  )
+  return Object.freeze({
+    content: activeDepartments.has('content'),
+    design: activeDepartments.has('design'),
+    marketing: activeDepartments.has('marketing'),
+  })
+}
 function required(value, label) {
   if (!value || typeof value !== 'string' || !value.trim()) {
     throw new TypeError(`${label} is required`)
@@ -224,10 +237,11 @@ export function createOperatingSpineRepository(client) {
         dataOrThrow(client.from('design_workshop_sessions').select('id').eq('engagement_id', engagementId).order('created_at', { ascending: false })),
       ])
 
-      const queueEntries = engagement?.brand_id
+      const queueEntryIds = contentRequests.map((request) => request.queue_entry_id).filter(Boolean)
+      const queueEntries = queueEntryIds.length
         ? await dataOrThrow(client.from('content_queue_entries')
           .select('id, organization_id, brand_id, planned_date, format, status, brief_template, linked_event_id, fulfilled_by_request_id')
-          .eq('brand_id', engagement.brand_id)
+          .in('id', queueEntryIds)
           .order('planned_date', { ascending: false })
           .order('created_at', { ascending: false }))
         : []

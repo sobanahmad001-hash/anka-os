@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import DevelopmentTrackingPanel from '../components/DevelopmentTrackingPanel.jsx'
 import PortfolioDashboard from '../components/PortfolioDashboard.jsx'
 import WorkItemsPanel from '../components/WorkItemsPanel.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { OPERATING_DEPARTMENTS } from '../data/operatingSpineRepository.js'
+import { OPERATING_DEPARTMENTS, pipelineDepartmentFlags } from '../data/operatingSpineRepository.js'
 import { operatingSpine } from '../data/operatingSpine.js'
 
 const INPUT = 'w-full rounded-xl border border-white/10 bg-black/20 px-3.5 py-2.5 text-sm text-white outline-none transition focus:border-violet-500/60 focus:ring-2 focus:ring-violet-500/10'
@@ -23,6 +23,9 @@ const labelize = value => String(value || '').replaceAll('_', ' ').replace(/\b\w
 
 export default function OperatingSpine({ initialView = 'engagements' }) {
   const { user } = useAuth()
+  const [searchParams] = useSearchParams()
+  const requestedEngagementId = searchParams.get('engagement') || ''
+  const requestedWorkspaceTab = searchParams.get('tab') || 'overview'
   const [view, setView] = useState(initialView)
   const [clients, setClients] = useState([])
   const [services, setServices] = useState([])
@@ -38,7 +41,10 @@ export default function OperatingSpine({ initialView = 'engagements' }) {
   const [brandForm, setBrandForm] = useState(INITIAL_BRAND)
   const [engagementForm, setEngagementForm] = useState(INITIAL_ENGAGEMENT)
 
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => {
+    loadAll()
+    if (requestedEngagementId) openEngagement(requestedEngagementId)
+  }, [requestedEngagementId])
 
   const ownerOptions = useMemo(() => owners.map(owner => ({
     id: owner.user_id,
@@ -167,7 +173,7 @@ export default function OperatingSpine({ initialView = 'engagements' }) {
 
   if (loading) return <div className="flex h-full items-center justify-center"><div className="h-9 w-9 animate-spin rounded-full border-2 border-slate-800 border-t-violet-500" /></div>
 
-  if (workspace) return <EngagementWorkspace workspace={workspace} owners={ownerOptions} onRefresh={() => openEngagement(workspace.engagement.id, { quiet: true })} onBack={() => setWorkspace(null)} />
+  if (workspace) return <EngagementWorkspace workspace={workspace} owners={ownerOptions} initialTab={requestedWorkspaceTab} onRefresh={() => openEngagement(workspace.engagement.id, { quiet: true })} onBack={() => setWorkspace(null)} />
 
   return (
     <div className="h-full overflow-y-auto text-white">
@@ -213,8 +219,8 @@ function ServiceCatalogue({ services }) {
   return <section className="mt-6 grid gap-5 xl:grid-cols-2">{OPERATING_DEPARTMENTS.map(department => <article key={department.id} className="rounded-2xl border border-white/[0.07] bg-[#0e111a]/80 p-5"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-400">{department.name}</p><div className="mt-4 grid gap-2">{services.filter(service => service.department_id === department.id).map(service => <div key={service.id} className="rounded-xl border border-white/[0.06] bg-white/[0.025] p-3"><p className="text-sm font-semibold">{service.name}</p><p className="mt-1 text-xs leading-5 text-slate-500">{service.description}</p></div>)}</div></article>)}</section>
 }
 
-function EngagementWorkspace({ workspace, owners, onRefresh, onBack }) {
-  const [tab, setTab] = useState('overview')
+function EngagementWorkspace({ workspace, owners, initialTab = 'overview', onRefresh, onBack }) {
+  const [tab, setTab] = useState(initialTab)
   const stageById = new Map(workspace.stages.map(stage => [stage.id, stage]))
   const hasDevelopment = workspace.services.some(item => item.status === 'active' && item.service_catalog?.department_id === 'development')
 
@@ -242,7 +248,7 @@ function PipelineWorkspace({ workspace }) {
   const designPages = workspace.pipeline?.design?.pageDesigns || []
   const designExportJobs = workspace.pipeline?.design?.wordpressExportJobs || []
   const engagementId = workspace.engagement.id
-
+  const { content: hasContent, design: hasDesign, marketing: hasMarketing } = pipelineDepartmentFlags(workspace.services)
   const workItemsByDepartment = workItems.reduce((acc, item) => {
     const department = item.department_id || 'unassigned'
     acc[department] = (acc[department] || 0) + 1
@@ -255,35 +261,47 @@ function PipelineWorkspace({ workspace }) {
         <h2 className="font-semibold">Pipeline snapshot</h2>
         <p className="mt-1 text-xs text-slate-500">Read-only visibility into cross-department touchpoints tied to this engagement.</p>
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
-          <Metric label="Content requests" value={contentRequests.length} />
-          <Metric label="Content queue entries" value={contentQueueEntries.length} />
+          <Metric label="Journey stages" value={workspace.stages.length} />
+          {hasContent && <><Metric label="Content requests" value={contentRequests.length} /><Metric label="Content queue entries" value={contentQueueEntries.length} /></>}
           <Metric label="Work items" value={workItems.length} />
-          <Metric label="Design pages" value={designPages.length} />
-          <Metric label="Design exports" value={designExportJobs.length} />
+          {hasDesign && <><Metric label="Design pages" value={designPages.length} /><Metric label="Design exports" value={designExportJobs.length} /></>}
         </div>
         <div className="mt-6 grid gap-3">
-          <ActionLink to={`/sphere/content/studio?engagement=${engagementId}`} text="Open content studio with engagement context" />
-          <ActionLink to={`/sphere/design/workshop?engagement=${engagementId}`} text="Open design workshop with engagement context" />
-          <ActionLink to={`/sphere/marketing/studio?engagement=${engagementId}`} text="Open marketing studio with engagement context" />
+          {hasContent && <ActionLink to={`/sphere/content/studio?engagement=${engagementId}`} text="Open content studio with engagement context" />}
+          {hasDesign && <ActionLink to={`/sphere/design/workshop?engagement=${engagementId}`} text="Open design workshop with engagement context" />}
+          {hasMarketing && <ActionLink to={`/sphere/marketing/studio?engagement=${engagementId}`} text="Open marketing studio with engagement context" />}
+          <ActionLink to={`/sphere/engagements?engagement=${engagementId}&tab=work`} text="Open engagement work items" />
         </div>
       </section>
-
       <div className="space-y-6">
+        <Panel title="Journey stage status">
+          {workspace.stages.length
+            ? workspace.stages.map(stage => <Record key={stage.id} title={stage.name} note={`${labelize(stage.accountable_department_id)} · ${labelize(stage.status)}`} />)
+            : <p className="text-sm text-slate-500">No journey stages are active for this engagement.</p>}
+        </Panel>
         <Panel title="Department work item coverage">
           {Object.entries(workItemsByDepartment).length
-            ? Object.entries(workItemsByDepartment).map(([department, count]) => (
-                <Record key={department} title={labelize(department)} note={`${count} active item${count === 1 ? '' : 's'}`} />
-              ))
+            ? Object.entries(workItemsByDepartment).map(([department, count]) => <Record key={department} title={labelize(department)} note={`${count} active item${count === 1 ? '' : 's'}`} />)
             : <p className="text-sm text-slate-500">No active work items recorded against this engagement yet.</p>}
         </Panel>
-
-        <Panel title="Most recent content requests">
+        {hasContent && <><Panel title="Most recent content requests">
           {contentRequests.slice(0, 4).length
-            ? contentRequests.slice(0, 4).map(item => (
-                <Record key={item.id} title={labelize(item.format)} note={`${labelize(item.status)} · ${new Date(item.created_at).toLocaleString()}`} />
-              ))
+            ? contentRequests.slice(0, 4).map(item => <Record key={item.id} title={labelize(item.format)} note={`${labelize(item.status)} · ${new Date(item.created_at).toLocaleString()}`} />)
             : <p className="text-sm text-slate-500">No content requests yet.</p>}
-        </Panel>
+        </Panel><Panel title="Most recent content queue entries">
+          {contentQueueEntries.slice(0, 4).length
+            ? contentQueueEntries.slice(0, 4).map(item => <Record key={item.id} title={labelize(item.format)} note={labelize(item.status)} />)
+            : <p className="text-sm text-slate-500">No engagement-linked queue entries yet.</p>}
+        </Panel></>}
+        {hasDesign && <><Panel title="Website page designs">
+          {designPages.slice(0, 4).length
+            ? designPages.slice(0, 4).map(item => <Record key={item.id} title={item.slug} note={labelize(item.status)} />)
+            : <p className="text-sm text-slate-500">No website page designs yet.</p>}
+        </Panel><Panel title="WordPress export jobs">
+          {designExportJobs.slice(0, 4).length
+            ? designExportJobs.slice(0, 4).map(item => <Record key={item.id} title={labelize(item.provider)} note={labelize(item.status)} />)
+            : <p className="text-sm text-slate-500">No export jobs yet.</p>}
+        </Panel></>}
       </div>
     </div>
   )

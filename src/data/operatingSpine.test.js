@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { createOperatingSpineRepository } from './operatingSpineRepository.js'
+import { createOperatingSpineRepository, pipelineDepartmentFlags } from './operatingSpineRepository.js'
 
 const migration = readFileSync(new URL('../../supabase/migrations/20260827150000_operating_spine_core.sql', import.meta.url), 'utf8')
 const repository = readFileSync(new URL('./operatingSpineRepository.js', import.meta.url), 'utf8')
@@ -120,6 +120,65 @@ test('Engagement workspace renders a pipeline tab and read-only entry points', (
   assert.match(operatingSpineView, /\/sphere\/content\/studio\?engagement=\$\{engagementId\}/)
   assert.match(operatingSpineView, /\/sphere\/design\/workshop\?engagement=\$\{engagementId\}/)
   assert.match(operatingSpineView, /\/sphere\/marketing\/studio\?engagement=\$\{engagementId\}/)
+  assert.match(operatingSpineView, /\/sphere\/engagements\?engagement=\$\{engagementId\}&tab=work/)
+  assert.match(operatingSpineView, /Journey stage status/)
+  assert.match(operatingSpineView, /pipelineDepartmentFlags\(workspace\.services\)/)
   assert.match(operatingSpineView, /function PipelineWorkspace\(\{ workspace \}\)/)
+  const marketingStudioView = readFileSync(new URL('../apps/MarketingStudio.jsx', import.meta.url), 'utf8')
+  assert.match(marketingStudioView, /useSearchParams/)
+  assert.match(marketingStudioView, /requestedEngagementId/)
+})
+function readOnlyPipelineClient(visibleRows) {
+  const calls = []
+  const client = {
+    from(table) {
+      const query = {
+        select() { return query },
+        eq(column, value) { calls.push({ table, operator: 'eq', column, value }); return query },
+        in(column, values) { calls.push({ table, operator: 'in', column, values }); return query },
+        is(column, value) { calls.push({ table, operator: 'is', column, value }); return query },
+        order() { return query },
+        limit() { return query },
+        single() { return Promise.resolve({ data: visibleRows[table]?.[0] || null, error: null }) },
+        then(resolve, reject) { return Promise.resolve({ data: visibleRows[table] || [], error: null }).then(resolve, reject) },
+      }
+      return query
+    },
+    rpc() { throw new Error('EPV1 must not call RPC') },
+  }
+  return { client, calls }
+}
+
+test('EPV1 keeps pipeline reads within caller-visible organisation rows and engagement-linked queue entries', async () => {
+  const visibleRows = {
+    engagements: [{ id: 'engagement-a', organization_id: 'org-a', brand_id: 'brand-a' }],
+    content_requests: [{ id: 'request-a', organization_id: 'org-a', engagement_id: 'engagement-a', queue_entry_id: 'queue-a', status: 'in_progress' }],
+    content_queue_entries: [{ id: 'queue-a', organization_id: 'org-a', status: 'planned' }],
+  }
+  const hiddenCrossOrganizationRows = [{ id: 'request-b', organization_id: 'org-b', engagement_id: 'engagement-b', queue_entry_id: 'queue-b' }]
+  const { client, calls } = readOnlyPipelineClient(visibleRows)
+  const result = await createOperatingSpineRepository(client).getEngagement('engagement-a')
+
+  assert.deepEqual(result.pipeline.contentRequests, visibleRows.content_requests)
+  assert.equal(result.pipeline.contentRequests.some(row => row.organization_id === 'org-b'), false)
+  assert.equal(hiddenCrossOrganizationRows.some(row => result.pipeline.contentRequests.includes(row)), false)
+  assert.deepEqual(result.pipeline.contentQueueEntries, visibleRows.content_queue_entries)
+  assert.deepEqual(calls.find(call => call.table === 'content_queue_entries' && call.operator === 'in'), {
+    table: 'content_queue_entries', operator: 'in', column: 'id', values: ['queue-a'],
+  })
 })
 
+test('EPV1 pipeline flags only the active department sections for an isolated service', () => {
+  assert.deepEqual(
+    pipelineDepartmentFlags([{ status: 'active', service_catalog: { department_id: 'marketing' } }]),
+    { content: false, design: false, marketing: true }
+  )
+  assert.deepEqual(
+    pipelineDepartmentFlags([
+      { status: 'active', service_catalog: { department_id: 'content' } },
+      { status: 'active', service_catalog: { department_id: 'design' } },
+      { status: 'active', service_catalog: { department_id: 'marketing' } },
+    ]),
+    { content: true, design: true, marketing: true }
+  )
+})
