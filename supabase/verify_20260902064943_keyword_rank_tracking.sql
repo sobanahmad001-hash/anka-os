@@ -397,6 +397,10 @@ select jsonb_build_object(
     select count(*) = 1 from pg_constraint constraint_definition
     where constraint_definition.conrelid = 'public.tracked_keywords'::regclass and constraint_definition.contype = 'u'
       and (select array_agg(attribute.attname order by key_position.ordinality) from unnest(constraint_definition.conkey) with ordinality key_position(attnum, ordinality) join pg_attribute attribute on attribute.attrelid = constraint_definition.conrelid and attribute.attnum = key_position.attnum) = array['id', 'organization_id']::name[]
+  ) and (
+    select count(*) = 2 from pg_constraint constraint_definition
+    where constraint_definition.conrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
+      and constraint_definition.contype = 'u'
   ) and not exists (
     select 1 from pg_constraint constraint_definition
     where constraint_definition.conrelid = 'public.keyword_rank_snapshots'::regclass and constraint_definition.contype = 'u'
@@ -433,6 +437,8 @@ select jsonb_build_object(
       and foreign_key.confrelid = 'public.tracked_keywords'::regclass
       and foreign_key.confdeltype = 'c'
       and foreign_key.conkey = array[(select attnum from pg_attribute where attrelid = 'public.keyword_rank_snapshots'::regclass and attname = 'tracked_keyword_id'), (select attnum from pg_attribute where attrelid = 'public.keyword_rank_snapshots'::regclass and attname = 'organization_id')]::smallint[]
+      and foreign_key.confkey = array[(select attnum from pg_attribute where attrelid = 'public.tracked_keywords'::regclass and attname = 'id'), (select attnum from pg_attribute where attrelid = 'public.tracked_keywords'::regclass and attname = 'organization_id')]::smallint[]
+      and foreign_key.confupdtype = 'a' and foreign_key.confmatchtype = 's' and foreign_key.convalidated and foreign_key.confdelsetcols is null
   )
 ) || (select jsonb_object_agg(check_name, passed) from mk6a_runtime_checks);
 
