@@ -22,6 +22,7 @@ declare
   v_other_brand_id uuid := gen_random_uuid();
   v_other_page_id uuid := gen_random_uuid();
   v_other_keyword_id uuid := gen_random_uuid();
+  v_other_artifact_id uuid := gen_random_uuid();
   v_duplicate_rejected boolean := false;
   v_invalid_tier_rejected boolean := false;
   v_cross_org_page_rejected boolean := false;
@@ -55,6 +56,8 @@ begin
     'https://mk6a-' || substr(v_page_id::text, 1, 8) || '.example/',
     'service', v_actor_id
   );
+  insert into public.artifacts (id, organization_id, brand_id, artifact_type, title, created_by)
+  values (v_other_artifact_id, v_other_organization_id, v_other_brand_id, 'keyword_strategy', 'MK6a verifier hidden source', v_actor_id);
 
   insert into public.tracked_keywords (
     id, organization_id, brand_id, tracked_page_id, keyword, target_rank_tier, created_by
@@ -145,7 +148,7 @@ begin
   end;
   begin
     insert into public.tracked_keywords (organization_id, brand_id, tracked_page_id, source_artifact_id, keyword, created_by)
-    values (v_organization_id, v_brand_id, v_page_id, gen_random_uuid(), 'cross organization source', v_actor_id);
+    values (v_organization_id, v_brand_id, v_page_id, v_other_artifact_id, 'cross organization source', v_actor_id);
   exception when foreign_key_violation then v_cross_org_source_rejected := true;
   end;
   begin
@@ -226,12 +229,13 @@ select jsonb_build_object(
       and cmd = 'SELECT'
       and permissive = 'PERMISSIVE'
       and with_check is null
-      and qual like '%is_team_organization_member(organization_id)%'
+      and policyname in ('Team can read organization tracked keywords', 'Team can read organization keyword rank snapshots')
+      and qual in ('is_team_organization_member(organization_id)', '(is_team_organization_member(organization_id))')
   ) and not exists (
     select 1 from pg_policies
     where schemaname = 'public'
       and tablename in ('tracked_keywords', 'keyword_rank_snapshots')
-      and (cmd <> 'SELECT' or permissive <> 'PERMISSIVE' or roles <> array['authenticated']::name[] or with_check is not null or qual not like '%is_team_organization_member(organization_id)%')
+      and (policyname not in ('Team can read organization tracked keywords', 'Team can read organization keyword rank snapshots') or cmd <> 'SELECT' or permissive <> 'PERMISSIVE' or roles <> array['authenticated']::name[] or with_check is not null or qual not in ('is_team_organization_member(organization_id)', '(is_team_organization_member(organization_id))'))
   ),
   'mk6a_composite_foreign_keys_exist', (
     select count(*) = 4
@@ -263,10 +267,11 @@ select jsonb_build_object(
   'mk6a_no_explicit_column_grants_or_grant_options', not exists (
     select 1
     from pg_attribute attribute
+    cross join lateral aclexplode(coalesce(attribute.attacl, '{}'::aclitem[])) acl
     where attribute.attrelid in ('public.tracked_keywords'::regclass, 'public.keyword_rank_snapshots'::regclass)
       and attribute.attnum > 0
       and not attribute.attisdropped
-      and attribute.attacl is not null
+      and acl.privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'REFERENCES')
   ) and not exists (
     select 1
     from information_schema.role_table_grants
