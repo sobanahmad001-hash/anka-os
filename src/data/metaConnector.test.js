@@ -100,7 +100,8 @@ test('the verifier proves the exact catalog, policy, ACL, FK, and index contract
     'all_constraint_and_supporting_indexes_live',
   ]) assert.match(verifier, new RegExp(anchor))
   assert.match(verifier, /aclexplode\(coalesce\(c\.relacl/)
-  assert.match(verifier, /aclexplode\(coalesce\(a\.attacl/)
+  assert.match(verifier, /aclexplode\(a\.attacl\)/)
+  assert.doesNotMatch(verifier, /aclexplode\(coalesce\(a\.attacl, '\{\}'::aclitem\[\]\)\)/)
   assert.match(verifier, /'MAINTAIN'/)
   assert.match(verifier, /confupdtype/)
   assert.match(verifier, /confdeltype/)

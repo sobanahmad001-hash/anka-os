@@ -335,7 +335,7 @@ insert into mk6b_checks values
       from pg_class c
       join pg_namespace n on n.oid = c.relnamespace
       join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
-      cross join lateral aclexplode(coalesce(a.attacl, '{}'::aclitem[])) x
+      cross join lateral aclexplode(a.attacl) x
       where n.nspname = 'public'
         and c.relname in ('meta_connections', 'meta_performance_snapshots', 'meta_oauth_sessions')
     )
