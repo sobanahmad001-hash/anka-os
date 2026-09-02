@@ -57,6 +57,9 @@ test('MK6a keeps the daily record immutable by reading an existing snapshot befo
   assert.match(verifier, /v_other_artifact_id/)
   assert.match(verifier, /aclexplode\(coalesce\(attribute\.attacl/)
   assert.match(verifier, /FOREIGN KEY \(tracked_keyword_id, organization_id\) REFERENCES tracked_keywords/)
+  assert.match(verifier, /confrelid = 'public\.brands'::regclass/)
+  assert.match(verifier, /confrelid = 'public\.tracked_pages'::regclass/)
+  assert.match(verifier, /confrelid = 'auth\.users'::regclass/)
   assert.match(verifier, /array_agg\(pg_get_indexdef/)
 })
 

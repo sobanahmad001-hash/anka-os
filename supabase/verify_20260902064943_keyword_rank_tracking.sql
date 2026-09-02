@@ -433,6 +433,24 @@ select jsonb_build_object(
       and foreign_key.confdelsetcols = array[(select attnum from pg_attribute where attrelid = 'public.tracked_keywords'::regclass and attname = 'source_artifact_id')]::smallint[]
   ) and exists (
     select 1 from pg_constraint foreign_key
+    where foreign_key.conrelid = 'public.tracked_keywords'::regclass and foreign_key.confrelid = 'public.brands'::regclass
+      and foreign_key.conkey = array[(select attnum from pg_attribute where attrelid = 'public.tracked_keywords'::regclass and attname = 'brand_id'), (select attnum from pg_attribute where attrelid = 'public.tracked_keywords'::regclass and attname = 'organization_id')]::smallint[]
+      and foreign_key.confkey = array[(select attnum from pg_attribute where attrelid = 'public.brands'::regclass and attname = 'id'), (select attnum from pg_attribute where attrelid = 'public.brands'::regclass and attname = 'organization_id')]::smallint[]
+      and foreign_key.confdeltype = 'c' and foreign_key.confupdtype = 'a' and foreign_key.confmatchtype = 's' and foreign_key.convalidated and foreign_key.confdelsetcols is null
+  ) and exists (
+    select 1 from pg_constraint foreign_key
+    where foreign_key.conrelid = 'public.tracked_keywords'::regclass and foreign_key.confrelid = 'public.tracked_pages'::regclass
+      and foreign_key.conkey = array[(select attnum from pg_attribute where attrelid = 'public.tracked_keywords'::regclass and attname = 'tracked_page_id'), (select attnum from pg_attribute where attrelid = 'public.tracked_keywords'::regclass and attname = 'organization_id')]::smallint[]
+      and foreign_key.confkey = array[(select attnum from pg_attribute where attrelid = 'public.tracked_pages'::regclass and attname = 'id'), (select attnum from pg_attribute where attrelid = 'public.tracked_pages'::regclass and attname = 'organization_id')]::smallint[]
+      and foreign_key.confdeltype = 'c' and foreign_key.confupdtype = 'a' and foreign_key.confmatchtype = 's' and foreign_key.convalidated and foreign_key.confdelsetcols is null
+  ) and exists (
+    select 1 from pg_constraint foreign_key
+    where foreign_key.conrelid = 'public.tracked_keywords'::regclass and foreign_key.confrelid = 'auth.users'::regclass
+      and foreign_key.conkey = array[(select attnum from pg_attribute where attrelid = 'public.tracked_keywords'::regclass and attname = 'created_by')]::smallint[]
+      and foreign_key.confkey = array[(select attnum from pg_attribute where attrelid = 'auth.users'::regclass and attname = 'id')]::smallint[]
+      and foreign_key.confdeltype = 'r' and foreign_key.confupdtype = 'a' and foreign_key.confmatchtype = 's' and foreign_key.convalidated and foreign_key.confdelsetcols is null
+  ) and exists (
+    select 1 from pg_constraint foreign_key
     where foreign_key.conrelid = 'public.keyword_rank_snapshots'::regclass
       and foreign_key.confrelid = 'public.tracked_keywords'::regclass
       and foreign_key.confdeltype = 'c'
