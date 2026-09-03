@@ -40,6 +40,7 @@ import {
 import { parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
 import DepartmentChat from '../components/DepartmentChat.jsx' // eslint-disable-line no-unused-vars
 import MarketingConnectionReadinessPanel from '../components/MarketingConnectionReadinessPanel.jsx'
+import MarketingOverview from '../components/MarketingOverview.jsx'
 import WorkshopContextShell from '../components/WorkshopContextShell.jsx'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
@@ -49,6 +50,7 @@ const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-
 const BUTTON = 'rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-emerald-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50'
 const PRIMARY = 'rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50'
 const MARKETING_TABS = Object.freeze([
+  ['overview', 'Overview'],
   ['campaigns', 'Campaigns'],
   ['ad-tracking', 'Ad campaign tracking'],
   ['seo-keywords', 'SEO keyword history'],
@@ -92,7 +94,7 @@ export default function MarketingStudio() {
   const navigationContext = useMemo(() => parseWorkshopNavigation(searchParams), [searchParams])
   const requestedPrivate = searchParams.get('mode') === 'private'
   const requestedTab = MARKETING_TABS.some(([id]) => id === navigationContext.workshopTab)
-    ? navigationContext.workshopTab : 'campaigns'
+    ? navigationContext.workshopTab : 'overview'
   const navigationLoadKey = useMemo(() => JSON.stringify({
     organizationId: navigationContext.organizationId,
     clientId: navigationContext.clientId,
@@ -152,7 +154,7 @@ export default function MarketingStudio() {
   useLayoutEffect(() => {
     workspaceGeneration.current += 1
     setEngagements([])
-    setWorkspace(null); setCampaignId(''); setTab('campaigns')
+    setWorkspace(null); setCampaignId(''); setTab('overview')
     setLoading(organizationReady); setSaving(false); setError(''); setMessage('')
   }, [activeOrganizationId, organizationReady, scopeRevision])
 
@@ -279,8 +281,14 @@ export default function MarketingStudio() {
   function selectTab(nextTab) {
     setTab(nextTab)
     if (context.engagement) setSearchParams(marketingSelectionParams(navigationContext, context.engagement, activeOrganizationId, {
-      workshopTab: nextTab === 'campaigns' ? '' : nextTab,
+      workshopTab: nextTab === 'overview' ? '' : nextTab,
     }), { replace: true })
+  }
+
+  function openMarketingBrief() {
+    const params = marketingSelectionParams(navigationContext, context.engagement, activeOrganizationId, { workshopTab: 'artifacts' })
+    params.set('artifact', 'campaign_brief')
+    setSearchParams(params)
   }
 
   return (
@@ -317,6 +325,19 @@ export default function MarketingStudio() {
 
         {loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Marketing Studio…</div> : !workspace ? (
           <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Select an engagement with a Marketing service to begin.</div>
+        ) : tab === 'overview' ? (
+          <MarketingOverview
+            key={`${activeOrganizationId}:${scopeRevision}:${engagementId}`}
+            organizationId={activeOrganizationId}
+            scopeRevision={scopeRevision}
+            signal={requestSignal}
+            onAccessError={handleOrganizationAccessError}
+            engagement={workspace.engagement}
+            onOpenBrief={openMarketingBrief}
+            onOpenPrivate={() => setSearchParams(privateMarketingParams(navigationContext, activeOrganizationId))}
+            onOpenConnections={() => selectTab('connections')}
+            onRefresh={() => loadWorkspace(engagementId, campaignId)}
+          />
         ) : tab === 'backlinks' ? (
           <BacklinkOutreach key={`${activeOrganizationId}:${scopeRevision}:${workspace.engagement.brand_id}`} studio={studio} brand={{ id: workspace.engagement.brand_id, name: workspace.engagement.brands?.name || 'Brand' }} act={act} onAccessError={handleOrganizationAccessError} />
         ) : tab === 'seo-keywords' ? (
@@ -333,7 +354,7 @@ export default function MarketingStudio() {
         ) : tab === 'ad-tracking' ? (
           <AdCampaignTracking studio={studio} workspace={workspace} saving={saving} act={act} />
         ) : tab === 'artifacts' ? (
-          <Artifacts studio={studio} workspace={workspace} campaign={selectedCampaign} saving={saving} act={act} setTab={selectTab} onRefresh={() => loadWorkspace(engagementId, campaignId)} />
+          <Artifacts studio={studio} workspace={workspace} campaign={selectedCampaign} saving={saving} act={act} setTab={selectTab} initialType={searchParams.get('artifact')} onRefresh={() => loadWorkspace(engagementId, campaignId)} />
         ) : tab === 'chat' ? (
           <DepartmentChat departmentId="marketing" engagement={workspace.engagement} artifactTypes={['channel_strategy', 'campaign_brief', 'measurement_plan']} artifactDefinitions={MARKETING_ARTIFACT_FORMS} artifactForType={artifactType => workspace.artifacts.find(item => item.artifact_type === artifactType)} stageForType={() => null} onPropose={input => reportMarketingAccess(() => studio.proposeArtifact(input))} onProposeWorkItem={input => reportMarketingAccess(() => studio.proposeWorkItem(input))} onCreated={() => loadWorkspace(engagementId, campaignId)} />
         ) : tab === 'connections' ? (
@@ -684,8 +705,8 @@ function MetricCard({ label, value }) {
   return <div className="rounded-xl bg-slate-950 p-4"><p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">{label}</p><p className="mt-1 text-xl font-semibold">{value}</p></div>
 }
 
-function Artifacts({ studio, workspace, campaign, saving, act, setTab, onRefresh }) {
-  const [type, setType] = useState('channel_strategy')
+function Artifacts({ studio, workspace, campaign, saving, act, setTab, initialType, onRefresh }) {
+  const [type, setType] = useState(MARKETING_ARTIFACT_FORMS[initialType] ? initialType : 'channel_strategy')
   const links = campaign ? workspace.links.filter(item => item.campaign_id === campaign.id) : []
   const artifact = workspace.artifacts.find(item => links.some(link => link.artifact_id === item.id) && item.artifact_type === type)
   const versions = artifact ? workspace.versions.filter(item => item.artifact_id === artifact.id) : []
