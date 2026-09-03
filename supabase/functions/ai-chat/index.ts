@@ -268,10 +268,6 @@ export async function handleRequest(request: Request) {
     departmentId = safeDepartmentId(body.departmentId)
     inputText = typeof body.input === 'string' ? body.input.trim().slice(0, 8000) : ''
     if (!CAPABILITIES.has(capability)) return json({ error: 'Unsupported AI capability' }, 400)
-    if (projectId && engagementId) return json({ error: 'Select a project or an engagement, not both' }, 400)
-    if (engagementId && capability === 'action_proposal') {
-      return json({ error: 'Action proposals are not available for Operating Spine engagements yet' }, 400)
-    }
     if (!inputText && !['project_pulse', 'daily_brief'].includes(capability)) return json({ error: 'Input is required' }, 400)
 
     const { data: membership } = await userClient.from('organization_memberships')
@@ -280,6 +276,22 @@ export async function handleRequest(request: Request) {
     if (membership?.status !== 'active' || membership?.member_kind !== 'team') {
       return json({ error: 'AI assistance is available to active team members only' }, 403)
     }
+
+    if (engagementId) {
+      const { data: engagementRoot, error: engagementRootError } = await userClient
+        .from('engagements')
+        .select('id, project_id')
+        .eq('id', engagementId)
+        .single()
+      if (engagementRootError || !engagementRoot) {
+        return json({ error: 'Engagement not found or inaccessible' }, 404)
+      }
+      if (projectId && projectId !== engagementRoot.project_id) {
+        return json({ error: 'The selected project and engagement do not share canonical ownership' }, 400)
+      }
+      projectId = engagementRoot.project_id
+    }
+
     if (!departmentId) departmentId = safeDepartmentId(membership.department_id)
     if (
       departmentId
@@ -318,7 +330,7 @@ export async function handleRequest(request: Request) {
     if (engagementId) {
       const [engagement, services, stages, dependencies, prerequisites, assets] = await Promise.all([
         userClient.from('engagements')
-          .select('id, name, objective, status, start_date, target_date, agency_clients(name), brands(name)')
+          .select('id, project_id, name, objective, status, start_date, target_date, agency_clients(name), brands(name)')
           .eq('id', engagementId).single(),
         userClient.from('engagement_services')
           .select('id, status, owner_id, target_date, service_catalog(id, name, department_id, description)')
@@ -363,6 +375,40 @@ export async function handleRequest(request: Request) {
         stages: (stages.data || []).map(item => item.id),
         prerequisites: (prerequisites.data || []).map(item => item.id),
         assets: (assets.data || []).map(item => item.id),
+      }
+
+      const [project, workstreams, tasks, research, deliverables, requests, livingRecord] = await Promise.all([
+        userClient.from('projects').select('id, name, description, status, priority, health, due_date, scope_statement, exclusions').eq('id', projectId).single(),
+        userClient.from('workstreams').select('id, department_id, name, status').eq('project_id', projectId),
+        userClient.from('tasks').select('id, workstream_id, title, status, priority, due_date, acceptance_criteria, completion_evidence').eq('project_id', projectId).is('archived_at', null).limit(100),
+        userClient.from('research_records').select('id, workstream_id, title, findings, recommendation, confidence, status').eq('project_id', projectId).is('archived_at', null).limit(40),
+        userClient.from('deliverables').select('id, workstream_id, title, status, due_date, deliverable_versions(id, version_number, review_status, change_summary)').eq('project_id', projectId).is('archived_at', null).limit(60),
+        userClient.from('requests').select('id, title, request_type, request_origin, requested_output, status, priority, required_by, resolution').eq('project_id', projectId).is('archived_at', null).limit(60),
+        userClient.from('living_project_documents').select('id, source_version, internal_projection, updated_at').eq('project_id', projectId).single(),
+      ])
+      if (project.error || !project.data) return json({ error: 'Canonical project not found or inaccessible' }, 404)
+      for (const result of [workstreams, tasks, research, deliverables, requests, livingRecord]) {
+        if (result.error) throw result.error
+      }
+      workstreamIds = new Set((workstreams.data || []).map(item => item.id))
+      context = {
+        project: project.data,
+        workstreams: workstreams.data || [],
+        tasks: tasks.data || [],
+        research: research.data || [],
+        deliverables: deliverables.data || [],
+        requests: requests.data || [],
+        living_record: livingRecord.data,
+        ...context,
+      }
+      manifest.record_ids = {
+        project: [projectId],
+        workstreams: (workstreams.data || []).map(item => item.id),
+        tasks: (tasks.data || []).map(item => item.id),
+        research: (research.data || []).map(item => item.id),
+        deliverables: (deliverables.data || []).map(item => item.id),
+        requests: (requests.data || []).map(item => item.id),
+        ...(manifest.record_ids as Record<string, string[]>),
       }
     } else if (projectId) {
       const [project, workstreams, tasks, research, deliverables, requests, livingRecord] = await Promise.all([

@@ -26,7 +26,6 @@ export default function AnkaAssistant() {
   const [engagements, setEngagements] = useState([])
   const [workspace, setWorkspace] = useState(null)
   const [projectId, setProjectId] = useState('')
-  const [engagementId, setEngagementId] = useState('')
   const [engagementWorkspace, setEngagementWorkspace] = useState(null)
   const [departmentId, setDepartmentId] = useState(
     DEPARTMENT_LABELS[requestedDepartment] ? requestedDepartment : '',
@@ -40,6 +39,10 @@ export default function AnkaAssistant() {
   const [running, setRunning] = useState(false)
   const [decisionSaving, setDecisionSaving] = useState(false)
   const [error, setError] = useState('')
+  const engagementId = useMemo(
+    () => engagements.find(engagement => engagement.project_id === projectId)?.id || '',
+    [engagements, projectId],
+  )
 
   useEffect(() => { load() }, [])
   useEffect(() => {
@@ -74,8 +77,7 @@ export default function AnkaAssistant() {
       setProjects(projectRows)
       setEngagements(engagementRows)
       setRuns(runRows)
-      setEngagementId(current => current || engagementRows[0]?.id || '')
-      if (!engagementRows.length) setProjectId(current => current || projectRows[0]?.id || '')
+      setProjectId(current => current || engagementRows[0]?.project_id || projectRows[0]?.id || '')
     } catch (loadError) {
       setError(loadError.message)
     } finally {
@@ -85,7 +87,7 @@ export default function AnkaAssistant() {
 
   async function runAssistant(event) {
     event.preventDefault()
-    if (!projectId && !engagementId && capability !== 'daily_brief') return setError('Select an engagement or project for this capability.')
+    if (!projectId && capability !== 'daily_brief') return setError('Select a project for this capability.')
     setRunning(true)
     setError('')
     setResult(null)
@@ -171,12 +173,11 @@ export default function AnkaAssistant() {
 
   const selectedCapability = CAPABILITIES.find(item => item[0] === capability)
   const departmentOptions = useMemo(() => {
-    if (engagementWorkspace) {
-      const ids = [...new Set(engagementWorkspace.services.map(item => item.service_catalog?.department_id).filter(id => DEPARTMENT_LABELS[id]))]
-      return ids.map(id => [id, DEPARTMENT_LABELS[id]])
-    }
-    if (!workspace) return Object.entries(DEPARTMENT_LABELS)
-    const ids = [...new Set(workspace.workstreams.map(item => item.department_id).filter(id => DEPARTMENT_LABELS[id]))]
+    if (!workspace && !engagementWorkspace) return Object.entries(DEPARTMENT_LABELS)
+    const ids = [...new Set([
+      ...(workspace?.workstreams || []).map(item => item.department_id),
+      ...(engagementWorkspace?.services || []).map(item => item.service_catalog?.department_id),
+    ].filter(id => DEPARTMENT_LABELS[id]))]
     return ids.map(id => [id, DEPARTMENT_LABELS[id]])
   }, [workspace, engagementWorkspace])
   const projectById = useMemo(() => new Map(projects.map(project => [project.id, project])), [projects])
@@ -196,7 +197,7 @@ export default function AnkaAssistant() {
     {error && <div className="mx-auto mt-4 max-w-7xl rounded-xl border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">{error}</div>}
 
     {activeTab === 'assistant' ? <main className="mx-auto grid max-w-7xl gap-6 p-6 xl:grid-cols-[360px_1fr]">
-      <form onSubmit={runAssistant} className="h-fit space-y-5 rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div><h2 className="font-semibold">Request assistance</h2><p className="mt-1 text-xs text-slate-500">The server retrieves only records your session can access and uses a verified connector mapped to the selected engagement and department.</p></div><Field label="Capability"><div className="space-y-2">{CAPABILITIES.map(([id, label, description]) => <button type="button" disabled={Boolean(engagementId) && id === 'action_proposal'} key={id} onClick={() => setCapability(id)} className={`w-full rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-40 ${capability === id ? 'border-purple-600 bg-purple-950/40' : 'border-slate-800 bg-slate-950/40'}`}><p className="text-sm font-medium">{label}</p><p className="mt-1 text-xs text-slate-500">{description}</p></button>)}</div></Field><Field label="Operating Spine engagement"><select className={INPUT} value={engagementId} onChange={event => { setEngagementId(event.target.value); if (event.target.value) setProjectId(''); if (event.target.value && capability === 'action_proposal') setCapability('project_pulse') }}><option value="">No canonical engagement</option>{engagements.map(engagement => <option key={engagement.id} value={engagement.id}>{engagement.name}</option>)}</select></Field><Field label="Legacy project context"><select className={INPUT} value={projectId} onChange={event => { setProjectId(event.target.value); if (event.target.value) setEngagementId('') }}><option value="">My work only</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></Field><Field label="Operating department"><select required className={INPUT} value={departmentId} onChange={event => setDepartmentId(event.target.value)}><option value="">Select department</option>{departmentOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></Field><Field label={capability === 'project_pulse' ? 'Specific focus (optional)' : 'Request'}><textarea className={INPUT} rows="5" value={input} onChange={event => setInput(event.target.value)} placeholder={placeholder(capability)} /></Field><button disabled={running || !departmentId || (projectId && !workspace) || (engagementId && !engagementWorkspace) || (!projectId && !engagementId && capability !== 'daily_brief')} className="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold disabled:opacity-50">{running ? 'Analyzing authorized context…' : `Run ${selectedCapability?.[1]}`}</button></form>
+      <form onSubmit={runAssistant} className="h-fit space-y-5 rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div><h2 className="font-semibold">Request assistance</h2><p className="mt-1 text-xs text-slate-500">The server retrieves the canonical project plus its Operating Spine extension, when present, and uses the verified connector mapped to the selected department.</p></div><Field label="Capability"><div className="space-y-2">{CAPABILITIES.map(([id, label, description]) => <button type="button" disabled={id === 'action_proposal' && !workspace?.workstreams?.length} key={id} onClick={() => setCapability(id)} className={`w-full rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-40 ${capability === id ? 'border-purple-600 bg-purple-950/40' : 'border-slate-800 bg-slate-950/40'}`}><p className="text-sm font-medium">{label}</p><p className="mt-1 text-xs text-slate-500">{description}</p></button>)}</div></Field><Field label="Project context"><select className={INPUT} value={projectId} onChange={event => setProjectId(event.target.value)}><option value="">My work only</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></Field>{engagementId && <p className="rounded-xl border border-violet-900/60 bg-violet-950/20 px-3 py-2 text-xs text-violet-300">Operating Spine services and artifacts are included automatically.</p>}<Field label="Operating department"><select required className={INPUT} value={departmentId} onChange={event => setDepartmentId(event.target.value)}><option value="">Select department</option>{departmentOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></Field><Field label={capability === 'project_pulse' ? 'Specific focus (optional)' : 'Request'}><textarea className={INPUT} rows="5" value={input} onChange={event => setInput(event.target.value)} placeholder={placeholder(capability)} /></Field><button disabled={running || !departmentId || (projectId && !workspace) || (engagementId && !engagementWorkspace) || (!projectId && capability !== 'daily_brief')} className="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold disabled:opacity-50">{running ? 'Analyzing authorized context…' : `Run ${selectedCapability?.[1]}`}</button></form>
 
       <section className="min-w-0 space-y-5">{result ? <><article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-purple-400">{labelize(capability)}</p><p className="mt-1 text-xs text-slate-600">{DEPARTMENT_LABELS[result.department_id] || labelize(result.department_id)} · {result.provider} · {result.model} · Run {result.run_id}</p></div><Usage usage={result.usage} /></div><pre className="mt-5 whitespace-pre-wrap font-sans text-sm leading-7 text-slate-200">{result.content}</pre><SourceManifest manifest={result.context_manifest} /></article>{result.proposed_action && <ProposalCard result={result} workspace={workspace} saving={decisionSaving} onConfirm={confirmProposal} onReject={rejectProposal} />}</> : <div className="flex min-h-[540px] items-center justify-center rounded-2xl border border-dashed border-slate-800 bg-slate-900/30 p-8 text-center"><div><div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-purple-600 text-2xl font-bold">A</div><h2 className="mt-5 text-lg font-semibold">Select a capability, project, and department</h2><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-500">Anka will use canonical tasks, research, deliverables, requests, the Living Project Record, and the verified connector assigned to that department. Record IDs and connector scope are preserved in the audit manifest.</p></div></div>}</section>
     </main> : <AuditView runs={runs} projects={projectById} engagements={engagementById} usage={usage} />}
