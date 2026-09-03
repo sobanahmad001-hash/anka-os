@@ -74,7 +74,13 @@ function foundationExtras(type: string, input: Json) {
       throw new Error(`source metadata for ${field} must contain exactly source label, source date, needs confirmation, and human confirmed`)
     }
     const sourceDate = entry.source_date === null ? null : text(entry.source_date, 10)
-    if (sourceDate && !/^\d{4}-\d{2}-\d{2}$/.test(sourceDate)) throw new Error(`source date for ${field} must use YYYY-MM-DD`)
+    if (sourceDate) {
+      const instant = /^\d{4}-\d{2}-\d{2}$/.test(sourceDate)
+        ? new Date(`${sourceDate}T00:00:00.000Z`) : null
+      if (!instant || Number.isNaN(instant.getTime()) || instant.toISOString().slice(0, 10) !== sourceDate) {
+        throw new Error(`source date for ${field} must be a real calendar date using YYYY-MM-DD`)
+      }
+    }
     if (typeof entry.needs_confirmation !== 'boolean' || typeof entry.human_confirmed !== 'boolean') {
       throw new Error(`confirmation state for ${field} must be boolean`)
     }
