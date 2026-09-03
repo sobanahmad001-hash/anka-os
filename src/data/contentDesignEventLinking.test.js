@@ -34,7 +34,7 @@ test('linked Design sessions reuse the session UUID as the event-link identity',
   assert.match(designFunction, /linked_work_item_id: null/)
   assert.match(designFunction, /status: 'in_progress'/)
   assert.match(designUi, /External event \(optional\)/)
-  assert.match(designRepository, /from\('external_events'\)/)
+  assert.match(designRepository, /scopedFrom\('external_events'\)/)
 })
 
 test('event detail resolves and links the exact Workshop session while preserving all content types', () => {

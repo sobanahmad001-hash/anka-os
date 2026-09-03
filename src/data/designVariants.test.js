@@ -75,7 +75,7 @@ test('variants are exact-size PNG exports and status transitions check database 
 test('batch formats are independent and the UI keeps variants outside direction comparison', () => {
   assert.match(edge, /runIndependentVariantJobs\(requestedFormats/)
   assert.match(edgeTest, /one failed variant does not block sibling formats in the same request/)
-  assert.match(repository, /from\('design_direction_variants'\)/)
+  assert.match(repository, /scopedFrom\('design_direction_variants'\)/)
   assert.match(repository, /generateVariants:/)
   assert.match(ui, /Released-format variants/)
   assert.match(ui, /remains separate from direction comparison/)

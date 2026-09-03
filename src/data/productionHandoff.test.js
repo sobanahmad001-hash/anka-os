@@ -90,17 +90,16 @@ test('the private package is available only through a short-lived signed URL', (
 })
 
 test('handoff controls appear only after release and reuse the Workshop read model', () => {
-  assert.match(workshopRepository, /from\('production_handoff_packages'\)/)
+  assert.match(workshopRepository, /scopedFrom\('production_handoff_packages'\)/)
   assert.match(workshop, /release && <ProductionHandoffPanel/)
   assert.match(repository, /invoke\('create_package'/)
   assert.match(ui, /nothing is edited, regenerated, or published/)
 })
 
 test('only a failed production handoff refreshes the Workshop after an action error', () => {
-  const ordinaryAction = "async function act(key, action) { setBusy(key); setError(''); try { await action(); setModal(null); await refresh() } catch (reason) { capture(reason) } finally { setBusy('') } }"
-  assert.ok(workshop.includes(ordinaryAction))
-  assert.equal(workshop.match(/setWorkspace\(await designWorkshop\.load\(engagementId\)\)/g)?.length, 2)
-  assert.match(workshop, /async function prepareHandoff\(release\)[\s\S]*setWorkspace\(await designWorkshop\.load\(engagementId\)\)[\s\S]*Keep the packaging failure primary/)
+  assert.match(workshop, /async function act\(key, action, capability = 'createDraft'\)[\s\S]*catch \(reason\) \{ deferredContext\.current = null; capture\(reason\) \}/)
+  assert.equal(workshop.match(/setWorkspace\(await studio\.load\(engagementId, navigationContext\)\)/g)?.length, 1)
+  assert.match(workshop, /async function prepareHandoff\(release\)[\s\S]*setWorkspace\(await studio\.load\(engagementId, navigationContext\)\)[\s\S]*Keep the packaging failure primary/)
   assert.match(workshop, /onPrepareHandoff=\{prepareHandoff\}/)
 })
 

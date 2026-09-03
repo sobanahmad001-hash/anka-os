@@ -56,8 +56,8 @@ test('UI separates experiments and supports invite and promotion actions', () =>
   assert.match(repository, /promote_direction_experiment/)
 })
 
-test('D2 does not modify W-series surfaces', () => {
-  for (const source of [migration, edge, repository, ui]) {
-    assert.doesNotMatch(source, /work_items|work_item_dependencies/)
-  }
+test('D2 does not mutate W-series surfaces while the P9 consumer may resolve a typed work item', () => {
+  for (const source of [migration, edge, ui]) assert.doesNotMatch(source, /work_items|work_item_dependencies/)
+  assert.match(repository, /scopedFrom\('work_items'\)\.select/)
+  assert.doesNotMatch(repository, /work_item_dependencies|scopedFrom\('work_items'\)\.(?:insert|update|delete)/)
 })

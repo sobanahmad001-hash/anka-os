@@ -39,7 +39,7 @@ test('DS3 validates real architecture slugs and rejects a flow outside the sessi
 })
 
 test('DS3 loads and groups flow sessions in the Design Workshop', () => {
-  assert.match(repository, /from\('design_page_flows'\)/)
+  assert.match(repository, /scopedFrom\('design_page_flows'\)/)
   assert.match(repository, /createPageFlow: input => invoke\('create_page_flow', input\)/)
   assert.match(ui, /workspace\.pageFlows\.map/)
   assert.match(ui, /item\.page_flow_id === flow\.id/)
