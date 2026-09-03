@@ -112,3 +112,10 @@ export function resolveMarketingNavigationScope(navigation, workspace, activeOrg
     allowedActions: [],
   }
 }
+
+export async function runAuthorizedMarketingAction(validation, isCurrent, action) {
+  if (validation?.status !== 'ready' || !isCurrent()) {
+    throw Object.assign(new Error('Official Marketing changes require a current authorized work context.'), { status: 403 })
+  }
+  return action()
+}

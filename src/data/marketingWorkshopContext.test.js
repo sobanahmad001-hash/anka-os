@@ -6,7 +6,10 @@ import {
   privateMarketingParams,
   resolveMarketingContext,
   resolveMarketingNavigationScope,
+  runAuthorizedMarketingAction,
 } from './marketingWorkshopContext.js'
+import { createMarketingProposalTransport } from './marketingProposalTransport.js'
+import { isOrganizationAccessError } from './organizationScope.js'
 import { parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from './workshopNavigation.js'
 
 const engagement = {
@@ -87,4 +90,50 @@ test('Marketing consumer imports P9 once and preserves approved feature tabs', (
   assert.match(ui, /Connections/)
   assert.match(repository, /from\('tasks'\)/)
   assert.match(repository, /from\('work_items'\)/)
+})
+
+test('Backlink Outreach is bound to the validated engagement brand and has no catalogue escape', () => {
+  const ui = readFileSync(new URL('../apps/MarketingStudio.jsx', import.meta.url), 'utf8')
+  const backlink = ui.slice(ui.indexOf('function BacklinkOutreach'), ui.indexOf('function Artifacts'))
+  assert.match(ui, /brand=\{\{ id: workspace\.engagement\.brand_id/)
+  assert.match(backlink, /listBacklinkTargets\(brand\.id\)/)
+  assert.match(backlink, /createBacklinkTarget\(brand\.id, form\)/)
+  assert.doesNotMatch(ui, /studio\.listBrands\(\)|backlinkBrandId|setBacklinkBrandId/)
+  assert.doesNotMatch(backlink, /<select[^>]+value=\{brand\.id\}/)
+})
+
+test('stale Marketing action callbacks are denied before mutation invocation', async () => {
+  let current = true
+  let mutations = 0
+  const delayedSubmit = () => runAuthorizedMarketingAction(
+    { status: 'ready' },
+    () => current,
+    async () => { mutations += 1 },
+  )
+  current = false
+  await assert.rejects(delayedSubmit(), error => error.status === 403 && isOrganizationAccessError(error))
+  assert.equal(mutations, 0)
+})
+
+test('both Marketing proposal paths preserve envelope-only 403 access denials', async () => {
+  const calls = []
+  const functionClient = {
+    functions: {
+      invoke: async (name, options) => {
+        calls.push({ name, options })
+        return { data: null, error: { message: 'denied', context: { status: 403 } } }
+      },
+    },
+  }
+  const proposals = createMarketingProposalTransport(functionClient, 'org-1')
+  for (const propose of [proposals.proposeArtifact, proposals.proposeWorkItem]) {
+    await assert.rejects(
+      propose({ engagement_id: 'eng-1', engagement_stage_instance_id: 'stage-ignored' }),
+      error => error.status === 403 && isOrganizationAccessError(error),
+    )
+  }
+  assert.deepEqual(calls.map(call => call.name), ['department-chat', 'department-chat'])
+  assert.deepEqual(calls.map(call => call.options.body.action), ['propose_artifact', 'propose_work_item'])
+  assert.equal(calls.every(call => call.options.body.organization_id === 'org-1'), true)
+  assert.equal(calls.every(call => !('engagement_stage_instance_id' in call.options.body)), true)
 })

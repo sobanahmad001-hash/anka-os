@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase.js'
+import { createMarketingProposalTransport } from './marketingProposalTransport.js'
 
 const TYPES = ['channel_strategy', 'campaign_brief', 'measurement_plan', 'marketing_report']
 
@@ -6,7 +7,7 @@ async function dataOrThrow(query, { signal } = {}) {
   if (signal && typeof query.abortSignal === 'function') query = query.abortSignal(signal)
   const { data, error } = await query
   if (error) throw Object.assign(new Error(error.message || 'Marketing Studio query failed'), {
-    status: error.status || error.statusCode,
+    status: error.status ?? error.statusCode ?? error.context?.status,
   })
   return data
 }
@@ -16,15 +17,16 @@ async function invoke(organizationId, action, input = {}, { signal } = {}) {
     body: { ...input, action, organization_id: organizationId }, signal,
   })
   if (error) throw Object.assign(new Error(error.message || 'Marketing Studio function failed'), {
-    status: error.status || error.statusCode || error.context?.status,
+    status: error.status ?? error.statusCode ?? error.context?.status,
   })
   if (data?.error) throw new Error(data.error)
   return data?.data
 }
 
-export function createMarketingStudioScope(organizationId, { signal } = {}) {
+export function createMarketingStudioScope(organizationId, { signal, functionClient = supabase } = {}) {
   if (!organizationId) throw new TypeError('Active organization is required')
   const options = { signal }
+  const proposals = createMarketingProposalTransport(functionClient, organizationId, options)
   return Object.freeze({
   organizationId,
   async listBrands() {
@@ -116,24 +118,8 @@ export function createMarketingStudioScope(organizationId, { signal } = {}) {
   deleteAdKeyword: (engagementId, keywordId) => invoke(organizationId, 'delete_ad_keyword', { engagement_id: engagementId, keyword_id: keywordId }, options),
   importAdPerformance: (engagementId, adCampaignId, snapshotDate) => invoke(organizationId, 'import_ad_campaign_performance', { engagement_id: engagementId, ad_campaign_id: adCampaignId, snapshot_date: snapshotDate }, options),
   saveArtifact: input => invoke(organizationId, 'save_artifact', input, options),
-  proposeArtifact: input => {
-    const { engagement_stage_instance_id: _ignoredStage, ...body } = input
-    return supabase.functions.invoke('department-chat', { body: { ...body, action: 'propose_artifact', organization_id: organizationId, department_id: 'marketing' }, signal })
-      .then(({ data, error }) => {
-        if (error) throw new Error(error.message || 'Department Chat function failed')
-        if (data?.error) throw new Error(data.error)
-        return data?.data
-      })
-  },
-  proposeWorkItem: input => {
-    const { engagement_stage_instance_id: _ignoredStage, ...body } = input
-    return supabase.functions.invoke('department-chat', { body: { ...body, action: 'propose_work_item', organization_id: organizationId, department_id: 'marketing' }, signal })
-      .then(({ data, error }) => {
-        if (error) throw new Error(error.message || 'Department Chat function failed')
-        if (data?.error) throw new Error(data.error)
-        return data?.data
-      })
-  },
+  proposeArtifact: proposals.proposeArtifact,
+  proposeWorkItem: proposals.proposeWorkItem,
   approveArtifact: (artifactVersionId, notes = '') => invoke(organizationId, 'approve_artifact', { artifact_version_id: artifactVersionId, notes }, options),
   analytics: (engagementId, startDate, endDate) => invoke(organizationId, 'analytics_dashboard', {
     engagement_id: engagementId, start_date: startDate, end_date: endDate,

@@ -33,6 +33,7 @@ import {
   privateMarketingParams,
   resolveMarketingContext,
   resolveMarketingNavigationScope,
+  runAuthorizedMarketingAction,
   selectableMarketingEngagements,
 } from '../data/marketingWorkshopContext.js'
 import { parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
@@ -104,8 +105,6 @@ export default function MarketingStudio() {
     draft: navigationContext.draft,
   }), [navigationContext])
   const [engagements, setEngagements] = useState([])
-  const [brands, setBrands] = useState([])
-  const [backlinkBrandId, setBacklinkBrandId] = useState('')
   const [workspace, setWorkspace] = useState(null)
   const [campaignId, setCampaignId] = useState('')
   const [tab, setTab] = useState(requestedTab)
@@ -151,7 +150,7 @@ export default function MarketingStudio() {
 
   useLayoutEffect(() => {
     workspaceGeneration.current += 1
-    setEngagements([]); setBrands([]); setBacklinkBrandId('')
+    setEngagements([])
     setWorkspace(null); setCampaignId(''); setTab('campaigns')
     setLoading(organizationReady); setSaving(false); setError(''); setMessage('')
   }, [activeOrganizationId, organizationReady, scopeRevision])
@@ -186,13 +185,11 @@ export default function MarketingStudio() {
     if (!studio || !organizationReady) return undefined
     let active = true
     const request = { organizationId: activeOrganizationId, revision: scopeRevision, signal: requestSignal }
-    Promise.all([studio.listEngagements(), studio.listBrands()]).then(([rows, brandRows]) => {
-      const mismatch = organizationMismatch(rows) || organizationMismatch(brandRows)
+    studio.listEngagements().then(rows => {
+      const mismatch = organizationMismatch(rows)
       if (mismatch) throw Object.assign(new Error('Marketing catalogue organization mismatch'), { status: 403, membershipMismatch: true })
       if (!active || !currentScope(request)) return
       setEngagements(rows || [])
-      setBrands(brandRows || [])
-      setBacklinkBrandId(brandRows?.[0]?.id || '')
       setLoading(false)
     }).catch(loadError => {
       if (active && currentScope(request) && loadError?.name !== 'AbortError') {
@@ -214,7 +211,7 @@ export default function MarketingStudio() {
 
   const selectedCampaign = workspace?.campaigns.find(item => item.id === campaignId) || null
 
-  async function act(callback, success, preferredCampaign = '') {
+  async function act(callback, success, preferredCampaign = '', refreshWorkspace = true) {
     if (!studio || !organizationReady) return null
     if (contextValidation.status !== 'ready') {
       setError('Official Marketing changes require a current authorized work context.')
@@ -223,10 +220,10 @@ export default function MarketingStudio() {
     const request = { organizationId: activeOrganizationId, revision: scopeRevision, signal: requestSignal }
     setSaving(true); setError(''); setMessage('')
     try {
-      const result = await callback()
+      const result = await runAuthorizedMarketingAction(contextValidation, () => currentScope(request), callback)
       if (!currentScope(request)) return null
       setMessage(success)
-      await loadWorkspace(engagementId, preferredCampaign || result?.id || campaignId, request)
+      if (refreshWorkspace) await loadWorkspace(engagementId, preferredCampaign || result?.id || campaignId, request)
       return result
     } catch (actionError) {
       if (!currentScope(request) || actionError?.name === 'AbortError') return null
@@ -239,8 +236,8 @@ export default function MarketingStudio() {
   }
 
   async function reportMarketingAccess(callback) {
-    if (contextValidation.status !== 'ready') throw new Error('Official Marketing changes require a current authorized work context.')
-    try { return await callback() }
+    const request = { organizationId: activeOrganizationId, revision: scopeRevision, signal: requestSignal }
+    try { return await runAuthorizedMarketingAction(contextValidation, () => currentScope(request), callback) }
     catch (actionError) {
       handleOrganizationAccessError(actionError, { membershipMismatch: actionError?.membershipMismatch === true })
       throw actionError
@@ -319,10 +316,10 @@ export default function MarketingStudio() {
           ))}
         </nav>
 
-        {loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Marketing Studio…</div> : tab === 'backlinks' ? (
-          <BacklinkOutreach key={`${activeOrganizationId}:${scopeRevision}`} studio={studio} brands={brands} brandId={backlinkBrandId} setBrandId={setBacklinkBrandId} onAccessError={handleOrganizationAccessError} />
-        ) : !workspace ? (
+        {loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Marketing Studio…</div> : !workspace ? (
           <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Select an engagement with a Marketing service to begin.</div>
+        ) : tab === 'backlinks' ? (
+          <BacklinkOutreach key={`${activeOrganizationId}:${scopeRevision}:${workspace.engagement.brand_id}`} studio={studio} brand={{ id: workspace.engagement.brand_id, name: workspace.engagement.brands?.name || 'Brand' }} act={act} onAccessError={handleOrganizationAccessError} />
         ) : tab === 'seo-keywords' ? (
           <SeoKeywordHistory
             key={activeOrganizationId + ':' + scopeRevision + ':' + workspace.engagement.brand_id}
@@ -407,7 +404,7 @@ function Campaigns({ studio, workspace, campaignId, setCampaignId, selected, sav
   </div>
 }
 
-function BacklinkOutreach({ studio, brands, brandId, setBrandId, onAccessError }) { // eslint-disable-line no-unused-vars
+function BacklinkOutreach({ studio, brand, act, onAccessError }) { // eslint-disable-line no-unused-vars
   const [targets, setTargets] = useState([])
   const [selectedId, setSelectedId] = useState('')
   const [creating, setCreating] = useState(true)
@@ -419,29 +416,12 @@ function BacklinkOutreach({ studio, brands, brandId, setBrandId, onAccessError }
   const [message, setMessage] = useState('')
   const visibleTargets = useMemo(() => filterBacklinkTargets(targets, filters), [targets, filters])
 
-  async function loadTargets(nextBrandId = brandId) {
-    if (!nextBrandId) { setTargets([]); return }
-    setLoading(true); setError('')
-    try {
-      const rows = await studio.listBacklinkTargets(nextBrandId)
-      if (rows.some(row => row.organization_id !== studio.organizationId)) {
-        throw Object.assign(new Error('Backlink catalogue organization mismatch'), { status: 403, membershipMismatch: true })
-      }
-      setTargets(rows)
-    }
-    catch (loadError) {
-      onAccessError(loadError, { membershipMismatch: loadError?.membershipMismatch === true })
-      setError(loadError.message)
-    }
-    finally { setLoading(false) }
-  }
-
   useEffect(() => {
     setSelectedId(''); setCreating(true); setForm(blankBacklinkTarget()); setMessage('')
-    if (!brandId) { setTargets([]); return undefined }
+    if (!brand.id) { setTargets([]); return undefined }
     let active = true
     setLoading(true); setError('')
-    studio.listBacklinkTargets(brandId)
+    studio.listBacklinkTargets(brand.id)
       .then(rows => {
         if (rows.some(row => row.organization_id !== studio.organizationId)) {
           throw Object.assign(new Error('Backlink catalogue organization mismatch'), { status: 403, membershipMismatch: true })
@@ -456,7 +436,7 @@ function BacklinkOutreach({ studio, brands, brandId, setBrandId, onAccessError }
       })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [brandId, onAccessError, studio])
+  }, [brand.id, onAccessError, studio])
 
   function editTarget(target) {
     setSelectedId(target.id); setCreating(false); setForm(backlinkTargetEditor(target)); setMessage('')
@@ -465,12 +445,14 @@ function BacklinkOutreach({ studio, brands, brandId, setBrandId, onAccessError }
   async function submit(event) {
     event.preventDefault(); setSaving(true); setError(''); setMessage('')
     try {
-      const result = creating
-        ? await studio.createBacklinkTarget(brandId, form)
-        : await studio.updateBacklinkTarget(selectedId, form)
+      const result = await act(
+        () => creating ? studio.createBacklinkTarget(brand.id, form) : studio.updateBacklinkTarget(selectedId, form),
+        creating ? 'Backlink target added.' : 'Backlink target updated.', '', false,
+      )
+      if (!result) return
       setSelectedId(result.id); setCreating(false); setForm(backlinkTargetEditor(result))
       setMessage(creating ? 'Backlink target added.' : 'Backlink target updated.')
-      await loadTargets(brandId)
+      setTargets(current => creating ? [result, ...current] : current.map(target => target.id === result.id ? result : target))
     } catch (saveError) {
       onAccessError(saveError, { membershipMismatch: saveError?.membershipMismatch === true })
       setError(saveError.message)
@@ -478,11 +460,11 @@ function BacklinkOutreach({ studio, brands, brandId, setBrandId, onAccessError }
     finally { setSaving(false) }
   }
 
-  if (!brands.length) return <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Create a brand before recording backlink opportunities.</div>
+  if (!brand.id) return <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">This engagement needs a brand before recording backlink opportunities.</div>
 
   return <div className="space-y-6">
     <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-      <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Manual research log</p><h2 className="mt-1 text-xl font-semibold">Backlink outreach</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Qualify opportunities and track human outreach. This area does not scrape sites, send messages, or verify backlinks.</p></div><Field label="Brand"><select className={`${INPUT} min-w-64`} value={brandId} onChange={event => setBrandId(event.target.value)}>{brands.map(brand => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select></Field></div>
+      <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Manual research log</p><h2 className="mt-1 text-xl font-semibold">Backlink outreach</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Qualify opportunities and track human outreach. This area does not scrape sites, send messages, or verify backlinks.</p></div><div className="rounded-xl bg-slate-950 px-4 py-3 text-sm text-slate-400">Engagement brand <span className="ml-2 font-semibold text-white">{brand.name}</span></div></div>
       <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <Field label="Status"><select className={INPUT} value={filters.outreach_status} onChange={event => setFilters({ ...filters, outreach_status: event.target.value })}><option value="">All statuses</option>{BACKLINK_STATUSES.map(value => <option key={value} value={value}>{titleize(value)}</option>)}</select></Field>
         <Field label="Link type"><select className={INPUT} value={filters.link_type} onChange={event => setFilters({ ...filters, link_type: event.target.value })}><option value="">All link types</option>{BACKLINK_LINK_TYPES.map(value => <option key={value} value={value}>{titleize(value)}</option>)}</select></Field>
