@@ -9,3 +9,13 @@ test('reports and records is a first-class Sphere route', () => {
   assert.match(app, /ReportsAndRecords/)
   assert.match(nav, /Reports & Records/)
 })
+
+test('reports and records consumes the active organization and isolates stale project loads', () => {
+  const screen = fs.readFileSync(new URL('../apps/ReportsAndRecords.jsx', import.meta.url), 'utf8')
+  assert.match(screen, /useOrganization/)
+  assert.match(screen, /listProjects\(activeOrganizationId/)
+  assert.match(screen, /getProjectWorkspace\(projectId, activeOrganizationId/)
+  assert.match(screen, /controller\.abort\(\)/)
+  assert.match(screen, /setWorkspace\(null\)/)
+  assert.doesNotMatch(screen, /delivery\.listProjects\(\)/)
+})

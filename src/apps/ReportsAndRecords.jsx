@@ -1,12 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useAuth } from '../context/AuthContext.jsx'
-import { delivery } from '../data/delivery.js'
+import { useOrganization } from '../context/OrganizationContext.jsx'
 import {
   buildClientProjectProjection,
   buildInternalProjectProjection,
   projectProjectionToMarkdown,
 } from '../data/livingProjectRecord.js'
+import { createReportsAndRecordsRepository } from '../data/reportsAndRecordsRepository.js'
+import { supabase } from '../lib/supabase.js'
+
+const reportsAndRecords = createReportsAndRecordsRepository(supabase)
 
 const BUTTON = 'rounded-xl border border-slate-700 px-3.5 py-2 text-sm font-medium text-slate-200 transition hover:border-purple-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50'
 
@@ -61,6 +65,7 @@ function StatusRows({ items, empty, titleKey = 'title' }) {
 
 export default function ReportsAndRecords() {
   const { user } = useAuth()
+  const { activeOrganizationId, scopeRevision, handleOrganizationAccessError } = useOrganization()
   const [projects, setProjects] = useState([])
   const [projectId, setProjectId] = useState('')
   const [workspace, setWorkspace] = useState(null)
@@ -69,34 +74,53 @@ export default function ReportsAndRecords() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const currentScope = useRef({ organizationId: activeOrganizationId, revision: scopeRevision, projectId })
+  currentScope.current = { organizationId: activeOrganizationId, revision: scopeRevision, projectId }
 
   useEffect(() => {
+    if (!activeOrganizationId) return undefined
     let active = true
-    delivery.listProjects()
+    const controller = new AbortController()
+    setProjects([])
+    setProjectId('')
+    setWorkspace(null)
+    setMessage('')
+    setError('')
+    setLoading(true)
+    reportsAndRecords.listProjects(activeOrganizationId, { signal: controller.signal })
       .then((rows) => {
-        if (!active) return
+        if (!active || controller.signal.aborted) return
         setProjects(rows || [])
         setProjectId(rows?.[0]?.id || '')
       })
-      .catch((loadError) => active && setError(loadError.message))
-      .finally(() => active && setLoading(false))
-    return () => { active = false }
-  }, [])
+      .catch((loadError) => {
+        if (!active || controller.signal.aborted) return
+        if (!handleOrganizationAccessError(loadError, { membershipMismatch: loadError.membershipMismatch })) setError(loadError.message)
+      })
+      .finally(() => active && !controller.signal.aborted && setLoading(false))
+    return () => { active = false; controller.abort() }
+  }, [activeOrganizationId, handleOrganizationAccessError, scopeRevision])
 
   useEffect(() => {
-    if (!projectId) {
+    if (!projectId || !activeOrganizationId) {
       setWorkspace(null)
-      return
+      return undefined
     }
     let active = true
+    const controller = new AbortController()
     setLoading(true)
+    setWorkspace(null)
+    setMessage('')
     setError('')
-    delivery.getProjectWorkspace(projectId)
-      .then((data) => active && setWorkspace(data))
-      .catch((loadError) => active && setError(loadError.message))
-      .finally(() => active && setLoading(false))
-    return () => { active = false }
-  }, [projectId])
+    reportsAndRecords.getProjectWorkspace(projectId, activeOrganizationId, { signal: controller.signal })
+      .then((data) => active && !controller.signal.aborted && setWorkspace(data))
+      .catch((loadError) => {
+        if (!active || controller.signal.aborted) return
+        if (!handleOrganizationAccessError(loadError, { membershipMismatch: loadError.membershipMismatch })) setError(loadError.message)
+      })
+      .finally(() => active && !controller.signal.aborted && setLoading(false))
+    return () => { active = false; controller.abort() }
+  }, [activeOrganizationId, handleOrganizationAccessError, projectId, scopeRevision])
 
   const projections = useMemo(() => {
     if (!workspace) return null
@@ -109,13 +133,14 @@ export default function ReportsAndRecords() {
   const projection = projections?.[projectionKind]
 
   async function createSnapshot() {
-    if (!workspace?.livingRecord?.id || !projection || !user?.id) return
+    if (!workspace?.livingRecord?.id || !projection || !user?.id || !activeOrganizationId) return
+    const requestedScope = { organizationId: activeOrganizationId, revision: scopeRevision, projectId: workspace.project.id }
     setSaving(true)
     setMessage('')
     setError('')
     try {
-      const snapshot = await delivery.createLivingRecordSnapshot({
-        organizationId: workspace.project.organization_id,
+      const snapshot = await reportsAndRecords.createLivingRecordSnapshot({
+        organizationId: activeOrganizationId,
         projectId: workspace.project.id,
         livingRecordId: workspace.livingRecord.id,
         projectionKind,
@@ -123,10 +148,17 @@ export default function ReportsAndRecords() {
         snapshot: projection,
         reason: `${labelize(projectionKind)} reporting checkpoint`,
       }, user.id)
+      const current = currentScope.current
+      if (current.organizationId !== requestedScope.organizationId || current.revision !== requestedScope.revision || current.projectId !== requestedScope.projectId) return
       setMessage(`${labelize(snapshot.projection_kind)} snapshot v${snapshot.source_version} is preserved.`)
-      setWorkspace(await delivery.getProjectWorkspace(workspace.project.id))
+      const nextWorkspace = await reportsAndRecords.getProjectWorkspace(workspace.project.id, activeOrganizationId)
+      const refreshed = currentScope.current
+      if (refreshed.organizationId === requestedScope.organizationId && refreshed.revision === requestedScope.revision && refreshed.projectId === requestedScope.projectId) setWorkspace(nextWorkspace)
     } catch (saveError) {
-      setError(saveError.message)
+      const current = currentScope.current
+      if (current.organizationId === requestedScope.organizationId && current.revision === requestedScope.revision && current.projectId === requestedScope.projectId) {
+        if (!handleOrganizationAccessError(saveError, { membershipMismatch: saveError.membershipMismatch })) setError(saveError.message)
+      }
     } finally {
       setSaving(false)
     }
