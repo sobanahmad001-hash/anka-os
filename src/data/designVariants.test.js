@@ -56,7 +56,7 @@ test('variant generation reuses the installed image adapter, storage path, asset
   assert.match(edge, /providerSize: spec\.providerSize,[\s\S]*targetWidth: spec\.width,[\s\S]*targetHeight: spec\.height/)
   assert.match(edge, /contentRequestId: request\.id,[\s\S]*engagementId: request\.engagement_id/)
   assert.match(edge, /from\('design_media_assets'\)\.insert/)
-  assert.match(edge, /mediaStoragePath\(input\.directionVersionId, asset\.id\)/)
+  assert.match(edge, /mediaStoragePath\(admin\.organizationId, input\.directionVersionId, asset\.id\)/)
   assert.match(edge, /createSignedUrls/)
   assert.doesNotMatch(edge, /VARIANT_[A-Z_]*BUCKET|variant-generated-media/)
 })

@@ -4,7 +4,6 @@ import {
   customFieldDraftValue,
   customFieldValueFromInput,
 } from '../data/contentCustomFields.js'
-import { contentCustomFields } from '../data/contentCustomFieldsRepository.js'
 
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20'
 const BUTTON = 'rounded-xl border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-amber-500 disabled:cursor-not-allowed disabled:opacity-50'
@@ -16,7 +15,7 @@ function FieldInput({ definition, value, onChange }) {
   return <input className={INPUT} type={definition.field_type === 'number' ? 'number' : definition.field_type === 'date' ? 'date' : 'text'} step={definition.field_type === 'number' ? 'any' : undefined} value={value ?? ''} onChange={event => onChange(event.target.value)} />
 }
 
-export default function ContentCustomFieldsPanel({ artifactType, versions, initialVersionId }) {
+export default function ContentCustomFieldsPanel({ artifactType, versions, initialVersionId, repository }) {
   const orderedVersions = useMemo(() => [...versions].sort((left, right) => right.version_number - left.version_number), [versions])
   const [versionId, setVersionId] = useState(initialVersionId || orderedVersions[0]?.id || '')
   const [definitions, setDefinitions] = useState([])
@@ -31,8 +30,8 @@ export default function ContentCustomFieldsPanel({ artifactType, versions, initi
     setLoading(true); setError('')
     try {
       const [nextDefinitions, values] = await Promise.all([
-        contentCustomFields.listDefinitions(artifactType),
-        contentCustomFields.listValues(versionId),
+        repository.listDefinitions(artifactType),
+        repository.listValues(versionId),
       ])
       const valueByDefinition = new Map(values.map(item => [item.field_def_id, item.value]))
       setDefinitions(nextDefinitions)
@@ -41,14 +40,14 @@ export default function ContentCustomFieldsPanel({ artifactType, versions, initi
       ])))
     } catch (reason) { setError(reason.message) }
     finally { setLoading(false) }
-  }, [artifactType, versionId])
+  }, [artifactType, repository, versionId])
   useEffect(() => { load() }, [load])
 
   async function save(definition) {
     setSavingId(definition.id); setError(''); setMessage('')
     try {
       const value = customFieldValueFromInput(definition.field_type, drafts[definition.id])
-      await contentCustomFields.saveValue(versionId, definition.id, value)
+      await repository.saveValue(versionId, definition.id, value)
       setMessage(`${definition.name.replaceAll('_', ' ')} saved on this exact version.`)
       await load()
     } catch (reason) { setError(reason.message) }

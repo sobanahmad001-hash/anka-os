@@ -32,7 +32,7 @@ test('DS3 adds nullable flow membership without changing the existing session mo
 test('DS3 validates real architecture slugs and rejects a flow outside the session engagement', () => {
   assert.match(edge, /text\(\(item as Json\)\.slug, 200\)/)
   assert.doesNotMatch(edge, /record\.page_slug|record\.path|record\.page_path/)
-  assert.match(edge, /eq\('id', flowId\)\.eq\('organization_id', ORGANIZATION_ID\)\.eq\('engagement_id', engagementId\)/)
+  assert.match(edge, /eq\('id', flowId\)\.eq\('organization_id', admin\.organizationId\)\.eq\('engagement_id', engagementId\)/)
   assert.match(edge, /if \(pageFlowId\) await resolvePageFlow\(admin, engagementId, pageFlowId, pageSlug\)/)
   assert.match(edge, /sessionValues\.page_flow_id = pageFlowId; sessionValues\.page_slug = pageSlug/)
   assert.match(edge, /create_page_flow: \(\) => createPageFlow/)

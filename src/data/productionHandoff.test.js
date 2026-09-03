@@ -45,7 +45,25 @@ test('the package contains exact content, direction media, and ready DS2 variant
   assert.match(edge, /from\('design_direction_variants'\)/)
   assert.match(edge, /variants\/\$\{variant\.variant_format\}/)
   assert.match(edgeTest, /contains exact release content, images, and DS2 variants/)
-  assert.doesNotMatch(edge, /content_request_id/)
+  assert.match(edge, /\.is\('content_request_id', null\)/)
+})
+
+test('Gate 0 derives release and package tenants through caller-readable canonical roots', () => {
+  assert.doesNotMatch(edge, /const ORGANIZATION_ID/)
+  assert.match(edge, /resolveServerOrganizationContext/)
+  assert.match(edge, /productionHandoffScope\(userClient, body\)/)
+  assert.match(edge, /root: \{ kind: 'engagement', id: root\.engagementId \}/)
+  assert.match(edge, /Requested organization does not match the root resource/)
+  assert.match(edge, /organization:organizations!inner\(id, status\)/)
+  assert.match(edge, /preflightProductionHandoffRequest[\s\S]*resolveServerOrganizationContext/)
+})
+
+test('Gate 0 constrains every privileged package and storage operation to exact source identity', () => {
+  assert.match(edge, /\.eq\('id', preflight\.release\.id\)\.eq\('organization_id', admin\.organizationId\)/)
+  assert.match(edge, /\.eq\('design_direction_release_id', source\.release\.id\)/)
+  assert.match(edge, /\.eq\('package_storage_path', storagePath\)/)
+  assert.match(edge, /assertHandoffStoragePath\(storagePath, admin\.organizationId/)
+  assert.match(edge, /Production handoff media has an invalid organization or source chain/)
 })
 
 test('missing or incomplete sources record a terminal failed package rather than a partial ready package', () => {
@@ -59,7 +77,7 @@ test('missing or incomplete sources record a terminal failed package rather than
 })
 
 test('the private package is available only through a short-lived signed URL', () => {
-  assert.match(edge, /createSignedUrl\(packageRow\.package_storage_path, SIGNED_URL_TTL_SECONDS\)/)
+  assert.match(edge, /createSignedUrl\(storagePath, SIGNED_URL_TTL_SECONDS\)/)
   assert.match(edge, /const SIGNED_URL_TTL_SECONDS = 300/)
   assert.match(edge, /const MAX_PACKAGE_BYTES = 32 \* 1024 \* 1024/)
   assert.match(migration, /file_size_limit = greatest\(coalesce\(file_size_limit, 0\), 33554432\)/)

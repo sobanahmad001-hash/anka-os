@@ -8,7 +8,6 @@ import {
   requestAssets,
   serializeContentRequest,
 } from '../data/contentRequests.js'
-import { contentRequests } from '../data/contentRequestsRepository.js'
 import ContentRequestReviewPanels from './ContentRequestReviewPanels.jsx'
 
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20'
@@ -21,7 +20,7 @@ const TONES = {
   red: 'bg-red-950 text-red-300',
 }
 
-export default function ContentRequestPanel({ engagement }) {
+export default function ContentRequestPanel({ engagement, repository }) {
   const engagementId = engagement?.id || ''
   const brandId = engagement?.brand_id || ''
   const [form, setForm] = useState(() => newContentRequest(engagement))
@@ -35,7 +34,7 @@ export default function ContentRequestPanel({ engagement }) {
     if (!engagementId) return
     setLoading(true); setError('')
     try {
-      const next = await contentRequests.loadProject({ id: engagementId, brand_id: brandId })
+      const next = await repository.loadProject(engagement)
       setWorkspace(next)
       setForm(current => ({
         ...current,
@@ -45,7 +44,7 @@ export default function ContentRequestPanel({ engagement }) {
       }))
     } catch (reason) { setError(reason.message) }
     finally { setLoading(false) }
-  }, [brandId, engagementId])
+  }, [brandId, engagement, engagementId, repository])
 
   useEffect(() => {
     setForm(newContentRequest({ id: engagementId, brand_id: brandId }))
@@ -60,16 +59,16 @@ export default function ContentRequestPanel({ engagement }) {
       if (form.output_path === 'internal_engine' && form.media_type === 'image' && !form.model_registry_id) {
         throw new Error('Select an active image model before generating media')
       }
-      const result = await contentRequests.create(serializeContentRequest(form))
+      const result = await repository.create(serializeContentRequest(form))
       createdRequest = result?.request
       if (!createdRequest?.id) throw new Error('The content request was not returned after creation')
       if (form.output_path === 'internal_engine') {
         if (form.media_type === 'video') {
-          await contentRequests.createVideoPlaceholder(createdRequest.id, form.brief)
+          await repository.createVideoPlaceholder(createdRequest.id, form.brief)
         } else {
-          await contentRequests.generateImage(createdRequest.id, form.model_registry_id, form.brief)
+          await repository.generateImage(createdRequest.id, form.model_registry_id, form.brief)
         }
-      } else await contentRequests.ensureFigmaHandoff(createdRequest.id)
+      } else await repository.ensureFigmaHandoff(createdRequest.id)
       setMessage(form.output_path === 'internal_engine'
         ? 'Content request created and sent through the existing Design Media pipeline.'
         : 'Content request created and its authenticated Figma reference page is ready.')
@@ -102,7 +101,7 @@ export default function ContentRequestPanel({ engagement }) {
     </form>
     <section className="space-y-4">
       <div className="flex items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Current engagement</p><h2 className="mt-1 text-2xl font-semibold">Production requests</h2></div><button type="button" onClick={load} disabled={loading} className={BUTTON}>{loading ? 'Loading…' : 'Refresh'}</button></div>
-      {loading ? <div className="rounded-2xl border border-slate-800 p-12 text-center text-sm text-slate-500">Loading content requests…</div> : workspace.requests.length ? workspace.requests.map(request => <RequestCard key={request.id} request={request} assets={requestAssets(request, workspace.assets)} handoff={workspace.handoffs.find(item => item.content_request_id === request.id)} event={workspace.events.find(item => item.id === request.linked_event_id)} onRepair={async () => { setSaving(true); setError(''); try { await contentRequests.ensureFigmaHandoff(request.id); setMessage('Authenticated Figma reference page is ready.'); await load() } catch (reason) { setError(reason.message) } finally { setSaving(false) } }} />) : <div className="rounded-2xl border border-dashed border-slate-700 p-12 text-center text-sm text-slate-500">No content requests yet for this engagement.</div>}
+      {loading ? <div className="rounded-2xl border border-slate-800 p-12 text-center text-sm text-slate-500">Loading content requests…</div> : workspace.requests.length ? workspace.requests.map(request => <RequestCard key={request.id} request={request} assets={requestAssets(request, workspace.assets)} handoff={workspace.handoffs.find(item => item.content_request_id === request.id)} event={workspace.events.find(item => item.id === request.linked_event_id)} onRepair={async () => { setSaving(true); setError(''); try { await repository.ensureFigmaHandoff(request.id); setMessage('Authenticated Figma reference page is ready.'); await load() } catch (reason) { setError(reason.message) } finally { setSaving(false) } }} />) : <div className="rounded-2xl border border-dashed border-slate-700 p-12 text-center text-sm text-slate-500">No content requests yet for this engagement.</div>}
     </section>
   </div>
 }

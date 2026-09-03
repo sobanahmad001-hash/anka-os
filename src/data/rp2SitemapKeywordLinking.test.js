@@ -28,7 +28,7 @@ test('RP2 validates both required JSON shapes in the canonical server save path'
   for (const field of ['term', 'category', 'search_volume', 'target_page_slug', 'notes']) assert.match(sharedContent, new RegExp(field))
   assert.match(sharedContent, /parent slug .*does not reference/)
   assert.match(sharedContent, /industry.*brand.*volume/)
-  assert.match(contentStudio, /visibilityClient: userClient/)
+  assert.match(contentStudio, /visibilityClient: context\.userClient/)
   assert.match(departmentChat, /validateContentArtifact/)
   assert.match(departmentChat, /p_validated_payload: input\.payload/)
 })

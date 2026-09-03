@@ -6,7 +6,6 @@ import {
   newGeneralContentRequest,
   serializeGeneralContentRequest,
 } from '../data/contentRequests.js'
-import { contentRequests } from '../data/contentRequestsRepository.js'
 import ContentRequestReviewPanels from './ContentRequestReviewPanels.jsx'
 import GeneralRequestQuickTaskCopy from './GeneralRequestQuickTaskCopy.jsx'
 
@@ -14,7 +13,7 @@ const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-
 const BUTTON = 'rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-amber-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50'
 const PRIMARY = 'rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50'
 
-export default function GeneralContentRequestsPanel() {
+export default function GeneralContentRequestsPanel({ repository }) {
   const [form, setForm] = useState(() => newGeneralContentRequest())
   const [workspace, setWorkspace] = useState({ requests: [], brands: [], handoffs: [] })
   const [loading, setLoading] = useState(true)
@@ -24,10 +23,10 @@ export default function GeneralContentRequestsPanel() {
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
-    try { setWorkspace(await contentRequests.loadGeneral()) }
+    try { setWorkspace(await repository.loadGeneral()) }
     catch (reason) { setError(reason.message) }
     finally { setLoading(false) }
-  }, [])
+  }, [repository])
 
   useEffect(() => { load() }, [load])
 
@@ -35,10 +34,10 @@ export default function GeneralContentRequestsPanel() {
     event.preventDefault()
     setSaving(true); setError(''); setMessage('')
     try {
-      const result = await contentRequests.create(serializeGeneralContentRequest(form))
+      const result = await repository.create(serializeGeneralContentRequest(form))
       if (form.output_path === 'figma_handoff') {
         if (!result?.request?.id) throw new Error('The content request was not returned after creation')
-        await contentRequests.ensureFigmaHandoff(result.request.id)
+        await repository.ensureFigmaHandoff(result.request.id)
       }
       setMessage(form.output_path === 'internal_engine'
         ? 'General request saved. Automatic media generation remains project-only for now.'

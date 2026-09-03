@@ -2,11 +2,16 @@ import { Buffer } from 'node:buffer'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { PNG } from 'npm:pngjs@7.0.0'
 import { compileApprovedArtifactContext, stableJson } from '../_shared/approvedArtifactContext.ts'
+import {
+  resolveServerOrganizationContext,
+  type ServerOrganizationContext,
+  type ServerOrganizationScope,
+} from '../_shared/serverOrganizationContext.ts'
 
 type Client = ReturnType<typeof createClient<any>>
+type ScopedClient = Client & { organizationId: string }
+type WorkshopOrganizationContext = Pick<ServerOrganizationContext, 'admin' | 'organizationId'>
 type Json = Record<string, unknown>
-
-const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
 const MEDIA_BUCKET = 'design-generated-media'
 const OPENAI_IMAGES_URL = 'https://api.openai.com/v1/images/generations'
 export const VIDEO_UNAVAILABLE_MESSAGE = 'Video generation is not yet configured. An API key and provider need to be added before this works.'
@@ -54,6 +59,166 @@ function text(value: unknown, max = 4000) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
 }
 
+function requiredActionId(value: unknown, label: string) {
+  const id = text(value, 80)
+  if (!id) throw new Error(`${label} is required`)
+  return id
+}
+
+type CallerRoot = { organizationId: string; engagementId: string }
+
+async function callerSessionRoot(userClient: Client, sessionId: string): Promise<CallerRoot> {
+  const { data: session, error } = await userClient.from('design_workshop_sessions')
+    .select('id, organization_id, engagement_id, brand_id').eq('id', requiredActionId(sessionId, 'Session')).maybeSingle()
+  if (error || !session) throw Object.assign(new Error('Design Workshop session not found'), { status: 404 })
+  const { data: engagement, error: engagementError } = await userClient.from('engagements')
+    .select('id, organization_id, brand_id').eq('id', session.engagement_id).maybeSingle()
+  if (engagementError || !engagement || engagement.organization_id !== session.organization_id
+    || engagement.brand_id !== session.brand_id) {
+    throw Object.assign(new Error('Design Workshop session has an invalid organization chain'), { status: 409 })
+  }
+  return { organizationId: session.organization_id, engagementId: session.engagement_id }
+}
+
+async function callerDirectionRoot(userClient: Client, directionId: string): Promise<CallerRoot> {
+  const { data: direction, error } = await userClient.from('design_directions')
+    .select('id, organization_id, session_id').eq('id', requiredActionId(directionId, 'Direction')).maybeSingle()
+  if (error || !direction) throw Object.assign(new Error('Design direction not found'), { status: 404 })
+  const root = await callerSessionRoot(userClient, direction.session_id)
+  if (root.organizationId !== direction.organization_id) {
+    throw Object.assign(new Error('Design direction has an invalid organization chain'), { status: 409 })
+  }
+  return root
+}
+
+async function callerVersionRoot(userClient: Client, versionId: string): Promise<CallerRoot> {
+  const { data: version, error } = await userClient.from('design_direction_versions')
+    .select('id, organization_id, direction_id').eq('id', requiredActionId(versionId, 'Direction version')).maybeSingle()
+  if (error || !version) throw Object.assign(new Error('Design direction version not found'), { status: 404 })
+  const root = await callerDirectionRoot(userClient, version.direction_id)
+  if (root.organizationId !== version.organization_id) {
+    throw Object.assign(new Error('Design direction version has an invalid organization chain'), { status: 409 })
+  }
+  return root
+}
+async function callerContentRequestRoot(userClient: Client, requestId: string): Promise<CallerRoot> {
+  const { data: request, error } = await userClient.from('content_requests')
+    .select('id, organization_id, engagement_id, brand_id').eq('id', requiredActionId(requestId, 'Content request')).maybeSingle()
+  if (error || !request?.engagement_id) {
+    throw Object.assign(new Error('Content request not found'), { status: 404 })
+  }
+  const { data: engagement, error: engagementError } = await userClient.from('engagements')
+    .select('id, organization_id, brand_id').eq('id', request.engagement_id).maybeSingle()
+  if (engagementError || !engagement || engagement.organization_id !== request.organization_id
+    || engagement.brand_id !== request.brand_id) {
+    throw Object.assign(new Error('Content request has an invalid organization chain'), { status: 409 })
+  }
+  return { organizationId: request.organization_id, engagementId: request.engagement_id }
+}
+
+async function callerReleasedVersionRoot(userClient: Client, versionId: string): Promise<CallerRoot> {
+  const root = await callerVersionRoot(userClient, versionId)
+  const { data: release, error } = await userClient.from('design_direction_releases')
+    .select('id, organization_id, direction_version_id').eq('direction_version_id', versionId).maybeSingle()
+  if (error || !release) throw Object.assign(new Error('Released direction version not found'), { status: 404 })
+  if (release.organization_id !== root.organizationId || release.direction_version_id !== versionId) {
+    throw Object.assign(new Error('Design release has an invalid organization chain'), { status: 409 })
+  }
+  return root
+}
+async function callerMediaRoot(userClient: Client, assetIds: string[]): Promise<CallerRoot | null> {
+  if (!assetIds.length) return null
+  const { data: assets, error } = await userClient.from('design_media_assets')
+    .select('id, organization_id, design_direction_version_id, content_request_id, storage_path').in('id', assetIds)
+  if (error || assets?.length !== assetIds.length) {
+    throw Object.assign(new Error('One or more media assets are not visible'), { status: 404 })
+  }
+  let root: CallerRoot | null = null
+  for (const asset of assets) {
+    let candidate: CallerRoot
+    if (asset.design_direction_version_id) {
+      candidate = await callerVersionRoot(userClient, asset.design_direction_version_id)
+    } else if (asset.content_request_id) {
+      candidate = await callerContentRequestRoot(userClient, asset.content_request_id)
+    } else {
+      throw Object.assign(new Error('Media asset has no canonical target'), { status: 409 })
+    }
+    if (candidate.organizationId !== asset.organization_id
+      || (asset.storage_path && !String(asset.storage_path).startsWith(`${asset.organization_id}/`))) {
+      throw Object.assign(new Error('Media asset has an invalid organization chain'), { status: 409 })
+    }
+    if (root && root.organizationId !== candidate.organizationId) {
+      throw Object.assign(new Error('Media assets must belong to one organization'), { status: 409 })
+    }
+    root = candidate
+  }
+  return root
+}
+
+export async function designWorkshopScope(userClient: Client, body: Json): Promise<ServerOrganizationScope> {
+  const action = text(body.action, 80)
+  const requestedOrganizationId = text(body.organization_id, 80) || null
+  if (action === 'create_page_flow' || action === 'create_session') return {
+    root: { kind: 'engagement', id: requiredActionId(body.engagement_id, 'Engagement') }, requestedOrganizationId,
+  }
+  if (action === 'generate_directions' || action === 'select_direction' || action === 'release_direction') {
+    const root = await callerSessionRoot(userClient, requiredActionId(body.session_id, 'Session'))
+    return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
+  }
+  if (action === 'create_direction_revision') {
+    const root = await callerDirectionRoot(userClient, requiredActionId(body.direction_id, 'Direction'))
+    return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
+  }
+  if (action === 'promote_direction_experiment' || action === 'generate_image'
+    || action === 'create_video_placeholder') {
+    const root = await callerVersionRoot(userClient, requiredActionId(body.direction_version_id, 'Direction version'))
+    return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
+  }
+  if (action === 'generate_variants') {
+    const root = await callerReleasedVersionRoot(userClient,
+      requiredActionId(body.source_direction_version_id, 'Source direction version'))
+    return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
+  }
+  if (action === 'generate_content_request_image' || action === 'create_content_request_video_placeholder') {
+    const requestId = requiredActionId(body.content_request_id, 'Content request')
+    await callerContentRequestRoot(userClient, requestId)
+    return { root: { kind: 'content_request', id: requestId }, requestedOrganizationId }
+  }
+  if (action === 'list_experiment_reviewers') {
+    return { root: null, requestedOrganizationId: requestedOrganizationId || '' }
+  }
+  if (action === 'sign_media_assets') {
+    const root = await callerMediaRoot(userClient, uniqueIds(body.asset_ids))
+    if (!root) return { root: null, requestedOrganizationId: requestedOrganizationId || '' }
+    return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
+  }
+  throw new Error('Unsupported action')
+}
+
+function publicApiKey() {
+  return Deno.env.get('SUPABASE_PUBLISHABLE_KEYS')?.split(',').map(value => value.trim()).find(Boolean)
+    || Deno.env.get('SUPABASE_ANON_KEY') || ''
+}
+
+async function callerClient(request: Request) {
+  const authorization = request.headers.get('Authorization') || ''
+  if (!authorization.startsWith('Bearer ') || !authorization.slice(7).trim()) {
+    throw Object.assign(new Error('Authentication required'), { status: 401 })
+  }
+  const url = Deno.env.get('SUPABASE_URL') || ''; const key = publicApiKey()
+  if (!url || !key) throw new Error('Function environment is incomplete')
+  const client = createClient(url, key, {
+    global: { headers: { Authorization: authorization } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+  const { data: { user }, error } = await client.auth.getUser()
+  if (error || !user) throw Object.assign(new Error('Authentication required'), { status: 401 })
+  return client
+}
+type HandlerDependencies = {
+  createCallerClient?: (request: Request) => Promise<Client>
+  resolveContext?: typeof resolveServerOrganizationContext
+}
 function strings(value: unknown, maxItems = 12) {
   return Array.isArray(value)
     ? value.map(item => text(item, 500)).filter(Boolean).slice(0, maxItems)
@@ -151,19 +316,8 @@ function outputText(result: Json) {
   }).join('\n')
 }
 
-async function requireUser(req: Request, url: string, anonKey: string, admin: Client) {
-  const authorization = req.headers.get('Authorization') || ''
-  if (!authorization.startsWith('Bearer ')) throw new Error('Authentication required')
-  const userClient = createClient(url, anonKey, { global: { headers: { Authorization: authorization } } })
-  const { data: { user }, error } = await userClient.auth.getUser()
-  if (error || !user) throw new Error('Authentication required')
-  const { data: membership } = await admin.from('organization_memberships').select('organization_id, role, department_id')
-    .eq('organization_id', ORGANIZATION_ID).eq('user_id', user.id).eq('member_kind', 'team').eq('status', 'active').maybeSingle()
-  if (!membership) throw new Error('Active team membership required')
-  return { user, membership, userClient }
-}
-
 export function hasWorkshopAuthority(membership: Json, action: string) {
+  if (membership.member_kind !== 'team') return false
   const role = String(membership.role || ''); const department = String(membership.department_id || '')
   if (LEADER_ROLES.has(role)) return true
   if (action === 'release_direction') return department === 'design' && role === 'department_manager'
@@ -210,20 +364,20 @@ export function variantPrompt(content: Json, format: unknown) {
     + 'Keep all critical text, logos, faces, and calls to action inside a conservative safe area for the target placement.', 6000)
 }
 
-export function mediaStoragePath(versionId: string, assetId: string) {
-  return `${ORGANIZATION_ID}/${versionId}/${assetId}.png`
+export function mediaStoragePath(organizationId: string, versionId: string, assetId: string) {
+  return `${organizationId}/${versionId}/${assetId}.png`
 }
 
-export function designEventLink(sessionId: string, externalEventId: string, actorId: string) {
+export function designEventLink(organizationId: string, sessionId: string, externalEventId: string, actorId: string) {
   return {
-    id: sessionId, organization_id: ORGANIZATION_ID, external_event_id: externalEventId,
+    id: sessionId, organization_id: organizationId, external_event_id: externalEventId,
     content_type: 'design_asset', linked_work_item_id: null, lead_time_days: 0,
     status: 'in_progress', created_by: actorId,
   }
 }
 
-export function contentRequestMediaStoragePath(contentRequestId: string, assetId: string) {
-  return `${ORGANIZATION_ID}/content-requests/${contentRequestId}/${assetId}.png`
+export function contentRequestMediaStoragePath(organizationId: string, contentRequestId: string, assetId: string) {
+  return `${organizationId}/content-requests/${contentRequestId}/${assetId}.png`
 }
 
 export function mediaTargetColumns(directionVersionId: string | null, contentRequestId: string | null) {
@@ -235,22 +389,22 @@ export function mediaTargetColumns(directionVersionId: string | null, contentReq
     : { content_request_id: contentRequestId }
 }
 
-async function insertEvent(admin: Client, engagementId: string, eventType: string, actorId: string,
+async function insertEvent(admin: ScopedClient, engagementId: string, eventType: string, actorId: string,
   recordType: string, recordId: string, versionId: string, action: string) {
   const { error } = await admin.from('engagement_events').insert({
-    organization_id: ORGANIZATION_ID, engagement_id: engagementId, event_type: eventType, actor_id: actorId,
+    organization_id: admin.organizationId, engagement_id: engagementId, event_type: eventType, actor_id: actorId,
     payload: { record_type: recordType, record_id: recordId, version_id: versionId, action },
   })
   if (error) throw error
 }
 
-async function validateScope(admin: Client, engagementId: string, brandId: string, stageId?: string | null) {
+async function validateScope(admin: ScopedClient, engagementId: string, brandId: string, stageId?: string | null) {
   const { data: engagement } = await admin.from('engagements').select('id, brand_id, engagement_type')
-    .eq('id', engagementId).eq('organization_id', ORGANIZATION_ID).eq('brand_id', brandId).maybeSingle()
+    .eq('id', engagementId).eq('organization_id', admin.organizationId).eq('brand_id', brandId).maybeSingle()
   if (!engagement) throw new Error('Engagement and brand are unavailable')
   if (stageId) {
     const { data: stage } = await admin.from('engagement_stage_instances').select('id').eq('id', stageId)
-      .eq('engagement_id', engagementId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+      .eq('engagement_id', engagementId).eq('organization_id', admin.organizationId).maybeSingle()
     if (!stage) throw new Error('The selected stage is outside this engagement')
   }
   return engagement
@@ -269,32 +423,32 @@ function extractFlowPages(content: Json) {
   }
   return pages
 }
-async function architecturePageSlugs(admin: Client, engagementId: string, artifactId: string) {
-  const { data: artifact, error: artifactError } = await admin.from('artifacts').select('id, artifact_type, engagement_id').eq('id', artifactId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+async function architecturePageSlugs(admin: ScopedClient, engagementId: string, artifactId: string) {
+  const { data: artifact, error: artifactError } = await admin.from('artifacts').select('id, artifact_type, engagement_id').eq('id', artifactId).eq('organization_id', admin.organizationId).maybeSingle()
   if (artifactError || !artifact || artifact.artifact_type !== 'website_architecture' || artifact.engagement_id !== engagementId) throw new Error('The selected website architecture artifact is unavailable for this engagement')
-  const { data: approvals, error: approvalError } = await admin.from('artifact_approvals').select('artifact_version_id').eq('artifact_id', artifactId).eq('organization_id', ORGANIZATION_ID).order('approved_at', { ascending: false }).limit(1)
+  const { data: approvals, error: approvalError } = await admin.from('artifact_approvals').select('artifact_version_id').eq('artifact_id', artifactId).eq('organization_id', admin.organizationId).order('approved_at', { ascending: false }).limit(1)
   if (approvalError) throw approvalError
   const approvedVersionId = approvals?.[0]?.artifact_version_id
   if (!approvedVersionId) throw new Error('A linked website architecture artifact must have an approved version')
-  const { data: version, error: versionError } = await admin.from('artifact_versions').select('content').eq('id', approvedVersionId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  const { data: version, error: versionError } = await admin.from('artifact_versions').select('content').eq('id', approvedVersionId).eq('organization_id', admin.organizationId).maybeSingle()
   if (versionError || !version) throw new Error('The approved website architecture version is unavailable')
   return extractFlowPages(version.content || {})
 }
-async function resolvePageFlow(admin: Client, engagementId: string, pageFlowId: string, pageSlug: string) {
+async function resolvePageFlow(admin: ScopedClient, engagementId: string, pageFlowId: string, pageSlug: string) {
   const flowId = text(pageFlowId, 80); const rawSlug = text(pageSlug, 200)
   if (!flowId || !normalizePageSlug(rawSlug)) throw new Error('A page flow requires a non-empty page slug')
-  const { data: flow, error: flowError } = await admin.from('design_page_flows').select('*').eq('id', flowId).eq('organization_id', ORGANIZATION_ID).eq('engagement_id', engagementId).maybeSingle()
+  const { data: flow, error: flowError } = await admin.from('design_page_flows').select('*').eq('id', flowId).eq('organization_id', admin.organizationId).eq('engagement_id', engagementId).maybeSingle()
   if (flowError || !flow) throw new Error('The selected page flow is unavailable for this engagement')
   if (flow.website_architecture_artifact_id && !(await architecturePageSlugs(admin, engagementId, flow.website_architecture_artifact_id)).has(normalizePageSlug(rawSlug))) throw new Error('The selected flow does not contain this page slug')
 }
-async function createPageFlow(admin: Client, body: Json, actorId: string) {
+async function createPageFlow(admin: ScopedClient, body: Json, actorId: string) {
   const engagementId = text(body.engagement_id, 80); const flowName = text(body.flow_name, 200)
   const architectureArtifactId = text(body.website_architecture_artifact_id, 80) || null
   if (!engagementId || !flowName) throw new Error('Engagement and flow name are required')
-  const { data: engagement, error: engagementError } = await admin.from('engagements').select('id').eq('id', engagementId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  const { data: engagement, error: engagementError } = await admin.from('engagements').select('id').eq('id', engagementId).eq('organization_id', admin.organizationId).maybeSingle()
   if (engagementError || !engagement) throw new Error('Engagement is unavailable')
   if (architectureArtifactId) await architecturePageSlugs(admin, engagementId, architectureArtifactId)
-  const { data: flow, error: flowError } = await admin.from('design_page_flows').insert({ organization_id: ORGANIZATION_ID, engagement_id: engagementId, website_architecture_artifact_id: architectureArtifactId, flow_name: flowName, created_by: actorId }).select('*').single()
+  const { data: flow, error: flowError } = await admin.from('design_page_flows').insert({ organization_id: admin.organizationId, engagement_id: engagementId, website_architecture_artifact_id: architectureArtifactId, flow_name: flowName, created_by: actorId }).select('*').single()
   if (flowError) throw flowError
   return flow
 }
@@ -304,11 +458,12 @@ export function outputFamilyForService(serviceSlug: unknown) {
   return outputFamily
 }
 
-export async function requireActiveDesignService(admin: Client, engagementId: string, engagementServiceId: string) {
+export async function requireActiveDesignService(context: WorkshopOrganizationContext, engagementId: string, engagementServiceId: string) {
+  const admin = context.admin
   if (!engagementServiceId) throw new Error('Select an active Design service')
   const { data: service, error } = await admin.from('engagement_services')
     .select('id, engagement_id, status, service_catalog!inner(id, slug, name, department_id, is_active)')
-    .eq('id', engagementServiceId).eq('organization_id', ORGANIZATION_ID).eq('engagement_id', engagementId)
+    .eq('id', engagementServiceId).eq('organization_id', context.organizationId).eq('engagement_id', engagementId)
     .eq('status', 'active').eq('service_catalog.department_id', 'design')
     .eq('service_catalog.is_active', true).maybeSingle()
   if (error) throw error
@@ -319,7 +474,7 @@ export async function requireActiveDesignService(admin: Client, engagementId: st
   return { service, catalog, outputFamily: outputFamilyForService(catalog.slug) }
 }
 
-export async function createSession(admin: Client, body: Json, actorId: string) {
+export async function createSession(admin: ScopedClient, body: Json, actorId: string) {
   const engagementId = text(body.engagement_id, 80); const brandId = text(body.brand_id, 80)
   const stageId = text(body.engagement_stage_instance_id, 80) || null
   const engagementServiceId = text(body.engagement_service_id, 80)
@@ -330,21 +485,21 @@ export async function createSession(admin: Client, body: Json, actorId: string) 
   const externalEventId = text(body.external_event_id, 80) || null
   if (externalEventId) {
     const { data: externalEvent, error: externalEventError } = await admin.from('external_events').select('id')
-      .eq('id', externalEventId).eq('organization_id', ORGANIZATION_ID).eq('brand_id', brandId).maybeSingle()
+      .eq('id', externalEventId).eq('organization_id', admin.organizationId).eq('brand_id', brandId).maybeSingle()
     if (externalEventError || !externalEvent) throw new Error('The selected external event is outside this brand')
   }
-  const { outputFamily } = await requireActiveDesignService(admin, engagementId, engagementServiceId)
+  const { outputFamily } = await requireActiveDesignService({ admin, organizationId: admin.organizationId }, engagementId, engagementServiceId)
   const modelIds = Array.isArray(body.model_registry_ids)
     ? [...new Set(body.model_registry_ids.map(value => text(value, 80)).filter(Boolean))].slice(0, 3) : []
   if (!modelIds.length) throw new Error('Select at least one registered model')
   const { data: models, error: modelError } = await admin.from('design_model_registry').select('*')
-    .eq('organization_id', ORGANIZATION_ID).eq('is_active', true).in('id', modelIds)
+    .eq('organization_id', admin.organizationId).eq('is_active', true).in('id', modelIds)
   if (modelError || models?.length !== modelIds.length) throw new Error('One or more selected models are unavailable')
   if (models.some(model => !supportsOutput(model, 'design_direction'))) {
     throw new Error('Direction sessions require models registered for design direction output')
   }
   const { selected, manifest: contextManifest } = await compileApprovedArtifactContext(admin, {
-    organizationId: ORGANIZATION_ID,
+    organizationId: admin.organizationId,
     engagementId,
     brandId,
     artifactTypes: [...ARTIFACT_TYPES],
@@ -359,7 +514,7 @@ export async function createSession(admin: Client, body: Json, actorId: string) 
   const checksum = await sha256(stableJson(contextManifest))
   const sessionId = crypto.randomUUID()
   const sessionValues: Record<string, unknown> = {
-    id: sessionId, organization_id: ORGANIZATION_ID, engagement_id: engagementId, brand_id: brandId,
+    id: sessionId, organization_id: admin.organizationId, engagement_id: engagementId, brand_id: brandId,
     engagement_stage_instance_id: stageId, engagement_service_id: engagementServiceId,
     output_family: outputFamily, output_brief: outputBrief,
     designer_instructions: designerInstructions, context_manifest: contextManifest,
@@ -370,34 +525,34 @@ export async function createSession(admin: Client, body: Json, actorId: string) 
   if (sessionError) throw sessionError
   try {
     const { error: contextError } = await admin.from('design_workshop_context_versions').insert(selected.map(({ artifact, approval, version }) => ({
-      organization_id: ORGANIZATION_ID, session_id: session.id, artifact_id: artifact.id,
+      organization_id: admin.organizationId, session_id: session.id, artifact_id: artifact.id,
       artifact_version_id: version.id, artifact_approval_id: approval.id, artifact_type: artifact.artifact_type,
     })))
     if (contextError) throw contextError
     const { error: selectionError } = await admin.from('design_workshop_model_selections').insert(modelIds.map((id, index) => ({
-      organization_id: ORGANIZATION_ID, session_id: session.id, model_registry_id: id, position: index + 1,
+      organization_id: admin.organizationId, session_id: session.id, model_registry_id: id, position: index + 1,
     })))
     if (selectionError) throw selectionError
     if (externalEventId) {
       const { error: linkError } = await admin.from('content_event_links')
-        .insert(designEventLink(session.id, externalEventId, actorId))
+        .insert(designEventLink(admin.organizationId, session.id, externalEventId, actorId))
       if (linkError) throw linkError
     }
   } catch (error) {
-    await admin.from('design_workshop_sessions').delete().eq('id', session.id)
+    await admin.from('design_workshop_sessions').delete().eq('id', session.id).eq('organization_id', admin.organizationId)
     throw error
   }
   return session
 }
 
-async function resolveOpenAi(admin: Client, engagementId: string) {
+async function resolveOpenAi(admin: ScopedClient, engagementId: string) {
   const { data: mappings, error: mappingError } = await admin.from('integration_connection_engagements')
-    .select('connection_id').eq('organization_id', ORGANIZATION_ID).eq('engagement_id', engagementId).eq('department_id', 'design')
+    .select('connection_id').eq('organization_id', admin.organizationId).eq('engagement_id', engagementId).eq('department_id', 'design')
   if (mappingError) throw mappingError
   const connectionIds = (mappings || []).map(item => item.connection_id)
   if (!connectionIds.length) throw new Error('A verified OpenAI connector must be mapped to this engagement and Design')
   const { data: connection, error } = await admin.from('integration_connections').select('id, provider, status, secret_name')
-    .eq('organization_id', ORGANIZATION_ID).eq('provider', 'openai').eq('status', 'verified')
+    .eq('organization_id', admin.organizationId).eq('provider', 'openai').eq('status', 'verified')
     .is('archived_at', null).in('id', connectionIds).order('updated_at', { ascending: false }).limit(1).maybeSingle()
   if (error) throw error
   const secretName = connection?.secret_name || ''
@@ -406,11 +561,11 @@ async function resolveOpenAi(admin: Client, engagementId: string) {
   return { connectionId: connection.id, credential }
 }
 
-async function generateOne(admin: Client, session: any, model: any, lane: typeof LANES[number], slot: number,
+async function generateOne(admin: ScopedClient, session: any, model: any, lane: typeof LANES[number], slot: number,
   actorId: string, credential: string, previous: Json[], storyboard: boolean) {
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const { data: run, error: runError } = await admin.from('design_generation_runs').insert({
-      organization_id: ORGANIZATION_ID, engagement_id: session.engagement_id, session_id: session.id,
+      organization_id: admin.organizationId, engagement_id: session.engagement_id, session_id: session.id,
       model_registry_id: model.id, provider: model.provider, model_id: model.model_id,
       direction_slot: slot, attempt_number: attempt, status: 'running',
       input_manifest_checksum: session.context_checksum,
@@ -440,34 +595,34 @@ async function generateOne(admin: Client, session: any, model: any, lane: typeof
       await admin.from('design_generation_runs').update({
         status: duplicate ? 'rejected_duplicate' : 'completed', external_response_id: result.id || null,
         output_checksum: checksum, failure_reason: duplicate ? 'Similarity threshold rejected this output.' : '', completed_at: new Date().toISOString(),
-      }).eq('id', run.id)
+      }).eq('id', run.id).eq('organization_id', admin.organizationId)
       if (!duplicate) return { generated, runId: run.id, checksum, signature: await sha256(directionText(generated).toLowerCase()) }
     } catch (error) {
       await admin.from('design_generation_runs').update({
         status: 'failed', failure_reason: error instanceof Error ? error.message.slice(0, 1000) : 'Generation failed',
         completed_at: new Date().toISOString(),
-      }).eq('id', run.id)
+      }).eq('id', run.id).eq('organization_id', admin.organizationId)
       if (attempt === 2) throw error
     }
   }
   throw new Error('A duplicate direction was rejected twice; no duplicate was stored')
 }
 
-async function generateDirections(admin: Client, body: Json, actorId: string) {
+async function generateDirections(admin: ScopedClient, body: Json, actorId: string) {
   const sessionId = text(body.session_id, 80)
   const { data: session } = await admin.from('design_workshop_sessions').select('*')
-    .eq('id', sessionId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+    .eq('id', sessionId).eq('organization_id', admin.organizationId).maybeSingle()
   if (!session || !['ready', 'generation_failed'].includes(session.status)) throw new Error('Session is not ready to generate')
   const storyboard = isStoryboardSession(session)
-  const { count } = await admin.from('design_directions').select('id', { count: 'exact', head: true }).eq('session_id', session.id)
+  const { count } = await admin.from('design_directions').select('id', { count: 'exact', head: true }).eq('session_id', session.id).eq('organization_id', admin.organizationId)
   if (count) throw new Error(storyboard
     ? 'This session already has its storyboard frame sequence'
     : 'This session already has its three comparison directions')
   const { data: selections, error: selectionError } = await admin.from('design_workshop_model_selections').select('*')
-    .eq('session_id', session.id).order('position')
+    .eq('session_id', session.id).eq('organization_id', admin.organizationId).order('position')
   if (selectionError || !selections?.length) throw new Error('Session has no model routing')
   const modelIds = selections.map(item => item.model_registry_id)
-  const { data: models, error: modelError } = await admin.from('design_model_registry').select('*').in('id', modelIds).eq('is_active', true)
+  const { data: models, error: modelError } = await admin.from('design_model_registry').select('*').in('id', modelIds).eq('organization_id', admin.organizationId).eq('is_active', true)
   if (modelError || !models?.length) throw new Error('Selected models are unavailable')
   const modelById = new Map(models.map(item => [item.id, item]))
   const orderedModels = selections.map(item => modelById.get(item.model_registry_id)).filter(Boolean)
@@ -476,7 +631,7 @@ async function generateDirections(admin: Client, body: Json, actorId: string) {
   }
   if (orderedModels.some(model => model.provider !== 'openai')) throw new Error('No installed adapter exists for one selected provider')
   const { credential } = await resolveOpenAi(admin, session.engagement_id)
-  await admin.from('design_workshop_sessions').update({ status: 'generating' }).eq('id', session.id)
+  await admin.from('design_workshop_sessions').update({ status: 'generating' }).eq('id', session.id).eq('organization_id', admin.organizationId)
   try {
     const outputs: Array<{ generated: Json; runId: string; checksum: string; signature: string }> = []
     for (let index = 0; index < LANES.length; index += 1) {
@@ -487,36 +642,36 @@ async function generateDirections(admin: Client, body: Json, actorId: string) {
       throw new Error('Distinctness gate rejected the generated set')
     }
     const { data: directions, error: directionError } = await admin.from('design_directions').insert(outputs.map((_, index) => ({
-      organization_id: ORGANIZATION_ID, session_id: session.id, direction_slot: index + 1,
+      organization_id: admin.organizationId, session_id: session.id, direction_slot: index + 1,
     }))).select('*')
     if (directionError) throw directionError
     const bySlot = new Map((directions || []).map(item => [item.direction_slot, item]))
     const { data: versions, error: versionError } = await admin.from('design_direction_versions').insert(outputs.map((item, index) => ({
-      organization_id: ORGANIZATION_ID, direction_id: bySlot.get(index + 1).id, version_number: 1,
+      organization_id: admin.organizationId, direction_id: bySlot.get(index + 1).id, version_number: 1,
       generation_run_id: item.runId, content: item.generated, content_checksum: item.checksum,
       distinctness_signature: item.signature, created_by: actorId,
     }))).select('*')
     if (versionError) throw versionError
-    await admin.from('design_workshop_sessions').update({ status: 'comparison' }).eq('id', session.id)
+    await admin.from('design_workshop_sessions').update({ status: 'comparison' }).eq('id', session.id).eq('organization_id', admin.organizationId)
     return { directions, versions }
   } catch (error) {
-    await admin.from('design_directions').delete().eq('session_id', session.id)
-    await admin.from('design_workshop_sessions').update({ status: 'generation_failed' }).eq('id', session.id)
+    await admin.from('design_directions').delete().eq('session_id', session.id).eq('organization_id', admin.organizationId)
+    await admin.from('design_workshop_sessions').update({ status: 'generation_failed' }).eq('id', session.id).eq('organization_id', admin.organizationId)
     throw error
   }
 }
 
-async function loadPermittedDirectionVersion(userClient: Client, directionVersionId: string) {
+async function loadPermittedDirectionVersion(userClient: Client, organizationId: string, directionVersionId: string) {
   const { data: version, error: versionError } = await userClient.from('design_direction_versions').select('*')
-    .eq('id', directionVersionId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+    .eq('id', directionVersionId).eq('organization_id', organizationId).maybeSingle()
   if (versionError) throw versionError
   if (!version) throw new Error('Direction version not found or not visible to this reviewer')
   const { data: direction, error: directionError } = await userClient.from('design_directions').select('id, session_id')
-    .eq('id', version.direction_id).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+    .eq('id', version.direction_id).eq('organization_id', organizationId).maybeSingle()
   if (directionError) throw directionError
   const { data: session, error: sessionError } = direction
     ? await userClient.from('design_workshop_sessions').select('id, engagement_id, engagement_service_id').eq('id', direction.session_id)
-      .eq('organization_id', ORGANIZATION_ID).maybeSingle()
+      .eq('organization_id', organizationId).maybeSingle()
     : { data: null, error: null }
   if (sessionError) throw sessionError
   if (!direction || !session) throw new Error('Direction version has no accessible Workshop session')
@@ -597,7 +752,7 @@ export async function cropResizePng(bytes: Uint8Array, width: number, height: nu
   return output
 }
 
-async function generateImageForTarget(admin: Client, input: {
+async function generateImageForTarget(admin: ScopedClient, input: {
   directionVersionId: string | null
   contentRequestId: string | null
   engagementId: string
@@ -609,21 +764,21 @@ async function generateImageForTarget(admin: Client, input: {
   targetHeight?: number
 }) {
   const { data: model, error: modelError } = await admin.from('design_model_registry').select('*')
-    .eq('id', input.modelRegistryId).eq('organization_id', ORGANIZATION_ID).eq('is_active', true).maybeSingle()
+    .eq('id', input.modelRegistryId).eq('organization_id', admin.organizationId).eq('is_active', true).maybeSingle()
   if (modelError) throw modelError
   if (!model || !supportsOutput(model, 'image')) throw new Error('Select an active image-capable model from the Design registry')
   if (model.provider !== 'openai') throw new Error('No installed image adapter exists for the selected provider')
   const { credential } = await resolveOpenAi(admin, input.engagementId)
   const { data: asset, error: assetError } = await admin.from('design_media_assets').insert({
-    organization_id: ORGANIZATION_ID,
+    organization_id: admin.organizationId,
     ...mediaTargetColumns(input.directionVersionId, input.contentRequestId),
     media_type: 'image', status: 'generating', model_registry_id: model.id,
     provider: model.provider, prompt: input.prompt, generated_by: input.actorId,
   }).select('*').single()
   if (assetError) throw assetError
   const storagePath = input.directionVersionId
-    ? mediaStoragePath(input.directionVersionId, asset.id)
-    : contentRequestMediaStoragePath(input.contentRequestId!, asset.id)
+    ? mediaStoragePath(admin.organizationId, input.directionVersionId, asset.id)
+    : contentRequestMediaStoragePath(admin.organizationId, input.contentRequestId!, asset.id)
   let uploaded = false
   try {
     let bytes = input.providerSize
@@ -643,7 +798,7 @@ async function generateImageForTarget(admin: Client, input: {
     uploaded = true
     const { data: ready, error: readyError } = await admin.from('design_media_assets').update({
       status: 'ready', storage_path: storagePath, failure_reason: '',
-    }).eq('id', asset.id).eq('organization_id', ORGANIZATION_ID).select('*').single()
+    }).eq('id', asset.id).eq('organization_id', admin.organizationId).select('*').single()
     if (readyError) throw readyError
     return ready
   } catch (error) {
@@ -651,15 +806,15 @@ async function generateImageForTarget(admin: Client, input: {
     const failureReason = error instanceof Error ? error.message.slice(0, 2000) : 'Image generation failed'
     const { data: failed, error: failedError } = await admin.from('design_media_assets').update({
       status: 'failed', storage_path: null, failure_reason: failureReason,
-    }).eq('id', asset.id).eq('organization_id', ORGANIZATION_ID).select('*').single()
+    }).eq('id', asset.id).eq('organization_id', admin.organizationId).select('*').single()
     if (failedError) throw new Error(`Image generation failed and its asset status could not be recorded: ${failedError.message}`)
     return failed || { ...asset, status: 'failed', failure_reason: failureReason }
   }
 }
 
-async function generateImage(admin: Client, userClient: Client, body: Json, actorId: string) {
+async function generateImage(admin: ScopedClient, userClient: Client, body: Json, actorId: string) {
   const directionVersionId = text(body.direction_version_id, 80)
-  const { version, session } = await loadPermittedDirectionVersion(userClient, directionVersionId)
+  const { version, session } = await loadPermittedDirectionVersion(userClient, admin.organizationId, directionVersionId)
   const prompt = mediaPrompt((version.content as Json) || {}, body.prompt)
   if (!prompt) throw new Error('Add an image prompt or complete the direction imagery and creative thesis')
   return generateImageForTarget(admin, {
@@ -672,10 +827,10 @@ async function generateImage(admin: Client, userClient: Client, body: Json, acto
   })
 }
 
-async function loadPermittedContentRequest(userClient: Client, contentRequestId: string) {
+async function loadPermittedContentRequest(userClient: Client, organizationId: string, contentRequestId: string) {
   const { data: request, error } = await userClient.from('content_requests')
     .select('id, organization_id, engagement_id, brand_id, output_path, mode, brief')
-    .eq('id', contentRequestId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+    .eq('id', contentRequestId).eq('organization_id', organizationId).maybeSingle()
   if (error) throw error
   if (!request || request.mode !== 'project' || !request.engagement_id) {
     throw new Error('Project content request not found or not visible')
@@ -686,8 +841,8 @@ async function loadPermittedContentRequest(userClient: Client, contentRequestId:
   return request
 }
 
-async function generateContentRequestImage(admin: Client, userClient: Client, body: Json, actorId: string) {
-  const request = await loadPermittedContentRequest(userClient, text(body.content_request_id, 80))
+async function generateContentRequestImage(admin: ScopedClient, userClient: Client, body: Json, actorId: string) {
+  const request = await loadPermittedContentRequest(userClient, admin.organizationId, text(body.content_request_id, 80))
   const prompt = text(body.prompt, 6000) || text(request.brief, 6000)
   if (!prompt) throw new Error('Add an image prompt or complete the content request brief')
   return generateImageForTarget(admin, {
@@ -700,15 +855,15 @@ async function generateContentRequestImage(admin: Client, userClient: Client, bo
   })
 }
 
-export async function requireReleasedVariantSource(admin: Client, userClient: Client, directionVersionId: string) {
-  const source = await loadPermittedDirectionVersion(userClient, directionVersionId)
+export async function requireReleasedVariantSource(admin: ScopedClient, userClient: Client, directionVersionId: string) {
+  const source = await loadPermittedDirectionVersion(userClient, admin.organizationId, directionVersionId)
   const { data: release, error: releaseError } = await admin.from('design_direction_releases').select('id, direction_version_id')
-    .eq('organization_id', ORGANIZATION_ID).eq('direction_version_id', source.version.id).maybeSingle()
+    .eq('organization_id', admin.organizationId).eq('direction_version_id', source.version.id).maybeSingle()
   if (releaseError) throw releaseError
   if (!release) throw new Error('Variants can only be generated from a released direction version')
   const { data: engagementService, error: serviceError } = await admin.from('engagement_services')
     .select('id, service_catalog!inner(slug)')
-    .eq('id', source.session.engagement_service_id).eq('organization_id', ORGANIZATION_ID)
+    .eq('id', source.session.engagement_service_id).eq('organization_id', admin.organizationId)
     .eq('engagement_id', source.session.engagement_id).maybeSingle()
   if (serviceError) throw serviceError
   const catalog = Array.isArray(engagementService?.service_catalog)
@@ -732,7 +887,7 @@ export async function runIndependentVariantJobs(formats: string[], processor: (f
   return results
 }
 
-async function generateVariants(admin: Client, userClient: Client, body: Json, actorId: string) {
+async function generateVariants(admin: ScopedClient, userClient: Client, body: Json, actorId: string) {
   const directionVersionId = text(body.source_direction_version_id, 80)
   const requestedFormats = [...new Set(strings(body.variant_formats, 6))]
   if (!requestedFormats.length) throw new Error('Select at least one variant format')
@@ -743,13 +898,13 @@ async function generateVariants(admin: Client, userClient: Client, body: Json, a
     const spec = variantFormatSpec(format)
     const prompt = variantPrompt((source.version.content as Json) || {}, format)
     const { data: variant, error: variantError } = await admin.from('design_direction_variants').insert({
-      organization_id: ORGANIZATION_ID, source_direction_version_id: source.version.id,
+      organization_id: admin.organizationId, source_direction_version_id: source.version.id,
       variant_format: format, status: 'pending', created_by: actorId,
     }).select('*').single()
     if (variantError) throw variantError
     try {
       const { error: generatingError } = await admin.from('design_direction_variants').update({ status: 'generating' })
-        .eq('id', variant.id).eq('organization_id', ORGANIZATION_ID)
+        .eq('id', variant.id).eq('organization_id', admin.organizationId)
       if (generatingError) throw generatingError
       const asset = await generateImageForTarget(admin, {
         directionVersionId: source.version.id,
@@ -765,12 +920,12 @@ async function generateVariants(admin: Client, userClient: Client, body: Json, a
       const status = asset?.status === 'ready' ? 'ready' : 'failed'
       const { data: finished, error: finishError } = await admin.from('design_direction_variants').update({
         status, design_media_asset_id: asset?.id || null,
-      }).eq('id', variant.id).eq('organization_id', ORGANIZATION_ID).select('*').single()
+      }).eq('id', variant.id).eq('organization_id', admin.organizationId).select('*').single()
       if (finishError) throw finishError
       return { ...finished, media_asset: asset }
     } catch (error) {
       const { error: failedStatusError } = await admin.from('design_direction_variants').update({ status: 'failed' })
-        .eq('id', variant.id).eq('organization_id', ORGANIZATION_ID)
+        .eq('id', variant.id).eq('organization_id', admin.organizationId)
       if (failedStatusError) {
         throw new Error(`Variant generation failed and its status could not be recorded: ${failedStatusError.message}`)
       }
@@ -779,13 +934,13 @@ async function generateVariants(admin: Client, userClient: Client, body: Json, a
   })
 }
 
-async function createVideoPlaceholder(admin: Client, userClient: Client, body: Json, actorId: string) {
+async function createVideoPlaceholder(admin: ScopedClient, userClient: Client, body: Json, actorId: string) {
   const directionVersionId = text(body.direction_version_id, 80)
-  const { version } = await loadPermittedDirectionVersion(userClient, directionVersionId)
+  const { version } = await loadPermittedDirectionVersion(userClient, admin.organizationId, directionVersionId)
   const prompt = mediaPrompt((version.content as Json) || {}, body.prompt)
   if (!prompt) throw new Error('Add a video prompt or complete the direction imagery and creative thesis')
   const { data, error } = await admin.from('design_media_assets').insert({
-    organization_id: ORGANIZATION_ID, design_direction_version_id: version.id,
+    organization_id: admin.organizationId, design_direction_version_id: version.id,
     media_type: 'video', status: 'unavailable', prompt,
     failure_reason: VIDEO_UNAVAILABLE_MESSAGE, generated_by: actorId,
   }).select('*').single()
@@ -793,12 +948,12 @@ async function createVideoPlaceholder(admin: Client, userClient: Client, body: J
   return data
 }
 
-async function createContentRequestVideoPlaceholder(admin: Client, userClient: Client, body: Json, actorId: string) {
-  const request = await loadPermittedContentRequest(userClient, text(body.content_request_id, 80))
+async function createContentRequestVideoPlaceholder(admin: ScopedClient, userClient: Client, body: Json, actorId: string) {
+  const request = await loadPermittedContentRequest(userClient, admin.organizationId, text(body.content_request_id, 80))
   const prompt = text(body.prompt, 6000) || text(request.brief, 6000)
   if (!prompt) throw new Error('Add a video prompt or complete the content request brief')
   const { data, error } = await admin.from('design_media_assets').insert({
-    organization_id: ORGANIZATION_ID, content_request_id: request.id,
+    organization_id: admin.organizationId, content_request_id: request.id,
     media_type: 'video', status: 'unavailable', prompt,
     failure_reason: VIDEO_UNAVAILABLE_MESSAGE, generated_by: actorId,
   }).select('*').single()
@@ -806,11 +961,11 @@ async function createContentRequestVideoPlaceholder(admin: Client, userClient: C
   return data
 }
 
-async function signMediaAssets(admin: Client, userClient: Client, body: Json) {
+async function signMediaAssets(admin: ScopedClient, userClient: Client, body: Json) {
   const assetIds = uniqueIds(body.asset_ids)
   if (!assetIds.length) return { signed_urls: {}, expires_in: 300 }
   const { data: assets, error } = await userClient.from('design_media_assets').select('id, storage_path')
-    .in('id', assetIds).eq('media_type', 'image').eq('status', 'ready')
+    .in('id', assetIds).eq('organization_id', admin.organizationId).eq('media_type', 'image').eq('status', 'ready')
   if (error) throw error
   const signable = (assets || []).filter(asset => asset.storage_path)
   if (!signable.length) return { signed_urls: {}, expires_in: 300 }
@@ -821,24 +976,24 @@ async function signMediaAssets(admin: Client, userClient: Client, body: Json) {
   return { signed_urls: signedUrls, expires_in: 300 }
 }
 
-async function validateExperimentReviewers(admin: Client, reviewerIds: string[], actorId: string) {
+async function validateExperimentReviewers(admin: ScopedClient, reviewerIds: string[], actorId: string) {
   const invited = reviewerIds.filter(id => id !== actorId)
   if (!invited.length) return []
   const { data, error } = await admin.from('organization_memberships').select('user_id')
-    .eq('organization_id', ORGANIZATION_ID).eq('member_kind', 'team').eq('status', 'active').in('user_id', invited)
+    .eq('organization_id', admin.organizationId).eq('member_kind', 'team').eq('status', 'active').in('user_id', invited)
   if (error) throw error
   if (data?.length !== invited.length) throw new Error('Every experiment reviewer must be an active team member')
   return invited
 }
 
-async function insertDirectionVersion(admin: Client, directionId: string, parent: any, content: Json,
+async function insertDirectionVersion(admin: ScopedClient, directionId: string, parent: any, content: Json,
   actorId: string, isExperimental: boolean, experimentVisibility: string[] | null) {
   const { data: latest, error: latestError } = await admin.from('design_direction_versions').select('version_number')
-    .eq('direction_id', directionId).order('version_number', { ascending: false }).limit(1).single()
+    .eq('direction_id', directionId).eq('organization_id', admin.organizationId).order('version_number', { ascending: false }).limit(1).single()
   if (latestError) throw latestError
   const checksum = await sha256(stableJson(content))
   const { data: version, error } = await admin.from('design_direction_versions').insert({
-    organization_id: ORGANIZATION_ID, direction_id: directionId, version_number: latest.version_number + 1,
+    organization_id: admin.organizationId, direction_id: directionId, version_number: latest.version_number + 1,
     parent_version_id: parent.id, content, content_checksum: checksum,
     distinctness_signature: await sha256(directionText(content).toLowerCase()), created_by: actorId,
     is_experimental: isExperimental, experiment_visibility: isExperimental ? experimentVisibility : null,
@@ -847,14 +1002,14 @@ async function insertDirectionVersion(admin: Client, directionId: string, parent
   return version
 }
 
-async function createDirectionRevision(admin: Client, body: Json, actorId: string) {
+async function createDirectionRevision(admin: ScopedClient, body: Json, actorId: string) {
   const directionId = text(body.direction_id, 80)
   const { data: direction } = await admin.from('design_directions').select('id, session_id')
-    .eq('id', directionId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+    .eq('id', directionId).eq('organization_id', admin.organizationId).maybeSingle()
   if (!direction) throw new Error('Direction not found')
   const parentId = text(body.parent_version_id, 80)
   const { data: parent } = await admin.from('design_direction_versions').select('id, direction_id, is_experimental')
-    .eq('id', parentId).eq('direction_id', direction.id).maybeSingle()
+    .eq('id', parentId).eq('organization_id', admin.organizationId).eq('direction_id', direction.id).maybeSingle()
   if (!parent) throw new Error('Parent direction version not found')
   if (parent.is_experimental) throw new Error('Use the dedicated promotion action for an experimental version')
   const content = body.content && typeof body.content === 'object' && !Array.isArray(body.content) ? body.content as Json : null
@@ -866,11 +1021,11 @@ async function createDirectionRevision(admin: Client, body: Json, actorId: strin
   return insertDirectionVersion(admin, direction.id, parent, content, actorId, isExperimental, reviewers)
 }
 
-async function listExperimentReviewers(admin: Client, membership: Json) {
+async function listExperimentReviewers(admin: ScopedClient, membership: Json) {
   const role = text(membership.role, 60)
   if (text(membership.department_id, 60) !== 'design' && !LEADER_ROLES.has(role)) return []
   const { data: memberships, error } = await admin.from('organization_memberships').select('user_id, role, department_id')
-    .eq('organization_id', ORGANIZATION_ID).eq('member_kind', 'team').eq('status', 'active').order('department_id')
+    .eq('organization_id', admin.organizationId).eq('member_kind', 'team').eq('status', 'active').order('department_id')
   if (error) throw error
   const ids = (memberships || []).map(item => item.user_id)
   const { data: profiles, error: profileError } = ids.length
@@ -881,10 +1036,10 @@ async function listExperimentReviewers(admin: Client, membership: Json) {
   return (memberships || []).map(item => ({ ...item, full_name: names.get(item.user_id) || 'Team member' }))
 }
 
-async function promoteDirectionExperiment(admin: Client, body: Json, actorId: string) {
+async function promoteDirectionExperiment(admin: ScopedClient, body: Json, actorId: string) {
   const versionId = text(body.direction_version_id, 80)
   const { data: experiment, error } = await admin.from('design_direction_versions').select('*')
-    .eq('id', versionId).eq('organization_id', ORGANIZATION_ID).eq('is_experimental', true).maybeSingle()
+    .eq('id', versionId).eq('organization_id', admin.organizationId).eq('is_experimental', true).maybeSingle()
   if (error) throw error
   if (!experiment) throw new Error('Experimental direction version not found')
   const invited = Array.isArray(experiment.experiment_visibility) ? experiment.experiment_visibility : []
@@ -894,58 +1049,61 @@ async function promoteDirectionExperiment(admin: Client, body: Json, actorId: st
   return insertDirectionVersion(admin, experiment.direction_id, experiment, experiment.content, actorId, false, null)
 }
 
-async function selectDirection(admin: Client, body: Json, actorId: string) {
+async function selectDirection(admin: ScopedClient, body: Json, actorId: string) {
   const sessionId = text(body.session_id, 80); const versionId = text(body.direction_version_id, 80)
   const { data: session } = await admin.from('design_workshop_sessions').select('id, engagement_id')
-    .eq('id', sessionId).eq('organization_id', ORGANIZATION_ID).eq('status', 'comparison').maybeSingle()
+    .eq('id', sessionId).eq('organization_id', admin.organizationId).eq('status', 'comparison').maybeSingle()
   if (!session) throw new Error('Session is not ready for selection')
   const { data: version } = await admin.from('design_direction_versions').select('id, direction_id').eq('id', versionId)
-    .eq('is_experimental', false).maybeSingle()
+    .eq('organization_id', admin.organizationId).eq('is_experimental', false).maybeSingle()
   const { data: direction } = version
-    ? await admin.from('design_directions').select('id').eq('id', version.direction_id).eq('session_id', session.id).maybeSingle()
+    ? await admin.from('design_directions').select('id').eq('id', version.direction_id).eq('organization_id', admin.organizationId).eq('session_id', session.id).maybeSingle()
     : { data: null }
   if (!version || !direction) throw new Error('Direction version is outside this session')
   const { data, error } = await admin.from('design_direction_selections').insert({
-    organization_id: ORGANIZATION_ID, engagement_id: session.engagement_id, session_id: session.id,
+    organization_id: admin.organizationId, engagement_id: session.engagement_id, session_id: session.id,
     direction_version_id: version.id, notes: text(body.notes, 2000), selected_by: actorId,
   }).select('*').single()
   if (error) throw error
   return data
 }
 
-async function releaseDirection(admin: Client, body: Json, actorId: string) {
+async function releaseDirection(admin: ScopedClient, body: Json, actorId: string) {
   const sessionId = text(body.session_id, 80)
   const { data: session } = await admin.from('design_workshop_sessions').select('id, engagement_id')
-    .eq('id', sessionId).eq('organization_id', ORGANIZATION_ID).eq('status', 'comparison').maybeSingle()
+    .eq('id', sessionId).eq('organization_id', admin.organizationId).eq('status', 'comparison').maybeSingle()
   const { data: selection } = session
-    ? await admin.from('design_direction_selections').select('*').eq('session_id', session.id).maybeSingle()
+    ? await admin.from('design_direction_selections').select('*').eq('session_id', session.id).eq('organization_id', admin.organizationId).maybeSingle()
     : { data: null }
   if (!session || !selection) throw new Error('A human-selected direction is required before release')
   const { data: version } = await admin.from('design_direction_versions').select('id, direction_id')
-    .eq('id', selection.direction_version_id).eq('is_experimental', false).maybeSingle()
+    .eq('id', selection.direction_version_id).eq('organization_id', admin.organizationId).eq('is_experimental', false).maybeSingle()
   if (!version) throw new Error('Selected direction version is unavailable')
   const { data: release, error } = await admin.from('design_direction_releases').insert({
-    organization_id: ORGANIZATION_ID, engagement_id: session.engagement_id, session_id: session.id,
+    organization_id: admin.organizationId, engagement_id: session.engagement_id, session_id: session.id,
     direction_version_id: version.id, release_notes: text(body.release_notes, 2000), released_by: actorId,
   }).select('*').single()
   if (error) throw error
-  await admin.from('design_workshop_sessions').update({ status: 'released' }).eq('id', session.id)
+  await admin.from('design_workshop_sessions').update({ status: 'released' }).eq('id', session.id).eq('organization_id', admin.organizationId)
   await insertEvent(admin, session.engagement_id, 'design_direction_released', actorId,
     'design_direction', version.direction_id, version.id, 'released')
   return release
 }
 
-async function handler(req: Request) {
+async function handler(req: Request, dependencies: HandlerDependencies = {}) {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
   try {
-    const url = Deno.env.get('SUPABASE_URL') || ''; const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || ''
-    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
-    if (!url || !anonKey || !serviceKey) throw new Error('Supabase function configuration is incomplete')
-    const admin = createClient(url, serviceKey, { auth: { persistSession: false } })
-    const { user, membership, userClient } = await requireUser(req, url, anonKey, admin)
-    const body = await req.json() as Json
+    const parsed: unknown = await req.json()
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Request body must be an object')
+    const body = parsed as Json
     const action = text(body.action, 80)
+    const preflightClient = await (dependencies.createCallerClient || callerClient)(req)
+    const scope = await designWorkshopScope(preflightClient, body)
+    const context = await (dependencies.resolveContext || resolveServerOrganizationContext)(req, scope)
+    const admin = context.admin as ScopedClient
+    admin.organizationId = context.organizationId
+    const { user, membership, userClient } = context
     const actions: Record<string, () => Promise<unknown>> = {
       create_page_flow: () => createPageFlow(admin, body, user.id),
       create_session: () => createSession(admin, body, user.id),
@@ -962,15 +1120,18 @@ async function handler(req: Request) {
       create_content_request_video_placeholder: () => createContentRequestVideoPlaceholder(admin, userClient, body, user.id),
       sign_media_assets: () => signMediaAssets(admin, userClient, body),
     }
-    if (!actions[action]) return response({ error: 'Unsupported action' }, 400)
-    if (!hasWorkshopAuthority(membership as Json, action)) return response({ error: 'Your department role cannot perform this action' }, 403)
+    if (!hasWorkshopAuthority(membership as Json, action)) {
+      return response({ error: 'Your department role cannot perform this action' }, 403)
+    }
     return response({ data: await actions[action]() })
   } catch (error) {
     console.error('Design Workshop failure', error)
-    return response({ error: error instanceof Error ? error.message : 'Design Workshop failed' }, 400)
+    const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : 400
+    return response({ error: error instanceof Error ? error.message : 'Design Workshop failed' },
+      Number.isFinite(status) ? status : 400)
   }
 }
 
-if (import.meta.main) Deno.serve(handler)
+if (import.meta.main) Deno.serve(req => handler(req))
 
 export { handler }

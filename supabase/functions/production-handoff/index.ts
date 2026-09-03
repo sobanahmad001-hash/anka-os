@@ -1,10 +1,18 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { strToU8, zipSync } from 'npm:fflate@0.8.2'
+import {
+  resolveServerOrganizationContext,
+  type ServerOrganizationScope,
+} from '../_shared/serverOrganizationContext.ts'
 
 type Client = ReturnType<typeof createClient<any>>
+type ScopedClient = Client & { organizationId: string }
 type Json = Record<string, any>
 type Asset = {
   id: string
+  organization_id?: string
+  design_direction_version_id?: string
+  content_request_id?: string | null
   media_type: string
   status: string
   storage_path: string | null
@@ -14,12 +22,13 @@ type Asset = {
 }
 type Variant = {
   id: string
+  organization_id?: string
+  source_direction_version_id?: string
   variant_format: string
   status: string
   design_media_asset_id: string | null
 }
 
-const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
 const MEDIA_BUCKET = 'design-generated-media'
 const SIGNED_URL_TTL_SECONDS = 300
 const MAX_PACKAGE_BYTES = 32 * 1024 * 1024
@@ -34,6 +43,61 @@ const response = (body: Json, status = 200) => new Response(JSON.stringify(body)
 
 function text(value: unknown, max = 2000) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
+}
+
+function httpError(message: string, status: number) {
+  return Object.assign(new Error(message), { status })
+}
+
+function requiredId(value: unknown, label: string) {
+  const id = text(value, 80)
+  if (!id) throw httpError(`${label} is required`, 400)
+  return id
+}
+
+export function hasProductionHandoffAuthority(membership: Json) {
+  return membership.member_kind === 'team'
+}
+
+type HandoffRoot = {
+  organizationId: string
+  engagementId: string
+  brandId: string
+  release: Json
+  version: Json
+  direction: Json
+  session: Json
+  packageRow?: Json
+}
+
+type HandoffPreflight = HandoffRoot & {
+  action: 'create_package' | 'sign_package'
+  membership: Json
+  scope: ServerOrganizationScope
+}
+
+type CallerIdentity = { userClient: Client; userId: string }
+
+function publicApiKey() {
+  return Deno.env.get('SUPABASE_PUBLISHABLE_KEYS')?.split(',').map(value => value.trim()).find(Boolean)
+    || Deno.env.get('SUPABASE_ANON_KEY') || ''
+}
+
+async function callerIdentity(req: Request): Promise<CallerIdentity> {
+  const authorization = req.headers.get('Authorization') || ''
+  if (!authorization.startsWith('Bearer ') || !authorization.slice(7).trim()) {
+    throw httpError('Authentication required', 401)
+  }
+  const url = Deno.env.get('SUPABASE_URL') || ''
+  const key = publicApiKey()
+  if (!url || !key) throw new Error('Supabase function configuration is incomplete')
+  const userClient = createClient(url, key, {
+    global: { headers: { Authorization: authorization } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+  const { data: { user }, error } = await userClient.auth.getUser()
+  if (error || !user) throw httpError('Authentication required', 401)
+  return { userClient, userId: user.id }
 }
 
 function jsonFile(value: unknown) {
@@ -191,83 +255,165 @@ export async function buildProductionArchive(
   }
 }
 
-async function requireUser(req: Request, url: string, anonKey: string, admin: Client) {
-  const authorization = req.headers.get('Authorization') || ''
-  if (!authorization.startsWith('Bearer ')) throw new Error('Authentication required')
-  const userClient = createClient(url, anonKey, {
-    global: { headers: { Authorization: authorization } },
-  })
-  const { data: { user }, error } = await userClient.auth.getUser()
-  if (error || !user) throw new Error('Authentication required')
-  const { data: membership, error: membershipError } = await admin
-    .from('organization_memberships')
-    .select('organization_id')
-    .eq('organization_id', ORGANIZATION_ID)
-    .eq('user_id', user.id)
-    .eq('member_kind', 'team')
-    .eq('status', 'active')
-    .maybeSingle()
-  if (membershipError) throw membershipError
-  if (!membership) throw new Error('Active team membership required')
-  return { user, userClient }
-}
-
-async function loadReleasedSource(userClient: Client, releaseId: string, engagementId: string) {
+async function callerReleasedSource(userClient: Client, releaseId: string, requestedEngagementId = ''): Promise<HandoffRoot> {
   const { data: release, error: releaseError } = await userClient
     .from('design_direction_releases')
     .select('*')
     .eq('id', releaseId)
-    .eq('organization_id', ORGANIZATION_ID)
     .maybeSingle()
-  if (releaseError) throw releaseError
+  if (releaseError || !release) throw httpError('Production handoff requires an already-released direction', 404)
   const { data: version, error: versionError } = release
     ? await userClient.from('design_direction_versions').select('*')
       .eq('id', release.direction_version_id)
-      .eq('organization_id', ORGANIZATION_ID)
       .maybeSingle()
     : { data: null, error: null }
   if (versionError) throw versionError
   const { data: direction, error: directionError } = version
     ? await userClient.from('design_directions').select('*')
       .eq('id', version.direction_id)
-      .eq('organization_id', ORGANIZATION_ID)
       .maybeSingle()
     : { data: null, error: null }
   if (directionError) throw directionError
   const { data: session, error: sessionError } = release
     ? await userClient.from('design_workshop_sessions').select('*')
       .eq('id', release.session_id)
-      .eq('organization_id', ORGANIZATION_ID)
       .maybeSingle()
     : { data: null, error: null }
   if (sessionError) throw sessionError
-  return validateReleasedSource(release, engagementId, version, direction, session)
+  const engagementId = requestedEngagementId || String(release.engagement_id || '')
+  const source = validateReleasedSource(release, engagementId, version, direction, session)
+  const { data: engagement, error: engagementError } = await userClient.from('engagements')
+    .select('id, organization_id, brand_id').eq('id', engagementId).maybeSingle()
+  if (engagementError || !engagement) throw httpError('Released direction engagement is not visible', 404)
+  if (engagement.organization_id !== release.organization_id
+    || engagement.id !== release.engagement_id
+    || session?.brand_id !== engagement.brand_id) {
+    throw httpError('Production handoff source has an invalid organization chain', 409)
+  }
+  return {
+    organizationId: String(release.organization_id),
+    engagementId,
+    brandId: String(engagement.brand_id),
+    ...source,
+  }
 }
 
-async function createPackage(admin: Client, userClient: Client, body: Json, actorId: string) {
-  const releaseId = text(body.design_direction_release_id, 80)
-  const engagementId = text(body.engagement_id, 80)
-  const source = await loadReleasedSource(userClient, releaseId, engagementId)
+export function assertHandoffStoragePath(path: unknown, organizationId: string, releaseId: string, packageId: string) {
+  const storagePath = text(path, 1000)
+  if (storagePath !== handoffStoragePath(organizationId, releaseId, packageId)) {
+    throw httpError('Production handoff package has an invalid private storage path', 409)
+  }
+  return storagePath
+}
+
+async function callerPackageRoot(userClient: Client, packageId: string): Promise<HandoffRoot> {
+  const { data: packageRow, error } = await userClient.from('production_handoff_packages')
+    .select('id, organization_id, design_direction_release_id, status, package_storage_path')
+    .eq('id', packageId).maybeSingle()
+  if (error || !packageRow) throw httpError('Ready production handoff package not found or not visible', 404)
+  const root = await callerReleasedSource(
+    userClient, requiredId(packageRow.design_direction_release_id, 'Design direction release'),
+  )
+  if (packageRow.organization_id !== root.organizationId
+    || packageRow.design_direction_release_id !== root.release.id) {
+    throw httpError('Production handoff package has an invalid organization chain', 409)
+  }
+  if (packageRow.status !== 'ready' || !packageRow.package_storage_path) {
+    throw httpError('Ready production handoff package not found or not visible', 404)
+  }
+  assertHandoffStoragePath(packageRow.package_storage_path, root.organizationId, String(root.release.id), String(packageRow.id))
+  return { ...root, packageRow: packageRow as Json }
+}
+
+export async function productionHandoffScope(userClient: Client, body: Json): Promise<HandoffRoot & {
+  action: 'create_package' | 'sign_package'
+  scope: ServerOrganizationScope
+}> {
+  const action = text(body.action, 80)
+  if (action !== 'create_package' && action !== 'sign_package') throw new Error('Unsupported action')
+  const root = action === 'create_package'
+    ? await callerReleasedSource(
+      userClient,
+      requiredId(body.design_direction_release_id, 'Design direction release'),
+      requiredId(body.engagement_id, 'Engagement'),
+    )
+    : await callerPackageRoot(userClient, requiredId(body.package_id, 'Production handoff package'))
+  const requestedOrganizationId = text(body.organization_id, 80) || null
+  if (requestedOrganizationId && requestedOrganizationId !== root.organizationId) {
+    throw httpError('Requested organization does not match the root resource', 403)
+  }
+  return { ...root, action, scope: { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId } }
+}
+
+export async function preflightProductionHandoffRequest(userClient: Client, userId: string, body: Json): Promise<HandoffPreflight> {
+  const root = await productionHandoffScope(userClient, body)
+  const { data: membership, error } = await userClient.from('organization_memberships')
+    .select('organization_id, role, department_id, status, member_kind, organization:organizations!inner(id, status)')
+    .eq('organization_id', root.organizationId).eq('user_id', userId).eq('status', 'active')
+    .eq('member_kind', 'team').eq('organization.status', 'active').maybeSingle()
+  const organization = Array.isArray(membership?.organization) ? membership.organization[0] : membership?.organization
+  if (error || !membership || membership.organization_id !== root.organizationId
+    || membership.status !== 'active' || membership.member_kind !== 'team' || organization?.status !== 'active') {
+    throw httpError('Active team membership required', 403)
+  }
+  if (!hasProductionHandoffAuthority(membership as Json)) throw httpError('Production handoff requires team access', 403)
+  return { ...root, membership: membership as Json }
+}
+
+async function loadExactRelease(admin: ScopedClient, preflight: HandoffPreflight) {
+  const { data, error } = await admin.from('design_direction_releases').select('*')
+    .eq('id', preflight.release.id).eq('organization_id', admin.organizationId)
+    .eq('engagement_id', preflight.engagementId).eq('session_id', preflight.session.id)
+    .eq('direction_version_id', preflight.version.id).maybeSingle()
+  if (error || !data) throw httpError('Released direction changed after caller validation', 409)
+  return { ...preflight, release: data as Json }
+}
+
+export function validateHandoffRows(
+  organizationId: string,
+  directionVersionId: string,
+  assets: Asset[],
+  variants: Variant[],
+) {
+  const mediaPrefix = `${organizationId}/${directionVersionId}/`
+  if (assets.some(asset => asset.organization_id !== organizationId
+    || asset.design_direction_version_id !== directionVersionId || asset.content_request_id !== null
+    || (asset.storage_path && (!asset.storage_path.startsWith(mediaPrefix)
+      || asset.storage_path.slice(mediaPrefix.length).includes('/') || asset.storage_path.includes('..'))))) {
+    throw httpError('Production handoff media has an invalid organization or source chain', 409)
+  }
+  if (variants.some(variant => variant.organization_id !== organizationId
+    || variant.source_direction_version_id !== directionVersionId)) {
+    throw httpError('Production handoff variants have an invalid organization or source chain', 409)
+  }
+}
+
+async function createPackage(admin: ScopedClient, userClient: Client, actorId: string, preflight: HandoffPreflight) {
+  const source = await loadExactRelease(admin, preflight)
   const [{ data: assets, error: assetError }, { data: variants, error: variantError }] = await Promise.all([
     userClient.from('design_media_assets').select(
-      'id, media_type, status, storage_path, prompt, provider, failure_reason',
-    ).eq('organization_id', ORGANIZATION_ID)
+      'id, organization_id, design_direction_version_id, content_request_id, media_type, status, storage_path, prompt, provider, failure_reason',
+    ).eq('organization_id', admin.organizationId)
       .eq('design_direction_version_id', source.version.id)
+      .is('content_request_id', null)
       .order('created_at'),
     userClient.from('design_direction_variants').select(
-      'id, variant_format, status, design_media_asset_id',
-    ).eq('organization_id', ORGANIZATION_ID)
+      'id, organization_id, source_direction_version_id, variant_format, status, design_media_asset_id',
+    ).eq('organization_id', admin.organizationId)
       .eq('source_direction_version_id', source.version.id)
       .order('created_at'),
   ])
   if (assetError) throw assetError
   if (variantError) throw variantError
+  const scopedAssets = (assets || []) as Asset[]
+  const scopedVariants = (variants || []) as Variant[]
+  validateHandoffRows(admin.organizationId, String(source.version.id), scopedAssets, scopedVariants)
 
   const createdAt = new Date().toISOString()
   const { data: packageRow, error: packageError } = await admin
     .from('production_handoff_packages')
     .insert({
-      organization_id: ORGANIZATION_ID,
+      organization_id: admin.organizationId,
       design_direction_release_id: source.release.id,
       requested_by: actorId,
       created_at: createdAt,
@@ -276,15 +422,16 @@ async function createPackage(admin: Client, userClient: Client, body: Json, acto
     .single()
   if (packageError) throw packageError
 
-  const storagePath = handoffStoragePath(ORGANIZATION_ID, source.release.id, packageRow.id)
+  const storagePath = handoffStoragePath(admin.organizationId, source.release.id, packageRow.id)
+  assertHandoffStoragePath(storagePath, admin.organizationId, String(source.release.id), String(packageRow.id))
   let uploaded = false
   try {
     const archive = await buildProductionArchive({
       packageId: packageRow.id,
       release: source.release,
       version: source.version,
-      assets: (assets || []) as Asset[],
-      variants: (variants || []) as Variant[],
+      assets: scopedAssets,
+      variants: scopedVariants,
       createdAt,
     }, async path => {
       const { data, error } = await admin.storage.from(MEDIA_BUCKET).download(path)
@@ -310,12 +457,15 @@ async function createPackage(admin: Client, userClient: Client, body: Json, acto
         completed_at: new Date().toISOString(),
       })
       .eq('id', packageRow.id)
-      .eq('organization_id', ORGANIZATION_ID)
+      .eq('organization_id', admin.organizationId)
+      .eq('design_direction_release_id', source.release.id)
+      .eq('status', 'preparing')
       .select('*')
       .single()
     if (readyError) {
       const { data: persisted } = await admin.from('production_handoff_packages')
-        .select('*').eq('id', packageRow.id).maybeSingle()
+        .select('*').eq('id', packageRow.id).eq('organization_id', admin.organizationId)
+        .eq('design_direction_release_id', source.release.id).maybeSingle()
       if (persisted?.status === 'ready') return persisted
       throw readyError
     }
@@ -333,7 +483,9 @@ async function createPackage(admin: Client, userClient: Client, body: Json, acto
         completed_at: new Date().toISOString(),
       })
       .eq('id', packageRow.id)
-      .eq('organization_id', ORGANIZATION_ID)
+      .eq('organization_id', admin.organizationId)
+      .eq('design_direction_release_id', source.release.id)
+      .eq('status', 'preparing')
     if (failedError) {
       throw new Error(`Production handoff failed and its status could not be recorded: ${failedError.message}`)
     }
@@ -341,20 +493,29 @@ async function createPackage(admin: Client, userClient: Client, body: Json, acto
   }
 }
 
-async function signPackage(admin: Client, userClient: Client, body: Json) {
-  const packageId = text(body.package_id, 80)
-  const { data: packageRow, error } = await userClient
+async function signPackage(admin: ScopedClient, preflight: HandoffPreflight) {
+  const callerPackage = preflight.packageRow as Json
+  const storagePath = assertHandoffStoragePath(
+    callerPackage.package_storage_path,
+    admin.organizationId,
+    String(preflight.release.id),
+    String(callerPackage.id),
+  )
+  const { data: packageRow, error } = await admin
     .from('production_handoff_packages')
-    .select('id, status, package_storage_path')
-    .eq('id', packageId)
+    .select('id, organization_id, design_direction_release_id, status, package_storage_path')
+    .eq('id', callerPackage.id)
+    .eq('organization_id', admin.organizationId)
+    .eq('design_direction_release_id', preflight.release.id)
     .eq('status', 'ready')
+    .eq('package_storage_path', storagePath)
     .maybeSingle()
   if (error) throw error
   if (!packageRow?.package_storage_path) {
-    throw new Error('Ready production handoff package not found or not visible')
+    throw httpError('Ready production handoff package changed after caller validation', 409)
   }
   const { data: signed, error: signedError } = await admin.storage.from(MEDIA_BUCKET)
-    .createSignedUrl(packageRow.package_storage_path, SIGNED_URL_TTL_SECONDS)
+    .createSignedUrl(storagePath, SIGNED_URL_TTL_SECONDS)
   if (signedError || !signed?.signedUrl) {
     throw signedError || new Error('Production handoff download could not be signed')
   }
@@ -365,33 +526,52 @@ async function signPackage(admin: Client, userClient: Client, body: Json) {
   }
 }
 
-async function handler(req: Request) {
+type HandlerDependencies = {
+  createCallerIdentity?: (request: Request) => Promise<CallerIdentity>
+  resolveContext?: typeof resolveServerOrganizationContext
+}
+
+async function handler(req: Request, dependencies: HandlerDependencies = {}) {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
   try {
-    const url = Deno.env.get('SUPABASE_URL') || ''
-    const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || ''
-    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
-    if (!url || !anonKey || !serviceKey) throw new Error('Supabase function configuration is incomplete')
-    const admin = createClient(url, serviceKey, { auth: { persistSession: false } })
-    const { user, userClient } = await requireUser(req, url, anonKey, admin)
-    const body = await req.json() as Json
+    const parsed: unknown = await req.json()
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Request body must be an object')
+    const body = parsed as Json
     const action = text(body.action, 80)
+    if (action !== 'create_package' && action !== 'sign_package') throw new Error('Unsupported action')
     if (action === 'create_package') {
-      return response({ data: await createPackage(admin, userClient, body, user.id) })
+      requiredId(body.design_direction_release_id, 'Design direction release')
+      requiredId(body.engagement_id, 'Engagement')
+    } else {
+      requiredId(body.package_id, 'Production handoff package')
     }
-    if (action === 'sign_package') {
-      return response({ data: await signPackage(admin, userClient, body) })
+
+    const identity = await (dependencies.createCallerIdentity || callerIdentity)(req)
+    const preflight = await preflightProductionHandoffRequest(identity.userClient, identity.userId, body)
+    const context = await (dependencies.resolveContext || resolveServerOrganizationContext)(req, preflight.scope)
+    if (context.organizationId !== preflight.organizationId
+      || context.engagementId !== preflight.engagementId
+      || context.brandId !== preflight.brandId) {
+      throw httpError('Resolved Production Handoff context changed after caller validation', 409)
     }
-    return response({ error: 'Unsupported action' }, 400)
+    if (!hasProductionHandoffAuthority(context.membership as Json)) {
+      throw httpError('Production handoff requires team access', 403)
+    }
+    const admin = context.admin as ScopedClient
+    admin.organizationId = context.organizationId
+    return response({ data: preflight.action === 'create_package'
+      ? await createPackage(admin, context.userClient, context.user.id, preflight)
+      : await signPackage(admin, preflight) })
   } catch (error) {
     console.error('Production handoff failure', error)
+    const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : 400
     return response({
       error: error instanceof Error ? error.message : 'Production handoff failed',
-    }, 400)
+    }, Number.isFinite(status) ? status : 400)
   }
 }
 
-if (import.meta.main) Deno.serve(handler)
+if (import.meta.main) Deno.serve(request => handler(request))
 
 export { handler }
