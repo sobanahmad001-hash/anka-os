@@ -90,6 +90,12 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/recurring-plans/index.ts"
 
+# Code registration only. No Cron job or machine identity is provisioned.
+[functions.recurring-scheduler]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/recurring-scheduler/index.ts"
+
 [functions.external-events]
 enabled = true
 verify_jwt = true
