@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import DevelopmentTrackingPanel from '../components/DevelopmentTrackingPanel.jsx'
+import OrganizationGate from '../components/OrganizationGate.jsx'
 import PortfolioDashboard from '../components/PortfolioDashboard.jsx'
 import WorkItemsPanel from '../components/WorkItemsPanel.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useOrganization } from '../context/OrganizationContext.jsx'
 import { OPERATING_DEPARTMENTS, pipelineDepartmentFlags } from '../data/operatingSpineRepository.js'
 import { operatingSpine } from '../data/operatingSpine.js'
 
@@ -21,8 +23,13 @@ const INITIAL_ENGAGEMENT = {
 
 const labelize = value => String(value || '').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
 
-export default function OperatingSpine({ initialView = 'engagements' }) {
+export default function OperatingSpine(props) {
+  return <OrganizationGate><ScopedOperatingSpine {...props} /></OrganizationGate>
+}
+
+function ScopedOperatingSpine({ initialView = 'engagements' }) {
   const { user } = useAuth()
+  const { activeOrganizationId, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
   const [searchParams] = useSearchParams()
   const requestedEngagementId = searchParams.get('engagement') || ''
   const requestedWorkspaceTab = searchParams.get('tab') || 'overview'
@@ -40,11 +47,19 @@ export default function OperatingSpine({ initialView = 'engagements' }) {
   const [clientForm, setClientForm] = useState(INITIAL_CLIENT)
   const [brandForm, setBrandForm] = useState(INITIAL_BRAND)
   const [engagementForm, setEngagementForm] = useState(INITIAL_ENGAGEMENT)
+  const catalogGeneration = useRef(0)
+  const workspaceGeneration = useRef(0)
 
   useEffect(() => {
-    loadAll()
-    if (requestedEngagementId) openEngagement(requestedEngagementId)
-  }, [requestedEngagementId])
+    loadAll(requestSignal)
+    if (requestedEngagementId) openEngagement(requestedEngagementId, { signal: requestSignal })
+    return () => {
+      catalogGeneration.current += 1
+      workspaceGeneration.current += 1
+    }
+    // The organization gate remounts this subtree on the same scope boundary.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeOrganizationId, scopeRevision, requestSignal, requestedEngagementId])
 
   const ownerOptions = useMemo(() => owners.map(owner => ({
     id: owner.user_id,
@@ -55,24 +70,29 @@ export default function OperatingSpine({ initialView = 'engagements' }) {
   const selectedClient = clients.find(client => client.id === engagementForm.clientId)
   const availableBrands = selectedClient?.brands || []
 
-  async function loadAll() {
+  async function loadAll(signal = requestSignal) {
+    const generation = ++catalogGeneration.current
     setLoading(true)
     setError('')
     try {
+      const options = { signal }
       const [clientRows, serviceRows, ownerRows, portfolioRows] = await Promise.all([
-        operatingSpine.listClientsAndBrands(),
-        operatingSpine.listServices(),
-        operatingSpine.listOwners(),
-        operatingSpine.getPortfolioSnapshot(),
+        operatingSpine.listClientsAndBrands(activeOrganizationId, options),
+        operatingSpine.listServices(activeOrganizationId, options),
+        operatingSpine.listOwners(activeOrganizationId, options),
+        operatingSpine.getPortfolioSnapshot(activeOrganizationId, options),
       ])
+      if (signal.aborted || generation !== catalogGeneration.current) return
       setClients(clientRows || [])
       setServices(serviceRows || [])
       setOwners(ownerRows || [])
       setPortfolioSnapshot(portfolioRows || { engagements: [], workItems: [], stages: [] })
     } catch (loadError) {
+      if (signal.aborted || generation !== catalogGeneration.current) return
+      handleOrganizationAccessError(loadError)
       setError(loadError.message)
     } finally {
-      setLoading(false)
+      if (!signal.aborted && generation === catalogGeneration.current) setLoading(false)
     }
   }
 
@@ -81,14 +101,15 @@ export default function OperatingSpine({ initialView = 'engagements' }) {
     if (!user?.id) return
     setSaving(true); setError(''); setNotice('')
     try {
-      const result = await operatingSpine.createClient(clientForm, user.id)
+      const result = await operatingSpine.createClient(clientForm, user.id, activeOrganizationId, { signal: requestSignal })
+      if (requestSignal.aborted) return
       setClientForm(INITIAL_CLIENT)
       setModal('')
       setNotice(`${result.client.name} and ${result.brand.name} are ready for engagements.`)
       await loadAll()
     } catch (saveError) {
-      setError(saveError.message)
-    } finally { setSaving(false) }
+      if (!requestSignal.aborted) { handleOrganizationAccessError(saveError); setError(saveError.message) }
+    } finally { if (!requestSignal.aborted) setSaving(false) }
   }
 
   async function createBrand(event) {
@@ -96,14 +117,15 @@ export default function OperatingSpine({ initialView = 'engagements' }) {
     if (!user?.id) return
     setSaving(true); setError(''); setNotice('')
     try {
-      const brand = await operatingSpine.createBrand(brandForm, user.id)
+      const brand = await operatingSpine.createBrand(brandForm, user.id, activeOrganizationId, { signal: requestSignal })
+      if (requestSignal.aborted) return
       setBrandForm(INITIAL_BRAND)
       setModal('')
       setNotice(`${brand.name} was added to the client registry.`)
       await loadAll()
     } catch (saveError) {
-      setError(saveError.message)
-    } finally { setSaving(false) }
+      if (!requestSignal.aborted) { handleOrganizationAccessError(saveError); setError(saveError.message) }
+    } finally { if (!requestSignal.aborted) setSaving(false) }
   }
 
   function chooseClient(clientId) {
@@ -150,25 +172,33 @@ export default function OperatingSpine({ initialView = 'engagements' }) {
     event.preventDefault()
     setSaving(true); setError(''); setNotice('')
     try {
-      const engagementId = await operatingSpine.composeEngagement(engagementForm)
+      const engagementId = await operatingSpine.composeEngagement(engagementForm, activeOrganizationId, { signal: requestSignal })
+      if (requestSignal.aborted) return
       setEngagementForm(INITIAL_ENGAGEMENT)
       setModal('')
       await loadAll()
       await openEngagement(engagementId)
       setNotice('Engagement created with only the selected service stages and required context gates.')
     } catch (saveError) {
-      setError(saveError.message)
-    } finally { setSaving(false) }
+      if (!requestSignal.aborted) { handleOrganizationAccessError(saveError); setError(saveError.message) }
+    } finally { if (!requestSignal.aborted) setSaving(false) }
   }
 
-  async function openEngagement(id, { quiet = false } = {}) {
+  async function openEngagement(id, { quiet = false, signal = requestSignal } = {}) {
+    const generation = ++workspaceGeneration.current
     if (!quiet) setLoading(true)
     setError('')
     try {
-      setWorkspace(await operatingSpine.getEngagement(id))
+      const nextWorkspace = await operatingSpine.getEngagement(id, activeOrganizationId, { signal })
+      if (signal.aborted || generation !== workspaceGeneration.current) return
+      setWorkspace(nextWorkspace)
     } catch (loadError) {
+      if (signal.aborted || generation !== workspaceGeneration.current) return
+      handleOrganizationAccessError(loadError)
       setError(loadError.message)
-    } finally { if (!quiet) setLoading(false) }
+    } finally {
+      if (!quiet && !signal.aborted && generation === workspaceGeneration.current) setLoading(false)
+    }
   }
 
   if (loading) return <div className="flex h-full items-center justify-center"><div className="h-9 w-9 animate-spin rounded-full border-2 border-slate-800 border-t-violet-500" /></div>

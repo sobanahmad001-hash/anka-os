@@ -8,7 +8,7 @@ import {
 } from './portfolioDashboard.js'
 
 const repository = readFileSync(new URL('./operatingSpineRepository.js', import.meta.url), 'utf8')
-const portfolioRepository = repository.slice(repository.indexOf('async getPortfolioSnapshot()'), repository.indexOf('async getEngagement('))
+const portfolioRepository = repository.slice(repository.indexOf('async getPortfolioSnapshot(organizationId'), repository.indexOf('async getEngagement('))
 const component = readFileSync(new URL('../components/PortfolioDashboard.jsx', import.meta.url), 'utf8')
 const operatingSpine = readFileSync(new URL('../apps/OperatingSpine.jsx', import.meta.url), 'utf8')
 const verification = readFileSync(new URL('../../supabase/verify_w7_portfolio_dashboard.sql', import.meta.url), 'utf8')
@@ -73,7 +73,7 @@ test('W7 filters status, target date, and lead owner while defaulting to soonest
 })
 
 test('W7 batch-loads three RLS-protected tables and reuses existing engagement detail navigation', () => {
-  assert.match(repository, /async getPortfolioSnapshot\(\)/)
+  assert.match(repository, /async getPortfolioSnapshot\(organizationId/)
   for (const table of ['engagements', 'work_items', 'engagement_stage_instances']) assert.match(repository, new RegExp(`client\\.from\\('${table}'\\)`))
   assert.match(repository, /Promise\.all/)
   assert.match(repository, /automation_flagged_at/)

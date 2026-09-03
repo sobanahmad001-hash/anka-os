@@ -79,12 +79,13 @@ test('Operating Spine client creation makes exactly one transactional RPC call',
     name: 'Acme',
     brandName: 'Acme Brand',
     primaryEmail: 'owner@example.com',
-  }, 'actor-id')
+  }, 'actor-id', 'org-b')
 
   assert.equal(result.canonical_client.id, 'client')
   assert.deepEqual(calls.map(call => call.name), ['create_commercial_client'])
   assert.equal(calls[0].params.p_name, 'Acme')
   assert.equal(calls[0].params.p_brand_name, 'Acme Brand')
+  assert.equal(calls[0].params.p_organization_id, 'org-b')
 })
 
 test('AI stores one canonical project with an optional consistent engagement extension', () => {

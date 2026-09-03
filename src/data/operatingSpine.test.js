@@ -83,7 +83,7 @@ test('the engagement compatibility route remains while the old projects URL open
 test('engagement composition rejects an empty service selection before calling Supabase', async () => {
   const repository = createOperatingSpineRepository({ from() {}, rpc() { throw new Error('must not be called') } })
   await assert.rejects(
-    () => repository.composeEngagement({ clientId: 'client', brandId: 'brand', name: 'Test', serviceIds: [] }),
+    () => repository.composeEngagement({ clientId: 'client', brandId: 'brand', name: 'Test', serviceIds: [] }, 'org-a'),
     /At least one service is required/
   )
 })
@@ -160,7 +160,7 @@ test('EPV1 keeps pipeline reads within caller-visible organisation rows and enga
   }
   const hiddenCrossOrganizationRows = [{ id: 'request-b', organization_id: 'org-b', engagement_id: 'engagement-b', queue_entry_id: 'queue-b' }]
   const { client, calls } = readOnlyPipelineClient(visibleRows)
-  const result = await createOperatingSpineRepository(client).getEngagement('engagement-a')
+  const result = await createOperatingSpineRepository(client).getEngagement('engagement-a', 'org-a')
 
   assert.deepEqual(result.pipeline.contentRequests, visibleRows.content_requests)
   assert.equal(result.pipeline.contentRequests.some(row => row.organization_id === 'org-b'), false)
