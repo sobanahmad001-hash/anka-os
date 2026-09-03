@@ -57,17 +57,17 @@ It fails closed unless all of these hold:
 - legacy tasks are untouched;
 - the entire verifier ends with ROLLBACK.
 
-Admin/Testing must apply the migration in an approved non-production environment, run the verifier in the same reviewed schema state, inspect its JSON result, and require every named check to be true before release. Local implementation verification used an isolated portable PostgreSQL 17 cluster on localhost:55436: all 25 named checks passed, including the approved-context TOCTOU zero-write regression, and the verifier rolled back. This local compatibility result does not replace Admin validation against the exact release schema.
+Admin/Testing must apply the migration in an approved non-production environment, run the verifier in the same reviewed schema state, inspect its JSON result, and require every named check to be true before release. Final local implementation verification used isolated PostgreSQL 17: all 27 named checks passed, including database-context TOCTOU zero-write coverage and explicit lock/authority ordering, and the verifier rolled back. A separate two-session regression observed both lock directions and zero deadlocks. This local compatibility result does not replace Admin validation against the exact release schema.
 
 ## Local gate results
 
 - Focused Node WCH2/WCH3/WCH4 structural tests: 11 passed, 0 failed.
 - Related Content, Design, Marketing, and RP2 regression tests: 27 passed, 0 failed.
-- Full Node data suite after fresh-main rebase: 460 passed, 0 failed.
-- Deno type-check: passed for the Department Chat function and its test.
-- Focused Deno Department Chat suite: 14 passed, 0 failed.
-- ESLint: 0 errors; 349 repository warnings remain.
-- Production build: passed.
+- Full Node data suite: 547 passed, 0 failed.
+- Full configured frozen Deno type-check: passed.
+- Full frozen Deno suite: 202 passed, 0 failed; focused Department Chat: 62 passed.
+- ESLint: 0 errors; 361 repository warnings remain.
+- Production build: passed, 376 modules.
 - Git whitespace check: passed.
 - No local or live database mutation was performed.
 
@@ -75,6 +75,7 @@ Admin/Testing must apply the migration in an approved non-production environment
 
 - supabase/migrations/20260903235243_department_chat_proposals.sql
 - supabase/verify_20260903235243_department_chat_proposals.sql
+- scripts/wch3-concurrency.ts
 - supabase/functions/department-chat/index.ts
 - supabase/functions/department-chat/index.test.ts
 - src/components/DepartmentChat.jsx

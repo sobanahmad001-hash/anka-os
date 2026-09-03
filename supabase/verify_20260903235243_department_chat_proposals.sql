@@ -139,6 +139,43 @@ insert into wch3_checks values
     and position('database_context_checksum' in pg_get_functiondef('public.confirm_department_chat_proposal(uuid,uuid,text,uuid,text)'::regprocedure)) > 0
     and position('for update' in lower(pg_get_functiondef('public.confirm_department_chat_proposal(uuid,uuid,text,uuid,text)'::regprocedure))) > 0
   ),
+  ('database_context_lock_order_is_explicit',
+    position(
+      'lock table public.artifact_approvals in share mode'
+      in lower(pg_get_functiondef(
+        'private.department_chat_current_context_checksum(uuid,uuid,text,uuid,text,uuid)'::regprocedure
+      ))
+    ) > 0
+    and position(
+      'public.organization_memberships'
+      in pg_get_functiondef(
+        'private.department_chat_current_context_checksum(uuid,uuid,text,uuid,text,uuid)'::regprocedure
+      )
+    ) > 0
+    and position(
+      'private.department_chat_current_context_checksum'
+      in pg_get_functiondef(
+        'public.save_department_chat_proposal(uuid,uuid,uuid,text,uuid,text,text,uuid,uuid,jsonb,jsonb,jsonb,uuid[],text,uuid,text,uuid,text,text,integer,integer,integer,bigint)'::regprocedure
+      )
+    ) < position(
+      'for share'
+      in lower(pg_get_functiondef(
+        'public.save_department_chat_proposal(uuid,uuid,uuid,text,uuid,text,text,uuid,uuid,jsonb,jsonb,jsonb,uuid[],text,uuid,text,uuid,text,text,integer,integer,integer,bigint)'::regprocedure
+      ))
+    )
+    and (
+      length(pg_get_functiondef(
+        'public.confirm_department_chat_proposal(uuid,uuid,text,uuid,text)'::regprocedure
+      ))
+      - length(replace(
+        pg_get_functiondef(
+          'public.confirm_department_chat_proposal(uuid,uuid,text,uuid,text)'::regprocedure
+        ),
+        'Department Chat authority changed.',
+        ''
+      ))
+    ) = 2 * length('Department Chat authority changed.')
+  ),
   ('tasks_are_untouched',
     position('public.tasks' in pg_get_functiondef('public.save_department_chat_proposal(uuid,uuid,uuid,text,uuid,text,text,uuid,uuid,jsonb,jsonb,jsonb,uuid[],text,uuid,text,uuid,text,text,integer,integer,integer,bigint)'::regprocedure)) = 0
     and position('public.tasks' in pg_get_functiondef('public.confirm_department_chat_proposal(uuid,uuid,text,uuid,text)'::regprocedure)) = 0
@@ -677,14 +714,32 @@ declare
   passed_count integer := 0;
 begin
   select * into f from wch3_fixture where department_id='development';
-  foreach scenario in array array['project','brand','service','catalog','connector','stage'] loop
+  foreach scenario in array array[
+    'engagement','project','agency_client','canonical_client','brand',
+    'service','catalog','connector','stage'
+  ] loop
     begin
       p := pg_temp.wch_preview(f,'work_item','task',null,
         case when scenario='stage' then f.stage_id else null end);
-      if scenario='project' then
+      if scenario='engagement' then
+        update public.engagements set name=name || ' changed' where id=f.engagement_id;
+      elsif scenario='project' then
         update public.projects set name=name || ' changed' where id=f.project_id;
+      elsif scenario='agency_client' then
+        update public.agency_clients set name=name || ' changed'
+        where id=(select client_id from public.engagements where id=f.engagement_id);
+      elsif scenario='canonical_client' then
+        update public.clients set company=coalesce(company,'') || ' changed'
+        where id=(
+          select agency.canonical_client_id
+          from public.engagements engagement
+          join public.agency_clients agency
+            on agency.id=engagement.client_id
+           and agency.organization_id=engagement.organization_id
+          where engagement.id=f.engagement_id
+        );
       elsif scenario='brand' then
-        update public.brands set description=description || ' changed' where id=f.brand_id;
+        update public.brands set description=coalesce(description,'') || ' changed' where id=f.brand_id;
       elsif scenario='service' then
         update public.engagement_services set target_date=current_date + 1 where service_id=f.service_id and engagement_id=f.engagement_id;
       elsif scenario='catalog' then
@@ -705,7 +760,7 @@ begin
       passed_count := passed_count + 1;
     end;
   end loop;
-  insert into wch3_checks values('complete_database_context_toctou_zero_writes',passed_count=6);
+  insert into wch3_checks values('complete_database_context_toctou_zero_writes',passed_count=9);
 end;
 $$;
 

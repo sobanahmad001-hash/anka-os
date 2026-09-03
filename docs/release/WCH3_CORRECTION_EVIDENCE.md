@@ -12,9 +12,9 @@ Terminal outcomes survive HTTP errors and replace pending state. Expiry removes 
 
 All three proposal RPCs explicitly require an active organization and active team authority. Proposal SELECT policy explicitly checks organization activity. The edge authentication boundary also checks it. The new attempt-audit RPC checks active organization/team membership. Service-role calls are subject to these explicit RPC checks; service_role itself remains the trusted BYPASSRLS database role and raw administrative table access is not redefined.
 
-Local runtime: portable PostgreSQL 17, separate cluster under .qa/wch3-postgres-local, bound to 127.0.0.1:55436, database wch3_test. Baseline: Admin's existing production-schema-only.dump plus synthetic reference rows. No production row export or live database call occurred. The migration applied successfully, then the final save RPC definition was reapplied during local iteration.
+Local runtime: portable PostgreSQL 17 with synthetic reference rows and no production row export or live database call. The original compatibility run used the separate WCH cluster; final migration, 27-check verifier, and two-session concurrency evidence used an isolated restored schema baseline on 127.0.0.1:55444. Random concurrency clones were removed and the server was stopped.
 
-Verifier: 25 named checks PASS; final ROLLBACK executed. It creates four synthetic organizations, actors, canonical client/project/engagement/brand roots, services and connectors. It tests all 26 allowed targets with actual service_role calls: preview, confirm, replay, reject, stale, expiry, and injected atomic failure. It also tests authenticated/anon RPC denial, proposer-only enforcement, cross-tenant/client/revoked actors, original-proposer revocation/client conversion, inactive organizations, RLS reads, exact tenant-safe audit foreign-key/index definitions, rejection of cross-organization proposal/AI-run audit references, and an authoritative approved-context mutation between preview resolution and confirmation with zero official writes. The source snapshot contains 24 protected sentinel rows across tasks, artifacts, versions, approvals, work items and stages. Every public source table is compared after execution; only the expected WCH/canonical/audit additions are permitted, and existing rows must remain identical.
+Verifier: 27 named checks PASS; final ROLLBACK executed. It creates four synthetic organizations, actors, canonical client/project/engagement/brand roots, services and connectors. It tests all 26 allowed targets with actual service_role calls: preview, confirm, replay, reject, stale, expiry, and injected atomic failure. It also tests authenticated/anon RPC denial, proposer-only enforcement, cross-tenant/client/revoked actors, original-proposer revocation/client conversion, inactive organizations, RLS reads, exact tenant-safe audit foreign-key/index definitions, rejection of cross-organization proposal/AI-run audit references, explicit lock/authority order, approved-context publication, and nine representative mutable-context changes between preview and confirmation with zero official writes. The source snapshot contains 24 protected sentinel rows across tasks, artifacts, versions, approvals, work items and stages. Every public source table is compared after execution; only the expected WCH/canonical/audit additions are permitted, and existing rows must remain identical.
 
 The local dump is a runtime compatibility baseline, not independently proven identical to every catalog on the final 2047cb6 base. Admin must still verify the exact release schema and final commit. No claim of release approval is made.
 
@@ -26,16 +26,17 @@ WCH AI runs retain no raw prompt or raw provider-output copies. The proposal kee
 
 ## Final local gates
 
-- Node: 469 passed, 0 failed.
-- Frozen full CI Deno suite: 178 passed, 0 failed, including 48 WCH tests; full frozen type-check passed.
-- Lint: 0 errors, 350 warnings. One additional warning is the scoped JSX component under the repository's existing unused-variable configuration.
-- Production build: passed, 369 modules.
-- Local SQL verifier: 25 named checks passed with populated sentinels, all changes rolled back.
+- Node: 547 passed, 0 failed.
+- Frozen full CI Deno suite: 202 passed, 0 failed, including 62 WCH tests; full frozen type-check passed.
+- Lint: 0 errors, 361 warnings.
+- Production build: passed, 376 modules.
+- Local SQL verifier: 27 named checks passed with populated sentinels; the verifier rolled back.
+- Local two-session PostgreSQL regression: context-writer and approval-publication contention both completed without deadlock; stale confirmation created no official record.
 - Diff whitespace gate: checked before commit.
 
 ## Remaining coordination and acceptance
 
-The inherited hard-coded ORGANIZATION_ID in the edge function is unchanged. It limits WCH to the existing configured organization; extending WCH to selected organizations requires a separately coordinated server-scope change. The new UI refuses mismatched engagement/selected organization and the server still derives canonical ownership within its configured organization. This limitation must not be described as multi-organization support.
+The selected organization is required by the shared component and revalidated by the Edge Function against active membership. The server derives canonical ownership only inside that validated organization and has no default-organization fallback.
 
 Admin owns independent exact-head/schema validation, merge, publication, live database changes and deployment. No such action was performed. The separate WKS product-edit hold remains intact. QTS stays optional; WCH keeps direct human confirmation.
 
@@ -49,4 +50,4 @@ Preview, confirm, reject and official-read catches call the existing organizatio
 
 Thirteen new behavioral tests exercise both preview modes, confirmation, rejection and official reads: envelope-only 403 recovery, late old-context 403 suppression, transport/fallback status preservation, terminal outcome preservation and recovery-triggered abort. These are repository/completion-guard tests, not mounted React browser tests.
 
-Historical error-path follow-up gates: configured Node suite 482 passed; full frozen CI Deno suite 178 passed; full frozen Deno check passed; lint 0 errors / 350 existing warnings; production build passed; whitespace check passed. An initial unrestricted Node discovery also attempted Deno-owned tests and failed those; the configured Node scope and separate Deno commands above both passed. Later selected-organization, audit-FK, TOCTOU, and invalid-output corrections supersede those gate totals; current final totals and the 25-check rollback verifier are recorded in WCH_SELECTED_ORGANIZATION_EVIDENCE.md.
+Historical error-path follow-up gates: configured Node suite 482 passed; full frozen CI Deno suite 178 passed; full frozen Deno check passed; lint 0 errors / 350 existing warnings; production build passed; whitespace check passed. An initial unrestricted Node discovery also attempted Deno-owned tests and failed those; the configured Node scope and separate Deno commands above both passed. Later selected-organization, audit-FK, TOCTOU, and invalid-output corrections supersede those gate totals; current final totals and the 27-check rollback verifier are recorded in WCH_SELECTED_ORGANIZATION_EVIDENCE.md.
