@@ -38,9 +38,10 @@ test('WCH2 connector and model selection fail closed without a fallback', () => 
   assert.doesNotMatch(edge, /anthropic/i)
 })
 
-test('Development Chat is mounted only in DevelopmentTrackingPanel', () => {
-  assert.match(panel, /<DepartmentChat/)
-  assert.match(panel, /departmentId="development"/)
-  assert.match(repository, /department_id: 'development'/)
+test('WCH2 keeps Development profiles schema-only and runtime-disabled', () => {
+  assert.match(edge, /ENABLED_DEPARTMENTS = new Set\(\['content', 'design', 'marketing'\]\)/)
+  assert.doesNotMatch(panel, /<DepartmentChat/)
+  assert.doesNotMatch(panel, /departmentId="development"/)
+  assert.doesNotMatch(repository, /department-chat|proposeArtifact|proposeWorkItem/)
   assert.doesNotMatch(workshop, /departmentId="development"[\s\S]*DepartmentChat/)
 })

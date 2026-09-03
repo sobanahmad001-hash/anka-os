@@ -9,14 +9,9 @@ import {
   validateDesignSystemArtifact,
 } from '../_shared/designSystemArtifacts.ts'
 import {
-  DEPARTMENT_CHAT_DEPARTMENT_IDS,
   DEPARTMENT_CHAT_PROFILE_VERSION,
   departmentChatProfile,
 } from '../_shared/departmentChatProfiles.ts'
-import {
-  developmentChatArtifactResponseFormat,
-  validateDevelopmentChatArtifact,
-} from '../_shared/developmentChatArtifacts.ts'
 import { stableJson } from '../_shared/approvedArtifactContext.ts'
 import { validateMarketingArtifact } from '../marketing-studio/index.ts'
 import { namedKey, sha256 } from '../_shared/googleOAuthTokens.ts'
@@ -27,7 +22,7 @@ type Json = Record<string, unknown>
 const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses'
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
-export const ENABLED_DEPARTMENTS = new Set(DEPARTMENT_CHAT_DEPARTMENT_IDS)
+export const ENABLED_DEPARTMENTS = new Set(['content', 'design', 'marketing'])
 export const CHAT_MARKETING_ARTIFACT_TYPE_SET = new Set(departmentChatProfile('marketing').artifactTypes)
 const WORK_ITEM_TYPES = new Set(departmentChatProfile('content').workItemTypes)
 const WORK_ITEM_PRIORITIES = new Set(['low', 'medium', 'high', 'urgent'])
@@ -327,77 +322,6 @@ export async function createMarketingArtifactVersion(admin: Client, input: {
   return { artifact_id: artifactId, version, warnings: [] }
 }
 
-export async function createDevelopmentArtifactVersion(admin: Client, input: {
-  engagement: { id: string, brand_id: string }
-  stageId: string | null
-  artifactId: string | null
-  artifactType: string
-  title: string
-  content: unknown
-  changeSummary: string
-  actorId: string
-  aiRunId: string
-}) {
-  const content = validateDevelopmentChatArtifact(input.artifactType, input.content)
-  let artifactId = text(input.artifactId, 80)
-  let createdArtifact = false
-  if (artifactId) {
-    const { data: artifact, error } = await admin.from('artifacts')
-      .select('id, artifact_type, engagement_id, brand_id')
-      .eq('id', artifactId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
-    if (error) throw error
-    if (!artifact || artifact.artifact_type !== input.artifactType || artifact.engagement_id !== input.engagement.id || artifact.brand_id !== input.engagement.brand_id) {
-      throw new Error('Development artifact does not match this engagement and type')
-    }
-  } else {
-    const { data: artifact, error } = await admin.from('artifacts').insert({
-      organization_id: ORGANIZATION_ID,
-      engagement_id: input.engagement.id,
-      brand_id: input.engagement.brand_id,
-      engagement_stage_instance_id: input.stageId,
-      artifact_type: input.artifactType,
-      title: text(input.title, 240) || `${input.artifactType.replaceAll('_', ' ')} chat draft`,
-      created_by: input.actorId,
-    }).select('id').single()
-    if (error) throw error
-    artifactId = artifact.id
-    createdArtifact = true
-  }
-  const { data: latest, error: latestError } = await admin.from('artifact_versions')
-    .select('id, version_number').eq('artifact_id', artifactId)
-    .order('version_number', { ascending: false }).limit(1).maybeSingle()
-  if (latestError) throw latestError
-  const { data: version, error: versionError } = await admin.from('artifact_versions').insert({
-    organization_id: ORGANIZATION_ID,
-    artifact_id: artifactId,
-    version_number: (latest?.version_number || 0) + 1,
-    parent_version_id: latest?.id || null,
-    content,
-    content_checksum: await sha256(stableJson(content)),
-    change_summary: text(input.changeSummary, 1000) || 'Draft proposed via Shared Department Chat',
-    ai_use_allowed: false,
-    data_classification: 'internal',
-    created_by: input.actorId,
-  }).select('*').single()
-  if (versionError) {
-    if (createdArtifact) await admin.from('artifacts').delete().eq('id', artifactId)
-    throw versionError
-  }
-  const { error: eventError } = await admin.from('engagement_events').insert({
-    organization_id: ORGANIZATION_ID,
-    engagement_id: input.engagement.id,
-    event_type: 'artifact_draft_proposed_via_chat',
-    actor_id: input.actorId,
-    payload: {
-      record_type: 'artifact', record_id: artifactId, version_id: version.id,
-      action: 'draft_proposed_via_chat', artifact_type: input.artifactType,
-      source: 'department_chat', ai_run_id: input.aiRunId,
-    },
-  })
-  if (eventError) throw eventError
-  return { artifact_id: artifactId, version, warnings: [] }
-}
-
 export function isDepartmentChatArtifactType(departmentId: string, artifactType: string) {
   try {
     return departmentChatProfile(departmentId).artifactTypes.includes(artifactType)
@@ -412,7 +336,6 @@ type ProposalDependencies = {
   approvedSafeContext?: typeof approvedSafeContext
   resolveSingleOpenAiModel?: typeof resolveSingleOpenAiModel
   createMarketingArtifactVersion?: typeof createMarketingArtifactVersion
-  createDevelopmentArtifactVersion?: typeof createDevelopmentArtifactVersion
   estimatedCost?: typeof estimatedCost
 }
 
@@ -553,6 +476,7 @@ export async function proposeArtifact(userClient: Client, admin: Client, body: J
   const departmentId = text(body.department_id, 40)
   const artifactType = text(body.artifact_type, 60)
   const prompt = text(body.prompt, 8000)
+  if (!departmentId || !ENABLED_DEPARTMENTS.has(departmentId)) throw new Error(`Unsupported ${departmentId} department`)
   if (!isDepartmentChatArtifactType(departmentId, artifactType)) throw new Error(`Unsupported ${departmentId} artifact`)
   if (!prompt) throw new Error('A draft prompt is required')
   if (body.prompt_safe_for_ai !== true) throw new Error('Confirm the prompt is safe to send to the configured model')
@@ -579,9 +503,7 @@ ENGAGEMENT CONTEXT JSON:
         ? contentArtifactResponseFormat(artifactType)
         : departmentId === 'design'
           ? designArtifactResponseFormat(artifactType)
-          : departmentId === 'marketing'
-            ? marketingArtifactResponseFormat(artifactType)
-            : developmentChatArtifactResponseFormat(artifactType) },
+          : marketingArtifactResponseFormat(artifactType) },
     }),
     signal: AbortSignal.timeout(30_000),
   })
@@ -614,9 +536,7 @@ ENGAGEMENT CONTEXT JSON:
     ? validateContentArtifact(artifactType, JSON.parse(raw))
     : departmentId === 'design'
       ? validateDesignSystemArtifact(artifactType, JSON.parse(raw))
-      : departmentId === 'marketing'
-        ? validateMarketingArtifact(artifactType, JSON.parse(raw))
-        : validateDevelopmentChatArtifact(artifactType, JSON.parse(raw))
+      : validateMarketingArtifact(artifactType, JSON.parse(raw))
   const saved = departmentId === 'design'
     ? await createDesignArtifactVersion(admin, {
       engagement, stageId, artifactId: text(body.artifact_id, 80) || null,
@@ -631,17 +551,11 @@ ENGAGEMENT CONTEXT JSON:
       aiUseAllowed: false, dataClassification: 'internal', actorId,
       source: 'department_chat', aiRunId: runId, visibilityClient: userClient,
     })
-    : departmentId === 'marketing'
-      ? await (dependencies.createMarketingArtifactVersion || createMarketingArtifactVersion)(admin, {
-        engagement, artifactId: text(body.artifact_id, 80) || null, artifactType,
-        title: text(body.title, 240) || `${artifactType.replaceAll('_', ' ')} chat draft`, content,
-        changeSummary: text(body.change_summary, 1000) || 'Draft proposed via Shared Department Chat', actorId, aiRunId: runId,
-      })
-      : await (dependencies.createDevelopmentArtifactVersion || createDevelopmentArtifactVersion)(admin, {
-        engagement, stageId, artifactId: text(body.artifact_id, 80) || null, artifactType,
-        title: text(body.title, 240) || `${artifactType.replaceAll('_', ' ')} chat draft`, content,
-        changeSummary: text(body.change_summary, 1000) || 'Draft proposed via Shared Department Chat', actorId, aiRunId: runId,
-      })
+    : await (dependencies.createMarketingArtifactVersion || createMarketingArtifactVersion)(admin, {
+      engagement, artifactId: text(body.artifact_id, 80) || null, artifactType,
+      title: text(body.title, 240) || `${artifactType.replaceAll('_', ' ')} chat draft`, content,
+      changeSummary: text(body.change_summary, 1000) || 'Draft proposed via Shared Department Chat', actorId, aiRunId: runId,
+    })
   return { ...saved, content, ai_run_id: runId, model: provider.model, connector_connection_id: provider.connectorId }
 }
 

@@ -2,7 +2,6 @@ import { assertEquals, assertRejects } from 'jsr:@std/assert@1.0.14'
 import {
   CHAT_MARKETING_ARTIFACT_TYPE_SET,
   ENABLED_DEPARTMENTS,
-  createDevelopmentArtifactVersion,
   createDesignArtifactVersion,
   createMarketingArtifactVersion,
   departmentChatExternalEndpoint,
@@ -12,6 +11,7 @@ import {
   marketingArtifactResponseFormat,
   outputText,
   proposeArtifact,
+  proposeWorkItem,
   requireDepartmentEngagement,
   selectSingleOpenAiModel,
 } from './index.ts'
@@ -29,8 +29,8 @@ Deno.test('Shared Department Chat is department-scoped', () => {
   assertEquals(hasDepartmentChatAuthority({ role: 'contributor', department_id: 'design' }, 'design'), true)
 })
 
-Deno.test('Shared Department Chat enables Content, Design, Marketing, and Development profiles', () => {
-  assertEquals([...ENABLED_DEPARTMENTS].sort(), ['content', 'design', 'development', 'marketing'])
+Deno.test('Shared Department Chat keeps Development schema-only while enabling existing runtime departments', () => {
+  assertEquals([...ENABLED_DEPARTMENTS].sort(), ['content', 'design', 'marketing'])
   assertEquals(CHAT_DESIGN_ARTIFACT_TYPE_SET.has('design_system'), true)
   assertEquals(CHAT_DESIGN_ARTIFACT_TYPE_SET.has('design_direction'), false)
   assertEquals([...CHAT_MARKETING_ARTIFACT_TYPE_SET].sort(), ['campaign_brief', 'channel_strategy', 'measurement_plan'])
@@ -268,34 +268,42 @@ Deno.test('context freeze rejects incomplete ownership and out-of-profile artifa
   )
 })
 
-Deno.test('Development chat creates only an internal unapproved technical artifact version', async () => {
-  const writes: Array<{ table: string, value: Record<string, unknown> }> = []
-  const admin = { from(table: string) {
-    const query: any = {
-      insert: (value: Record<string, unknown>) => { writes.push({ table, value }); return query },
-      select: () => query,
-      single: async () => ({ data: table === 'artifacts' ? { id: 'development-artifact' } : { id: 'development-version', version_number: 1 }, error: null }),
-      eq: () => query, order: () => query, limit: () => query,
-      maybeSingle: async () => ({ data: null, error: null }),
-    }
-    return query
-  } }
-  const content = validateDevelopmentChatArtifact('technical_brief', {
-    notes: 'Use the approved architecture.', checklist: ['Confirm environment access'],
-  })
-  const result = await createDevelopmentArtifactVersion(admin as any, {
-    engagement: { id: 'engagement', brand_id: 'brand' }, stageId: 'stage', artifactId: null,
-    artifactType: 'technical_brief', title: 'Technical brief', content,
-    changeSummary: 'Initial chat draft', actorId: 'member', aiRunId: 'run',
-  })
-  assertEquals(result.artifact_id, 'development-artifact')
-  assertEquals(writes.find(write => write.table === 'artifacts')?.value.artifact_type, 'technical_brief')
-  const version = writes.find(write => write.table === 'artifact_versions')?.value
-  assertEquals(version?.content, content)
-  assertEquals(version?.ai_use_allowed, false)
-  assertEquals(version?.data_classification, 'internal')
-  assertEquals(writes.some(write => write.table === 'artifact_approvals'), false)
-  assertEquals(writes.some(write => write.table === 'tasks'), false)
+Deno.test('direct Development proposals are rejected before any official or model path is reached', async () => {
+  let touchedRuntime = false
+  const forbidden = () => {
+    touchedRuntime = true
+    throw new Error('Development runtime path must be unreachable in WCH2')
+  }
+  const admin = new Proxy({}, { get: forbidden })
+  const dependencies = {
+    requireDepartmentEngagement: forbidden,
+    approvedSafeContext: forbidden,
+    resolveSingleOpenAiModel: forbidden,
+    createMarketingArtifactVersion: forbidden,
+    estimatedCost: forbidden,
+  }
+  const fetcher = async () => {
+    forbidden()
+    return new Response()
+  }
+
+  await assertRejects(
+    () => proposeArtifact({} as any, admin as any, {
+      department_id: 'development', engagement_id: 'engagement', artifact_type: 'technical_brief',
+      prompt: 'Draft a technical brief', prompt_safe_for_ai: true,
+    }, 'member', fetcher, dependencies as any),
+    Error,
+    'Unsupported development department',
+  )
+  await assertRejects(
+    () => proposeWorkItem({} as any, admin as any, {
+      department_id: 'development', engagement_id: 'engagement', work_item_type: 'task',
+      title: 'Implementation task', prompt: 'Draft a work item', prompt_safe_for_ai: true,
+    }, 'member', fetcher, dependencies as any),
+    Error,
+    'Unsupported development department',
+  )
+  assertEquals(touchedRuntime, false)
 })
 
 Deno.test('Shared Department Chat has one external allowlisted model endpoint', () => {

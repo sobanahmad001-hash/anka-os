@@ -14,7 +14,7 @@ const repository = read('src/data/designSystemsRepository.js')
 test('UW1 keeps Design alongside Content and reconciled Marketing Department Chat', () => {
   assert.deepEqual(Object.keys(profileData.departments), ['content', 'design', 'marketing', 'development'])
   assert.deepEqual(profileData.departments.design.artifact_types, ['design_system'])
-  assert.match(edge, /ENABLED_DEPARTMENTS = new Set\(DEPARTMENT_CHAT_DEPARTMENT_IDS\)/)
+  assert.match(edge, /ENABLED_DEPARTMENTS = new Set\(\['content', 'design', 'marketing'\]\)/)
   assert.match(edge, /departmentChatProfile/)
   assert.doesNotMatch(edge, /departmentId !== 'content'/)
   assert.match(designArtifact, /new Set\(\['design_system'\]\)/)
