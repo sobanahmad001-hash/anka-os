@@ -1,4 +1,7 @@
 import {
+  normalizeGeneralRequestCopy,
+  copyGeneralRequest,
+  handleRequest,
   hasSandboxDepartmentAuthority,
   normalizeQuickTaskChatInput,
   normalizeQuickTaskInput,
@@ -11,6 +14,47 @@ import {
   SANDBOX_DEPARTMENTS,
   sandboxChat,
 } from './index.ts'
+
+const copyIds = {
+  organizationId: '11111111-1111-4111-8111-111111111111',
+  sourceRequestId: '22222222-2222-4222-8222-222222222222',
+  idempotencyKey: '33333333-3333-4333-8333-333333333333',
+}
+Deno.test('General Request copy normalizes only identity and rejects payload/owner injection', () => {
+  equal(normalizeGeneralRequestCopy({ ...copyIds, organizationId: '  ' + copyIds.organizationId + '  ' }).p_organization_id, copyIds.organizationId)
+  for (const key of ['content', 'brief', 'brand_id', 'owner_id', 'actorId', 'source_kind', 'target']) {
+    throws(() => normalizeGeneralRequestCopy({ ...copyIds, [key]: 'forged' }), /Unsupported copy fields/)
+  }
+  for (const key of Object.keys(copyIds)) {
+    throws(() => normalizeGeneralRequestCopy({ ...copyIds, [key]: 'invalid' }), /UUIDs/)
+  }
+})
+Deno.test('General Request copy binds verified actor and calls only the atomic RPC', async () => {
+  let calls = 0
+  const admin = { rpc: async (name: string, args: Record<string, unknown>) => {
+    calls++
+    equal(name, 'copy_general_request_to_quick_task')
+    equal(args.p_actor_id, 'verified-actor')
+    equal(args.p_source_request_id, copyIds.sourceRequestId)
+    equal(Object.keys(args).length, 4)
+    return { data: { purged: true, replayed: true }, error: null }
+  } }
+  const result = await copyGeneralRequest(admin as never, 'verified-actor', copyIds)
+  equal(result.purged, true); equal(calls, 1)
+})
+Deno.test('General Request copy preserves authorization and conflict status', async () => {
+  for (const [code, status] of [['42501', 403], ['23505', 409]] as const) {
+    const admin = { rpc: async () => ({ data: null, error: { code, message: 'denied' } }) }
+    try { await copyGeneralRequest(admin as never, 'actor', copyIds); throw new Error('Expected failure') }
+    catch (error) { equal((error as { status: number }).status, status) }
+  }
+})
+Deno.test('General Request copy rejects unauthenticated requests before database access', async () => {
+  const result = await handleRequest(new Request('https://example.test', {
+    method: 'POST', body: JSON.stringify({ action: 'copy_general', ...copyIds }),
+  }))
+  equal(result.status, 401)
+})
 
 function equal(actual: unknown, expected: unknown) { if (actual !== expected) throw new Error(`Expected ${String(expected)}, received ${String(actual)}`) }
 function throws(run: () => unknown, pattern: RegExp) { try { run() } catch (error) { if (pattern.test(error instanceof Error ? error.message : String(error))) return; throw error } throw new Error(`Expected error matching ${pattern}`) }

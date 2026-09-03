@@ -385,6 +385,31 @@ ${JSON.stringify({ title: task.title, revision: revision.content, transcript }).
   return { ...data, model: provider.model, connector_connection_id: provider.connectorId }
 }
 
+export function normalizeGeneralRequestCopy(input: Json) {
+  const allowed = new Set(['action', 'organizationId', 'sourceRequestId', 'idempotencyKey'])
+  if (Object.keys(input).some(key => !allowed.has(key))) throw new Error('Unsupported copy fields')
+  function uuid(value: unknown) {
+    if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim())) {
+      throw new Error('Copy requires organization, source request and idempotency UUIDs')
+    }
+    return value.trim().toLowerCase()
+  }
+  return {
+    p_organization_id: uuid(input.organizationId),
+    p_source_request_id: uuid(input.sourceRequestId),
+    p_idempotency_key: uuid(input.idempotencyKey),
+  }
+}
+
+export async function copyGeneralRequest(admin: Client, actorId: string, body: Json) {
+  const input = normalizeGeneralRequestCopy(body)
+  const { data, error } = await admin.rpc('copy_general_request_to_quick_task', { ...input, p_actor_id: actorId })
+  if (error) throw Object.assign(new Error(error.message || 'Copy failed'), {
+    status: error.code === '42501' ? 403 : error.code === '23505' ? 409 : 400,
+  })
+  return data
+}
+
 export async function handleRequest(request: Request) {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (request.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
@@ -392,6 +417,7 @@ export async function handleRequest(request: Request) {
     const body = await request.json() as Json
     const action = text(body.action, 20)
     const { admin, user } = await requireContext(request)
+    if (action === 'copy_general') return response({ data: await copyGeneralRequest(admin, user.id, body) })
     if (action === 'chat') return response({ data: await sandboxChat(admin, user.id, body) })
     if (action === 'promote') {
       const input = normalizeQuickTaskPromotionInput(body)
