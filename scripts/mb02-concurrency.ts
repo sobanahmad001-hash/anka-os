@@ -33,7 +33,7 @@ try {
   const ids = {
     org: crypto.randomUUID(), actor: crypto.randomUUID(), client: crypto.randomUUID(),
     brand: crypto.randomUUID(), engagement: crypto.randomUUID(), service: crypto.randomUUID(),
-    campaign: crypto.randomUUID(), otherCampaign: crypto.randomUUID(),
+    campaign: crypto.randomUUID(), otherCampaign: crypto.randomUUID(), thirdCampaign: crypto.randomUUID(),
   }
   await setup.query('insert into auth.users(id) values($1)', [ids.actor])
   await setup.query('insert into public.organizations(id,name,slug) values($1,$2,$3)', [ids.org, 'MB02 concurrency', ids.org])
@@ -43,7 +43,7 @@ try {
   await setup.query("insert into public.engagements(id,organization_id,client_id,brand_id,name,status,created_by) values($1,$2,$3,$4,$5,'active',$6)", [ids.engagement, ids.org, ids.client, ids.brand, 'MB02 engagement', ids.actor])
   await setup.query("insert into public.service_catalog(id,organization_id,department_id,slug,name,is_active) values($1,$2,'marketing','mb02_concurrency','MB02 concurrency',true)", [ids.service, ids.org])
   await setup.query("insert into public.engagement_services(organization_id,engagement_id,service_id,status,activated_by) values($1,$2,$3,'active',$4)", [ids.org, ids.engagement, ids.service, ids.actor])
-  await setup.query("insert into public.marketing_campaigns(id,organization_id,engagement_id,brand_id,name,planned_channels,created_by,updated_by) values($1,$3,$4,$5,'MB02 campaign','{email}',$6,$6),($2,$3,$4,$5,'MB02 other campaign','{search}',$6,$6)", [ids.campaign, ids.otherCampaign, ids.org, ids.engagement, ids.brand, ids.actor])
+  await setup.query("insert into public.marketing_campaigns(id,organization_id,engagement_id,brand_id,name,planned_channels,created_by,updated_by) values($1,$4,$5,$6,'MB02 campaign','{email}',$7,$7),($2,$4,$5,$6,'MB02 other campaign','{search}',$7,$7),($3,$4,$5,$6,'MB02 third campaign','{social}',$7,$7)", [ids.campaign, ids.otherCampaign, ids.thirdCampaign, ids.org, ids.engagement, ids.brand, ids.actor])
 
   const saveSql = 'select public.save_marketing_campaign_brief($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) result'
   const initial = (key: string, checksum: string) => [
@@ -80,18 +80,28 @@ try {
   counts = await setup.query('select (select count(*) from public.artifact_versions where artifact_id=$1) versions,(select count(*) from public.marketing_brief_save_requests where organization_id=$2 and actor_id=$3 and idempotency_key=$4) ledger', [artifact, ids.org, ids.actor, reusedKey])
   assert.deepEqual(counts.rows[0], { versions: '2', ledger: '1' })
 
-  const freeArtifact = crypto.randomUUID()
-  await setup.query("insert into public.artifacts(id,organization_id,brand_id,engagement_id,artifact_type,title,created_by) values($1,$2,$3,$4,'channel_strategy','Race binding',$5)", [freeArtifact, ids.org, ids.brand, ids.engagement, ids.actor])
-  const linkSql = "insert into public.marketing_campaign_artifacts(organization_id,campaign_id,artifact_id,relation_type,linked_by) values($1,$2,$3,'channel_strategy',$4)"
+  const freeBrief = crypto.randomUUID()
+  await setup.query("insert into public.artifacts(id,organization_id,brand_id,engagement_id,artifact_type,title,created_by) values($1,$2,$3,$4,'campaign_brief','Race binding',$5)", [freeBrief, ids.org, ids.brand, ids.engagement, ids.actor])
+  const briefLinkSql = "insert into public.marketing_campaign_artifacts(organization_id,campaign_id,artifact_id,relation_type,linked_by) values($1,$2,$3,'campaign_brief',$4)"
   const bindingRace = await Promise.allSettled([
-    firstWriter.query(linkSql, [ids.org, ids.campaign, freeArtifact, ids.actor]),
-    secondWriter.query(linkSql, [ids.org, ids.otherCampaign, freeArtifact, ids.actor]),
+    firstWriter.query(briefLinkSql, [ids.org, ids.otherCampaign, freeBrief, ids.actor]),
+    secondWriter.query(briefLinkSql, [ids.org, ids.thirdCampaign, freeBrief, ids.actor]),
   ])
   assert.equal(bindingRace.filter(result => result.status === 'fulfilled').length, 1)
   assert.equal(bindingRace.filter(result => result.status === 'rejected' && String(result.reason).includes('duplicate key')).length, 1)
-  counts = await setup.query('select count(*) bindings from public.marketing_campaign_artifacts where organization_id=$1 and artifact_id=$2', [ids.org, freeArtifact])
+  counts = await setup.query('select count(*) bindings from public.marketing_campaign_artifacts where organization_id=$1 and artifact_id=$2', [ids.org, freeBrief])
   assert.equal(counts.rows[0].bindings, '1')
-  console.log('first_save_race=1_winner; expired_key_race=one_write_one_replay; artifact_rebind_race=1_winner; local_clone_only=true')
+
+  const sharedArtifact = crypto.randomUUID()
+  await setup.query("insert into public.artifacts(id,organization_id,brand_id,engagement_id,artifact_type,title,created_by) values($1,$2,$3,$4,'channel_strategy','Shared strategy',$5)", [sharedArtifact, ids.org, ids.brand, ids.engagement, ids.actor])
+  const sharedLinkSql = "insert into public.marketing_campaign_artifacts(organization_id,campaign_id,artifact_id,relation_type,linked_by) values($1,$2,$3,'channel_strategy',$4)"
+  await Promise.all([
+    firstWriter.query(sharedLinkSql, [ids.org, ids.otherCampaign, sharedArtifact, ids.actor]),
+    secondWriter.query(sharedLinkSql, [ids.org, ids.thirdCampaign, sharedArtifact, ids.actor]),
+  ])
+  counts = await setup.query('select count(*) bindings from public.marketing_campaign_artifacts where organization_id=$1 and artifact_id=$2', [ids.org, sharedArtifact])
+  assert.equal(counts.rows[0].bindings, '2')
+  console.log('first_save_race=1_winner; expired_key_race=one_write_one_replay; campaign_brief_rebind_race=1_winner; non_brief_multi_campaign=2_links; local_clone_only=true')
 } finally {
   for (const client of clients) await client.end().catch(() => {})
   if (created) await admin.query('DROP DATABASE "' + dbName + '"')

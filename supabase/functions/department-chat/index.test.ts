@@ -170,6 +170,21 @@ for (const action of ['confirm_proposal', 'reject_proposal']) {
   })
 }
 
+Deno.test('authenticated Department Chat campaign_brief confirmation is suggestions-only with zero canonical side effects', async () => {
+  const fixture = selectedOrganizationFixture()
+  Object.assign(fixture.rows.organization_memberships.find(row => row.organization_id === 'B'), {
+    department_id: 'marketing', role: 'contributor',
+  })
+  Object.assign(fixture.rows.department_chat_proposals.find(row => row.organization_id === 'B'), {
+    department_id: 'marketing', proposal_kind: 'artifact_version', target_key: 'campaign_brief',
+  })
+  const response = await fixture.request({ action: 'confirm_proposal', organization_id: 'B', proposal_id: 'proposal-B' })
+  assertEquals(response.status, 409)
+  assertEquals((await response.json()).error, 'Campaign brief proposals are suggestions only and cannot be confirmed from Department Chat')
+  assertEquals(fixture.providerCalls(), 0)
+  assertEquals(fixture.rpcCalls, [])
+})
+
 Deno.test('selected B work-item preview keeps save and audit in B', async () => {
   const fixture = selectedOrganizationFixture()
   const response = await fixture.request({ ...selectedPreview, action: 'propose_work_item', title: 'Offline task', work_item_type: 'task' })

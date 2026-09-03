@@ -11,6 +11,9 @@ const studio = readFileSync(new URL('../apps/MarketingStudio.jsx', import.meta.u
 const main = readFileSync(new URL('../main.jsx', import.meta.url), 'utf8')
 const brief = readFileSync(new URL('../components/MarketingCampaignBrief.jsx', import.meta.url), 'utf8')
 const concurrency = readFileSync(new URL('../../scripts/mb02-concurrency.ts', import.meta.url), 'utf8')
+const marketingEdge = readFileSync(new URL('../../supabase/functions/marketing-studio/index.ts', import.meta.url), 'utf8')
+const departmentEdge = readFileSync(new URL('../../supabase/functions/department-chat/index.ts', import.meta.url), 'utf8')
+const departmentUi = readFileSync(new URL('../components/DepartmentChat.jsx', import.meta.url), 'utf8')
 
 test('campaign brief requires only a goal and at least one channel', () => {
   const result = validateCampaignBriefDraft({ campaign_goal: 'Launch', channels: ['Email'] })
@@ -52,7 +55,7 @@ test('save RPC expires replay keys atomically and enforces one canonical campaig
   assert.match(migration, /expires_at > pg_catalog\.clock_timestamp\(\)/)
   assert.match(migration, /pg_advisory_xact_lock[\s\S]*campaign_brief_lineage/)
   assert.match(migration, /uq_marketing_campaign_artifacts_campaign_brief_lineage[\s\S]*where relation_type = 'campaign_brief'/)
-  assert.match(migration, /uq_marketing_campaign_artifacts_artifact_lineage/)
+  assert.match(migration, /uq_marketing_campaign_artifacts_artifact_lineage[\s\S]*where relation_type = 'campaign_brief'/)
   assert.match(migration, /v_canonical_artifact_id is distinct from p_artifact_id/)
   assert.doesNotMatch(migration, /on conflict \(campaign_id, artifact_id\) do nothing/)
 })
@@ -66,6 +69,21 @@ test('two-session concurrency harness is disposable and refuses remote databases
   assert.match(concurrency, /Promise\.all\(/)
   assert.match(concurrency, /already has a canonical campaign brief/)
   assert.match(concurrency, /expired_key_race=one_write_one_replay/)
+  assert.match(concurrency, /campaign_brief_rebind_race=1_winner/)
+  assert.match(concurrency, /non_brief_multi_campaign=2_links/)
+})
+
+test('both campaign brief bypasses fail closed before mutation and official confirmation', () => {
+  const legacySave = marketingEdge.slice(marketingEdge.indexOf('async function saveArtifact'), marketingEdge.indexOf('async function saveCampaignBrief'))
+  assert.match(legacySave, /artifactType === 'campaign_brief'/)
+  assert.ok(legacySave.indexOf("artifactType === 'campaign_brief'") < legacySave.indexOf("from('artifacts').insert"))
+
+  const confirmation = departmentEdge.slice(departmentEdge.indexOf('export async function confirmProposal'), departmentEdge.indexOf('export async function rejectProposal'))
+  assert.match(confirmation, /proposal\.department_id === 'marketing'[\s\S]*proposal\.proposal_kind === 'artifact_version'[\s\S]*proposal\.target_key === 'campaign_brief'/)
+  assert.ok(confirmation.indexOf("proposal.target_key === 'campaign_brief'") < confirmation.indexOf("rpc('confirm_department_chat_proposal'"))
+  assert.match(departmentUi, /suggestionsOnly[\s\S]*!suggestionsOnly[\s\S]*Confirm official draft/)
+  assert.match(departmentUi, /suggestionsOnly[\s\S]*governed campaign brief editor/)
+  assert.match(departmentUi, /onClick=\{onReject\}[\s\S]*>Reject</)
 })
 
 test('rollback verifier is exhaustive, named, fail-closed, and ends in PASS', () => {
@@ -79,7 +97,9 @@ test('rollback verifier is exhaustive, named, fail-closed, and ends in PASS', ()
     'first_save_is_single_unapproved_lineage', 'unexpired_request_replays_exact_version',
     'expired_request_does_not_replay_and_key_is_reusable',
     'reused_key_replays_new_version_under_lock', 'conflicting_unexpired_reuse_rejected',
-    'duplicate_first_save_rejected', 'artifact_rebind_rejected', 'cross_tenant_save_rejected',
+    'duplicate_first_save_rejected', 'artifact_rebind_rejected',
+    'campaign_brief_relation_rebind_rejected', 'non_brief_multi_campaign_relation_allowed',
+    'cross_tenant_save_rejected',
     'foreign_asset_version_rejected', 'immutable_version_update_rejected',
     'campaign_brief_one_eligible_approver_succeeds',
     'campaign_brief_ineligible_approver_rejected', 'generic_one_approver_still_rejected',

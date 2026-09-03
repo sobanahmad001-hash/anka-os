@@ -31,7 +31,8 @@ create unique index uq_marketing_campaign_artifacts_campaign_brief_lineage
   on public.marketing_campaign_artifacts (organization_id, campaign_id)
   where relation_type = 'campaign_brief';
 create unique index uq_marketing_campaign_artifacts_artifact_lineage
-  on public.marketing_campaign_artifacts (organization_id, artifact_id);
+  on public.marketing_campaign_artifacts (organization_id, artifact_id)
+  where relation_type = 'campaign_brief';
 
 alter table public.marketing_brief_save_requests enable row level security;
 revoke all on public.marketing_brief_save_requests from anon, authenticated;

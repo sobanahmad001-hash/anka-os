@@ -579,6 +579,9 @@ async function saveArtifact(context: MarketingRequestContext, body: Json, actorI
   const engagementId = text(body.engagement_id, 80)
   const campaignId = text(body.campaign_id, 80)
   const artifactType = text(body.artifact_type, 60)
+  if (artifactType === 'campaign_brief') {
+    throw Object.assign(new Error('Campaign briefs must be saved through the governed campaign brief workflow'), { status: 409 })
+  }
   const engagement = await requireMarketingEngagement(context, engagementId)
   const content = validateMarketingArtifact(artifactType, body.content)
   const checksum = await sha256(stableJson(content))

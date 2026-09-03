@@ -600,6 +600,9 @@ export async function confirmProposal(
   if (!hasDepartmentChatAuthority(membership, proposal.department_id)) {
     throw Object.assign(new Error('Department Chat authority changed; regenerate the proposal'), { status: 403 })
   }
+  if (proposal.department_id === 'marketing' && proposal.proposal_kind === 'artifact_version' && proposal.target_key === 'campaign_brief') {
+    throw Object.assign(new Error('Campaign brief proposals are suggestions only and cannot be confirmed from Department Chat'), { status: 409 })
+  }
   if (proposal.status !== 'pending' || new Date(proposal.expires_at).getTime() <= Date.now()) {
     const { data, error } = await admin.rpc('confirm_department_chat_proposal', {
       p_proposal_id: proposal.id, p_actor_id: actorId, p_context_checksum: proposal.context_checksum,

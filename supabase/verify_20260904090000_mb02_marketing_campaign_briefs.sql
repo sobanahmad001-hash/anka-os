@@ -67,7 +67,7 @@ insert into mb02b_checks values
 ) and exists (
   select 1 from pg_indexes where schemaname = 'public'
     and indexname = 'uq_marketing_campaign_artifacts_artifact_lineage'
-    and indexdef like '%UNIQUE%organization_id, artifact_id%'
+    and indexdef like '%UNIQUE%organization_id, artifact_id%WHERE (relation_type = ''campaign_brief''%'
 )),
 ('ledger_rls_and_policies_exact',
   (select relrowsecurity and not relforcerowsecurity from pg_class where oid = 'public.marketing_brief_save_requests'::regclass)
@@ -141,6 +141,8 @@ insert into mb02b_checks values
 ('conflicting_unexpired_reuse_rejected', false),
 ('duplicate_first_save_rejected', false),
 ('artifact_rebind_rejected', false),
+('campaign_brief_relation_rebind_rejected', false),
+('non_brief_multi_campaign_relation_allowed', false),
 ('cross_tenant_save_rejected', false),
 ('foreign_asset_version_rejected', false),
 ('immutable_version_update_rejected', false),
@@ -270,6 +272,13 @@ begin
 
   v_rejected := false;
   begin
+    insert into public.marketing_campaign_artifacts (organization_id,campaign_id,artifact_id,relation_type,linked_by)
+      values (v_org,v_other_campaign,v_artifact,'campaign_brief',v_actor);
+  exception when unique_violation then v_rejected := true; end;
+  update mb02b_checks set passed=v_rejected where check_name='campaign_brief_relation_rebind_rejected';
+
+  v_rejected := false;
+  begin
     perform public.save_marketing_campaign_brief(v_other_org,v_engagement,v_campaign,null,null,'Cross tenant','{}',repeat('f',64),'',false,gen_random_uuid(),repeat('6',64),v_actor);
   exception when others then v_rejected := true; end;
   update mb02b_checks set passed=v_rejected where check_name='cross_tenant_save_rejected';
@@ -303,6 +312,13 @@ begin
     values (v_generic_artifact,v_org,v_brand,v_engagement,'channel_strategy','Generic approval verifier',v_actor);
   insert into public.artifact_versions (id,organization_id,artifact_id,version_number,content,content_checksum,created_by)
     values (v_generic_version,v_org,v_generic_artifact,1,'{}',repeat('8',64),v_actor);
+  insert into public.marketing_campaign_artifacts (organization_id,campaign_id,artifact_id,relation_type,linked_by) values
+    (v_org,v_campaign,v_generic_artifact,'channel_strategy',v_actor),
+    (v_org,v_other_campaign,v_generic_artifact,'channel_strategy',v_actor);
+  update mb02b_checks set passed = (
+    select count(*)=2 from public.marketing_campaign_artifacts
+    where organization_id=v_org and artifact_id=v_generic_artifact and relation_type='channel_strategy'
+  ) where check_name='non_brief_multi_campaign_relation_allowed';
   v_rejected := false;
   begin perform public.create_artifact_approval_request(v_generic_version,'parallel',array[v_manager],v_actor);
   exception when others then v_rejected := sqlerrm like '%between 2 and 50%'; end;
@@ -311,6 +327,7 @@ begin
   update mb02b_checks set passed =
     (select count(*)=1 from public.marketing_campaign_artifacts where organization_id=v_org and campaign_id=v_campaign and relation_type='campaign_brief')
     and (select count(*)=1 from public.marketing_campaign_artifacts where organization_id=v_org and artifact_id=v_artifact)
+    and (select count(*)=2 from public.marketing_campaign_artifacts where organization_id=v_org and artifact_id=v_generic_artifact)
     and (select count(*)=2 from public.artifact_versions where organization_id=v_org and artifact_id=v_artifact)
   where check_name='sequential_lineage_cardinality_exact';
 end;
