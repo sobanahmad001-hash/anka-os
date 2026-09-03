@@ -9,6 +9,14 @@ type SandboxDependencies = {
   estimatedCost?: typeof estimatedCost
 }
 const MUTATION_ACTIONS = new Set(['create', 'append', 'fork'])
+export const QUICK_TASK_LIFECYCLE_RPCS = Object.freeze({
+  preserve: 'preserve_quick_task',
+  unpreserve: 'unpreserve_quick_task',
+  discard: 'discard_quick_task',
+  restore: 'restore_quick_task',
+  expire: 'expire_quick_task',
+  purge: 'purge_quick_task',
+})
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 export const SANDBOX_DEPARTMENTS = new Set(['content', 'design', 'development', 'marketing'])
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses'
@@ -43,6 +51,14 @@ export function normalizeQuickTaskInput(action: string, input: Json) {
   const quickTaskId = id(input.quickTaskId); const revisionId = id(input.revisionId)
   if (!quickTaskId || !revisionId) throw new Error('Quick Task and source revision are required')
   return { p_source_quick_task_id: quickTaskId, p_source_revision_id: revisionId, p_title: text(input.title, 240) || null }
+}
+
+export function normalizeQuickTaskLifecycleInput(action: string, input: Json) {
+  if (!Object.hasOwn(QUICK_TASK_LIFECYCLE_RPCS, action)) throw new Error('Unsupported lifecycle action')
+  const rpc = QUICK_TASK_LIFECYCLE_RPCS[action as keyof typeof QUICK_TASK_LIFECYCLE_RPCS]
+  const quickTaskId = id(input.quickTaskId)
+  if (!quickTaskId) throw new Error('Quick Task is required')
+  return { rpc, input: { p_quick_task_id: quickTaskId } }
 }
 
 export function normalizeQuickTaskChatInput(input: Json) {
@@ -298,6 +314,12 @@ export async function handleRequest(request: Request) {
     const action = text(body.action, 20)
     const { admin, user } = await requireContext(request)
     if (action === 'chat') return response({ data: await sandboxChat(admin, user.id, body) })
+    if (Object.hasOwn(QUICK_TASK_LIFECYCLE_RPCS, action)) {
+      const lifecycle = normalizeQuickTaskLifecycleInput(action, body)
+      const { data, error } = await admin.rpc(lifecycle.rpc, { ...lifecycle.input, p_actor_id: user.id })
+      if (error) throw error
+      return response({ data })
+    }
     const input = normalizeQuickTaskInput(action, body)
     const functionName = action === 'create' ? 'create_quick_task' : action === 'append' ? 'append_quick_task_revision' : 'fork_quick_task'
     const { data, error } = await admin.rpc(functionName, { ...input, p_actor_id: user.id })
