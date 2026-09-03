@@ -7,3 +7,9 @@ export function createChatCompletionGuard(signal) {
     dispose() { active = false; sequence += 1 },
   }
 }
+
+export function handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, showError) {
+  if (!isCurrent()) return
+  handleOrganizationAccessError(reason)
+  if (isCurrent()) showError(reason)
+}

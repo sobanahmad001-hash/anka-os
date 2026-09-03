@@ -10,7 +10,7 @@ const read = path => readFileSync(`${root}${path}`, 'utf8')
 const edge = read('supabase/functions/department-chat/index.ts')
 const panel = read('src/components/DevelopmentTrackingPanel.jsx')
 const workshop = read('src/apps/DepartmentWorkshop.jsx')
-const repository = read('src/data/departmentChatRepository.js')
+const repository = read('src/data/departmentChatTransport.js')
 
 test('WCH2 exposes one shared, versioned profile contract for all four departments', () => {
   assert.equal(DEPARTMENT_CHAT_PROFILE_VERSION, 'wch2-v1')

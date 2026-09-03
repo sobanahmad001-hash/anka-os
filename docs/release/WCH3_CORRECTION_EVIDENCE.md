@@ -40,3 +40,13 @@ The inherited hard-coded ORGANIZATION_ID in the edge function is unchanged. It l
 Admin owns independent exact-head/schema validation, merge, publication, live database changes and deployment. No such action was performed. The separate WKS product-edit hold remains intact. QTS stays optional; WCH keeps direct human confirmation.
 
 Rollback additions: any Admin forward rollback must also remove the WCH audit trigger, its private function, record_department_chat_attempt RPC and audit table after preserving required audit history. Confirmed official records must remain intact.
+
+## Narrow OAF error-path follow-up
+
+Based on accepted correction f25436457189dee0e3bacfeba9e6fa6e006cce82. The WCH transport now preserves FunctionsHttpError context status, response-envelope status, fallback error status/statusCode, and terminal outcome. Official-record PostgREST reads preserve envelope status as well. Shared DepartmentChat previews now use this same WCH transport directly because inherited studio adapters discarded error metadata; proposal inputs and department selection are unchanged.
+
+Preview, confirm, reject and official-read catches call the existing organization access handler only while their captured identity/request remains current. They check again after recovery, which can synchronously abort the scope. No provider/global helper or WKS changes were made.
+
+Thirteen new behavioral tests exercise both preview modes, confirmation, rejection and official reads: envelope-only 403 recovery, late old-context 403 suppression, transport/fallback status preservation, terminal outcome preservation and recovery-triggered abort. These are repository/completion-guard tests, not mounted React browser tests.
+
+Follow-up gates: configured Node suite 482 passed; full frozen CI Deno suite 178 passed; full frozen Deno check passed; lint 0 errors / 350 existing warnings; production build passed; whitespace check passed. An initial unrestricted Node discovery also attempted Deno-owned tests and failed those; the configured Node scope and separate Deno commands above both pass. No SQL changed or database verifier rerun in this follow-up: the prior 23-check rollback-only SQL evidence remains unchanged. The inherited fixed tenant scope, retention decision, WKS hold, and Admin-owned release/deployment boundary remain unchanged.

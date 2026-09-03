@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
-import { createChatCompletionGuard } from '../data/departmentChatIdentity.js'
+import { createChatCompletionGuard, handleCurrentChatFailure } from '../data/departmentChatIdentity.js'
 
 import { departmentChatProfile } from '../data/departmentChatProfiles.js'
 import { departmentChat } from '../data/departmentChatRepository.js'
@@ -11,11 +11,11 @@ const PRIMARY = 'rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-wh
 
 export default function DepartmentChat(props) {
   const { user } = useAuth()
-  const { activeOrganizationId, scopeRevision, requestSignal } = useOrganization()
+  const { activeOrganizationId, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
   const identity = JSON.stringify([user?.id, activeOrganizationId, scopeRevision, props.engagement?.id, props.departmentId])
   if (!user?.id || !activeOrganizationId || requestSignal?.aborted
     || props.engagement?.organization_id !== activeOrganizationId) return null
-  return <ScopedDepartmentChat key={identity} {...props} requestSignal={requestSignal} />
+  return <ScopedDepartmentChat key={identity} {...props} requestSignal={requestSignal} handleOrganizationAccessError={handleOrganizationAccessError} />
 }
 
 function ScopedDepartmentChat({
@@ -25,10 +25,9 @@ function ScopedDepartmentChat({
   artifactDefinitions = {},
   artifactForType = () => null,
   stageForType = () => null,
-  onPropose,
-  onProposeWorkItem,
   onCreated,
   requestSignal,
+  handleOrganizationAccessError,
 }) {
   const completion = useRef(null)
   useLayoutEffect(() => {
@@ -59,11 +58,8 @@ function ScopedDepartmentChat({
     setResult(null)
     setOfficial(null)
     try {
-      if (!onProposeWorkItem && proposalMode === 'work_item') {
-        throw new Error('Work-item proposal is not available for this workflow.')
-      }
       const proposed = proposalMode === 'artifact'
-        ? await onPropose({
+        ? await departmentChat.proposeArtifact(departmentId, {
           engagement_id: engagement.id,
           artifact_id: (artifactForType(artifactType) || {}).id || null,
           engagement_stage_instance_id: (stageForType(artifactType) || {}).id || null,
@@ -73,7 +69,7 @@ function ScopedDepartmentChat({
           prompt_safe_for_ai: safe,
           change_summary: 'Draft proposed via Shared Department Chat',
         })
-        : await onProposeWorkItem({
+        : await departmentChat.proposeWorkItem(departmentId, {
           engagement_id: engagement.id,
           title: title || `${artifactDefinitions[artifactType]?.label || 'Work item'} request`,
           work_item_type: workItemType,
@@ -86,7 +82,7 @@ function ScopedDepartmentChat({
       setPrompt('')
       setSafe(false)
     } catch (reason) {
-      if (isCurrent()) setError(reason.message)
+      handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message))
     } finally {
       if (isCurrent()) setBusy(false)
     }
@@ -106,11 +102,12 @@ function ScopedDepartmentChat({
       setResult(current => ({ ...current, status: decision.outcome, decision }))
       if (decision.outcome === 'accepted' && isCurrent()) await onCreated?.(decision)
     } catch (reason) {
-      if (!isCurrent()) return
-      if (['stale', 'expired', 'rejected'].includes(reason.outcome)) {
-        setResult(current => ({ ...current, status: reason.outcome }))
-      }
-      setError(reason.message)
+      handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => {
+        if (['stale', 'expired', 'rejected'].includes(failure.outcome)) {
+          setResult(current => ({ ...current, status: failure.outcome }))
+        }
+        setError(failure.message)
+      })
     } finally {
       if (isCurrent()) setBusy(false)
     }
@@ -128,7 +125,7 @@ function ScopedDepartmentChat({
       const record = await departmentChat.getOfficialRecord(engagement.organization_id, result.decision)
       if (isCurrent()) setOfficial(record)
     } catch (reason) {
-      if (isCurrent()) setError(reason.message)
+      handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message))
     } finally {
       if (isCurrent()) setBusy(false)
     }

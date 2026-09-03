@@ -11,7 +11,7 @@ const edge = read('supabase/functions/department-chat/index.ts')
 const chat = read('src/components/DepartmentChat.jsx')
 const development = read('src/components/DevelopmentTrackingPanel.jsx')
 const workshop = read('src/apps/DepartmentWorkshop.jsx')
-const repository = read('src/data/departmentChatRepository.js')
+const repository = read('src/data/departmentChatTransport.js')
 
 function section(source, start, end) {
   const startIndex = source.indexOf(start)
