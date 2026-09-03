@@ -294,14 +294,14 @@ with expected(constraint_name, child_table, parent_table, child_columns, parent_
     ('quick_task_lifecycle_events_related_task_fkey', 'public.quick_task_lifecycle_events'::regclass, 'public.quick_tasks'::regclass,
       array['related_quick_task_id','organization_id','owner_id'], array['id','organization_id','owner_id'])
 ), actual as (
-  select constraint.oid, constraint.conname, constraint.conrelid, constraint.confrelid,
-    array(select attribute.attname::text from unnest(constraint.conkey) with ordinality key(attnum, position)
-      join pg_attribute attribute on attribute.attrelid = constraint.conrelid and attribute.attnum = key.attnum
+  select constraint_record.oid, constraint_record.conname, constraint_record.conrelid, constraint_record.confrelid,
+    array(select attribute.attname::text from unnest(constraint_record.conkey) with ordinality key(attnum, position)
+      join pg_attribute attribute on attribute.attrelid = constraint_record.conrelid and attribute.attnum = key.attnum
       order by key.position) as child_columns,
-    array(select attribute.attname::text from unnest(constraint.confkey) with ordinality key(attnum, position)
-      join pg_attribute attribute on attribute.attrelid = constraint.confrelid and attribute.attnum = key.attnum
+    array(select attribute.attname::text from unnest(constraint_record.confkey) with ordinality key(attnum, position)
+      join pg_attribute attribute on attribute.attrelid = constraint_record.confrelid and attribute.attnum = key.attnum
       order by key.position) as parent_columns
-  from pg_constraint constraint where constraint.contype = 'f'
+  from pg_constraint constraint_record where constraint_record.contype = 'f'
 )
 insert into qts1_checks
 select 'composite_foreign_keys_are_exact', count(actual.oid) = 6 and bool_and(coalesce(

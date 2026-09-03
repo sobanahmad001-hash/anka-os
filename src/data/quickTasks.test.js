@@ -84,6 +84,8 @@ test('QTS1 verifier is rollback-safe, exhaustive, and fails closed', () => {
   ]) assert.match(verifier, new RegExp(check))
   assert.match(verifier, /jsonb_object_agg\(check_name, passed order by check_name\)/)
   assert.match(verifier, /raise exception 'QTS1 verification failed/)
+  assert.doesNotMatch(verifier, /\bconstraint\./i)
+  assert.doesNotMatch(verifier, /from\s+pg_constraint\s+constraint\b/i)
   assert.match(verifier, /insert into auth\.users \(id\) values \(v_owner\), \(v_leader\)/)
   assert.match(verifier, /\(v_org, v_owner, 'team', 'contributor'/)
   assert.match(verifier, /\(v_org, v_leader, 'team', 'system_owner'/)
