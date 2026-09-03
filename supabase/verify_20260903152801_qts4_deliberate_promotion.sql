@@ -1,0 +1,30 @@
+begin;
+create temporary table qts4_checks(check_name text primary key,passed boolean not null) on commit drop;
+
+insert into qts4_checks values
+('project_atomic_and_type_exact',position('case when v_client_id is null then ''internal'' else ''project'' end' in pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure))>0),
+('project_creates_no_engagement_or_projection',position('insert into public.engagements' in pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure))=0 and position('insert into public.workstreams' in pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure))=0),
+('work_item_only_and_provenance',position('public.save_work_item' in pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure))>0 and position('quick_task_promotion' in pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure))>0 and position('insert into public.tasks' in pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure))=0),
+('artifact_is_internal_unapproved_unreleased',position('false, ''internal''' in pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure))>0 and position('artifact_approvals' in pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure))=0 and position('artifact_releases' in pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure))=0),
+('exact_revision_and_checksum_required',position('current_revision_id <> p_expected_revision_id' in pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure))>0 and position('content_sha256 <> p_expected_content_sha256' in pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure))>0),
+('inactive_states_rejected',position('state not in (''active'', ''preserved'')' in pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure))>0),
+('retry_is_idempotent',position('idempotent_replay'', true' in pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure))>0),
+('conflicting_retry_rejected',position('different promotion request' in pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure))>0),
+('cross_tenant_and_foreign_mapping_rejected',position('organization_id = v_task.organization_id' in pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure))>0),
+('source_is_terminal_provenance',position('state = ''promoted''' in pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure))>0),
+('destination_and_promotion_rollback_together',position('for update' in pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure))>0),
+('ledger_is_append_only',exists(select 1 from pg_trigger where tgrelid='public.quick_task_promotions'::regclass and tgname='trg_quick_task_promotions_append_only' and tgenabled<>'D')),
+('leadership_metadata_only',not exists(select 1 from information_schema.columns where table_schema='public' and table_name='quick_task_promotions' and column_name in('content','title','notes','prompt','output_text'))),
+('promotion_table_rls_enabled',(select relrowsecurity from pg_class where oid='public.quick_task_promotions'::regclass)),
+('promotion_policy_is_metadata_only',(select count(*)=1 and bool_and(polcmd='r') from pg_policy where polrelid='public.quick_task_promotions'::regclass)),
+('table_acl_is_exact',not has_table_privilege('anon','public.quick_task_promotions','SELECT') and has_table_privilege('authenticated','public.quick_task_promotions','SELECT') and not has_table_privilege('authenticated','public.quick_task_promotions','INSERT,UPDATE,DELETE') and has_table_privilege('service_role','public.quick_task_promotions','SELECT,INSERT,UPDATE,DELETE,MAINTAIN')),
+('promotion_rpc_acl_is_exact',not has_function_privilege('anon','public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)','EXECUTE') and not has_function_privilege('authenticated','public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)','EXECUTE') and has_function_privilege('service_role','public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)','EXECUTE')),
+('typed_foreign_keys_are_exact',(select count(*)=6 from pg_constraint where conrelid='public.quick_task_promotions'::regclass and contype='f')),
+('supporting_indexes_exist',(select count(*)=6 from pg_indexes where schemaname='public' and indexname like 'idx_quick_task_promotions_%')),
+('exact_target_constraint_exists',exists(select 1 from pg_constraint where conrelid='public.quick_task_promotions'::regclass and conname='quick_task_promotions_exact_target_check')),
+('created_via_constraint_is_exact',exists(select 1 from pg_constraint where conrelid='public.work_items'::regclass and conname='work_items_created_via_check' and pg_get_constraintdef(oid) like '%quick_task_promotion%')),
+('no_bypass_side_effects',position('security definer' in lower(pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure)))=0);
+
+select jsonb_object_agg(check_name,passed order by check_name) as qts4_verification from qts4_checks;
+do $$ declare v_failed text; begin select string_agg(check_name,', ' order by check_name) into v_failed from qts4_checks where not passed; if v_failed is not null then raise exception 'QTS4 verification failed: %',v_failed; end if; end $$;
+rollback;

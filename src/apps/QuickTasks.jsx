@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { daysUntilExpiry, quickTaskContent } from '../data/quickTasks.js'
 import { quickTasks } from '../data/quickTasksRepository.js'
+import QuickTaskPromotionPanel from '../components/QuickTaskPromotionPanel.jsx'
 
 const inputClass = 'w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none focus:border-violet-500/60 disabled:cursor-not-allowed disabled:opacity-60'
 const departments = ['content', 'design', 'development', 'marketing']
@@ -20,6 +21,7 @@ export default function QuickTasks({ organizationId }) {
   const [selectedId, setSelectedId] = useState('')
   const [draft, setDraft] = useState({ title: '', notes: '' })
   const [messages, setMessages] = useState([])
+  const [sourceRevision, setSourceRevision] = useState(null)
   const [chatPrompt, setChatPrompt] = useState('')
   const [chatDepartment, setChatDepartment] = useState('content')
   const [promptSafeForAi, setPromptSafeForAi] = useState(false)
@@ -62,7 +64,7 @@ export default function QuickTasks({ organizationId }) {
   async function open(item) {
     setSelectedId(item.id); setError('')
     if (item.purged_at || !item.current_revision_id) {
-      setDraft({ title: '[purged]', notes: '' }); setMessages([])
+      setDraft({ title: '[purged]', notes: '' }); setMessages([]); setSourceRevision(null)
       return
     }
     try {
@@ -70,12 +72,12 @@ export default function QuickTasks({ organizationId }) {
         quickTasks.revision(item.current_revision_id), quickTasks.messages(item.id),
       ])
       setDraft({ title: item.title, notes: String(revision?.content?.notes || '') })
-      setMessages(transcript || [])
+      setSourceRevision(revision); setMessages(transcript || [])
     } catch (reason) { setError(reason.message) }
   }
 
   function newTask() {
-    setSelectedId(''); setDraft({ title: '', notes: '' }); setMessages([])
+    setSelectedId(''); setDraft({ title: '', notes: '' }); setMessages([]); setSourceRevision(null)
     setChatPrompt(''); setPromptSafeForAi(false); setError('')
   }
 
@@ -120,6 +122,7 @@ export default function QuickTasks({ organizationId }) {
         departmentId: chatDepartment, prompt: chatPrompt, promptSafeForAi,
       })
       setDraft({ title: result.task.title, notes: String(result.revision?.content?.notes || '') })
+      setSourceRevision(result.revision)
       setChatPrompt(''); setPromptSafeForAi(false)
       await load()
       setMessages(await quickTasks.messages(selected.id) || [])
@@ -129,7 +132,7 @@ export default function QuickTasks({ organizationId }) {
 
   return <main className="mx-auto max-w-7xl p-6 lg:p-8">
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-400">Private working memory</p><h1 className="mt-2 text-3xl font-semibold text-white">Quick Tasks</h1><p className="mt-2 max-w-2xl text-sm text-slate-400">Only you can read task content and its sandbox chat. Active notes expire after 30 days without a substantive owner edit; preserved notes do not expire; promotion is intentionally unavailable in this release.</p></div>
+      <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-400">Private working memory</p><h1 className="mt-2 text-3xl font-semibold text-white">Quick Tasks</h1><p className="mt-2 max-w-2xl text-sm text-slate-400">Only you can read task content and its sandbox chat. Active notes expire after 30 days without a substantive owner edit; preserved notes do not expire; promotion is an explicit reviewed copy into one canonical destination.</p></div>
       <button type="button" onClick={newTask} className="rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white">New Quick Task</button>
     </div>
     {error && <div className="mt-5 rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">{error}</div>}
@@ -160,6 +163,7 @@ export default function QuickTasks({ organizationId }) {
           <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Notes<textarea rows="12" disabled={Boolean(selected && !isActive)} className={inputClass + ' mt-2 resize-y'} value={draft.notes} onChange={event => setDraft({ ...draft, notes: event.target.value })} /></label>
           {(!selected || isActive) && <div className="mt-5 flex justify-end"><button disabled={saving || !organizationId} className="rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saving ? 'Saving…' : selected ? 'Append revision' : 'Create Quick Task'}</button></div>}
         </form>
+        {selected && sourceRevision && !isPurged && ['active', 'preserved'].includes(selected.state) && <QuickTaskPromotionPanel task={selected} revision={sourceRevision} organizationId={organizationId} onPromoted={load} />}
         {selected && !isPurged && <section className="rounded-2xl border border-white/[0.07] bg-[#0e111a]/80 p-5">
           <div><h2 className="font-semibold text-white">Sandbox chat</h2><p className="mt-1 text-xs text-slate-500">Uses your department’s verified model. It cannot load canonical context or perform business actions.</p></div>
           <div className="mt-4 max-h-72 space-y-3 overflow-y-auto">{messages.map(message => <div key={message.id} className={'rounded-xl border px-3 py-2.5 text-sm ' + (message.role === 'user' ? 'border-violet-500/20 bg-violet-500/10 text-violet-100' : 'border-white/[0.06] bg-black/20 text-slate-300')}><p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">{message.role}</p><p className="whitespace-pre-wrap">{message.body}</p></div>)}</div>
@@ -169,7 +173,7 @@ export default function QuickTasks({ organizationId }) {
             <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Prompt<textarea required maxLength="8000" rows="4" className={inputClass + ' mt-2 resize-y'} value={chatPrompt} onChange={event => setChatPrompt(event.target.value)} /></label>
             <label className="flex items-start gap-2 text-xs text-slate-400"><input type="checkbox" className="mt-0.5" checked={promptSafeForAi} onChange={event => setPromptSafeForAi(event.target.checked)} /><span>I confirm this prompt is safe to send to the configured model.</span></label>
             <div className="flex justify-end"><button disabled={chatting || !promptSafeForAi || !chatPrompt.trim()} className="rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{chatting ? 'Thinking…' : 'Create sandbox revision'}</button></div>
-          </form> : <p className="mt-5 text-xs text-slate-500">Restore or resume this task before starting another sandbox chat.</p>}
+          </form> : <p className="mt-5 text-xs text-slate-500">{selected.state === 'promoted' ? 'This source is terminal after promotion.' : 'Restore or resume this task before starting another sandbox chat.'}</p>}
         </section>}
       </div>
     </div>

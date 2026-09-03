@@ -1,5 +1,10 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { namedKey, sha256 } from '../_shared/googleOAuthTokens.ts'
+import { validateContentArtifact } from '../_shared/contentArtifacts.ts'
+import { validateDesignSystemArtifact } from '../_shared/designSystemArtifacts.ts'
+import { validateDevelopmentChatArtifact } from '../_shared/developmentChatArtifacts.ts'
+import { departmentChatProfile } from '../_shared/departmentChatProfiles.ts'
+import { validateMarketingArtifact } from '../marketing-studio/index.ts'
 
 type Client = ReturnType<typeof createClient<any>>
 type Json = Record<string, unknown>
@@ -59,6 +64,80 @@ export function normalizeQuickTaskLifecycleInput(action: string, input: Json) {
   const quickTaskId = id(input.quickTaskId)
   if (!quickTaskId) throw new Error('Quick Task is required')
   return { rpc, input: { p_quick_task_id: quickTaskId } }
+}
+
+const PROMOTION_TARGETS = new Set(['project', 'work_item', 'artifact'])
+const WORK_ITEM_TYPES = new Set(['task', 'bug', 'request'])
+const WORK_ITEM_PRIORITIES = new Set(['low', 'medium', 'high', 'urgent'])
+
+function optionalId(value: unknown) { return id(value) }
+function date(value: unknown) {
+  const normalized = text(value, 10)
+  if (normalized && !/^\d{4}-\d{2}-\d{2}$/.test(normalized)) throw new Error('Dates must use YYYY-MM-DD')
+  return normalized || null
+}
+function object(value: unknown, label: string) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`)
+  return value as Json
+}
+
+export function normalizeQuickTaskPromotionInput(input: Json) {
+  const quickTaskId = id(input.quickTaskId)
+  const expectedRevisionId = id(input.expectedRevisionId)
+  const expectedContentSha256 = text(input.expectedContentSha256, 64).toLowerCase()
+  const targetKind = text(input.targetKind, 20)
+  const idempotencyKey = id(input.idempotencyKey)
+  const raw = object(input.mapping, 'Promotion mapping')
+  if (!quickTaskId || !expectedRevisionId || !idempotencyKey) throw new Error('Quick Task, revision, and idempotency key are required')
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) throw new Error('A valid idempotency key is required')
+  if (!/^[0-9a-f]{64}$/.test(expectedContentSha256)) throw new Error('A valid expected content checksum is required')
+  if (!PROMOTION_TARGETS.has(targetKind)) throw new Error('Unsupported promotion target')
+  if (input.humanConfirmed !== true) throw new Error('Review and explicitly confirm the promotion')
+  let mapping: Json
+  if (targetKind === 'project') {
+    const name = text(raw.name, 240)
+    if (!name) throw new Error('Project name is required')
+    mapping = {
+      name, description: text(raw.description, 20000), client_id: optionalId(raw.clientId),
+      owner_id: optionalId(raw.ownerId), department_id: text(raw.departmentId, 40) || null,
+      priority: text(raw.priority, 20) || 'medium', start_date: date(raw.startDate),
+      due_date: date(raw.dueDate), scope_statement: text(raw.scopeStatement, 20000),
+      exclusions: text(raw.exclusions, 20000),
+    }
+  } else if (targetKind === 'work_item') {
+    const engagementId = id(raw.engagementId); const title = text(raw.title, 240)
+    const workItemType = text(raw.workItemType, 20) || 'task'; const priority = text(raw.priority, 20) || 'medium'
+    const assigneeId = optionalId(raw.assigneeId)
+    if (!engagementId || !title) throw new Error('Engagement and work-item title are required')
+    if (!WORK_ITEM_TYPES.has(workItemType) || !WORK_ITEM_PRIORITIES.has(priority)) throw new Error('Unsupported work-item mapping')
+    if (assigneeId && raw.assigneeConfirmed !== true) throw new Error('Explicitly confirm the mapped assignee')
+    mapping = {
+      engagement_id: engagementId, title, description: text(raw.description, 20000),
+      work_item_type: workItemType, priority, department_id: text(raw.departmentId, 40) || null,
+      assignee_id: assigneeId, assignee_confirmed: Boolean(assigneeId),
+      start_date: date(raw.startDate), due_date: date(raw.dueDate),
+    }
+  } else {
+    const engagementId = id(raw.engagementId); const departmentId = text(raw.departmentId, 40)
+    const artifactType = text(raw.artifactType, 80); const title = text(raw.title, 240)
+    if (!engagementId || !departmentId || !artifactType) throw new Error('Engagement, department, and artifact type are required')
+    if (!departmentChatProfile(departmentId).artifactTypes.includes(artifactType)) throw new Error('Artifact type is not supported by the selected department')
+    const content = departmentId === 'content' ? validateContentArtifact(artifactType, raw.content)
+      : departmentId === 'design' ? validateDesignSystemArtifact(artifactType, raw.content)
+      : departmentId === 'marketing' ? validateMarketingArtifact(artifactType, raw.content)
+      : validateDevelopmentChatArtifact(artifactType, raw.content)
+    if (!optionalId(raw.artifactId) && !title) throw new Error('A title is required for a new artifact')
+    mapping = {
+      engagement_id: engagementId, department_id: departmentId, artifact_type: artifactType,
+      artifact_id: optionalId(raw.artifactId), title, content,
+      change_summary: text(raw.changeSummary, 1000) || 'Promoted from Quick Tasks',
+    }
+  }
+  return {
+    p_quick_task_id: quickTaskId, p_expected_revision_id: expectedRevisionId,
+    p_expected_content_sha256: expectedContentSha256, p_target_kind: targetKind,
+    p_mapping: mapping, p_idempotency_key: idempotencyKey, p_human_confirmed: true,
+  }
 }
 
 export function normalizeQuickTaskChatInput(input: Json) {
@@ -314,6 +393,12 @@ export async function handleRequest(request: Request) {
     const action = text(body.action, 20)
     const { admin, user } = await requireContext(request)
     if (action === 'chat') return response({ data: await sandboxChat(admin, user.id, body) })
+    if (action === 'promote') {
+      const input = normalizeQuickTaskPromotionInput(body)
+      const { data, error } = await admin.rpc('promote_quick_task', { ...input, p_actor_id: user.id })
+      if (error) throw error
+      return response({ data })
+    }
     if (Object.hasOwn(QUICK_TASK_LIFECYCLE_RPCS, action)) {
       const lifecycle = normalizeQuickTaskLifecycleInput(action, body)
       const { data, error } = await admin.rpc(lifecycle.rpc, { ...lifecycle.input, p_actor_id: user.id })
