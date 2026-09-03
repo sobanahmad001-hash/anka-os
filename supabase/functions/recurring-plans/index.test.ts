@@ -1,4 +1,9 @@
-import { normalizePeriodInput, normalizePlanVersionInput, normalizeTransitionInput } from './index.ts'
+import {
+  normalizeMonthInput,
+  normalizePeriodInput,
+  normalizePlanVersionInput,
+  normalizeTransitionInput,
+} from './index.ts'
 
 function equal(actual: unknown, expected: unknown) {
   if (actual !== expected) throw new Error(`Expected ${String(expected)}, received ${String(actual)}`)
@@ -61,4 +66,16 @@ Deno.test('rejects malformed RET2 dates and request identities', () => {
   throws(() => normalizePeriodInput({ planId, periodStart: '2026-02-30' }), /real ISO date/)
   throws(() => normalizePeriodInput({ planId: 'not-an-id', periodStart: '2026-09-07' }), /must be a UUID/)
   throws(() => normalizePeriodInput({ planId, periodStart: '2026-09-07', requestKey: 'bad' }, true), /must be a UUID/)
+})
+
+Deno.test('RET3 normalizes only first-of-month plan-local previews', () => {
+  const planId = '11111111-1111-4111-8111-111111111111'
+  const normalized = normalizeMonthInput({
+    planId, monthStart: '2026-09-01', pastPeriodReason: ' Approved recovery ',
+  })
+  equal(normalized.p_plan_id, planId)
+  equal(normalized.p_month_start, '2026-09-01')
+  equal(normalized.p_past_period_reason, 'Approved recovery')
+  throws(() => normalizeMonthInput({ planId, monthStart: '2026-09-02' }), /first day/)
+  throws(() => normalizeMonthInput({ planId, monthStart: '2026-02-30' }), /real ISO date/)
 })

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { projectEngagementWorkspace } from '../data/projectEngagementWorkspace'
+import RetainerPlanningPanel from '../components/RetainerPlanningPanel'
 
 const TABS = [
   ['overview', 'Overview'],
@@ -36,6 +37,11 @@ export default function ProjectEngagementWorkspace() {
   if (!workspace) return <StateMessage error={error} action={() => navigate('/sphere/workspace')}>Return to Portfolio</StateMessage>
 
   const { project, identity, summary } = workspace
+  const showRetainerPlanning = identity.hasEngagement
+    && (project.engagement_type === 'retainer' || workspace.engagement?.engagement_type === 'retainer')
+  const tabs = showRetainerPlanning
+    ? [...TABS.slice(0, 4), ['retainer-planning', 'Retainer Planning'], ...TABS.slice(4)]
+    : TABS
   return (
     <main className="min-h-full bg-[#090c13] p-4 text-slate-100 sm:p-6 lg:p-8">
       <div className="mx-auto max-w-[1500px]">
@@ -61,7 +67,7 @@ export default function ProjectEngagementWorkspace() {
         </section>
 
         <nav aria-label="Project workspace sections" className="mt-7 flex gap-1 overflow-x-auto border-b border-white/[0.08]">
-          {TABS.map(([id, title]) => <button type="button" key={id} onClick={() => setTab(id)} className={`whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium ${tab === id ? 'border-violet-400 text-white' : 'border-transparent text-slate-500 hover:text-slate-200'}`}>{title}</button>)}
+          {tabs.map(([id, title]) => <button type="button" key={id} onClick={() => setTab(id)} className={`whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium ${tab === id ? 'border-violet-400 text-white' : 'border-transparent text-slate-500 hover:text-slate-200'}`}>{title}</button>)}
         </nav>
 
         <div className="mt-6">
@@ -69,6 +75,7 @@ export default function ProjectEngagementWorkspace() {
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
           {tab === 'project-tasks' && <ProjectTasks rows={workspace.projectTasks} />}
           {tab === 'engagement-work' && <EngagementWork rows={workspace.engagementWorkItems} hasEngagement={identity.hasEngagement} />}
+          {tab === 'retainer-planning' && showRetainerPlanning && <RetainerPlanningPanel project={project} engagement={workspace.engagement} services={workspace.services} />}
           {tab === 'outputs' && <Outputs workspace={workspace} />}
           {tab === 'activity' && <Activity rows={workspace.activity} />}
         </div>

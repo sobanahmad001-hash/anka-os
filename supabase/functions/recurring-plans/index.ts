@@ -4,7 +4,7 @@ import { namedKey } from '../_shared/googleOAuthTokens.ts'
 type Json = Record<string, unknown>
 const ACTIONS = new Set([
   'create_plan', 'create_version', 'approve_version', 'reassign_template_item',
-  'transition_plan', 'preview_period', 'confirm_period',
+  'transition_plan', 'preview_period', 'preview_month', 'confirm_period',
 ])
 const FREQUENCIES = new Set(['weekly', 'monthly'])
 const STATUSES = new Set(['active', 'paused', 'ended', 'archived'])
@@ -125,6 +125,16 @@ export function normalizePeriodInput(input: Json, confirm = false) {
   return normalized
 }
 
+export function normalizeMonthInput(input: Json) {
+  const monthStart = date(input.monthStart, 'Month start') as string
+  if (!monthStart.endsWith('-01')) throw new Error('Month start must be the first day of a calendar month')
+  return {
+    p_plan_id: uuid(input.planId, 'Recurring plan'),
+    p_month_start: monthStart,
+    p_past_period_reason: text(input.pastPeriodReason, 2000),
+  }
+}
+
 async function requireContext(request: Request) {
   const authorization = request.headers.get('Authorization') || ''
   if (!authorization.startsWith('Bearer ')) throw Object.assign(new Error('Authentication required'), { status: 401 })
@@ -152,6 +162,9 @@ export async function handleRequest(request: Request) {
     if (action === 'preview_period') {
       functionName = 'preview_recurring_work_period'
       input = normalizePeriodInput(body)
+    } else if (action === 'preview_month') {
+      functionName = 'preview_recurring_work_month'
+      input = normalizeMonthInput(body)
     } else if (action === 'confirm_period') {
       functionName = 'confirm_recurring_work_period'
       input = normalizePeriodInput(body, true)
