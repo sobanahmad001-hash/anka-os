@@ -1,17 +1,21 @@
-import { assertEquals } from 'jsr:@std/assert@1.0.14'
+import { assertEquals, assertRejects } from 'jsr:@std/assert@1.0.14'
 import {
   CHAT_MARKETING_ARTIFACT_TYPE_SET,
   ENABLED_DEPARTMENTS,
+  createDevelopmentArtifactVersion,
   createDesignArtifactVersion,
   createMarketingArtifactVersion,
   departmentChatExternalEndpoint,
+  freezeDepartmentChatContext,
   hasDepartmentChatAuthority,
   isDepartmentChatArtifactType,
   marketingArtifactResponseFormat,
   outputText,
   proposeArtifact,
   requireDepartmentEngagement,
+  selectSingleOpenAiModel,
 } from './index.ts'
+import { developmentChatArtifactResponseFormat, validateDevelopmentChatArtifact } from '../_shared/developmentChatArtifacts.ts'
 import {
   CHAT_DESIGN_ARTIFACT_TYPE_SET,
   designArtifactResponseFormat,
@@ -25,14 +29,17 @@ Deno.test('Shared Department Chat is department-scoped', () => {
   assertEquals(hasDepartmentChatAuthority({ role: 'contributor', department_id: 'design' }, 'design'), true)
 })
 
-Deno.test('Shared Department Chat enables Content, Design, and confirmed Marketing planning drafts', () => {
-  assertEquals([...ENABLED_DEPARTMENTS].sort(), ['content', 'design', 'marketing'])
+Deno.test('Shared Department Chat enables Content, Design, Marketing, and Development profiles', () => {
+  assertEquals([...ENABLED_DEPARTMENTS].sort(), ['content', 'design', 'development', 'marketing'])
   assertEquals(CHAT_DESIGN_ARTIFACT_TYPE_SET.has('design_system'), true)
   assertEquals(CHAT_DESIGN_ARTIFACT_TYPE_SET.has('design_direction'), false)
   assertEquals([...CHAT_MARKETING_ARTIFACT_TYPE_SET].sort(), ['campaign_brief', 'channel_strategy', 'measurement_plan'])
   assertEquals(CHAT_MARKETING_ARTIFACT_TYPE_SET.has('marketing_report'), false)
   assertEquals(isDepartmentChatArtifactType('marketing', 'measurement_plan'), true)
   assertEquals(marketingArtifactResponseFormat('measurement_plan').schema.required, ['business_objectives', 'kpis', 'conversions', 'tracking_requirements', 'reporting_cadence'])
+  assertEquals(isDepartmentChatArtifactType('development', 'technical_brief'), true)
+  assertEquals(isDepartmentChatArtifactType('development', 'launch_checklist'), true)
+  assertEquals(developmentChatArtifactResponseFormat('technical_brief').schema.required, ['notes', 'checklist'])
 })
 
 Deno.test('Design chat output is the same structured Design System draft accepted by the library', () => {
@@ -53,19 +60,26 @@ function resolved(data: unknown, error: unknown = null) {
 Deno.test('Design-only service is accepted without a Content service', async () => {
   const client = {
     from(table: string) {
-      const rows = table === 'engagements'
-        ? { id: 'engagement-1', organization_id: '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25', brand_id: 'brand-1' }
-        : [{ id: 'design-service', service_catalog: { department_id: 'design', slug: 'design_systems', name: 'Design Systems' } }]
+      const rows: Record<string, unknown> = {
+        engagements: { id: 'engagement-1', organization_id: '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25', client_id: 'agency-client-1', project_id: 'project-1', brand_id: 'brand-1' },
+        agency_clients: { id: 'agency-client-1', organization_id: '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25', canonical_client_id: 'client-1', name: 'Operating client' },
+        clients: { id: 'client-1', organization_id: '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25', name: 'Canonical client' },
+        projects: { id: 'project-1', organization_id: '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25', client_id: 'client-1', name: 'Canonical project' },
+        brands: { id: 'brand-1', organization_id: '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25', client_id: 'agency-client-1', name: 'Brand' },
+        engagement_services: [{ id: 'design-service', service_catalog: { department_id: 'design', slug: 'design_systems', name: 'Design Systems' } }],
+      }
       const chain: Record<string, unknown> = {}
       for (const method of ['select', 'eq']) chain[method] = () => chain
-      chain.maybeSingle = () => resolved(rows)
-      chain.then = (resolve: (value: unknown) => unknown) => resolved(rows).then(resolve)
+      chain.maybeSingle = () => resolved(rows[table])
+      chain.then = (resolve: (value: unknown) => unknown) => resolved(rows[table]).then(resolve)
       return chain
     },
   }
   const result = await requireDepartmentEngagement(client as never, 'engagement-1', 'design')
   assertEquals(result.services.length, 1)
   assertEquals(JSON.stringify(result.services).includes('"department_id":"design"'), true)
+  assertEquals(result.commercialContext.canonical_client.id, 'client-1')
+  assertEquals(result.commercialContext.project.id, 'project-1')
 })
 
 Deno.test('Design chat draft persists a canonical immutable version and no approval', async () => {
@@ -152,7 +166,14 @@ Deno.test('Marketing proposal completes with only an isolated Marketing service 
     requestBody = JSON.parse(String(init?.body))
     return new Response(JSON.stringify({ output_text: JSON.stringify(content), usage: { input_tokens: 10, output_tokens: 20 } }))
   }, {
-    requireDepartmentEngagement: (async () => ({ engagement: { id: 'marketing-engagement', brand_id: 'brand' }, services: [{ id: 'marketing-service', service_catalog: { department_id: 'marketing' } }] })) as any,
+    requireDepartmentEngagement: (async () => ({
+      engagement: { id: 'marketing-engagement', brand_id: 'brand' },
+      services: [{ id: 'marketing-service', service_catalog: { department_id: 'marketing' } }],
+      commercialContext: {
+        canonical_client: { id: 'client' }, agency_client: { id: 'agency-client' },
+        project: { id: 'project' }, engagement: { id: 'marketing-engagement' }, brand: { id: 'brand' },
+      },
+    })) as any,
     safeStage: (async () => null) as any, approvedSafeContext: (async () => []) as any,
     resolveSingleOpenAiModel: (async () => ({ connectorId: 'marketing-connector', credential: 'test-key', model: 'test-model' })) as any,
     estimatedCost: () => null,
@@ -165,10 +186,116 @@ Deno.test('Marketing proposal completes with only an isolated Marketing service 
   assertEquals(saved.artifactType, 'measurement_plan')
   assertEquals(saved.content, content)
   assertEquals(saved.aiRunId, 'marketing-run')
-  assertEquals(runWrites[0].context_manifest, { purpose: 'marketing_artifact_draft', proposal_target: 'artifact', department_id: 'marketing', artifact_type: 'measurement_plan', connector_connection_id: 'marketing-connector', approved_artifact_version_ids: [] })
+  const manifest = runWrites[0].context_manifest as Record<string, unknown>
+  assertEquals(runWrites[0].project_id, 'project')
+  assertEquals(manifest.purpose, 'marketing_artifact_draft')
+  assertEquals(manifest.profile_version, 'wch2-v1')
+  assertEquals(manifest.canonical_client_id, 'client')
+  assertEquals(manifest.agency_client_id, 'agency-client')
+  assertEquals(manifest.project_id, 'project')
+  assertEquals(manifest.approved_artifact_version_ids, [])
+  assertEquals(typeof manifest.context_checksum, 'string')
   assertEquals((request.text as Record<string, unknown>).format, marketingArtifactResponseFormat('measurement_plan'))
   assertEquals(String(request.instructions).includes('"approved_artifacts":[]'), true)
   assertEquals(String(request.instructions).includes('marketing-service'), true)
+})
+
+Deno.test('connector resolution rejects ambiguity and requires an explicit model', async () => {
+  await assertRejects(
+    async () => selectSingleOpenAiModel([], 'content', () => 'test-key'),
+    Error,
+    'No verified OpenAI connector',
+  )
+  await assertRejects(
+    async () => selectSingleOpenAiModel([{ id: 'one' }, { id: 'two' }], 'content', () => 'test-key'),
+    Error,
+    'Exactly one verified OpenAI connector',
+  )
+  await assertRejects(
+    async () => selectSingleOpenAiModel([{ id: 'one', secret_name: 'OPENAI_KEY', public_config: {} }], 'content', () => 'test-key'),
+    Error,
+    'requires an explicit model_id',
+  )
+})
+
+Deno.test('context freeze is deterministic across canonical roots and exact approved versions', async () => {
+  const input = {
+    departmentId: 'development',
+    commercialContext: {
+      canonical_client: { id: 'client' }, agency_client: { id: 'agency-client' },
+      project: { id: 'project' }, engagement: { id: 'engagement' }, brand: { id: 'brand' },
+    },
+    services: [{ id: 'service-b' }, { id: 'service-a' }],
+    approvedContext: [
+      { artifact_id: 'artifact-b', artifact_version_id: 'version-b', artifact_type: 'design_system', content: { summary: 'B' } },
+      { artifact_id: 'artifact-a', artifact_version_id: 'version-a', artifact_type: 'technical_brief', content: { summary: 'A' } },
+    ],
+    provider: { connectorId: 'connector', model: 'explicit-model' },
+    stageId: 'stage',
+  }
+  const first = await freezeDepartmentChatContext(input)
+  const second = await freezeDepartmentChatContext(input)
+  assertEquals(first.manifest.context_checksum, second.manifest.context_checksum)
+  assertEquals(first.manifest.active_service_ids, ['service-a', 'service-b'])
+  assertEquals(first.manifest.approved_artifact_version_ids, ['version-a', 'version-b'])
+  assertEquals(first.manifest.project_id, 'project')
+  assertEquals(first.manifest.engagement_stage_instance_id, 'stage')
+})
+
+Deno.test('context freeze rejects incomplete ownership and out-of-profile artifacts', async () => {
+  const base = {
+    departmentId: 'development',
+    commercialContext: {
+      canonical_client: { id: 'client' }, agency_client: { id: 'agency-client' },
+      project: { id: 'project' }, engagement: { id: 'engagement' }, brand: { id: 'brand' },
+    },
+    services: [{ id: 'service' }],
+    approvedContext: [] as Record<string, unknown>[],
+    provider: { connectorId: 'connector', model: 'explicit-model' },
+  }
+  await assertRejects(
+    () => freezeDepartmentChatContext({ ...base, commercialContext: { ...base.commercialContext, project: { id: '' } } }),
+    Error,
+    'canonical context envelope is incomplete',
+  )
+  await assertRejects(
+    () => freezeDepartmentChatContext({
+      ...base,
+      approvedContext: [{ artifact_id: 'artifact', artifact_version_id: 'version', artifact_type: 'marketing_report', content: {} }],
+    }),
+    Error,
+    'outside the development profile',
+  )
+})
+
+Deno.test('Development chat creates only an internal unapproved technical artifact version', async () => {
+  const writes: Array<{ table: string, value: Record<string, unknown> }> = []
+  const admin = { from(table: string) {
+    const query: any = {
+      insert: (value: Record<string, unknown>) => { writes.push({ table, value }); return query },
+      select: () => query,
+      single: async () => ({ data: table === 'artifacts' ? { id: 'development-artifact' } : { id: 'development-version', version_number: 1 }, error: null }),
+      eq: () => query, order: () => query, limit: () => query,
+      maybeSingle: async () => ({ data: null, error: null }),
+    }
+    return query
+  } }
+  const content = validateDevelopmentChatArtifact('technical_brief', {
+    notes: 'Use the approved architecture.', checklist: ['Confirm environment access'],
+  })
+  const result = await createDevelopmentArtifactVersion(admin as any, {
+    engagement: { id: 'engagement', brand_id: 'brand' }, stageId: 'stage', artifactId: null,
+    artifactType: 'technical_brief', title: 'Technical brief', content,
+    changeSummary: 'Initial chat draft', actorId: 'member', aiRunId: 'run',
+  })
+  assertEquals(result.artifact_id, 'development-artifact')
+  assertEquals(writes.find(write => write.table === 'artifacts')?.value.artifact_type, 'technical_brief')
+  const version = writes.find(write => write.table === 'artifact_versions')?.value
+  assertEquals(version?.content, content)
+  assertEquals(version?.ai_use_allowed, false)
+  assertEquals(version?.data_classification, 'internal')
+  assertEquals(writes.some(write => write.table === 'artifact_approvals'), false)
+  assertEquals(writes.some(write => write.table === 'tasks'), false)
 })
 
 Deno.test('Shared Department Chat has one external allowlisted model endpoint', () => {

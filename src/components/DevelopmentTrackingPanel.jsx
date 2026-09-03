@@ -11,6 +11,7 @@ import {
 import { developmentStudio } from '../data/developmentStudioRepository.js'
 import ArtifactApprovalPanel from './ArtifactApprovalPanel.jsx'
 import ArtifactRelationsPanel from './ArtifactRelationsPanel.jsx'
+import DepartmentChat from './DepartmentChat.jsx'
 
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20'
 const PRIMARY = 'rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50'
@@ -40,6 +41,16 @@ export default function DevelopmentTrackingPanel({ workspace, onRefresh }) {
       <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">Record stage progress, concise team notes, and immutable technical or launch artifacts. Source code, builds, deployments, and engineering tickets remain outside Anka Sphere.</p>
     </section>
     {(error || notice) && <div className={`rounded-xl border px-4 py-3 text-sm ${error ? 'border-red-900/60 bg-red-950/40 text-red-300' : 'border-emerald-900/60 bg-emerald-950/30 text-emerald-300'}`}>{error || notice}</div>}
+    <DepartmentChat
+      departmentId="development"
+      engagement={workspace.engagement}
+      artifactDefinitions={DEVELOPMENT_ARTIFACTS}
+      artifactForType={artifactType => workspace.developmentArtifacts.find(item => item.artifact_type === artifactType) || null}
+      stageForType={() => stages[0] || null}
+      onPropose={developmentStudio.proposeArtifact}
+      onProposeWorkItem={developmentStudio.proposeWorkItem}
+      onCreated={onRefresh}
+    />
     <section>
       <div><h2 className="text-lg font-semibold">Development stages</h2><p className="mt-1 text-xs text-slate-500">Four status choices and one notes field per instantiated Development stage.</p></div>
       <div className="mt-4 grid gap-4 xl:grid-cols-3">{stages.map(stage => <StageCard key={`${stage.id}:${stage.status}:${stage.team_notes}`} stage={stage} saving={saving} onSave={(status, notes) => act(() => developmentStudio.updateStage({ stage_id: stage.id, status, notes }), `${stage.name} tracking updated.`)} />)}</div>

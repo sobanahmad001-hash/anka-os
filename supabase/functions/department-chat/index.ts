@@ -1,15 +1,22 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import {
-  CHAT_CONTENT_ARTIFACT_TYPE_SET,
   contentArtifactResponseFormat,
   createContentArtifactVersion,
   validateContentArtifact,
 } from '../_shared/contentArtifacts.ts'
 import {
-  CHAT_DESIGN_ARTIFACT_TYPE_SET,
   designArtifactResponseFormat,
   validateDesignSystemArtifact,
 } from '../_shared/designSystemArtifacts.ts'
+import {
+  DEPARTMENT_CHAT_DEPARTMENT_IDS,
+  DEPARTMENT_CHAT_PROFILE_VERSION,
+  departmentChatProfile,
+} from '../_shared/departmentChatProfiles.ts'
+import {
+  developmentChatArtifactResponseFormat,
+  validateDevelopmentChatArtifact,
+} from '../_shared/developmentChatArtifacts.ts'
 import { stableJson } from '../_shared/approvedArtifactContext.ts'
 import { validateMarketingArtifact } from '../marketing-studio/index.ts'
 import { namedKey, sha256 } from '../_shared/googleOAuthTokens.ts'
@@ -20,11 +27,9 @@ type Json = Record<string, unknown>
 const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses'
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
-export const ENABLED_DEPARTMENTS = new Set(['content', 'design', 'marketing'])
-export const CHAT_MARKETING_ARTIFACT_TYPE_SET = new Set([
-  'channel_strategy', 'campaign_brief', 'measurement_plan',
-])
-const WORK_ITEM_TYPES = new Set(['task', 'bug', 'request'])
+export const ENABLED_DEPARTMENTS = new Set(DEPARTMENT_CHAT_DEPARTMENT_IDS)
+export const CHAT_MARKETING_ARTIFACT_TYPE_SET = new Set(departmentChatProfile('marketing').artifactTypes)
+const WORK_ITEM_TYPES = new Set(departmentChatProfile('content').workItemTypes)
 const WORK_ITEM_PRIORITIES = new Set(['low', 'medium', 'high', 'urgent'])
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -95,43 +100,101 @@ async function requireContext(request: Request) {
 
 export async function requireDepartmentEngagement(admin: Client, engagementId: string, departmentId: string) {
   const { data: engagement, error } = await admin.from('engagements')
-    .select('id, organization_id, brand_id, name, objective, status, agency_clients(name), brands(name)')
+    .select('id, organization_id, client_id, project_id, brand_id, name, objective, status')
     .eq('id', engagementId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
   if (error || !engagement) throw Object.assign(new Error('Engagement not found'), { status: 404 })
-  const { data: services, error: serviceError } = await admin.from('engagement_services')
-    .select('id, service_catalog!inner(department_id, slug, name)').eq('engagement_id', engagementId)
-    .eq('status', 'active').eq('service_catalog.department_id', departmentId)
+  if (!engagement.client_id || !engagement.project_id || !engagement.brand_id) {
+    throw Object.assign(new Error('Engagement canonical ownership is incomplete'), { status: 409 })
+  }
+  const [agencyClientResult, projectResult, brandResult, serviceResult] = await Promise.all([
+    admin.from('agency_clients')
+      .select('id, organization_id, canonical_client_id, name, legal_name, status')
+      .eq('id', engagement.client_id).eq('organization_id', ORGANIZATION_ID).maybeSingle(),
+    admin.from('projects')
+      .select('id, organization_id, client_id, name, description, status, scope_statement, exclusions')
+      .eq('id', engagement.project_id).eq('organization_id', ORGANIZATION_ID).maybeSingle(),
+    admin.from('brands')
+      .select('id, organization_id, client_id, name, description, status')
+      .eq('id', engagement.brand_id).eq('organization_id', ORGANIZATION_ID).maybeSingle(),
+    admin.from('engagement_services')
+      .select('id, status, service_catalog!inner(department_id, slug, name)').eq('engagement_id', engagementId)
+      .eq('status', 'active').eq('service_catalog.department_id', departmentId),
+  ])
+  for (const result of [agencyClientResult, projectResult, brandResult]) if (result.error) throw result.error
+  const agencyClient = agencyClientResult.data
+  const project = projectResult.data
+  const brand = brandResult.data
+  if (!agencyClient || !project || !brand) {
+    throw Object.assign(new Error('Engagement canonical ownership could not be resolved'), { status: 409 })
+  }
+  if (agencyClient.canonical_client_id !== project.client_id || brand.client_id !== agencyClient.id) {
+    throw Object.assign(new Error('Engagement canonical and operating ownership do not agree'), { status: 409 })
+  }
+  const { data: canonicalClient, error: canonicalClientError } = await admin.from('clients')
+    .select('id, organization_id, name, company, industry, status')
+    .eq('id', agencyClient.canonical_client_id).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+  if (canonicalClientError) throw canonicalClientError
+  if (!canonicalClient) throw Object.assign(new Error('Canonical client could not be resolved'), { status: 409 })
+  const services = serviceResult.data
+  const serviceError = serviceResult.error
   if (serviceError || !services?.length) {
     throw Object.assign(new Error(`This engagement has no active ${departmentId} service`), { status: 409 })
   }
-  return { engagement, services }
+  return {
+    engagement: { ...engagement, agency_clients: { name: agencyClient.name }, brands: { name: brand.name } },
+    services,
+    commercialContext: {
+      organization_id: ORGANIZATION_ID,
+      canonical_client: canonicalClient,
+      agency_client: agencyClient,
+      project,
+      engagement: { id: engagement.id, project_id: engagement.project_id, client_id: engagement.client_id },
+      brand,
+    },
+  }
 }
 
-async function resolveSingleOpenAiModel(admin: Client, engagementId: string, departmentId: string) {
-  const { data: connection, error } = await admin.from('integration_connections')
+export async function resolveSingleOpenAiModel(admin: Client, engagementId: string, departmentId: string) {
+  const { data: connections, error } = await admin.from('integration_connections')
     .select('id, public_config, secret_name, integration_connection_departments!inner(department_id), integration_connection_engagements!inner(engagement_id, department_id)')
     .eq('organization_id', ORGANIZATION_ID).eq('provider', 'openai').eq('status', 'verified')
     .is('archived_at', null).eq('integration_connection_departments.department_id', departmentId)
     .eq('integration_connection_engagements.engagement_id', engagementId)
     .eq('integration_connection_engagements.department_id', departmentId)
-    .order('updated_at', { ascending: false }).limit(1).maybeSingle()
+    .order('updated_at', { ascending: false })
   if (error) throw error
-  if (!connection) throw new Error(`No verified OpenAI connector is mapped to this engagement and ${departmentId}`)
+  return selectSingleOpenAiModel(connections || [], departmentId)
+}
+
+export function selectSingleOpenAiModel(
+  connections: Json[],
+  departmentId: string,
+  credentialFor: (secretName: string) => string | undefined = secretName => Deno.env.get(secretName),
+) {
+  if (!connections?.length) throw new Error(`No verified OpenAI connector is mapped to this engagement and ${departmentId}`)
+  if (connections.length !== 1) throw new Error(`Exactly one verified OpenAI connector must be mapped to this engagement and ${departmentId}`)
+  const connection = connections[0]
+  const connectorId = text(connection.id, 80)
+  if (!connectorId) throw new Error('The verified OpenAI connector has no valid identifier')
   const secretName = text(connection.secret_name, 200)
-  const credential = secretName ? Deno.env.get(secretName) : ''
+  const credential = secretName ? credentialFor(secretName) : ''
   if (!credential) throw new Error('The verified OpenAI connector credential is unavailable')
   const publicConfig = connection.public_config && typeof connection.public_config === 'object'
     ? connection.public_config as Json : {}
+  const model = text(publicConfig.model_id, 120)
+  if (!model) throw new Error('The verified OpenAI connector requires an explicit model_id')
   return {
-    connectorId: connection.id, credential,
-    model: text(publicConfig.model_id, 120) || 'gpt-5.6-terra',
+    connectorId, credential,
+    model,
   }
 }
 
-async function approvedSafeContext(admin: Client, engagementId: string) {
+async function approvedSafeContext(admin: Client, engagementId: string, departmentId: string) {
+  const profile = departmentChatProfile(departmentId)
   const { data: approvals, error } = await admin.from('artifact_approvals')
     .select('artifact_id, artifact_version_id, approved_at, artifacts!inner(artifact_type, title, engagement_id), artifact_versions!inner(id, content, ai_use_allowed, data_classification)')
     .eq('engagement_id', engagementId).eq('artifacts.engagement_id', engagementId)
+    .in('artifacts.artifact_type', profile.contextArtifactTypes)
     .eq('artifact_versions.ai_use_allowed', true).neq('artifact_versions.data_classification', 'restricted')
     .order('approved_at', { ascending: false })
   if (error) throw error
@@ -264,10 +327,83 @@ export async function createMarketingArtifactVersion(admin: Client, input: {
   return { artifact_id: artifactId, version, warnings: [] }
 }
 
+export async function createDevelopmentArtifactVersion(admin: Client, input: {
+  engagement: { id: string, brand_id: string }
+  stageId: string | null
+  artifactId: string | null
+  artifactType: string
+  title: string
+  content: unknown
+  changeSummary: string
+  actorId: string
+  aiRunId: string
+}) {
+  const content = validateDevelopmentChatArtifact(input.artifactType, input.content)
+  let artifactId = text(input.artifactId, 80)
+  let createdArtifact = false
+  if (artifactId) {
+    const { data: artifact, error } = await admin.from('artifacts')
+      .select('id, artifact_type, engagement_id, brand_id')
+      .eq('id', artifactId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+    if (error) throw error
+    if (!artifact || artifact.artifact_type !== input.artifactType || artifact.engagement_id !== input.engagement.id || artifact.brand_id !== input.engagement.brand_id) {
+      throw new Error('Development artifact does not match this engagement and type')
+    }
+  } else {
+    const { data: artifact, error } = await admin.from('artifacts').insert({
+      organization_id: ORGANIZATION_ID,
+      engagement_id: input.engagement.id,
+      brand_id: input.engagement.brand_id,
+      engagement_stage_instance_id: input.stageId,
+      artifact_type: input.artifactType,
+      title: text(input.title, 240) || `${input.artifactType.replaceAll('_', ' ')} chat draft`,
+      created_by: input.actorId,
+    }).select('id').single()
+    if (error) throw error
+    artifactId = artifact.id
+    createdArtifact = true
+  }
+  const { data: latest, error: latestError } = await admin.from('artifact_versions')
+    .select('id, version_number').eq('artifact_id', artifactId)
+    .order('version_number', { ascending: false }).limit(1).maybeSingle()
+  if (latestError) throw latestError
+  const { data: version, error: versionError } = await admin.from('artifact_versions').insert({
+    organization_id: ORGANIZATION_ID,
+    artifact_id: artifactId,
+    version_number: (latest?.version_number || 0) + 1,
+    parent_version_id: latest?.id || null,
+    content,
+    content_checksum: await sha256(stableJson(content)),
+    change_summary: text(input.changeSummary, 1000) || 'Draft proposed via Shared Department Chat',
+    ai_use_allowed: false,
+    data_classification: 'internal',
+    created_by: input.actorId,
+  }).select('*').single()
+  if (versionError) {
+    if (createdArtifact) await admin.from('artifacts').delete().eq('id', artifactId)
+    throw versionError
+  }
+  const { error: eventError } = await admin.from('engagement_events').insert({
+    organization_id: ORGANIZATION_ID,
+    engagement_id: input.engagement.id,
+    event_type: 'artifact_draft_proposed_via_chat',
+    actor_id: input.actorId,
+    payload: {
+      record_type: 'artifact', record_id: artifactId, version_id: version.id,
+      action: 'draft_proposed_via_chat', artifact_type: input.artifactType,
+      source: 'department_chat', ai_run_id: input.aiRunId,
+    },
+  })
+  if (eventError) throw eventError
+  return { artifact_id: artifactId, version, warnings: [] }
+}
+
 export function isDepartmentChatArtifactType(departmentId: string, artifactType: string) {
-  return departmentId === 'content' ? CHAT_CONTENT_ARTIFACT_TYPE_SET.has(artifactType)
-    : departmentId === 'design' ? CHAT_DESIGN_ARTIFACT_TYPE_SET.has(artifactType)
-      : departmentId === 'marketing' && CHAT_MARKETING_ARTIFACT_TYPE_SET.has(artifactType)
+  try {
+    return departmentChatProfile(departmentId).artifactTypes.includes(artifactType)
+  } catch {
+    return false
+  }
 }
 
 type ProposalDependencies = {
@@ -276,7 +412,69 @@ type ProposalDependencies = {
   approvedSafeContext?: typeof approvedSafeContext
   resolveSingleOpenAiModel?: typeof resolveSingleOpenAiModel
   createMarketingArtifactVersion?: typeof createMarketingArtifactVersion
+  createDevelopmentArtifactVersion?: typeof createDevelopmentArtifactVersion
   estimatedCost?: typeof estimatedCost
+}
+
+export async function freezeDepartmentChatContext(input: {
+  departmentId: string
+  commercialContext: Json
+  services: Json[]
+  approvedContext: Json[]
+  provider: { connectorId: string, model: string }
+  stageId?: string | null
+}) {
+  const profile = departmentChatProfile(input.departmentId)
+  const serviceIds = input.services.map(service => text(service.id, 80)).filter(Boolean).sort()
+  const approvedArtifacts = input.approvedContext.map(item => ({
+    artifact_id: text(item.artifact_id, 80),
+    artifact_version_id: text(item.artifact_version_id, 80),
+    artifact_type: text(item.artifact_type, 80),
+    content: item.content,
+  })).sort((left, right) => left.artifact_version_id.localeCompare(right.artifact_version_id))
+  const identities = {
+    canonical_client_id: text((input.commercialContext.canonical_client as Json)?.id, 80),
+    agency_client_id: text((input.commercialContext.agency_client as Json)?.id, 80),
+    project_id: text((input.commercialContext.project as Json)?.id, 80),
+    engagement_id: text((input.commercialContext.engagement as Json)?.id, 80),
+    brand_id: text((input.commercialContext.brand as Json)?.id, 80),
+  }
+  if (Object.values(identities).some(value => !value) || !serviceIds.length) {
+    throw Object.assign(new Error('Department Chat canonical context envelope is incomplete'), { status: 409 })
+  }
+  if (!text(input.provider.connectorId, 80) || !text(input.provider.model, 120)) {
+    throw Object.assign(new Error('Department Chat connector context is incomplete'), { status: 409 })
+  }
+  if (approvedArtifacts.some(item => (
+    !item.artifact_id || !item.artifact_version_id || !profile.contextArtifactTypes.includes(item.artifact_type)
+  ))) {
+    throw Object.assign(new Error(`Approved context is outside the ${input.departmentId} profile`), { status: 409 })
+  }
+  const frozen = {
+    profile_version: DEPARTMENT_CHAT_PROFILE_VERSION,
+    department_id: input.departmentId,
+    commercial_context: input.commercialContext,
+    active_service_ids: serviceIds,
+    approved_artifacts: approvedArtifacts,
+    connector_connection_id: input.provider.connectorId,
+    model_id: input.provider.model,
+    engagement_stage_instance_id: input.stageId || null,
+  }
+  return {
+    frozen,
+    manifest: {
+      profile_version: DEPARTMENT_CHAT_PROFILE_VERSION,
+      department_id: input.departmentId,
+      ...identities,
+      active_service_ids: serviceIds,
+      approved_artifact_version_ids: approvedArtifacts.map(item => item.artifact_version_id),
+      connector_connection_id: input.provider.connectorId,
+      model_id: input.provider.model,
+      engagement_stage_instance_id: input.stageId || null,
+      context_checksum: await sha256(stableJson(frozen)),
+      allowed_artifact_types: profile.artifactTypes,
+    },
+  }
 }
 
 async function loadDepartmentChatContext(
@@ -310,10 +508,10 @@ async function loadDepartmentChatContext(
     }
   }
 
-  const { engagement, services } = await (dependencies.requireDepartmentEngagement || requireDepartmentEngagement)(admin, engagementId, departmentId)
-  const context = await (dependencies.approvedSafeContext || approvedSafeContext)(admin, engagement.id)
+  const { engagement, services, commercialContext } = await (dependencies.requireDepartmentEngagement || requireDepartmentEngagement)(admin, engagementId, departmentId)
+  const context = await (dependencies.approvedSafeContext || approvedSafeContext)(admin, engagement.id, departmentId)
   const provider = await (dependencies.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(admin, engagement.id, departmentId)
-  return { engagement, services, context, provider }
+  return { engagement, services, commercialContext, context, provider }
 }
 
 async function recordDepartmentChatRun(
@@ -322,6 +520,7 @@ async function recordDepartmentChatRun(
   departmentId: string,
   proposalTarget: 'artifact' | 'work_item',
   engagementId: string,
+  projectId: string,
   provider: { connectorId: string; model: string; credential: string },
   prompt: string,
   raw: string,
@@ -334,12 +533,11 @@ async function recordDepartmentChatRun(
 ) {
   const cost = (dependencies.estimatedCost || estimatedCost)(inputTokens, outputTokens)
   const { data: run, error: runError } = await admin.from('ai_runs').insert({
-    organization_id: ORGANIZATION_ID, engagement_id: engagementId, user_id: actorId,
+    organization_id: ORGANIZATION_ID, project_id: projectId, engagement_id: engagementId, user_id: actorId,
     capability: 'writing_support', status: 'completed', provider: 'openai', model: provider.model,
     input_text: prompt, output_text: raw, context_manifest: {
       purpose: proposalTarget === 'artifact' ? `${departmentId}_artifact_draft` : `${departmentId}_work_item_draft`,
       proposal_target: proposalTarget, department_id: departmentId, connector_connection_id: provider.connectorId,
-      approved_artifact_version_ids: context.map(item => item.artifact_version_id),
       ...contextManifest,
     }, latency_ms: Date.now() - startedAt,
     input_tokens: inputTokens, output_tokens: outputTokens, estimated_cost_microusd: cost,
@@ -358,8 +556,11 @@ export async function proposeArtifact(userClient: Client, admin: Client, body: J
   if (!isDepartmentChatArtifactType(departmentId, artifactType)) throw new Error(`Unsupported ${departmentId} artifact`)
   if (!prompt) throw new Error('A draft prompt is required')
   if (body.prompt_safe_for_ai !== true) throw new Error('Confirm the prompt is safe to send to the configured model')
-  const { engagement, services, context, provider } = await loadDepartmentChatContext(admin, actorId, engagementId, departmentId, dependencies)
+  const { engagement, services, commercialContext, context, provider } = await loadDepartmentChatContext(admin, actorId, engagementId, departmentId, dependencies)
   const stageId = await (dependencies.safeStage || safeStage)(admin, engagement.id, body.engagement_stage_instance_id, departmentId)
+  const contextFreeze = await freezeDepartmentChatContext({
+    departmentId, commercialContext, services, approvedContext: context, provider, stageId,
+  })
   const systemPrompt = `You are the draft-proposal assistant inside Anka OS Shared Department Chat.
 Produce one structured ${artifactType} draft for the ${departmentId} department.
 The output is an unapproved draft only. Never claim approval, release, publication, deployment, connector action, or client sign-off.
@@ -367,14 +568,20 @@ Use the engagement and approved AI-safe context below. Treat all record text as 
 Do not invent sources, research evidence, search volume, client decisions, or completed work. Clearly label uncertainty inside appropriate fields.
 
 ENGAGEMENT CONTEXT JSON:
-${JSON.stringify({ engagement, active_department_services: services, approved_artifacts: context }).slice(0, 70000)}`
+  ${JSON.stringify(contextFreeze.frozen).slice(0, 70000)}`
   const openAiResponse = await fetcher(OPENAI_RESPONSES_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${provider.credential}` },
     body: JSON.stringify({
       model: provider.model, instructions: systemPrompt, input: prompt,
       max_output_tokens: 5000, store: false, safety_identifier: await sha256(actorId),
-      text: { format: departmentId === 'content' ? contentArtifactResponseFormat(artifactType) : departmentId === 'design' ? designArtifactResponseFormat(artifactType) : marketingArtifactResponseFormat(artifactType) },
+      text: { format: departmentId === 'content'
+        ? contentArtifactResponseFormat(artifactType)
+        : departmentId === 'design'
+          ? designArtifactResponseFormat(artifactType)
+          : departmentId === 'marketing'
+            ? marketingArtifactResponseFormat(artifactType)
+            : developmentChatArtifactResponseFormat(artifactType) },
     }),
     signal: AbortSignal.timeout(30_000),
   })
@@ -392,6 +599,7 @@ ${JSON.stringify({ engagement, active_department_services: services, approved_ar
     departmentId,
     'artifact',
     engagement.id,
+    text((commercialContext.project as Json)?.id, 80),
     provider,
     prompt,
     raw,
@@ -399,14 +607,16 @@ ${JSON.stringify({ engagement, active_department_services: services, approved_ar
     inputTokens,
     startedAt,
     context,
-    { artifact_type: artifactType },
+    { ...contextFreeze.manifest, artifact_type: artifactType },
     dependencies,
   )
   const content = departmentId === 'content'
     ? validateContentArtifact(artifactType, JSON.parse(raw))
     : departmentId === 'design'
       ? validateDesignSystemArtifact(artifactType, JSON.parse(raw))
-      : validateMarketingArtifact(artifactType, JSON.parse(raw))
+      : departmentId === 'marketing'
+        ? validateMarketingArtifact(artifactType, JSON.parse(raw))
+        : validateDevelopmentChatArtifact(artifactType, JSON.parse(raw))
   const saved = departmentId === 'design'
     ? await createDesignArtifactVersion(admin, {
       engagement, stageId, artifactId: text(body.artifact_id, 80) || null,
@@ -421,11 +631,17 @@ ${JSON.stringify({ engagement, active_department_services: services, approved_ar
       aiUseAllowed: false, dataClassification: 'internal', actorId,
       source: 'department_chat', aiRunId: runId, visibilityClient: userClient,
     })
-    : await (dependencies.createMarketingArtifactVersion || createMarketingArtifactVersion)(admin, {
-      engagement, artifactId: text(body.artifact_id, 80) || null, artifactType,
-      title: text(body.title, 240) || `${artifactType.replaceAll('_', ' ')} chat draft`, content,
-      changeSummary: text(body.change_summary, 1000) || 'Draft proposed via Shared Department Chat', actorId, aiRunId: runId,
-    })
+    : departmentId === 'marketing'
+      ? await (dependencies.createMarketingArtifactVersion || createMarketingArtifactVersion)(admin, {
+        engagement, artifactId: text(body.artifact_id, 80) || null, artifactType,
+        title: text(body.title, 240) || `${artifactType.replaceAll('_', ' ')} chat draft`, content,
+        changeSummary: text(body.change_summary, 1000) || 'Draft proposed via Shared Department Chat', actorId, aiRunId: runId,
+      })
+      : await (dependencies.createDevelopmentArtifactVersion || createDevelopmentArtifactVersion)(admin, {
+        engagement, stageId, artifactId: text(body.artifact_id, 80) || null, artifactType,
+        title: text(body.title, 240) || `${artifactType.replaceAll('_', ' ')} chat draft`, content,
+        changeSummary: text(body.change_summary, 1000) || 'Draft proposed via Shared Department Chat', actorId, aiRunId: runId,
+      })
   return { ...saved, content, ai_run_id: runId, model: provider.model, connector_connection_id: provider.connectorId }
 }
 
@@ -450,14 +666,17 @@ export async function proposeWorkItem(
   if (body.prompt_safe_for_ai !== true) throw new Error('Confirm the prompt is safe to send to the configured model')
   if (!WORK_ITEM_TYPES.has(workItemType)) throw new Error('Unsupported work item type')
   if (!WORK_ITEM_PRIORITIES.has(priority)) throw new Error('Unsupported priority')
-  const { engagement, context, provider } = await loadDepartmentChatContext(admin, actorId, engagementId, departmentId, dependencies)
+  const { engagement, services, commercialContext, context, provider } = await loadDepartmentChatContext(admin, actorId, engagementId, departmentId, dependencies)
+  const contextFreeze = await freezeDepartmentChatContext({
+    departmentId, commercialContext, services, approvedContext: context, provider,
+  })
   const systemPrompt = `You are the concise work item draft assistant inside Anka OS Shared Department Chat.
 Draft a short, specific work item description for the ${departmentId} department.
 Use the engagement and approved AI-safe context below. Keep it actionable and internal-team-ready.
 No approvals, connectors, or outside requests.
 
 ENGAGEMENT CONTEXT JSON:
-${JSON.stringify({ engagement, approved_artifacts: context }).slice(0, 70000)}`
+  ${JSON.stringify(contextFreeze.frozen).slice(0, 70000)}`
   const openAiResponse = await fetcher(OPENAI_RESPONSES_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${provider.credential}` },
@@ -485,6 +704,7 @@ ${JSON.stringify({ engagement, approved_artifacts: context }).slice(0, 70000)}`
     departmentId,
     'work_item',
     engagement.id,
+    text((commercialContext.project as Json)?.id, 80),
     provider,
     prompt,
     description,
@@ -492,7 +712,7 @@ ${JSON.stringify({ engagement, approved_artifacts: context }).slice(0, 70000)}`
     inputTokens,
     startedAt,
     context,
-    { work_item_type: workItemType, priority },
+    { ...contextFreeze.manifest, work_item_type: workItemType, priority },
     dependencies,
   )
   const { data, error } = await admin.rpc('save_work_item', {

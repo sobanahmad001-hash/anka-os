@@ -15,6 +15,7 @@ const designEdge = read('supabase/functions/design-workshop/index.ts')
 const compiler = read('supabase/functions/_shared/approvedArtifactContext.ts')
 const sharedArtifacts = read('supabase/functions/_shared/contentArtifacts.ts')
 const chat = read('supabase/functions/department-chat/index.ts')
+const chatProfiles = JSON.parse(read('supabase/functions/_shared/departmentChatProfiles.json'))
 const ui = read('src/apps/ContentStudio.jsx')
 
 test('brand brief editor serializes mutable working context', () => {
@@ -66,7 +67,8 @@ test('statement generation is explicit, reviewable, approvable, and not a chat a
   assert.match(ui, /Save reviewed version/)
   assert.match(ui, /ArtifactApprovalPanel/)
   assert.match(ui, /VersionProofingPanel/)
-  assert.match(chat, /CHAT_CONTENT_ARTIFACT_TYPE_SET/)
+  assert.match(chat, /departmentChatProfile/)
+  assert.equal(chatProfiles.departments.content.artifact_types.includes('brand_statement'), false)
   assert.match(sharedArtifacts, /filter\(type => type !== 'brand_statement'\)/)
   assert.doesNotMatch(contentEdge, /api\.openai\.com|generateText|integration-gateway/)
 })

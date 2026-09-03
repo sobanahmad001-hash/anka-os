@@ -6,13 +6,16 @@ import { fileURLToPath } from 'node:url'
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const read = path => readFileSync(`${root}${path}`, 'utf8')
 const edge = read('supabase/functions/department-chat/index.ts')
+const profileData = JSON.parse(read('supabase/functions/_shared/departmentChatProfiles.json'))
 const designArtifact = read('supabase/functions/_shared/designSystemArtifacts.ts')
 const ui = read('src/apps/DesignSystems.jsx')
 const repository = read('src/data/designSystemsRepository.js')
 
 test('UW1 keeps Design alongside Content and reconciled Marketing Department Chat', () => {
-  assert.match(edge, /ENABLED_DEPARTMENTS = new Set\(\['content', 'design', 'marketing'\]\)/)
-  assert.match(edge, /CHAT_DESIGN_ARTIFACT_TYPE_SET/)
+  assert.deepEqual(Object.keys(profileData.departments), ['content', 'design', 'marketing', 'development'])
+  assert.deepEqual(profileData.departments.design.artifact_types, ['design_system'])
+  assert.match(edge, /ENABLED_DEPARTMENTS = new Set\(DEPARTMENT_CHAT_DEPARTMENT_IDS\)/)
+  assert.match(edge, /departmentChatProfile/)
   assert.doesNotMatch(edge, /departmentId !== 'content'/)
   assert.match(designArtifact, /new Set\(\['design_system'\]\)/)
   assert.doesNotMatch(designArtifact, /design_direction/)
