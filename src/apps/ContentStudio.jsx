@@ -10,6 +10,7 @@ import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'
 import ContentCustomFieldsPanel from '../components/ContentCustomFieldsPanel.jsx'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
+import WorkshopContextShell from '../components/WorkshopContextShell.jsx'
 import {
   BRAND_STATEMENT_SOURCE_TYPES,
   BRAND_STATEMENT_TYPE,
@@ -34,6 +35,8 @@ import { contentRequests } from '../data/contentRequestsRepository.js'
 import { contentQueue } from '../data/contentQueueRepository.js'
 import { contentCustomFields } from '../data/contentCustomFieldsRepository.js'
 import { blogLinksForMonth, relatedRecord } from '../data/contentDesignEventLinking.js'
+import { contentSelectionParams, resolveContentContext, resolveContentNavigationScope, selectableContentEngagements } from '../data/contentWorkshopContext.js'
+import { parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
 
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20'
 const BUTTON = 'rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-amber-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50'
@@ -45,14 +48,12 @@ export default function ContentStudio() {
     handleOrganizationAccessError, scopeRevision, requestSignal,
   } = useOrganization()
   const [searchParams, setSearchParams] = useSearchParams()
-  const requestedBrandId = searchParams.get('brand') || ''
-  const requestedEngagementId = searchParams.get('engagement') || ''
-  const originLinkId = searchParams.get('eventLink') || ''
+  const navigationContext = useMemo(() => parseWorkshopNavigation(searchParams), [searchParams])
+  const originLinkId = navigationContext.output?.kind === 'event_link' ? navigationContext.output.id : ''
   const [engagements, setEngagements] = useState([])
-  const [engagementId, setEngagementId] = useState('')
   const [workspace, setWorkspace] = useState(null)
   const [type, setType] = useState('discovery')
-  const requestedTab = searchParams.get('tab') || ''
+  const requestedTab = navigationContext.workshopTab || ''
   const [tab, setTab] = useState(['general', 'queue', 'calendar'].includes(requestedTab) ? requestedTab : 'artifacts')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -69,6 +70,15 @@ export default function ContentStudio() {
   } : null, [activeOrganizationId, organizationReady, requestSignal])
   const studio = repositories?.studio || null
   const loadGeneration = useRef(0)
+  const context = useMemo(() => resolveContentContext(navigationContext, engagements, activeOrganizationId), [activeOrganizationId, engagements, navigationContext])
+  const engagementId = context.engagement?.id || ''
+  const selectableEngagements = useMemo(() => selectableContentEngagements(navigationContext, engagements), [engagements, navigationContext])
+  const canonicalScope = useMemo(() => resolveContentNavigationScope(navigationContext, workspace, activeOrganizationId), [activeOrganizationId, navigationContext, workspace])
+  const contextValidation = validateWorkshopNavigation(navigationContext, canonicalScope)
+  const sameOrganization = !navigationContext.organizationId || navigationContext.organizationId === activeOrganizationId
+  const returnTarget = workspaceReturnTarget(contextValidation.context ? contextValidation : {}, {
+    fallbackProjectId: sameOrganization ? context.engagement?.project_id : '',
+  })
 
   function currentScope(request) {
     return !request.signal?.aborted && currentOrganization.current.organizationId === request.organizationId
@@ -84,7 +94,7 @@ export default function ContentStudio() {
     }
     setLoading(true); setError('')
     try {
-      const next = await studio.load(id)
+      const next = await studio.load(id, navigationContext)
       if (next?.engagement?.organization_id !== request.organizationId) {
         throw Object.assign(new Error('Content workspace organization mismatch'), { status: 403, membershipMismatch: true })
       }
@@ -100,7 +110,7 @@ export default function ContentStudio() {
 
   useEffect(() => {
     loadGeneration.current += 1
-    setEngagements([]); setEngagementId(''); setWorkspace(null)
+    setEngagements([]); setWorkspace(null)
     setSaving(false); setError(''); setMessage(''); setLoading(organizationReady)
   }, [activeOrganizationId, organizationReady, scopeRevision])
 
@@ -114,12 +124,7 @@ export default function ContentStudio() {
       }
       if (!active || !currentScope(request)) return
       setEngagements(rows || [])
-      const requested = rows?.find(item => item.id === requestedEngagementId)
-        || rows?.find(item => item.brand_id === requestedBrandId)
-      const first = requested?.id || rows?.[0]?.id || ''
-      setEngagementId(first)
-      if (first) loadWorkspace(first, request)
-      else setLoading(false)
+      setLoading(false)
     }).catch(reason => {
       if (active && currentScope(request) && reason?.name !== 'AbortError') {
         handleOrganizationAccessError(reason, { membershipMismatch: reason?.membershipMismatch === true })
@@ -127,8 +132,18 @@ export default function ContentStudio() {
       }
     })
     return () => { active = false }
-  }, [activeOrganizationId, handleOrganizationAccessError, organizationReady, requestedBrandId,
-    requestedEngagementId, requestSignal, scopeRevision, studio])
+  }, [activeOrganizationId, handleOrganizationAccessError, organizationReady, requestSignal, scopeRevision, studio])
+
+  useEffect(() => {
+    if (engagementId) loadWorkspace(engagementId)
+    else setWorkspace(null)
+    // Exact record and output pointers must be re-resolved when navigation changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engagementId, navigationContext, studio])
+
+  useEffect(() => {
+    setTab(['general', 'queue', 'calendar'].includes(requestedTab) ? requestedTab : 'artifacts')
+  }, [requestedTab])
 
   async function act(callback, success) {
     if (!studio || !organizationReady) return null
@@ -170,21 +185,37 @@ export default function ContentStudio() {
 
   async function openBlogDraft(link) {
     await updateBlogLink(link, 'in_progress', 'Blog draft started from the shared event plan.')
-    const nextParams = new URLSearchParams(searchParams)
-    nextParams.set('brand', workspace.engagement.brand_id)
-    nextParams.set('eventLink', link.id)
-    nextParams.set('tab', 'artifacts')
-    setSearchParams(nextParams, { replace: true })
+    setSearchParams(contentSelectionParams(navigationContext, context.engagement, activeOrganizationId, {
+      output: { kind: 'event_link', id: link.id }, workshopTab: 'artifacts',
+    }), { replace: true })
     setType('content')
     setTab('artifacts')
   }
 
   function selectTab(nextTab) {
     setTab(nextTab)
-    const nextParams = new URLSearchParams(searchParams)
-    if (nextTab === 'artifacts') nextParams.delete('tab')
-    else nextParams.set('tab', nextTab)
-    setSearchParams(nextParams, { replace: true })
+    if (context.engagement) setSearchParams(contentSelectionParams(navigationContext, context.engagement, activeOrganizationId, {
+      workshopTab: nextTab === 'artifacts' ? '' : nextTab,
+    }), { replace: true })
+  }
+
+  if (organizationReady && !loading && context.mode === 'choose') return <ContentEntryShell>
+    <section className="mx-auto max-w-3xl rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Content Studio</p>
+      <h1 className="mt-2 text-2xl font-semibold">Choose Content work</h1>
+      <p className="mt-2 text-sm text-slate-400">Select an authorized engagement. Content Studio will not choose work silently.</p>
+      <div className="mt-5 grid gap-3">{selectableEngagements.map(item => <button type="button" key={item.id} onClick={() => setSearchParams(contentSelectionParams(navigationContext, item, activeOrganizationId))} className="rounded-xl border border-slate-700 px-4 py-3 text-left text-sm font-semibold text-slate-200 hover:border-amber-500">{item.name} · {item.brands?.name || 'Brand'}</button>)}</div>
+      {!selectableEngagements.length && <p className="mt-5 text-sm text-slate-500">No active Content engagement is available in this organization.</p>}
+    </section>
+  </ContentEntryShell>
+
+  if (organizationReady && !loading && context.mode === 'denied') {
+    const rejected = navigationContext.organizationId && navigationContext.organizationId !== activeOrganizationId
+      ? validateWorkshopNavigation(navigationContext, { status: 'ready', activeOrganizationId, organizationId: activeOrganizationId })
+      : validateWorkshopNavigation(navigationContext, { status: 'denied' })
+    return <ContentEntryShell><WorkshopContextShell navigation={navigationContext} validation={rejected} returnTarget={workspaceReturnTarget(rejected)}>
+      <div />
+    </WorkshopContextShell><div className="mt-5 text-center"><button type="button" onClick={() => setSearchParams({})} className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200">Choose permitted work</button></div></ContentEntryShell>
   }
 
   return <div className="h-full overflow-y-auto bg-slate-950 text-white">
@@ -195,10 +226,12 @@ export default function ContentStudio() {
       </div>
     </header>
     <main className="mx-auto max-w-7xl space-y-6 px-6 py-6">
+      <WorkshopContextShell navigation={navigationContext} validation={contextValidation} returnTarget={returnTarget} projectName={context.engagement?.name}>
       {(error || message) && <div className={`rounded-xl border px-4 py-3 text-sm ${error ? 'border-red-900/60 bg-red-950/40 text-red-300' : 'border-emerald-900/60 bg-emerald-950/30 text-emerald-300'}`}>{error || message}</div>}
       {!['general', 'queue'].includes(tab) && <section className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
         <label className="min-w-72 flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Content engagement
-          <select value={engagementId} onChange={event => { setEngagementId(event.target.value); loadWorkspace(event.target.value) }} className={`${INPUT} mt-2 normal-case tracking-normal`}>
+          <select value={engagementId} onChange={event => { const item = engagements.find(candidate => candidate.id === event.target.value); setSearchParams(item ? contentSelectionParams(navigationContext, item, activeOrganizationId) : {}) }} className={`${INPUT} mt-2 normal-case tracking-normal`}>
+            <option value="">Choose work</option>
             {engagements.map(item => <option key={item.id} value={item.id}>{item.name} · {item.brands?.name || 'Brand'}</option>)}
           </select>
         </label>
@@ -216,8 +249,13 @@ export default function ContentStudio() {
       ) : tab === 'brand' ? (
         <BrandBriefWorkspace studio={studio} workspace={workspace} saving={saving} act={act} onRefresh={() => loadWorkspace(engagementId)} />
       ) : <DepartmentChat departmentId="content" engagement={workspace.engagement} artifactTypes={CONTENT_ARTIFACT_TYPES} artifactDefinitions={CONTENT_ARTIFACT_FORMS} artifactForType={artifactForType} stageForType={artifactType => bestContentStage(workspace.stages, artifactType)} onPropose={studio.proposeArtifact} onProposeWorkItem={studio.proposeWorkItem} onCreated={() => loadWorkspace(engagementId)} />}
+      </WorkshopContextShell>
     </main>
   </div>
+}
+
+function ContentEntryShell({ children }) {
+  return <div className="h-full overflow-y-auto bg-slate-950 px-6 py-12 text-white">{children}</div>
 }
 
 function BrandBriefWorkspace({ studio, workspace, saving, act, onRefresh }) {
