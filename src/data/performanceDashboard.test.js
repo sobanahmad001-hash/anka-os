@@ -6,6 +6,7 @@ import { buildPerformanceDashboard, collectPaginatedRows, shouldApplyDashboardRe
 
 const read = relative => readFileSync(new URL(relative, import.meta.url), 'utf8')
 const repository = read('./performanceDashboardRepository.js')
+const marketingRepository = read('./marketingStudioRepository.js')
 const ui = read('../apps/MarketingStudio.jsx')
 const edge = read('../../supabase/functions/marketing-studio/index.ts')
 
@@ -78,13 +79,42 @@ test('MK6c rolls up every fixed section and keeps unlike sources separate', () =
 })
 
 test('MK6c rejects stale or wrong-brand async dashboard responses', () => {
-  const request = { generation: 4, brandId: brand.id }
-  assert.equal(shouldApplyDashboardResponse({ brand }, request, 4), true)
+  const request = { generation: 4, brandId: brand.id, organizationId, scopeRevision: 9 }
+  assert.equal(shouldApplyDashboardResponse({ brand }, request, 4, 9), true)
   assert.equal(shouldApplyDashboardResponse({ brand }, request, 5), false)
   assert.equal(shouldApplyDashboardResponse({ brand: { ...brand, id: 'brand-b' } }, request, 4), false)
+  assert.equal(shouldApplyDashboardResponse({ brand }, request, 4, 10), false)
+  assert.equal(shouldApplyDashboardResponse({ brand: { ...brand, organization_id: 'organization-b' } }, request, 4, 9), false)
+  const delayedA = { generation: 4, brandId: brand.id, organizationId, scopeRevision: 9 }
+  assert.equal(shouldApplyDashboardResponse({ brand }, delayedA, 4, 10), false)
   assert.match(ui, /useRef\(0\)/)
   assert.match(ui, /\+\+requestGeneration\.current/)
-  assert.match(ui, /shouldApplyDashboardResponse\(result, request, requestGeneration\.current\)/)
+  assert.match(ui, /shouldApplyDashboardResponse\(result, request, requestGeneration\.current, scopeRevision\)/)
+})
+
+test('MK6c binds catalogues, dashboard roots, and writes to the selected organization', () => {
+  assert.match(marketingRepository, /createMarketingStudioScope\(organizationId/)
+  assert.match(marketingRepository, /from\('brands'\)[\s\S]*?eq\('organization_id', organizationId\)/)
+  assert.match(marketingRepository, /from\('engagements'\)[\s\S]*?eq\('organization_id', organizationId\)/)
+  assert.match(marketingRepository, /body: \{ \.\.\.input, action, organization_id: organizationId/)
+  for (const source of ['tracked_page_current_health', 'tracked_keywords', 'ad_campaigns', 'meta_connections']) {
+    const start = repository.indexOf(`from('${source}')`)
+    assert.notEqual(start, -1)
+    assert.match(repository.slice(start, start + 420), /eq\('organization_id', organizationId\)/)
+  }
+  assert.match(repository, /rowsForParents\([\s\S]*?organizationId, options/)
+  assert.match(repository, /organization_id: organizationId/)
+})
+
+test('MK6c blocks queries until selection resolves, clears scope state, and never auto-switches for deep links', () => {
+  assert.match(ui, /const organizationReady = Boolean\(activeOrganizationId\) && !organizationLoading && !selectionRequired/)
+  assert.match(ui, /if \(!studio \|\| !organizationReady\) return undefined/)
+  assert.match(ui, /useLayoutEffect\(\(\) => \{[\s\S]*?setEngagements\(\[\]\); setBrands\(\[\]\); setBacklinkBrandId\(''\); setEngagementId\(''\)/)
+  assert.match(ui, /setWorkspace\(null\); setCampaignId\(''\); setTab\('campaigns'\)/)
+  assert.match(ui, /setLoading\(organizationReady\); setSaving\(false\); setError\(''\); setMessage\(''\)/)
+  assert.match(ui, /requestedEngagementId && !requested/)
+  assert.match(ui, /requested Marketing engagement is not available in the active organization/)
+  assert.doesNotMatch(ui, /selectOrganization\s*\(/)
 })
 
 test('MK6c distinguishes configured snapshot sources from no data in the selected period', () => {
