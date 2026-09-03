@@ -63,6 +63,26 @@ export function hasSandboxDepartmentAuthority(membership: Json, departmentId: st
 
 export function quickTaskChatExternalEndpoint() { return OPENAI_RESPONSES_URL }
 
+export function selectSingleSandboxOpenAiModel(
+  connections: Json[],
+  departmentId: string,
+  credentialFor: (secretName: string) => string | undefined = secretName => Deno.env.get(secretName),
+) {
+  if (!connections?.length) throw new Error(`No verified OpenAI connector is mapped to ${departmentId}`)
+  if (connections.length !== 1) throw new Error(`Exactly one verified OpenAI connector must be mapped to ${departmentId}`)
+  const connection = connections[0]
+  const connectorId = text(connection.id, 80)
+  if (!connectorId) throw new Error('The verified OpenAI connector has no valid identifier')
+  const secretName = text(connection.secret_name, 200)
+  const credential = secretName ? credentialFor(secretName) : ''
+  if (!credential) throw new Error('The verified OpenAI connector credential is unavailable')
+  const publicConfig = connection.public_config && typeof connection.public_config === 'object'
+    ? connection.public_config as Json : {}
+  const model = text(publicConfig.model_id, 120)
+  if (!model) throw new Error('The verified OpenAI connector requires an explicit model_id')
+  return { connectorId, credential, model }
+}
+
 export function quickTaskChatResponseFormat() {
   return {
     type: 'json_schema', name: 'anka_quick_task_sandbox_revision', strict: true,
@@ -133,20 +153,14 @@ async function requireContext(request: Request) {
   return { admin, user }
 }
 
-async function resolveSandboxProvider(admin: Client, organizationId: string, departmentId: string) {
-  const { data: connection, error } = await admin.from('integration_connections')
+export async function resolveSandboxProvider(admin: Client, organizationId: string, departmentId: string) {
+  const { data: connections, error } = await admin.from('integration_connections')
     .select('id, public_config, secret_name, integration_connection_departments!inner(department_id)')
     .eq('organization_id', organizationId).eq('provider', 'openai').eq('status', 'verified')
     .is('archived_at', null).eq('integration_connection_departments.department_id', departmentId)
-    .order('updated_at', { ascending: false }).limit(1).maybeSingle()
+    .order('updated_at', { ascending: false })
   if (error) throw error
-  if (!connection) throw new Error(`No verified OpenAI connector is mapped to ${departmentId}`)
-  const secretName = text(connection.secret_name, 200)
-  const credential = secretName ? Deno.env.get(secretName) : ''
-  if (!credential) throw new Error('The verified OpenAI connector credential is unavailable')
-  const publicConfig = connection.public_config && typeof connection.public_config === 'object'
-    ? connection.public_config as Json : {}
-  return { connectorId: connection.id, credential, model: text(publicConfig.model_id, 120) || 'gpt-5.6-terra' }
+  return selectSingleSandboxOpenAiModel(connections || [], departmentId)
 }
 
 async function loadSandboxContext(admin: Client, actorId: string, input: ReturnType<typeof normalizeQuickTaskChatInput>) {

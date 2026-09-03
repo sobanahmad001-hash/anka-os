@@ -10,6 +10,7 @@ This change adds owner-private Quick Task messages, explicit Quick Task AI-run p
 - Migration `20260903100732` was generated with `supabase migration new` and follows applied QTS1 migration `20260903071848` without changing it.
 - Quick Task messages are owner-only under RLS, append-only, tenant-consistent, and unavailable to organization leadership unless the leader owns the Quick Task.
 - QTS AI runs use the explicit `quick_task_chat` capability and bind organization, owner, Quick Task, source revision, department, and verified OpenAI connection.
+- Provider resolution queries all verified organization/department OpenAI mappings and fails closed unless exactly one connection has an explicit `public_config.model_id` and available named credential.
 - The provider request uses `store: false`, a pseudonymous safety identifier, a strict notes/checklist schema, and no business tools or connector action surface.
 - The Edge Function loads only the owned Quick Task revision and its private transcript. It does not load projects, engagements, clients, artifacts, work items, content requests, approvals, releases, or restricted context.
 - Successful chat recording atomically inserts the AI audit, user and assistant messages, one validated `quick_chat` revision, and the ordinary revision lifecycle event.

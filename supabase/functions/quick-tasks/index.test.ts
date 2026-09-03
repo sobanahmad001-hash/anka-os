@@ -5,6 +5,7 @@ import {
   normalizeSandboxContent,
   quickTaskChatExternalEndpoint,
   quickTaskChatResponseFormat,
+  selectSingleSandboxOpenAiModel,
   SANDBOX_DEPARTMENTS,
   sandboxChat,
 } from './index.ts'
@@ -60,6 +61,39 @@ Deno.test('sandbox output is a strict bounded Quick Task revision', () => {
 
 Deno.test('sandbox chat uses only the approved model endpoint', () => {
   equal(quickTaskChatExternalEndpoint(), 'https://api.openai.com/v1/responses')
+})
+
+Deno.test('sandbox chat rejects zero, multiple, and model-less connectors before any provider call', async () => {
+  const cases = [
+    { connections: [], message: /No verified OpenAI connector/ },
+    { connections: [{ id: 'one' }, { id: 'two' }], message: /Exactly one verified OpenAI connector/ },
+    {
+      connections: [{ id: 'one', secret_name: 'OPENAI_KEY', public_config: {} }],
+      message: /requires an explicit model_id/,
+    },
+  ]
+  let providerCalls = 0
+  for (const scenario of cases) {
+    let rejected = false
+    try {
+      await sandboxChat({} as never, 'owner', {
+        action: 'chat', quickTaskId: 'task', expectedRevisionId: 'revision',
+        departmentId: 'content', prompt: 'Refine', promptSafeForAi: true,
+      }, (() => {
+        providerCalls += 1
+        return Promise.resolve(new Response('{}', { status: 200 }))
+      }) as typeof fetch, {
+        loadSandboxContext: async () => {
+          selectSingleSandboxOpenAiModel(scenario.connections, 'content', () => 'test-key')
+          throw new Error('unreachable')
+        },
+      })
+    } catch (error) {
+      rejected = error instanceof Error && scenario.message.test(error.message)
+    }
+    equal(rejected, true)
+  }
+  equal(providerCalls, 0)
 })
 
 Deno.test('sandbox chat disables provider retention and records one atomic sandbox revision', async () => {
