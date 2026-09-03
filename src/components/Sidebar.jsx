@@ -15,7 +15,7 @@ export default function Sidebar() {
     if (item.path === '/assistant' && !featureFlags.aiAssistance) return false
     if (activeEnv.key === 'admin') return profile?.role === 'admin'
     if (activeEnv.key === 'sphere') {
-      if (item.dept === null) return true
+      if (item.dept == null) return true
       return profile?.role === 'admin' || userDept === item.dept
     }
     return false
@@ -61,9 +61,6 @@ export default function Sidebar() {
       </div>
 
       <div className="flex-1 p-3">
-        <div className="mb-2 px-3 pt-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-600">
-          Workspace
-        </div>
         <div className="space-y-1">
           {visibleItems.map((item) => {
             if (item.isHeader) {
@@ -117,7 +114,8 @@ function NavIcon({ path }) {
     className: 'shrink-0 text-slate-500 transition-colors group-hover:text-violet-300',
   }
 
-  if (path?.includes('engagements') || path?.includes('projects')) return <svg {...common}><rect x="4" y="4" width="6" height="6" rx="1.5"/><rect x="14" y="4" width="6" height="6" rx="1.5"/><rect x="4" y="14" width="6" height="6" rx="1.5"/><rect x="14" y="14" width="6" height="6" rx="1.5"/></svg>
+  if (path?.includes('workspace') || path?.includes('engagements') || path?.includes('projects')) return <svg {...common}><rect x="4" y="4" width="6" height="6" rx="1.5"/><rect x="14" y="4" width="6" height="6" rx="1.5"/><rect x="4" y="14" width="6" height="6" rx="1.5"/><rect x="14" y="14" width="6" height="6" rx="1.5"/></svg>
+  if (path?.includes('internal')) return <svg {...common}><path d="M4 20h16M6 20V8l6-4 6 4v12M9 12h6M9 16h6"/></svg>
   if (path?.includes('my-work')) return <svg {...common}><path d="m5 12 4 4L19 6"/><path d="M19 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h7"/></svg>
   if (path?.includes('events')) return <svg {...common}><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/><path d="m9 16 2 2 4-5"/></svg>
   if (path?.includes('clients')) return <svg {...common}><path d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 20v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>

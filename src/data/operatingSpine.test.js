@@ -75,9 +75,9 @@ test('security remediation keeps legacy organization-less tables server-only', (
   assert.match(remediation, /public\.is_team_organization_member\(task\.organization_id\)/)
 })
 
-test('the active product route is Engagements while the old projects URL remains a redirect', () => {
+test('the engagement compatibility route remains while the old projects URL opens Portfolio Workspace', () => {
   assert.match(app, /path="sphere\/engagements" element={<OperatingSpine initialView="engagements" \/>}/)
-  assert.match(app, /path="sphere\/projects" element={<Navigate to="\/sphere\/engagements" replace \/>}/)
+  assert.match(app, /path="sphere\/projects" element={<Navigate to="\/sphere\/workspace" replace \/>}/)
 })
 
 test('engagement composition rejects an empty service selection before calling Supabase', async () => {

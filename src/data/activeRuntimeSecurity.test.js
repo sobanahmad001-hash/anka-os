@@ -21,7 +21,8 @@ test('navigation exposes only canonical delivery surfaces', () => {
   for (const path of ['/sphere/figma', '/sphere/assets', '/sphere/wp-sites', '/sphere/campaigns']) {
     assert.doesNotMatch(nav, new RegExp(`path: '${path}'`))
   }
-  for (const path of ['/sphere/my-work', '/sphere/engagements', '/sphere/content', '/sphere/content/studio', '/sphere/design', '/sphere/marketing', '/sphere/delivery', '/sphere/clients', '/sphere/portal']) {
+  for (const path of ['/sphere/workspace', '/sphere/internal', '/sphere/my-work', '/sphere/content', '/sphere/content/studio', '/sphere/design', '/sphere/marketing', '/sphere/delivery', '/sphere/clients', '/sphere/portal']) {
     assert.match(nav, new RegExp(`path: '${path}'`))
   }
+  assert.doesNotMatch(nav, /path: '\/sphere\/engagements'/)
 })
