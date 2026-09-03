@@ -69,6 +69,16 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
     const sessionIds = sessions.map(item => item.id)
     const externalEvents = await dataOrThrow(scopedFrom('external_events').select('id, event_name, event_category, start_date, end_date')
       .eq('brand_id', engagement.brand_id).order('start_date').order('event_name'))
+    const creativeBriefs = await dataOrThrow(scopedFrom('design_creative_briefs').select('*')
+      .eq('engagement_id', engagementId).eq('visibility', 'official').order('updated_at', { ascending: false }))
+    const creativeBriefVersions = creativeBriefs.length
+      ? await dataOrThrow(scopedFrom('design_creative_brief_versions').select('*')
+        .in('creative_brief_id', creativeBriefs.map(item => item.id)).order('version_number'))
+      : []
+    const creativeBriefSources = creativeBriefVersions.length
+      ? await dataOrThrow(scopedFrom('design_creative_brief_version_sources').select('*')
+        .in('creative_brief_version_id', creativeBriefVersions.map(item => item.id)))
+      : []
     const directionData = sessionIds.length ? await Promise.all([
       dataOrThrow(scopedFrom('design_workshop_context_versions').select('*').in('session_id', sessionIds)),
       dataOrThrow(scopedFrom('design_workshop_model_selections').select('*, design_model_registry(*)').in('session_id', sessionIds).order('position')),
@@ -78,6 +88,9 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
       dataOrThrow(scopedFrom('design_direction_releases').select('*').in('session_id', sessionIds)),
     ]) : [[], [], [], [], [], []]
     const directions = directionData[3]
+    const workingDirectionPreferences = sessionIds.length
+      ? await dataOrThrow(scopedFrom('design_working_direction_preferences').select('*').in('session_id', sessionIds))
+      : []
     const releaseIds = directionData[5].map(item => item.id)
     const [directionVersions, experimentalDirectionVersions] = directions.length
       ? await Promise.all([
@@ -127,6 +140,7 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
       contextVersions: directionData[0], modelSelections: directionData[1], runs: directionData[2],
       directions, selections: directionData[4], releases: directionData[5], directionVersions,
       experimentalDirectionVersions, experimentReviewers,
+      creativeBriefs, creativeBriefVersions, creativeBriefSources, workingDirectionPreferences,
       navigationWorkRecord: navigationRecord ? {
         kind: navigation.workRecord.kind,
         id: navigationRecord.id,
@@ -145,12 +159,17 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
   },
 
   createPageFlow: input => invoke('create_page_flow', input),
+  validateCreativeBrief: content => invoke('validate_creative_brief', { content }),
+  saveCreativeBrief: input => invoke('save_creative_brief', input),
+  freezeCreativeBrief: input => invoke('freeze_creative_brief', input),
+  setWorkingDirection: input => invoke('set_working_direction', input),
   createSession: input => invoke('create_session', input),
   generateDirections: sessionId => invoke('generate_directions', { session_id: sessionId }),
-  createDirectionRevision: (directionId, parentVersionId, content, experiment = {}) => invoke('create_direction_revision', {
+  createDirectionRevision: (directionId, parentVersionId, content, experiment = {}, creativeBriefVersionId = '') => invoke('create_direction_revision', {
     direction_id: directionId, parent_version_id: parentVersionId, content,
     is_experimental: experiment.isExperimental === true,
     experiment_visibility: experiment.reviewerIds || [],
+    creative_brief_version_id: creativeBriefVersionId || null,
   }),
   promoteDirectionExperiment: directionVersionId => invoke('promote_direction_experiment', {
     direction_version_id: directionVersionId,

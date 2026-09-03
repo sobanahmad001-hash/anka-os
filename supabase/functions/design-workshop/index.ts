@@ -7,6 +7,9 @@ import {
   type ServerOrganizationContext,
   type ServerOrganizationScope,
 } from '../_shared/serverOrganizationContext.ts'
+import {
+  freezeCreativeBrief, saveCreativeBrief, setWorkingDirection, validateCreativeBrief,
+} from './creativeBriefs.ts'
 
 type Client = ReturnType<typeof createClient<any>>
 type ScopedClient = Client & { organizationId: string }
@@ -101,6 +104,19 @@ async function callerVersionRoot(userClient: Client, versionId: string): Promise
   }
   return root
 }
+
+async function callerCreativeBriefRoot(userClient: Client, briefId: string): Promise<CallerRoot> {
+  const { data: brief, error } = await userClient.from('design_creative_briefs')
+    .select('id, organization_id, engagement_id, visibility').eq('id', requiredActionId(briefId, 'Creative brief')).maybeSingle()
+  if (error || !brief) throw Object.assign(new Error('Creative brief not found'), { status: 404 })
+  if (brief.visibility === 'private') return { organizationId: brief.organization_id, engagementId: '' }
+  const { data: engagement, error: engagementError } = await userClient.from('engagements')
+    .select('id, organization_id').eq('id', brief.engagement_id).maybeSingle()
+  if (engagementError || !engagement || engagement.organization_id !== brief.organization_id) {
+    throw Object.assign(new Error('Creative brief has an invalid organization chain'), { status: 409 })
+  }
+  return { organizationId: brief.organization_id, engagementId: brief.engagement_id }
+}
 async function callerContentRequestRoot(userClient: Client, requestId: string): Promise<CallerRoot> {
   const { data: request, error } = await userClient.from('content_requests')
     .select('id, organization_id, engagement_id, brand_id').eq('id', requiredActionId(requestId, 'Content request')).maybeSingle()
@@ -160,6 +176,24 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
   const requestedOrganizationId = text(body.organization_id, 80) || null
   if (action === 'create_page_flow' || action === 'create_session') return {
     root: { kind: 'engagement', id: requiredActionId(body.engagement_id, 'Engagement') }, requestedOrganizationId,
+  }
+  if (action === 'validate_creative_brief'
+    || (action === 'save_creative_brief' && !text(body.creative_brief_id, 80))) {
+    if (text(body.visibility, 20) === 'private') return { root: null, requestedOrganizationId: requestedOrganizationId || '' }
+    return { root: { kind: 'engagement', id: requiredActionId(body.engagement_id, 'Engagement') }, requestedOrganizationId }
+  }
+  if (action === 'save_creative_brief' || action === 'freeze_creative_brief') {
+    const root = await callerCreativeBriefRoot(userClient, requiredActionId(body.creative_brief_id, 'Creative brief'))
+    if (requestedOrganizationId && requestedOrganizationId !== root.organizationId) {
+      throw Object.assign(new Error('Requested organization does not match the creative brief'), { status: 403 })
+    }
+    return root.engagementId
+      ? { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
+      : { root: null, requestedOrganizationId: root.organizationId }
+  }
+  if (action === 'set_working_direction') {
+    const root = await callerSessionRoot(userClient, requiredActionId(body.session_id, 'Session'))
+    return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
   }
   if (action === 'generate_directions' || action === 'select_direction' || action === 'release_direction') {
     const root = await callerSessionRoot(userClient, requiredActionId(body.session_id, 'Session'))
@@ -478,6 +512,9 @@ export async function createSession(admin: ScopedClient, body: Json, actorId: st
   const engagementId = text(body.engagement_id, 80); const brandId = text(body.brand_id, 80)
   const stageId = text(body.engagement_stage_instance_id, 80) || null
   const engagementServiceId = text(body.engagement_service_id, 80)
+  const projectTaskId = text(body.project_task_id, 80) || null
+  const engagementWorkItemId = text(body.engagement_work_item_id, 80) || null
+  if (projectTaskId && engagementWorkItemId) throw new Error('A Design session can target a task or work item, not both')
   await validateScope(admin, engagementId, brandId, stageId)
   const pageFlowId = text(body.flow_id, 80) || null
   const pageSlug = text(body.page_slug, 200)
@@ -516,6 +553,7 @@ export async function createSession(admin: ScopedClient, body: Json, actorId: st
   const sessionValues: Record<string, unknown> = {
     id: sessionId, organization_id: admin.organizationId, engagement_id: engagementId, brand_id: brandId,
     engagement_stage_instance_id: stageId, engagement_service_id: engagementServiceId,
+    project_task_id: projectTaskId, engagement_work_item_id: engagementWorkItemId,
     output_family: outputFamily, output_brief: outputBrief,
     designer_instructions: designerInstructions, context_manifest: contextManifest,
     context_checksum: checksum, created_by: actorId,
@@ -613,6 +651,13 @@ async function generateDirections(admin: ScopedClient, body: Json, actorId: stri
   const { data: session } = await admin.from('design_workshop_sessions').select('*')
     .eq('id', sessionId).eq('organization_id', admin.organizationId).maybeSingle()
   if (!session || !['ready', 'generation_failed'].includes(session.status)) throw new Error('Session is not ready to generate')
+  let briefQuery = admin.from('design_creative_briefs').select('id, frozen_version_id')
+    .eq('organization_id', admin.organizationId).eq('engagement_id', session.engagement_id)
+    .eq('engagement_service_id', session.engagement_service_id).eq('visibility', 'official')
+  briefQuery = session.project_task_id ? briefQuery.eq('project_task_id', session.project_task_id) : briefQuery.is('project_task_id', null)
+  briefQuery = session.engagement_work_item_id ? briefQuery.eq('engagement_work_item_id', session.engagement_work_item_id) : briefQuery.is('engagement_work_item_id', null)
+  const { data: frozenBrief, error: briefError } = await briefQuery.maybeSingle()
+  if (briefError || !frozenBrief?.frozen_version_id) throw new Error('Freeze the exact-scope creative brief before generation')
   const storyboard = isStoryboardSession(session)
   const { count } = await admin.from('design_directions').select('id', { count: 'exact', head: true }).eq('session_id', session.id).eq('organization_id', admin.organizationId)
   if (count) throw new Error(storyboard
@@ -649,7 +694,8 @@ async function generateDirections(admin: ScopedClient, body: Json, actorId: stri
     const { data: versions, error: versionError } = await admin.from('design_direction_versions').insert(outputs.map((item, index) => ({
       organization_id: admin.organizationId, direction_id: bySlot.get(index + 1).id, version_number: 1,
       generation_run_id: item.runId, content: item.generated, content_checksum: item.checksum,
-      distinctness_signature: item.signature, created_by: actorId,
+      distinctness_signature: item.signature, creative_brief_version_id: frozenBrief.frozen_version_id,
+      created_by: actorId,
     }))).select('*')
     if (versionError) throw versionError
     await admin.from('design_workshop_sessions').update({ status: 'comparison' }).eq('id', session.id).eq('organization_id', admin.organizationId)
@@ -987,7 +1033,8 @@ async function validateExperimentReviewers(admin: ScopedClient, reviewerIds: str
 }
 
 async function insertDirectionVersion(admin: ScopedClient, directionId: string, parent: any, content: Json,
-  actorId: string, isExperimental: boolean, experimentVisibility: string[] | null) {
+  actorId: string, isExperimental: boolean, experimentVisibility: string[] | null,
+  creativeBriefVersionId: string | null = parent?.creative_brief_version_id || null) {
   const { data: latest, error: latestError } = await admin.from('design_direction_versions').select('version_number')
     .eq('direction_id', directionId).eq('organization_id', admin.organizationId).order('version_number', { ascending: false }).limit(1).single()
   if (latestError) throw latestError
@@ -997,6 +1044,7 @@ async function insertDirectionVersion(admin: ScopedClient, directionId: string, 
     parent_version_id: parent.id, content, content_checksum: checksum,
     distinctness_signature: await sha256(directionText(content).toLowerCase()), created_by: actorId,
     is_experimental: isExperimental, experiment_visibility: isExperimental ? experimentVisibility : null,
+    creative_brief_version_id: creativeBriefVersionId,
   }).select('*').single()
   if (error) throw error
   return version
@@ -1008,7 +1056,7 @@ async function createDirectionRevision(admin: ScopedClient, body: Json, actorId:
     .eq('id', directionId).eq('organization_id', admin.organizationId).maybeSingle()
   if (!direction) throw new Error('Direction not found')
   const parentId = text(body.parent_version_id, 80)
-  const { data: parent } = await admin.from('design_direction_versions').select('id, direction_id, is_experimental')
+  const { data: parent } = await admin.from('design_direction_versions').select('id, direction_id, is_experimental, creative_brief_version_id')
     .eq('id', parentId).eq('organization_id', admin.organizationId).eq('direction_id', direction.id).maybeSingle()
   if (!parent) throw new Error('Parent direction version not found')
   if (parent.is_experimental) throw new Error('Use the dedicated promotion action for an experimental version')
@@ -1018,7 +1066,20 @@ async function createDirectionRevision(admin: ScopedClient, body: Json, actorId:
   const reviewers = isExperimental
     ? await validateExperimentReviewers(admin, uniqueIds(body.experiment_visibility), actorId)
     : null
-  return insertDirectionVersion(admin, direction.id, parent, content, actorId, isExperimental, reviewers)
+  const creativeBriefVersionId = text(body.creative_brief_version_id, 80) || parent.creative_brief_version_id || null
+  if (creativeBriefVersionId) {
+    const { data: session } = await admin.from('design_workshop_sessions').select('engagement_id')
+      .eq('id', direction.session_id).eq('organization_id', admin.organizationId).maybeSingle()
+    const { data: briefVersion } = await admin.from('design_creative_brief_versions')
+      .select('id, design_creative_briefs!inner(engagement_id, visibility)')
+      .eq('id', creativeBriefVersionId).eq('organization_id', admin.organizationId).maybeSingle()
+    const brief = Array.isArray(briefVersion?.design_creative_briefs)
+      ? briefVersion.design_creative_briefs[0] : briefVersion?.design_creative_briefs
+    if (!session || !briefVersion || brief?.visibility !== 'official' || brief?.engagement_id !== session.engagement_id) {
+      throw new Error('Direction drafts require an exact official brief version from this engagement')
+    }
+  }
+  return insertDirectionVersion(admin, direction.id, parent, content, actorId, isExperimental, reviewers, creativeBriefVersionId)
 }
 
 async function listExperimentReviewers(admin: ScopedClient, membership: Json) {
@@ -1107,6 +1168,10 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
     const actions: Record<string, () => Promise<unknown>> = {
       create_page_flow: () => createPageFlow(admin, body, user.id),
       create_session: () => createSession(admin, body, user.id),
+      validate_creative_brief: async () => validateCreativeBrief(body.content),
+      save_creative_brief: () => saveCreativeBrief(admin, userClient, body, user.id),
+      freeze_creative_brief: () => freezeCreativeBrief(admin, body, user.id),
+      set_working_direction: () => setWorkingDirection(admin, body, user.id),
       generate_directions: () => generateDirections(admin, body, user.id),
       create_direction_revision: () => createDirectionRevision(admin, body, user.id),
       list_experiment_reviewers: () => listExperimentReviewers(admin, membership as Json),

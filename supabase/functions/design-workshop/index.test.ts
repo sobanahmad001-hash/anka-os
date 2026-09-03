@@ -4,6 +4,7 @@ import { contentRequestMediaStoragePath, createSession, cropResizePng, designEve
   requireReleasedVariantSource, runIndependentVariantJobs, sha256, similarity, variantFormatSpec, variantPrompt,
   VIDEO_UNAVAILABLE_MESSAGE, handler } from './index.ts'
 import { compileApprovedArtifactContext } from '../_shared/approvedArtifactContext.ts'
+import { normalizeCreativeBrief, saveCreativeBrief, validateCreativeBrief } from './creativeBriefs.ts'
 
 function assert(value: unknown, message = 'Expected value to be truthy') {
   if (!value) throw new Error(message)
@@ -25,6 +26,41 @@ Deno.test('client memberships cannot cross the original team-only Workshop bound
 Deno.test('Content members cannot call Design Workshop actions after authoring relocation', () => {
   assert.equal(hasWorkshopAuthority({ member_kind: 'team', role: 'member', department_id: 'content' }, 'create_session'), false)
   assert.equal(hasWorkshopAuthority({ member_kind: 'team', role: 'department_manager', department_id: 'content' }, 'generate_directions'), false)
+})
+
+Deno.test('B02 saves title-only drafts but computes output-specific validation without a provider', () => {
+  const draft = normalizeCreativeBrief({ title: 'Launch image', output_type: 'image' })
+  assert.equal(draft.title, 'Launch image')
+  const result = validateCreativeBrief(draft)
+  assert.equal(result.valid, false)
+  assert.equal(result.unsupported, false)
+  assert.equal(result.missing.join(','), 'purpose,audience,objective,placement_destination,requested_outputs')
+})
+
+Deno.test('B02 rejects an ambiguous task and work-item scope before any database mutation', async () => {
+  let called = false
+  const client = { organizationId: 'org-1', from() { called = true; throw new Error('unexpected query') } }
+  let rejected = false
+  try {
+    await saveCreativeBrief(client, client, {
+      visibility: 'official', engagement_id: 'eng-1', brand_id: 'brand-1', engagement_service_id: 'service-1',
+      project_task_id: 'task-1', engagement_work_item_id: 'item-1', expected_revision: 0,
+      operation_key: 'operation-1', content: { title: 'Ambiguous', output_type: 'image' },
+    }, 'actor-1')
+  } catch (error) { rejected = error instanceof Error && error.message.includes('not both') }
+  assert(rejected, 'Expected an ambiguous scope to fail closed')
+  assert.equal(called, false)
+})
+
+Deno.test('B02 rejects unsupported output types and accepts complete isolated Design briefs', () => {
+  const complete = {
+    title: 'Identity', purpose: 'Refresh', output_type: 'brand_identity', audience: 'Customers',
+    objective: 'Recognition', requested_outputs: ['Logo'], exclusions_constraints: 'Keep the name',
+  }
+  assert.equal(validateCreativeBrief(complete).valid, true)
+  const unsupported = validateCreativeBrief({ ...complete, output_type: 'video' })
+  assert.equal(unsupported.valid, false)
+  assert.equal(unsupported.unsupported, true)
 })
 
 Deno.test('all eight Design services derive a compatible display family', () => {
@@ -405,6 +441,10 @@ function scopeFixtures() {
       { id: 'release-1', organization_id: 'org-1', direction_version_id: 'version-1' },
       { id: 'release-2', organization_id: 'org-2', direction_version_id: 'version-2' },
     ],
+    design_creative_briefs: [
+      { id: 'brief-private', organization_id: 'org-1', engagement_id: null, visibility: 'private' },
+      { id: 'brief-official', organization_id: 'org-1', engagement_id: 'engagement-1', visibility: 'official' },
+    ],
     content_requests: [
       { id: 'request-1', organization_id: 'org-1', engagement_id: 'engagement-1', brand_id: 'brand-1' },
     ],
@@ -420,8 +460,11 @@ Deno.test('Design Workshop maps every action family to a closed caller-readable 
   const cases: Array<[Record<string, unknown>, string | null, string | null]> = [
     [{ action: 'create_page_flow', engagement_id: 'engagement-1' }, 'engagement', 'engagement-1'],
     [{ action: 'create_session', engagement_id: 'engagement-1' }, 'engagement', 'engagement-1'],
+    [{ action: 'validate_creative_brief', engagement_id: 'engagement-1', visibility: 'official' }, 'engagement', 'engagement-1'],
+    [{ action: 'save_creative_brief', engagement_id: 'engagement-1', visibility: 'official' }, 'engagement', 'engagement-1'],
     [{ action: 'generate_directions', session_id: 'session-1' }, 'engagement', 'engagement-1'],
     [{ action: 'select_direction', session_id: 'session-1' }, 'engagement', 'engagement-1'],
+    [{ action: 'set_working_direction', session_id: 'session-1' }, 'engagement', 'engagement-1'],
     [{ action: 'release_direction', session_id: 'session-1' }, 'engagement', 'engagement-1'],
     [{ action: 'create_direction_revision', direction_id: 'direction-1' }, 'engagement', 'engagement-1'],
     [{ action: 'promote_direction_experiment', direction_version_id: 'version-1' }, 'engagement', 'engagement-1'],
@@ -451,6 +494,22 @@ Deno.test('only explicit team operations may use a selected-organization rootles
     missingRootRejected = error instanceof Error && error.message.includes('Engagement is required')
   }
   assert(missingRootRejected, 'Expected a root-bound action without its root to be rejected')
+})
+
+Deno.test('private creative brief mutations bind to the caller-readable owner organization', async () => {
+  const client = scopeClient(scopeFixtures()) as never
+  const scope = await designWorkshopScope(client, {
+    action: 'freeze_creative_brief', creative_brief_id: 'brief-private', organization_id: 'org-1',
+  })
+  assert.equal(scope.root, null)
+  assert.equal(scope.requestedOrganizationId, 'org-1')
+  let mismatch = false
+  try {
+    await designWorkshopScope(client, {
+      action: 'freeze_creative_brief', creative_brief_id: 'brief-private', organization_id: 'org-2',
+    })
+  } catch (error) { mismatch = error instanceof Error && error.message.includes('does not match') }
+  assert(mismatch, 'Expected private creative brief organization mismatch to fail before admin creation')
 })
 
 Deno.test('caller-visible canonical validation rejects unreadable and injected related roots', async () => {
