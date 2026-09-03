@@ -54,8 +54,11 @@ begin
   insert into public.content_request_assets(organization_id,content_request_id,figma_handoff_url)
     values(org,source_id,'https://example.invalid/private-handoff');
   before_rows := pg_temp.qts5_snapshot();
+  set local role service_role;
   result := public.copy_general_request_to_quick_task(org,source_id,key_id,owner_id);
+  reset role;
   task_id := (result->>'quick_task_id')::uuid;
+  perform pg_temp.check_qts5('service_role_executes_real_copy',task_id is not null);
   perform pg_temp.check_qts5('server_mapping_preserves_exact_brief_and_inert_fields',
     (select r.source_kind='copied_general_request'
       and r.content = jsonb_build_object('notes',s.brief || E'\n\nFormat: ' || s.format
@@ -194,7 +197,7 @@ begin
     (select state='active' from public.quick_tasks where id=cycle_id));
 
   insert into public.integration_connections(id,organization_id,provider,display_name,public_config,secret_name,status,last_check_status,created_by)
-    values(connection_id,org,'openai','QTS5 rollback model','{"model_id":"qts5-test"}','QTS5_TEST_ONLY','verified','passed',owner_id);
+    values(connection_id,org,'openai','QTS5 rollback model','{"model_id":"qts5-test"}','ANKA_OPENAI_QTS5_TEST_ONLY','verified','passed',owner_id);
   insert into public.integration_connection_departments(connection_id,organization_id,department_id,created_by)
     values(connection_id,org,'content',owner_id);
   select current_revision_id into revision_id from public.quick_tasks where id=task_id;
