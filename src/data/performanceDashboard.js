@@ -35,6 +35,10 @@ function scoped(rows, organizationId) {
   return (rows || []).filter(row => row.organization_id === organizationId)
 }
 
+export function shouldApplyDashboardResponse(response, request, activeGeneration) {
+  return request.generation === activeGeneration && response?.brand?.id === request.brandId
+}
+
 export function buildPerformanceDashboard({
   brand,
   period,
@@ -107,12 +111,12 @@ export function buildPerformanceDashboard({
       keywords: {
         tracked: keywords.length,
         ranked: knownPositions.length,
-        no_rank_data: keywords.length - knownPositions.length,
+        no_rank_data_in_period: keywords.length - knownPositions.length,
         top_3: knownPositions.filter(position => position <= 3).length,
         top_10: knownPositions.filter(position => position <= 10).length,
         top_20: knownPositions.filter(position => position <= 20).length,
         average_position: average(knownPositions),
-        improved,
+        improved_in_period: improved,
       },
     },
     technical: {
@@ -131,26 +135,28 @@ export function buildPerformanceDashboard({
     },
     paid: {
       available: campaigns.length > 0,
+      has_period_data: paidRows.length > 0,
       campaigns: campaigns.length,
       active_campaigns: campaigns.filter(row => row.status === 'active').length,
-      spend: sum(paidRows, 'cost'),
-      impressions: paidImpressions,
-      clicks: paidClicks,
-      conversions: sum(paidRows, 'conversions'),
-      ctr: paidImpressions ? paidClicks / paidImpressions : null,
+      spend: paidRows.length ? sum(paidRows, 'cost') : null,
+      impressions: paidRows.length ? paidImpressions : null,
+      clicks: paidRows.length ? paidClicks : null,
+      conversions: paidRows.length ? sum(paidRows, 'conversions') : null,
+      ctr: paidRows.length && paidImpressions ? paidClicks / paidImpressions : null,
       trend: trend(paidRows, ['cost', 'conversions']),
     },
     social: {
       available: meta.length > 0,
+      has_period_data: socialRows.length > 0,
       connections: meta.length,
       platforms: [...new Set(socialRows.map(row => row.platform))].sort(),
-      reach: sum(socialRows, 'reach'),
-      impressions: socialImpressions,
-      engagement: socialEngagement,
-      engagement_rate: socialImpressions ? socialEngagement / socialImpressions : null,
+      reach: socialRows.length ? sum(socialRows, 'reach') : null,
+      impressions: socialRows.length ? socialImpressions : null,
+      engagement: socialRows.length ? socialEngagement : null,
+      engagement_rate: socialRows.length && socialImpressions ? socialEngagement / socialImpressions : null,
       trend: trend(socialRows, ['reach', 'engagement']),
     },
-    source_errors: reports.filter(report => report.error).map(report => ({
+    source_errors: reports.filter(report => report.error && ['google_analytics', 'google_search_console'].includes(report.provider)).map(report => ({
       provider: report.provider,
       connection_name: report.connection_name,
       error: report.error,

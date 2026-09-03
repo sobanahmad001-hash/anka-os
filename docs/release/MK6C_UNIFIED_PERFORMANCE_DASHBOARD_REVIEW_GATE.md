@@ -21,12 +21,15 @@
 
 - Each section has its own availability state.
 - A brand can render with any combination of missing Google, technical SEO, Ads, keyword, or Meta data.
-- Connector failures are surfaced per source without replacing successful sections with placeholder values.
-- A missing keyword position remains an honest no-rank-data state and is not converted to position zero.
+- GA4 and Search Console report failures are surfaced per provider without replacing successful sections with placeholder values. An authenticated database-read failure fails the dashboard load instead of presenting a partial rollup as complete.
+- Only GA4 and Search Console connector failures are surfaced; the dashboard does not request live Google Ads because Paid reads MK3 snapshots.
+- A missing keyword position remains an honest no-rank-data-in-this-period state and is not converted to position zero.
+- A configured Ads or Meta source with no snapshots in the selected period shows an explicit no-period-data state, never measured zeros.
+- Request generations and brand identity checks prevent a response started for one selection from populating a later selection.
 
 ## Fixed views and trends
 
-- Organic: GSC clicks/impressions, GA4 sessions/active users, keyword tracking/top-10/average/improvement summary, and the GSC daily series.
+- Organic: GSC clicks/impressions, GA4 sessions/active users, keyword tracking/top-10/average/improvement-within-period summary, and the GSC daily series.
 - Technical: tracked pages, pages with open issues, open issue count, needs-attention count, and a short affected-page list.
 - Paid: spend, impressions, clicks, conversions, CTR, active campaign count, and a dated spend/conversion series.
 - Social: reach, impressions, engagement, engagement rate, connected platforms, and a dated reach/engagement series.
@@ -37,6 +40,7 @@
 - No migration, table, column, index, policy, view, function, trigger, or SQL verifier is added.
 - No cached rollup, browser cache, dashboard preference, configurable widget, or new provider is added.
 - No product insert, update, upsert, delete, RPC, sync, import, publish, or provider mutation is added.
+- Reporting periods include at most 366 calendar dates, matching the 366-row GA4/GSC request limit.
 - This PR requires the already-merged MK2, MK3, MK6a, and MK6b schemas and the existing GA4/GSC reporting connector.
 - Review only. Do not merge, deploy functions, apply migrations, or change the live project before explicit sign-off.
 
@@ -44,8 +48,14 @@
 
 - [ ] A brand with all supported sources shows correct totals and dated series in all four sections.
 - [ ] A brand missing one or more connectors still renders every other section without an error.
+- [ ] Changing brand, engagement, or reporting period while a load is in flight cannot surface the stale response.
+- [ ] Configured Ads or Meta sources without snapshots in the selected period do not display zero performance.
+- [ ] Keyword no-data and improvement labels explicitly describe the selected period.
 - [ ] Foreign-organization parent rows and child snapshots cannot enter the rollup.
+- [ ] The authenticated Edge path rejects a foreign-organization engagement before reading connector mappings or connections.
 - [ ] Search Console requests use the existing reporting-only endpoint with `dimensions: ['date']`.
+- [ ] The unified dashboard requests only GA4 and Search Console from the Google reporting action; Paid remains sourced from MK3 snapshots.
+- [ ] A 366-inclusive-date range is accepted and a 367-inclusive-date range is rejected.
 - [ ] Meta remains organic read-only and never surfaces encrypted tokens or ad-management fields.
 - [ ] The PR contains no migration or verifier and introduces no write call.
 - [ ] The dashboard remains a fixed view with no widget configuration or persistence.

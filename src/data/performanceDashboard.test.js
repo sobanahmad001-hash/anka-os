@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { buildPerformanceDashboard } from './performanceDashboard.js'
+import { buildPerformanceDashboard, shouldApplyDashboardResponse } from './performanceDashboard.js'
 
 const read = relative => readFileSync(new URL(relative, import.meta.url), 'utf8')
 const repository = read('./performanceDashboardRepository.js')
@@ -66,7 +66,7 @@ test('MK6c rolls up every fixed section and keeps unlike sources separate', () =
   ])
   assert.deepEqual(dashboard.organic.ga4, { connected: true, active_users: 80, sessions: 100, events: 250 })
   assert.deepEqual(dashboard.organic.keywords, {
-    tracked: 2, ranked: 1, no_rank_data: 1, top_3: 0, top_10: 1, top_20: 1, average_position: 7, improved: 1,
+    tracked: 2, ranked: 1, no_rank_data_in_period: 1, top_3: 0, top_10: 1, top_20: 1, average_position: 7, improved_in_period: 1,
   })
   assert.equal(dashboard.technical.tracked_pages, 1)
   assert.equal(dashboard.technical.pages_with_open_issues, 1)
@@ -75,6 +75,52 @@ test('MK6c rolls up every fixed section and keeps unlike sources separate', () =
   assert.equal(dashboard.paid.ctr, 0.05)
   assert.equal(dashboard.social.reach, 500)
   assert.equal(dashboard.social.engagement_rate, 0.1)
+})
+
+test('MK6c rejects stale or wrong-brand async dashboard responses', () => {
+  const request = { generation: 4, brandId: brand.id }
+  assert.equal(shouldApplyDashboardResponse({ brand }, request, 4), true)
+  assert.equal(shouldApplyDashboardResponse({ brand }, request, 5), false)
+  assert.equal(shouldApplyDashboardResponse({ brand: { ...brand, id: 'brand-b' } }, request, 4), false)
+  assert.match(ui, /useRef\(0\)/)
+  assert.match(ui, /\+\+requestGeneration\.current/)
+  assert.match(ui, /shouldApplyDashboardResponse\(result, request, requestGeneration\.current\)/)
+})
+
+test('MK6c distinguishes configured snapshot sources from no data in the selected period', () => {
+  const dashboard = buildPerformanceDashboard({
+    brand, period, googleDashboard: { brand_id: brand.id, reports: [] },
+    trackedKeywords: [{ id: 'keyword-1', organization_id: organizationId, brand_id: brand.id, active: true }],
+    adCampaigns: [{ id: 'campaign-1', organization_id: organizationId, brand_id: brand.id, status: 'active' }],
+    metaConnections: [{ id: 'meta-1', organization_id: organizationId, brand_id: brand.id }],
+  })
+  assert.equal(dashboard.organic.keywords.no_rank_data_in_period, 1)
+  assert.equal(dashboard.organic.keywords.improved_in_period, 0)
+  assert.equal(dashboard.paid.available, true)
+  assert.equal(dashboard.paid.has_period_data, false)
+  assert.equal(dashboard.paid.spend, null)
+  assert.equal(dashboard.paid.impressions, null)
+  assert.equal(dashboard.paid.clicks, null)
+  assert.equal(dashboard.paid.conversions, null)
+  assert.equal(dashboard.social.available, true)
+  assert.equal(dashboard.social.has_period_data, false)
+  assert.equal(dashboard.social.reach, null)
+  assert.match(ui, /No dated Google Ads snapshots fall within this period/)
+  assert.match(ui, /no rank data in this period/)
+})
+
+test('MK6c ignores Google Ads report failures because paid uses stored MK3 snapshots', () => {
+  const dashboard = buildPerformanceDashboard({
+    brand, period,
+    googleDashboard: { brand_id: brand.id, reports: [
+      { provider: 'google_ads', connection_name: 'Ads', error: 'Ads unavailable' },
+      { provider: 'google_search_console', connection_name: 'Search', error: 'Search unavailable' },
+    ] },
+  })
+  assert.deepEqual(dashboard.source_errors, [
+    { provider: 'google_search_console', connection_name: 'Search', error: 'Search unavailable' },
+  ])
+  assert.match(repository, /providers: \['google_analytics', 'google_search_console'\]/)
 })
 
 test('MK6c returns honest empty states when connectors or source rows are missing', () => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import {
@@ -22,6 +22,7 @@ import {
   filterBacklinkTargets,
 } from '../data/backlinkOutreach.js'
 import { marketingStudio } from '../data/marketingStudioRepository.js'
+import { shouldApplyDashboardResponse } from '../data/performanceDashboard.js'
 import { loadPerformanceDashboard } from '../data/performanceDashboardRepository.js'
 import DepartmentChat from '../components/DepartmentChat.jsx' // eslint-disable-line no-unused-vars
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
@@ -162,7 +163,7 @@ export default function MarketingStudio() {
         ) : tab === 'chat' ? (
           <DepartmentChat departmentId="marketing" engagement={workspace.engagement} artifactTypes={['channel_strategy', 'campaign_brief', 'measurement_plan']} artifactDefinitions={MARKETING_ARTIFACT_FORMS} artifactForType={artifactType => workspace.artifacts.find(item => item.artifact_type === artifactType)} stageForType={() => null} onPropose={marketingStudio.proposeArtifact} onProposeWorkItem={marketingStudio.proposeWorkItem} onCreated={() => loadWorkspace(engagementId, campaignId)} />
         ) : (
-          <Analytics engagementId={engagementId} brand={{ id: workspace.engagement.brand_id, name: workspace.engagement.brands?.name || 'Brand', organization_id: workspace.engagement.organization_id }} />
+          <Analytics key={`${engagementId}:${workspace.engagement.brand_id}`} engagementId={engagementId} brand={{ id: workspace.engagement.brand_id, name: workspace.engagement.brands?.name || 'Brand', organization_id: workspace.engagement.organization_id }} />
         )}
       </main>
     </div>
@@ -528,12 +529,23 @@ function Analytics({ engagementId, brand }) {
   const [dashboard, setDashboard] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  useEffect(() => { setDashboard(null); setError('') }, [engagementId, brand.id])
+  const requestGeneration = useRef(0)
+  useEffect(() => {
+    requestGeneration.current += 1
+    setDashboard(null); setError(''); setLoading(false)
+    return () => { requestGeneration.current += 1 }
+  }, [engagementId, brand.id, period.start, period.end])
   async function load() {
+    const request = { generation: ++requestGeneration.current, brandId: brand.id }
     setLoading(true); setError('')
-    try { setDashboard(await loadPerformanceDashboard({ engagementId, brand, period })) }
-    catch (loadError) { setError(loadError.message) }
-    finally { setLoading(false) }
+    try {
+      const result = await loadPerformanceDashboard({ engagementId, brand, period })
+      if (shouldApplyDashboardResponse(result, request, requestGeneration.current)) setDashboard(result)
+    } catch (loadError) {
+      if (request.generation === requestGeneration.current) setError(loadError.message)
+    } finally {
+      if (request.generation === requestGeneration.current) setLoading(false)
+    }
   }
   return <section className="space-y-5"><div className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="mr-auto"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">{brand.name}</p><h2 className="mt-1 font-semibold">Unified performance dashboard</h2><p className="mt-1 max-w-2xl text-sm leading-6 text-slate-400">Live, read-only reporting across organic visibility, technical health, paid campaigns, and Meta. Every section reads its existing source; no rollup is stored.</p></div><Field label="From"><input type="date" className={INPUT} value={period.start} onChange={event => setPeriod({ ...period, start: event.target.value })} /></Field><Field label="To"><input type="date" className={INPUT} value={period.end} onChange={event => setPeriod({ ...period, end: event.target.value })} /></Field><button onClick={load} disabled={loading} className={PRIMARY}>{loading ? 'Loading sources…' : 'Load dashboard'}</button></div>
     {error && <Notice error={error} />}
@@ -558,9 +570,9 @@ function PerformanceSections({ dashboard }) {
           <CompactMetric label="Tracked keywords" value={organic.keywords.tracked} />
           <CompactMetric label="Top 10" value={organic.keywords.top_10} />
           <CompactMetric label="Average position" value={organic.keywords.average_position === null ? '—' : metric(organic.keywords.average_position)} />
-          <CompactMetric label="Improved" value={organic.keywords.improved} />
+          <CompactMetric label="Improved in period" value={organic.keywords.improved_in_period} />
         </div>
-        {organic.keywords.no_rank_data > 0 && <p className="text-xs text-slate-500">{organic.keywords.no_rank_data} tracked keyword{organic.keywords.no_rank_data === 1 ? '' : 's'} has no Search Console rank data yet.</p>}
+        {organic.keywords.no_rank_data_in_period > 0 && <p className="text-xs text-slate-500">{organic.keywords.no_rank_data_in_period} tracked keyword{organic.keywords.no_rank_data_in_period === 1 ? '' : 's'} has no rank data in this period.</p>}
       </DashboardSection>
 
       <DashboardSection eyebrow="Technical health" title="Pages needing attention" available={technical.available} empty="No tracked pages exist for this brand yet.">
@@ -578,20 +590,18 @@ function PerformanceSections({ dashboard }) {
       </DashboardSection>
 
       <DashboardSection eyebrow="Paid performance" title="Google Ads snapshots" available={paid.available} empty="No Google Ads planning campaign exists for this brand.">
-        <MetricGrid items={[
+        {paid.has_period_data ? <><MetricGrid items={[
           ['Spend (account currency)', metric(paid.spend, 'money')], ['Impressions', metric(paid.impressions)],
           ['Clicks', metric(paid.clicks)], ['Conversions', metric(paid.conversions)],
-        ]} />
-        <TrendChart points={paid.trend} series={[['cost', 'Spend', '#fbbf24'], ['conversions', 'Conversions', '#a78bfa']]} />
+        ]} /><TrendChart points={paid.trend} series={[['cost', 'Spend', '#fbbf24'], ['conversions', 'Conversions', '#a78bfa']]} /></> : <div className="rounded-xl border border-dashed border-slate-700 px-4 py-8 text-center text-sm leading-6 text-slate-500">No dated Google Ads snapshots fall within this period. Campaign configuration is available, but performance is not measured as zero.</div>}
         <p className="text-xs text-slate-500">{paid.active_campaigns} active of {paid.campaigns} tracked campaign{paid.campaigns === 1 ? '' : 's'} · CTR {metric(paid.ctr, 'percent')}</p>
       </DashboardSection>
 
       <DashboardSection eyebrow="Social performance" title="Meta organic snapshots" available={social.available} empty="No Meta connection exists for this brand.">
-        <MetricGrid items={[
+        {social.has_period_data ? <><MetricGrid items={[
           ['Reach', metric(social.reach)], ['Impressions', metric(social.impressions)],
           ['Engagement', metric(social.engagement)], ['Engagement rate', metric(social.engagement_rate, 'percent')],
-        ]} />
-        <TrendChart points={social.trend} series={[['reach', 'Reach', '#fb7185'], ['engagement', 'Engagement', '#c084fc']]} />
+        ]} /><TrendChart points={social.trend} series={[['reach', 'Reach', '#fb7185'], ['engagement', 'Engagement', '#c084fc']]} /></> : <div className="rounded-xl border border-dashed border-slate-700 px-4 py-8 text-center text-sm leading-6 text-slate-500">No dated Meta snapshots fall within this period. The connection exists, but performance is not measured as zero.</div>}
         <p className="text-xs text-slate-500">{social.connections} Meta connection{social.connections === 1 ? '' : 's'} · {social.platforms.length ? social.platforms.map(titleize).join(' + ') : 'No dated snapshots in this period'}</p>
       </DashboardSection>
     </div>

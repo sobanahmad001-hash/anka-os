@@ -60,10 +60,16 @@ export function safeDateRange(startValue: unknown, endValue: unknown) {
   const start = safeDate(startValue, true) as string
   const startMs = Date.parse(`${start}T00:00:00Z`)
   const endMs = Date.parse(`${end}T00:00:00Z`)
-  if (startMs > endMs || endMs - startMs > 366 * 86_400_000) {
-    throw new Error('Reporting period must be ordered and no longer than 366 days')
+  if (startMs > endMs || endMs - startMs > 365 * 86_400_000) {
+    throw new Error('Reporting period must be ordered and include no more than 366 days')
   }
   return { start, end }
+}
+
+export function requestedGoogleProviders(value: unknown) {
+  if (!Array.isArray(value)) return [...GOOGLE_PROVIDERS]
+  const requested = new Set(value.map(provider => text(provider, 60)).filter(provider => GOOGLE_PROVIDERS.has(provider)))
+  return [...GOOGLE_PROVIDERS].filter(provider => requested.has(provider))
 }
 
 export function hasMarketingAuthority(membership: Json, action: string) {
@@ -761,6 +767,8 @@ async function analyticsDashboard(admin: Client, body: Json) {
   const engagementId = text(body.engagement_id, 80)
   const engagement = await requireMarketingEngagement(admin, engagementId)
   const period = safeDateRange(body.start_date, body.end_date)
+  const providers = requestedGoogleProviders(body.providers)
+  if (!providers.length) return { engagement_id: engagement.id, brand_id: engagement.brand_id, period, reports: [] }
   const { data: mappings, error: mappingError } = await admin.from('integration_connection_engagements')
     .select('connection_id').eq('organization_id', ORGANIZATION_ID)
     .eq('engagement_id', engagement.id).eq('department_id', 'marketing')
@@ -769,7 +777,7 @@ async function analyticsDashboard(admin: Client, body: Json) {
   if (!ids.length) return { engagement_id: engagement.id, brand_id: engagement.brand_id, period, reports: [] }
   const { data: connections, error } = await admin.from('integration_connections')
     .select('id, provider, display_name, public_config, status').eq('organization_id', ORGANIZATION_ID)
-    .eq('status', 'verified').is('archived_at', null).in('id', ids).in('provider', [...GOOGLE_PROVIDERS])
+    .eq('status', 'verified').is('archived_at', null).in('id', ids).in('provider', providers)
   if (error) throw error
   const reports = await Promise.all((connections || []).map(async connection => {
     try {

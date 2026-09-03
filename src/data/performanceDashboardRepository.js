@@ -9,7 +9,11 @@ async function dataOrThrow(query) {
 
 async function invokeAnalytics(engagementId, period) {
   const { data, error } = await supabase.functions.invoke('marketing-studio', {
-    body: { action: 'analytics_dashboard', engagement_id: engagementId, start_date: period.start, end_date: period.end },
+    body: {
+      action: 'analytics_dashboard', engagement_id: engagementId,
+      start_date: period.start, end_date: period.end,
+      providers: ['google_analytics', 'google_search_console'],
+    },
   })
   if (error) throw new Error(error.message || 'Live Google reporting failed')
   if (data?.error) throw new Error(data.error)
