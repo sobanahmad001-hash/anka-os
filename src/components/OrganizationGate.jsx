@@ -1,13 +1,16 @@
-const _ScopedFragment = ({ children }) => children
 import { useOrganization } from '../context/OrganizationContext.jsx'
+import { resolveOrganizationGateState } from '../data/organizationScope.js'
+
+const _ScopedFragment = ({ children }) => children
 
 export default function OrganizationGate({ children }) {
-  const { memberships, activeOrganizationId, selectionRequired, loading, error, refreshMemberships, scopeRevision } = useOrganization()
-  if (loading) return <_State title="Loading organization access" detail="Checking your active memberships..." />
-  if (error) return <_State title="Organization access unavailable" detail={error.message || 'Memberships could not be loaded.'}><button type="button" onClick={refreshMemberships} className="rounded-xl bg-violet-500 px-4 py-2 text-sm font-semibold text-white">Try again</button></_State>
-  if (!memberships.length) return <_State title="No active organization access" detail="Ask an organization administrator to restore your team membership." />
-  if (selectionRequired || !activeOrganizationId) return <_State title="Choose an organization" detail="Use the organization selector in the header before opening tenant data." />
-  return <_ScopedFragment key={activeOrganizationId + ':' + scopeRevision}>{children}</_ScopedFragment>
+  const scope = useOrganization()
+  const decision = resolveOrganizationGateState(scope)
+  if (decision.status === 'loading') return <_State title="Loading organization access" detail="Checking your active memberships..." />
+  if (decision.status === 'error') return <_State title="Organization access unavailable" detail={scope.error.message || 'Memberships could not be loaded.'}><button type="button" onClick={scope.refreshMemberships} className="rounded-xl bg-violet-500 px-4 py-2 text-sm font-semibold text-white">Try again</button></_State>
+  if (decision.status === 'empty') return <_State title="No active organization access" detail="Ask an organization administrator to restore your team membership." />
+  if (decision.status === 'selection_required') return <_State title="Choose an organization" detail="Use the organization selector in the header before opening tenant data." />
+  return <_ScopedFragment key={decision.scopeKey}>{children}</_ScopedFragment>
 }
 
 function _State({ title, detail, children }) {

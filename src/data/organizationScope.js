@@ -57,6 +57,14 @@ export function isOrganizationAccessError(error) {
   return status === 401 || status === 403
 }
 
+export function resolveOrganizationGateState({ memberships = [], activeOrganizationId = null, selectionRequired = false, loading = false, error = null, scopeRevision = 0 } = {}) {
+  if (loading) return Object.freeze({ status: 'loading', rendersContent: false, scopeKey: null })
+  if (error) return Object.freeze({ status: 'error', rendersContent: false, scopeKey: null })
+  if (!memberships.length) return Object.freeze({ status: 'empty', rendersContent: false, scopeKey: null })
+  if (selectionRequired || !activeOrganizationId) return Object.freeze({ status: 'selection_required', rendersContent: false, scopeKey: null })
+  return Object.freeze({ status: 'ready', rendersContent: true, scopeKey: `${activeOrganizationId}:${scopeRevision}` })
+}
+
 export function createOrganizationScopeRepository(client) {
   if (!client?.from) throw new TypeError('A Supabase-compatible client is required')
   return Object.freeze({

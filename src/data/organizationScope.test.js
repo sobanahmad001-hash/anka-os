@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { createLatestRequestGuard, createOrganizationScopeRepository, createOrganizationSelectionStorage, isOrganizationAccessError, normalizeOrganizationMemberships, resolveOrganizationSelection } from './organizationScope.js'
+import { createLatestRequestGuard, createOrganizationScopeRepository, createOrganizationSelectionStorage, isOrganizationAccessError, normalizeOrganizationMemberships, resolveOrganizationGateState, resolveOrganizationSelection } from './organizationScope.js'
 
 const row = (id, overrides = {}) => ({ id: 'membership-' + id, organization_id: id, member_kind: 'team', status: 'active', role: 'contributor', department_id: 'design', organization: { id, name: id.toUpperCase(), slug: id, status: 'active' }, ...overrides })
 
@@ -58,11 +58,42 @@ test('provider clears prior-user persistence and remains route-independent', () 
   assert.doesNotMatch(source, /react-router|useLocation|useSearchParams/)
 })
 
-test('shared provider and header selector are wired without changing AuthContext', () => {
+test('organization gate blocks tenant content until one active organization is ready', () => {
+  const membership = row('org-a')
+  for (const state of [
+    { loading: true },
+    { error: new Error('unavailable') },
+    { memberships: [] },
+    { memberships: [membership], selectionRequired: true },
+    { memberships: [membership], activeOrganizationId: null },
+  ]) {
+    assert.equal(resolveOrganizationGateState(state).rendersContent, false)
+  }
+  assert.deepEqual(
+    resolveOrganizationGateState({ memberships: [membership], activeOrganizationId: 'org-a', scopeRevision: 4 }),
+    { status: 'ready', rendersContent: true, scopeKey: 'org-a:4' },
+  )
+})
+
+test('organization gate scope key changes for organization and revision switches', () => {
+  const memberships = [row('org-a'), row('org-b')]
+  const key = (activeOrganizationId, scopeRevision) => resolveOrganizationGateState({ memberships, activeOrganizationId, scopeRevision }).scopeKey
+  assert.notEqual(key('org-a', 1), key('org-b', 1))
+  assert.notEqual(key('org-a', 1), key('org-a', 2))
+})
+
+test('shared provider, selector, and application-content gate are wired without changing AuthContext', () => {
   const main = readFileSync(new URL('../main.jsx', import.meta.url), 'utf8')
+  const layout = readFileSync(new URL('../components/Layout.jsx', import.meta.url), 'utf8')
+  const gate = readFileSync(new URL('../components/OrganizationGate.jsx', import.meta.url), 'utf8')
   const header = readFileSync(new URL('../components/Header.jsx', import.meta.url), 'utf8')
   const auth = readFileSync(new URL('../context/AuthContext.jsx', import.meta.url), 'utf8')
   assert.match(main, /<AuthProvider>[\s\S]*<OrganizationProvider>/)
   assert.match(header, /aria-label="Active organization"/)
+  assert.match(layout, /import OrganizationGate from '\.\/OrganizationGate'/)
+  assert.match(layout, /<Header \/>[\s\S]*<OrganizationGate>[\s\S]*<Sidebar \/>[\s\S]*<Outlet \/>[\s\S]*<AssistantFloat \/>[\s\S]*<\/OrganizationGate>/)
+  assert.equal((layout.match(/<OrganizationGate>/g) || []).length, 1)
+  assert.match(gate, /resolveOrganizationGateState\(scope\)/)
+  assert.match(gate, /key=\{decision\.scopeKey\}/)
   assert.doesNotMatch(auth, /activeOrganization|OrganizationProvider/)
 })
