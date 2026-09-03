@@ -6,7 +6,7 @@ Correction status: the current correction evidence in WCH3_CORRECTION_EVIDENCE.m
 
 ## Release position
 
-WCH3 is implemented on branch feat/wch3-proposals and rebased onto exact origin/main commit c30b4fab1cf95ed2eec88f7c211e05a2d9cd3607 after the release target advanced during implementation.
+WCH3 is implemented on branch feat/wch3-proposals and finally rebased onto exact origin/main commit 2047cb6546a4a174e2bb7874f96da1aae814fe09 after the release target advanced during implementation.
 
 This packet is for Admin/Testing review only. Nothing in this branch has been pushed, applied to a live database, merged, published, or deployed.
 

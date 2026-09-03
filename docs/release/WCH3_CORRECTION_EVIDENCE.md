@@ -1,6 +1,6 @@
 # WCH3 correction evidence
 
-Correction to 427701c0adc4851399fbdd794c1c028d3bb5cdf3 on feat/wch3-proposals. The base remains c30b4fab1cf95ed2eec88f7c211e05a2d9cd3607. The accompanying correction commit is the reviewed unit; obtain its exact identity with git rev-parse HEAD. No WKS-owned screen, shared authentication helper, historical migration, or save_work_item signature changed.
+Historical correction evidence for feat/wch3-proposals. Following the final local rebase, current origin/main and merge-base are 2047cb6546a4a174e2bb7874f96da1aae814fe09; the four WCH commits are dbdbf84, a48d6a6, e5a31b1, and b8c8322. Pre-rebase identities in earlier handoffs are historical only. Obtain the exact final identity with git rev-parse HEAD. No WKS-owned screen, shared authentication helper, historical migration, or save_work_item signature changed.
 
 ## Identity and result UI
 
@@ -16,7 +16,7 @@ Local runtime: portable PostgreSQL 17, separate cluster under .qa/wch3-postgres-
 
 Verifier: 23 named checks PASS; final ROLLBACK executed. It creates four synthetic organizations, actors, canonical client/project/engagement/brand roots, services and connectors. It tests all 26 allowed targets with actual service_role calls: preview, confirm, replay, reject, stale, expiry, and injected atomic failure. It also tests authenticated/anon RPC denial, proposer-only enforcement, cross-tenant/client/revoked actors, original-proposer revocation/client conversion, inactive organizations, and RLS reads. The source snapshot contains 24 protected sentinel rows across tasks, artifacts, versions, approvals, work items and stages. Every public source table is compared after execution; only the expected WCH/canonical/audit additions are permitted, and existing rows must remain identical.
 
-The local dump is a runtime compatibility baseline, not independently proven identical to every catalog on c30b4fab. Admin must still verify the exact release schema and final commit. No claim of release approval is made.
+The local dump is a runtime compatibility baseline, not independently proven identical to every catalog on the final 2047cb6 base. Admin must still verify the exact release schema and final commit. No claim of release approval is made.
 
 ## Audit and provenance
 
