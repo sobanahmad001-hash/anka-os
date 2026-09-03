@@ -56,21 +56,32 @@ export default function RetainerReviewPanel({ project, engagement }) {
       : error ? <div role="alert" className={box}><p>{error.message || 'Unable to load review.'}</p><button type="button" className="mt-3 underline" onClick={() => setAttempt(value => value + 1)}>Retry</button></div>
         : !model ? <p role="status">Loading retainer review…</p> : <>
           <p className="text-xs text-slate-400">Refreshed {new Date(model.asOf).toLocaleString()}. Changes made afterward appear on refresh. Counts use current visible records and may change while work is updated.</p>
-          <div className="grid gap-3 sm:grid-cols-4">{[['Currently completed', model.summary.completed], ['Earlier-period work still open now', model.summary.carryover], ['Work with blockers', model.summary.blockers], ['Upcoming period starts', model.summary.upcoming]].map(([title, value]) => <div key={title} className={box}><p className="text-sm text-slate-400">{title}</p><p className="mt-2 text-xl">{value}</p></div>)}</div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{[['Approved commitments', model.summary.commitments], ['Projected starts', model.summary.projections], ['Generated work', model.summary.generatedWork], ['Currently completed', model.summary.completed], ['Carryover open now', model.summary.carryover]].map(([title, value]) => <div key={title} className={box}><p className="text-sm text-slate-400">{title}</p><p className="mt-2 text-xl">{value}</p></div>)}</div>
           {!model.cards.length && <p>No recurring plans recorded for this retainer.</p>}
           {model.cards.map(card => <article key={card.id} className={`${box} space-y-4`}>
             <h3 className="font-semibold">{card.relevantVersions[0]?.title || 'Recurring plan'} · {label(card.status)}</h3>
             <p className="text-xs text-slate-400">{card.relevantVersions.length ? card.relevantVersions.map(version => `v${version.version_number} · ${version.timezone} · ${version.effective_start} to ${version.effective_end || 'open'}`).join(' / ') : 'No approved version applies to this month.'}</p>
+            <div><h4 className="font-medium">Approved commitments</h4><p className="text-xs text-slate-400">Template definitions from approved versions that govern at least one day in this month. These are commitments, not generated work.</p>
+              {!card.commitments.length && <p className="mt-2 text-sm text-slate-500">No approved commitment templates apply.</p>}
+              <ul className="mt-2 space-y-1 text-sm">{card.commitments.map(item => <li key={item.id}>{item.title} · Version {card.relevantVersions.find(version => version.id === item.plan_version_id)?.version_number || 'unavailable'}</li>)}</ul>
+            </div>
             <RecordList title="Currently completed" note="Work from this month’s periods that is done now—not work completed during that month." rows={card.completed} />
             <RecordList title="Earlier-period work still open now" note="Carryover is derived from current status. Original period and dates remain unchanged." rows={card.carryover} />
-            <div><h4 className="font-medium">Upcoming commitments</h4><p className="text-xs text-slate-400">Canonical starts from today through month-end, using each applicable version’s timezone. This review does not establish permission or eligibility to generate work.</p>
-              {!card.upcoming.length && <p className="mt-2 text-sm text-slate-500">No remaining canonical starts in this month.</p>}
-              <ul className="mt-2 space-y-2">{card.upcoming.map(period => <li key={period.period_start} className="rounded bg-white/[0.03] p-3 text-sm">
+            <div><h4 className="font-medium">Projected period starts</h4><p className="text-xs text-slate-400">Ungenerated starts projected from approved versions, from today through month-end in each version’s timezone. A projection is not a canonical work record and does not establish generation eligibility.</p>
+              {!card.projections.length && <p className="mt-2 text-sm text-slate-500">No ungenerated projected starts remain in this month.</p>}
+              <ul className="mt-2 space-y-2">{card.projections.map(period => <li key={period.period_start} className="rounded bg-white/[0.03] p-3 text-sm">
                 <p>{period.period_start} · Version {period.version.version_number || 'unavailable'} · {period.version.timezone}</p>
-                <p>{period.occurrence ? `Generated · recorded version ${period.recordedVersion?.version_number || 'unavailable'}` : 'Ungenerated commitment'} · {period.active ? 'Active plan context' : 'Inactive / not executable'}</p>
+                <p>Projection only · ungenerated · {period.active ? 'Active plan context' : 'Inactive / not executable'}</p>
                 <ul className="ml-4 mt-1 list-disc text-slate-400">{period.templates.map(item => <li key={item.id}>{item.title}</li>)}</ul>
-                {period.occurrence && <div className="mt-2">{card.selectedWork.filter(item => item.recurring_occurrence_id === period.occurrence.id).map(item => <p key={item.id}><RecordLink item={item} /></p>)}</div>}
               </li>)}</ul>
+            </div>
+            <div><h4 className="font-medium">Generated period work</h4><p className="text-xs text-slate-400">Actual occurrences and canonical work for the selected month. Completion is shown separately from generation.</p>
+              {!card.generatedStarts.length && !card.generatedWork.length && <p className="mt-2 text-sm text-slate-500">No generated periods or work in this month.</p>}
+              <ul className="mt-2 space-y-2">{card.generatedStarts.map(period => <li key={period.period_start} className="rounded bg-white/[0.03] p-3 text-sm">
+                <p>{period.period_start} · Generated from recorded version {period.recordedVersion?.version_number || 'unavailable'} · {period.version.timezone}</p>
+                <div className="mt-2">{card.generatedWork.filter(item => item.recurring_occurrence_id === period.occurrence.id).map(item => <p key={item.id}><RecordLink item={item} /> · {label(item.status)}</p>)}</div>
+              </li>)}</ul>
+              {card.generatedWork.filter(item => !card.generatedStarts.some(period => period.occurrence.id === item.recurring_occurrence_id)).map(item => <p key={item.id} className="mt-2 text-sm"><RecordLink item={item} /> · {label(item.status)} · generated earlier in the selected month</p>)}
             </div>
             <div><h4 className="font-medium">Blockers</h4><p className="text-xs text-slate-400">Selected-month open work and carryover with blocked status or visible unfinished prerequisites.</p>
               {!card.blockers.length && <p className="mt-2 text-sm text-slate-500">No visible current blockers.</p>}

@@ -93,10 +93,20 @@ export function buildRetainerReview(snapshot, scope, now = new Date()) {
     const upcoming = [...new Map([...projectedUpcoming, ...recordedUpcoming].map(row => [row.period_start, row])).values()]
       .sort((a, b) => a.period_start.localeCompare(b.period_start))
     const relevantVersions = versions.filter(version => days.some(day => versions.find(row => row.effective_start <= day && (!row.effective_end || row.effective_end >= day))?.id === version.id))
-    return { ...plan, relevantVersions, completed, carryover, blockers, upcoming, selectedWork }
+    const relevantVersionIds = new Set(relevantVersions.map(version => version.id))
+    const commitments = unique(snapshot.templateItems.filter(row => own(row) && row.plan_id === plan.id && relevantVersionIds.has(row.plan_version_id)))
+    // Keep the legacy combined upcoming collection while exposing P6's factual categories.
+    // Projections have no occurrence or canonical work identity; generated starts do.
+    const projections = upcoming.filter(row => !row.occurrence)
+    const generatedStarts = upcoming.filter(row => row.occurrence)
+    return { ...plan, relevantVersions, commitments, projections, generatedStarts,
+      generatedWork: selectedWork, completed, carryover, blockers, upcoming, selectedWork }
   })
   const records = unique(cards.flatMap(card => [...card.selectedWork, ...card.carryover, ...card.blockers.flatMap(row => row.dependencies)]))
   return { cards, records, asOf: now.toISOString(), summary: {
+    commitments: cards.reduce((n, card) => n + card.commitments.length, 0),
+    projections: cards.reduce((n, card) => n + card.projections.length, 0),
+    generatedWork: cards.reduce((n, card) => n + card.generatedWork.length, 0),
     completed: cards.reduce((n, card) => n + card.completed.length, 0),
     carryover: cards.reduce((n, card) => n + card.carryover.length, 0),
     blockers: cards.reduce((n, card) => n + card.blockers.length, 0),
