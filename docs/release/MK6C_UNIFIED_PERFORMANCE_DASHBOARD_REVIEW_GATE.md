@@ -13,6 +13,7 @@
 ## Data and security boundary
 
 - Browser reads use the signed-in Supabase client, so the existing organization-scoped RLS policies remain the primary access boundary.
+- Multi-page reads use stable offset ranges and intentionally accept eventual consistency rather than adding keyset or transaction-consistent pagination. During an active import, a refresh may be needed; the dashboard states this limitation directly.
 - The in-memory rollup additionally rejects every row whose `organization_id` does not match the visible brand and rejects child snapshots whose parent is not in the brand-scoped parent result.
 - Live Google reports continue through the existing `analytics_dashboard` Edge Function action, which authenticates the caller, requires an active team membership, checks Marketing access, and resolves an organization-scoped Marketing engagement before reading mapped connectors.
 - `tracked_page_current_health` and `ad_campaign_performance_metrics` remain existing `security_invoker = true` views. MK6c reads the underlying Ads snapshot table directly and adds no view.
@@ -58,6 +59,7 @@
 - [ ] The unified dashboard requests only GA4 and Search Console from the Google reporting action; Paid remains sourced from MK3 snapshots.
 - [ ] A 366-inclusive-date range is accepted and a 367-inclusive-date range is rejected.
 - [ ] More than 1,000 dated source rows are fully paginated and included in totals and trends.
+- [ ] The dashboard displays exactly: “Data may be momentarily incomplete during an active import; refresh to update.”
 - [ ] Meta remains organic read-only and never surfaces encrypted tokens or ad-management fields.
 - [ ] The PR contains no migration or verifier and introduces no write call.
 - [ ] The dashboard remains a fixed view with no widget configuration or persistence.

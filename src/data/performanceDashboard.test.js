@@ -157,6 +157,10 @@ test('MK6c paginates beyond 1,000 rows and keeps complete totals and trends', as
   assert.equal(repository.includes(".order('id')"), true)
 })
 
+test('MK6c discloses eventual consistency during an active import', () => {
+  assert.equal(ui.includes('Data may be momentarily incomplete during an active import; refresh to update.'), true)
+})
+
 test('MK6c returns honest empty states when connectors or source rows are missing', () => {
   const dashboard = buildPerformanceDashboard({ brand, period, googleDashboard: { brand_id: brand.id, reports: [] } })
   assert.equal(dashboard.organic.available, false)
