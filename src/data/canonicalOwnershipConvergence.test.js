@@ -26,6 +26,10 @@ test('OAF2 keeps clients and projects as canonical roots without re-keying exten
   assert.match(migration, /new\.client_id is distinct from old\.client_id[\s\S]*from public\.engagements/)
   assert.match(migration, /before update of client_id on public\.projects/)
   assert.match(migration, /A project with an engagement cannot change client ownership/)
+  assert.match(migration, /create or replace function private\.validate_engagement_canonical_ownership\(\)/)
+  assert.match(migration, /agency_client\.canonical_client_id[\s\S]*project\.client_id/)
+  assert.match(migration, /before insert or update of organization_id, client_id, project_id[\s\S]*on public\.engagements/)
+  assert.match(migration, /The engagement project must belong to its canonical client/)
   assert.doesNotMatch(migration, /drop table public\.(agency_clients|engagements)/)
   assert.doesNotMatch(migration, /delete from public\.(agency_clients|engagements|clients|projects)/)
 })
@@ -86,9 +90,9 @@ test('Operating Spine client creation makes exactly one transactional RPC call',
 test('AI stores one canonical project with an optional consistent engagement extension', () => {
   assert.match(migration, /drop constraint ai_runs_single_commercial_context_check/)
   assert.match(migration, /ai_runs_engagement_project_organization_fkey/)
-  assert.match(aiChat, /select\('id, project_id'\)/)
-  assert.match(aiChat, /projectId !== engagementRoot\.project_id/)
-  assert.match(aiChat, /projectId = engagementRoot\.project_id/)
+  assert.match(aiChat, /resolveCanonicalCommercialContext/)
+  assert.match(aiChat, /withAiCommercialContext/)
+  assert.match(aiChat, /insert\(completedRun\)/)
   assert.match(aiChat, /context = \{[\s\S]*engagement: engagement\.data/)
   assert.match(aiChat, /context = \{[\s\S]*project: project\.data[\s\S]*\.\.\.context/)
   assert.doesNotMatch(aiChat, /Select a project or an engagement, not both/)
@@ -103,6 +107,25 @@ test('Assistant presents one project context and derives its engagement extensio
 })
 
 test('OAF2 verifier checks invariants and rolls all representative writes back', () => {
+  const alwaysEmittedRuntimeChecks = [
+    'old_client_insert_creates_canonical_root',
+    'old_engagement_insert_creates_project_and_living_record',
+    'commercial_client_rpc_creates_exact_graph',
+    'commercial_client_rpc_failure_is_atomic',
+    'compose_engagement_creates_exact_graph',
+    'compose_engagement_failure_is_atomic',
+    'mismatched_same_org_engagement_insert_is_rejected',
+    'mismatched_same_org_engagement_update_is_rejected',
+    'valid_unrelated_engagement_update_is_allowed',
+    'engaged_project_client_change_is_rejected',
+    'engaged_project_unrelated_update_is_allowed',
+    'standalone_project_client_change_retains_existing_behavior',
+    'engaged_project_cross_organization_change_is_rejected',
+    'cross_organization_engagement_write_is_rejected',
+    'anon_rpc_execution_is_rejected',
+    'authenticated_cross_organization_write_is_rejected',
+    'browser_rls_and_acl_boundaries_are_enforced',
+  ]
   for (const check of [
     'all_agency_clients_have_canonical_roots',
     'all_engagements_have_canonical_projects',
@@ -111,14 +134,14 @@ test('OAF2 verifier checks invariants and rolls all representative writes back',
     'artifact_ownership_is_consistent',
     'work_item_ownership_is_consistent',
     'portal_client_matches_commercial_client',
-    'engaged_project_client_change_is_rejected',
-    'engaged_project_unrelated_update_is_allowed',
-    'standalone_project_client_change_retains_existing_behavior',
-    'engaged_project_cross_organization_change_is_rejected',
+    ...alwaysEmittedRuntimeChecks,
   ]) {
     assert.match(verifier, new RegExp(check))
   }
-  assert.match(verifier, /old_client_insert_creates_canonical_root/)
-  assert.match(verifier, /old_engagement_insert_creates_project_and_living_record/)
+  for (const check of alwaysEmittedRuntimeChecks) {
+    assert.match(verifier, new RegExp(`\\('${check}', false\\)`))
+  }
+  assert.match(verifier, /set local role anon[\s\S]*create_commercial_client/)
+  assert.match(verifier, /set local role authenticated[\s\S]*insert into public\.projects/)
   assert.match(verifier, /\nrollback;\s*$/)
 })

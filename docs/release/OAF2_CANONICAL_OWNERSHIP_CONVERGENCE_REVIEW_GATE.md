@@ -7,6 +7,7 @@ Status: branch-only implementation. Do not merge, deploy, or apply the migration
 - `clients` and `projects` are the canonical commercial ownership roots.
 - `agency_clients` and `engagements` remain one-to-one operating extensions.
 - A canonical project's `client_id` is immutable while an engagement extension exists.
+- Engagement inserts and ownership updates must resolve to the same organization and canonical client as their project.
 - Existing QA-only operating records are preserved by materializing canonical roots during migration.
 - `tasks` and `work_items` remain distinct in OAF2; only canonical project ownership is added to `work_items`.
 
@@ -22,6 +23,7 @@ Status: branch-only implementation. Do not merge, deploy, or apply the migration
 
 - [ ] Confirm `clients`/`projects` remain authoritative and extensions cannot be re-keyed.
 - [ ] Confirm an engaged project rejects client re-keying while unrelated project updates and standalone-project behavior remain unchanged.
+- [ ] Confirm mismatched same-organization engagement clients are rejected on insert and update, while unrelated engagement updates remain allowed.
 - [ ] Confirm cross-organization re-key attempts remain rejected.
 - [ ] Confirm QA records are preserved and gain exactly one canonical root each.
 - [ ] Confirm every project has exactly one Living Record after backfill.
@@ -40,16 +42,14 @@ Status: branch-only implementation. Do not merge, deploy, or apply the migration
 - `git diff --check`
 - Supabase linked migration dry-run only (never a live push from this branch task)
 
-## Corrected branch evidence
+## Required corrected-head evidence
 
-- Focused ownership, AI, and Operating Spine regression set: 30/30 passed.
-- Full repository test suite: 346/346 passed.
-- Lint: passed with 0 errors; the existing 284-warning baseline remains.
-- Production build: passed with 343 modules transformed.
-- `git diff --check`: passed.
-- Supabase CLI 2.115.0 linked dry-run: passed and would apply only `20260903050747_canonical_ownership_convergence.sql`.
-- PR validation and preview checks must pass again on the corrected pushed head.
-- Local database reset remains unavailable on this host because Docker/Podman is not installed; Deno check remains unavailable because Deno is not installed.
+- Focused and full Node test results from the final source state.
+- Full Deno test and type-check results from exact-head CI, including the five canonical AI context paths.
+- Lint and production build results from the final source state.
+- `git diff --check` and Supabase linked dry-run results.
+- Runtime verifier output is required after Admin/Testing applies the migration through its controlled process.
+- Local database reset remains unavailable on this branch host because Docker/Podman is not installed.
 
 ## Rollout order after approval
 

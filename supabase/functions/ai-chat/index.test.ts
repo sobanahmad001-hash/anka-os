@@ -4,8 +4,10 @@ import {
   actionResponseFormat,
   outputText,
   parseAction,
+  resolveCanonicalCommercialContext,
   safetyIdentifier,
   safeDepartmentId,
+  withAiCommercialContext,
 } from './index.ts'
 
 Deno.test('operating department validation accepts only canonical departments', () => {
@@ -57,4 +59,55 @@ Deno.test('OpenAI safety identifier is stable and does not transmit the user UUI
 
 Deno.test('unsupported departments reject asynchronously when used by a caller', async () => {
   await assertRejects(async () => safeDepartmentId('sales'), Error, 'Unknown operating department')
+})
+
+Deno.test('matching project and engagement are accepted as one stored commercial context', async () => {
+  const storedContext = await resolveCanonicalCommercialContext(
+    'project-1',
+    'engagement-1',
+    async () => 'project-1',
+  )
+  const storedRun = withAiCommercialContext({ capability: 'project_pulse' }, storedContext)
+  assertEquals(storedRun, {
+    capability: 'project_pulse',
+    project_id: 'project-1',
+    engagement_id: 'engagement-1',
+  })
+})
+
+Deno.test('mismatched project and engagement are rejected', async () => {
+  await assertRejects(
+    () => resolveCanonicalCommercialContext('project-2', 'engagement-1', async () => 'project-1'),
+    Error,
+    'do not share canonical ownership',
+  )
+})
+
+Deno.test('engagement-only context derives and stores its canonical project', async () => {
+  const storedContext = await resolveCanonicalCommercialContext(
+    null,
+    'engagement-1',
+    async () => 'project-1',
+  )
+  assertEquals(storedContext, { project_id: 'project-1', engagement_id: 'engagement-1' })
+})
+
+Deno.test('project-only context remains project-only without an engagement lookup', async () => {
+  let lookupCount = 0
+  const storedContext = await resolveCanonicalCommercialContext('project-1', null, async () => {
+    lookupCount += 1
+    return 'unexpected'
+  })
+  assertEquals(storedContext, { project_id: 'project-1', engagement_id: null })
+  assertEquals(lookupCount, 0)
+})
+
+Deno.test('daily brief context with neither project nor engagement remains unscoped', async () => {
+  let lookupCount = 0
+  const storedContext = await resolveCanonicalCommercialContext(null, null, async () => {
+    lookupCount += 1
+    return 'unexpected'
+  })
+  assertEquals(storedContext, { project_id: null, engagement_id: null })
+  assertEquals(lookupCount, 0)
 })

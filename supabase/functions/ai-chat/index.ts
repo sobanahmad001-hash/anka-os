@@ -9,6 +9,38 @@ type ConnectorRecord = {
 type EngagementServiceRecord = {
   service_catalog: { department_id?: string | null } | Array<{ department_id?: string | null }> | null
 }
+export type AiCommercialContext = { project_id: string | null, engagement_id: string | null }
+
+export class CommercialContextError extends Error {
+  constructor(public status: number, message: string) {
+    super(message)
+    this.name = 'CommercialContextError'
+  }
+}
+
+export async function resolveCanonicalCommercialContext(
+  projectId: string | null,
+  engagementId: string | null,
+  findEngagementProjectId: (engagementId: string) => Promise<string | null>,
+): Promise<AiCommercialContext> {
+  if (!engagementId) return { project_id: projectId, engagement_id: null }
+
+  const engagementProjectId = await findEngagementProjectId(engagementId)
+  if (!engagementProjectId) {
+    throw new CommercialContextError(404, 'Engagement not found or inaccessible')
+  }
+  if (projectId && projectId !== engagementProjectId) {
+    throw new CommercialContextError(400, 'The selected project and engagement do not share canonical ownership')
+  }
+  return { project_id: engagementProjectId, engagement_id: engagementId }
+}
+
+export function withAiCommercialContext<T extends Record<string, unknown>>(
+  payload: T,
+  commercialContext: AiCommercialContext,
+) {
+  return { ...payload, ...commercialContext }
+}
 
 const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
 const CAPABILITIES = new Set([
@@ -277,20 +309,28 @@ export async function handleRequest(request: Request) {
       return json({ error: 'AI assistance is available to active team members only' }, 403)
     }
 
-    if (engagementId) {
-      const { data: engagementRoot, error: engagementRootError } = await userClient
-        .from('engagements')
-        .select('id, project_id')
-        .eq('id', engagementId)
-        .single()
-      if (engagementRootError || !engagementRoot) {
-        return json({ error: 'Engagement not found or inaccessible' }, 404)
+    let commercialContext: AiCommercialContext
+    try {
+      commercialContext = await resolveCanonicalCommercialContext(
+        projectId,
+        engagementId,
+        async selectedEngagementId => {
+          const { data, error } = await userClient
+            .from('engagements')
+            .select('project_id')
+            .eq('id', selectedEngagementId)
+            .single()
+          return error || !data ? null : data.project_id
+        },
+      )
+    } catch (contextError) {
+      if (contextError instanceof CommercialContextError) {
+        return json({ error: contextError.message }, contextError.status)
       }
-      if (projectId && projectId !== engagementRoot.project_id) {
-        return json({ error: 'The selected project and engagement do not share canonical ownership' }, 400)
-      }
-      projectId = engagementRoot.project_id
+      throw contextError
     }
+    projectId = commercialContext.project_id
+    engagementId = commercialContext.engagement_id
 
     if (!departmentId) departmentId = safeDepartmentId(membership.department_id)
     if (
@@ -532,15 +572,17 @@ ${JSON.stringify(context).slice(0, 90000)}`
 
     const proposal = capability === 'action_proposal' ? parseAction(content, projectId, workstreamIds) : null
     const cost = estimatedCost(provider, inputTokens, outputTokens)
-    const { data: run, error: auditError } = await adminClient.from('ai_runs').insert({
-      organization_id: ORGANIZATION_ID, project_id: projectId, engagement_id: engagementId, user_id: actorId,
+    const completedRun = withAiCommercialContext({
+      organization_id: ORGANIZATION_ID, user_id: actorId,
       capability, status: 'completed', provider, model,
       input_text: inputText, output_text: proposal ? proposal.summary : content,
       context_manifest: manifest, proposed_action: proposal?.action || null,
       latency_ms: Date.now() - startedAt, input_tokens: inputTokens,
       output_tokens: outputTokens, estimated_cost_microusd: cost,
       human_decision: proposal ? 'pending' : 'not_applicable',
-    }).select().single()
+    }, commercialContext)
+    const { data: run, error: auditError } = await adminClient.from('ai_runs')
+      .insert(completedRun).select().single()
     if (auditError) throw auditError
 
     return json({
