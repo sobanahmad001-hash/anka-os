@@ -1,10 +1,14 @@
 import { supabase } from '../lib/supabase.js'
-import { buildPerformanceDashboard } from './performanceDashboard.js'
+import { buildPerformanceDashboard, collectPaginatedRows } from './performanceDashboard.js'
 
 async function dataOrThrow(query) {
   const { data, error } = await query
   if (error) throw new Error(error.message || 'Performance dashboard query failed')
   return data || []
+}
+
+async function paginatedRows(queryForPage) {
+  return collectPaginatedRows((from, to) => dataOrThrow(queryForPage().range(from, to)))
 }
 
 async function invokeAnalytics(engagementId, period) {
@@ -22,32 +26,37 @@ async function invokeAnalytics(engagementId, period) {
 
 async function rowsForParents(table, columns, parentColumn, parentIds, period) {
   if (!parentIds.length) return []
-  return dataOrThrow(supabase.from(table).select(columns)
+  return paginatedRows(() => supabase.from(table).select(columns)
     .in(parentColumn, parentIds)
     .gte('snapshot_date', period.start)
     .lte('snapshot_date', period.end)
-    .order('snapshot_date'))
+    .order('snapshot_date')
+    .order('id'))
 }
 
 export async function loadPerformanceDashboard({ engagementId, brand, period }) {
   const [googleDashboard, pageHealth, trackedKeywords, adCampaigns, metaConnections] = await Promise.all([
     invokeAnalytics(engagementId, period),
-    dataOrThrow(supabase.from('tracked_page_current_health')
+    paginatedRows(() => supabase.from('tracked_page_current_health')
       .select('tracked_page_id, organization_id, brand_id, page_url, audit_date, index_status, schema_valid, open_issue_count, needs_attention')
       .eq('brand_id', brand.id)
-      .order('page_url')),
-    dataOrThrow(supabase.from('tracked_keywords')
+      .order('page_url')
+      .order('tracked_page_id')),
+    paginatedRows(() => supabase.from('tracked_keywords')
       .select('id, organization_id, brand_id, tracked_page_id, keyword, target_rank_tier, active')
       .eq('brand_id', brand.id)
       .eq('active', true)
-      .order('keyword')),
-    dataOrThrow(supabase.from('ad_campaigns')
+      .order('keyword')
+      .order('id')),
+    paginatedRows(() => supabase.from('ad_campaigns')
       .select('id, organization_id, brand_id, campaign_name, status')
       .eq('brand_id', brand.id)
-      .order('campaign_name')),
-    dataOrThrow(supabase.from('meta_connections')
+      .order('campaign_name')
+      .order('id')),
+    paginatedRows(() => supabase.from('meta_connections')
       .select('id, organization_id, brand_id, facebook_page_id, instagram_account_id')
-      .eq('brand_id', brand.id)),
+      .eq('brand_id', brand.id)
+      .order('id')),
   ])
 
   const [rankSnapshots, adSnapshots, metaSnapshots] = await Promise.all([

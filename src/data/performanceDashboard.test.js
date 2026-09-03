@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { buildPerformanceDashboard, shouldApplyDashboardResponse } from './performanceDashboard.js'
+import { buildPerformanceDashboard, collectPaginatedRows, shouldApplyDashboardResponse } from './performanceDashboard.js'
 
 const read = relative => readFileSync(new URL(relative, import.meta.url), 'utf8')
 const repository = read('./performanceDashboardRepository.js')
@@ -121,6 +121,40 @@ test('MK6c ignores Google Ads report failures because paid uses stored MK3 snaps
     { provider: 'google_search_console', connection_name: 'Search', error: 'Search unavailable' },
   ])
   assert.match(repository, /providers: \['google_analytics', 'google_search_console'\]/)
+})
+
+test('MK6c paginates beyond 1,000 rows and keeps complete totals and trends', async () => {
+  const snapshots = Array.from({ length: 1005 }, (_, index) => ({
+    id: `snapshot-${String(index).padStart(4, '0')}`,
+    organization_id: organizationId,
+    ad_campaign_id: 'campaign-1',
+    snapshot_date: `2026-08-${String((index % 31) + 1).padStart(2, '0')}`,
+    impressions: 10,
+    clicks: 2,
+    cost: 1,
+    conversions: 1,
+  })).sort((left, right) => left.snapshot_date.localeCompare(right.snapshot_date) || left.id.localeCompare(right.id))
+  const ranges = []
+  const collected = await collectPaginatedRows(async (from, to) => {
+    ranges.push([from, to])
+    return snapshots.slice(from, to + 1)
+  })
+  const dashboard = buildPerformanceDashboard({
+    brand, period,
+    adCampaigns: [{ id: 'campaign-1', organization_id: organizationId, brand_id: brand.id, status: 'active' }],
+    adSnapshots: collected,
+  })
+  assert.deepEqual(ranges, [[0, 499], [500, 999], [1000, 1499]])
+  assert.equal(collected.length, 1005)
+  assert.equal(dashboard.paid.spend, 1005)
+  assert.equal(dashboard.paid.impressions, 10050)
+  assert.equal(dashboard.paid.clicks, 2010)
+  assert.equal(dashboard.paid.conversions, 1005)
+  assert.equal(dashboard.paid.trend.length, 31)
+  assert.equal(dashboard.paid.trend.reduce((total, point) => total + point.conversions, 0), 1005)
+  assert.equal(repository.includes('queryForPage().range(from, to)'), true)
+  assert.equal(repository.includes(".order('snapshot_date')"), true)
+  assert.equal(repository.includes(".order('id')"), true)
 })
 
 test('MK6c returns honest empty states when connectors or source rows are missing', () => {

@@ -4,6 +4,7 @@
 
 - Replaces the Marketing Studio's Google-only analytics panel with one fixed, per-brand performance dashboard.
 - Computes every summary live in memory from authenticated source reads for the selected reporting period.
+- Paginates every multi-row browser source read with deterministic ordering so the Data API row cap cannot silently truncate a rollup.
 - Shows four sections: organic visibility, technical health, paid performance, and social performance.
 - Includes GA4 site-activity totals and a dated Search Console clicks/impressions series in Organic.
 - Includes current keyword-rank distribution from MK6a, current page health from MK2, dated Ads snapshots from MK3, and dated Meta organic snapshots from MK6b.
@@ -56,6 +57,7 @@
 - [ ] Search Console requests use the existing reporting-only endpoint with `dimensions: ['date']`.
 - [ ] The unified dashboard requests only GA4 and Search Console from the Google reporting action; Paid remains sourced from MK3 snapshots.
 - [ ] A 366-inclusive-date range is accepted and a 367-inclusive-date range is rejected.
+- [ ] More than 1,000 dated source rows are fully paginated and included in totals and trends.
 - [ ] Meta remains organic read-only and never surfaces encrypted tokens or ad-management fields.
 - [ ] The PR contains no migration or verifier and introduces no write call.
 - [ ] The dashboard remains a fixed view with no widget configuration or persistence.

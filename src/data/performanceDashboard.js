@@ -39,6 +39,15 @@ export function shouldApplyDashboardResponse(response, request, activeGeneration
   return request.generation === activeGeneration && response?.brand?.id === request.brandId
 }
 
+export async function collectPaginatedRows(fetchPage, pageSize = 500) {
+  const rows = []
+  for (let from = 0; ; from += pageSize) {
+    const page = await fetchPage(from, from + pageSize - 1)
+    rows.push(...page)
+    if (page.length < pageSize) return rows
+  }
+}
+
 export function buildPerformanceDashboard({
   brand,
   period,
