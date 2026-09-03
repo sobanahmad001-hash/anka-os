@@ -47,7 +47,9 @@ Status: branch-only performance follow-up. Do not merge or apply the migration u
 - `git diff --check`: passed.
 - Supabase CLI `2.115.0` linked migration dry-run: passed and reported only `20260903060726_oaf2a_cover_composite_fks.sql` pending; no database push was performed.
 - Local migration-ledger verification is unavailable because the local PostgreSQL runtime is not running on this host.
-- Exact-head CI is required after the branch is pushed.
+- Implementation head `ae25577bccef4626769da310283867c06efee23a` CI run `33810933765`: passed in 48 seconds.
+- That CI run repeated the full Node suite, lint, production build, 118 passing Deno tests, and the full Deno type-check; Vercel preview also passed.
+- The final pull-request head must pass CI again after this evidence-only documentation update.
 
 ## Rollout boundary
 
