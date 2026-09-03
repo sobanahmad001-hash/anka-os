@@ -25,7 +25,7 @@ RET1 is additive foundation only: recurring plan headers, immutable versions and
 - [ ] Migration is exactly `20260903071706_ret1_recurring_plan_foundation.sql`.
 - [ ] Full Node tests, lint, and production build pass.
 - [ ] Full CI-listed Deno tests and type-check pass at exact PR head.
-- [ ] Local migration reset and rollback-safe verifier pass without retained test data.
+- [ ] Local migration reset and rollback-safe verifier pass without retained test data. The verifier must emit its complete named result before failing, if any check fails.
 - [ ] SQL diff review shows only intended additive objects plus the audit vocabulary extension.
 - [ ] Linked migration dry-run succeeds; no migration is applied to a remote database.
 - [ ] PR review confirms no occurrence generation, cron/scheduler, notification, UI, or task/work-item convergence code.
@@ -34,6 +34,8 @@ RET1 is additive foundation only: recurring plan headers, immutable versions and
 
 This pull request must not be merged, deployed, or applied as part of RET1 implementation. A later authorized rollout must run the matching verifier immediately after migration and stop on any failed check.
 
-Because the implementation host has no Docker or Podman, a full local `supabase db reset` could not be run. The migration and verifier were instead executed successfully against a disposable embedded PostgreSQL instance, and the linked CLI dry-run identified only the reserved RET1 migration. This does not replace rollout verification.
+The rollback verifier creates representative data for two organizations inside a transaction, exercises service-owner creation, project-owner approval and lifecycle authority, department-manager immutable reassignment, wrong-role and cross-organization rejection, validation constraints, append-only guards, and audit events, then always ends in `ROLLBACK`. Its catalog checks cover the complete anon/authenticated/service-role ACL matrix across all four tables and five RPCs, the exact SELECT-only RLS policies, and every named tenant-composite foreign key with its supporting index.
+
+Because the implementation host has no Docker or Podman, a full local `supabase db reset` could not be run. The migration and verifier were instead executed against a disposable embedded PostgreSQL instance, and the linked CLI dry-run identified only the reserved RET1 migration. This does not replace rollout verification.
 
 After a separately authorized migration application, Admin must run `supabase/verify_20260903071706_ret1_recurring_plan_foundation.sql`, capture its named JSON result at the applied commit SHA, and persist that result in the release evidence record. A failed or missing persisted result blocks rollout completion.

@@ -23,9 +23,11 @@ create table public.recurring_work_plans (
   created_by uuid not null references auth.users(id) on delete restrict,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  foreign key (engagement_id, project_id, organization_id)
+  constraint recurring_plans_engagement_project_org_fk
+    foreign key (engagement_id, project_id, organization_id)
     references public.engagements(id, project_id, organization_id) on delete restrict,
-  foreign key (engagement_service_id, engagement_id, service_id, organization_id)
+  constraint recurring_plans_service_scope_fk
+    foreign key (engagement_service_id, engagement_id, service_id, organization_id)
     references public.engagement_services(id, engagement_id, service_id, organization_id) on delete restrict,
   unique (id, organization_id),
   check (status = 'draft' or approved_version_id is not null)
@@ -45,7 +47,8 @@ create table public.recurring_work_plan_versions (
   schedule_definition jsonb not null default '{}'::jsonb check (jsonb_typeof(schedule_definition) = 'object'),
   created_by uuid not null references auth.users(id) on delete restrict,
   created_at timestamptz not null default now(),
-  foreign key (plan_id, organization_id) references public.recurring_work_plans(id, organization_id) on delete restrict,
+  constraint recurring_versions_plan_org_fk
+    foreign key (plan_id, organization_id) references public.recurring_work_plans(id, organization_id) on delete restrict,
   unique (plan_id, version_number),
   unique (id, plan_id, organization_id),
   check (effective_end is null or effective_end >= effective_start)
@@ -69,7 +72,8 @@ create table public.recurring_work_plan_template_items (
   position integer not null check (position >= 0),
   created_by uuid not null references auth.users(id) on delete restrict,
   created_at timestamptz not null default now(),
-  foreign key (plan_version_id, plan_id, organization_id)
+  constraint recurring_template_version_plan_org_fk
+    foreign key (plan_version_id, plan_id, organization_id)
     references public.recurring_work_plan_versions(id, plan_id, organization_id) on delete restrict,
   unique (plan_version_id, template_key),
   unique (plan_version_id, position)
@@ -83,7 +87,8 @@ create table public.recurring_work_plan_version_approvals (
   approved_by uuid not null references auth.users(id) on delete restrict,
   approval_note text not null default '',
   approved_at timestamptz not null default now(),
-  foreign key (plan_version_id, plan_id, organization_id)
+  constraint recurring_approvals_version_plan_org_fk
+    foreign key (plan_version_id, plan_id, organization_id)
     references public.recurring_work_plan_versions(id, plan_id, organization_id) on delete restrict,
   unique (plan_version_id)
 );

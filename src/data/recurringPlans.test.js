@@ -45,14 +45,53 @@ test('RET1 tenant constraints, audit vocabulary, and server-only ACLs are explic
   assert.doesNotMatch(migration, /security definer/i)
   assert.match(migration, /grant execute on function public\.reassign_recurring_plan_template_item[\s\S]*to service_role/)
   assert.match(migration, /membership\.role = 'department_manager'[\s\S]*membership\.department_id = v_department_id/)
+  for (const constraintName of [
+    'recurring_plans_engagement_project_org_fk',
+    'recurring_plans_service_scope_fk',
+    'recurring_versions_plan_org_fk',
+    'recurring_template_version_plan_org_fk',
+    'recurring_approvals_version_plan_org_fk',
+    'recurring_work_plans_approved_version_fk',
+  ]) {
+    assert.match(migration, new RegExp(`constraint ${constraintName}`))
+  }
 })
 
-test('RET1 verifier is rollback-safe and fails closed on named security checks', () => {
+test('RET1 verifier exercises representative authority, immutability, and validation behavior', () => {
+  for (const checkName of [
+    'service_owner_can_create_plan', 'service_owner_can_create_version',
+    'project_owner_can_approve_version', 'project_owner_can_transition_lifecycle',
+    'department_manager_reassignment_creates_immutable_version',
+    'wrong_role_plan_creation_is_rejected', 'wrong_role_approval_is_rejected',
+    'cross_organization_actor_is_rejected', 'cross_organization_target_is_rejected',
+    'version_update_is_rejected', 'version_delete_is_rejected',
+    'template_item_update_is_rejected', 'template_item_delete_is_rejected',
+    'approval_update_is_rejected', 'approval_delete_is_rejected',
+    'invalid_cadence_is_rejected', 'invalid_timezone_is_rejected',
+    'invalid_effective_dates_are_rejected', 'invalid_template_offsets_are_rejected',
+    'audit_events_are_created',
+  ]) {
+    assert.match(verifier, new RegExp(`'${checkName}'`))
+  }
+  assert.match(verifier, /public\.create_recurring_work_plan\(/)
+  assert.match(verifier, /public\.reassign_recurring_plan_template_item\(/)
+  assert.match(verifier, /exception when sqlstate '42501'/)
+  assert.match(verifier, /exception when sqlstate '55000'/)
+})
+
+test('RET1 verifier exhaustively checks catalog security and fails closed after reporting', () => {
   assert.match(verifier, /^begin;/m)
-  assert.match(verifier, /browser_tables_are_read_only/)
+  assert.match(verifier, /table_acl_matrix_is_exact/)
+  assert.match(verifier, /count\(\*\) = 48/)
+  assert.match(verifier, /rpc_acl_matrix_is_exact/)
+  assert.match(verifier, /count\(\*\) = 15/)
+  assert.match(verifier, /rls_select_policies_are_exact/)
+  assert.match(verifier, /rls_write_policies_are_absent/)
   assert.match(verifier, /server_actions_are_invoker_only/)
-  assert.match(verifier, /browser_cannot_execute_server_actions/)
-  assert.match(verifier, /raise exception 'RET1 verification failed.'/)
+  assert.match(verifier, /tenant_composite_foreign_keys_are_exact/)
+  assert.match(verifier, /tenant_foreign_key_indexes_are_exact/)
+  assert.match(verifier, /select jsonb_object_agg\(check_name, passed order by check_name\)/)
+  assert.match(verifier, /raise exception 'RET1 verification failed: %'/)
   assert.match(verifier, /rollback;\s*$/)
   assert.doesNotMatch(verifier, /commit;/i)
 })
