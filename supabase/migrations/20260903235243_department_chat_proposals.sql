@@ -34,6 +34,7 @@ create table public.department_chat_proposals (
   safe_prompt_metadata jsonb not null default '{}'::jsonb check (jsonb_typeof(safe_prompt_metadata) = 'object' and octet_length(safe_prompt_metadata::text) <= 4000),
   context_artifact_version_ids uuid[] not null default '{}'::uuid[],
   context_checksum text not null check (context_checksum ~ '^[a-f0-9]{64}$'),
+  database_context_checksum text not null check (database_context_checksum ~ '^[a-f0-9]{64}$'),
   connector_connection_id uuid not null,
   model_id text not null check (length(trim(model_id)) between 1 and 160),
   ai_run_id uuid not null unique,
@@ -128,6 +129,7 @@ begin
      or new.safe_prompt_metadata is distinct from old.safe_prompt_metadata
      or new.context_artifact_version_ids is distinct from old.context_artifact_version_ids
      or new.context_checksum is distinct from old.context_checksum
+     or new.database_context_checksum is distinct from old.database_context_checksum
      or new.connector_connection_id is distinct from old.connector_connection_id
      or new.model_id is distinct from old.model_id
      or new.ai_run_id is distinct from old.ai_run_id
@@ -210,47 +212,65 @@ before update on public.department_chat_proposals
 for each row execute function private.protect_department_chat_proposal();
 
 -- Caller checksums detect Edge-observed changes. This database-owned check independently
--- resolves the immutable approved versions while the engagement row is update-locked,
--- preventing a new approval from entering between validation and the official write.
-create or replace function private.department_chat_context_versions_match(
+-- freezes every mutable table used by the WCH context before reading it. The fixed lock
+-- order starts with artifact_approvals so approval writers cannot publish a new context
+-- version between this manifest and the official write.
+create or replace function private.department_chat_current_context_checksum(
   p_organization_id uuid, p_engagement_id uuid, p_department_id text,
-  p_expected_artifact_version_ids uuid[]
+  p_connector_connection_id uuid, p_model_id text, p_engagement_stage_instance_id uuid
 )
-returns boolean
-language sql
+returns text
+language plpgsql
 security invoker
 set search_path = ''
 as $$
-  with latest_per_artifact as (
-    select distinct on (approval.artifact_id) approval.artifact_version_id
-    from public.artifact_approvals approval
-    join public.artifacts artifact
-      on artifact.id = approval.artifact_id
-     and artifact.organization_id = approval.organization_id
-     and artifact.engagement_id = approval.engagement_id
-    join public.artifact_versions version
-      on version.id = approval.artifact_version_id
-     and version.organization_id = approval.organization_id
-     and version.artifact_id = approval.artifact_id
-    where approval.organization_id = p_organization_id
-      and approval.engagement_id = p_engagement_id
-      and version.ai_use_allowed
-      and version.data_classification <> 'restricted'
-      and artifact.artifact_type = any(case p_department_id
-        when 'content' then array['discovery','vision','audience','brand_statement','website_architecture','keyword_strategy','content','campaign_messaging','scripts']
-        when 'design' then array['discovery','vision','audience','brand_statement','website_architecture','content','campaign_messaging','design_system']
-        when 'marketing' then array['discovery','vision','audience','brand_statement','website_architecture','keyword_strategy','content','campaign_messaging','scripts','channel_strategy','campaign_brief','measurement_plan']
-        when 'development' then array['brand_statement','website_architecture','keyword_strategy','content','design_system','technical_brief','launch_checklist']
-        else array[]::text[] end)
-    order by approval.artifact_id, approval.approved_at desc, approval.id desc
-  )
-  select coalesce(array_agg(artifact_version_id order by artifact_version_id), '{}'::uuid[])
-    = array(select id from unnest(coalesce(p_expected_artifact_version_ids, '{}'::uuid[])) id order by id)
-  from latest_per_artifact;
+declare v_manifest jsonb;
+begin
+  lock table public.artifact_approvals in share mode;
+  lock table public.artifacts, public.artifact_versions, public.organizations,
+    public.organization_memberships, public.clients, public.agency_clients,
+    public.projects, public.brands, public.engagements, public.service_catalog,
+    public.engagement_services, public.integration_connections,
+    public.integration_connection_departments,
+    public.integration_connection_engagements,
+    public.engagement_stage_instances in share mode;
+  select jsonb_build_object(
+    'profile_version','wch2-v1','department_id',p_department_id,
+    'engagement',to_jsonb(e),'agency_client',to_jsonb(ac),'canonical_client',to_jsonb(c),
+    'project',to_jsonb(p),'brand',to_jsonb(b),
+    'active_services',coalesce((select jsonb_agg(jsonb_build_object('service',to_jsonb(es),'catalog',to_jsonb(sc)) order by es.id)
+      from public.engagement_services es join public.service_catalog sc on sc.id=es.service_id
+      where es.organization_id=p_organization_id and es.engagement_id=p_engagement_id and es.status='active' and sc.department_id=p_department_id),'[]'::jsonb),
+    'approved_artifacts',coalesce((select jsonb_agg(x.value order by x.artifact_id) from
+      (select distinct on (a.id) a.id artifact_id,jsonb_build_object('approval',to_jsonb(ap),'artifact',to_jsonb(a),'version',to_jsonb(v)) value
+       from public.artifact_approvals ap join public.artifacts a on a.id=ap.artifact_id and a.organization_id=ap.organization_id and a.engagement_id=ap.engagement_id
+       join public.artifact_versions v on v.id=ap.artifact_version_id and v.organization_id=ap.organization_id and v.artifact_id=ap.artifact_id
+       where ap.organization_id=p_organization_id and ap.engagement_id=p_engagement_id and v.ai_use_allowed and v.data_classification<>'restricted'
+       and a.artifact_type=any(case p_department_id
+         when 'content' then array['discovery','vision','audience','brand_statement','website_architecture','keyword_strategy','content','campaign_messaging','scripts']
+         when 'design' then array['discovery','vision','audience','brand_statement','website_architecture','content','campaign_messaging','design_system']
+         when 'marketing' then array['discovery','vision','audience','brand_statement','website_architecture','keyword_strategy','content','campaign_messaging','scripts','channel_strategy','campaign_brief','measurement_plan']
+         when 'development' then array['brand_statement','website_architecture','keyword_strategy','content','design_system','technical_brief','launch_checklist'] else array[]::text[] end)
+       order by a.id,ap.approved_at desc,ap.id desc) x),'[]'::jsonb),
+    'connector',jsonb_build_object('connection',to_jsonb(ic),
+      'department_mappings',coalesce((select jsonb_agg(to_jsonb(m) order by m.department_id) from public.integration_connection_departments m where m.organization_id=p_organization_id and m.connection_id=ic.id),'[]'::jsonb),
+      'engagement_mappings',coalesce((select jsonb_agg(to_jsonb(m) order by m.engagement_id,m.department_id) from public.integration_connection_engagements m where m.organization_id=p_organization_id and m.connection_id=ic.id),'[]'::jsonb),
+      'model_id',p_model_id),'selected_stage',to_jsonb(s)
+  ) into v_manifest
+  from public.engagements e join public.projects p on p.id=e.project_id and p.organization_id=e.organization_id
+  join public.agency_clients ac on ac.id=e.client_id and ac.organization_id=e.organization_id
+  join public.clients c on c.id=ac.canonical_client_id and c.organization_id=ac.organization_id
+  left join public.brands b on b.id=e.brand_id and b.organization_id=e.organization_id
+  join public.integration_connections ic on ic.id=p_connector_connection_id and ic.organization_id=e.organization_id
+  left join public.engagement_stage_instances s on s.id=p_engagement_stage_instance_id and s.organization_id=e.organization_id
+  where e.id=p_engagement_id and e.organization_id=p_organization_id;
+  if v_manifest is null then return null; end if;
+  return encode(extensions.digest(convert_to(v_manifest::text,'UTF8'),'sha256'),'hex');
+end;
 $$;
-revoke all on function private.department_chat_context_versions_match(uuid, uuid, text, uuid[])
+revoke all on function private.department_chat_current_context_checksum(uuid, uuid, text, uuid, text, uuid)
   from public, anon, authenticated;
-grant execute on function private.department_chat_context_versions_match(uuid, uuid, text, uuid[])
+grant execute on function private.department_chat_current_context_checksum(uuid, uuid, text, uuid, text, uuid)
   to service_role;
 
 create or replace function public.save_department_chat_proposal(
@@ -271,10 +291,21 @@ set search_path = ''
 as $$
 declare
   v_engagement public.engagements;
+  v_database_context_checksum text;
   v_proposal_id uuid := gen_random_uuid();
   v_ai_run_id uuid;
   v_proposal public.department_chat_proposals;
 begin
+  -- Acquire the canonical context locks before taking any row lock. This avoids
+  -- lock-order inversion with concurrent context writers and approval publication.
+  v_database_context_checksum := private.department_chat_current_context_checksum(
+    p_organization_id, p_engagement_id, p_department_id,
+    p_connector_connection_id, p_model_id, p_engagement_stage_instance_id
+  );
+  if v_database_context_checksum is null then
+    raise exception 'Department Chat database context changed.' using errcode = '23514';
+  end if;
+
   select engagement.* into v_engagement
   from public.engagements engagement
   where engagement.id = p_engagement_id
@@ -362,6 +393,7 @@ begin
       'proposal_kind', p_proposal_kind, 'target_key', p_target_key,
       'connector_connection_id', p_connector_connection_id,
       'model_id', p_model_id, 'context_checksum', p_context_checksum,
+      'database_context_checksum', v_database_context_checksum,
       'approved_artifact_version_ids', to_jsonb(coalesce(p_context_artifact_version_ids, '{}'::uuid[]))
     ),
     jsonb_build_object('proposal_id', v_proposal_id, 'proposal_kind', p_proposal_kind, 'target_key', p_target_key),
@@ -373,14 +405,14 @@ begin
     id, organization_id, engagement_id, project_id, department_id, proposer_id,
     proposal_kind, target_key, artifact_id, engagement_stage_instance_id,
     validated_payload, preview_payload, safe_prompt_metadata,
-    context_artifact_version_ids, context_checksum, connector_connection_id,
+    context_artifact_version_ids, context_checksum, database_context_checksum, connector_connection_id,
     model_id, ai_run_id, idempotency_key
   ) values (
     v_proposal_id, p_organization_id, p_engagement_id, p_project_id,
     p_department_id, p_actor_id, p_proposal_kind, p_target_key, p_artifact_id,
     p_engagement_stage_instance_id, p_validated_payload, p_preview_payload,
     p_safe_prompt_metadata, coalesce(p_context_artifact_version_ids, '{}'::uuid[]),
-    p_context_checksum, p_connector_connection_id, p_model_id, v_ai_run_id,
+    p_context_checksum, v_database_context_checksum, p_connector_connection_id, p_model_id, v_ai_run_id,
     p_idempotency_key
   ) returning * into v_proposal;
 
@@ -413,6 +445,7 @@ declare
   v_artifact_id uuid;
   v_content jsonb;
   v_content_checksum text;
+  v_current_database_context_checksum text;
   v_connector_count integer;
 begin
   select proposal.* into v_proposal
@@ -463,22 +496,33 @@ begin
     where id = v_proposal.ai_run_id;
     return jsonb_build_object('outcome', 'expired', 'proposal_id', v_proposal.id);
   end if;
-  select engagement.* into v_engagement
-  from public.engagements engagement
-  where engagement.id = v_proposal.engagement_id
-    and engagement.project_id = v_proposal.project_id
-    and engagement.organization_id = v_proposal.organization_id
-  for update;
-  if not found then
-    raise exception 'Department Chat engagement context changed.' using errcode = '23514';
+  v_current_database_context_checksum := private.department_chat_current_context_checksum(
+    v_proposal.organization_id, v_proposal.engagement_id, v_proposal.department_id,
+    v_proposal.connector_connection_id, v_proposal.model_id,
+    v_proposal.engagement_stage_instance_id
+  );
+  -- Authority is rechecked after the organization and membership tables are
+  -- frozen, so revocation cannot race the canonical write.
+  if not exists (
+    select 1 from public.organization_memberships membership
+    join public.organizations organization
+      on organization.id = membership.organization_id
+     and organization.status = 'active'
+    where membership.organization_id = v_proposal.organization_id
+      and membership.user_id = p_actor_id
+      and membership.member_kind = 'team'
+      and membership.status = 'active'
+      and (
+        membership.department_id = v_proposal.department_id
+        or membership.role in ('system_owner', 'operations_admin', 'executive')
+      )
+  ) then
+    raise exception 'Department Chat authority changed.' using errcode = '42501';
   end if;
   if v_proposal.context_checksum is distinct from p_context_checksum
      or v_proposal.connector_connection_id is distinct from p_connector_connection_id
      or v_proposal.model_id is distinct from p_model_id
-     or not private.department_chat_context_versions_match(
-       v_proposal.organization_id, v_proposal.engagement_id,
-       v_proposal.department_id, v_proposal.context_artifact_version_ids
-     ) then
+     or v_proposal.database_context_checksum is distinct from v_current_database_context_checksum then
     update public.department_chat_proposals
     set status = 'stale', decided_by = p_actor_id, decided_at = now(),
         failure_reason = 'context_changed_regenerate'
@@ -488,6 +532,16 @@ begin
         decided_by = p_actor_id, decided_at = now()
     where id = v_proposal.ai_run_id;
     return jsonb_build_object('outcome', 'stale', 'proposal_id', v_proposal.id);
+  end if;
+
+  select engagement.* into v_engagement
+  from public.engagements engagement
+  where engagement.id = v_proposal.engagement_id
+    and engagement.project_id = v_proposal.project_id
+    and engagement.organization_id = v_proposal.organization_id
+  for share;
+  if not found then
+    raise exception 'Department Chat engagement context changed.' using errcode = '23514';
   end if;
 
   select count(*) into v_connector_count

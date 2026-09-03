@@ -5,7 +5,8 @@ begin;
 -- Fixtures are private to this transaction. No existing operating record is selected or changed.
 create temp table wch3_fixture (
   department_id text primary key, organization_id uuid, engagement_id uuid, project_id uuid,
-  actor_id uuid, client_actor_id uuid, revoked_actor_id uuid, connector_id uuid
+  actor_id uuid, client_actor_id uuid, revoked_actor_id uuid, connector_id uuid,
+  brand_id uuid, service_id uuid, stage_id uuid
 ) on commit drop;
 grant select on wch3_fixture to service_role, authenticated, anon;
 do $$
@@ -32,7 +33,7 @@ begin
     values(o,'openai','WCH fixture',jsonb_build_object('model_id','wch-fixture-model'),'ANKA_OPENAI_WCH_FIXTURE','verified',a) returning id into con;
     insert into public.integration_connection_departments(connection_id,organization_id,department_id,created_by) values(con,o,d,a);
     insert into public.integration_connection_engagements(connection_id,organization_id,engagement_id,department_id,created_by) values(con,o,e,d,a);
-    insert into wch3_fixture values(d,o,e,p,a,ca,ra,con);
+    insert into wch3_fixture values(d,o,e,p,a,ca,ra,con,b,s,null);
   end loop;
 end;
 $$;
@@ -55,7 +56,8 @@ begin
     insert into public.blueprint_stage_catalog(organization_id,slug,name,display_order)
     values(f.organization_id,'wch_sentinel','WCH sentinel',0) returning id into catalog;
     insert into public.engagement_stage_instances(organization_id,engagement_id,stage_catalog_id,name,accountable_department_id,stage_kind,position)
-    values(f.organization_id,f.engagement_id,catalog,'WCH sentinel',f.department_id,'delivery',0);
+    values(f.organization_id,f.engagement_id,catalog,'WCH sentinel',f.department_id,'delivery',0) returning id into catalog;
+    update wch3_fixture set stage_id=catalog where department_id=f.department_id;
   end loop;
 end;
 $$;
@@ -133,7 +135,8 @@ insert into wch3_checks values
   ),
   ('confirmation_is_proposer_only',
     position('Only the proposer can confirm' in pg_get_functiondef('public.confirm_department_chat_proposal(uuid,uuid,text,uuid,text)'::regprocedure)) > 0
-    and position('private.department_chat_context_versions_match' in pg_get_functiondef('public.confirm_department_chat_proposal(uuid,uuid,text,uuid,text)'::regprocedure)) > 0
+    and position('private.department_chat_current_context_checksum' in pg_get_functiondef('public.confirm_department_chat_proposal(uuid,uuid,text,uuid,text)'::regprocedure)) > 0
+    and position('database_context_checksum' in pg_get_functiondef('public.confirm_department_chat_proposal(uuid,uuid,text,uuid,text)'::regprocedure)) > 0
     and position('for update' in lower(pg_get_functiondef('public.confirm_department_chat_proposal(uuid,uuid,text,uuid,text)'::regprocedure))) > 0
   ),
   ('tasks_are_untouched',
@@ -363,10 +366,10 @@ begin
 end;
 $$;
 
-create function pg_temp.wch_preview(f wch3_fixture, kind text, target text, actor uuid default null)
+create function pg_temp.wch_preview(f wch3_fixture, kind text, target text, actor uuid default null, stage uuid default null)
 returns jsonb language sql security invoker as $$
   select public.save_department_chat_proposal(
-    f.organization_id,f.engagement_id,f.project_id,f.department_id,coalesce(actor,f.actor_id),kind,target,null,null,
+    f.organization_id,f.engagement_id,f.project_id,f.department_id,coalesce(actor,f.actor_id),kind,target,null,stage,
     jsonb_build_object('title','WCH fixture','description','Fixture','priority','medium','content',jsonb_build_object('notes','Fixture','checklist',jsonb_build_array('Check'))),
     jsonb_build_object('title','WCH fixture'),'{}','{}',repeat('a',64),f.connector_id,'wch-fixture-model',gen_random_uuid(),'','',1,1,1,0
   );
@@ -661,6 +664,48 @@ begin
   end if;
   update wch3_checks set passed = passed and proposal_mismatch_denied and ai_run_mismatch_denied
   where check_name = 'audit_scope_constraints_and_indexes';
+end;
+$$;
+
+do $$
+declare
+  f wch3_fixture;
+  scenario text;
+  p jsonb;
+  decision jsonb;
+  before_work_items bigint;
+  passed_count integer := 0;
+begin
+  select * into f from wch3_fixture where department_id='development';
+  foreach scenario in array array['project','brand','service','catalog','connector','stage'] loop
+    begin
+      p := pg_temp.wch_preview(f,'work_item','task',null,
+        case when scenario='stage' then f.stage_id else null end);
+      if scenario='project' then
+        update public.projects set name=name || ' changed' where id=f.project_id;
+      elsif scenario='brand' then
+        update public.brands set description=description || ' changed' where id=f.brand_id;
+      elsif scenario='service' then
+        update public.engagement_services set target_date=current_date + 1 where service_id=f.service_id and engagement_id=f.engagement_id;
+      elsif scenario='catalog' then
+        update public.service_catalog set name=name || ' changed' where id=f.service_id;
+      elsif scenario='connector' then
+        update public.integration_connections set public_config=jsonb_set(public_config,'{model_id}','"changed-model"') where id=f.connector_id;
+      else
+        update public.engagement_stage_instances set name=name || ' changed' where id=f.stage_id;
+      end if;
+      select count(*) into before_work_items from public.work_items;
+      decision := public.confirm_department_chat_proposal((p->>'proposal_id')::uuid,f.actor_id,repeat('a',64),f.connector_id,'wch-fixture-model');
+      if decision->>'outcome'<>'stale' or (select count(*) from public.work_items)<>before_work_items
+        or exists(select 1 from public.department_chat_proposals where id=(p->>'proposal_id')::uuid and accepted_work_item_id is not null) then
+        raise exception 'Context mutation created an official record: %',scenario;
+      end if;
+      raise exception using errcode='Z0001',message='rollback context mutation';
+    exception when sqlstate 'Z0001' then
+      passed_count := passed_count + 1;
+    end;
+  end loop;
+  insert into wch3_checks values('complete_database_context_toctou_zero_writes',passed_count=6);
 end;
 $$;
 
