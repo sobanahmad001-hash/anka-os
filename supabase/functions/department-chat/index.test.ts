@@ -14,7 +14,10 @@ import {
   rejectProposal,
   requireDepartmentEngagement,
   selectSingleOpenAiModel,
+  safeAttemptReason,
 } from './index.ts'
+import { contentArtifactResponseFormat } from '../_shared/contentArtifacts.ts'
+import { departmentChatProfile } from '../_shared/departmentChatProfiles.ts'
 import { developmentChatArtifactResponseFormat } from '../_shared/developmentChatArtifacts.ts'
 import {
   CHAT_DESIGN_ARTIFACT_TYPE_SET,
@@ -23,6 +26,122 @@ import {
 } from '../_shared/designSystemArtifacts.ts'
 
 const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
+
+function schemaFixture(schema: any): any {
+  if (schema.enum) return schema.enum[0]
+  if (schema.anyOf) return schemaFixture(schema.anyOf.find((item: any) => item.type === 'null') || schema.anyOf[0])
+  if (Array.isArray(schema.type)) {
+    if (schema.type.includes('null')) return null
+    return schemaFixture({ ...schema, type: schema.type[0] })
+  }
+  if (schema.type === 'object') return Object.fromEntries(Object.entries(schema.properties).map(([key, value]) => [key, schemaFixture(value)]))
+  if (schema.type === 'array') return [schemaFixture(schema.items)]
+  if (schema.type === 'number' || schema.type === 'integer') return 1
+  if (schema.type === 'boolean') return false
+  if (schema.type === 'null') return null
+  return 'fixture'
+}
+
+for (const department of ['content','design','marketing','development']) {
+  for (const target of departmentChatProfile(department).artifactTypes) {
+    Deno.test('preview validates and saves only a pending ' + department + '/' + target, async () => {
+      const format = department === 'content' ? contentArtifactResponseFormat(target)
+        : department === 'design' ? designArtifactResponseFormat(target)
+        : department === 'marketing' ? marketingArtifactResponseFormat(target)
+        : developmentChatArtifactResponseFormat(target)
+      const { admin, rpcCalls } = proposalAdmin()
+      const fixture = schemaFixture(format.schema)
+      if (target === 'design_system') fixture.color_tokens[0].value = '#123456'
+      await proposeArtifact({} as any, admin as any, {
+        department_id: department, engagement_id: 'engagement-1', artifact_type: target,
+        prompt: 'Fixture', prompt_safe_for_ai: true,
+        organization_id: 'injected', project_id: 'injected', actor_id: 'injected', approval: true,
+      }, 'member-1', async () => new Response(JSON.stringify({ output_text: JSON.stringify(fixture) })), contextDependencies)
+      assertEquals(rpcCalls.length, 1)
+      assertEquals(rpcCalls[0].name, 'save_department_chat_proposal')
+      assertEquals(rpcCalls[0].args.p_actor_id, 'member-1')
+      assertEquals(rpcCalls[0].args.p_project_id, 'project-1')
+      assertEquals(rpcCalls[0].args.p_organization_id, ORGANIZATION_ID)
+      assertEquals(rpcCalls[0].args.p_target_key, target)
+      const invalid = proposalAdmin()
+      await assertRejects(() => proposeArtifact({} as any, invalid.admin as any, {
+        department_id: department, engagement_id: 'engagement-1', artifact_type: target,
+        prompt: 'Fixture', prompt_safe_for_ai: true,
+      }, 'member-1', async () => new Response(JSON.stringify({ output_text: '{}' })), contextDependencies))
+      assertEquals(invalid.rpcCalls.length, 0)
+    })
+  }
+  for (const target of ['task','bug','request']) {
+    Deno.test('preview creates only a pending ' + department + '/' + target, async () => {
+      const { admin, rpcCalls } = proposalAdmin()
+      await proposeWorkItem({} as any, admin as any, {
+        department_id: department, engagement_id: 'engagement-1', work_item_type: target,
+        title: 'Fixture', prompt: 'Fixture', prompt_safe_for_ai: true, status: 'done', assignee_id: 'injected',
+      }, 'member-1', async () => new Response(JSON.stringify({output_text:'Fixture'})), contextDependencies)
+      assertEquals(rpcCalls.length, 1)
+      assertEquals((rpcCalls[0].args.p_preview_payload as any).status, 'not_started')
+      assertEquals((rpcCalls[0].args.p_validated_payload as any).assignee_id, undefined)
+      const invalid = proposalAdmin()
+      await assertRejects(() => proposeWorkItem({} as any, invalid.admin as any, {
+        department_id: department, engagement_id: 'engagement-1', work_item_type: target,
+        title: 'Fixture', prompt: 'Fixture', prompt_safe_for_ai: true,
+      }, 'member-1', async () => new Response(JSON.stringify({ output_text: '' })), contextDependencies))
+      assertEquals(invalid.rpcCalls.length, 0)
+    })
+  }
+}
+
+Deno.test('audit reasons never contain provider secrets or raw failures', () => {
+  for (const message of ['credential sk-secret', 'model_id token-secret', 'connector Bearer secret', 'OpenAI private failure']) {
+    assertEquals(['credential_missing','model_missing','connector_unavailable','provider_failed'].includes(safeAttemptReason(new Error(message))), true)
+  }
+})
+
+for (const department of ['content','design','marketing','development']) {
+  Deno.test('connector failures call no provider or proposal path for ' + department, async () => {
+    const badConnections = [[], [{id:'one'},{id:'two'}], [{id:'one',secret_name:'KEY',public_config:{model_id:'explicit'}}], [{id:'one',secret_name:'KEY',public_config:{}}]]
+    for (const [index, connections] of badConnections.entries()) {
+      for (const target of [...departmentChatProfile(department).artifactTypes, 'task','bug','request']) {
+        const { admin, rpcCalls } = proposalAdmin()
+        let providerCalls=0
+        const dependencies={...contextDependencies,resolveSingleOpenAiModel:(async () => selectSingleOpenAiModel(connections,department,() => index===2 ? undefined : 'test-key')) as any}
+        const body={department_id:department,engagement_id:'engagement-1',artifact_type:target,work_item_type:target,title:'Fixture',prompt:'Fixture',prompt_safe_for_ai:true}
+        const fetcher=(async () => { providerCalls++; return new Response('{}') }) as typeof fetch
+        await assertRejects(() => ['task','bug','request'].includes(target)
+          ? proposeWorkItem({} as any,admin as any,body,'member-1',fetcher,dependencies)
+          : proposeArtifact({} as any,admin as any,body,'member-1',fetcher,dependencies))
+        assertEquals(providerCalls,0)
+        assertEquals(rpcCalls.length,0)
+      }
+    }
+  })
+}
+
+Deno.test('expired and stale outcomes remain machine-readable for terminal UI state', async () => {
+  for (const outcome of ['expired','stale','rejected']) {
+    const {admin}=decisionAdmin({...pendingProposal,status:outcome},{outcome})
+    const error=await assertRejects(() => confirmProposal(admin as any,'proposal-1','member-1',{department_id:'development'},contextDependencies))
+    assertEquals((error as any).outcome,outcome)
+  }
+})
+
+Deno.test('unavailable changed context becomes stale without an official write', async () => {
+  const {admin,rpcCalls}=decisionAdmin(pendingProposal,{outcome:'stale'})
+  const error=await assertRejects(() => confirmProposal(admin as any,'proposal-1','member-1',{department_id:'development'}, {
+    ...contextDependencies, resolveSingleOpenAiModel:(async () => {throw new Error('No verified connector')}) as any,
+  }))
+  assertEquals((error as any).outcome,'stale')
+  assertEquals(rpcCalls[0].args.p_context_checksum,null)
+})
+
+Deno.test('accepted replay does not require a still-available connector', async () => {
+  const { admin, rpcCalls } = decisionAdmin({ ...pendingProposal, status: 'accepted' }, { outcome: 'accepted', replayed: true, artifact_version_id: 'saved-version' })
+  const result = await confirmProposal(admin as any,'proposal-1','member-1',{department_id:'development'}, {
+    requireDepartmentEngagement: (async () => { throw new Error('Must not re-resolve accepted context') }) as any,
+  })
+  assertEquals(result.artifact_version_id,'saved-version')
+  assertEquals(rpcCalls.length,1)
+})
 
 Deno.test('Shared Department Chat is department-scoped', () => {
   assertEquals(hasDepartmentChatAuthority({ role: 'contributor', department_id: 'content' }, 'content'), true)

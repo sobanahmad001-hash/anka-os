@@ -2,6 +2,8 @@
 
 Date: 2026-09-04
 
+Correction status: the current correction evidence in WCH3_CORRECTION_EVIDENCE.md supersedes the original local counts and database-runtime limitation below. The corrected runtime matrix has been executed on isolated portable PostgreSQL with synthetic data. Admin acceptance remains pending.
+
 ## Release position
 
 WCH3 is implemented on branch feat/wch3-proposals and rebased onto exact origin/main commit c30b4fab1cf95ed2eec88f7c211e05a2d9cd3607 after the release target advanced during implementation.

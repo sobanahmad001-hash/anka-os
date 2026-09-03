@@ -2,10 +2,87 @@
 
 begin;
 
+-- Fixtures are private to this transaction. No existing operating record is selected or changed.
+create temp table wch3_fixture (
+  department_id text primary key, organization_id uuid, engagement_id uuid, project_id uuid,
+  actor_id uuid, client_actor_id uuid, revoked_actor_id uuid, connector_id uuid
+) on commit drop;
+grant select on wch3_fixture to service_role, authenticated, anon;
+do $$
+declare
+  d text; o uuid; a uuid; ca uuid; ra uuid; c uuid; ac uuid; b uuid; p uuid; e uuid; s uuid; con uuid;
+begin
+  foreach d in array array['content','design','marketing','development'] loop
+    o := gen_random_uuid(); a := gen_random_uuid(); ca := gen_random_uuid(); ra := gen_random_uuid();
+    insert into public.organizations(id,name,slug) values(o,'WCH rollback fixture','wch-' || o);
+    insert into auth.users(id) values(a),(ca),(ra);
+    insert into public.organization_memberships(organization_id,user_id,member_kind,role,department_id,status)
+    values(o,a,'team','contributor',d,'active'),(o,ca,'client','contributor',d,'active'),(o,ra,'team','contributor',d,'revoked');
+    insert into public.clients(name,company,owner_id,organization_id) values('WCH fixture','WCH',a,o) returning id into c;
+    insert into public.agency_clients(organization_id,legacy_client_id,canonical_client_id,name,owner_id,created_by)
+    values(o,c,c,'WCH fixture',a,a) returning id into ac;
+    insert into public.brands(organization_id,client_id,name,is_default,created_by) values(o,ac,'WCH fixture',true,a) returning id into b;
+    insert into public.projects(name,department_id,status,owner_id,organization_id,client_id,engagement_type)
+    values('WCH fixture',d,'active',a,o,c,'project') returning id into p;
+    insert into public.engagements(organization_id,client_id,brand_id,legacy_project_id,project_id,name,engagement_type,status,created_by)
+    values(o,ac,b,p,p,'WCH fixture','project','active',a) returning id into e;
+    insert into public.service_catalog(organization_id,department_id,slug,name) values(o,d,'wch_fixture_' || replace(o::text,'-',''),'WCH fixture') returning id into s;
+    insert into public.engagement_services(organization_id,engagement_id,service_id,status,activated_by) values(o,e,s,'active',a);
+    insert into public.integration_connections(organization_id,provider,display_name,public_config,secret_name,status,created_by)
+    values(o,'openai','WCH fixture',jsonb_build_object('model_id','wch-fixture-model'),'ANKA_OPENAI_WCH_FIXTURE','verified',a) returning id into con;
+    insert into public.integration_connection_departments(connection_id,organization_id,department_id,created_by) values(con,o,d,a);
+    insert into public.integration_connection_engagements(connection_id,organization_id,engagement_id,department_id,created_by) values(con,o,e,d,a);
+    insert into wch3_fixture values(d,o,e,p,a,ca,ra,con);
+  end loop;
+end;
+$$;
+
+-- Full existing rows are compared, not counts, so updates/deletes cannot hide behind replacements.
+do $$
+declare f wch3_fixture; b uuid; a uuid; v uuid; catalog uuid;
+begin
+  for f in select * from wch3_fixture loop
+    select brand_id into b from public.engagements where id=f.engagement_id;
+    insert into public.tasks(user_id,title,organization_id,project_id,created_by,status) values(f.actor_id,'WCH sentinel task',f.organization_id,f.project_id,f.actor_id,'backlog');
+    insert into public.artifacts(organization_id,project_id,engagement_id,brand_id,artifact_type,title,created_by)
+    values(f.organization_id,f.project_id,f.engagement_id,b,'discovery','WCH sentinel',f.actor_id) returning id into a;
+    insert into public.artifact_versions(organization_id,artifact_id,version_number,content,content_checksum,created_by)
+    values(f.organization_id,a,1,'{"sentinel":true}',repeat('1',64),f.actor_id) returning id into v;
+    insert into public.artifact_approvals(organization_id,artifact_id,artifact_version_id,engagement_id,approved_by)
+    values(f.organization_id,a,v,f.engagement_id,f.actor_id);
+    insert into public.work_items(organization_id,engagement_id,brand_id,department_id,title,created_by)
+    values(f.organization_id,f.engagement_id,b,f.department_id,'WCH sentinel work',f.actor_id);
+    insert into public.blueprint_stage_catalog(organization_id,slug,name,display_order)
+    values(f.organization_id,'wch_sentinel','WCH sentinel',0) returning id into catalog;
+    insert into public.engagement_stage_instances(organization_id,engagement_id,stage_catalog_id,name,accountable_department_id,stage_kind,position)
+    values(f.organization_id,f.engagement_id,catalog,'WCH sentinel',f.department_id,'delivery',0);
+  end loop;
+end;
+$$;
+create temp table wch3_original_rows on commit drop as
+select 'tasks'::text as table_name, to_jsonb(t) as row_data from public.tasks t
+union all select 'artifact_approvals',to_jsonb(t) from public.artifact_approvals t
+union all select 'engagement_stage_instances',to_jsonb(t) from public.engagement_stage_instances t
+union all select 'artifacts',to_jsonb(t) from public.artifacts t
+union all select 'artifact_versions',to_jsonb(t) from public.artifact_versions t
+union all select 'work_items',to_jsonb(t) from public.work_items t;
+
+create temp table wch3_source_snapshot(table_name text primary key, rows jsonb) on commit drop;
+do $$
+declare tab text; snapshot jsonb;
+begin
+  for tab in select tablename from pg_tables where schemaname='public' loop
+    execute format('select coalesce(jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text), ''[]''::jsonb) from public.%I t',tab) into snapshot;
+    insert into wch3_source_snapshot values(tab,snapshot);
+  end loop;
+end;
+$$;
+
 create temporary table wch3_checks (
   check_name text primary key,
   passed boolean not null
 ) on commit drop;
+grant select, insert, update on wch3_checks to service_role, authenticated, anon;
 
 create function pg_temp.wch3_fail_version_insert()
 returns trigger
@@ -78,67 +155,9 @@ declare
   v_failed boolean := false;
   v_artifact_type text;
 begin
-  select
-    engagement.organization_id,
-    engagement.id,
-    engagement.project_id,
-    membership.user_id,
-    mapping.department_id,
-    connection.id,
-    connection.public_config ->> 'model_id'
-  into
-    v_organization_id, v_engagement_id, v_project_id, v_actor_id,
-    v_department_id, v_connector_id, v_model_id
-  from public.integration_connection_engagements mapping
-  join public.integration_connections connection
-    on connection.id = mapping.connection_id
-   and connection.organization_id = mapping.organization_id
-  join public.engagements engagement
-    on engagement.id = mapping.engagement_id
-   and engagement.organization_id = mapping.organization_id
-  join public.organization_memberships membership
-    on membership.organization_id = mapping.organization_id
-   and membership.member_kind = 'team'
-   and membership.status = 'active'
-   and (
-     membership.department_id = mapping.department_id
-     or membership.role in ('system_owner', 'operations_admin', 'executive')
-   )
-  where mapping.department_id in ('content', 'design', 'marketing', 'development')
-    and connection.provider = 'openai'
-    and connection.status = 'verified'
-    and connection.archived_at is null
-    and nullif(connection.public_config ->> 'model_id', '') is not null
-    and exists (
-      select 1 from public.engagement_services service
-      join public.service_catalog catalog on catalog.id = service.service_id
-      where service.organization_id = mapping.organization_id
-        and service.engagement_id = mapping.engagement_id
-        and service.status = 'active'
-        and catalog.department_id = mapping.department_id
-    )
-    and (
-      select count(*)
-      from public.integration_connection_engagements other_mapping
-      join public.integration_connections other_connection
-        on other_connection.id = other_mapping.connection_id
-       and other_connection.organization_id = other_mapping.organization_id
-      join public.integration_connection_departments other_department
-        on other_department.connection_id = other_connection.id
-       and other_department.organization_id = other_connection.organization_id
-       and other_department.department_id = other_mapping.department_id
-      where other_mapping.organization_id = mapping.organization_id
-        and other_mapping.engagement_id = mapping.engagement_id
-        and other_mapping.department_id = mapping.department_id
-        and other_connection.provider = 'openai'
-        and other_connection.status = 'verified'
-        and other_connection.archived_at is null
-    ) = 1
-  limit 1;
-
-  if v_engagement_id is null then
-    raise exception 'WCH3 verifier requires one engagement/department with exactly one verified OpenAI connector, explicit model, active service, and authorized team member.';
-  end if;
+  select organization_id, engagement_id, project_id, actor_id, department_id, connector_id, 'wch-fixture-model'
+  into v_organization_id, v_engagement_id, v_project_id, v_actor_id, v_department_id, v_connector_id, v_model_id
+  from wch3_fixture where department_id = 'development';
 
   v_artifact_type := case v_department_id
     when 'content' then 'content'
@@ -326,6 +345,245 @@ begin
     'tasks_remain_untouched_at_runtime',
     (select count(*) from public.tasks) = v_before_tasks
   );
+end;
+$$;
+
+create function pg_temp.wch_preview(f wch3_fixture, kind text, target text, actor uuid default null)
+returns jsonb language sql security invoker as $$
+  select public.save_department_chat_proposal(
+    f.organization_id,f.engagement_id,f.project_id,f.department_id,coalesce(actor,f.actor_id),kind,target,null,null,
+    jsonb_build_object('title','WCH fixture','description','Fixture','priority','medium','content',jsonb_build_object('notes','Fixture','checklist',jsonb_build_array('Check'))),
+    jsonb_build_object('title','WCH fixture'),'{}','{}',repeat('a',64),f.connector_id,'wch-fixture-model',gen_random_uuid(),'','',1,1,1,0
+  );
+$$;
+
+create temp table wch3_results(department_id text, target text, proposal_id uuid, official_id uuid) on commit drop;
+grant all on wch3_results to service_role;
+set local role service_role;
+do $$
+declare f wch3_fixture; target text; kind text; targets text[]; p jsonb; accepted jsonb; replay jsonb; rejected jsonb; before_count bigint; denied boolean; actor uuid;
+begin
+  for f in select * from wch3_fixture order by department_id loop
+    targets := case f.department_id
+      when 'content' then array['discovery','vision','audience','website_architecture','keyword_strategy','content','campaign_messaging','scripts']
+      when 'design' then array['design_system']
+      when 'marketing' then array['channel_strategy','campaign_brief','measurement_plan']
+      else array['technical_brief','launch_checklist'] end || array['task','bug','request'];
+    foreach target in array targets loop
+      kind := case when target in ('task','bug','request') then 'work_item' else 'artifact_version' end;
+      select (select count(*) from public.artifact_versions)+(select count(*) from public.work_items) into before_count;
+      p := pg_temp.wch_preview(f,kind,target);
+      if before_count <> (select (select count(*) from public.artifact_versions)+(select count(*) from public.work_items)) then raise exception 'Preview wrote official state'; end if;
+      accepted := public.confirm_department_chat_proposal((p->>'proposal_id')::uuid,f.actor_id,repeat('a',64),f.connector_id,'wch-fixture-model');
+      replay := public.confirm_department_chat_proposal((p->>'proposal_id')::uuid,f.actor_id,repeat('a',64),f.connector_id,'wch-fixture-model');
+      if accepted->>'outcome' <> 'accepted' or replay->>'replayed' <> 'true'
+         or (accepted - 'replayed') is distinct from (replay - 'replayed') then raise exception 'Acceptance/replay failed: % % %', f.department_id,target,accepted; end if;
+      if before_count + 1 <> (select (select count(*) from public.artifact_versions)+(select count(*) from public.work_items)) then raise exception 'Official write count failed'; end if;
+      if kind = 'artifact_version' and not exists (
+        select 1 from public.artifact_versions v where v.id=(accepted->>'artifact_version_id')::uuid and not v.ai_use_allowed and v.data_classification='internal'
+        and not exists(select 1 from public.artifact_approvals a where a.artifact_version_id=v.id)
+      ) then raise exception 'Artifact boundary failed'; end if;
+      if kind = 'work_item' and not exists (
+        select 1 from public.work_items w where w.id=(accepted->>'work_item_id')::uuid and w.status='not_started' and w.work_item_type=target and w.assignee_id is null
+      ) then raise exception 'Work item boundary failed'; end if;
+      if not exists(select 1 from public.engagement_events event where event.payload->>'proposal_id'=p->>'proposal_id' and event.payload->>'ai_run_id'=p->>'ai_run_id') then raise exception 'Missing event provenance'; end if;
+      insert into wch3_results values(f.department_id,target,(p->>'proposal_id')::uuid,coalesce((accepted->>'artifact_version_id')::uuid,(accepted->>'work_item_id')::uuid));
+      p := pg_temp.wch_preview(f,kind,target);
+      rejected := public.reject_department_chat_proposal((p->>'proposal_id')::uuid,f.actor_id);
+      replay := public.reject_department_chat_proposal((p->>'proposal_id')::uuid,f.actor_id);
+      if rejected->>'outcome'<>'rejected' or replay->>'replayed'<>'true' then raise exception 'Reject/replay failed'; end if;
+      p := pg_temp.wch_preview(f,kind,target);
+      rejected := public.confirm_department_chat_proposal((p->>'proposal_id')::uuid,f.actor_id,repeat('b',64),f.connector_id,'wch-fixture-model');
+      if rejected->>'outcome'<>'stale' then raise exception 'Stale accepted'; end if;
+      foreach actor in array array[f.client_actor_id,f.revoked_actor_id,(select actor_id from wch3_fixture where department_id<>f.department_id limit 1)] loop
+        denied:=false;
+        begin perform pg_temp.wch_preview(f,kind,target,actor); exception when insufficient_privilege then denied:=true; end;
+        if not denied then raise exception 'Unauthorized preview accepted'; end if;
+        denied:=false;
+        begin perform public.confirm_department_chat_proposal((p->>'proposal_id')::uuid,actor,repeat('a',64),f.connector_id,'wch-fixture-model'); exception when insufficient_privilege then denied:=true; end;
+        if not denied then raise exception 'Unauthorized confirm accepted'; end if;
+        denied:=false;
+        begin perform public.reject_department_chat_proposal((p->>'proposal_id')::uuid,actor); exception when insufficient_privilege then denied:=true; end;
+        if not denied then raise exception 'Unauthorized reject accepted'; end if;
+      end loop;
+    end loop;
+  end loop;
+  insert into wch3_checks values('every_department_target_service_role_runtime',(select count(*)=26 from wch3_results));
+end;
+$$;
+reset role;
+
+do $$
+declare f wch3_fixture; p jsonb; denied boolean; op text; actor uuid;
+begin
+  for f in select * from wch3_fixture loop
+    p:=pg_temp.wch_preview(f,'work_item','task');
+    update public.organizations set status='suspended' where id=f.organization_id;
+    execute 'set local role service_role';
+    foreach op in array array['save','confirm','reject'] loop
+      denied:=false;
+      begin
+        if op='save' then perform pg_temp.wch_preview(f,'work_item','task');
+        elsif op='confirm' then perform public.confirm_department_chat_proposal((p->>'proposal_id')::uuid,f.actor_id,repeat('a',64),f.connector_id,'wch-fixture-model');
+        else perform public.reject_department_chat_proposal((p->>'proposal_id')::uuid,f.actor_id); end if;
+      exception when insufficient_privilege then denied:=true; end;
+      if not denied then raise exception 'Inactive organization permitted %',op; end if;
+    end loop;
+    execute 'reset role';
+    perform set_config('request.jwt.claim.sub',f.actor_id::text,true);
+    execute 'set local role authenticated';
+    if exists(select 1 from public.department_chat_proposals where organization_id=f.organization_id) then raise exception 'Inactive organization readable'; end if;
+    execute 'reset role';
+    update public.organizations set status='active' where id=f.organization_id;
+    foreach actor in array array[f.actor_id,f.client_actor_id,f.revoked_actor_id,(select actor_id from wch3_fixture where department_id<>f.department_id limit 1)] loop
+      perform set_config('request.jwt.claim.sub',actor::text,true);
+      execute 'set local role authenticated';
+      if (exists(select 1 from public.department_chat_proposals where id=(p->>'proposal_id')::uuid)) <> (actor=f.actor_id) then raise exception 'Proposal RLS actor boundary failed'; end if;
+      foreach op in array array['save','confirm','reject'] loop
+        denied:=false;
+        begin
+          if op='save' then perform pg_temp.wch_preview(f,'work_item','task');
+          elsif op='confirm' then perform public.confirm_department_chat_proposal((p->>'proposal_id')::uuid,actor,repeat('a',64),f.connector_id,'wch-fixture-model');
+          else perform public.reject_department_chat_proposal((p->>'proposal_id')::uuid,actor); end if;
+        exception when insufficient_privilege then denied:=true; end;
+        if not denied then raise exception 'Authenticated RPC permitted %',op; end if;
+      end loop;
+      execute 'reset role';
+    end loop;
+    execute 'set local role anon';
+    denied:=false;
+    begin perform 1 from public.department_chat_proposals; exception when insufficient_privilege then denied:=true; end;
+    if not denied then raise exception 'Anon proposal read permitted'; end if;
+    execute 'reset role';
+  end loop;
+  insert into wch3_checks values('inactive_org_and_actor_runtime_boundaries',true);
+end;
+$$;
+
+do $$
+declare f wch3_fixture; p jsonb; variant text; operation text; denied boolean;
+begin
+  for f in select * from wch3_fixture loop
+    p:=pg_temp.wch_preview(f,'work_item','task');
+    foreach variant in array array['revoked','client'] loop
+      update public.organization_memberships set status=case when variant='revoked' then 'revoked' else 'active' end,
+        member_kind=case when variant='client' then 'client' else 'team' end
+      where organization_id=f.organization_id and user_id=f.actor_id;
+      execute 'set local role service_role';
+      foreach operation in array array['save','confirm','reject','audit'] loop
+        denied:=false;
+        begin
+          if operation='save' then perform pg_temp.wch_preview(f,'work_item','task');
+          elsif operation='confirm' then perform public.confirm_department_chat_proposal((p->>'proposal_id')::uuid,f.actor_id,repeat('a',64),f.connector_id,'wch-fixture-model');
+          elsif operation='reject' then perform public.reject_department_chat_proposal((p->>'proposal_id')::uuid,f.actor_id);
+          else perform public.record_department_chat_attempt(f.organization_id,f.actor_id,'preview_requested',''); end if;
+        exception when insufficient_privilege then denied:=true; end;
+        if not denied then raise exception 'Changed proposer authorization accepted: % %',variant,operation; end if;
+      end loop;
+      execute 'reset role';
+      perform set_config('request.jwt.claim.sub',f.actor_id::text,true);
+      execute 'set local role authenticated';
+      if exists(select 1 from public.department_chat_proposals where id=(p->>'proposal_id')::uuid) then raise exception 'Changed proposer still reads proposal'; end if;
+      execute 'reset role';
+      update public.organization_memberships set status='active',member_kind='team' where organization_id=f.organization_id and user_id=f.actor_id;
+    end loop;
+  end loop;
+  insert into wch3_checks values('revoked_and_client_proposer_denied',true);
+end;
+$$;
+
+do $$
+declare f wch3_fixture; result record; kind text; p jsonb; outcome jsonb; before_count bigint;
+begin
+  for result in select * from wch3_results loop
+    select * into f from wch3_fixture where department_id=result.department_id;
+    kind:=case when result.target in ('task','bug','request') then 'work_item' else 'artifact_version' end;
+    p:=pg_temp.wch_preview(f,kind,result.target);
+    execute 'alter table public.department_chat_proposals disable trigger trg_department_chat_proposals_protect';
+    update public.department_chat_proposals set created_at=now()-interval '25 hours',expires_at=now()-interval '1 hour' where id=(p->>'proposal_id')::uuid;
+    execute 'alter table public.department_chat_proposals enable trigger trg_department_chat_proposals_protect';
+    select (select count(*) from public.artifact_versions)+(select count(*) from public.work_items) into before_count;
+    execute 'set local role service_role';
+    outcome:=public.confirm_department_chat_proposal((p->>'proposal_id')::uuid,f.actor_id,repeat('a',64),f.connector_id,'wch-fixture-model');
+    if outcome->>'outcome'<>'expired' then raise exception 'Expiry accepted for %',result.target; end if;
+    execute 'reset role';
+    if before_count<>(select (select count(*) from public.artifact_versions)+(select count(*) from public.work_items)) then raise exception 'Expiry wrote official record'; end if;
+  end loop;
+  execute 'create trigger wch3_fail_all_versions before insert on public.artifact_versions for each row execute function pg_temp.wch3_fail_version_insert()';
+  execute 'create trigger wch3_fail_all_items before insert on public.work_items for each row execute function pg_temp.wch3_fail_version_insert()';
+  for result in select * from wch3_results loop
+    select * into f from wch3_fixture where department_id=result.department_id;
+    kind:=case when result.target in ('task','bug','request') then 'work_item' else 'artifact_version' end;
+    p:=pg_temp.wch_preview(f,kind,result.target);
+    select (select count(*) from public.artifacts)+(select count(*) from public.artifact_versions)+(select count(*) from public.work_items) into before_count;
+    execute 'set local role service_role';
+    outcome:=public.confirm_department_chat_proposal((p->>'proposal_id')::uuid,f.actor_id,repeat('a',64),f.connector_id,'wch-fixture-model');
+    if outcome->>'outcome'<>'atomic_failure' then raise exception 'Injection did not fail %',result.target; end if;
+    if not exists(select 1 from public.department_chat_audit_events where proposal_id=(p->>'proposal_id')::uuid and event_kind='atomic_failure' and reason_code='atomic_write_failed') then raise exception 'Missing atomic failure audit'; end if;
+    if not exists(select 1 from public.department_chat_proposals where id=(p->>'proposal_id')::uuid and status='pending') then raise exception 'Partial proposal transition'; end if;
+    if not exists(select 1 from public.ai_runs where id=(p->>'ai_run_id')::uuid and human_decision='pending') then raise exception 'Partial AI decision'; end if;
+    execute 'reset role';
+    if before_count<>(select (select count(*) from public.artifacts)+(select count(*) from public.artifact_versions)+(select count(*) from public.work_items)) then raise exception 'Partial canonical state after failure'; end if;
+  end loop;
+  execute 'drop trigger wch3_fail_all_versions on public.artifact_versions';
+  execute 'drop trigger wch3_fail_all_items on public.work_items';
+  insert into wch3_checks values('all_targets_expiry_and_atomic_failure',true);
+end;
+$$;
+
+do $$
+declare f wch3_fixture; op text; denied boolean; fn record;
+begin
+  select * into f from wch3_fixture where department_id='content';
+  execute 'set local role service_role';
+  perform public.record_department_chat_attempt(f.organization_id,f.actor_id,'preview_requested','');
+  perform public.record_department_chat_attempt(f.organization_id,f.actor_id,'preview_blocked','connector_unavailable');
+  perform public.record_department_chat_attempt(f.organization_id,f.actor_id,'preview_failed','invalid_output');
+  execute 'reset role';
+  for fn in select p.oid,p.prosecdef,p.proconfig,p.proacl from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    where n.nspname='public' and p.proname in ('save_department_chat_proposal','confirm_department_chat_proposal','reject_department_chat_proposal','record_department_chat_attempt') loop
+    if fn.prosecdef or not has_function_privilege('service_role',fn.oid,'execute')
+      or has_function_privilege('anon',fn.oid,'execute') or has_function_privilege('authenticated',fn.oid,'execute')
+      or exists(select 1 from aclexplode(fn.proacl) where grantee=0 and privilege_type='EXECUTE') then raise exception 'Unexpected RPC catalog privilege'; end if;
+  end loop;
+  foreach op in array array['preview_requested','preview_generated','preview_blocked','preview_failed','confirmed','rejected','expired','stale','replay','official_record_created','atomic_failure'] loop
+    if not exists(select 1 from public.department_chat_audit_events where event_kind=op) then raise exception 'Missing audit event %',op; end if;
+  end loop;
+  execute 'set local role anon';
+  foreach op in array array['save','confirm','reject','audit'] loop
+    denied:=false;
+    begin
+      if op='save' then perform pg_temp.wch_preview(f,'work_item','task');
+      elsif op='confirm' then perform public.confirm_department_chat_proposal(gen_random_uuid(),f.actor_id,repeat('a',64),f.connector_id,'wch-fixture-model');
+      elsif op='reject' then perform public.reject_department_chat_proposal(gen_random_uuid(),f.actor_id);
+      else perform public.record_department_chat_attempt(f.organization_id,f.actor_id,'preview_requested',''); end if;
+    exception when insufficient_privilege then denied:=true; end;
+    if not denied then raise exception 'Anonymous mutation permitted %',op; end if;
+  end loop;
+  execute 'reset role';
+  insert into wch3_checks values('full_audit_vocabulary_and_rpc_acl',true);
+end;
+$$;
+
+do $$
+declare original record; current_row jsonb; source record; current_rows jsonb;
+begin
+  if (select count(*) from wch3_original_rows) < 24 then raise exception 'Protected sentinels are missing'; end if;
+  for original in select * from wch3_original_rows loop
+    execute format('select to_jsonb(t) from public.%I t where id::text=$1',original.table_name) into current_row using original.row_data->>'id';
+    if current_row is distinct from original.row_data then raise exception 'Existing canonical row changed: %',original.table_name; end if;
+  end loop;
+  if (select count(*) from public.tasks) <> (select count(*) from wch3_original_rows where table_name='tasks')
+    or (select count(*) from public.artifact_approvals) <> (select count(*) from wch3_original_rows where table_name='artifact_approvals')
+    or (select count(*) from public.engagement_stage_instances) <> (select count(*) from wch3_original_rows where table_name='engagement_stage_instances') then raise exception 'Forbidden canonical insertion'; end if;
+  insert into wch3_checks values('complete_canonical_rows_preserved',true);
+  for source in select * from wch3_source_snapshot loop
+    execute format('select coalesce(jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text), ''[]''::jsonb) from public.%I t',source.table_name) into current_rows;
+    if source.table_name in ('artifacts','artifact_versions','work_items','ai_runs','engagement_events','department_chat_proposals','department_chat_audit_events') then
+      if not source.rows <@ current_rows then raise exception 'Existing source row changed: %',source.table_name; end if;
+    elsif source.rows is distinct from current_rows then raise exception 'Excluded source table changed: %',source.table_name; end if;
+  end loop;
+  insert into wch3_checks values('complete_source_snapshot_preserved',true);
 end;
 $$;
 

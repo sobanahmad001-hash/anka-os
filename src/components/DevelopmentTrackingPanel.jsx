@@ -49,6 +49,7 @@ export default function DevelopmentTrackingPanel({ workspace, onRefresh }) {
     </section>
     <section>
       <DepartmentChat
+        key={workspace.engagement.organization_id + ':' + workspace.engagement.id + ':development'}
         departmentId="development"
         departmentLabel="Development"
         engagement={workspace.engagement}

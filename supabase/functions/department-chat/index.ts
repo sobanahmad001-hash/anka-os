@@ -87,6 +87,9 @@ async function requireContext(request: Request) {
   const admin = createClient(supabaseUrl, secretKey, { auth: { persistSession: false, autoRefreshToken: false } })
   const { data: { user }, error } = await userClient.auth.getUser()
   if (error || !user) throw Object.assign(new Error('Authentication required'), { status: 401 })
+  const { data: activeOrganization, error: organizationError } = await admin.from('organizations')
+    .select('id').eq('id', ORGANIZATION_ID).eq('status', 'active').maybeSingle()
+  if (organizationError || !activeOrganization) throw Object.assign(new Error('Active organization required'), { status: 403 })
   const { data: membership } = await admin.from('organization_memberships')
     .select('organization_id, role, department_id, status, member_kind')
     .eq('organization_id', ORGANIZATION_ID).eq('user_id', user.id).maybeSingle()
@@ -557,6 +560,15 @@ export async function confirmProposal(
   if (!hasDepartmentChatAuthority(membership, proposal.department_id)) {
     throw Object.assign(new Error('Department Chat authority changed; regenerate the proposal'), { status: 403 })
   }
+  if (proposal.status !== 'pending' || new Date(proposal.expires_at).getTime() <= Date.now()) {
+    const { data, error } = await admin.rpc('confirm_department_chat_proposal', {
+      p_proposal_id: proposal.id, p_actor_id: actorId, p_context_checksum: proposal.context_checksum,
+      p_connector_connection_id: proposal.connector_connection_id, p_model_id: proposal.model_id,
+    })
+    if (error) throw error
+    if (data?.outcome === 'accepted') return data
+    throw Object.assign(new Error('This proposal is ' + data?.outcome + '. Regenerate a fresh preview.'), { status: 409, outcome: data?.outcome })
+  }
   if (!ENABLED_DEPARTMENTS.has(proposal.department_id)) {
     throw Object.assign(new Error('The proposal department is no longer enabled'), { status: 409 })
   }
@@ -568,6 +580,7 @@ export async function confirmProposal(
   ) {
     throw Object.assign(new Error('The proposal target is no longer allowed'), { status: 409 })
   }
+  const { provider, contextFreeze } = await (async () => {
   const { engagement, services, commercialContext } = await (
     dependencies.requireDepartmentEngagement || requireDepartmentEngagement
   )(admin, proposal.engagement_id, proposal.department_id)
@@ -595,6 +608,17 @@ export async function confirmProposal(
     provider,
     stageId,
   })
+  return { provider, contextFreeze }
+  })().catch(async () => {
+    const { data, error } = await admin.rpc('confirm_department_chat_proposal', {
+      p_proposal_id: proposal.id, p_actor_id: actorId, p_context_checksum: null,
+      p_connector_connection_id: null, p_model_id: null,
+    })
+    if (error) throw error
+    // A concurrent successful confirmation remains replayable.
+    if (data?.outcome === 'accepted') throw Object.assign(new Error('Confirmation completed. Retry to retrieve the saved record.'), { status: 409 })
+    throw Object.assign(new Error('Proposal context is unavailable. Regenerate a fresh preview.'), { status: 409, outcome: data?.outcome })
+  })
   const { data, error } = await admin.rpc('confirm_department_chat_proposal', {
     p_proposal_id: proposal.id,
     p_actor_id: actorId,
@@ -609,7 +633,7 @@ export async function confirmProposal(
       : data?.outcome === 'expired'
         ? 'This proposal expired. Regenerate a fresh preview.'
         : 'This proposal can no longer be confirmed.'
-    throw Object.assign(new Error(message), { status: 409 })
+    throw Object.assign(new Error(message), { status: 409, outcome: data?.outcome })
   }
   return data
 }
@@ -637,7 +661,7 @@ export async function rejectProposal(
       data?.outcome === 'expired'
         ? 'This proposal expired and cannot be rejected.'
         : 'This proposal can no longer be rejected.',
-    ), { status: 409 })
+    ), { status: 409, outcome: data?.outcome })
   }
   return data
 }
@@ -645,10 +669,15 @@ export async function rejectProposal(
 export async function handleRequest(request: Request) {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (request.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
+  let auditContext: { admin: Client, actorId: string } | null = null
+  let previewAttempt = false
   try {
     const { userClient, admin, user, membership } = await requireContext(request)
+    auditContext = { admin, actorId: user.id }
     const body = await request.json() as Json
     const action = text(body.action, 60)
+    previewAttempt = ['propose_artifact', 'propose_work_item'].includes(action)
+    if (previewAttempt) await auditAttempt(admin, user.id, 'preview_requested', '')
     if (action === 'confirm_proposal') {
       return response({ data: await confirmProposal(admin, text(body.proposal_id, 80), user.id, membership) })
     }
@@ -656,18 +685,45 @@ export async function handleRequest(request: Request) {
       return response({ data: await rejectProposal(admin, text(body.proposal_id, 80), user.id, membership) })
     }
     const departmentId = text(body.department_id, 40)
-    if (!ENABLED_DEPARTMENTS.has(departmentId)) return response({ error: 'This department is not enabled for Shared Department Chat' }, 400)
+    if (!ENABLED_DEPARTMENTS.has(departmentId)) throw Object.assign(new Error('Department policy denied'), { status: 403 })
     if (!hasDepartmentChatAuthority(membership, departmentId)) {
-      return response({ error: 'This department chat is restricted to its team and organization leadership' }, 403)
+      throw Object.assign(new Error('Department policy denied'), { status: 403 })
     }
     if (action === 'propose_artifact') return response({ data: await proposeArtifact(userClient, admin, body, user.id) })
     if (action === 'propose_work_item') return response({ data: await proposeWorkItem(userClient, admin, body, user.id) })
     return response({ error: 'Unsupported action' }, 400)
   } catch (error) {
+    if (previewAttempt && auditContext) {
+      const reason = safeAttemptReason(error)
+      try {
+        await auditAttempt(auditContext.admin, auditContext.actorId,
+          reason === 'provider_failed' || reason === 'invalid_output' ? 'preview_failed' : 'preview_blocked', reason)
+      } catch {
+        return response({ error: 'Department Chat audit could not be recorded' }, 503)
+      }
+    }
     const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : 400
-    return response({ error: error instanceof Error ? error.message : 'Unexpected Department Chat error' },
+    const outcome = error && typeof error === 'object' && 'outcome' in error ? error.outcome : undefined
+    return response({ error: error instanceof Error ? error.message : 'Unexpected Department Chat error', outcome },
       Number.isFinite(status) ? status : 400)
   }
+}
+
+export function safeAttemptReason(error: unknown) {
+  const message = error instanceof Error ? error.message : ''
+  if (message.includes('credential')) return 'credential_missing'
+  if (message.includes('model_id')) return 'model_missing'
+  if (message.includes('connector')) return 'connector_unavailable'
+  if (message.includes('OpenAI')) return 'provider_failed'
+  if (error instanceof SyntaxError || message.includes('requires') || message.includes('schema')) return 'invalid_output'
+  return 'policy_denied'
+}
+
+async function auditAttempt(admin: Client, actorId: string, kind: string, reason: string) {
+  const { error } = await admin.rpc('record_department_chat_attempt', {
+    p_organization_id: ORGANIZATION_ID, p_actor_id: actorId, p_event_kind: kind, p_reason_code: reason,
+  })
+  if (error) throw new Error('Department Chat audit could not be recorded')
 }
 
 if (import.meta.main) Deno.serve(handleRequest)

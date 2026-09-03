@@ -101,6 +101,7 @@ create policy "Proposers and leaders can read Department Chat proposals"
   on public.department_chat_proposals for select to authenticated
   using (
     public.is_team_organization_member(organization_id)
+    and exists (select 1 from public.organizations organization where organization.id = department_chat_proposals.organization_id and organization.status = 'active')
     and (proposer_id = (select auth.uid()) or public.has_organization_role(organization_id, array['system_owner', 'operations_admin', 'executive']))
   );
 revoke all on public.department_chat_proposals from anon, authenticated;
@@ -147,6 +148,59 @@ begin
 end;
 $$;
 
+-- WCH-owned bounded audit vocabulary avoids changes to shared event enums.
+create table public.department_chat_audit_events (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id),
+  actor_id uuid not null references auth.users(id),
+  proposal_id uuid references public.department_chat_proposals(id),
+  ai_run_id uuid references public.ai_runs(id),
+  event_kind text not null check (event_kind in ('preview_requested', 'preview_generated', 'preview_blocked', 'preview_failed', 'confirmed', 'rejected', 'expired', 'stale', 'replay', 'official_record_created', 'atomic_failure')),
+  reason_code text not null default '' check (reason_code in ('', 'policy_denied', 'connector_unavailable', 'model_missing', 'credential_missing', 'invalid_output', 'provider_failed', 'context_changed', 'proposal_expired', 'atomic_write_failed')),
+  created_at timestamptz not null default now()
+);
+create index department_chat_audit_proposal_idx on public.department_chat_audit_events(proposal_id, created_at);
+create index department_chat_audit_org_idx on public.department_chat_audit_events(organization_id, created_at);
+alter table public.department_chat_audit_events enable row level security;
+revoke all on public.department_chat_audit_events from public, anon, authenticated, service_role;
+grant select, insert on public.department_chat_audit_events to service_role;
+
+create function public.record_department_chat_attempt(p_organization_id uuid, p_actor_id uuid, p_event_kind text, p_reason_code text)
+returns void language plpgsql security invoker set search_path = '' as $$
+begin
+  if p_event_kind not in ('preview_requested', 'preview_blocked', 'preview_failed') then
+    raise exception 'Invalid attempt event.' using errcode = '23514';
+  end if;
+  if not exists (
+    select 1 from public.organization_memberships membership
+    join public.organizations organization on organization.id = membership.organization_id and organization.status = 'active'
+    where membership.organization_id = p_organization_id and membership.user_id = p_actor_id
+      and membership.status = 'active' and membership.member_kind = 'team'
+  ) then raise exception 'Active team organization required.' using errcode = '42501'; end if;
+  insert into public.department_chat_audit_events(organization_id, actor_id, event_kind, reason_code)
+  values (p_organization_id, p_actor_id, p_event_kind, p_reason_code);
+end;
+$$;
+revoke all on function public.record_department_chat_attempt(uuid, uuid, text, text) from public, anon, authenticated;
+grant execute on function public.record_department_chat_attempt(uuid, uuid, text, text) to service_role;
+
+create function private.audit_department_chat_proposal()
+returns trigger language plpgsql security invoker set search_path = '' as $$
+begin
+  insert into public.department_chat_audit_events(organization_id, actor_id, proposal_id, ai_run_id, event_kind, reason_code)
+  values (new.organization_id, coalesce(new.decided_by, new.proposer_id), new.id, new.ai_run_id,
+    case new.status when 'pending' then 'preview_generated' when 'accepted' then 'confirmed' else new.status end,
+    case new.status when 'stale' then 'context_changed' when 'expired' then 'proposal_expired' else '' end);
+  if new.status = 'accepted' then
+    insert into public.department_chat_audit_events(organization_id, actor_id, proposal_id, ai_run_id, event_kind)
+    values (new.organization_id, new.decided_by, new.id, new.ai_run_id, 'official_record_created');
+  end if;
+  return new;
+end;
+$$;
+create trigger trg_department_chat_audit after insert or update on public.department_chat_proposals
+for each row execute function private.audit_department_chat_proposal();
+
 create trigger trg_department_chat_proposals_protect
 before update on public.department_chat_proposals
 for each row execute function private.protect_department_chat_proposal();
@@ -184,6 +238,7 @@ begin
   end if;
   if not exists (
     select 1 from public.organization_memberships membership
+    join public.organizations organization on organization.id = membership.organization_id and organization.status = 'active'
     where membership.organization_id = p_organization_id
       and membership.user_id = p_actor_id
       and membership.member_kind = 'team'
@@ -216,6 +271,15 @@ begin
   ) then
     raise exception 'Department Chat connector context changed.' using errcode = '23514';
   end if;
+  if (select count(*) from public.integration_connections c
+      join public.integration_connection_departments d on d.connection_id=c.id and d.organization_id=c.organization_id
+      join public.integration_connection_engagements e on e.connection_id=c.id and e.organization_id=c.organization_id and e.department_id=d.department_id
+      where c.organization_id=p_organization_id and c.provider='openai' and c.status='verified' and c.archived_at is null
+        and d.department_id=p_department_id and e.engagement_id=p_engagement_id) <> 1
+    or not exists(select 1 from public.engagement_services s join public.service_catalog c on c.id=s.service_id
+      where s.organization_id=p_organization_id and s.engagement_id=p_engagement_id and s.status='active' and c.department_id=p_department_id) then
+    raise exception 'Department Chat connector or service policy changed.' using errcode = '23514';
+  end if;
   if p_artifact_id is not null and not exists (
     select 1 from public.artifacts artifact
     where artifact.id = p_artifact_id
@@ -243,7 +307,7 @@ begin
   ) values (
     p_organization_id, p_project_id, p_engagement_id, p_actor_id,
     'action_proposal', 'completed', 'openai', p_model_id,
-    left(coalesce(p_input_text, ''), 8000), left(coalesce(p_output_text, ''), 50000),
+    '', '', -- WCH retains validated payload and prompt digest only, never raw prompts/provider output.
     jsonb_build_object(
       'purpose', p_department_id || '_' || p_proposal_kind || '_proposal',
       'profile_version', 'wch2-v1', 'department_id', p_department_id,
@@ -315,6 +379,7 @@ begin
   end if;
   if not exists (
     select 1 from public.organization_memberships membership
+    join public.organizations organization on organization.id = membership.organization_id and organization.status = 'active'
     where membership.organization_id = v_proposal.organization_id
       and membership.user_id = p_actor_id
       and membership.member_kind = 'team'
@@ -327,6 +392,8 @@ begin
     raise exception 'Department Chat authority changed.' using errcode = '42501';
   end if;
   if v_proposal.status = 'accepted' then
+    insert into public.department_chat_audit_events(organization_id, actor_id, proposal_id, ai_run_id, event_kind)
+    values (v_proposal.organization_id, p_actor_id, v_proposal.id, v_proposal.ai_run_id, 'replay');
     return jsonb_build_object(
       'outcome', 'accepted', 'replayed', true, 'proposal_id', v_proposal.id,
       'artifact_id', v_proposal.accepted_artifact_id,
@@ -348,9 +415,9 @@ begin
     where id = v_proposal.ai_run_id;
     return jsonb_build_object('outcome', 'expired', 'proposal_id', v_proposal.id);
   end if;
-  if v_proposal.context_checksum <> p_context_checksum
-     or v_proposal.connector_connection_id <> p_connector_connection_id
-     or v_proposal.model_id <> p_model_id then
+  if v_proposal.context_checksum is distinct from p_context_checksum
+     or v_proposal.connector_connection_id is distinct from p_connector_connection_id
+     or v_proposal.model_id is distinct from p_model_id then
     update public.department_chat_proposals
     set status = 'stale', decided_by = p_actor_id, decided_at = now(),
         failure_reason = 'context_changed_regenerate'
@@ -416,6 +483,7 @@ begin
     raise exception 'Department Chat engagement context changed.' using errcode = '23514';
   end if;
 
+  begin
   if v_proposal.proposal_kind = 'artifact_version' then
     v_artifact_id := v_proposal.artifact_id;
     if v_artifact_id is not null then
@@ -498,6 +566,10 @@ begin
       p_parent_work_item_id => null, p_actor_id => p_actor_id,
       p_created_via => 'ai_chat_proposal'
     );
+    update public.engagement_events
+    set payload = payload || jsonb_build_object('proposal_id', v_proposal.id, 'ai_run_id', v_proposal.ai_run_id)
+    where organization_id = v_proposal.organization_id and engagement_id = v_proposal.engagement_id
+      and event_type = 'work_item_created' and payload ->> 'record_id' = v_work_item.id::text;
     update public.department_chat_proposals
     set status = 'accepted', decided_by = p_actor_id, decided_at = now(),
         accepted_work_item_id = v_work_item.id
@@ -513,6 +585,11 @@ begin
     'artifact_id', v_artifact_id, 'artifact_version_id', v_version.id,
     'work_item_id', v_work_item.id
   );
+  exception when others then
+    insert into public.department_chat_audit_events(organization_id, actor_id, proposal_id, ai_run_id, event_kind, reason_code)
+    values (v_proposal.organization_id, p_actor_id, v_proposal.id, v_proposal.ai_run_id, 'atomic_failure', 'atomic_write_failed');
+    return jsonb_build_object('outcome', 'atomic_failure', 'proposal_id', v_proposal.id);
+  end;
 end;
 $$;
 
@@ -539,6 +616,7 @@ begin
   end if;
   if not exists (
     select 1 from public.organization_memberships membership
+    join public.organizations organization on organization.id = membership.organization_id and organization.status = 'active'
     where membership.organization_id = v_proposal.organization_id
       and membership.user_id = p_actor_id
       and membership.member_kind = 'team'
@@ -551,6 +629,8 @@ begin
     raise exception 'Department Chat authority changed.' using errcode = '42501';
   end if;
   if v_proposal.status = 'rejected' then
+    insert into public.department_chat_audit_events(organization_id, actor_id, proposal_id, ai_run_id, event_kind)
+    values (v_proposal.organization_id, p_actor_id, v_proposal.id, v_proposal.ai_run_id, 'replay');
     return jsonb_build_object('outcome', 'rejected', 'replayed', true, 'proposal_id', v_proposal.id);
   end if;
   if v_proposal.status <> 'pending' then
