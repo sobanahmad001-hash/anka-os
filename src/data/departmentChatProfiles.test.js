@@ -10,7 +10,7 @@ const read = path => readFileSync(`${root}${path}`, 'utf8')
 const edge = read('supabase/functions/department-chat/index.ts')
 const panel = read('src/components/DevelopmentTrackingPanel.jsx')
 const workshop = read('src/apps/DepartmentWorkshop.jsx')
-const repository = read('src/data/developmentStudioRepository.js')
+const repository = read('src/data/departmentChatRepository.js')
 
 test('WCH2 exposes one shared, versioned profile contract for all four departments', () => {
   assert.equal(DEPARTMENT_CHAT_PROFILE_VERSION, 'wch2-v1')
@@ -28,7 +28,8 @@ test('WCH2 freezes canonical roots and operating extensions with exact approved 
   ]) assert.match(edge, new RegExp(field))
   assert.match(edge, /agencyClient\.canonical_client_id !== project\.client_id/)
   assert.match(edge, /brand\.client_id !== agencyClient\.id/)
-  assert.match(edge, /project_id: projectId, engagement_id: engagementId/)
+  assert.ok(edge.includes('p_project_id: input.projectId'))
+  assert.ok(edge.includes('p_engagement_id: input.engagementId'))
 })
 
 test('WCH2 connector and model selection fail closed without a fallback', () => {
@@ -38,10 +39,12 @@ test('WCH2 connector and model selection fail closed without a fallback', () => 
   assert.doesNotMatch(edge, /anthropic/i)
 })
 
-test('WCH2 keeps Development profiles schema-only and runtime-disabled', () => {
-  assert.match(edge, /ENABLED_DEPARTMENTS = new Set\(\['content', 'design', 'marketing'\]\)/)
-  assert.doesNotMatch(panel, /<DepartmentChat/)
-  assert.doesNotMatch(panel, /departmentId="development"/)
-  assert.doesNotMatch(repository, /department-chat|proposeArtifact|proposeWorkItem/)
+test('WCH3 enables Development only in the approved tracking panel', () => {
+  assert.ok(edge.includes("ENABLED_DEPARTMENTS = new Set(['content', 'design', 'marketing', 'development'])"))
+  assert.match(panel, /<DepartmentChat/)
+  assert.match(panel, /departmentId="development"/)
+  assert.match(repository, /department-chat/)
+  assert.match(repository, /confirmProposal/)
+  assert.match(repository, /rejectProposal/)
   assert.doesNotMatch(workshop, /departmentId="development"[\s\S]*DepartmentChat/)
 })

@@ -10,11 +10,12 @@ const profileData = JSON.parse(read('supabase/functions/_shared/departmentChatPr
 const designArtifact = read('supabase/functions/_shared/designSystemArtifacts.ts')
 const ui = read('src/apps/DesignSystems.jsx')
 const repository = read('src/data/designSystemsRepository.js')
+const proposalMigration = read('supabase/migrations/20260903235243_department_chat_proposals.sql')
 
 test('UW1 keeps Design alongside Content and reconciled Marketing Department Chat', () => {
   assert.deepEqual(Object.keys(profileData.departments), ['content', 'design', 'marketing', 'development'])
   assert.deepEqual(profileData.departments.design.artifact_types, ['design_system'])
-  assert.match(edge, /ENABLED_DEPARTMENTS = new Set\(\['content', 'design', 'marketing'\]\)/)
+  assert.ok(edge.includes("ENABLED_DEPARTMENTS = new Set(['content', 'design', 'marketing', 'development'])"))
   assert.match(edge, /departmentChatProfile/)
   assert.doesNotMatch(edge, /departmentId !== 'content'/)
   assert.match(designArtifact, /new Set\(\['design_system'\]\)/)
@@ -24,12 +25,14 @@ test('UW1 keeps Design alongside Content and reconciled Marketing Department Cha
 test('UW1 keeps Design chat draft-only, auditable, and scoped to Design', () => {
   assert.match(edge, /service_catalog\.department_id', departmentId/)
   assert.match(edge, /integration_connection_departments\.department_id', departmentId/)
-  assert.match(edge, /artifact_draft_proposed_via_chat/)
-  assert.match(edge, /ai_use_allowed: false/)
-  assert.match(edge, /data_classification: 'internal'/)
+  assert.match(edge, /save_department_chat_proposal/)
+  assert.match(edge, /confirm_department_chat_proposal/)
+  assert.match(proposalMigration, /artifact_draft_proposed_via_chat/)
+  assert.match(proposalMigration, /false, 'internal', p_actor_id/)
   assert.match(edge, /Hourly AI run limit reached/)
   assert.match(edge, /Organization AI budget has been reached/)
   assert.doesNotMatch(edge, /artifact_approvals\)\.insert/)
+  assert.doesNotMatch(proposalMigration, /insert into public\.artifact_approvals/)
 })
 
 test('UW1 provides an engagement-scoped Design Systems chat UI', () => {
