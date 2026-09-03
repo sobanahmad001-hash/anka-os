@@ -34,8 +34,9 @@ test('QTS1 schema separates private content from metadata-only lifecycle audit',
   assert.match(migration, /interval '30 days'/)
   for (const index of [
     'idx_quick_tasks_current_revision', 'idx_quick_tasks_fork_source',
-    'idx_quick_tasks_fork_revision', 'idx_quick_task_revisions_owner',
-    'idx_quick_task_revisions_created_by', 'idx_quick_task_lifecycle_events_related',
+    'idx_quick_tasks_fork_revision', 'idx_quick_task_revisions_task_owner',
+    'idx_quick_task_revisions_owner', 'idx_quick_task_revisions_created_by',
+    'idx_quick_task_lifecycle_events_task_owner', 'idx_quick_task_lifecycle_events_related',
   ]) assert.match(migration, new RegExp(index))
 })
 
@@ -69,8 +70,21 @@ test('QTS1 ships standalone UI and does not register or mutate canonical records
   }
 })
 
-test('QTS1 verifier is rollback-safe and covers privacy, append-only history, and privileges', () => {
-  for (const check of ['owner_can_read_content', 'non_owner_cannot_read_content', 'history_is_append_only', 'write_functions_are_service_role_only', 'events_are_metadata_only']) assert.match(verifier, new RegExp(check))
+test('QTS1 verifier is rollback-safe, exhaustive, and fails closed', () => {
+  for (const check of [
+    'owner_can_read_content', 'leadership_metadata_only_access',
+    'wrong_owner_operations_rejected', 'cross_organization_create_rejected',
+    'optimistic_concurrency_rejected', 'revision_update_rejected',
+    'revision_delete_rejected', 'lifecycle_update_rejected',
+    'lifecycle_delete_rejected', 'create_append_fork_are_atomic_and_audited',
+    'table_acls_are_exact', 'rpc_execute_acls_are_exact',
+    'owner_content_policies_are_exact', 'leadership_event_policy_is_exact',
+    'no_write_policies_exist', 'composite_foreign_keys_are_exact',
+    'composite_fk_supporting_indexes_are_exact',
+  ]) assert.match(verifier, new RegExp(check))
+  assert.match(verifier, /jsonb_object_agg\(check_name, passed order by check_name\)/)
+  assert.match(verifier, /raise exception 'QTS1 verification failed/)
+  assert.match(verifier, /if not found then return; end if;/)
   assert.match(verifier.trim(), /rollback;$/)
   assert.doesNotMatch(verifier, /(^|\n)\s*commit\s*;/i)
 })

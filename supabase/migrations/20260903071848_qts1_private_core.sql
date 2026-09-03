@@ -87,10 +87,12 @@ create index idx_quick_tasks_fork_source on public.quick_tasks(forked_from_quick
 create index idx_quick_tasks_fork_revision on public.quick_tasks(forked_from_revision_id, forked_from_quick_task_id, organization_id, owner_id)
   where forked_from_revision_id is not null;
 create index idx_quick_task_revisions_task_created on public.quick_task_revisions(quick_task_id, revision_number desc);
+create index idx_quick_task_revisions_task_owner on public.quick_task_revisions(quick_task_id, organization_id, owner_id);
 create index idx_quick_task_revisions_organization_owner on public.quick_task_revisions(organization_id, owner_id, created_at desc);
 create index idx_quick_task_revisions_owner on public.quick_task_revisions(owner_id);
 create index idx_quick_task_revisions_created_by on public.quick_task_revisions(created_by);
 create index idx_quick_task_lifecycle_events_task on public.quick_task_lifecycle_events(quick_task_id, occurred_at desc);
+create index idx_quick_task_lifecycle_events_task_owner on public.quick_task_lifecycle_events(quick_task_id, organization_id, owner_id);
 create index idx_quick_task_lifecycle_events_audit on public.quick_task_lifecycle_events(organization_id, occurred_at desc);
 create index idx_quick_task_lifecycle_events_actor on public.quick_task_lifecycle_events(actor_id, occurred_at desc);
 create index idx_quick_task_lifecycle_events_owner on public.quick_task_lifecycle_events(owner_id, occurred_at desc);
