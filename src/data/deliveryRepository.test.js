@@ -7,6 +7,7 @@ import {
   TASK_TRANSITIONS,
   createDeliveryRepository,
 } from './deliveryRepository.js'
+import { isOrganizationAccessError } from './organizationScope.js'
 
 function createFakeClient(tableResults = {}) {
   const calls = []
@@ -231,6 +232,21 @@ test('WKS5 issues zero tenant queries without a selected organization and reject
   await assert.rejects(
     createDeliveryRepository(foreignClient).getMyWork('user-1', 'org-a'),
     error => error.status === 403 && error.membershipMismatch === true,
+  )
+})
+
+test('WKS5 preserves response-level access status for the organization consumer path', async () => {
+  const client = createFakeClient({
+    tasks: {
+      data: null,
+      error: { message: 'Permission denied' },
+      status: 403,
+    },
+  })
+
+  await assert.rejects(
+    createDeliveryRepository(client).getMyWork('user-1', 'org-a'),
+    error => error.status === 403 && isOrganizationAccessError(error),
   )
 })
 

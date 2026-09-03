@@ -78,12 +78,12 @@ function assertDepartment(departmentId) {
 }
 
 async function dataOrThrow(query) {
-  const { data, error } = await query
+  const { data, error, status } = await query
 
   if (error) {
     const failure = new Error(error.message || 'Supabase delivery query failed')
     failure.cause = error
-    failure.status = error.status || error.statusCode
+    failure.status = status || error.status || error.statusCode
     throw failure
   }
 
