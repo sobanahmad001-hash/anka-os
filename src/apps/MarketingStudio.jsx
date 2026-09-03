@@ -173,7 +173,8 @@ export default function MarketingStudio() {
       if (mismatch) throw Object.assign(new Error('Marketing workspace organization mismatch'), { status: 403, membershipMismatch: true })
       if (!currentScope(request) || generation !== workspaceGeneration.current) return
       setWorkspace(result)
-      const nextCampaign = result.campaigns.find(item => item.id === preferredCampaignId)?.id || result.campaigns[0]?.id || ''
+      const requestedCampaignId = preferredCampaignId || searchParams.get('campaign') || ''
+      const nextCampaign = result.campaigns.find(item => item.id === requestedCampaignId)?.id || result.campaigns[0]?.id || ''
       setCampaignId(nextCampaign)
     } catch (loadError) {
       if (!currentScope(request) || loadError?.name === 'AbortError') return
@@ -333,6 +334,8 @@ export default function MarketingStudio() {
             signal={requestSignal}
             onAccessError={handleOrganizationAccessError}
             engagement={workspace.engagement}
+            serviceId={context.service?.id || ''}
+            campaignId={campaignId}
             onOpenBrief={openMarketingBrief}
             onOpenPrivate={() => setSearchParams(privateMarketingParams(navigationContext, activeOrganizationId))}
             onOpenConnections={() => selectTab('connections')}

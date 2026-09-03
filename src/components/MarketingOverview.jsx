@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { buildMarketingOverview, filterMarketingOverview, marketingOverviewCounts } from '../data/marketingOverview.js'
+import { buildMarketingOverview, filterMarketingOverview, marketingOverviewCounts, marketingOverviewLoadFailure, marketingOverviewRowHref } from '../data/marketingOverview.js'
 import { loadMarketingOverviewWork } from '../data/marketingOverviewRepository.js'
 import { loadMarketingConnectionReadiness } from '../data/marketingConnectionReadinessRepository.js'
 
@@ -11,22 +11,28 @@ const FACETS = Object.freeze([['due_work', 'Due work'], ['blockers', 'Blockers']
 const label = value => String(value || '').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
 const dueLabel = value => value ? new Date(`${value}T00:00:00Z`).toLocaleDateString() : 'No due date'
 
-export default function MarketingOverview({ organizationId, scopeRevision, signal, onAccessError, engagement, onOpenBrief, onOpenPrivate, onOpenConnections, onRefresh }) {
+export default function MarketingOverview({ organizationId, scopeRevision, signal, onAccessError, engagement, serviceId, campaignId, onOpenBrief, onOpenPrivate, onOpenConnections, onRefresh }) {
   const [work, setWork] = useState(null)
   const [readiness, setReadiness] = useState([])
   const [sourceError, setSourceError] = useState('')
+  const [workError, setWorkError] = useState('')
+  const [stale, setStale] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshKey, setRefreshKey] = useState(0)
   const [filters, setFilters] = useState({ facet: 'due_work', owner: '', status: '', dueWindow: '' })
   const generation = useRef(0)
+  const workRef = useRef(work)
+  workRef.current = work
 
   useEffect(() => {
     const current = ++generation.current
-    setLoading(true); setSourceError('')
+    setLoading(true); setSourceError(''); setWorkError('')
     loadMarketingOverviewWork({ organizationId, engagement, signal }).then(result => {
-      if (current === generation.current && !signal?.aborted) setWork(result)
+      if (current === generation.current && !signal?.aborted) { setWork(result); setStale(false) }
     }).catch(error => {
-      if (current !== generation.current || signal?.aborted || error?.name === 'AbortError') return
+      const failure = marketingOverviewLoadFailure({ requestGeneration: current, currentGeneration: generation.current, aborted: signal?.aborted, error, hasWork: Boolean(workRef.current) })
+      if (failure.ignored) return
+      setWorkError(failure.message); setStale(failure.stale)
       onAccessError(error, { membershipMismatch: error?.membershipMismatch === true })
     }).finally(() => {
       if (current === generation.current && !signal?.aborted) setLoading(false)
@@ -46,6 +52,8 @@ export default function MarketingOverview({ organizationId, scopeRevision, signa
   const rows = useMemo(() => filterMarketingOverview(overview.records, filters), [filters, overview.records])
   const refresh = () => { setRefreshKey(value => value + 1); onRefresh?.() }
   const sectionFailures = work?.sectionErrors ? Object.values(work.sectionErrors).filter(Boolean) : []
+  const project = Array.isArray(engagement.projects) ? engagement.projects[0] : engagement.projects
+  const navigation = { organizationId, clientId: project?.client_id || '', projectId: engagement.project_id, engagementId: engagement.id, brandId: engagement.brand_id, serviceId, campaignId }
 
   if (loading && !work) return <OverviewSkeleton />
   return <section className="space-y-6">
@@ -53,6 +61,8 @@ export default function MarketingOverview({ organizationId, scopeRevision, signa
       <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-300">Engagement overview</p><h2 className="mt-1 text-xl font-semibold">{engagement.name}</h2><p className="mt-2 text-sm text-slate-400">Current authorized Marketing work only. Counts and rows always use the same filters.</p><p className="mt-1 text-xs text-slate-500">Dates use your browser display timezone; stored due dates remain unchanged.</p></div>
       <div className="flex flex-wrap gap-2"><button type="button" className={BUTTON} onClick={onOpenBrief}>New marketing brief</button><button type="button" className={BUTTON} onClick={onOpenConnections}>View connection issues</button><button type="button" disabled={loading} className={BUTTON} onClick={refresh}>{loading ? 'Refreshing…' : 'Refresh'}</button></div>
     </div>
+    {workError && <div role="alert" className="rounded-xl border border-red-800 bg-red-950/40 px-4 py-3 text-sm text-red-200">Overview load failed. {stale ? 'Previously verified rows are shown below and are explicitly stale.' : 'No current Overview rows are available.'} {workError}</div>}
+    {stale && <div className="rounded-xl border border-amber-700 bg-amber-950/30 px-4 py-3 text-sm font-semibold text-amber-200">Stale snapshot — refresh did not complete. Do not treat these rows as current.</div>}
     {(sourceError || sectionFailures.length > 0) && <div role="status" className="rounded-xl border border-amber-800 bg-amber-950/30 px-4 py-3 text-sm text-amber-200">Some Overview sources are unavailable. Healthy work remains visible. {sourceError || sectionFailures.join(' ')}</div>}
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{FACETS.map(([id, title]) => <button type="button" key={id} onClick={() => setFilters(current => ({ ...current, facet: id }))} className={`rounded-2xl border p-4 text-left ${filters.facet === id ? 'border-emerald-500 bg-emerald-950/25' : 'border-slate-800 bg-slate-900/70'}`}><p className="text-xs uppercase tracking-[0.12em] text-slate-500">{title}</p><p className="mt-2 text-3xl font-semibold text-white">{counts[id]}</p></button>)}</div>
     <div className="grid gap-3 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 md:grid-cols-4">
@@ -61,13 +71,13 @@ export default function MarketingOverview({ organizationId, scopeRevision, signa
       <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Due window<select className={`${INPUT} mt-2 w-full normal-case`} value={filters.dueWindow} onChange={event => setFilters({ ...filters, dueWindow: event.target.value })}><option value="">Any due date</option><option value="overdue">Overdue</option><option value="7_days">Next 7 days</option><option value="30_days">Next 30 days</option><option value="no_due">No due date</option></select></label>
       <div className="flex items-end"><button type="button" className={`${BUTTON} w-full`} onClick={() => setFilters({ facet: 'due_work', owner: '', status: '', dueWindow: '' })}>Reset filters</button></div>
     </div>
-    <div className="space-y-3">{rows.map(item => <OverviewRow key={item.id} item={item} onOpenConnections={onOpenConnections} />)}{!rows.length && <EmptyOverview facet={filters.facet} onOpenBrief={onOpenBrief} onOpenPrivate={onOpenPrivate} />}</div>
+    <div className="space-y-3">{rows.map(item => <OverviewRow key={item.id} item={item} navigation={navigation} onOpenConnections={onOpenConnections} />)}{!rows.length && <EmptyOverview facet={filters.facet} onOpenBrief={onOpenBrief} onOpenPrivate={onOpenPrivate} />}</div>
   </section>
 }
 
-function OverviewRow({ item, onOpenConnections }) {
+function OverviewRow({ item, navigation, onOpenConnections }) {
   if (item.recordKind === 'source') return <article className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/70 p-4"><div><p className="font-semibold text-white">{item.title}</p><p className="mt-1 text-xs text-slate-500">{item.detail}</p></div><div className="flex items-center gap-3"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${item.available ? 'bg-emerald-950 text-emerald-300' : 'bg-amber-950 text-amber-200'}`}>{label(item.status)}</span>{!item.available && <button type="button" className={BUTTON} onClick={onOpenConnections}>View issue</button>}</div></article>
-  const href = item.recordKind === 'artifact_review' ? '/sphere/marketing/studio?tab=artifacts' : '/sphere/marketing'
+  const href = marketingOverviewRowHref(item, navigation)
   return <article className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/70 p-4"><div><p className="font-semibold text-white">{item.title}</p><p className="mt-1 text-xs text-slate-500">{label(item.recordKind)} · {item.ownerLabel} · {dueLabel(item.dueDate)}</p></div><div className="flex items-center gap-3"><span className="rounded-full bg-slate-950 px-2.5 py-1 text-xs font-semibold text-slate-300">{label(item.status)}</span><Link className={BUTTON} to={href}>{item.recordKind === 'artifact_review' ? 'Open output' : 'Open work'}</Link></div></article>
 }
 

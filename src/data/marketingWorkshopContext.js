@@ -106,7 +106,7 @@ export function resolveMarketingNavigationScope(navigation, workspace, activeOrg
     activeServiceId: service?.id || '',
     stageId: stage?.id || '',
     workRecord: workspace.navigationWorkRecord,
-    output: null,
+    output: workspace.navigationOutput,
     draft: null,
     permissions: {},
     allowedActions: [],

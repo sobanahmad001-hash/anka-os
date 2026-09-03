@@ -1,3 +1,5 @@
+import { appendWorkshopNavigation, WORKSHOP_DESTINATIONS } from './workshopNavigation.js'
+
 const CLOSED_TASK_STATUSES = new Set(['done', 'cancelled'])
 const CLOSED_WORK_ITEM_STATUSES = new Set(['done'])
 const SOURCE_AVAILABLE_STATES = new Set(['healthy', 'stale', 'connected_no_data'])
@@ -53,6 +55,7 @@ export function filterMarketingOverview(records, filters = {}, now = new Date())
   const horizonDay = isoDay(horizon)
   return (records || []).filter(item => {
     if (filters.facet && !item.facets.includes(filters.facet)) return false
+    if (filters.facet === 'available_sources' && item.available !== true) return false
     if (filters.owner === '__unassigned__' && item.ownerId) return false
     if (filters.owner && filters.owner !== '__unassigned__' && item.ownerId !== filters.owner) return false
     if (filters.status && item.status !== filters.status) return false
@@ -66,4 +69,29 @@ export function filterMarketingOverview(records, filters = {}, now = new Date())
 export function marketingOverviewCounts(records, filters = {}, now = new Date()) {
   const filtered = filterMarketingOverview(records, { ...filters, facet: '' }, now)
   return Object.freeze({ due_work: filtered.filter(item => item.facets.includes('due_work')).length, blockers: filtered.filter(item => item.facets.includes('blockers')).length, awaiting_review: filtered.filter(item => item.facets.includes('awaiting_review')).length, available_sources: filtered.filter(item => item.facets.includes('available_sources') && item.available).length })
+}
+
+export function marketingOverviewRowHref(item, { organizationId, clientId = '', projectId, engagementId, brandId, serviceId, campaignId = '' }) {
+  if (!item || !organizationId || !projectId || !engagementId || !brandId || !serviceId) throw new TypeError('Complete authorized Marketing context is required')
+  const workRecord = ['project_task', 'engagement_work_item'].includes(item.recordKind)
+    ? { kind: item.recordKind, id: item.recordId } : null
+  const output = item.recordKind === 'artifact_review'
+    ? { kind: 'artifact', id: item.artifactId, versionId: item.versionId } : null
+  const href = appendWorkshopNavigation(WORKSHOP_DESTINATIONS.marketing, {
+    organizationId, clientId, projectId, engagementId, brandId, activeServiceId: serviceId,
+    workRecord, output, workshopTab: item.recordKind === 'artifact_review' ? 'artifacts' : 'overview',
+  })
+  const target = new URL(href, 'https://anka.invalid')
+  if (campaignId) target.searchParams.set('campaign', campaignId)
+  if (item.recordKind === 'artifact_review') {
+    target.searchParams.set('artifact', 'campaign_brief')
+    target.searchParams.set('version', item.versionId)
+  }
+  return target.pathname + target.search
+}
+
+export function marketingOverviewLoadFailure({ requestGeneration, currentGeneration, aborted = false, error, hasWork = false }) {
+  if (aborted || error?.name === 'AbortError' || requestGeneration !== currentGeneration) return Object.freeze({ ignored: true, stale: false, message: '' })
+  const access = [401, 403].includes(Number(error?.status))
+  return Object.freeze({ ignored: false, stale: hasWork, access, message: error?.message || 'Marketing Overview could not be loaded' })
 }

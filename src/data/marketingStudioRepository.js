@@ -63,7 +63,10 @@ export function createMarketingStudioScope(organizationId, { signal, functionCli
         : Promise.resolve(null)
     const engagement = await dataOrThrow(supabase.from('engagements').select('*, agency_clients(name), brands(name), projects(client_id)')
       .eq('organization_id', organizationId).eq('id', engagementId).single(), options)
-    const [campaigns, artifacts, versions, approvals, adCampaigns, googleAdsConnections, marketingServices, stages, navigationRecord] = await Promise.all([
+    const outputQuery = navigation.output?.kind === 'artifact'
+      ? dataOrThrow(supabase.from('artifact_versions').select('id, organization_id, artifact_id, artifacts!inner(id, engagement_id)').eq('organization_id', organizationId).eq('id', navigation.output.versionId).eq('artifact_id', navigation.output.id).eq('artifacts.engagement_id', engagementId).maybeSingle(), options)
+      : Promise.resolve(null)
+    const [campaigns, artifacts, versions, approvals, adCampaigns, googleAdsConnections, marketingServices, stages, navigationRecord, navigationOutput] = await Promise.all([
       dataOrThrow(supabase.from('marketing_campaigns').select('*').eq('organization_id', organizationId).eq('engagement_id', engagementId).order('updated_at', { ascending: false }), options),
       dataOrThrow(supabase.from('artifacts').select('*').eq('organization_id', organizationId).eq('engagement_id', engagementId).in('artifact_type', TYPES).order('created_at'), options),
       dataOrThrow(supabase.from('artifact_versions').select('*, artifacts!inner(engagement_id, artifact_type)').eq('organization_id', organizationId).eq('artifacts.engagement_id', engagementId).in('artifacts.artifact_type', TYPES).order('version_number'), options),
@@ -73,6 +76,7 @@ export function createMarketingStudioScope(organizationId, { signal, functionCli
       dataOrThrow(supabase.from('engagement_services').select('id, organization_id, engagement_id, service_id, status, service_catalog!inner(id, department_id, is_active)').eq('organization_id', organizationId).eq('engagement_id', engagementId).eq('status', 'active').eq('service_catalog.department_id', 'marketing').eq('service_catalog.is_active', true), options),
       dataOrThrow(supabase.from('engagement_stage_instances').select('id, organization_id, engagement_id, name, accountable_department_id, stage_kind, position, status').eq('organization_id', organizationId).eq('engagement_id', engagementId).order('position'), options),
       recordQuery,
+      outputQuery,
     ])
     const campaignIds = campaigns.map(item => item.id)
     const campaignLinks = campaignIds.length
@@ -101,6 +105,10 @@ export function createMarketingStudioScope(organizationId, { signal, functionCli
         organizationId: navigationRecord.organization_id,
         projectId: navigationRecord.project_id,
         engagementId: navigationRecord.engagement_id,
+      } : null,
+      navigationOutput: navigationOutput ? {
+        kind: 'artifact', id: navigationOutput.artifact_id, versionId: navigationOutput.id,
+        organizationId: navigationOutput.organization_id, engagementId,
       } : null,
     }
   },
