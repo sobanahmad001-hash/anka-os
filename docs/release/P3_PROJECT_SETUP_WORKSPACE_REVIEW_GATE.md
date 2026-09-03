@@ -2,9 +2,9 @@
 
 ## Review basis
 
-- Canonical rebase target: `origin/main` at `43a7206de5f57282827fc6205d0621688870bd86`.
+- Canonical rebase target: `origin/main` at `453c10658f7d4d9472969997868fde3de610703c`.
 - Existing authorities are preserved: Projects owns canonical project creation; Operating Spine and PLN own engagement composition and pipeline preview/instantiation.
-- Content B02 and Design B02 are contained by the canonical base. Design B02 changes only Design Workshop, creative-brief, Edge Function, and its own migration/verifier; P3 has no overlap.
+- Content B02, Design B02, and Marketing MB02B are contained by the canonical base. MB02B changes Marketing/Quick Tasks/shared proposal surfaces, Marketing and shared Edge Functions, and its own migration/verifier/concurrency proof. Its 19-file delta has zero path overlap with P3.
 - The approved operating architecture keeps Client Work and Internal Work on one canonical spine, preserves optional one-to-one engagement extensions, and requires official isolated service work to retain real client, brand, and engagement identity.
 
 ## Delivered scope
