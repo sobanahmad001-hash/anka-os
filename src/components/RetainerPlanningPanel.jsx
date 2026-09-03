@@ -7,6 +7,7 @@ import {
   canConfirmRetainerPeriod,
   createRetainerPlanningRequestGuard,
   retainerPlanningContextKey,
+  retainerPlanningLoadState,
   retainerPlanningReason,
 } from '../data/retainerPlanning'
 
@@ -105,6 +106,13 @@ export default function RetainerPlanningPanel({ project, engagement, services })
   }) : null, [snapshot, project.organization_id, engagement.id, month, user?.id])
   const modelRef = useRef(model)
   modelRef.current = model
+  const panelState = retainerPlanningLoadState({
+    loading,
+    hasCurrentSnapshot: Boolean(snapshot),
+    hasPriorSnapshot: Boolean(snapshotEnvelope),
+    hasModel: Boolean(model),
+    error,
+  })
 
   async function previewMonth(plan) {
     const token = requestGuard.current.begin('preview', contextKey)
@@ -174,8 +182,10 @@ export default function RetainerPlanningPanel({ project, engagement, services })
     }
   }
 
-  if ((loading || !snapshot) && !model) return <State>Loading retainer planning…</State>
-  if (!model) return <State error={error}>Retainer planning is unavailable.</State>
+  if (panelState.status === 'loading') return <State>Loading retainer planning…</State>
+  if (panelState.status !== 'ready') {
+    return <State error={error} action={load}>Retainer planning is unavailable.</State>
+  }
 
   return (
     <section aria-label="Retainer planning" className="space-y-5">
@@ -308,6 +318,12 @@ function Pill({ children }) {
   return <span className="rounded-full border border-violet-500/20 bg-violet-500/10 px-2 py-1 text-violet-200">{children}</span>
 }
 
-function State({ children, error = '' }) {
-  return <div className={`rounded-2xl border border-dashed p-8 text-center text-sm ${error ? 'border-rose-500/20 text-rose-300' : 'border-white/10 text-slate-500'}`}>{error || children}</div>
+function State({ children, error = '', action = null }) {
+  return <div className={`rounded-2xl border border-dashed p-8 text-center text-sm ${error ? 'border-rose-500/20 text-rose-300' : 'border-white/10 text-slate-500'}`}>
+    <p>{error || children}</p>
+    {action && <button type="button" onClick={action}
+      className="mt-4 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-medium text-white">
+      Retry
+    </button>}
+  </div>
 }

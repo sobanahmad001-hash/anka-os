@@ -71,6 +71,21 @@ export function canConfirmRetainerPeriod(plan, previewEnvelope, contextKey, mont
     && previewEnvelope.value?.periods?.some((period) => period.period_start === periodStart))
 }
 
+export function retainerPlanningLoadState({
+  loading,
+  hasCurrentSnapshot,
+  hasPriorSnapshot,
+  hasModel,
+  error,
+}) {
+  if (hasModel) return Object.freeze({ status: 'ready', canRetry: false })
+  if (error) return Object.freeze({ status: 'error', canRetry: true })
+  if (loading || (!hasCurrentSnapshot && hasPriorSnapshot)) {
+    return Object.freeze({ status: 'loading', canRetry: false })
+  }
+  return Object.freeze({ status: 'unavailable', canRetry: true })
+}
+
 export function retainerPlanningReason(code) {
   return RET3_REASON_LABELS[code]
     || String(code || 'unknown_exception').replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase())

@@ -7,6 +7,7 @@ import {
   canConfirmRetainerPeriod,
   createRetainerPlanningRequestGuard,
   retainerPlanningContextKey,
+  retainerPlanningLoadState,
   retainerPlanningReason,
 } from './retainerPlanning.js'
 
@@ -180,6 +181,21 @@ test('RET3 drops delayed month previews and superseded post-confirm refreshes', 
   const currentRefresh = guard.begin('preview', october)
   assert.equal(guard.isCurrent(staleRefresh, october), false)
   assert.equal(guard.isCurrent(currentRefresh, october), true)
+})
+
+test('RET3 surfaces failed initial and context-switch loads with retry while hiding stale context', () => {
+  assert.deepEqual(retainerPlanningLoadState({
+    loading: true, hasCurrentSnapshot: false, hasPriorSnapshot: false, hasModel: false, error: '',
+  }), { status: 'loading', canRetry: false })
+  assert.deepEqual(retainerPlanningLoadState({
+    loading: false, hasCurrentSnapshot: false, hasPriorSnapshot: false, hasModel: false, error: 'Initial load failed',
+  }), { status: 'error', canRetry: true })
+  assert.deepEqual(retainerPlanningLoadState({
+    loading: false, hasCurrentSnapshot: false, hasPriorSnapshot: true, hasModel: false, error: '',
+  }), { status: 'loading', canRetry: false })
+  assert.deepEqual(retainerPlanningLoadState({
+    loading: false, hasCurrentSnapshot: false, hasPriorSnapshot: true, hasModel: false, error: 'Context B failed',
+  }), { status: 'error', canRetry: true })
 })
 
 test('RET3 requires one explicit YYYY-MM planning context', () => {

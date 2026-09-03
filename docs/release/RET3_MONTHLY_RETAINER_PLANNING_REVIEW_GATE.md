@@ -40,6 +40,8 @@ Each plan is interpreted in the immutable IANA timezone of the applicable approv
 - Loaded snapshots, previews, and post-confirm refreshes are accepted only for the current
   organization, project, engagement, actor, and month. A visible confirm action must still
   belong to that exact preview and the current Service Owner.
+- Initial and context-switch load failures replace the loading state with the captured error
+  and a retry action; prior-context content remains hidden.
 
 ## Verification
 
