@@ -192,11 +192,12 @@ test('MK6c binds catalogues, dashboard roots, and writes to the selected organiz
 test('MK6c blocks queries until selection resolves, clears scope state, and never auto-switches for deep links', () => {
   assert.match(ui, /const organizationReady = Boolean\(activeOrganizationId\) && !organizationLoading && !selectionRequired/)
   assert.match(ui, /if \(!studio \|\| !organizationReady\) return undefined/)
-  assert.match(ui, /useLayoutEffect\(\(\) => \{[\s\S]*?setEngagements\(\[\]\); setBrands\(\[\]\); setBacklinkBrandId\(''\); setEngagementId\(''\)/)
+  assert.match(ui, /useLayoutEffect\(\(\) => \{[\s\S]*?setEngagements\(\[\]\); setBrands\(\[\]\); setBacklinkBrandId\(''\)/)
   assert.match(ui, /setWorkspace\(null\); setCampaignId\(''\); setTab\('campaigns'\)/)
   assert.match(ui, /setLoading\(organizationReady\); setSaving\(false\); setError\(''\); setMessage\(''\)/)
-  assert.match(ui, /requestedEngagementId && !requested/)
-  assert.match(ui, /requested Marketing engagement is not available in the active organization/)
+  assert.match(ui, /const engagementId = context\.engagement\?\.id \|\| ''/)
+  assert.match(ui, /Choose Marketing work/)
+  assert.doesNotMatch(ui, /rows\?\.\[0\]/)
   assert.doesNotMatch(ui, /selectOrganization\s*\(/)
 })
 

@@ -129,7 +129,8 @@ assert.ok(operatingSpineView.includes('to={`/sphere/engagements?engagement=${eng
   assert.match(operatingSpineView, /function PipelineWorkspace\(\{ workspace \}\)/)
   const marketingStudioView = readFileSync(new URL('../apps/MarketingStudio.jsx', import.meta.url), 'utf8')
   assert.match(marketingStudioView, /useSearchParams/)
-  assert.match(marketingStudioView, /requestedEngagementId/)
+  assert.match(marketingStudioView, /navigationContext/)
+  assert.match(marketingStudioView, /resolveMarketingContext/)
 })
 function readOnlyPipelineClient(visibleRows) {
   const calls = []

@@ -44,23 +44,33 @@ export function createMarketingStudioScope(organizationId, { signal } = {}) {
 
   async listEngagements() {
     const rows = await dataOrThrow(supabase.from('engagements')
-      .select('id, organization_id, name, brand_id, status, agency_clients(name), brands(name), engagement_services!inner(id, service_catalog!inner(name, department_id))')
+      .select('id, organization_id, project_id, name, brand_id, status, agency_clients(name), brands(name), projects(client_id), engagement_services!inner(id, status, service_catalog!inner(id, name, department_id, is_active))')
       .eq('organization_id', organizationId)
+      .eq('engagement_services.status', 'active')
       .eq('engagement_services.service_catalog.department_id', 'marketing')
+      .eq('engagement_services.service_catalog.is_active', true)
       .order('updated_at', { ascending: false }), options)
     return rows
   },
 
-  async load(engagementId) {
-    const engagement = await dataOrThrow(supabase.from('engagements').select('*, agency_clients(name), brands(name)')
+  async load(engagementId, navigation = {}) {
+    const recordQuery = navigation.workRecord?.kind === 'project_task'
+      ? dataOrThrow(supabase.from('tasks').select('id, organization_id, project_id').eq('organization_id', organizationId).eq('id', navigation.workRecord.id).is('archived_at', null).maybeSingle(), options)
+      : navigation.workRecord?.kind === 'engagement_work_item'
+        ? dataOrThrow(supabase.from('work_items').select('id, organization_id, project_id, engagement_id').eq('organization_id', organizationId).eq('id', navigation.workRecord.id).is('deleted_at', null).maybeSingle(), options)
+        : Promise.resolve(null)
+    const engagement = await dataOrThrow(supabase.from('engagements').select('*, agency_clients(name), brands(name), projects(client_id)')
       .eq('organization_id', organizationId).eq('id', engagementId).single(), options)
-    const [campaigns, artifacts, versions, approvals, adCampaigns, googleAdsConnections] = await Promise.all([
+    const [campaigns, artifacts, versions, approvals, adCampaigns, googleAdsConnections, marketingServices, stages, navigationRecord] = await Promise.all([
       dataOrThrow(supabase.from('marketing_campaigns').select('*').eq('organization_id', organizationId).eq('engagement_id', engagementId).order('updated_at', { ascending: false }), options),
       dataOrThrow(supabase.from('artifacts').select('*').eq('organization_id', organizationId).eq('engagement_id', engagementId).in('artifact_type', TYPES).order('created_at'), options),
       dataOrThrow(supabase.from('artifact_versions').select('*, artifacts!inner(engagement_id, artifact_type)').eq('organization_id', organizationId).eq('artifacts.engagement_id', engagementId).in('artifacts.artifact_type', TYPES).order('version_number'), options),
       dataOrThrow(supabase.from('artifact_approvals').select('*, artifacts!inner(artifact_type)').eq('organization_id', organizationId).eq('engagement_id', engagementId).in('artifacts.artifact_type', TYPES).order('approved_at'), options),
       dataOrThrow(supabase.from('ad_campaigns').select('*').eq('organization_id', organizationId).eq('brand_id', engagement.brand_id).order('updated_at', { ascending: false }), options),
       invoke(organizationId, 'list_google_ads_connections', { engagement_id: engagementId }, options),
+      dataOrThrow(supabase.from('engagement_services').select('id, organization_id, engagement_id, service_id, status, service_catalog!inner(id, department_id, is_active)').eq('organization_id', organizationId).eq('engagement_id', engagementId).eq('status', 'active').eq('service_catalog.department_id', 'marketing').eq('service_catalog.is_active', true), options),
+      dataOrThrow(supabase.from('engagement_stage_instances').select('id, organization_id, engagement_id, name, accountable_department_id, stage_kind, position, status').eq('organization_id', organizationId).eq('engagement_id', engagementId).order('position'), options),
+      recordQuery,
     ])
     const campaignIds = campaigns.map(item => item.id)
     const campaignLinks = campaignIds.length
@@ -82,6 +92,14 @@ export function createMarketingStudioScope(organizationId, { signal } = {}) {
     return {
       engagement, campaigns, artifacts, versions, approvals, links: campaignLinks,
       adCampaigns, adGroups, adKeywords, adSnapshots, googleAdsConnections: googleAdsConnections || [],
+      marketingServices, stages,
+      navigationWorkRecord: navigationRecord ? {
+        kind: navigation.workRecord.kind,
+        id: navigationRecord.id,
+        organizationId: navigationRecord.organization_id,
+        projectId: navigationRecord.project_id,
+        engagementId: navigationRecord.engagement_id,
+      } : null,
     }
   },
 

@@ -28,8 +28,17 @@ import { loadPerformanceDashboard } from '../data/performanceDashboardRepository
 import { shouldApplyKeywordResearchResponse } from '../data/marketingKeywordResearch.js'
 import { loadMarketingKeywordResearch } from '../data/marketingKeywordResearchRepository.js'
 import { canManageMarketingConnections } from '../data/marketingConnectionReadiness.js'
+import {
+  marketingSelectionParams,
+  privateMarketingParams,
+  resolveMarketingContext,
+  resolveMarketingNavigationScope,
+  selectableMarketingEngagements,
+} from '../data/marketingWorkshopContext.js'
+import { parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
 import DepartmentChat from '../components/DepartmentChat.jsx' // eslint-disable-line no-unused-vars
 import MarketingConnectionReadinessPanel from '../components/MarketingConnectionReadinessPanel.jsx'
+import WorkshopContextShell from '../components/WorkshopContextShell.jsx'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'
@@ -37,6 +46,16 @@ import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
 const BUTTON = 'rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-emerald-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50'
 const PRIMARY = 'rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50'
+const MARKETING_TABS = Object.freeze([
+  ['campaigns', 'Campaigns'],
+  ['ad-tracking', 'Ad campaign tracking'],
+  ['seo-keywords', 'SEO keyword history'],
+  ['backlinks', 'Backlink outreach'],
+  ['artifacts', 'Artifacts'],
+  ['chat', 'Shared Department Chat'],
+  ['analytics', 'Performance dashboard'],
+  ['connections', 'Connections'],
+])
 
 function blankCampaign() {
   return { name: '', objective: '', planned_channels: '', starts_on: '', ends_on: '', planned_budget: '', currency_code: 'USD', status: 'draft' }
@@ -63,19 +82,33 @@ function Notice({ error, message }) {
 }
 
 export default function MarketingStudio() {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const {
     activeOrganizationId, selectionRequired, loading: organizationLoading,
     handleOrganizationAccessError, scopeRevision, requestSignal, activeMembership,
   } = useOrganization()
-  const requestedEngagementId = searchParams.get('engagement') || ''
+  const navigationContext = useMemo(() => parseWorkshopNavigation(searchParams), [searchParams])
+  const requestedPrivate = searchParams.get('mode') === 'private'
+  const requestedTab = MARKETING_TABS.some(([id]) => id === navigationContext.workshopTab)
+    ? navigationContext.workshopTab : 'campaigns'
+  const navigationLoadKey = useMemo(() => JSON.stringify({
+    organizationId: navigationContext.organizationId,
+    clientId: navigationContext.clientId,
+    projectId: navigationContext.projectId,
+    engagementId: navigationContext.engagementId,
+    brandId: navigationContext.brandId,
+    activeServiceId: navigationContext.activeServiceId,
+    stageId: navigationContext.stageId,
+    workRecord: navigationContext.workRecord,
+    output: navigationContext.output,
+    draft: navigationContext.draft,
+  }), [navigationContext])
   const [engagements, setEngagements] = useState([])
   const [brands, setBrands] = useState([])
   const [backlinkBrandId, setBacklinkBrandId] = useState('')
-  const [engagementId, setEngagementId] = useState('')
   const [workspace, setWorkspace] = useState(null)
   const [campaignId, setCampaignId] = useState('')
-  const [tab, setTab] = useState('campaigns')
+  const [tab, setTab] = useState(requestedTab)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -87,6 +120,24 @@ export default function MarketingStudio() {
     ? marketingStudio.forOrganization(activeOrganizationId, { signal: requestSignal })
     : null, [activeOrganizationId, organizationReady, requestSignal])
   const workspaceGeneration = useRef(0)
+  const context = useMemo(
+    () => resolveMarketingContext(navigationContext, engagements, activeOrganizationId, requestedPrivate),
+    [activeOrganizationId, engagements, navigationContext, requestedPrivate],
+  )
+  const engagementId = context.engagement?.id || ''
+  const selectableEngagements = useMemo(
+    () => selectableMarketingEngagements(navigationContext, engagements),
+    [engagements, navigationContext],
+  )
+  const canonicalScope = useMemo(
+    () => resolveMarketingNavigationScope(navigationContext, workspace, activeOrganizationId),
+    [activeOrganizationId, navigationContext, workspace],
+  )
+  const contextValidation = validateWorkshopNavigation(navigationContext, canonicalScope)
+  const sameOrganization = !navigationContext.organizationId || navigationContext.organizationId === activeOrganizationId
+  const returnTarget = workspaceReturnTarget(contextValidation.context ? contextValidation : {}, {
+    fallbackProjectId: sameOrganization ? context.engagement?.project_id : '',
+  })
 
   function currentScope(request) {
     return !request.signal?.aborted &&
@@ -100,7 +151,7 @@ export default function MarketingStudio() {
 
   useLayoutEffect(() => {
     workspaceGeneration.current += 1
-    setEngagements([]); setBrands([]); setBacklinkBrandId(''); setEngagementId('')
+    setEngagements([]); setBrands([]); setBacklinkBrandId('')
     setWorkspace(null); setCampaignId(''); setTab('campaigns')
     setLoading(organizationReady); setSaving(false); setError(''); setMessage('')
   }, [activeOrganizationId, organizationReady, scopeRevision])
@@ -115,7 +166,7 @@ export default function MarketingStudio() {
     setLoading(true)
     setError('')
     try {
-      const result = await studio.load(id)
+      const result = await studio.load(id, navigationContext)
       const mismatch = result?.engagement?.organization_id !== request.organizationId
       if (mismatch) throw Object.assign(new Error('Marketing workspace organization mismatch'), { status: 403, membershipMismatch: true })
       if (!currentScope(request) || generation !== workspaceGeneration.current) return
@@ -142,16 +193,7 @@ export default function MarketingStudio() {
       setEngagements(rows || [])
       setBrands(brandRows || [])
       setBacklinkBrandId(brandRows?.[0]?.id || '')
-      const requested = rows?.find(item => item.id === requestedEngagementId)?.id || ''
-      if (requestedEngagementId && !requested) {
-        setEngagementId(''); setWorkspace(null); setLoading(false)
-        setError('The requested Marketing engagement is not available in the active organization.')
-        return
-      }
-      const first = requested || rows?.[0]?.id || ''
-      setEngagementId(first)
-      if (first) loadWorkspace(first, '', request)
-      else setLoading(false)
+      setLoading(false)
     }).catch(loadError => {
       if (active && currentScope(request) && loadError?.name !== 'AbortError') {
         handleOrganizationAccessError(loadError, { membershipMismatch: loadError?.membershipMismatch === true })
@@ -159,12 +201,25 @@ export default function MarketingStudio() {
       }
     })
     return () => { active = false }
-  }, [activeOrganizationId, organizationReady, requestedEngagementId, requestSignal, scopeRevision, studio])
+  }, [activeOrganizationId, organizationReady, requestSignal, scopeRevision, studio])
+
+  useEffect(() => {
+    if (engagementId) loadWorkspace(engagementId)
+    else setWorkspace(null)
+    // Exact record and output pointers must be re-resolved when navigation changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engagementId, navigationLoadKey, studio])
+
+  useEffect(() => { setTab(requestedTab) }, [requestedTab])
 
   const selectedCampaign = workspace?.campaigns.find(item => item.id === campaignId) || null
 
   async function act(callback, success, preferredCampaign = '') {
     if (!studio || !organizationReady) return null
+    if (contextValidation.status !== 'ready') {
+      setError('Official Marketing changes require a current authorized work context.')
+      return null
+    }
     const request = { organizationId: activeOrganizationId, revision: scopeRevision, signal: requestSignal }
     setSaving(true); setError(''); setMessage('')
     try {
@@ -184,6 +239,7 @@ export default function MarketingStudio() {
   }
 
   async function reportMarketingAccess(callback) {
+    if (contextValidation.status !== 'ready') throw new Error('Official Marketing changes require a current authorized work context.')
     try { return await callback() }
     catch (actionError) {
       handleOrganizationAccessError(actionError, { membershipMismatch: actionError?.membershipMismatch === true })
@@ -193,6 +249,42 @@ export default function MarketingStudio() {
 
   if (!organizationReady) {
     return <div className="flex h-full items-center justify-center bg-slate-950 p-6 text-sm text-slate-400">{organizationLoading ? 'Loading organization access…' : 'Choose an active organization before opening Marketing Studio.'}</div>
+  }
+
+  if (!loading && context.mode === 'choose') return <MarketingEntryShell>
+    <section className="mx-auto max-w-3xl rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Marketing Studio</p>
+      <h1 className="mt-2 text-2xl font-semibold">Choose Marketing work</h1>
+      <p className="mt-2 text-sm text-slate-400">Select an authorized engagement. Marketing Studio will not choose work silently.</p>
+      <div className="mt-5 grid gap-3">{selectableEngagements.map(item => <button type="button" key={item.id} onClick={() => setSearchParams(marketingSelectionParams(navigationContext, item, activeOrganizationId))} className="rounded-xl border border-slate-700 px-4 py-3 text-left text-sm font-semibold text-slate-200 hover:border-emerald-500">{item.name} · {item.brands?.name || 'Brand'}</button>)}</div>
+      {!selectableEngagements.length && <p className="mt-5 text-sm text-slate-500">No active Marketing engagement is available in this organization.</p>}
+      <button type="button" onClick={() => setSearchParams(privateMarketingParams(navigationContext, activeOrganizationId))} className={BUTTON + ' mt-5'}>Open private experiment</button>
+    </section>
+  </MarketingEntryShell>
+
+  if (!loading && context.mode === 'private') return <MarketingEntryShell>
+    <section className="mx-auto max-w-2xl rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Private experiment</p>
+      <h1 className="mt-2 text-2xl font-semibold">Private Marketing workspace</h1>
+      <p className="mt-2 text-sm leading-6 text-slate-400">This private entry has no official project, engagement, brand, provider account, or save target. Choose authorized work before creating any official Marketing record.</p>
+      <button type="button" onClick={() => setSearchParams({})} className={BUTTON + ' mt-5'}>Choose official work</button>
+    </section>
+  </MarketingEntryShell>
+
+  if (!loading && context.mode === 'denied') {
+    const rejected = navigationContext.organizationId && navigationContext.organizationId !== activeOrganizationId
+      ? validateWorkshopNavigation(navigationContext, { status: 'ready', activeOrganizationId, organizationId: activeOrganizationId })
+      : validateWorkshopNavigation(navigationContext, { status: 'denied' })
+    return <MarketingEntryShell><WorkshopContextShell navigation={navigationContext} validation={rejected} returnTarget={workspaceReturnTarget(rejected)}>
+      <div />
+    </WorkshopContextShell><div className="mt-5 text-center"><button type="button" onClick={() => setSearchParams({})} className={BUTTON}>Choose permitted work</button></div></MarketingEntryShell>
+  }
+
+  function selectTab(nextTab) {
+    setTab(nextTab)
+    if (context.engagement) setSearchParams(marketingSelectionParams(navigationContext, context.engagement, activeOrganizationId, {
+      workshopTab: nextTab === 'campaigns' ? '' : nextTab,
+    }), { replace: true })
   }
 
   return (
@@ -209,10 +301,12 @@ export default function MarketingStudio() {
       </header>
 
       <main className="mx-auto max-w-7xl space-y-6 px-6 py-6">
+        <WorkshopContextShell navigation={navigationContext} validation={contextValidation} returnTarget={returnTarget} projectName={context.engagement?.name}>
         <Notice error={error} message={message} />
         <section className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
           <label className="min-w-72 flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Marketing engagement
-            <select value={engagementId} onChange={event => { setEngagementId(event.target.value); loadWorkspace(event.target.value) }} className={`${INPUT} mt-2 normal-case tracking-normal`}>
+            <select value={engagementId} onChange={event => { const item = engagements.find(candidate => candidate.id === event.target.value); setSearchParams(item ? marketingSelectionParams(navigationContext, item, activeOrganizationId) : {}) }} className={`${INPUT} mt-2 normal-case tracking-normal`}>
+              <option value="">Choose work</option>
               {engagements.map(item => <option key={item.id} value={item.id}>{item.name} · {item.brands?.name || 'Brand'}</option>)}
             </select>
           </label>
@@ -220,8 +314,8 @@ export default function MarketingStudio() {
         </section>
 
         <nav className="flex gap-2 overflow-x-auto border-b border-slate-800">
-          {[['campaigns', 'Campaigns'], ['ad-tracking', 'Ad campaign tracking'], ['seo-keywords', 'SEO keyword history'], ['backlinks', 'Backlink outreach'], ['artifacts', 'Artifacts'], ['chat', 'Shared Department Chat'], ['analytics', 'Performance dashboard'], ['connections', 'Connections']].map(([id, label]) => (
-            <button key={id} onClick={() => setTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-emerald-400 text-emerald-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>
+          {MARKETING_TABS.map(([id, label]) => (
+            <button key={id} onClick={() => selectTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-emerald-400 text-emerald-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>
           ))}
         </nav>
 
@@ -243,7 +337,7 @@ export default function MarketingStudio() {
         ) : tab === 'ad-tracking' ? (
           <AdCampaignTracking studio={studio} workspace={workspace} saving={saving} act={act} />
         ) : tab === 'artifacts' ? (
-          <Artifacts studio={studio} workspace={workspace} campaign={selectedCampaign} saving={saving} act={act} setTab={setTab} onRefresh={() => loadWorkspace(engagementId, campaignId)} />
+          <Artifacts studio={studio} workspace={workspace} campaign={selectedCampaign} saving={saving} act={act} setTab={selectTab} onRefresh={() => loadWorkspace(engagementId, campaignId)} />
         ) : tab === 'chat' ? (
           <DepartmentChat departmentId="marketing" engagement={workspace.engagement} artifactTypes={['channel_strategy', 'campaign_brief', 'measurement_plan']} artifactDefinitions={MARKETING_ARTIFACT_FORMS} artifactForType={artifactType => workspace.artifacts.find(item => item.artifact_type === artifactType)} stageForType={() => null} onPropose={input => reportMarketingAccess(() => studio.proposeArtifact(input))} onProposeWorkItem={input => reportMarketingAccess(() => studio.proposeWorkItem(input))} onCreated={() => loadWorkspace(engagementId, campaignId)} />
         ) : tab === 'connections' ? (
@@ -259,9 +353,14 @@ export default function MarketingStudio() {
         ) : (
           <Analytics key={`${activeOrganizationId}:${scopeRevision}:${engagementId}:${workspace.engagement.brand_id}`} organizationId={activeOrganizationId} scopeRevision={scopeRevision} signal={requestSignal} onAccessError={handleOrganizationAccessError} engagementId={engagementId} brand={{ id: workspace.engagement.brand_id, name: workspace.engagement.brands?.name || 'Brand', organization_id: workspace.engagement.organization_id }} />
         )}
+        </WorkshopContextShell>
       </main>
     </div>
   )
+}
+
+function MarketingEntryShell({ children }) {
+  return <div className="h-full overflow-y-auto bg-slate-950 px-6 py-12 text-white">{children}</div>
 }
 
 function Campaigns({ studio, workspace, campaignId, setCampaignId, selected, saving, act }) {
