@@ -20,9 +20,9 @@ insert into qts1_checks (check_name, passed) values
 
 do $$
 declare
-  v_org uuid;
-  v_owner uuid;
-  v_leader uuid;
+  v_org uuid := gen_random_uuid();
+  v_owner uuid := gen_random_uuid();
+  v_leader uuid := gen_random_uuid();
   v_other_org uuid := gen_random_uuid();
   v_initial public.quick_tasks;
   v_appended public.quick_tasks;
@@ -39,25 +39,23 @@ declare
   v_event_delete_rejected boolean := false;
   v_revision_count_before integer;
 begin
-  select owner.organization_id, owner.user_id, leader.user_id
-  into v_org, v_owner, v_leader
-  from public.organization_memberships owner
-  join public.organization_memberships leader
-    on leader.organization_id = owner.organization_id
-   and leader.user_id <> owner.user_id
-   and leader.member_kind = 'team'
-   and leader.status = 'active'
-   and leader.role in ('system_owner', 'operations_admin', 'executive')
-  where owner.member_kind = 'team'
-    and owner.status = 'active'
-  order by owner.created_at, leader.created_at
-  limit 1;
+  -- Synthetic principals and memberships keep verification independent of the
+  -- production user population. The enclosing transaction rolls all fixtures back.
+  insert into auth.users (id) values (v_owner), (v_leader);
+  insert into public.organizations (id, name, slug) values
+    (v_org, 'QTS1 verifier primary tenant', 'qts1-primary-' || replace(v_org::text, '-', '')),
+    (v_other_org, 'QTS1 verifier other tenant', 'qts1-other-' || replace(v_other_org::text, '-', ''));
+  insert into public.organization_memberships (
+    organization_id, user_id, member_kind, role, department_id, status
+  ) values
+    (v_org, v_owner, 'team', 'contributor', null, 'active'),
+    (v_org, v_leader, 'team', 'system_owner', null, 'active');
 
-  if not found then return; end if;
-  update qts1_checks set passed = true where check_name = 'active_fixture_available';
-
-  insert into public.organizations (id, name, slug)
-  values (v_other_org, 'QTS1 verifier tenant', 'qts1-verifier-' || replace(v_other_org::text, '-', ''));
+  update qts1_checks set passed =
+    v_owner <> v_leader
+    and exists (select 1 from public.organization_memberships where organization_id = v_org and user_id = v_owner and role = 'contributor')
+    and exists (select 1 from public.organization_memberships where organization_id = v_org and user_id = v_leader and role = 'system_owner')
+  where check_name = 'active_fixture_available';
 
   select * into v_initial from public.create_quick_task(
     v_org, v_owner, 'QTS1 verifier', '{"notes":"private"}'::jsonb

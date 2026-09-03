@@ -15,7 +15,7 @@ This change adds owner-private Quick Tasks, immutable content revisions, metadat
 - The append operation uses `current_revision_id` as an optimistic-concurrency token.
 - No canonical record writes, promotion, AI/chat, expiry job, purge, cron, or live database action exists.
 - Node tests, lint, build, affected/full Deno checks, SQL review, linked migration dry-run, and exact-head CI pass before merge.
-- The rollback verifier emits every ordered result and raises if any structural or runtime check is false, including when no suitable active owner/leader fixture exists.
+- The rollback verifier creates isolated synthetic owner and leadership principals, emits every ordered result, and raises if any structural or runtime check is false.
 
 ## Human review
 
