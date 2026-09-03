@@ -15,6 +15,7 @@ const screen = read('src/apps/QuickTasks.jsx')
 const edge = read('supabase/functions/quick-tasks/index.ts')
 const config = read('supabase/config.toml')
 const verifier = read('supabase/verify_20260903071848_qts1_private_core.sql')
+const ci = read('.github/workflows/ci.yml')
 
 test('QTS1 content normalization is bounded and predictable', () => {
   const content = quickTaskContent({ notes: ' idea ', checklist: [{ text: ' ship ', done: 1 }, { text: '' }] })
@@ -55,6 +56,11 @@ test('QTS1 mutations are atomic service-role operations with exact revision chec
   assert.match(edge, /admin\.rpc\(functionName/)
   assert.match(edge, /user\.id/)
   assert.match(config, /\[functions\.quick-tasks\][\s\S]*verify_jwt = true/)
+})
+
+test('QTS1 Edge Function is covered by frozen CI tests and checks', () => {
+  assert.match(ci, /deno test --frozen[^\n]*quick-tasks\/index\.test\.ts/)
+  assert.match(ci, /deno check --frozen[^\n]*quick-tasks\/index\.ts[^\n]*quick-tasks\/index\.test\.ts/)
 })
 
 test('QTS1 ships standalone UI and does not register or mutate canonical records', () => {
