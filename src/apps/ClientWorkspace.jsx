@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useOrganization } from '../context/OrganizationContext.jsx'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { clientWorkspace } from '../data/clientWorkspace'
 
 const TABS = [['overview', 'Overview'], ['projects', 'Projects'], ['people', 'People & Access'], ['due', 'Dated Work'], ['requests', 'Requests'], ['delivery', 'Deliverables & Releases']]
@@ -55,7 +55,8 @@ export default function ClientWorkspace() {
   if (!workspace) return <State error={error} action={() => navigate('/sphere/clients')}>Return to Clients</State>
   const { client, summary } = workspace
   return <main className="min-h-full bg-[#090c13] p-4 text-slate-100 sm:p-6 lg:p-8"><div className="mx-auto max-w-[1500px]">
-    <button type="button" onClick={() => navigate('/sphere/clients')} className="text-sm font-medium text-slate-500 hover:text-white">← Clients & Brands</button>
+    <DirectoryNavigation />
+    <Link to="/sphere/clients" className="mt-5 inline-block text-sm font-medium text-slate-500 outline-none hover:text-white focus:ring-2 focus:ring-violet-400">← Client Work directory</Link>
     <header className="mt-5 flex flex-wrap items-start justify-between gap-5"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">Client Workspace</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">{client.company || client.name}</h1><p className="mt-2 text-sm text-slate-400">{client.name}{client.industry ? ` · ${client.industry}` : ''} · Owner: {client.owner.name}</p><p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500">{client.notes || 'Canonical client context across projects, people, dated work, requests, deliverables, and releases.'}</p></div><div className="flex items-center gap-2"><button type="button" onClick={load} disabled={loading} className="rounded-xl border border-white/10 px-4 py-2 text-sm disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={client.status} /></div></header>
     {error && <div role="alert" className="mt-5 rounded-xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>}
     <section aria-label="Client workspace summary" className="mt-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-7"><Metric title="Active projects" value={summary.activeProjects} /><Metric title="One-time" value={summary.oneTimeProjects} /><Metric title="Retainers" value={summary.retainers} /><Metric title="Project Tasks" value={summary.openProjectTasks} /><Metric title="Engagement Work Items" value={summary.openEngagementWorkItems} /><Metric title="Open requests" value={summary.openRequests} /><Metric title="Releases" value={summary.releases} /></section>
@@ -89,6 +90,9 @@ function Delivery({ workspace }) {
   return <div className="grid gap-5 xl:grid-cols-[1.2fr_1fr]"><Panel title="Deliverables"><RecordList rows={workspace.deliverables} empty="No deliverables recorded." render={(item) => <Record key={item.id} title={item.title} note={`${item.projectName} · ${item.versions.length} version${item.versions.length === 1 ? '' : 's'} · Due ${date(item.due_date)}`} status={item.status} />} /></Panel><Panel title="Released client items"><RecordList rows={workspace.releases} empty="No client releases recorded." render={(item) => <Record key={item.id} title={item.title} note={`${item.projectName} · ${label(item.item_type)} · Released ${date(item.released_at)}`} status={item.status} />} /></Panel></div>
 }
 
+function DirectoryNavigation() {
+  return <nav aria-label="Work directories" className="flex flex-wrap gap-2"><Link to="/sphere/portfolio" className="rounded-xl border border-white/10 px-3 py-2 text-sm font-medium text-slate-400 outline-none hover:text-white focus:ring-2 focus:ring-violet-400">Company work</Link><Link to="/sphere/clients" aria-current="page" className="rounded-xl border border-violet-400/40 bg-violet-500/15 px-3 py-2 text-sm font-medium text-violet-100 outline-none focus:ring-2 focus:ring-violet-400">Client Work</Link><Link to="/sphere/internal" className="rounded-xl border border-white/10 px-3 py-2 text-sm font-medium text-slate-400 outline-none hover:text-white focus:ring-2 focus:ring-violet-400">Internal Work</Link></nav>
+}
 function Panel({ title, description, children }) { return <section className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5"><h2 className="font-semibold">{title}</h2>{description && <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p>}<div className="mt-4">{children}</div></section> }
 function RecordList({ rows, empty, render }) { return rows.length ? <div className="space-y-3">{rows.map(render)}</div> : <p className="text-sm text-slate-500">{empty}</p> }
 function Record({ title, note, status, attention = false }) { return <div className={`flex items-start justify-between gap-3 rounded-xl border p-3 ${attention ? 'border-amber-500/20 bg-amber-500/[0.04]' : 'border-white/[0.07] bg-black/10'}`}><div><p className="text-sm font-medium text-white">{title}</p><p className="mt-1 text-xs leading-5 text-slate-500">{note}</p></div>{status && <Status value={status} />}</div> }
