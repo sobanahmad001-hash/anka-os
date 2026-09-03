@@ -4,9 +4,9 @@ import test from 'node:test'
 import {
   marketingSelectionParams,
   privateMarketingParams,
+  reportAuthorizedMarketingAction,
   resolveMarketingContext,
   resolveMarketingNavigationScope,
-  runAuthorizedMarketingAction,
 } from './marketingWorkshopContext.js'
 import { createMarketingProposalTransport } from './marketingProposalTransport.js'
 import { isOrganizationAccessError } from './organizationScope.js'
@@ -102,17 +102,29 @@ test('Backlink Outreach is bound to the validated engagement brand and has no ca
   assert.doesNotMatch(backlink, /<select[^>]+value=\{brand\.id\}/)
 })
 
-test('stale Marketing action callbacks are denied before mutation invocation', async () => {
+test('stale Marketing report callbacks invoke neither mutation nor access recovery', async () => {
   let current = true
   let mutations = 0
-  const delayedSubmit = () => runAuthorizedMarketingAction(
+  let accessRecoveries = 0
+  const delayedSubmit = () => reportAuthorizedMarketingAction(
     { status: 'ready' },
     () => current,
     async () => { mutations += 1 },
+    () => { accessRecoveries += 1 },
   )
   current = false
-  await assert.rejects(delayedSubmit(), error => error.status === 403 && isOrganizationAccessError(error))
+  await assert.rejects(delayedSubmit(), error => error.name === 'AbortError' && error.code === 'MARKETING_CONTEXT_STALE' && !isOrganizationAccessError(error))
   assert.equal(mutations, 0)
+  assert.equal(accessRecoveries, 0)
+})
+
+test('local invalid Marketing context is not reported as a backend access denial', async () => {
+  let accessRecoveries = 0
+  await assert.rejects(
+    reportAuthorizedMarketingAction({ status: 'invalid' }, () => true, async () => {}, () => { accessRecoveries += 1 }),
+    error => error.code === 'MARKETING_CONTEXT_INVALID' && error.status === undefined && !isOrganizationAccessError(error),
+  )
+  assert.equal(accessRecoveries, 0)
 })
 
 test('both Marketing proposal paths preserve envelope-only 403 access denials', async () => {
@@ -136,4 +148,18 @@ test('both Marketing proposal paths preserve envelope-only 403 access denials', 
   assert.deepEqual(calls.map(call => call.options.body.action), ['propose_artifact', 'propose_work_item'])
   assert.equal(calls.every(call => call.options.body.organization_id === 'org-1'), true)
   assert.equal(calls.every(call => !('engagement_stage_instance_id' in call.options.body)), true)
+})
+
+test('real Marketing proposal 403 reaches the access recovery handler', async () => {
+  const proposals = createMarketingProposalTransport({
+    functions: { invoke: async () => ({ data: null, error: { message: 'denied', context: { status: 403 } } }) },
+  }, 'org-1')
+  let accessRecoveries = 0
+  await assert.rejects(
+    reportAuthorizedMarketingAction({ status: 'ready' }, () => true, () => proposals.proposeArtifact({ engagement_id: 'eng-1' }), error => {
+      if (isOrganizationAccessError(error)) accessRecoveries += 1
+    }),
+    error => error.status === 403 && isOrganizationAccessError(error),
+  )
+  assert.equal(accessRecoveries, 1)
 })

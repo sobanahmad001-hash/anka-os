@@ -31,6 +31,7 @@ import { canManageMarketingConnections } from '../data/marketingConnectionReadin
 import {
   marketingSelectionParams,
   privateMarketingParams,
+  reportAuthorizedMarketingAction,
   resolveMarketingContext,
   resolveMarketingNavigationScope,
   runAuthorizedMarketingAction,
@@ -237,11 +238,9 @@ export default function MarketingStudio() {
 
   async function reportMarketingAccess(callback) {
     const request = { organizationId: activeOrganizationId, revision: scopeRevision, signal: requestSignal }
-    try { return await runAuthorizedMarketingAction(contextValidation, () => currentScope(request), callback) }
-    catch (actionError) {
+    return reportAuthorizedMarketingAction(contextValidation, () => currentScope(request), callback, actionError => {
       handleOrganizationAccessError(actionError, { membershipMismatch: actionError?.membershipMismatch === true })
-      throw actionError
-    }
+    })
   }
 
   if (!organizationReady) {

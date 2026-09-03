@@ -114,8 +114,19 @@ export function resolveMarketingNavigationScope(navigation, workspace, activeOrg
 }
 
 export async function runAuthorizedMarketingAction(validation, isCurrent, action) {
-  if (validation?.status !== 'ready' || !isCurrent()) {
-    throw Object.assign(new Error('Official Marketing changes require a current authorized work context.'), { status: 403 })
-  }
+  if (!isCurrent()) throw Object.assign(new Error('The Marketing work context changed before this action could run.'), {
+    name: 'AbortError', code: 'MARKETING_CONTEXT_STALE',
+  })
+  if (validation?.status !== 'ready') throw Object.assign(new Error('Official Marketing changes require a current authorized work context.'), {
+    code: 'MARKETING_CONTEXT_INVALID',
+  })
   return action()
+}
+
+export async function reportAuthorizedMarketingAction(validation, isCurrent, action, onAccessError) {
+  try { return await runAuthorizedMarketingAction(validation, isCurrent, action) }
+  catch (error) {
+    if (error?.code !== 'MARKETING_CONTEXT_STALE' && error?.code !== 'MARKETING_CONTEXT_INVALID') onAccessError(error)
+    throw error
+  }
 }
