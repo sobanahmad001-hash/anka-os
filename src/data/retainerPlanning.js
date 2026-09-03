@@ -15,6 +15,61 @@ export const RET3_REASON_LABELS = Object.freeze({
 
 const rowsFor = (rows, key, value) => rows.filter((row) => row?.[key] === value)
 const monthOf = (value) => typeof value === 'string' ? value.slice(0, 7) : ''
+const monthEnd = (month) => {
+  const [year, monthNumber] = month.split('-').map(Number)
+  return new Date(Date.UTC(year, monthNumber, 1)).toISOString().slice(0, 10)
+}
+
+const selectedVersionsInMonth = (versions, approvedVersionIds, month) => {
+  const start = `${month}-01`
+  const end = monthEnd(month)
+  const candidates = versions.filter((version) => approvedVersionIds.has(version.id)
+    && version.effective_start < end
+    && (!version.effective_end || version.effective_end >= start))
+  const selectedIds = new Set()
+  for (let cursor = new Date(`${start}T00:00:00Z`); cursor.toISOString().slice(0, 10) < end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+    const day = cursor.toISOString().slice(0, 10)
+    const selected = candidates.filter((version) => version.effective_start <= day
+      && (!version.effective_end || version.effective_end >= day))
+      .sort((left, right) => right.effective_start.localeCompare(left.effective_start)
+        || right.version_number - left.version_number)[0]
+    if (selected) selectedIds.add(selected.id)
+  }
+  return candidates.filter((version) => selectedIds.has(version.id))
+    .sort((left, right) => left.effective_start.localeCompare(right.effective_start)
+      || left.version_number - right.version_number)
+}
+
+export function retainerPlanningContextKey(context) {
+  const { organizationId, projectId, engagementId, actorId = '', month } = context || {}
+  return [organizationId, projectId, engagementId, actorId, month].map((value) => String(value || '')).join('|')
+}
+
+export function createRetainerPlanningRequestGuard() {
+  const sequences = new Map()
+  return Object.freeze({
+    begin(channel, contextKey) {
+      const sequence = (sequences.get(channel) || 0) + 1
+      sequences.set(channel, sequence)
+      return Object.freeze({ channel, contextKey, sequence })
+    },
+    isCurrent(token, contextKey) {
+      return Boolean(token && token.contextKey === contextKey
+        && sequences.get(token.channel) === token.sequence)
+    },
+    invalidate(channel) {
+      sequences.set(channel, (sequences.get(channel) || 0) + 1)
+    },
+  })
+}
+
+export function canConfirmRetainerPeriod(plan, previewEnvelope, contextKey, month, periodStart) {
+  return Boolean(plan?.canManagePeriods
+    && previewEnvelope?.contextKey === contextKey
+    && previewEnvelope.value?.plan_id === plan.id
+    && previewEnvelope.value?.month_start === `${month}-01`
+    && previewEnvelope.value?.periods?.some((period) => period.period_start === periodStart))
+}
 
 export function retainerPlanningReason(code) {
   return RET3_REASON_LABELS[code]
@@ -40,15 +95,21 @@ export function buildRetainerPlanning(snapshot, options) {
     const versions = rowsFor(snapshot.versions, 'plan_id', plan.id)
       .filter((version) => version.organization_id === organizationId)
       .sort((left, right) => right.version_number - left.version_number)
-    const approvedVersion = versions.find((version) => version.id === plan.approved_version_id) || null
     const approvals = rowsFor(snapshot.approvals, 'plan_id', plan.id)
       .filter((approval) => approval.organization_id === organizationId)
       .sort((left, right) => new Date(right.approved_at) - new Date(left.approved_at))
-    const templates = approvedVersion
-      ? rowsFor(snapshot.templateItems, 'plan_version_id', approvedVersion.id)
-        .filter((item) => item.organization_id === organizationId)
-        .sort((left, right) => left.position - right.position)
-      : []
+    const approvedVersionIds = new Set(approvals.map((approval) => approval.plan_version_id))
+    const monthVersions = selectedVersionsInMonth(versions, approvedVersionIds, month)
+    const monthVersionIds = new Set(monthVersions.map((version) => version.id))
+    const templates = snapshot.templateItems.filter((item) => item.organization_id === organizationId
+      && monthVersionIds.has(item.plan_version_id))
+      .sort((left, right) => left.plan_version_id.localeCompare(right.plan_version_id)
+        || left.position - right.position)
+    const templateGroups = monthVersions.map((version) => ({
+      version,
+      templates: templates.filter((item) => item.plan_version_id === version.id),
+    }))
+    const currentApprovedVersion = versions.find((version) => version.id === plan.approved_version_id) || null
     const occurrences = rowsFor(snapshot.occurrences, 'plan_id', plan.id)
       .filter((occurrence) => occurrence.organization_id === organizationId && monthOf(occurrence.period_start) === month)
       .sort((left, right) => left.period_start.localeCompare(right.period_start))
@@ -66,23 +127,25 @@ export function buildRetainerPlanning(snapshot, options) {
     const serviceOwnerId = serviceOwners.get(plan.engagement_service_id) || null
     const exceptions = []
     if (plan.status !== 'active') exceptions.push(`plan_${plan.status}`)
-    if (!approvedVersion) exceptions.push('no_approved_version')
+    if (!monthVersions.length) exceptions.push('no_approved_effective_version')
     if (templates.some((item) => !item.default_assignee_id)) exceptions.push('unassigned_template_items')
     if (inactiveAssigned.length) exceptions.push('template_assignee_not_active')
 
     return {
       ...plan,
       versions,
-      approvedVersion,
+      currentApprovedVersion,
+      monthVersions,
       approvals,
       templates,
+      templateGroups,
       occurrences,
       generatedWork,
       attempts,
       serviceOwnerId,
       canManagePeriods: Boolean(actorId && actorId === serviceOwnerId),
-      hasUnapprovedNewerVersion: approvedVersion
-        ? versions.some((version) => version.version_number > approvedVersion.version_number)
+      hasUnapprovedNewerVersion: currentApprovedVersion
+        ? versions.some((version) => version.version_number > currentApprovedVersion.version_number)
         : versions.length > 0,
       coverage: {
         total: templates.length,
@@ -103,14 +166,17 @@ export function buildRetainerPlanning(snapshot, options) {
       plans: planCards.length,
       activePlans: planCards.filter((plan) => plan.status === 'active').length,
       generatedPeriods: planCards.reduce((total, plan) => total + plan.occurrences.length, 0),
-      plannedItems: planCards.reduce((total, plan) => total + plan.coverage.total, 0),
+      applicableTemplateItems: planCards.reduce((total, plan) => total + plan.coverage.total, 0),
       unassignedItems: planCards.reduce((total, plan) => total + plan.coverage.unassigned, 0),
       exceptions: planCards.reduce((total, plan) => total + plan.exceptions.length, 0),
     },
   }
 }
 
-export function applyRetainerMonthPreview(plan, preview) {
+export function applyRetainerMonthPreview(plan, preview, context) {
+  const expectedMonthStart = `${context?.month || ''}-01`
+  if (preview?.plan_id !== plan.id || preview?.month_start !== expectedMonthStart
+      || (context?.planId && context.planId !== plan.id)) return plan
   const periods = Array.isArray(preview?.periods) ? preview.periods : []
   const reasonCodes = [
     ...(Array.isArray(preview?.reasons) ? preview.reasons : []),

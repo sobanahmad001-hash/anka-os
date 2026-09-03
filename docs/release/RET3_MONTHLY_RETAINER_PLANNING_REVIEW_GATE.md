@@ -19,6 +19,9 @@ Each plan is interpreted in the immutable IANA timezone of the applicable approv
   or accepted occurrence state.
 - Coverage is factual assignment/activity counts only: assigned, unassigned, active,
   inactive, and already-generated work. It adds no capacity, SLA, or performance policy.
+- Historical months show the approved version facts that actually apply in that month,
+  including version transitions inside one month. Template counts describe definitions,
+  not a period-multiplied monthly workload.
 - Month previews enumerate canonical weekly/monthly starts on the server and reuse the
   authoritative RET2 one-period preview for dates, eligibility, and work-item intent.
 - Confirmation remains an explicit one-period action with a new request UUID and the
@@ -34,6 +37,9 @@ Each plan is interpreted in the immutable IANA timezone of the applicable approv
 - QTS promotion rows remain separate; RET3 counts generated work only when recurring
   provenance is present and created_via is recurring_plan.
 - Existing Project Tasks and Engagement Work Items remain distinct.
+- Loaded snapshots, previews, and post-confirm refreshes are accepted only for the current
+  organization, project, engagement, actor, and month. A visible confirm action must still
+  belong to that exact preview and the current Service Owner.
 
 ## Verification
 
