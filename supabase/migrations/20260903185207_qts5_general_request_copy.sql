@@ -1,4 +1,4 @@
--- QTS5: locally generated timestamp awaits Admin ledger ordering before release.
+-- QTS5: unapplied migration reconciled by Admin immediately after live RET3.
 begin;
 set local lock_timeout = '5s';
 set local statement_timeout = '60s';

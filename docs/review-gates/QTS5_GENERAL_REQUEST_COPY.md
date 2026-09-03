@@ -77,11 +77,11 @@ No change to QTS3 purge code. Task title, notes (including format/path/brand), r
 
 The source FK deliberately prevents deleting/re-keying the source while provenance exists. It does not grant access to that source and introduces no source mutation path. A future change to General Request deletion/retention would need separate review; this phase preserves its existing durable operational role.
 
-## Migration ordering hold
+## Migration ordering reconciled by Admin
 
 Supabase CLI generated 20260903173419_qts5_general_request_copy.sql locally using migration new. The local clock sorts it BEFORE merged RET3 20260903185206 and unmerged WCH3 20260903235243. No existing migration was edited.
 
-The user chose to leave ordering for Admin. This file and its verifier retain the generated name and are **not ready for application/publication**. Admin must assign a unique valid ledger position, rename the new unapplied migration/verifier, update the dedicated Node test path and review references, refresh main, and rerun gates. Do not use a blanket include-all or edit applied history to overcome this discrepancy.
+Admin read the live ledger and confirmed its latest version is RET3 20260903185206; QTS5 has no live table or RPC. The unapplied migration and verifier are renamed to 20260903185207, the unused next position after RET3, with the test path and references updated. Migration SQL behavior is unchanged; only its introductory comment changed. No applied file or ledger was edited, and no include-all override was used. Recheck main and the ledger before application if another phase lands first. Runtime SQL, concurrency, hosted CI and browser checks remain open gates.
 
 ## Requirement-by-requirement evidence
 
@@ -112,9 +112,9 @@ The user chose to leave ordering for Admin. This file and its verifier retain th
 - scripts/qts5-concurrency.ts and parser type-check passed.
 
 For independent syntax repeat:
-    deno run --no-config --no-lock --allow-read scripts/qts5-parse-sql.ts supabase/migrations/20260903173419_qts5_general_request_copy.sql supabase/verify_20260903173419_qts5_general_request_copy.sql
+    deno run --no-config --no-lock --allow-read scripts/qts5-parse-sql.ts supabase/migrations/20260903185207_qts5_general_request_copy.sql supabase/verify_20260903185207_qts5_general_request_copy.sql
 
-For authorized local database review, Admin first resolves migration ordering and prepares a disposable complete-schema database. Run the SQL verifier with stop-on-error and retain every named result. The script always ends ROLLBACK when successful; on error, connection closure or explicit ROLLBACK must discard its transaction.
+For authorized local database review, Admin prepares a disposable complete-schema database. Run the SQL verifier with stop-on-error and retain every named result. The script always ends ROLLBACK when successful; on error, connection closure or explicit ROLLBACK must discard its transaction.
 
 For independent concurrency execution, scripts/qts5-concurrency.ts requires QTS5_LOCAL_TEMPLATE_URL pointing to an explicitly prepared LOCAL database named qts5_template_*. It rejects remote hosts, URL options and fragments. It clones that local template to a random qts5_verify_* database, runs actual competing sessions, then drops only the generated database. It does not apply migrations. Its pinned pg client is 8.23.0. Use explicit localhost-only network permissions and environment/read permissions as required by Deno. No URL/credentials were configured and this script was not executed in the principal task.
 
@@ -127,15 +127,15 @@ For independent concurrency execution, scripts/qts5-concurrency.ts requires QTS5
 - src/data/quickTaskCopy.test.js
 - supabase/functions/quick-tasks/index.ts
 - supabase/functions/quick-tasks/index.test.ts
-- supabase/migrations/20260903173419_qts5_general_request_copy.sql
-- supabase/verify_20260903173419_qts5_general_request_copy.sql
+- supabase/migrations/20260903185207_qts5_general_request_copy.sql
+- supabase/verify_20260903185207_qts5_general_request_copy.sql
 - scripts/qts5-parse-sql.ts
 - scripts/qts5-concurrency.ts
 - docs/review-gates/QTS5_GENERAL_REQUEST_COPY.md
 
 ## Admin stop/go
 
-Do not release on this packet alone. Resolve ordering, refresh main/overlap, execute the native PostgreSQL verifier and concurrent sessions, run authenticated browser smoke, and obtain hosted CI at the published commit. Any false result or scope/ownership conflict stops release. No live fallback or release action is authorized by this local implementation task.
+Do not release on this packet alone. Recheck ordering and main/overlap, execute the native PostgreSQL verifier and concurrent sessions, run authenticated browser smoke, and obtain hosted CI at the published commit. Any false result or scope/ownership conflict stops release. No live fallback or release action is authorized by this local implementation task.
 
 Supabase guidance informed explicit grants/RLS and the fixed invoker boundary; it did not authorize any database execution. Current official references:
 - https://supabase.com/docs/guides/api/securing-your-api

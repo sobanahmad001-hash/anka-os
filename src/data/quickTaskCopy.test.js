@@ -90,7 +90,7 @@ test('copy endpoint is a single RPC and rejects arbitrary payload; WCH is indepe
 })
 
 test('copy transaction has only sandbox writes and retains no purgeable payload in its ledger', () => {
-  const sql = readFileSync(new URL('../../supabase/migrations/20260903173419_qts5_general_request_copy.sql', import.meta.url), 'utf8')
+  const sql = readFileSync(new URL('../../supabase/migrations/20260903185207_qts5_general_request_copy.sql', import.meta.url), 'utf8')
   const writes = [...sql.matchAll(/insert into public\.([a-z_]+)/g)].map(match => match[1])
   assert.deepEqual(writes, ['quick_tasks', 'quick_task_revisions', 'quick_task_lifecycle_events', 'quick_task_request_copies'])
   assert.doesNotMatch(sql, /\b(?:update|delete from) public\./)
