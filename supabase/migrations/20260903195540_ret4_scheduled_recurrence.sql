@@ -42,7 +42,6 @@ create table public.recurring_schedule_consents (
   foreign key (plan_version_id, plan_id, organization_id)
     references public.recurring_work_plan_versions(id, plan_id, organization_id) on delete restrict
 );
-create index recurring_schedule_consents_scope_idx on public.recurring_schedule_consents(plan_version_id, plan_id, organization_id);
 create or replace function private.record_recurring_schedule_consent()
 returns trigger language plpgsql security invoker set search_path = '' as $$
 begin

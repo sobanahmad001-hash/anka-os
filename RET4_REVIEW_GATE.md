@@ -1,10 +1,10 @@
 # RET4 local review gate
 
-Status: local implementation verified; Admin release review required. No publication or activation authorized.
+Status: Admin independently verified on current main; publication and hosted release gates remain. No live activation has occurred.
 
 ## Scope and operational contract
 
-- Base: c30b4fab1cf95ed2eec88f7c211e05a2d9cd3607. Branch: ret4-scheduled-recurrence.
+- Base: 49dc9fddd93c7379fe8e5eabdb6e4b85b393ba98. Branch: ret4-scheduled-recurrence.
 - Migration: supabase/migrations/20260903195540_ret4_scheduled_recurrence.sql.
 - Service Owner drafts a new immutable version with an explicit scheduler object:
   `{"scheduler":{"enabled":true,"local_time":"09:00","policy":"ret4_v1"}}`.
@@ -37,15 +37,15 @@ The Edge function verifies the identity before supplying the explicit actor to t
 
 | Gate | Result |
 | --- | --- |
-| Complete migration on fresh schema-only local PostgreSQL database | Passed |
+| Corrected migration applied as the real `postgres` migration owner on a fresh schema-only local PostgreSQL database | Passed |
 | RET4 clock/security/rollback diagnostic | 16/16 |
 | Actual service_role behavioral + concurrent-session suite | 40/40 |
 | Existing RET2 rollback regression | 29/29 |
 | Existing RET3 rollback regression | 9/9 |
-| Node tests, including 5 RET4 contracts | 458/458 |
-| Updated configured Deno tests | 149/149 |
+| Node tests, including 5 RET4 contracts | 502/502 |
+| Updated configured Deno tests | 153/153 |
 | Updated configured Deno checks | Passed |
-| Lint | 0 errors; 347 existing frontend warnings |
+| Lint | 0 errors; 358 existing frontend warnings |
 | Production build | Passed |
 | Whitespace check | Passed |
 
@@ -59,6 +59,6 @@ Local Windows harness: `node scripts/verify-ret4-local.mjs`, with `RET4_TEST_DAT
 
 Run supabase/verify_ret4_clock_and_runtime_gate.sql with psql ON_ERROR_STOP against the isolated database after applying the migration. It returns nonzero after rollback if a gate fails. The full behavioral harness is not automatically run against hosted CI databases.
 
-Hosted Supabase advisors, remote exact-head CI, current-main integration and live scheduling are not claimed. No shared/live database or migration history was changed. Initial fixture mistakes (SQL delimiter/address format and unsupported membership status) were corrected and the final full suite rerun successfully; initial permission failures remain documented in local history.
+Current-main integration is clean and has no file overlap with QTS5, RET5 or WKS. Admin removed one provably redundant consent-table index whose leading column was already the table primary key and reran the corrected migration plus every database gate. Hosted Supabase advisors, remote exact-head CI and live scheduling are not claimed. No shared/live database or migration history was changed. Initial fixture mistakes (SQL delimiter/address format and unsupported membership status) were corrected and the final full suite rerun successfully; initial permission failures remain documented in local history.
 
-Admin must coordinate this unapplied migration with QTS5, PLN2 and WCH before release and assess the final current-main diff. No ledger repair or independent renumbering. This RET4 task made no RET5 changes. RET5 independently advanced from the earlier observed 1121088e0084c19c054c4c6a0ee3ea5a0b399022 to a clean ret5-retainer-review at 56a62bc08336b270a321224251eb8b58fd278cff during verification; that is an observation, not work performed here. The exact resulting local RET4 commit and database stop status are recorded outside the repo in .qa/RET4_CURRENT_STATE.md.
+Admin must preserve migration ordering with PLN2 and WCH; RET4's 20260903195540 timestamp follows the already-live QTS5 migration and precedes PLN2. No ledger repair or independent renumbering. This RET4 task made no RET5 changes. The exact resulting local RET4 commit and database stop status are recorded outside the repo in .qa/RET4_CURRENT_STATE.md.
