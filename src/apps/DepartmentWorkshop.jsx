@@ -255,6 +255,16 @@ export default function DepartmentWorkshop({ departmentId }) {
 
   if (!departmentAllowed) return <div className="flex h-full items-center justify-center bg-slate-950 p-6 text-center"><div><h1 className="text-xl font-semibold text-white">Department workspace unavailable</h1><p className="mt-2 text-sm text-slate-400">Your active team membership does not include this department.</p></div></div>
 
+  if (!workspace) return (
+    <div className="flex h-full items-center justify-center bg-slate-950 p-6 text-center text-white">
+      <section role="alert">
+        <h1 className="text-xl font-semibold">Department workspace unavailable</h1>
+        <p className="mt-2 text-sm text-slate-400">{error || 'The department workspace could not be loaded.'}</p>
+        <button type="button" onClick={loadWorkspace} className="mt-4 rounded-xl bg-purple-600 px-4 py-2 text-sm font-semibold">Try again</button>
+      </section>
+    </div>
+  )
+
   const projectTaskOverdue = workspace.tasks.filter((task) => task.due_date && !['done', 'cancelled'].includes(task.status) && new Date(task.due_date) < new Date()).length
   const workItemOverdue = workspace.workItems.filter((item) => item.due_date && item.status !== 'done' && new Date(item.due_date) < new Date()).length
   const incoming = workspace.requests.filter((request) => workspace.workstreams.some((workstream) => workstream.id === request.receiving_workstream_id) && !['completed', 'declined', 'withdrawn'].includes(request.status)).length
