@@ -84,14 +84,30 @@ export function validateMarketingArtifact(type: string, value: unknown): Json {
     throw new Error('Unsupported marketing artifact content')
   }
   const input = value as Json
+  if (type === 'campaign_brief') {
+    const campaignGoal = text(input.campaign_goal, 4000)
+    const channels = strings(input.channels)
+    const startsOn = safeDate(input.starts_on)
+    const endsOn = safeDate(input.ends_on)
+    const measurementValue = input.measurement_value === '' || input.measurement_value === null || input.measurement_value === undefined ? null : Number(input.measurement_value)
+    const measurementUnit = text(input.measurement_unit, 120)
+    if (!campaignGoal) throw new Error('campaign goal is required')
+    if (!channels.length) throw new Error('channels is required')
+    if (startsOn && endsOn && startsOn > endsOn) throw new Error('Campaign brief end date cannot precede its start date')
+    if (measurementValue !== null && !Number.isFinite(measurementValue)) throw new Error('Measurement value must be a number')
+    if (measurementValue !== null && !measurementUnit) throw new Error('Measurement unit is required when a value is provided')
+    return {
+      campaign_goal: campaignGoal, channels, market: text(input.market, 500), audience: text(input.audience, 4000),
+      offer: text(input.offer, 4000), key_message: text(input.key_message, 4000), starts_on: startsOn || '', ends_on: endsOn || '',
+      measurement_target: text(input.measurement_target, 500), measurement_value: measurementValue,
+      measurement_unit: measurementUnit, measurement_evidence: text(input.measurement_evidence, 4000),
+      deliverables: strings(input.deliverables), existing_asset_version_ids: strings(input.existing_asset_version_ids, 100),
+    }
+  }
   const definitions: Record<string, Array<[string, 'text' | 'list']>> = {
     channel_strategy: [
       ['objectives', 'list'], ['priority_audiences', 'list'], ['channel_roles', 'list'],
       ['sequencing', 'text'], ['success_measures', 'list'],
-    ],
-    campaign_brief: [
-      ['campaign_goal', 'text'], ['audience', 'text'], ['offer', 'text'],
-      ['key_message', 'text'], ['channels', 'list'], ['deliverables', 'list'],
     ],
     measurement_plan: [
       ['business_objectives', 'list'], ['kpis', 'list'], ['conversions', 'list'],
@@ -608,6 +624,34 @@ async function saveArtifact(context: MarketingRequestContext, body: Json, actorI
   return version
 }
 
+async function saveCampaignBrief(context: MarketingRequestContext, body: Json, actorId: string) {
+  const engagementId = text(body.engagement_id, 80)
+  const campaignId = text(body.campaign_id, 80)
+  const title = text(body.title, 240)
+  const idempotencyKey = text(body.idempotency_key, 80)
+  const artifactId = text(body.artifact_id, 80) || null
+  const expectedLatestVersionId = text(body.expected_latest_version_id, 80) || null
+  if (!campaignId || !title) throw new Error('Campaign and brief title are required')
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) throw new Error('A UUID idempotency key is required')
+  await requireMarketingEngagement(context, engagementId)
+  const content = validateMarketingArtifact('campaign_brief', body.content)
+  const contentChecksum = await sha256(stableJson(content))
+  const payloadChecksum = await sha256(stableJson({
+    organization_id: context.organizationId, actor_id: actorId, engagement_id: engagementId, campaign_id: campaignId,
+    artifact_id: artifactId, expected_latest_version_id: expectedLatestVersionId, title, content,
+    change_summary: text(body.change_summary, 1000), ai_use_allowed: body.ai_use_allowed === true,
+  }))
+  const { data, error } = await context.admin.rpc('save_marketing_campaign_brief', {
+    p_organization_id: context.organizationId, p_engagement_id: engagementId, p_campaign_id: campaignId,
+    p_artifact_id: artifactId, p_expected_latest_version_id: expectedLatestVersionId, p_title: title,
+    p_content: content, p_content_checksum: contentChecksum, p_change_summary: text(body.change_summary, 1000),
+    p_ai_use_allowed: body.ai_use_allowed === true, p_idempotency_key: idempotencyKey,
+    p_payload_checksum: payloadChecksum, p_actor_id: actorId,
+  })
+  if (error) throw error
+  return data
+}
+
 async function approveArtifact(context: MarketingRequestContext, body: Json, actorId: string) {
   const { admin, organizationId } = context
   const versionId = text(body.artifact_version_id, 80)
@@ -852,6 +896,7 @@ export async function handleRequest(
     if (action === 'delete_ad_keyword') return response({ data: await deleteAdKeyword(context, body) })
     if (action === 'import_ad_campaign_performance') return response({ data: await importAdCampaignPerformance(context, body, user.id) })
     if (action === 'save_artifact') return response({ data: await saveArtifact(context, body, user.id) })
+    if (action === 'save_campaign_brief') return response({ data: await saveCampaignBrief(context, body, user.id) })
     if (action === 'approve_artifact') return response({ data: await approveArtifact(context, body, user.id) })
     if (action === 'analytics_dashboard') return response({ data: await analyticsDashboard(context, body) })
     return response({ error: 'Unsupported action' }, 400)

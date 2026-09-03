@@ -10,11 +10,18 @@ export const MARKETING_ARTIFACT_FORMS = Object.freeze({
   }),
   campaign_brief: Object.freeze({
     label: 'Campaign brief',
-    description: 'The campaign goal, audience, offer, message, channels, and deliverables.',
+    description: 'A governed campaign plan with explicit goals, channels, measures, and exact-version assets.',
     fields: Object.freeze([
-      ['campaign_goal', 'Campaign goal', 'textarea'], ['audience', 'Audience', 'textarea'],
+      ['campaign_goal', 'Campaign goal', 'textarea'], ['channels', 'Channels', 'list'],
+      ['market', 'Market', 'text'], ['audience', 'Audience', 'textarea'],
       ['offer', 'Offer', 'textarea'], ['key_message', 'Key message', 'textarea'],
-      ['channels', 'Channels', 'list'], ['deliverables', 'Deliverables', 'list'],
+      ['starts_on', 'Starts on', 'date'], ['ends_on', 'Ends on', 'date'],
+      ['measurement_target', 'Measurement target', 'text'],
+      ['measurement_value', 'Measurement value', 'number'],
+      ['measurement_unit', 'Measurement unit', 'text'],
+      ['measurement_evidence', 'Measurement evidence', 'textarea'],
+      ['deliverables', 'Deliverables', 'list'],
+      ['existing_asset_version_ids', 'Existing asset version IDs', 'list'],
     ]),
   }),
   measurement_plan: Object.freeze({
@@ -60,6 +67,37 @@ export function campaignAfterDeletion(campaigns = [], deletedCampaignId = '') {
 
 export function blankMarketingArtifact(type) {
   return Object.fromEntries((MARKETING_ARTIFACT_FORMS[type]?.fields || []).map(([key, , kind]) => [key, kind === 'list' ? [] : '']))
+}
+
+export function validateCampaignBriefDraft(value = {}) {
+  const content = { ...blankMarketingArtifact('campaign_brief'), ...value }
+  const channels = Array.isArray(content.channels) ? content.channels.map(item => String(item).trim()).filter(Boolean) : lines(content.channels)
+  if (!String(content.campaign_goal || '').trim()) throw new Error('Campaign goal is required')
+  if (!channels.length) throw new Error('At least one channel is required')
+  if (content.starts_on && !/^\d{4}-\d{2}-\d{2}$/.test(content.starts_on)) throw new Error('Start date must use YYYY-MM-DD')
+  if (content.ends_on && !/^\d{4}-\d{2}-\d{2}$/.test(content.ends_on)) throw new Error('End date must use YYYY-MM-DD')
+  if (content.starts_on && content.ends_on && content.ends_on < content.starts_on) throw new Error('End date cannot precede start date')
+  if (content.measurement_value !== '' && content.measurement_value !== null && content.measurement_value !== undefined) {
+    if (!Number.isFinite(Number(content.measurement_value))) throw new Error('Measurement value must be a number')
+    if (!String(content.measurement_unit || '').trim()) throw new Error('Measurement unit is required when a value is provided')
+  }
+  return {
+    campaign_goal: String(content.campaign_goal).trim(), channels,
+    market: String(content.market || '').trim(), audience: String(content.audience || '').trim(),
+    offer: String(content.offer || '').trim(), key_message: String(content.key_message || '').trim(),
+    starts_on: content.starts_on || '', ends_on: content.ends_on || '',
+    measurement_target: String(content.measurement_target || '').trim(),
+    measurement_value: content.measurement_value === '' || content.measurement_value === null || content.measurement_value === undefined ? null : Number(content.measurement_value),
+    measurement_unit: String(content.measurement_unit || '').trim(),
+    measurement_evidence: String(content.measurement_evidence || '').trim(),
+    deliverables: Array.isArray(content.deliverables) ? content.deliverables.map(item => String(item).trim()).filter(Boolean) : lines(content.deliverables),
+    existing_asset_version_ids: [...new Set(Array.isArray(content.existing_asset_version_ids) ? content.existing_asset_version_ids.map(item => String(item).trim()).filter(Boolean) : lines(content.existing_asset_version_ids))],
+  }
+}
+
+export function selectedCampaignBriefSuggestions(current, suggested, selectedFields = []) {
+  return selectedFields.reduce((next, field) => Object.prototype.hasOwnProperty.call(suggested || {}, field)
+    ? { ...next, [field]: suggested[field] } : next, { ...current })
 }
 
 export function lines(value) {

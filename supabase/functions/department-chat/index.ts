@@ -242,7 +242,12 @@ export function marketingArtifactResponseFormat(type: string) {
   if (!CHAT_MARKETING_ARTIFACT_TYPE_SET.has(type)) throw new Error('Unsupported Marketing chat artifact')
   const definitions: Record<string, Record<string, Json>> = {
     channel_strategy: { objectives: listSchema(), priority_audiences: listSchema(), channel_roles: listSchema(), sequencing: stringSchema(), success_measures: listSchema() },
-    campaign_brief: { campaign_goal: stringSchema(), audience: stringSchema(), offer: stringSchema(), key_message: stringSchema(), channels: listSchema(), deliverables: listSchema() },
+    campaign_brief: {
+      campaign_goal: stringSchema(), channels: listSchema(), market: stringSchema(), audience: stringSchema(), offer: stringSchema(), key_message: stringSchema(),
+      starts_on: stringSchema(), ends_on: stringSchema(), measurement_target: stringSchema(), measurement_value: { type: ['number', 'null'] },
+      measurement_unit: stringSchema(), measurement_evidence: stringSchema(), deliverables: { type: 'array', items: stringSchema() },
+      existing_asset_version_ids: { type: 'array', items: stringSchema() },
+    },
     measurement_plan: { business_objectives: listSchema(), kpis: listSchema(), conversions: listSchema(), tracking_requirements: listSchema(), reporting_cadence: stringSchema() },
   }
   const properties = definitions[type]
