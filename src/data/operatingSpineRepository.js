@@ -64,39 +64,19 @@ export function createOperatingSpineRepository(client) {
     async createClient(input, userId) {
       required(input?.name, 'Client name')
       required(input?.brandName, 'Brand name')
-      const membership = await organizationContext(userId)
-      const agencyClient = await dataOrThrow(
-        client.from('agency_clients').insert({
-          organization_id: membership.organization_id,
-          name: input.name.trim(),
-          legal_name: input.legalName?.trim() || input.name.trim(),
-          primary_email: input.primaryEmail?.trim() || null,
-          website_url: input.websiteUrl?.trim() || null,
-          industry: input.industry?.trim() || '',
-          status: 'active',
-          owner_id: userId,
-          created_by: userId,
-        }).select().single()
+      required(userId, 'userId')
+      return dataOrThrow(
+        client.rpc('create_commercial_client', {
+          p_name: input.name.trim(),
+          p_brand_name: input.brandName.trim(),
+          p_legal_name: input.legalName?.trim() || input.name.trim(),
+          p_primary_email: input.primaryEmail?.trim() || null,
+          p_website_url: input.websiteUrl?.trim() || null,
+          p_industry: input.industry?.trim() || '',
+          p_brand_description: input.brandDescription?.trim() || '',
+          p_brand_website_url: input.brandWebsiteUrl?.trim() || input.websiteUrl?.trim() || null,
+        })
       )
-
-      try {
-        const brand = await dataOrThrow(
-          client.from('brands').insert({
-            organization_id: membership.organization_id,
-            client_id: agencyClient.id,
-            name: input.brandName.trim(),
-            description: input.brandDescription?.trim() || '',
-            website_url: input.brandWebsiteUrl?.trim() || input.websiteUrl?.trim() || null,
-            status: 'active',
-            is_default: true,
-            created_by: userId,
-          }).select().single()
-        )
-        return { client: agencyClient, brand }
-      } catch (error) {
-        await client.from('agency_clients').delete().eq('id', agencyClient.id)
-        throw error
-      }
     },
 
     async createBrand(input, userId) {
