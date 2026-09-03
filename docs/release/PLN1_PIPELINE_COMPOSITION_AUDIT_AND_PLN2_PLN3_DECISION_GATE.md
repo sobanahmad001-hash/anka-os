@@ -116,7 +116,7 @@ PLN3 should add journey preview and template-backed instantiation through:
 
 ## PLN4 prerequisites and unresolved scope
 
-The available authority does not define a PLN4 implementation. A later phase could plausibly cover template authoring, publishing, governance, or engagement-stage replanning, but selecting one would invent scope. Before PLN4 is briefed, Product Design must identify its user outcome, authorized roles, lifecycle, and whether it changes already-instantiated engagements. PLN4 must remain separate from PLN2 schema foundation and PLN3 preview and instantiation.
+PLN4's specified user outcome is pipeline management after engagement creation: safely add, pause, replace, or remove services without corrupting completed history. Its detailed policies remain unbriefed. Before PLN4 implementation, Product Design must define authorized roles, lifecycle transitions, the meaning and constraints of service replacement, effects on active and completed stage instances, dependency and prerequisite recalculation, work-item and artifact preservation, template provenance, audit requirements, and rollback or compensation behaviour. PLN4 must remain separate from PLN2 schema foundation and PLN3 preview and instantiation.
 
 ## Current collision report
 
