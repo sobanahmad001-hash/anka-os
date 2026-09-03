@@ -34,6 +34,8 @@ RET1 is additive foundation only: recurring plan headers, immutable versions and
 
 This pull request must not be merged, deployed, or applied as part of RET1 implementation. A later authorized rollout must run the matching verifier immediately after migration and stop on any failed check.
 
+Before any separately authorized deployment, `supabase/config.toml` must register `recurring-plans` as enabled, require platform JWT verification, and point to the checked-in TypeScript entrypoint. The structural regression test treats a missing, duplicate, disabled, JWT-bypassing, or misdirected registration as a release-blocking failure.
+
 The rollback verifier creates fresh rollback-only `auth.users` identities and representative data for two organizations inside a transaction, without reading or changing real user memberships. It exercises service-owner creation, project-owner approval and lifecycle authority, department-manager immutable reassignment, wrong-role and cross-organization rejection, validation constraints, append-only guards, and audit events, then always ends in `ROLLBACK`. Its catalog checks cover the complete anon/authenticated/service-role ACL matrix across all four tables and five RPCs, the exact SELECT-only RLS policies, and every named tenant-composite foreign key with its supporting index.
 
 Because the implementation host has no Docker or Podman, a full local `supabase db reset` could not be run. The migration and verifier were instead executed against a disposable embedded PostgreSQL instance, and the linked CLI dry-run identified only the reserved RET1 migration. This does not replace rollout verification.

@@ -85,6 +85,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/work-items/index.ts"
 
+[functions.recurring-plans]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/recurring-plans/index.ts"
+
 [functions.external-events]
 enabled = true
 verify_jwt = true
