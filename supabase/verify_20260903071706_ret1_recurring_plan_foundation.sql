@@ -252,14 +252,13 @@ update ret1_checks set passed = not exists (
 
 do $$
 declare
-  v_users uuid[];
   v_org_id uuid;
   v_cross_org_id uuid := gen_random_uuid();
   v_department_id text;
-  v_service_owner uuid;
-  v_project_owner uuid;
-  v_manager uuid;
-  v_cross_actor uuid;
+  v_service_owner uuid := gen_random_uuid();
+  v_project_owner uuid := gen_random_uuid();
+  v_manager uuid := gen_random_uuid();
+  v_cross_actor uuid := gen_random_uuid();
   v_client_id uuid;
   v_agency_client_id uuid;
   v_brand_id uuid;
@@ -292,21 +291,15 @@ begin
   order by department.created_at, department.id
   limit 1;
 
-  select array_agg(candidate.id order by candidate.created_at, candidate.id)
-    into v_users
-  from (
-    select users.id, users.created_at from auth.users users
-    order by users.created_at, users.id limit 4
-  ) candidate;
-
-  if v_org_id is null or coalesce(cardinality(v_users), 0) < 4 then
+  if v_org_id is null then
     return;
   end if;
 
-  v_service_owner := v_users[1];
-  v_project_owner := v_users[2];
-  v_manager := v_users[3];
-  v_cross_actor := v_users[4];
+  insert into auth.users (id) values
+    (v_service_owner),
+    (v_project_owner),
+    (v_manager),
+    (v_cross_actor);
 
   insert into public.organizations (id, name, slug)
   values (v_cross_org_id, 'RET1 rollback cross organization', 'ret1-cross-' || v_suffix);
@@ -317,12 +310,7 @@ begin
     (v_org_id, v_service_owner, 'team', 'contributor', v_department_id, 'active'),
     (v_org_id, v_project_owner, 'team', 'project_owner', v_department_id, 'active'),
     (v_org_id, v_manager, 'team', 'department_manager', v_department_id, 'active'),
-    (v_cross_org_id, v_cross_actor, 'team', 'project_owner', v_department_id, 'active')
-  on conflict (organization_id, user_id) do update set
-    member_kind = excluded.member_kind,
-    role = excluded.role,
-    department_id = excluded.department_id,
-    status = excluded.status;
+    (v_cross_org_id, v_cross_actor, 'team', 'project_owner', v_department_id, 'active');
 
   insert into public.clients (name, company, owner_id, organization_id)
   values ('RET1 client ' || v_suffix, 'RET1', v_project_owner, v_org_id)

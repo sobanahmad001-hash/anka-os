@@ -75,6 +75,9 @@ test('RET1 verifier exercises representative authority, immutability, and valida
   }
   assert.match(verifier, /public\.create_recurring_work_plan\(/)
   assert.match(verifier, /public\.reassign_recurring_plan_template_item\(/)
+  assert.match(verifier, /insert into auth\.users \(id\) values/)
+  assert.doesNotMatch(verifier, /from auth\.users/)
+  assert.doesNotMatch(verifier, /on conflict \(organization_id, user_id\) do update/)
   assert.match(verifier, /exception when sqlstate '42501'/)
   assert.match(verifier, /exception when sqlstate '55000'/)
 })
