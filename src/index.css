@@ -20,6 +20,7 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  color-scheme: dark;
 }
 
 * {
@@ -37,6 +38,18 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
+button,
+a,
+select,
+input,
+textarea {
+  outline-offset: 3px;
+}
+
+:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.9);
+}
+
 ::selection {
   background: rgba(139, 92, 246, 0.35);
   color: white;
@@ -48,6 +61,94 @@ button {
     radial-gradient(circle at 18% 92%, rgba(14, 165, 233, 0.05), transparent 24rem),
     #090b11;
 }
+
+.workspace-page {
+  min-height: 100%;
+  padding: 1rem;
+  color: #f1f5f9;
+}
+
+.workspace-container {
+  width: 100%;
+  max-width: 100rem;
+  margin-inline: auto;
+}
+
+.workspace-eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #a78bfa;
+}
+
+.workspace-title {
+  margin-top: 0.5rem;
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  line-height: 1.1;
+  font-weight: 650;
+  letter-spacing: -0.035em;
+  color: #fff;
+}
+
+.workspace-description {
+  max-width: 48rem;
+  margin-top: 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: #94a3b8;
+}
+
+.workspace-button {
+  display: inline-flex;
+  min-height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 0.75rem;
+  padding: 0.5rem 0.9rem;
+  background: rgba(255, 255, 255, 0.035);
+  color: #cbd5e1;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  transition: 160ms ease;
+}
+
+.workspace-button:hover { background: rgba(255, 255, 255, 0.07); color: #fff; }
+.workspace-button:disabled { cursor: wait; opacity: 0.55; }
+.workspace-button-primary { border-color: rgba(139, 92, 246, 0.28); background: rgba(124, 58, 237, 0.18); color: #ede9fe; }
+.workspace-button-primary:hover { background: rgba(124, 58, 237, 0.28); }
+
+.workspace-card,
+.workspace-metric {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 1rem;
+  background: rgba(15, 19, 29, 0.76);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.12);
+}
+
+.workspace-metric {
+  position: relative;
+  padding: 1rem;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.workspace-metric:hover { border-color: rgba(167, 139, 250, 0.22); background: rgba(20, 25, 38, 0.9); transform: translateY(-1px); }
+.workspace-metric-dot { position: absolute; top: 1rem; right: 1rem; width: 0.4rem; height: 0.4rem; border-radius: 999px; background: #64748b; box-shadow: 0 0 14px currentColor; }
+.workspace-metric-dot-violet { color: #8b5cf6; background: #8b5cf6; }
+.workspace-metric-dot-sky { color: #38bdf8; background: #38bdf8; }
+.workspace-metric-dot-indigo { color: #818cf8; background: #818cf8; }
+.workspace-metric-dot-rose { color: #fb7185; background: #fb7185; }
+.workspace-metric-dot-amber { color: #fbbf24; background: #fbbf24; }
+.workspace-metric-dot-emerald { color: #34d399; background: #34d399; }
+.workspace-metric-dot-fuchsia { color: #e879f9; background: #e879f9; }
+.workspace-skeleton { border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 1rem; background: linear-gradient(90deg, rgba(255,255,255,0.025), rgba(255,255,255,0.06), rgba(255,255,255,0.025)); background-size: 200% 100%; animation: workspace-shimmer 1.4s infinite linear; }
+
+@keyframes workspace-shimmer { to { background-position: -200% 0; } }
+
+@media (min-width: 640px) { .workspace-page { padding: 1.5rem; } }
+@media (min-width: 1024px) { .workspace-page { padding: 2rem; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; } }
 
 * {
   scrollbar-color: #334155 transparent;

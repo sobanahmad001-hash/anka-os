@@ -12,7 +12,7 @@ test('engagement compatibility uses Operating Spine while projects open Portfoli
   ])
 
   assert.match(appSource, /path="sphere\/engagements" element={<OperatingSpine initialView="engagements" \/>}/)
-  assert.match(appSource, /path="sphere\/projects" element={<Navigate to="\/sphere\/workspace" replace \/>}/)
+  assert.match(appSource, /path="sphere\/projects" element={<Navigate to="\/sphere\/portfolio" replace \/>}/)
   assert.doesNotMatch(projectSource, /\.from\s*\(/)
   assert.doesNotMatch(projectSource, /as_/)
   assert.match(projectSource, /operatingSpine\.composeEngagement/)

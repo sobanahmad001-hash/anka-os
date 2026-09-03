@@ -6,6 +6,7 @@ import { featureFlags } from './config/featureFlags'
 
 const Login = lazy(() => import('./pages/Login'))
 const Settings = lazy(() => import('./apps/Settings'))
+const WorkspaceHome = lazy(() => import('./apps/WorkspaceHome'))
 const AgencyCommandCenter = lazy(() => import('./apps/AgencyCommandCenter'))
 const UserManagement = lazy(() => import('./apps/UserManagement'))
 const OperatingSpine = lazy(() => import('./apps/OperatingSpine'))
@@ -70,11 +71,12 @@ export default function App() {
         <Route path="settings" element={<Settings />} />
 
         {/* ANKA SPHERE */}
-        <Route path="sphere/workspace" element={<PortfolioWorkspace />} />
+        <Route path="sphere/workspace" element={<WorkspaceHome />} />
+        <Route path="sphere/portfolio" element={<PortfolioWorkspace />} />
         <Route path="sphere/workspace/projects/:projectId" element={<ProjectEngagementWorkspace />} />
         <Route path="sphere/internal" element={<InternalWorkspace />} />
         <Route path="sphere/engagements" element={<OperatingSpine initialView="engagements" />} />
-        <Route path="sphere/projects" element={<Navigate to="/sphere/workspace" replace />} />
+        <Route path="sphere/projects" element={<Navigate to="/sphere/portfolio" replace />} />
         <Route path="sphere/my-work" element={<MyWork />} />
         <Route path="sphere/content" element={<DepartmentWorkshop departmentId="content" />} />
         <Route path="sphere/content/studio" element={<ContentStudio />} />

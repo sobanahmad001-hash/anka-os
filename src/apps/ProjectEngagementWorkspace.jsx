@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useOrganization } from '../context/OrganizationContext.jsx'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { projectEngagementWorkspace } from '../data/projectEngagementWorkspace'
 import RetainerPlanningPanel from '../components/RetainerPlanningPanel'
 
@@ -19,12 +19,19 @@ const date = (value) => value ? new Date(`${value.slice(0, 10)}T00:00:00Z`).toLo
 export default function ProjectEngagementWorkspace() {
   const { projectId } = useParams()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedTab = searchParams.get('tab')
+  const tab = TABS.some(([id]) => id === requestedTab) ? requestedTab : 'overview'
+  const selectTab = (id) => {
+    const next = new URLSearchParams(searchParams)
+    next.set('tab', id)
+    setSearchParams(next, { replace: true })
+  }
   const { activeOrganizationId, selectionRequired, loading: organizationLoading, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
   const currentRequest = useRef(null)
   currentRequest.current = { organizationId: activeOrganizationId, revision: scopeRevision, recordId: projectId }
   const requestGeneration = useRef(0)
   const [workspace, setWorkspace] = useState(null)
-  const [tab, setTab] = useState('overview')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -53,7 +60,6 @@ export default function ProjectEngagementWorkspace() {
 
   useEffect(() => {
     setWorkspace(null)
-    setTab('overview')
     setError('')
     setLoading(true)
     load()
@@ -61,7 +67,7 @@ export default function ProjectEngagementWorkspace() {
   }, [load])
 
   if (loading && !workspace) return <StateMessage>Loading project workspace…</StateMessage>
-  if (!workspace) return <StateMessage error={error} action={() => navigate('/sphere/workspace')}>Return to Portfolio</StateMessage>
+  if (!workspace) return <StateMessage error={error} action={() => navigate('/sphere/portfolio')}>Return to Portfolio</StateMessage>
 
   const { project, identity, summary } = workspace
   const showRetainerPlanning = identity.hasEngagement
@@ -72,7 +78,7 @@ export default function ProjectEngagementWorkspace() {
   return (
     <main className="min-h-full bg-[#090c13] p-4 text-slate-100 sm:p-6 lg:p-8">
       <div className="mx-auto max-w-[1500px]">
-        <button type="button" onClick={() => navigate('/sphere/workspace')} className="text-sm font-medium text-slate-500 hover:text-white">← Portfolio Workspace</button>
+        <button type="button" onClick={() => navigate('/sphere/portfolio')} className="text-sm font-medium text-slate-500 hover:text-white">← Portfolio Workspace</button>
         <header className="mt-5 flex flex-wrap items-start justify-between gap-5">
           <div className="max-w-4xl">
             <div className="flex flex-wrap items-center gap-2 text-xs"><Pill>{identity.workType}</Pill><Pill>{label(project.engagement_type)}</Pill>{identity.hasEngagement && <Pill>Engagement connected</Pill>}</div>
@@ -94,7 +100,7 @@ export default function ProjectEngagementWorkspace() {
         </section>
 
         <nav aria-label="Project workspace sections" className="mt-7 flex gap-1 overflow-x-auto border-b border-white/[0.08]">
-          {tabs.map(([id, title]) => <button type="button" key={id} onClick={() => setTab(id)} className={`whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium ${tab === id ? 'border-violet-400 text-white' : 'border-transparent text-slate-500 hover:text-slate-200'}`}>{title}</button>)}
+          {tabs.map(([id, title]) => <button type="button" key={id} onClick={() => selectTab(id)} className={`whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium ${tab === id ? 'border-violet-400 text-white' : 'border-transparent text-slate-500 hover:text-slate-200'}`}>{title}</button>)}
         </nav>
 
         <div className="mt-6">

@@ -62,17 +62,17 @@ export default function Login() {
         }} />
       </div>
 
-      <div className="anka-fade-in" style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 420, margin: '0 24px' }}>
+      <div className="anka-fade-in" style={{ position: 'relative', zIndex: 1, width: 'calc(100% - 32px)', maxWidth: 420, margin: '0 auto' }}>
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
           <h1 style={{
-            fontSize: 42, fontWeight: 700, letterSpacing: '-0.03em', lineHeight: 1,
+            fontSize: 'clamp(2.25rem, 10vw, 2.625rem)', fontWeight: 700, letterSpacing: '-0.03em', lineHeight: 1,
             background: 'linear-gradient(135deg, #818cf8, #a78bfa, #60a5fa)',
             backgroundSize: '200% 200%', animation: 'anka-gradient-flow 6s ease infinite',
             WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
             backgroundClip: 'text',
           }}>
-            Anka OS
+            Anka Sphere
           </h1>
           <p style={{ color: '#94a3b8', marginTop: 8, fontSize: 14, fontWeight: 400 }}>
             Your creative workspace, reimagined
@@ -81,7 +81,7 @@ export default function Login() {
 
         {/* Card */}
         <div className="anka-glass-heavy" style={{
-          borderRadius: 20, padding: 36, border: '1px solid rgba(71, 85, 105, 0.72)',
+          borderRadius: 20, padding: 'clamp(24px, 7vw, 36px)', border: '1px solid rgba(71, 85, 105, 0.72)',
           background: 'rgba(15, 23, 42, 0.88)', backdropFilter: 'blur(24px)',
           boxShadow: '0 24px 70px rgba(0, 0, 0, 0.45), 0 0 40px rgba(99, 102, 241, 0.12)',
         }}>

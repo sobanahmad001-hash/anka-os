@@ -9,7 +9,7 @@ export const CONTENT_REQUEST_FORMATS = Object.freeze([
 ])
 
 export const CONTENT_REQUEST_OUTPUT_PATHS = Object.freeze([
-  ['internal_engine', 'Generate with Anka OS'],
+  ['internal_engine', 'Generate with Anka Sphere'],
   ['figma_handoff', 'Prepare for Figma handoff'],
 ])
 

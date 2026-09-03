@@ -64,7 +64,7 @@ export default function Header() {
           </svg>
         </div>
         <div className="min-w-0">
-          <span className="block truncate text-sm font-semibold tracking-tight text-white">Anka OS</span>
+          <span className="block truncate text-sm font-semibold tracking-tight text-white">Anka Sphere</span>
           <span className="hidden text-[10px] font-medium uppercase tracking-[0.15em] text-slate-600 lg:block">Creative delivery system</span>
         </div>
       </div>
@@ -74,13 +74,13 @@ export default function Header() {
         aria-label="Open workspace navigation"
         aria-expanded={showMobileNav}
         onClick={() => setShowMobileNav((current) => !current)}
-        className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.06] text-slate-400 sm:hidden"
+        className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.06] text-slate-400 md:hidden"
       >
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
       </button>
 
       {showMobileNav && (
-        <nav className="absolute left-3 right-3 top-[3.75rem] rounded-2xl border border-white/10 bg-[#141824] p-2 shadow-2xl sm:hidden">
+        <nav className="absolute left-3 right-3 top-[3.75rem] max-h-[calc(100vh-5rem)] overflow-y-auto rounded-2xl border border-white/10 bg-[#141824] p-2 shadow-2xl md:hidden">
           <p className="px-3 pb-2 pt-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">{activeEnv?.label}</p>
           {mobileItems.map((item) => item.isHeader ? (
             <p key={`header-${item.label}`} className="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">{item.label}</p>
@@ -93,7 +93,7 @@ export default function Header() {
       )}
 
       {/* Environment tabs */}
-      <nav className="hidden flex-1 items-center gap-1 sm:flex">
+      <nav className="hidden flex-1 items-center gap-1 md:flex">
         {environmentNav.map(env => {
           if (env.key === 'admin' && profile?.role !== 'admin') return null
           const isActive = activeEnv?.key === env.key

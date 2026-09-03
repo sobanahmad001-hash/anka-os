@@ -19,7 +19,7 @@ test('stale deployment chunks trigger a guarded one-time reload', () => {
 
 test('unexpected render failures show a visible recovery action', () => {
   assert.match(main, /AppErrorBoundary/)
-  assert.match(boundary, /Reload Anka OS/)
+  assert.match(boundary, /Reload Anka Sphere/)
   assert.match(boundary, /window\.location\.reload/)
 })
 
