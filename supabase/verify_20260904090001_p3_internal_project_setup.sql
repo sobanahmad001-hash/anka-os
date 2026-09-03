@@ -1,4 +1,5 @@
 -- P3 rollback-only verifier. Run only against a disposable/local database after the migration.
+-- Verifies deterministic successor migration 20260904090001.
 begin;
 set local lock_timeout = '5s';
 set local statement_timeout = '60s';

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import test from 'node:test'
 
 let moduleSequence = 0
@@ -118,8 +118,9 @@ test('P3 setup preserves denied, stale, and malformed-result states', async () =
 })
 
 test('P3 SQL contract is invoker-only, exact-replay atomic, tenant-scoped, and creates no external delivery graph', () => {
-  const migration = readFileSync(new URL('../../supabase/migrations/20260904003651_p3_internal_project_setup.sql', import.meta.url), 'utf8')
-  const verifier = readFileSync(new URL('../../supabase/verify_20260904003651_p3_internal_project_setup.sql', import.meta.url), 'utf8')
+  const migration = readFileSync(new URL('../../supabase/migrations/20260904090001_p3_internal_project_setup.sql', import.meta.url), 'utf8')
+  const verifier = readFileSync(new URL('../../supabase/verify_20260904090001_p3_internal_project_setup.sql', import.meta.url), 'utf8')
+  const migrationNames = readdirSync(new URL('../../supabase/migrations/', import.meta.url)).sort()
   const concurrency = readFileSync(new URL('../../scripts/p3-internal-project-setup-concurrency.ts', import.meta.url), 'utf8')
   const organizationFoundation = readFileSync(new URL('../../supabase/migrations/20260825010000_organization_access_foundation.sql', import.meta.url), 'utf8')
   const canonicalDelivery = readFileSync(new URL('../../supabase/migrations/20260825040000_canonical_delivery_core.sql', import.meta.url), 'utf8')
@@ -130,6 +131,7 @@ test('P3 SQL contract is invoker-only, exact-replay atomic, tenant-scoped, and c
     migration.indexOf('create function public.create_internal_project_setup'),
     migration.indexOf('revoke all on function public.create_internal_project_setup'),
   )
+  assert.equal(migrationNames.at(-1), '20260904090001_p3_internal_project_setup.sql')
   assert.match(migration, /language plpgsql[\s\S]*security invoker[\s\S]*set search_path = ''/)
   assert.match(migration, /pg_advisory_xact_lock[\s\S]*normalized_payload_sha256[\s\S]*idempotent_replay/)
   assert.match(migration, /member_kind = 'team'[\s\S]*membership\.status = 'active'/)

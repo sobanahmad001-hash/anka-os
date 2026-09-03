@@ -3,6 +3,7 @@
 ## Review basis
 
 - Canonical rebase target: `origin/main` at `453c10658f7d4d9472969997868fde3de610703c`.
+- Migration identity: the installed Supabase CLI v2.115.0 created the required `20260903202936_p3_internal_project_setup.sql` seed, but its UTC timestamp sorted before MB02B's future-stamped `20260904090000` migration and the CLI exposes no version override. The empty seed and superseded, unapplied P3 identity were removed without database action; P3 therefore uses the minimal deterministic successor `20260904090001_p3_internal_project_setup.sql`.
 - Existing authorities are preserved: Projects owns canonical project creation; Operating Spine and PLN own engagement composition and pipeline preview/instantiation.
 - Content B02, Design B02, and Marketing MB02B are contained by the canonical base. MB02B changes Marketing/Quick Tasks/shared proposal surfaces, Marketing and shared Edge Functions, and its own migration/verifier/concurrency proof. Its 19-file delta has zero path overlap with P3.
 - The approved operating architecture keeps Client Work and Internal Work on one canonical spine, preserves optional one-to-one engagement extensions, and requires official isolated service work to retain real client, brand, and engagement identity.
@@ -47,7 +48,8 @@ P4 and later packages, Management, Meetings, Sales, Finance, People, Workshop pr
 8. Confirm generation, approval, release, and completion remain separate.
 9. Confirm Workshop navigation retains its original record and workspace context.
 10. Confirm atomic rollback, exact replay, conflicting reuse, authenticated-only execution, organization/team/owner/department isolation, empty-workstream rejection, and external-composer non-regression.
-11. Run focused tests during iteration, then one consolidated final Node, frozen Deno, lint, build, type-check, static rollback-safe SQL verification, diff, and clean-state gate.
+11. Confirm the lexically latest migration is exactly `20260904090001_p3_internal_project_setup.sql`.
+12. Run focused tests during iteration, then one consolidated final Node, frozen Deno, lint, build, type-check, static rollback-safe SQL verification, diff, and clean-state gate.
 
 The rollback verifier is executable only against a disposable/local database and rolls back its entire transaction. The two-session proof is also local-only: set `P3_LOCAL_TEMPLATE_URL` to a loopback PostgreSQL URL whose database name begins with `p3_template_`, then run:
 

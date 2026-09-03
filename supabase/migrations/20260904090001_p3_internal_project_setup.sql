@@ -1,4 +1,5 @@
 -- P3: one authenticated, atomic setup path for canonical Internal Work.
+-- Deterministic successor to MB02B migration 20260904090000; runtime SQL is unchanged.
 begin;
 set local lock_timeout = '5s';
 set local statement_timeout = '60s';
