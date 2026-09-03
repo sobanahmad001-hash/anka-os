@@ -36,6 +36,11 @@ try {
   const sourceBefore = await setup.query('select to_jsonb(r) as row from public.content_requests r where id=$1',[source])
   const call = 'select public.copy_general_request_to_quick_task($1,$2,$3,$4) as result'
   const args = [org, source, key, actor]
+  // Exercise the real Edge Function database role in both competing sessions.
+  await first.query('set role service_role')
+  await second.query('set role service_role')
+  assert.equal((await first.query('select current_user')).rows[0].current_user, 'service_role')
+  assert.equal((await second.query('select current_user')).rows[0].current_user, 'service_role')
   await first.query('begin')
   const a = await first.query(call, args)
   let secondFinished = false
@@ -60,7 +65,7 @@ try {
   assert.notEqual(fresh.rows[0].result.quick_task_id,a.rows[0].result.quick_task_id)
   const sourceAfter = await setup.query('select to_jsonb(r) as row from public.content_requests r where id=$1',[source])
   assert.deepEqual(sourceAfter.rows,sourceBefore.rows)
-  console.log('concurrent_retry_one_result=true; fresh_key_distinct=true; source_unchanged=true')
+  console.log('service_role_sessions=true; observed_lock_contention=true; concurrent_retry_one_result=true; fresh_key_distinct=true; source_unchanged=true')
 } finally {
   // Release the first transaction even when an assertion fails during contention.
   if (clients[1]) await clients[1].query('rollback').catch(() => {})

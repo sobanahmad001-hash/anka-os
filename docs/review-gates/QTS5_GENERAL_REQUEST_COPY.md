@@ -1,5 +1,9 @@
 # QTS5 General Request copying — local review gate
 
+## Admin native PostgreSQL concurrency addendum
+
+Admin installed portable PostgreSQL 17.11 locally, restored a schema-only template with original owners/grants and synthetic reference rows, and applied the exact QTS5 migration only locally. Full 44-check verifier passed. The concurrency harness now explicitly verifies service_role in both competing sessions. Three independent runs observed actual advisory-lock contention, then one shared retry result, a distinct fresh-key copy and unchanged complete source row. All five named results returned true in each run. Cleanup confirmed zero fixture rows and zero qts5_verify_* databases; server stopped afterward. Full evidence: C:/Users/Soban/Documents/ChatGPT/Anka Sphere/.qa/QTS5_NATIVE_CONCURRENCY.md. This supersedes earlier native-runtime unavailable and concurrency NOT executed statements. Browser smoke, published-head CI, permanent apply/persisted schema, merge and deployment remain pending.
+
 ## Admin rollback preflight addendum
 
 Under explicit user approval, Admin executed migration DDL and verifier together in a transaction ending ROLLBACK against fhoxaogfjszftoqtnbav. Corrected the verifier-only dummy connector name to ANKA_OPENAI_QTS5_TEST_ONLY to satisfy the existing constraint, and added a real service_role copy call. Final 44 named checks all true; eight separate cleanup checks confirmed no QTS5 table/RPC/ledger entry, fixture organizations/clients/brands/connector or failure triggers remained. Node460 and SQL/PLpgSQL parsing passed again. Migration implementation unchanged. Full results: C:/Users/Soban/Documents/ChatGPT/Anka Sphere/.qa/QTS5_ROLLBACK_PREFLIGHT.md. This supersedes historical NOT executed statements below only for rollback runtime verification. Two-session concurrency, authenticated browser smoke, published-head CI, permanent apply/persisted checks, merge and deployment remain pending.
