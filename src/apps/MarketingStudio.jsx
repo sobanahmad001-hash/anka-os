@@ -27,7 +27,9 @@ import { shouldApplyDashboardResponse } from '../data/performanceDashboard.js'
 import { loadPerformanceDashboard } from '../data/performanceDashboardRepository.js'
 import { shouldApplyKeywordResearchResponse } from '../data/marketingKeywordResearch.js'
 import { loadMarketingKeywordResearch } from '../data/marketingKeywordResearchRepository.js'
+import { canManageMarketingConnections } from '../data/marketingConnectionReadiness.js'
 import DepartmentChat from '../components/DepartmentChat.jsx' // eslint-disable-line no-unused-vars
+import MarketingConnectionReadinessPanel from '../components/MarketingConnectionReadinessPanel.jsx'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'
@@ -64,7 +66,7 @@ export default function MarketingStudio() {
   const [searchParams] = useSearchParams()
   const {
     activeOrganizationId, selectionRequired, loading: organizationLoading,
-    handleOrganizationAccessError, scopeRevision, requestSignal,
+    handleOrganizationAccessError, scopeRevision, requestSignal, activeMembership,
   } = useOrganization()
   const requestedEngagementId = searchParams.get('engagement') || ''
   const [engagements, setEngagements] = useState([])
@@ -218,7 +220,7 @@ export default function MarketingStudio() {
         </section>
 
         <nav className="flex gap-2 overflow-x-auto border-b border-slate-800">
-          {[['campaigns', 'Campaigns'], ['ad-tracking', 'Ad campaign tracking'], ['seo-keywords', 'SEO keyword history'], ['backlinks', 'Backlink outreach'], ['artifacts', 'Artifacts'], ['chat', 'Shared Department Chat'], ['analytics', 'Performance dashboard']].map(([id, label]) => (
+          {[['campaigns', 'Campaigns'], ['ad-tracking', 'Ad campaign tracking'], ['seo-keywords', 'SEO keyword history'], ['backlinks', 'Backlink outreach'], ['artifacts', 'Artifacts'], ['chat', 'Shared Department Chat'], ['analytics', 'Performance dashboard'], ['connections', 'Connections']].map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-emerald-400 text-emerald-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>
           ))}
         </nav>
@@ -244,6 +246,16 @@ export default function MarketingStudio() {
           <Artifacts studio={studio} workspace={workspace} campaign={selectedCampaign} saving={saving} act={act} setTab={setTab} onRefresh={() => loadWorkspace(engagementId, campaignId)} />
         ) : tab === 'chat' ? (
           <DepartmentChat departmentId="marketing" engagement={workspace.engagement} artifactTypes={['channel_strategy', 'campaign_brief', 'measurement_plan']} artifactDefinitions={MARKETING_ARTIFACT_FORMS} artifactForType={artifactType => workspace.artifacts.find(item => item.artifact_type === artifactType)} stageForType={() => null} onPropose={input => reportMarketingAccess(() => studio.proposeArtifact(input))} onProposeWorkItem={input => reportMarketingAccess(() => studio.proposeWorkItem(input))} onCreated={() => loadWorkspace(engagementId, campaignId)} />
+        ) : tab === 'connections' ? (
+          <MarketingConnectionReadinessPanel
+            key={activeOrganizationId + ':' + scopeRevision + ':' + workspace.engagement.brand_id}
+            organizationId={activeOrganizationId}
+            scopeRevision={scopeRevision}
+            signal={requestSignal}
+            onAccessError={handleOrganizationAccessError}
+            canManage={canManageMarketingConnections(activeMembership)}
+            brand={{ id: workspace.engagement.brand_id, name: workspace.engagement.brands?.name || 'Brand', organization_id: workspace.engagement.organization_id }}
+          />
         ) : (
           <Analytics key={`${activeOrganizationId}:${scopeRevision}:${engagementId}:${workspace.engagement.brand_id}`} organizationId={activeOrganizationId} scopeRevision={scopeRevision} signal={requestSignal} onAccessError={handleOrganizationAccessError} engagementId={engagementId} brand={{ id: workspace.engagement.brand_id, name: workspace.engagement.brands?.name || 'Brand', organization_id: workspace.engagement.organization_id }} />
         )}
