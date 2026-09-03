@@ -19,10 +19,35 @@ insert into qts4_checks values
 ('promotion_policy_is_metadata_only',(select count(*)=1 and bool_and(polcmd='r') from pg_policy where polrelid='public.quick_task_promotions'::regclass)),
 ('table_acl_is_exact',not has_table_privilege('anon','public.quick_task_promotions','SELECT') and has_table_privilege('authenticated','public.quick_task_promotions','SELECT') and not has_table_privilege('authenticated','public.quick_task_promotions','INSERT,UPDATE,DELETE') and has_table_privilege('service_role','public.quick_task_promotions','SELECT,INSERT,UPDATE,DELETE,MAINTAIN')),
 ('promotion_rpc_acl_is_exact',not has_function_privilege('anon','public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)','EXECUTE') and not has_function_privilege('authenticated','public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)','EXECUTE') and has_function_privilege('service_role','public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)','EXECUTE')),
-('typed_foreign_keys_are_exact',(select count(*)=6 from pg_constraint where conrelid='public.quick_task_promotions'::regclass and contype='f')),
+('typed_foreign_keys_are_exact',(
+  with expected(constraint_name,parent_table,child_columns,parent_columns) as (
+    values
+      ('quick_task_promotions_owner_id_fkey','auth.users'::regclass,array['owner_id'],array['id']),
+      ('quick_task_promotions_source_task_fkey','public.quick_tasks'::regclass,array['quick_task_id','organization_id','owner_id'],array['id','organization_id','owner_id']),
+      ('quick_task_promotions_source_revision_fkey','public.quick_task_revisions'::regclass,array['source_revision_id','quick_task_id','organization_id','owner_id'],array['id','quick_task_id','organization_id','owner_id']),
+      ('quick_task_promotions_project_fkey','public.projects'::regclass,array['destination_project_id','organization_id'],array['id','organization_id']),
+      ('quick_task_promotions_work_item_fkey','public.work_items'::regclass,array['destination_work_item_id','organization_id'],array['id','organization_id']),
+      ('quick_task_promotions_artifact_fkey','public.artifacts'::regclass,array['destination_artifact_id','organization_id'],array['id','organization_id']),
+      ('quick_task_promotions_artifact_version_fkey','public.artifact_versions'::regclass,array['destination_artifact_version_id','organization_id'],array['id','organization_id']),
+      ('quick_task_promotions_promoted_by_fkey','auth.users'::regclass,array['promoted_by'],array['id'])
+  ), actual as (
+    select relationship.conname,relationship.confrelid,relationship.confdeltype,relationship.confupdtype,
+      relationship.confmatchtype,relationship.condeferrable,
+      array(select attribute.attname::text from unnest(relationship.conkey) with ordinality key(attnum,position)
+        join pg_attribute attribute on attribute.attrelid=relationship.conrelid and attribute.attnum=key.attnum order by key.position) child_columns,
+      array(select attribute.attname::text from unnest(relationship.confkey) with ordinality key(attnum,position)
+        join pg_attribute attribute on attribute.attrelid=relationship.confrelid and attribute.attnum=key.attnum order by key.position) parent_columns
+    from pg_constraint relationship where relationship.conrelid='public.quick_task_promotions'::regclass and relationship.contype='f'
+  )
+  select (select count(*) from actual)=8 and count(actual.conname)=8 and bool_and(
+    actual.confrelid=expected.parent_table and actual.child_columns=expected.child_columns
+    and actual.parent_columns=expected.parent_columns and actual.confdeltype='r'
+    and actual.confupdtype='a' and actual.confmatchtype='s' and not actual.condeferrable
+  ) from expected left join actual using(constraint_name)
+)),
 ('supporting_indexes_exist',(select count(*)=6 from pg_indexes where schemaname='public' and indexname like 'idx_quick_task_promotions_%')),
 ('exact_target_constraint_exists',exists(select 1 from pg_constraint where conrelid='public.quick_task_promotions'::regclass and conname='quick_task_promotions_exact_target_check')),
-('created_via_constraint_is_exact',coalesce((select pg_get_expr(rule.conbin,rule.conrelid,true) = '(created_via = ANY (ARRAY[''manual''::text, ''ai_chat_proposal''::text, ''automation_rule''::text, ''recurring_plan''::text, ''quick_task_promotion''::text]))' from pg_constraint rule where rule.conrelid='public.work_items'::regclass and rule.conname='work_items_created_via_check' and rule.contype='c'),false)),
+('created_via_constraint_is_exact',coalesce((select regexp_replace(btrim(pg_get_expr(rule.conbin,rule.conrelid,true)), '[[:space:]]+', ' ', 'g') = 'created_via = ANY (ARRAY[''manual''::text, ''ai_chat_proposal''::text, ''automation_rule''::text, ''recurring_plan''::text, ''quick_task_promotion''::text])' from pg_constraint rule where rule.conrelid='public.work_items'::regclass and rule.conname='work_items_created_via_check' and rule.contype='c'),false)),
 ('no_bypass_side_effects',position('security definer' in lower(pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure)))=0);
 
 select jsonb_object_agg(check_name,passed order by check_name) as qts4_verification from qts4_checks;

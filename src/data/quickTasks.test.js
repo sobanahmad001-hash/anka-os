@@ -298,3 +298,25 @@ test('QTS4 preserves every prior work-item created_via value and adds only promo
   assert.deepEqual(qts4, [...prior, 'quick_task_promotion'])
   assert.match(qts4Verifier, /pg_get_expr[\s\S]*manual[\s\S]*ai_chat_proposal[\s\S]*automation_rule[\s\S]*recurring_plan[\s\S]*quick_task_promotion/)
 })
+test('QTS4 verifier matches PostgreSQL 17 catalog shapes exactly', () => {
+  assert.ok(qts4Verifier.includes('regexp_replace(btrim(pg_get_expr'))
+  assert.ok(qts4Verifier.includes("= 'created_via = ANY (ARRAY["))
+  assert.ok(!qts4Verifier.includes("= '(created_via = ANY"))
+  assert.ok(qts4Verifier.includes('(select count(*) from actual)=8'))
+  assert.ok(qts4Verifier.includes('count(actual.conname)=8'))
+  for (const name of [
+    'quick_task_promotions_owner_id_fkey',
+    'quick_task_promotions_source_task_fkey',
+    'quick_task_promotions_source_revision_fkey',
+    'quick_task_promotions_project_fkey',
+    'quick_task_promotions_work_item_fkey',
+    'quick_task_promotions_artifact_fkey',
+    'quick_task_promotions_artifact_version_fkey',
+    'quick_task_promotions_promoted_by_fkey',
+  ]) assert.match(qts4Verifier, new RegExp(name))
+  assert.ok(qts4Verifier.includes("confdeltype='r'"))
+  assert.ok(qts4Verifier.includes("confupdtype='a'"))
+  assert.ok(qts4Verifier.includes("confmatchtype='s'"))
+  assert.ok(qts4Verifier.includes('not actual.condeferrable'))
+  assert.ok(!qts4Verifier.includes('count(*)=6 from pg_constraint'))
+})
