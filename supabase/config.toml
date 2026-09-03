@@ -122,3 +122,8 @@ enabled = true
 # Meta's callback has no Supabase JWT; it validates an expiring, one-time state.
 verify_jwt = false
 entrypoint = "./functions/meta-oauth/index.ts"
+
+[functions.quick-tasks]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/quick-tasks/index.ts"
