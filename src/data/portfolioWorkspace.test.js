@@ -56,12 +56,12 @@ test('portfolio repository is read-only and queries project-owned records', () =
   assert.doesNotMatch(repository, /\.(insert|update|upsert|delete|rpc|functions)\s*\(/)
 })
 
-test('workspace routes and terminology expose portfolio without replacing engagement compatibility', () => {
+test('workspace routes and terminology expose portfolio alongside dedicated WKS4 internal work', () => {
   const app = readFileSync(new URL('../App.jsx', import.meta.url), 'utf8')
   const nav = readFileSync(new URL('../config/environmentNav.js', import.meta.url), 'utf8')
   const view = readFileSync(new URL('../apps/PortfolioWorkspace.jsx', import.meta.url), 'utf8')
   assert.match(app, /path="sphere\/workspace" element={<PortfolioWorkspace \/>}/)
-  assert.match(app, /path="sphere\/internal" element={<PortfolioWorkspace initialOwnerKind="internal" \/>}/)
+  assert.match(app, /path="sphere\/internal" element={<InternalWorkspace \/>}/)
   assert.match(app, /path="sphere\/engagements" element={<OperatingSpine initialView="engagements" \/>}/)
   for (const term of ['Coordination', 'Portfolio', 'Client Work', 'Internal Work']) assert.match(nav, new RegExp(term))
   assert.match(view, /Project Tasks/)
