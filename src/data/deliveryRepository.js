@@ -1,3 +1,23 @@
+const requireOrganizationId = (organizationId) => {
+  if (typeof organizationId !== 'string' || !organizationId.trim()) throw new TypeError('organizationId is required')
+  return organizationId
+}
+
+const withRequestSignal = (query, signal) => signal && typeof query?.abortSignal === 'function' ? query.abortSignal(signal) : query
+
+const assertOrganizationRecords = (organizationId, ...collections) => {
+  requireOrganizationId(organizationId)
+  for (const collection of collections) {
+    const records = Array.isArray(collection) ? collection : collection ? [collection] : []
+    if (records.some(record => record?.organization_id && record.organization_id !== organizationId)) {
+      throw Object.assign(new Error('The requested record is unavailable in the active organization.'), {
+        status: 403,
+        membershipMismatch: true,
+      })
+    }
+  }
+}
+
 export const TASK_STATUSES = Object.freeze([
   'backlog',
   'ready',
@@ -63,6 +83,7 @@ async function dataOrThrow(query) {
   if (error) {
     const failure = new Error(error.message || 'Supabase delivery query failed')
     failure.cause = error
+    failure.status = error.status || error.statusCode
     throw failure
   }
 
@@ -254,13 +275,16 @@ export function createDeliveryRepository(client) {
       )
     },
 
-    async getDepartmentWorkspace(departmentId) {
+    async getDepartmentWorkspace(departmentId, activeOrganizationId, { signal } = {}) {
       assertDepartment(departmentId)
+      const organizationId = requireOrganizationId(activeOrganizationId)
+      const load = (query) => dataOrThrow(withRequestSignal(query, signal))
 
-      const workstreams = await dataOrThrow(
+      const workstreams = await load(
         client
           .from('workstreams')
-          .select('*, projects(id, name, status, priority, health, due_date, engagement_type)')
+          .select('*, projects(id, organization_id, name, status, priority, health, due_date, engagement_type)')
+          .eq('organization_id', organizationId)
           .eq('department_id', departmentId)
           .in('status', ['planned', 'active', 'on_hold'])
           .order('updated_at', { ascending: false })
@@ -274,7 +298,11 @@ export function createDeliveryRepository(client) {
           departmentId,
           workstreams: [],
           relatedWorkstreams: [],
+          engagements: [],
           tasks: [],
+          workItems: [],
+          services: [],
+          stages: [],
           research: [],
           milestones: [],
           deliverables: [],
@@ -282,51 +310,95 @@ export function createDeliveryRepository(client) {
         }
       }
 
-      const [relatedWorkstreams, tasks, research, milestones, deliverables, projectRequests] = await Promise.all([
-        dataOrThrow(
+      const engagements = await load(
+        client
+          .from('engagements')
+          .select('id, organization_id, project_id, name, status')
+          .eq('organization_id', organizationId)
+          .in('project_id', projectIds)
+      ) || []
+      const engagementIds = engagements.map((engagement) => engagement.id)
+
+      const [relatedWorkstreams, tasks, workItems, services, stages, research, milestones, deliverables, projectRequests] = await Promise.all([
+        load(
           client
             .from('workstreams')
-            .select('id, project_id, department_id, name, status')
+            .select('id, organization_id, project_id, department_id, name, status')
+            .eq('organization_id', organizationId)
             .in('project_id', projectIds)
             .in('status', ['planned', 'active', 'on_hold'])
             .order('created_at')
         ),
-        dataOrThrow(
+        load(
           client
             .from('tasks')
             .select('*')
+            .eq('organization_id', organizationId)
             .eq('department_id', departmentId)
             .is('archived_at', null)
             .order('due_date')
         ),
-        dataOrThrow(
+        engagementIds.length ? load(
+          client
+            .from('work_items')
+            .select('*, projects(id, name), engagements(id, name)')
+            .eq('organization_id', organizationId)
+            .eq('department_id', departmentId)
+            .in('engagement_id', engagementIds)
+            .is('deleted_at', null)
+            .order('due_date')
+        ) : Promise.resolve([]),
+        engagementIds.length ? load(
+          client
+            .from('engagement_services')
+            .select('id, organization_id, engagement_id, owner_id, target_date, status, service_catalog!inner(id, department_id, name, slug)')
+            .eq('organization_id', organizationId)
+            .in('engagement_id', engagementIds)
+            .eq('service_catalog.department_id', departmentId)
+            .in('status', ['planned', 'active', 'on_hold'])
+            .order('target_date')
+        ) : Promise.resolve([]),
+        engagementIds.length ? load(
+          client
+            .from('engagement_stage_instances')
+            .select('id, organization_id, engagement_id, name, accountable_department_id, stage_kind, position, status')
+            .eq('organization_id', organizationId)
+            .eq('accountable_department_id', departmentId)
+            .in('engagement_id', engagementIds)
+            .order('position')
+        ) : Promise.resolve([]),
+        load(
           client
             .from('research_records')
             .select('*')
+            .eq('organization_id', organizationId)
             .in('project_id', projectIds)
             .is('archived_at', null)
             .order('updated_at', { ascending: false })
         ),
-        dataOrThrow(
+        load(
           client
             .from('milestones')
             .select('*')
+            .eq('organization_id', organizationId)
             .in('project_id', projectIds)
             .is('archived_at', null)
             .order('target_date')
         ),
-        dataOrThrow(
+        load(
           client
             .from('deliverables')
             .select('*, deliverable_versions(id, version_number, review_status, created_at)')
+            .eq('organization_id', organizationId)
             .in('workstream_id', workstreamIds)
             .is('archived_at', null)
             .order('due_date')
         ),
-        dataOrThrow(
+        load(
           client
             .from('requests')
             .select('*')
+            .eq('organization_id', organizationId)
             .in('project_id', projectIds)
             .is('archived_at', null)
             .order('required_by')
@@ -340,12 +412,17 @@ export function createDeliveryRepository(client) {
         workstreamIds.includes(request.requesting_workstream_id)
         || workstreamIds.includes(request.receiving_workstream_id)
       ))
+      assertOrganizationRecords(organizationId, workstreams, engagements, relatedWorkstreams, tasks, workItems, services, stages, research, milestones, deliverables, projectRequests)
 
       return {
         departmentId,
         workstreams,
         relatedWorkstreams: relatedWorkstreams || [],
+        engagements,
         tasks: tasks || [],
+        workItems: workItems || [],
+        services: services || [],
+        stages: stages || [],
         research: relevantResearch,
         milestones: milestones || [],
         deliverables: deliverables || [],
@@ -353,47 +430,64 @@ export function createDeliveryRepository(client) {
       }
     },
 
-    async getMyWork(userId) {
+    async getMyWork(userId, activeOrganizationId, { signal } = {}) {
       assertIdentifier(userId, 'userId')
+      const organizationId = requireOrganizationId(activeOrganizationId)
+      const load = (query) => dataOrThrow(withRequestSignal(query, signal))
 
-      const [tasks, requests, deliverables, reviewVersions, releaseVersions] = await Promise.all([
-        dataOrThrow(
+      const [tasks, workItems, requests, deliverables, reviewVersions, releaseVersions] = await Promise.all([
+        load(
           client.from('tasks')
             .select('*, projects(id, name), workstreams(id, name, department_id)')
+            .eq('organization_id', organizationId)
             .eq('assigned_to', userId)
             .is('archived_at', null)
             .order('due_date')
         ),
-        dataOrThrow(
+        load(
+          client.from('work_items')
+            .select('*, projects(id, name), engagements(id, name)')
+            .eq('organization_id', organizationId)
+            .eq('assignee_id', userId)
+            .is('deleted_at', null)
+            .order('due_date')
+        ),
+        load(
           client.from('requests')
             .select('*, projects(id, name)')
+            .eq('organization_id', organizationId)
             .or(`owner_id.eq.${userId},requested_by.eq.${userId}`)
             .is('archived_at', null)
             .order('required_by')
         ),
-        dataOrThrow(
+        load(
           client.from('deliverables')
             .select('*, projects(id, name), workstreams(id, name, department_id), deliverable_versions(id, version_number, review_status, created_at)')
+            .eq('organization_id', organizationId)
             .eq('owner_id', userId)
             .is('archived_at', null)
             .order('due_date')
         ),
-        dataOrThrow(
+        load(
           client.from('deliverable_versions')
             .select('*, deliverables(id, title, deliverable_type, owner_id), projects(id, name)')
+            .eq('organization_id', organizationId)
             .eq('review_status', 'ready_for_internal_review')
             .order('created_at')
         ),
-        dataOrThrow(
+        load(
           client.from('deliverable_versions')
             .select('*, deliverables(id, title, deliverable_type, owner_id), projects(id, name, client_id)')
+            .eq('organization_id', organizationId)
             .eq('review_status', 'ready_for_client_review')
             .order('internal_reviewed_at')
         ),
       ])
+      assertOrganizationRecords(organizationId, tasks, workItems, requests, deliverables, reviewVersions, releaseVersions)
 
       return {
         tasks: tasks || [],
+        workItems: workItems || [],
         requests: requests || [],
         deliverables: deliverables || [],
         reviewVersions: reviewVersions || [],
