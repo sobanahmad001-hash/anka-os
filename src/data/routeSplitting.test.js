@@ -11,6 +11,7 @@ test('major application surfaces are loaded as independent route chunks', () => 
     'OperatingSpine',
     'PortfolioWorkspace',
     'ProjectEngagementWorkspace',
+    'ClientWorkspace',
     'DepartmentWorkshop',
     'ContentStudio',
     'MarketingStudio',
