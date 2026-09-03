@@ -411,6 +411,27 @@ begin
 end;
 $$;
 
+create or replace function private.protect_engaged_project_client()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if new.client_id is distinct from old.client_id
+     and exists (
+       select 1
+       from public.engagements engagement
+       where engagement.project_id = old.id
+         and engagement.organization_id = old.organization_id
+     ) then
+    raise exception 'A project with an engagement cannot change client ownership.'
+      using errcode = '23514';
+  end if;
+  return new;
+end;
+$$;
+
 create or replace function private.derive_engagement_project_ownership()
 returns trigger
 language plpgsql
@@ -463,6 +484,11 @@ create trigger trg_oaf2_protect_engagement_project
 before update of organization_id, project_id, legacy_project_id
 on public.engagements
 for each row execute function private.protect_engagement_canonical_project();
+
+drop trigger if exists trg_oaf2_protect_engaged_project_client on public.projects;
+create trigger trg_oaf2_protect_engaged_project_client
+before update of client_id on public.projects
+for each row execute function private.protect_engaged_project_client();
 
 drop trigger if exists trg_oaf2_derive_artifact_project on public.artifacts;
 create trigger trg_oaf2_derive_artifact_project
@@ -650,6 +676,8 @@ revoke all on function private.ensure_engagement_canonical_project()
   from public, anon, authenticated;
 revoke all on function private.protect_engagement_canonical_project()
   from public, anon, authenticated;
+revoke all on function private.protect_engaged_project_client()
+  from public, anon, authenticated;
 revoke all on function private.derive_engagement_project_ownership()
   from public, anon, authenticated;
 revoke all on function private.sync_agency_client_from_canonical_client()
@@ -661,6 +689,7 @@ grant execute on function private.ensure_agency_client_canonical_root() to servi
 grant execute on function private.protect_agency_client_canonical_root() to service_role;
 grant execute on function private.ensure_engagement_canonical_project() to service_role;
 grant execute on function private.protect_engagement_canonical_project() to service_role;
+grant execute on function private.protect_engaged_project_client() to service_role;
 grant execute on function private.derive_engagement_project_ownership() to service_role;
 grant execute on function private.sync_agency_client_from_canonical_client() to service_role;
 grant execute on function private.sync_engagement_from_canonical_project() to service_role;

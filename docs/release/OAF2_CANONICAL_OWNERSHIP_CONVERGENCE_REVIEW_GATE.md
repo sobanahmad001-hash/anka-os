@@ -6,6 +6,7 @@ Status: branch-only implementation. Do not merge, deploy, or apply the migration
 
 - `clients` and `projects` are the canonical commercial ownership roots.
 - `agency_clients` and `engagements` remain one-to-one operating extensions.
+- A canonical project's `client_id` is immutable while an engagement extension exists.
 - Existing QA-only operating records are preserved by materializing canonical roots during migration.
 - `tasks` and `work_items` remain distinct in OAF2; only canonical project ownership is added to `work_items`.
 
@@ -20,6 +21,8 @@ Status: branch-only implementation. Do not merge, deploy, or apply the migration
 ## Approval checklist
 
 - [ ] Confirm `clients`/`projects` remain authoritative and extensions cannot be re-keyed.
+- [ ] Confirm an engaged project rejects client re-keying while unrelated project updates and standalone-project behavior remain unchanged.
+- [ ] Confirm cross-organization re-key attempts remain rejected.
 - [ ] Confirm QA records are preserved and gain exactly one canonical root each.
 - [ ] Confirm every project has exactly one Living Record after backfill.
 - [ ] Confirm artifacts, work items, and AI runs agree with their engagement's canonical project.
@@ -36,6 +39,17 @@ Status: branch-only implementation. Do not merge, deploy, or apply the migration
 - Deno check/test for the changed edge function where the repository supports it
 - `git diff --check`
 - Supabase linked migration dry-run only (never a live push from this branch task)
+
+## Corrected branch evidence
+
+- Focused ownership, AI, and Operating Spine regression set: 30/30 passed.
+- Full repository test suite: 346/346 passed.
+- Lint: passed with 0 errors; the existing 284-warning baseline remains.
+- Production build: passed with 343 modules transformed.
+- `git diff --check`: passed.
+- Supabase CLI 2.115.0 linked dry-run: passed and would apply only `20260903050747_canonical_ownership_convergence.sql`.
+- PR validation and preview checks must pass again on the corrected pushed head.
+- Local database reset remains unavailable on this host because Docker/Podman is not installed; Deno check remains unavailable because Deno is not installed.
 
 ## Rollout order after approval
 

@@ -22,6 +22,10 @@ test('OAF2 keeps clients and projects as canonical roots without re-keying exten
   assert.match(migration, /engagements_project_id_key[\s\S]*unique \(project_id\)/)
   assert.match(migration, /references public\.clients\(id, organization_id\) on delete restrict/)
   assert.match(migration, /references public\.projects\(id, organization_id\) on delete restrict/)
+  assert.match(migration, /create or replace function private\.protect_engaged_project_client\(\)/)
+  assert.match(migration, /new\.client_id is distinct from old\.client_id[\s\S]*from public\.engagements/)
+  assert.match(migration, /before update of client_id on public\.projects/)
+  assert.match(migration, /A project with an engagement cannot change client ownership/)
   assert.doesNotMatch(migration, /drop table public\.(agency_clients|engagements)/)
   assert.doesNotMatch(migration, /delete from public\.(agency_clients|engagements|clients|projects)/)
 })
@@ -107,6 +111,10 @@ test('OAF2 verifier checks invariants and rolls all representative writes back',
     'artifact_ownership_is_consistent',
     'work_item_ownership_is_consistent',
     'portal_client_matches_commercial_client',
+    'engaged_project_client_change_is_rejected',
+    'engaged_project_unrelated_update_is_allowed',
+    'standalone_project_client_change_retains_existing_behavior',
+    'engaged_project_cross_organization_change_is_rejected',
   ]) {
     assert.match(verifier, new RegExp(check))
   }

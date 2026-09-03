@@ -84,6 +84,10 @@ declare
   v_agency_client public.agency_clients;
   v_brand public.brands;
   v_engagement public.engagements;
+  v_standalone_project_id uuid;
+  v_cross_org_id uuid := gen_random_uuid();
+  v_cross_org_client_id uuid;
+  v_updated_summary text;
 begin
   select membership.*
   into v_membership
@@ -163,6 +167,79 @@ begin
         and project.client_id = v_agency_client.canonical_client_id
     )
   );
+
+  begin
+    update public.projects
+    set client_id = null
+    where id = v_engagement.project_id;
+
+    insert into oaf2_runtime_checks values
+      ('engaged_project_client_change_is_rejected', false);
+  exception
+    when check_violation then
+      insert into oaf2_runtime_checks values
+        ('engaged_project_client_change_is_rejected', true);
+  end;
+
+  update public.projects
+  set client_summary = client_summary || ' [OAF2 unrelated update verified]'
+  where id = v_engagement.project_id
+  returning client_summary into v_updated_summary;
+
+  insert into oaf2_runtime_checks values (
+    'engaged_project_unrelated_update_is_allowed',
+    v_updated_summary like '%[OAF2 unrelated update verified]'
+  );
+
+  insert into public.projects (name, organization_id, client_id)
+  values (
+    'OAF2 rollback-only standalone project',
+    v_membership.organization_id,
+    v_agency_client.canonical_client_id
+  ) returning id into v_standalone_project_id;
+
+  update public.projects
+  set client_id = null
+  where id = v_standalone_project_id;
+
+  insert into oaf2_runtime_checks values (
+    'standalone_project_client_change_retains_existing_behavior',
+    exists (
+      select 1
+      from public.projects project
+      where project.id = v_standalone_project_id
+        and project.client_id is null
+    )
+    and not exists (
+      select 1
+      from public.engagements engagement
+      where engagement.project_id = v_standalone_project_id
+    )
+  );
+
+  insert into public.organizations (id, name, slug)
+  values (
+    v_cross_org_id,
+    'OAF2 rollback-only cross-organization check',
+    'oaf2-rollback-' || replace(v_cross_org_id::text, '-', '')
+  );
+
+  insert into public.clients (name, organization_id)
+  values ('OAF2 rollback-only cross-organization client', v_cross_org_id)
+  returning id into v_cross_org_client_id;
+
+  begin
+    update public.projects
+    set client_id = v_cross_org_client_id
+    where id = v_engagement.project_id;
+
+    insert into oaf2_runtime_checks values
+      ('engaged_project_cross_organization_change_is_rejected', false);
+  exception
+    when check_violation then
+      insert into oaf2_runtime_checks values
+        ('engaged_project_cross_organization_change_is_rejected', true);
+  end;
 end;
 $$;
 
