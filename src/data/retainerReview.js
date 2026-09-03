@@ -72,14 +72,26 @@ export function buildRetainerReview(snapshot, scope, now = new Date()) {
     })
     const service = snapshot.services.find(row => own(row) && row.engagement_id === scope.engagementId && row.id === plan.engagement_service_id)
     const active = plan.status === 'active' && snapshot.engagement.status === 'active' && service?.status === 'active' && service?.catalog_active === true
-    const upcoming = days.flatMap(day => {
+    // RET2 replays existing plan/period identity before evaluating a new schedule.
+    // Recorded occurrences therefore survive changes to anchors, frequency or timezone.
+    const recordedDates = new Set(occurrences.map(row => row.period_start))
+    const recordedUpcoming = occurrences.filter(row => row.period_start.startsWith(scope.month)).flatMap(occurrence => {
+      const recordedVersion = snapshot.versions.find(row => own(row) && row.plan_id === plan.id && row.id === occurrence.plan_version_id)
+      const timezone = occurrence.timezone || recordedVersion?.timezone
+      if (!timezone) throw new Error('Recorded occurrence timezone unavailable. Retry loading.')
+      if (occurrence.period_start < reviewLocalDate(now, timezone)) return []
+      const version = { ...recordedVersion, id: occurrence.plan_version_id, timezone }
+      return [{ period_start: occurrence.period_start, version, recordedVersion: recordedVersion || null, occurrence, templates: [], active }]
+    })
+    const projectedUpcoming = days.flatMap(day => {
+      if (recordedDates.has(day)) return []
       const version = versions.find(row => row.effective_start <= day && (!row.effective_end || row.effective_end >= day))
       if (!version || !reviewCanonicalStart(version, day) || day < reviewLocalDate(now, version.timezone)) return []
-      const occurrence = occurrences.find(row => row.period_start === day)
-      const recordedVersion = occurrence ? versions.find(row => row.id === occurrence.plan_version_id) : null
-      const templates = occurrence ? [] : unique(snapshot.templateItems.filter(row => own(row) && row.plan_id === plan.id && row.plan_version_id === version.id))
-      return [{ period_start: day, version, recordedVersion, occurrence: occurrence || null, templates, active }]
+      const templates = unique(snapshot.templateItems.filter(row => own(row) && row.plan_id === plan.id && row.plan_version_id === version.id))
+      return [{ period_start: day, version, recordedVersion: null, occurrence: null, templates, active }]
     })
+    const upcoming = [...new Map([...projectedUpcoming, ...recordedUpcoming].map(row => [row.period_start, row])).values()]
+      .sort((a, b) => a.period_start.localeCompare(b.period_start))
     const relevantVersions = versions.filter(version => days.some(day => versions.find(row => row.effective_start <= day && (!row.effective_end || row.effective_end >= day))?.id === version.id))
     return { ...plan, relevantVersions, completed, carryover, blockers, upcoming, selectedWork }
   })

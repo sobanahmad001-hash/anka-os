@@ -96,6 +96,40 @@ test('RET5 distinguishes generated from ungenerated and inactive commitments wit
   assert.equal(buildRetainerReview(snapshot, scope, now).summary.upcoming, 0)
 })
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
+test('RET5 recorded future occurrences survive anchor and frequency changes with original work identity', () => {
+  for (const frequency of ['monthly', 'weekly']) {
+    const snapshot = fixture()
+    snapshot.occurrences[0].timezone = 'Asia/Karachi'
+    snapshot.versions.push({ ...snapshot.versions[0], id: 'v2', version_number: 2, frequency, effective_start: '2026-08-15', timezone: 'America/Los_Angeles' })
+    snapshot.approvals.push({ organization_id: 'org', plan_id: 'plan', plan_version_id: 'v2' })
+    const before = JSON.stringify(snapshot)
+    const card = buildRetainerReview(snapshot, scope, new Date('2026-08-31T00:00:00Z')).cards[0]
+    const generated = card.upcoming.find(row => row.period_start === '2026-09-01')
+    assert.equal(generated.occurrence.id, 'sep')
+    assert.equal(generated.version.id, 'v1')
+    assert.equal(generated.version.timezone, 'Asia/Karachi')
+    assert.deepEqual(generated.templates, [])
+    assert.ok(card.upcoming.some(row => !row.occurrence && row.version.id === 'v2'))
+    assert.equal(card.completed[0].recurring_occurrence_id, 'sep')
+    assert.equal(JSON.stringify(snapshot), before)
+  }
+})
+test('RET5 same-date recorded occurrence wins projection and uses its frozen timezone for today', () => {
+  const snapshot = fixture()
+  snapshot.occurrences[0].timezone = 'America/Los_Angeles'
+  snapshot.versions[0].timezone = 'America/Los_Angeles'
+  snapshot.versions.push({ ...snapshot.versions[0], id: 'v2', version_number: 2, effective_start: '2026-08-01', timezone: 'Asia/Karachi' })
+  snapshot.approvals.push({ organization_id: 'org', plan_id: 'plan', plan_version_id: 'v2' })
+  let upcoming = buildRetainerReview(snapshot, scope, now).cards[0].upcoming
+  assert.equal(upcoming.length, 1)
+  assert.equal(upcoming[0].occurrence.id, 'sep')
+  assert.equal(upcoming[0].version.id, 'v1')
+  upcoming = buildRetainerReview(snapshot, scope, new Date('2026-09-02T02:00:00Z')).cards[0].upcoming
+  assert.equal(upcoming.length, 1) // September 1 in recorded LA, September 2 in new Karachi.
+  snapshot.occurrences[0].timezone = 'Asia/Karachi'
+  snapshot.versions[1].timezone = 'America/Los_Angeles'
+  assert.equal(buildRetainerReview(snapshot, scope, new Date('2026-09-02T02:00:00Z')).summary.upcoming, 0)
+})
 test('RET5 loader rejects delayed A responses, including A-B-A, actor/month/revision and unmount', async () => {
   for (const change of [{ organizationId: 'B' }, { actorId: 'B' }, { month: '2026-10' }, { revision: 2 }]) {
     const first = deferred(), second = deferred(), states = []

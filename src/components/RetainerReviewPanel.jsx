@@ -66,7 +66,7 @@ export default function RetainerReviewPanel({ project, engagement }) {
             <div><h4 className="font-medium">Upcoming commitments</h4><p className="text-xs text-slate-400">Canonical starts from today through month-end, using each applicable version’s timezone. This review does not establish permission or eligibility to generate work.</p>
               {!card.upcoming.length && <p className="mt-2 text-sm text-slate-500">No remaining canonical starts in this month.</p>}
               <ul className="mt-2 space-y-2">{card.upcoming.map(period => <li key={period.period_start} className="rounded bg-white/[0.03] p-3 text-sm">
-                <p>{period.period_start} · v{period.version.version_number} · {period.version.timezone}</p>
+                <p>{period.period_start} · Version {period.version.version_number || 'unavailable'} · {period.version.timezone}</p>
                 <p>{period.occurrence ? `Generated · recorded version ${period.recordedVersion?.version_number || 'unavailable'}` : 'Ungenerated commitment'} · {period.active ? 'Active plan context' : 'Inactive / not executable'}</p>
                 <ul className="ml-4 mt-1 list-disc text-slate-400">{period.templates.map(item => <li key={item.id}>{item.title}</li>)}</ul>
                 {period.occurrence && <div className="mt-2">{card.selectedWork.filter(item => item.recurring_occurrence_id === period.occurrence.id).map(item => <p key={item.id}><RecordLink item={item} /></p>)}</div>}
