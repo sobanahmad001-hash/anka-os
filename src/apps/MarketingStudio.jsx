@@ -25,6 +25,8 @@ import {
 import { marketingStudio } from '../data/marketingStudioRepository.js'
 import { shouldApplyDashboardResponse } from '../data/performanceDashboard.js'
 import { loadPerformanceDashboard } from '../data/performanceDashboardRepository.js'
+import { shouldApplyKeywordResearchResponse } from '../data/marketingKeywordResearch.js'
+import { loadMarketingKeywordResearch } from '../data/marketingKeywordResearchRepository.js'
 import DepartmentChat from '../components/DepartmentChat.jsx' // eslint-disable-line no-unused-vars
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
@@ -216,7 +218,7 @@ export default function MarketingStudio() {
         </section>
 
         <nav className="flex gap-2 overflow-x-auto border-b border-slate-800">
-          {[['campaigns', 'Campaigns'], ['ad-tracking', 'Ad campaign tracking'], ['backlinks', 'Backlink outreach'], ['artifacts', 'Artifacts'], ['chat', 'Shared Department Chat'], ['analytics', 'Performance dashboard']].map(([id, label]) => (
+          {[['campaigns', 'Campaigns'], ['ad-tracking', 'Ad campaign tracking'], ['seo-keywords', 'SEO keyword history'], ['backlinks', 'Backlink outreach'], ['artifacts', 'Artifacts'], ['chat', 'Shared Department Chat'], ['analytics', 'Performance dashboard']].map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-emerald-400 text-emerald-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>
           ))}
         </nav>
@@ -225,6 +227,15 @@ export default function MarketingStudio() {
           <BacklinkOutreach key={`${activeOrganizationId}:${scopeRevision}`} studio={studio} brands={brands} brandId={backlinkBrandId} setBrandId={setBacklinkBrandId} onAccessError={handleOrganizationAccessError} />
         ) : !workspace ? (
           <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Select an engagement with a Marketing service to begin.</div>
+        ) : tab === 'seo-keywords' ? (
+          <SeoKeywordHistory
+            key={activeOrganizationId + ':' + scopeRevision + ':' + workspace.engagement.brand_id}
+            organizationId={activeOrganizationId}
+            scopeRevision={scopeRevision}
+            signal={requestSignal}
+            onAccessError={handleOrganizationAccessError}
+            brand={{ id: workspace.engagement.brand_id, name: workspace.engagement.brands?.name || 'Brand', organization_id: workspace.engagement.organization_id }}
+          />
         ) : tab === 'campaigns' ? (
           <Campaigns studio={studio} workspace={workspace} campaignId={campaignId} setCampaignId={setCampaignId} selected={selectedCampaign} saving={saving} act={act} />
         ) : tab === 'ad-tracking' ? (
@@ -613,6 +624,109 @@ function Artifacts({ studio, workspace, campaign, saving, act, setTab, onRefresh
       <div className="mt-6 grid gap-4 md:grid-cols-2">{definition.fields.map(([key, label, kind]) => <div key={key} className={kind === 'textarea' || kind === 'list' ? 'md:col-span-2' : ''}><Field label={label} hint={kind === 'list' ? 'One item per line' : ''}>{kind === 'textarea' || kind === 'list' ? <textarea required className={`${INPUT} min-h-28`} value={form[key] || ''} onChange={event => setForm({ ...form, [key]: event.target.value })} /> : <input required type={kind} className={INPUT} value={form[key] || ''} onChange={event => setForm({ ...form, [key]: event.target.value })} />}</Field></div>)}</div>
       <div className="mt-6 flex flex-wrap items-center justify-end gap-3 border-t border-slate-800 pt-5"><button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : latest ? 'Create new version' : 'Save first version'}</button></div>
     </form><ArtifactApprovalPanel version={latest} approval={approval} theme="emerald" singleApprovalLabel={`Approve version ${latest?.version_number}`} onSingleApprove={() => act(() => studio.approveArtifact(latest.id), `${definition.label} exact version approved.`, campaign.id)} onChanged={onRefresh} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="marketing" theme="emerald" /></div>
+  </div>
+}
+
+function SeoKeywordHistory({ organizationId, scopeRevision, signal, onAccessError, brand }) {
+  const [research, setResearch] = useState(null)
+  const [selectedId, setSelectedId] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const generation = useRef(0)
+  const current = useRef({ organizationId, brandId: brand.id, revision: scopeRevision })
+  current.current = { organizationId, brandId: brand.id, revision: scopeRevision }
+
+  useEffect(() => {
+    const requestGeneration = ++generation.current
+    const request = { organizationId, brandId: brand.id, revision: scopeRevision, signal }
+    setResearch(null); setSelectedId(''); setLoading(true); setError('')
+    loadMarketingKeywordResearch({ organizationId, brand, signal }).then(result => {
+      if (!shouldApplyKeywordResearchResponse(request, current.current, requestGeneration, generation.current)) return
+      setResearch(result)
+      setSelectedId(result.trackedKeywords[0]?.id || '')
+    }).catch(loadError => {
+      if (!shouldApplyKeywordResearchResponse(request, current.current, requestGeneration, generation.current) || loadError?.name === 'AbortError') return
+      onAccessError(loadError, { membershipMismatch: loadError?.membershipMismatch === true })
+      setError(loadError.message)
+    }).finally(() => {
+      if (shouldApplyKeywordResearchResponse(request, current.current, requestGeneration, generation.current)) setLoading(false)
+    })
+    return () => { generation.current += 1 }
+  }, [brand, organizationId, onAccessError, scopeRevision, signal])
+
+  const selected = research?.trackedKeywords.find(item => item.id === selectedId) || null
+  const rank = snapshot => snapshot?.position == null ? 'Rank unknown' : 'Position ' + snapshot.position
+  const metric = value => value == null ? 'Unknown' : Number(value).toLocaleString()
+
+  if (loading) return <div className="py-20 text-center text-sm text-slate-500">Loading SEO keyword history…</div>
+  if (error) return <Notice error={error} />
+
+  return <div className="space-y-6">
+    <section className="rounded-2xl border border-sky-900/60 bg-sky-950/30 p-5">
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-sky-300">Read-only SEO identity</p>
+      <h2 className="mt-1 text-xl font-semibold">{brand.name} keyword history</h2>
+      <p className="mt-2 text-sm leading-6 text-slate-400">Tracked SEO keywords retain their own identity, target page, Content keyword-strategy source, and dated rank observations. They are separate from Google Ads planning keywords.</p>
+    </section>
+
+    {!research?.trackedKeywords.length ? (
+      <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-14 text-center text-sm text-slate-500">No tracked SEO keywords are recorded for this brand.</div>
+    ) : (
+      <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
+        <section className="space-y-3">
+          {research.trackedKeywords.map(item => (
+            <button key={item.id} onClick={() => setSelectedId(item.id)} className={'w-full rounded-2xl border p-4 text-left transition ' + (selectedId === item.id ? 'border-sky-500 bg-sky-950/40' : 'border-slate-800 bg-slate-900/70 hover:border-slate-600')}>
+              <div className="flex items-start justify-between gap-3">
+                <p className="font-semibold text-white">{item.keyword}</p>
+                <span className={'rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ' + (item.active ? 'bg-emerald-950 text-emerald-300' : 'bg-slate-800 text-slate-400')}>{item.active ? 'Active' : 'Inactive'}</span>
+              </div>
+              <p className="mt-2 break-all text-xs text-slate-400">{item.pageTarget?.url || 'Tracked page unavailable'}</p>
+              <p className="mt-2 text-xs text-slate-500">{rank(item.latestSnapshot)} · {item.history.length} dated observation{item.history.length === 1 ? '' : 's'}</p>
+            </button>
+          ))}
+        </section>
+
+        {selected && <section className="space-y-5 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-xl font-semibold">{selected.keyword}</h3>
+              {!selected.active && <span className="rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-400">Inactive keyword retained</span>}
+            </div>
+            <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+              <div className="rounded-xl bg-slate-950 p-3"><dt className="text-xs uppercase tracking-wide text-slate-500">Canonical page target</dt><dd className="mt-1 break-all text-slate-200">{selected.pageTarget?.url || 'Unavailable'}</dd></div>
+              <div className="rounded-xl bg-slate-950 p-3"><dt className="text-xs uppercase tracking-wide text-slate-500">Page type</dt><dd className="mt-1 text-slate-200">{titleize(selected.pageTarget?.pageType || 'unknown')}</dd></div>
+              <div className="rounded-xl bg-slate-950 p-3"><dt className="text-xs uppercase tracking-wide text-slate-500">Target tier</dt><dd className="mt-1 text-slate-200">{selected.targetRankTier ? titleize(selected.targetRankTier) : 'Not set'}</dd></div>
+              <div className="rounded-xl bg-slate-950 p-3"><dt className="text-xs uppercase tracking-wide text-slate-500">Content source</dt><dd className="mt-1 text-slate-200">{selected.sourceArtifact?.title || 'No keyword-strategy artifact linked'}</dd></div>
+            </dl>
+          </div>
+
+          <div>
+            <h4 className="font-semibold">Dated rank history</h4>
+            {!selected.history.length ? <p className="mt-3 rounded-xl border border-dashed border-slate-700 p-5 text-sm text-slate-500">No rank observations have been recorded.</p> : (
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full min-w-[620px] text-left text-sm">
+                  <thead className="border-b border-slate-700 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Date</th><th className="px-3 py-2">Rank</th><th className="px-3 py-2">Clicks</th><th className="px-3 py-2">Impressions</th></tr></thead>
+                  <tbody>{selected.history.map(snapshot => <tr key={snapshot.id} className="border-b border-slate-800"><td className="px-3 py-3">{snapshot.date}</td><td className="px-3 py-3 font-semibold text-white">{rank(snapshot)}</td><td className="px-3 py-3">{metric(snapshot.clicks)}</td><td className="px-3 py-3">{metric(snapshot.impressions)}</td></tr>)}</tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </section>}
+      </div>
+    )}
+
+    <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+      <h3 className="font-semibold">Recorded backlink evidence</h3>
+      <p className="mt-1 text-sm text-slate-500">Existing research facts are shown separately. This view does not generate or save interpretations.</p>
+      {!research?.backlinkEvidence.length ? <p className="mt-4 text-sm text-slate-500">No backlink evidence is recorded for this brand.</p> : (
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {research.backlinkEvidence.map(item => <article key={item.id} className="rounded-xl bg-slate-950 p-4 text-sm">
+            <p className="font-semibold text-white">{item.siteName}</p>
+            <p className="mt-1 break-all text-xs text-slate-500">{item.siteUrl || 'URL unknown'}</p>
+            <p className="mt-3 text-slate-400">Status: {titleize(item.outreachStatus)} · Authority: {metric(item.domainAuthority)} · Relevance: {metric(item.relevanceScore)}</p>
+          </article>)}
+        </div>
+      )}
+    </section>
   </div>
 }
 
