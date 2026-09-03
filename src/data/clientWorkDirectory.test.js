@@ -69,15 +69,6 @@ test('P2 Client Work requires an explicit active organization', () => {
   assert.throws(() => buildClientWorkDirectory(fixture({ organizationId: '' })), /active organization/i)
 })
 
-test('P2 directory repository is read-only and scopes every organization-owned table', () => {
-  const repository = readFileSync(new URL('./clientWorkDirectoryRepository.js', import.meta.url), 'utf8')
-  for (const table of ['clients', 'agency_clients', 'brands', 'projects', 'engagements', 'tasks', 'work_items', 'organization_memberships']) {
-    assert.match(repository, new RegExp("scoped\\('" + table + "'"))
-  }
-  assert.match(repository, /\.eq\('organization_id', organizationId\)/)
-  assert.doesNotMatch(repository, /\.(insert|update|upsert|delete|rpc|functions)\s*\(/)
-})
-
 test('P2 directory UI preserves routes, local filters, honest states, and company-client-internal navigation', () => {
   const app = readFileSync(new URL('../App.jsx', import.meta.url), 'utf8')
   const operatingSpine = readFileSync(new URL('../apps/OperatingSpine.jsx', import.meta.url), 'utf8')

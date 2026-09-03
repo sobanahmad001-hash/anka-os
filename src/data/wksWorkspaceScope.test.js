@@ -27,7 +27,7 @@ function fakeClient({ failure, corruptTable } = {}) {
     archived_at: null, deleted_at: null, withdrawn_at: null, review_status: 'ready_for_internal_review',
   }))]))
   return { calls, from(table) {
-    const call = { table, filters: [], signal: null }
+    const call = { table, filters: [], orders: [], range: null, signal: null }
     calls.push(call)
     let single = false
     const query = {
@@ -35,13 +35,16 @@ function fakeClient({ failure, corruptTable } = {}) {
       eq(key, value) { call.filters.push(['eq', key, value]); return query },
       is(key, value) { call.filters.push(['is', key, value]); return query },
       in(key, value) { call.filters.push(['in', key, value]); return query },
-      order() { return query }, limit() { return query },
+      order(column, options) { call.orders.push([column, options]); return query },
+      range(from, to) { call.range = [from, to]; return query },
+      limit() { return query },
       single() { single = true; return query }, maybeSingle() { single = true; return query },
       abortSignal(signal) { call.signal = signal; return query },
       then(resolve, reject) {
         if (failure) return Promise.resolve(failure).then(resolve, reject)
         let rows = (seed[table] || []).filter(row => call.filters.every(([op, key, value]) => op === 'in' ? value.includes(row[key]) : (row[key] ?? null) === value))
         if (table === corruptTable) rows = [{ ...seed[table][1] }]
+        if (call.range) rows = rows.slice(call.range[0], call.range[1] + 1)
         return Promise.resolve({ data: single ? rows[0] || null : rows, error: null, status: 200 }).then(resolve, reject)
       },
     }
@@ -53,7 +56,7 @@ async function loadRepository(name, client) {
   const key = '__wksScopeTest' + sequence++
   globalThis[key] = client
   const source = readFileSync(new URL('./' + name + 'Repository.js', import.meta.url), 'utf8')
-    .replace("import { supabase } from '../lib/supabase'", 'const supabase = globalThis[' + JSON.stringify(key) + ']')
+    .replace(/import \{ supabase \} from '\.\.\/lib\/supabase(?:\.js)?'/, 'const supabase = globalThis[' + JSON.stringify(key) + ']')
   try { return await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64')) }
   finally { delete globalThis[key] }
 }
