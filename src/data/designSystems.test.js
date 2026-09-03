@@ -26,7 +26,7 @@ test('DS5 migration adds only the design_system artifact vocabulary', () => {
 
 test('DS5 reuses the DS1 active-service validator without a Workshop generation path', () => {
   assert.match(edge, /import[\s\S]*requireActiveDesignService[\s\S]*from '\.\.\/design-workshop\/index\.ts'/)
-  assert.match(edge, /await requireActiveDesignService\(\{ admin, organizationId: ORGANIZATION_ID \}, engagementId, engagementServiceId\)/)
+  assert.match(edge, /await requireActiveDesignService\(context, engagementId, engagementServiceId\)/)
   assert.match(edge, /result\.catalog\?\.slug !== DESIGN_SYSTEM_SERVICE/)
   assert.doesNotMatch(edge, /generateDirections|generateOne|directionSchema|createSession/)
 })
@@ -64,6 +64,19 @@ test('DS5 verifier is named and rollback-only', () => {
   ]) assert.match(verifier, new RegExp(`'${check}'`))
   assert.match(verifier.trim(), /rollback;$/)
   assert.doesNotMatch(verifier, /(^|\n)\s*commit\s*;/i)
+})
+
+test('Design Systems uses caller-rooted organization authority and never moves approved versions', () => {
+  assert.match(edge, /resolveServerOrganizationContext/)
+  assert.match(edge, /root: \{ kind: 'engagement'/)
+  assert.match(edge, /root: \{ kind: 'artifact_version'/)
+  assert.doesNotMatch(edge, /const ORGANIZATION_ID|8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25/)
+  assert.match(edge, /admin\.from\('artifact_versions'\)\.insert\(\{/)
+  assert.match(edge, /parent_version_id: latest\?\.id \|\| null/)
+  assert.doesNotMatch(edge, /admin\.from\('artifact_versions'\)\.update\(/)
+  assert.doesNotMatch(edge, /admin\.from\('artifact_approvals'\)\.update\(/)
+  assert.match(edge, /if \(existing\) return existing/)
+  assert.match(edge, /\.eq\('artifact_version_id', version\.id\)\.eq\('artifact_id', artifact\.id\)/)
 })
 
 test('design-system editor clones immutable content for safe local editing', () => {
