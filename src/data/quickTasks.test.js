@@ -303,7 +303,10 @@ test('QTS4 verifier matches PostgreSQL 17 catalog shapes exactly', () => {
   assert.ok(qts4Verifier.includes("= 'created_via = ANY (ARRAY["))
   assert.ok(!qts4Verifier.includes("= '(created_via = ANY"))
   assert.ok(qts4Verifier.includes('(select count(*) from actual)=8'))
-  assert.ok(qts4Verifier.includes('count(actual.conname)=8'))
+  assert.ok(qts4Verifier.includes('select relationship.conname as constraint_name'))
+  assert.ok(qts4Verifier.includes('count(actual.constraint_name)=8'))
+  assert.ok(qts4Verifier.includes('left join actual using(constraint_name)'))
+  assert.ok(!qts4Verifier.includes('select relationship.conname,relationship.confrelid'))
   for (const name of [
     'quick_task_promotions_owner_id_fkey',
     'quick_task_promotions_source_task_fkey',

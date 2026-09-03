@@ -31,7 +31,7 @@ insert into qts4_checks values
       ('quick_task_promotions_artifact_version_fkey','public.artifact_versions'::regclass,array['destination_artifact_version_id','organization_id'],array['id','organization_id']),
       ('quick_task_promotions_promoted_by_fkey','auth.users'::regclass,array['promoted_by'],array['id'])
   ), actual as (
-    select relationship.conname,relationship.confrelid,relationship.confdeltype,relationship.confupdtype,
+    select relationship.conname as constraint_name,relationship.confrelid,relationship.confdeltype,relationship.confupdtype,
       relationship.confmatchtype,relationship.condeferrable,
       array(select attribute.attname::text from unnest(relationship.conkey) with ordinality key(attnum,position)
         join pg_attribute attribute on attribute.attrelid=relationship.conrelid and attribute.attnum=key.attnum order by key.position) child_columns,
@@ -39,7 +39,7 @@ insert into qts4_checks values
         join pg_attribute attribute on attribute.attrelid=relationship.confrelid and attribute.attnum=key.attnum order by key.position) parent_columns
     from pg_constraint relationship where relationship.conrelid='public.quick_task_promotions'::regclass and relationship.contype='f'
   )
-  select (select count(*) from actual)=8 and count(actual.conname)=8 and bool_and(
+  select (select count(*) from actual)=8 and count(actual.constraint_name)=8 and bool_and(
     actual.confrelid=expected.parent_table and actual.child_columns=expected.child_columns
     and actual.parent_columns=expected.parent_columns and actual.confdeltype='r'
     and actual.confupdtype='a' and actual.confmatchtype='s' and not actual.condeferrable
