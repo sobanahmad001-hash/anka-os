@@ -91,19 +91,25 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
     setError('')
     try {
       const options = { signal }
-      const [clientRows, serviceRows, ownerRows, portfolioRows, templateRows] = await Promise.all([
-        operatingSpine.listClientsAndBrands(activeOrganizationId, options),
-        operatingSpine.listServices(activeOrganizationId, options),
-        operatingSpine.listOwners(activeOrganizationId, options),
-        operatingSpine.getPortfolioSnapshot(activeOrganizationId, options),
+      const [operatingResult, templateResult] = await Promise.allSettled([
+        Promise.all([
+          operatingSpine.listClientsAndBrands(activeOrganizationId, options),
+          operatingSpine.listServices(activeOrganizationId, options),
+          operatingSpine.listOwners(activeOrganizationId, options),
+          operatingSpine.getPortfolioSnapshot(activeOrganizationId, options),
+        ]),
         pipelineTemplates.list(activeOrganizationId, options),
       ])
       if (signal.aborted || generation !== catalogGeneration.current) return
+      if (operatingResult.status === 'rejected') throw operatingResult.reason
+      const [clientRows, serviceRows, ownerRows, portfolioRows] = operatingResult.value
       setClients(clientRows || [])
       setServices(serviceRows || [])
       setOwners(ownerRows || [])
       setPortfolioSnapshot(portfolioRows || { engagements: [], workItems: [], stages: [] })
-      setTemplateCatalog(templateRows || { templates: [], versions: [], selections: [], publications: [] })
+      setTemplateCatalog(templateResult.status === 'fulfilled' && templateResult.value
+        ? templateResult.value
+        : { templates: [], versions: [], selections: [], publications: [] })
     } catch (loadError) {
       if (signal.aborted || generation !== catalogGeneration.current) return
       handleOrganizationAccessError(loadError)

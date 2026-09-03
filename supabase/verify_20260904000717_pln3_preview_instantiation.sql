@@ -18,8 +18,11 @@ insert into pln3_checks (check_name) values
   ('contributor_cannot_preview_draft'),
   ('unnamed_asset_does_not_satisfy_prerequisite'),
   ('named_asset_satisfies_prerequisite'),
+  ('equal_order_satisfying_stage_is_rejected'),
+  ('multi_service_context_reason_collision_is_rejected'),
   ('same_set_reorder_has_moved_provenance'),
   ('template_composition_matches_preview'),
+  ('graph_tables_are_locked_for_transaction'),
   ('origin_provenance_is_persisted'),
   ('composition_replay_is_idempotent'),
   ('request_reuse_with_new_payload_is_rejected'),
@@ -92,8 +95,12 @@ declare
   v_service_a uuid := gen_random_uuid();
   v_service_b uuid := gen_random_uuid();
   v_service_other uuid := gen_random_uuid();
+  v_service_c uuid := gen_random_uuid();
+  v_service_d uuid := gen_random_uuid();
+  v_service_e uuid := gen_random_uuid();
   v_stage_a uuid := gen_random_uuid();
   v_stage_b uuid := gen_random_uuid();
+  v_stage_c uuid := gen_random_uuid();
   v_stage_fallback uuid := gen_random_uuid();
   v_department text;
   v_published_version jsonb;
@@ -143,12 +150,16 @@ begin
   ) values
     (v_service_a, v_org_a, v_department, 'pln3_service_a', 'PLN3 service A', 1),
     (v_service_b, v_org_a, v_department, 'pln3_service_b', 'PLN3 service B', 2),
+    (v_service_c, v_org_a, v_department, 'pln3_service_c', 'PLN3 service C', 3),
+    (v_service_d, v_org_a, v_department, 'pln3_service_d', 'PLN3 service D', 4),
+    (v_service_e, v_org_a, v_department, 'pln3_service_e', 'PLN3 service E', 5),
     (v_service_other, v_org_b, v_department, 'pln3_service_other', 'PLN3 other service', 1);
   insert into public.blueprint_stage_catalog (
     id, organization_id, slug, name, accountable_department_id, display_order, stage_kind
   ) values
     (v_stage_a, v_org_a, 'pln3_stage_a', 'PLN3 stage A', v_department, 10, 'delivery'),
     (v_stage_b, v_org_a, 'pln3_stage_b', 'PLN3 stage B', v_department, 20, 'delivery'),
+    (v_stage_c, v_org_a, 'pln3_stage_c', 'PLN3 stage C', v_department, 10, 'delivery'),
     (v_stage_fallback, v_org_a, 'pln3_context_intake', 'PLN3 context intake', v_department, 5, 'short_prerequisite');
   insert into public.service_stage_rules (
     organization_id, service_id, target_stage_id, rule_kind,
@@ -157,8 +168,15 @@ begin
   ) values
     (v_org_a, v_service_a, v_stage_a, 'primary', null, '', '{}', '{}', null),
     (v_org_a, v_service_b, v_stage_b, 'primary', null, '', '{}', '{}', null),
+    (v_org_a, v_service_c, v_stage_c, 'primary', null, '', '{}', '{}', null),
+    (v_org_a, v_service_d, v_stage_b, 'primary', null, '', '{}', '{}', null),
+    (v_org_a, v_service_e, v_stage_b, 'primary', null, '', '{}', '{}', null),
     (v_org_a, v_service_b, v_stage_b, 'prerequisite', 'brand_context',
-      'Brand context is required', array['brand_context'], '{}', v_stage_fallback);
+      'Brand context is required', array['brand_context'], '{}', v_stage_fallback),
+    (v_org_a, v_service_d, v_stage_b, 'prerequisite', 'd_context',
+      'D context reason', '{}', array['pln3_stage_a', 'pln3_stage_c'], v_stage_fallback),
+    (v_org_a, v_service_e, v_stage_b, 'prerequisite', 'e_context',
+      'E context reason', '{}', '{}', v_stage_fallback);
   insert into public.blueprint_stage_dependencies (
     organization_id, stage_id, depends_on_stage_id, reason
   ) values (v_org_a, v_stage_b, v_stage_fallback, 'Canonical duplicate of context gate');
@@ -237,6 +255,38 @@ begin
     select 1 from jsonb_array_elements(v_named_asset_preview->'prerequisites') prerequisite
     where prerequisite->>'satisfaction_method' = 'existing_asset'
   ) where check_name = 'named_asset_satisfies_prerequisite';
+
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', v_contributor, 'role', 'authenticated'
+  )::text, true);
+  set local role authenticated;
+  v_denied := false;
+  begin
+    perform public.preview_pipeline_engagement(
+      v_org_a, (v_published_version->>'pipeline_template_version_id')::uuid,
+      array[v_service_a, v_service_c, v_service_d], '[]'::jsonb
+    );
+  exception when invalid_parameter_value then v_denied := true;
+  end;
+  reset role;
+  update pln3_checks set passed = v_denied
+    where check_name = 'equal_order_satisfying_stage_is_rejected';
+
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', v_contributor, 'role', 'authenticated'
+  )::text, true);
+  set local role authenticated;
+  v_denied := false;
+  begin
+    perform public.preview_pipeline_engagement(
+      v_org_a, (v_published_version->>'pipeline_template_version_id')::uuid,
+      array[v_service_d, v_service_e], '[]'::jsonb
+    );
+  exception when invalid_parameter_value then v_denied := true;
+  end;
+  reset role;
+  update pln3_checks set passed = v_denied
+    where check_name = 'multi_service_context_reason_collision_is_rejected';
   update pln3_checks set passed = jsonb_array_length(v_preview->'customization_provenance') = 2
     and not exists (
       select 1 from jsonb_array_elements(v_preview->'customization_provenance') change
@@ -283,7 +333,67 @@ begin
     and v_dependency_count = jsonb_array_length(v_preview->'dependencies')
     and v_dependency_count = 1
     and (v_preview->'dependencies'->0->>'dependency_kind') = 'context_gate'
+    and not exists (
+      select 1 from jsonb_array_elements(v_preview->'stages') stage
+      where not exists (
+        select 1 from public.engagement_stage_instances instance
+        where instance.engagement_id = v_engagement
+          and instance.stage_catalog_id = (stage->>'id')::uuid
+          and instance.stage_kind = stage->>'stage_kind'
+          and instance.status = stage->>'status'
+      )
+    )
+    and not exists (
+      select 1
+      from jsonb_array_elements(v_preview->'dependencies') dependency
+      where not exists (
+        select 1
+        from public.engagement_stage_dependencies actual
+        join public.engagement_stage_instances later on later.id = actual.stage_instance_id
+        join public.engagement_stage_instances earlier on earlier.id = actual.depends_on_stage_instance_id
+        where actual.engagement_id = v_engagement
+          and later.stage_catalog_id = (dependency->>'stage_id')::uuid
+          and earlier.stage_catalog_id = (dependency->>'depends_on_stage_id')::uuid
+          and actual.dependency_kind = dependency->>'dependency_kind'
+          and actual.reason = dependency->>'reason'
+      )
+    )
+    and not exists (
+      select 1
+      from jsonb_array_elements(v_preview->'prerequisites') prerequisite
+      where not exists (
+        select 1
+        from public.engagement_prerequisites actual
+        join public.engagement_services engagement_service
+          on engagement_service.id = actual.engagement_service_id
+        join public.engagement_stage_instances target
+          on target.id = actual.target_stage_instance_id
+        left join public.engagement_stage_instances required
+          on required.id = actual.prerequisite_stage_instance_id
+        where actual.engagement_id = v_engagement
+          and engagement_service.service_id = (prerequisite->>'service_id')::uuid
+          and target.stage_catalog_id = (prerequisite->>'target_stage_id')::uuid
+          and required.stage_catalog_id is not distinct from
+            (nullif(prerequisite->>'prerequisite_stage_id', ''))::uuid
+          and actual.prerequisite_key = prerequisite->>'prerequisite_key'
+          and actual.satisfaction_method = prerequisite->>'satisfaction_method'
+      )
+    )
     where check_name = 'template_composition_matches_preview';
+  update pln3_checks set passed = (
+    select count(distinct relation) = 4
+    from pg_locks lock_record
+    where lock_record.pid = pg_backend_pid()
+      and lock_record.locktype = 'relation'
+      and lock_record.mode = 'ShareLock'
+      and lock_record.granted
+      and lock_record.relation = any(array[
+        'public.blueprint_stage_catalog'::regclass,
+        'public.blueprint_stage_dependencies'::regclass,
+        'public.service_catalog'::regclass,
+        'public.service_stage_rules'::regclass
+      ])
+  ) where check_name = 'graph_tables_are_locked_for_transaction';
   update pln3_checks set passed = exists (
     select 1 from public.engagement_pipeline_origins origin
     where origin.engagement_id = v_engagement

@@ -17,6 +17,7 @@ Migration `20260904000717_pln3_preview_instantiation.sql` adds no tables. It add
 - one private deterministic planner shared by preview and creation;
 - one zero-write preview action for a visible immutable template version and a proposed ordered service selection;
 - one atomic template-backed wrapper around the unchanged canonical composer;
+- transaction-scoped `SHARE` locks on `blueprint_stage_catalog`, `blueprint_stage_dependencies`, `service_catalog`, and `service_stage_rules`, acquired before publication lookup/planning and held until the caller transaction commits or rolls back;
 - server-owned normalization of service owners and existing assets;
 - a preview hash bound to organization, immutable template version, ordered service selection, current canonical-rule hash, and the planned graph;
 - stale-preview rejection before canonical composition writes;
@@ -24,22 +25,23 @@ Migration `20260904000717_pln3_preview_instantiation.sql` adds no tables. It add
 - append-only origin provenance through PLN2's existing engagement origin boundary;
 - authenticated-only execution with a fixed empty search path and active team membership checks.
 
-The existing Operating Spine composer now offers an optional published template preset. Direct service composition remains available and continues to use the unchanged path. Template-backed creation requires a current preview, displays rule drift and historical-version context, and invalidates an in-flight or completed preview whenever plan inputs change.
+The existing Operating Spine composer now offers an optional published template preset. Direct service composition remains available and continues to use the unchanged path. Template-catalog loading is isolated with `Promise.allSettled`, so an optional template read failure leaves core clients, services, owners, portfolio data, and direct composition usable. Template-backed creation requires a current preview, displays rule drift and historical-version context, and invalidates an in-flight or completed preview whenever plan inputs change.
 
 ## Architectural invariants
 
 1. Templates own only an immutable ordered service preset; no template-owned stage, prerequisite, dependency, workflow, or owner graph exists.
 2. Preview performs no inserts, updates, or deletes.
 3. Preview and creation call the same database planner.
-4. Creation re-plans inside the write transaction and rejects a changed rule or graph hash before calling the canonical composer.
-5. Canonical context-gate dependencies win the same pair conflict that the existing composer resolves by insertion order; preview therefore matches the instantiated dependency graph exactly.
-6. Draft preview is available only through PLN2's existing visible-version authority. Composition requires a published version.
-7. Exact request replay returns the same engagement. Reuse of a request ID with different normalized input is rejected.
-8. Existing engagements and the canonical composer are not rewritten.
+4. Creation locks the four canonical graph/catalog tables for the transaction, re-plans, and rejects a changed rule or graph hash before calling the canonical composer. Concurrent writers are blocked until the transaction ends, preventing a later READ COMMITTED statement from observing a different graph.
+5. A highest-display-order tie between valid prerequisite stages is rejected because the unchanged composer has no deterministic tie-breaker. This prevents preview and creation from choosing different identities.
+6. Same-pair context dependencies are collapsed only when their reasons agree. Conflicting reasons are rejected because the unchanged composer persists one pair and does not define a deterministic winner.
+7. Draft preview is available only through PLN2's existing visible-version authority. Composition requires a published version.
+8. Exact request replay returns the same engagement. Reuse of a request ID with different normalized input is rejected.
+9. Existing engagements and the canonical composer are not rewritten.
 
 ## Rollback verifier
 
-`supabase/verify_20260904000717_pln3_preview_instantiation.sql` starts a transaction and always rolls it back. Its 20 named checks cover:
+`supabase/verify_20260904000717_pln3_preview_instantiation.sql` starts a transaction and always rolls it back. Its 23 named checks cover:
 
 - exact RPC privileges, security-definer configuration, volatility, and private planner execution;
 - preservation of the canonical composer and use of canonical rules/dependencies;
@@ -48,7 +50,9 @@ The existing Operating Spine composer now offers an optional published template 
 - rejection of Contributor draft preview, unpublished composition, anonymous execution, and cross-organization preview;
 - named versus unnamed prerequisite assets;
 - same-set reorder provenance;
-- preview/instantiation stage and dependency parity, including a duplicate canonical/context dependency pair;
+- exact preview/instantiation stage, prerequisite, dependency-kind, dependency-reason, and catalog-identity parity;
+- equal-order satisfying-stage rejection and multi-service conflicting-reason rejection;
+- acquisition of all four transaction-scoped canonical graph/catalog locks;
 - append-only origin persistence;
 - exact replay, changed-payload rejection, and stale-preview rejection with no residual writes.
 
@@ -63,7 +67,19 @@ The verifier passed against a fresh disposable PostgreSQL 17.11 cluster restored
 - Production build: passed.
 - Lint: 0 errors and 359 pre-existing warnings; PLN3 adds no warning.
 - Fresh disposable PostgreSQL migration chain: PLN2 then PLN3 applied successfully.
-- Rollback SQL verifier: all 20 named checks passed and rolled back.
+- Rollback SQL verifier: all 23 named checks passed and rolled back.
+
+## Two-session concurrency evidence
+
+The approved table-lock strategy was exercised with two independent PostgreSQL sessions against the disposable cluster:
+
+- Session 1 called the template composition wrapper inside an explicit transaction, then held the transaction open after composition returned.
+- Session 2 observed granted `ShareLock` entries for all four tables: `blueprint_stage_catalog`, `blueprint_stage_dependencies`, `service_catalog`, and `service_stage_rules`.
+- Separate `ROW EXCLUSIVE NOWAIT` attempts against every locked table failed while Session 1 remained open.
+- A real `service_stage_rules` update with `lock_timeout = '1s'` failed after 1,364 ms with `canceling statement due to lock timeout`.
+- Session 1 rolled back. Immediately afterward, the observed external lock count was zero, both composed engagement/request counts were zero, and the attempted rule change was absent.
+
+The lock boundary is the complete database transaction containing `compose_engagement_from_pipeline_template(...)`, not only the function's planner statement. Callers should keep that transaction short. The tradeoff is intentional: canonical graph/catalog writes wait behind in-flight template composition so the unchanged composer cannot observe a post-preview rule state.
 
 ## Migration ordering
 

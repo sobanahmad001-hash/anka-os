@@ -112,6 +112,7 @@ begin
       rule.target_stage_id,
       rule.prerequisite_key,
       rule.prerequisite_description,
+      rule.satisfied_by_stage_slugs,
       rule.fallback_stage_id,
       exists (
         select 1
@@ -139,6 +140,29 @@ begin
     from fallback_decisions
     where not has_asset and not has_primary_stage
   ),
+  satisfying_stage_candidates as (
+    select decision.service_id, decision.prerequisite_key, relevant.stage_id,
+      stage.display_order
+    from fallback_decisions decision
+    cross join relevant_stages relevant
+    join public.blueprint_stage_catalog stage
+      on stage.id = relevant.stage_id
+     and stage.organization_id = p_organization_id
+    where not decision.has_asset
+      and stage.slug = any(decision.satisfied_by_stage_slugs)
+  ),
+  ambiguous_satisfying_stages as (
+    select candidate.service_id, candidate.prerequisite_key
+    from satisfying_stage_candidates candidate
+    where candidate.display_order = (
+      select max(peer.display_order)
+      from satisfying_stage_candidates peer
+      where peer.service_id = candidate.service_id
+        and peer.prerequisite_key = candidate.prerequisite_key
+    )
+    group by candidate.service_id, candidate.prerequisite_key
+    having count(*) > 1
+  ),
   prerequisite_plans as (
     select
       decision.*,
@@ -155,21 +179,15 @@ begin
       end as prerequisite_stage_id
     from fallback_decisions decision
     left join lateral (
-      select relevant.stage_id
-      from relevant_stages relevant
-      join public.blueprint_stage_catalog stage
-        on stage.id = relevant.stage_id
-       and stage.organization_id = p_organization_id
-      join public.service_stage_rules rule
-        on rule.service_id = decision.service_id
-       and rule.prerequisite_key = decision.prerequisite_key
-       and rule.rule_kind = 'prerequisite'
-      where stage.slug = any(rule.satisfied_by_stage_slugs)
-      order by stage.display_order desc, stage.slug
+      select candidate.stage_id
+      from satisfying_stage_candidates candidate
+      where candidate.service_id = decision.service_id
+        and candidate.prerequisite_key = decision.prerequisite_key
+      order by candidate.display_order desc
       limit 1
     ) satisfying on not decision.has_asset
   ),
-  context_dependencies as (
+  context_dependency_candidates as (
     select
       prerequisite.target_stage_id as stage_id,
       prerequisite.prerequisite_stage_id as depends_on_stage_id,
@@ -177,6 +195,18 @@ begin
       prerequisite.prerequisite_description as reason
     from prerequisite_plans prerequisite
     where prerequisite.prerequisite_stage_id is not null
+  ),
+  ambiguous_context_dependencies as (
+    select candidate.stage_id, candidate.depends_on_stage_id
+    from context_dependency_candidates candidate
+    group by candidate.stage_id, candidate.depends_on_stage_id
+    having count(distinct candidate.reason) > 1
+  ),
+  context_dependencies as (
+    select candidate.stage_id, candidate.depends_on_stage_id,
+      'context_gate'::text as dependency_kind, min(candidate.reason) as reason
+    from context_dependency_candidates candidate
+    group by candidate.stage_id, candidate.depends_on_stage_id
   ),
   canonical_dependencies as (
     select
@@ -293,9 +323,23 @@ begin
     'customization_provenance', (
       select coalesce(jsonb_agg(customization.change order by customization.action_order, customization.position), '[]'::jsonb)
       from customization
-    )
+    ),
+    '_has_ambiguous_satisfying_stage', exists (select 1 from ambiguous_satisfying_stages),
+    '_has_ambiguous_context_dependency', exists (select 1 from ambiguous_context_dependencies)
   )
   into v_plan_core;
+
+  if (v_plan_core ->> '_has_ambiguous_satisfying_stage')::boolean then
+    raise exception 'Canonical prerequisite stage selection is ambiguous at the highest display order.'
+      using errcode = '22023';
+  end if;
+  if (v_plan_core ->> '_has_ambiguous_context_dependency')::boolean then
+    raise exception 'Canonical context dependency reason is ambiguous for one stage pair.'
+      using errcode = '22023';
+  end if;
+  v_plan_core := v_plan_core
+    - '_has_ambiguous_satisfying_stage'
+    - '_has_ambiguous_context_dependency';
 
   v_customization := v_plan_core -> 'customization_provenance';
   v_preview_rule_sha256 := encode(extensions.digest(
@@ -417,6 +461,14 @@ begin
   if jsonb_typeof(coalesce(p_existing_assets, '[]'::jsonb)) <> 'array' then
     raise exception 'Existing assets must be a JSON array.' using errcode = '22023';
   end if;
+
+  -- The unchanged canonical composer executes later PL/pgSQL statements under
+  -- READ COMMITTED. Hold graph/catalog table locks so preview validation and
+  -- instantiation observe one authoritative rule state for this transaction.
+  lock table public.blueprint_stage_catalog,
+    public.blueprint_stage_dependencies,
+    public.service_catalog,
+    public.service_stage_rules in share mode;
 
   select version.*
   into v_version
