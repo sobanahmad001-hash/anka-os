@@ -1,3 +1,5 @@
+import { appendWorkshopNavigation } from './workshopNavigation.js'
+
 const CLOSED_PROJECT_TASK = new Set(['done', 'cancelled'])
 const CLOSED_WORK_ITEM = new Set(['done'])
 const CLOSED_MILESTONE = new Set(['completed', 'cancelled'])
@@ -79,7 +81,25 @@ export function buildProjectEngagementWorkspace(snapshot, options = {}) {
   const workshopPaths = { content: '/sphere/content', design: '/sphere/design', development: '/sphere/delivery', marketing: '/sphere/marketing' }
   const workshopLinks = [...new Set(services.filter((item) => item.status === 'active').map((item) => item.service_catalog?.department_id).filter(Boolean))]
     .filter((department) => workshopPaths[department])
-    .map((department) => ({ department, path: `${workshopPaths[department]}?engagement=${engagement.id}` }))
+    .map((department) => {
+      const service = services.find(item => item.status === 'active' && item.service_catalog?.department_id === department)
+      const stage = journey.find(item => item.accountable_department_id === department && !['completed', 'cancelled'].includes(item.status))
+      return {
+        department,
+        path: appendWorkshopNavigation(workshopPaths[department], {
+          organizationId: project.organization_id,
+          clientId: client?.id,
+          projectId: project.id,
+          engagementId: engagement.id,
+          brandId: brand?.id,
+          activeServiceId: service?.id,
+          stageId: stage?.id,
+          origin: `/sphere/workspace/projects/${project.id}?tab=journey`,
+          originTab: 'journey',
+          workshopTab: 'services',
+        }),
+      }
+    })
 
   return {
     project: { ...project, owner: owner(project.owner_id) },

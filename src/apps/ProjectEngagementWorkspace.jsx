@@ -3,6 +3,7 @@ import { useOrganization } from '../context/OrganizationContext.jsx'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { projectEngagementWorkspace } from '../data/projectEngagementWorkspace'
 import RetainerPlanningPanel from '../components/RetainerPlanningPanel'
+import { appendWorkshopNavigation, parseWorkshopNavigation } from '../data/workshopNavigation.js'
 
 const TABS = [
   ['overview', 'Overview'],
@@ -22,6 +23,7 @@ export default function ProjectEngagementWorkspace() {
   const [searchParams, setSearchParams] = useSearchParams()
   const requestedTab = searchParams.get('tab')
   const tab = TABS.some(([id]) => id === requestedTab) ? requestedTab : 'overview'
+  const focusedRecord = parseWorkshopNavigation(searchParams).workRecord
   const selectTab = (id) => {
     const next = new URLSearchParams(searchParams)
     next.set('tab', id)
@@ -65,8 +67,14 @@ export default function ProjectEngagementWorkspace() {
     load()
     return () => { requestGeneration.current += 1 }
   }, [load])
+  useEffect(() => {
+    if (!workspace || !focusedRecord) return
+    globalThis.document?.getElementById(`work-record-${focusedRecord.kind}-${focusedRecord.id}`)?.focus()
+  }, [focusedRecord, tab, workspace])
+
 
   if (loading && !workspace) return <StateMessage>Loading project workspace…</StateMessage>
+
   if (!workspace) return <StateMessage error={error} action={() => navigate('/sphere/portfolio')}>Return to Portfolio</StateMessage>
 
   const { project, identity, summary } = workspace
@@ -106,8 +114,8 @@ export default function ProjectEngagementWorkspace() {
         <div className="mt-6">
           {tab === 'overview' && <Overview workspace={workspace} />}
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
-          {tab === 'project-tasks' && <ProjectTasks rows={workspace.projectTasks} />}
-          {tab === 'engagement-work' && <EngagementWork rows={workspace.engagementWorkItems} hasEngagement={identity.hasEngagement} />}
+          {tab === 'project-tasks' && <ProjectTasks rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
+          {tab === 'engagement-work' && <EngagementWork rows={workspace.engagementWorkItems} hasEngagement={identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
           {tab === 'retainer-planning' && showRetainerPlanning && <RetainerPlanningPanel project={project} engagement={workspace.engagement} services={workspace.services} />}
           {tab === 'outputs' && <Outputs workspace={workspace} />}
           {tab === 'activity' && <Activity rows={workspace.activity} />}
@@ -127,17 +135,26 @@ function Journey({ workspace, navigate }) {
   return <div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]"><Panel title="Instantiated journey"><RecordList rows={workspace.journey} empty="No journey stages were instantiated." render={(stage, index) => <div key={stage.id} className="rounded-xl border border-white/[0.07] bg-black/10 p-4"><div className="flex items-start gap-3"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-violet-500/15 text-xs font-semibold text-violet-300">{index + 1}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{stage.name}</p><Status value={stage.status} /></div><p className="mt-1 text-xs text-slate-500">{label(stage.accountable_department_id)} · {label(stage.stage_kind)}</p>{stage.blockers.length > 0 && <p className="mt-2 text-xs text-amber-300">Depends on: {stage.blockers.join(', ')}</p>}</div></div></div>} /></Panel><div className="space-y-5"><Panel title="Activated services"><RecordList rows={workspace.services} empty="No services activated." render={(item) => <Record key={item.id} title={item.service_catalog?.name || 'Service'} note={`${label(item.service_catalog?.department_id)} · ${item.owner.name}`} status={item.status} />} /></Panel><Panel title="Prerequisites"><RecordList rows={workspace.prerequisites} empty="No additional prerequisites recorded." render={(item) => <Record key={item.id} title={label(item.prerequisite_key)} note={`${label(item.satisfaction_method)} · ${item.description || 'No note'}`} status={item.status} />} /></Panel>{workspace.workshopLinks.length > 0 && <Panel title="Department Workshops"><div className="flex flex-wrap gap-2">{workspace.workshopLinks.map((item) => <button type="button" key={item.department} onClick={() => navigate(item.path)} className="rounded-xl border border-violet-500/20 bg-violet-500/10 px-3 py-2 text-sm font-medium text-violet-200 hover:bg-violet-500/15">Open {label(item.department)} Workshop</button>)}</div></Panel>}</div></div>
 }
 
-function ProjectTasks({ rows }) {
-  return <Panel title="Project Tasks" description="Canonical project-level planning and execution tasks. These are not Engagement Work Items."><RecordList rows={rows} empty="No Project Tasks recorded." render={(item) => <WorkRecord key={item.id} item={item} context={item.workstreamName} />} /></Panel>
+function recordWorkshopPath(link, item, kind, originTab) {
+  if (!link) return null
+  const context = parseWorkshopNavigation(new URL(link.path, 'https://anka.invalid').searchParams)
+  return appendWorkshopNavigation(new URL(link.path, 'https://anka.invalid').pathname, {
+    ...context, originTab, workRecord: { kind, id: item.id },
+    workshopTab: kind === 'project_task' ? 'tasks' : 'engagement-work',
+  })
 }
 
-function EngagementWork({ rows, hasEngagement }) {
+function ProjectTasks({ rows, workshopLinks, navigate }) {
+  return <Panel title="Project Tasks" description="Canonical project-level planning and execution tasks. These are not Engagement Work Items."><RecordList rows={rows} empty="No Project Tasks recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="project_task" context={item.workstreamName} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'project_task', 'project-tasks')} navigate={navigate} />} /></Panel>
+}
+
+function EngagementWork({ rows, hasEngagement, workshopLinks, navigate }) {
   if (!hasEngagement) return <Empty title="No engagement extension" note="Engagement Work Items do not apply to this project. Project Tasks remain available separately." />
-  return <Panel title="Engagement Work Items" description="Delivery work attached to the engagement extension. These are not Project Tasks."><RecordList rows={rows} empty="No Engagement Work Items recorded." render={(item) => <WorkRecord key={item.id} item={item} context={label(item.department_id)} automation={Boolean(item.automation_flagged_at)} />} /></Panel>
+  return <Panel title="Engagement Work Items" description="Delivery work attached to the engagement extension. These are not Project Tasks."><RecordList rows={rows} empty="No Engagement Work Items recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="engagement_work_item" context={label(item.department_id)} automation={Boolean(item.automation_flagged_at)} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'engagement_work_item', 'engagement-work')} navigate={navigate} />} /></Panel>
 }
 
-function WorkRecord({ item, context, automation = false }) {
-  return <div className={`rounded-xl border p-4 ${item.overdue || item.status === 'blocked' ? 'border-amber-500/20 bg-amber-500/[0.04]' : 'border-white/[0.07] bg-black/10'}`}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium text-white">{item.title}</p><p className="mt-1 text-xs text-slate-500">{context} · {item.owner.name} · Due {date(item.due_date)}</p></div><Status value={item.status} /></div>{item.description && <p className="mt-3 text-sm leading-6 text-slate-400">{item.description}</p>}<div className="mt-3 flex flex-wrap gap-2 text-[11px]">{item.overdue && <Pill attention>Overdue</Pill>}{automation && <Pill attention>Automation flag</Pill>}<Pill>{label(item.priority)}</Pill></div></div>
+function WorkRecord({ item, kind, context, automation = false, workshopPath, navigate }) {
+  return <div id={`work-record-${kind}-${item.id}`} tabIndex={-1} className={`rounded-xl border p-4 outline-none focus:ring-2 focus:ring-violet-400 ${item.overdue || item.status === 'blocked' ? 'border-amber-500/20 bg-amber-500/[0.04]' : 'border-white/[0.07] bg-black/10'}`}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium text-white">{item.title}</p><p className="mt-1 text-xs text-slate-500">{context} · {item.owner.name} · Due {date(item.due_date)}</p></div><Status value={item.status} /></div>{item.description && <p className="mt-3 text-sm leading-6 text-slate-400">{item.description}</p>}<div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">{item.overdue && <Pill attention>Overdue</Pill>}{automation && <Pill attention>Automation flag</Pill>}<Pill>{label(item.priority)}</Pill>{workshopPath && <button type="button" onClick={() => navigate(workshopPath)} className="ml-auto rounded-lg border border-violet-500/25 px-2.5 py-1.5 font-semibold text-violet-200 hover:bg-violet-500/10 focus:outline-none focus:ring-2 focus:ring-violet-400">Open in Workshop</button>}</div></div>
 }
 
 function Outputs({ workspace }) {

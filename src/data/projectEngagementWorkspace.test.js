@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { buildProjectEngagementWorkspace } from './projectEngagementWorkspaceModel.js'
+import { parseWorkshopNavigation } from './workshopNavigation.js'
 
 function fixture(overrides = {}) {
   return {
@@ -12,7 +13,7 @@ function fixture(overrides = {}) {
     brand: { id: 'brand-a', organization_id: 'org-a', name: 'Acme Brand' },
     workstreams: [{ id: 'stream-a', organization_id: 'org-a', project_id: 'project-a', department_id: 'design', name: 'Design', status: 'active', owner_id: 'owner-a' }],
     tasks: [
-      { id: 'task-a', organization_id: 'org-a', project_id: 'project-a', workstream_id: 'stream-a', title: 'Approve design', status: 'blocked', priority: 'high', assigned_to: 'owner-a', due_date: '2026-09-01' },
+      { id: 'task-a', organization_id: 'org-a', project_id: 'project-a', workstream_id: 'stream-a', department_id: 'design', title: 'Approve design', status: 'blocked', priority: 'high', assigned_to: 'owner-a', due_date: '2026-09-01' },
       { id: 'forged-task', organization_id: 'org-b', project_id: 'project-a', title: 'Forged', status: 'ready' },
     ],
     milestones: [{ id: 'milestone-a', organization_id: 'org-a', project_id: 'project-a', name: 'Launch', status: 'at_risk', target_date: '2026-09-02' }],
@@ -25,7 +26,7 @@ function fixture(overrides = {}) {
     stages: [{ id: 'stage-a', organization_id: 'org-a', engagement_id: 'engagement-a', name: 'Design review', accountable_department_id: 'design', stage_kind: 'delivery', position: 0, status: 'blocked' }],
     stageDependencies: [],
     prerequisites: [{ id: 'prereq-a', organization_id: 'org-a', engagement_id: 'engagement-a', prerequisite_key: 'brand', status: 'satisfied', satisfaction_method: 'existing_asset', target_stage_instance_id: 'stage-a' }],
-    workItems: [{ id: 'item-a', organization_id: 'org-a', project_id: 'project-a', engagement_id: 'engagement-a', title: 'Prepare frames', status: 'in_progress', priority: 'medium', assignee_id: 'owner-a', due_date: '2026-09-05' }],
+    workItems: [{ id: 'item-a', organization_id: 'org-a', project_id: 'project-a', engagement_id: 'engagement-a', department_id: 'design', title: 'Prepare frames', status: 'in_progress', priority: 'medium', assignee_id: 'owner-a', due_date: '2026-09-05' }],
     artifacts: [{ id: 'artifact-a', organization_id: 'org-a', project_id: 'project-a', engagement_id: 'engagement-a', title: 'Direction', artifact_type: 'vision' }],
     artifactVersions: [{ id: 'artifact-version-a', organization_id: 'org-a', artifact_id: 'artifact-a', version_number: 1 }],
     artifactApprovals: [{ id: 'approval-a', organization_id: 'org-a', engagement_id: 'engagement-a', artifact_id: 'artifact-a', artifact_version_id: 'artifact-version-a' }],
@@ -43,7 +44,17 @@ test('WKS2 composes one canonical project with its validated engagement extensio
   assert.equal(workspace.summary.reviewQueue, 1)
   assert.equal(workspace.workshopArtifacts[0].approvedVersions, 1)
   assert.deepEqual(workspace.activity.map((item) => item.source), ['Engagement', 'Project'])
-  assert.deepEqual(workspace.workshopLinks, [{ department: 'design', path: '/sphere/design?engagement=engagement-a' }])
+  assert.equal(workspace.workshopLinks.length, 1)
+  assert.equal(workspace.workshopLinks[0].department, 'design')
+  assert.equal(new URL(workspace.workshopLinks[0].path, 'https://anka.invalid').pathname, '/sphere/design')
+  const workshopContext = parseWorkshopNavigation(new URL(workspace.workshopLinks[0].path, 'https://anka.invalid').searchParams)
+  assert.equal(workshopContext.organizationId, 'org-a')
+  assert.equal(workshopContext.clientId, 'client-a')
+  assert.equal(workshopContext.projectId, 'project-a')
+  assert.equal(workshopContext.engagementId, 'engagement-a')
+  assert.equal(workshopContext.brandId, 'brand-a')
+  assert.equal(workshopContext.activeServiceId, 'service-a')
+  assert.equal(workshopContext.stageId, 'stage-a')
   assert.ok(workspace.attentionSignals.includes('Project Tasks include blocked work'))
 })
 
