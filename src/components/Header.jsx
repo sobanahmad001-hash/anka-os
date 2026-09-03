@@ -19,10 +19,9 @@ export default function Header() {
     (e.key === 'admin' && (location.pathname.startsWith('/admin') || location.pathname === '/users' || location.pathname === '/settings'))
   )
   const mobileItems = (activeEnv?.items || []).filter((item) => {
-    if (item.isHeader || !item.path) return false
     if (item.path === '/assistant' && !featureFlags.aiAssistance) return false
     if (activeEnv?.key === 'admin') return profile?.role === 'admin'
-    return item.dept === null || profile?.role === 'admin' || profile?.department === item.dept
+    return item.dept == null || profile?.role === 'admin' || profile?.department === item.dept
   })
 
   // Close dropdown on outside click
@@ -81,13 +80,10 @@ export default function Header() {
       {showMobileNav && (
         <nav className="absolute left-3 right-3 top-[3.75rem] rounded-2xl border border-white/10 bg-[#141824] p-2 shadow-2xl sm:hidden">
           <p className="px-3 pb-2 pt-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">{activeEnv?.label}</p>
-          {mobileItems.map((item) => (
-            <button
-              type="button"
-              key={item.path}
-              onClick={() => navigate(item.path)}
-              className={`block w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium ${location.pathname === item.path ? 'bg-violet-500/15 text-violet-100' : 'text-slate-400 hover:bg-white/[0.05] hover:text-white'}`}
-            >
+          {mobileItems.map((item) => item.isHeader ? (
+            <p key={`header-${item.label}`} className="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">{item.label}</p>
+          ) : (
+            <button type="button" key={item.path} onClick={() => navigate(item.path)} className={`block w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium ${location.pathname === item.path ? 'bg-violet-500/15 text-violet-100' : 'text-slate-400 hover:bg-white/[0.05] hover:text-white'}`}>
               {item.label}
             </button>
           ))}
@@ -159,7 +155,7 @@ export default function Header() {
                       onClick={() => {
                         markRead(notif.id)
                         if (notif.action_url) navigate(notif.action_url)
-                        else if (notif.project_id) navigate('/sphere/engagements')
+                        else if (notif.project_id) navigate('/sphere/workspace')
                         setShowNotifications(false)
                       }}
                       className={`w-full text-left px-4 py-3 border-b border-gray-700/50 hover:bg-gray-700/50 transition-colors ${!notif.read ? 'bg-purple-900/10' : ''}`}>

@@ -9,6 +9,7 @@ test('major application surfaces are loaded as independent route chunks', () => 
   for (const moduleName of [
     'AgencyCommandCenter',
     'OperatingSpine',
+    'PortfolioWorkspace',
     'DepartmentWorkshop',
     'ContentStudio',
     'MarketingStudio',

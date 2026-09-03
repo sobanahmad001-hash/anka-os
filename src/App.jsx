@@ -9,6 +9,7 @@ const Settings = lazy(() => import('./apps/Settings'))
 const AgencyCommandCenter = lazy(() => import('./apps/AgencyCommandCenter'))
 const UserManagement = lazy(() => import('./apps/UserManagement'))
 const OperatingSpine = lazy(() => import('./apps/OperatingSpine'))
+const PortfolioWorkspace = lazy(() => import('./apps/PortfolioWorkspace'))
 const DesignWorkshop = lazy(() => import('./apps/DesignWorkshop'))
 const DesignSystems = lazy(() => import('./apps/DesignSystems'))
 const MarketingStudio = lazy(() => import('./apps/MarketingStudio'))
@@ -57,7 +58,7 @@ export default function App() {
         }
       >
         {/* Default redirect */}
-        <Route index element={<Navigate to="/sphere/engagements" replace />} />
+        <Route index element={<Navigate to="/sphere/workspace" replace />} />
 
         {/* ADMIN */}
         <Route path="admin" element={<AgencyCommandCenter />} />
@@ -66,8 +67,10 @@ export default function App() {
         <Route path="settings" element={<Settings />} />
 
         {/* ANKA SPHERE */}
+        <Route path="sphere/workspace" element={<PortfolioWorkspace />} />
+        <Route path="sphere/internal" element={<PortfolioWorkspace initialOwnerKind="internal" />} />
         <Route path="sphere/engagements" element={<OperatingSpine initialView="engagements" />} />
-        <Route path="sphere/projects" element={<Navigate to="/sphere/engagements" replace />} />
+        <Route path="sphere/projects" element={<Navigate to="/sphere/workspace" replace />} />
         <Route path="sphere/my-work" element={<MyWork />} />
         <Route path="sphere/content" element={<DepartmentWorkshop departmentId="content" />} />
         <Route path="sphere/content/studio" element={<ContentStudio />} />
@@ -97,9 +100,9 @@ export default function App() {
         <Route path="sphere/seo" element={<Navigate to="/sphere/marketing/seo" replace />} />
 
         {/* ANKA ASSISTANT */}
-        <Route path="assistant" element={featureFlags.aiAssistance ? <AnkaAssistant /> : <Navigate to="/sphere/engagements" replace />} />
+        <Route path="assistant" element={featureFlags.aiAssistance ? <AnkaAssistant /> : <Navigate to="/sphere/workspace" replace />} />
 
-        <Route path="*" element={<Navigate to="/sphere/engagements" replace />} />
+        <Route path="*" element={<Navigate to="/sphere/workspace" replace />} />
       </Route>
     </Routes>
     </Suspense>
