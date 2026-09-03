@@ -17,6 +17,9 @@ create table private.internal_project_setup_requests (
     references public.projects(id, organization_id) on delete restrict
 );
 
+create index internal_project_setup_requests_requested_by_idx
+  on private.internal_project_setup_requests(requested_by);
+
 alter table private.internal_project_setup_requests enable row level security;
 
 create policy "Creators read own Internal Work setup requests"
@@ -52,6 +55,102 @@ on private.internal_project_setup_requests for insert to authenticated with chec
 revoke all on table private.internal_project_setup_requests from public, anon, authenticated, service_role;
 grant usage on schema private to authenticated;
 grant select, insert on table private.internal_project_setup_requests to authenticated;
+
+-- The canonical project INSERT policy authorizes every active team member. The
+-- membership table's inherited RLS intentionally shows ordinary contributors
+-- only their own row, so target-owner validation must cross that boundary in a
+-- narrow helper without exposing membership records or granting wider table
+-- visibility. Successful checks lock the exact membership row for this setup.
+create function private.can_select_internal_project_owner(
+  p_organization_id uuid,
+  p_user_id uuid,
+  p_department_id text
+)
+returns boolean
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.is_team_organization_member(p_organization_id) then
+    return false;
+  end if;
+
+  perform 1
+  from public.organization_memberships membership
+  where membership.organization_id = p_organization_id
+    and membership.user_id = p_user_id
+    and membership.member_kind = 'team'
+    and membership.status = 'active'
+    and (p_department_id is null or membership.department_id = p_department_id)
+  for share;
+
+  return found;
+end;
+$$;
+
+revoke all on function private.can_select_internal_project_owner(uuid, uuid, text)
+  from public, anon, authenticated, service_role;
+grant execute on function private.can_select_internal_project_owner(uuid, uuid, text)
+  to authenticated;
+
+-- Read-only owner choices for callers who already hold the canonical project
+-- creation authority. It returns only the fields required by the setup form.
+create function public.get_internal_project_setup_options(p_organization_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_members jsonb;
+  v_departments jsonb;
+begin
+  if (select auth.uid()) is null
+    or not public.is_team_organization_member(p_organization_id)
+    or not exists (
+      select 1 from public.organizations organization
+      where organization.id = p_organization_id and organization.status = 'active'
+    ) then
+    raise exception 'Active team membership in the selected organization is required.' using errcode = '42501';
+  end if;
+
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'id', membership.user_id,
+    'name', coalesce(nullif(trim(profile.full_name), ''), 'Team member'),
+    'role', membership.role,
+    'department_id', membership.department_id
+  ) order by membership.user_id), '[]'::jsonb)
+  into v_members
+  from public.organization_memberships membership
+  left join public.profiles profile on profile.id = membership.user_id
+  where membership.organization_id = p_organization_id
+    and membership.member_kind = 'team'
+    and membership.status = 'active';
+
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'id', department.id,
+    'organization_id', department.organization_id,
+    'name', department.name
+  ) order by department.id), '[]'::jsonb)
+  into v_departments
+  from public.departments department
+  where department.organization_id = p_organization_id
+    and department.id in ('content', 'design', 'development', 'marketing');
+
+  return jsonb_build_object('members', v_members, 'departments', v_departments);
+end;
+$$;
+
+revoke all on function public.get_internal_project_setup_options(uuid)
+  from public, anon, authenticated, service_role;
+grant execute on function public.get_internal_project_setup_options(uuid)
+  to authenticated;
+
+comment on function public.get_internal_project_setup_options(uuid) is
+  'Returns the active same-organization team owners and canonical departments available to an authorized Internal Work creator.';
 
 create function public.create_internal_project_setup(
   p_organization_id uuid,
@@ -141,14 +240,7 @@ begin
     raise exception 'Active team membership required.' using errcode = '42501';
   end if;
 
-  perform 1
-  from public.organization_memberships membership
-  where membership.organization_id = p_organization_id
-    and membership.user_id = p_owner_id
-    and membership.member_kind = 'team'
-    and membership.status = 'active'
-  for share;
-  if not found then
+  if not private.can_select_internal_project_owner(p_organization_id, p_owner_id, null) then
     raise exception 'Project owner must be an active team member in the selected organization.' using errcode = '42501';
   end if;
 
@@ -171,15 +263,11 @@ begin
   for share;
 
   for v_position in 1..cardinality(v_department_ids) loop
-    perform 1
-    from public.organization_memberships membership
-    where membership.organization_id = p_organization_id
-      and membership.user_id = v_workstream_owner_ids[v_position]
-      and membership.member_kind = 'team'
-      and membership.status = 'active'
-      and membership.department_id = v_department_ids[v_position]
-    for share;
-    if not found then
+    if not private.can_select_internal_project_owner(
+      p_organization_id,
+      v_workstream_owner_ids[v_position],
+      v_department_ids[v_position]
+    ) then
       raise exception 'Each workstream owner must be an active team member of that department in the selected organization.' using errcode = '42501';
     end if;
   end loop;

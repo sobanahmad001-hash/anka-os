@@ -2,7 +2,6 @@ import { supabase } from '../lib/supabase.js'
 
 export const INTERNAL_WORK_DEPARTMENTS = Object.freeze(['content', 'design', 'development', 'marketing'])
 
-const PAGE_SIZE = 500
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function required(value, label) {
@@ -18,25 +17,6 @@ function requestError(error, fallback) {
 
 function withSignal(query, signal) {
   return signal && typeof query.abortSignal === 'function' ? query.abortSignal(signal) : query
-}
-
-async function collectPages(factory, { signal, validate, label, key = (row) => row.id }) {
-  const rowsByKey = new Map()
-  for (let offset = 0; offset < PAGE_SIZE * 10000; offset += PAGE_SIZE) {
-    if (signal?.aborted) throw Object.assign(new Error(`${label} request aborted`), { name: 'AbortError' })
-    const { data, error, status } = await factory(offset, offset + PAGE_SIZE - 1)
-    if (error) throw requestError({ ...error, status }, `Unable to load ${label}.`)
-    const rows = data || []
-    for (const row of rows) {
-      const id = key(row)
-      if (!id || !validate(row)) throw Object.assign(new Error(`${label} returned data outside the active organization.`), { status: 403, membershipMismatch: true })
-      const prior = rowsByKey.get(id)
-      if (prior && JSON.stringify(prior) !== JSON.stringify(row)) throw Object.assign(new Error(`${label} changed while loading.`), { status: 409 })
-      rowsByKey.set(id, row)
-    }
-    if (rows.length < PAGE_SIZE) return [...rowsByKey.values()]
-  }
-  throw Object.assign(new Error(`${label} exceeded the safe pagination limit.`), { status: 409 })
 }
 
 export function normalizeInternalProjectSetup(input) {
@@ -74,23 +54,35 @@ export function createInternalProjectSetupRepository(client) {
   return Object.freeze({
     async getOptions(organizationId, { signal } = {}) {
       required(organizationId, 'organizationId')
-      const memberships = await collectPages((from, to) => withSignal(
-        client.from('organization_memberships')
-          .select('organization_id, user_id, role, department_id, member_kind, status')
-          .eq('organization_id', organizationId).eq('member_kind', 'team').eq('status', 'active')
-          .order('user_id').range(from, to), signal
-      ), { signal, label: 'Internal Work setup memberships', key: (row) => row.user_id, validate: (row) => row.organization_id === organizationId && row.member_kind === 'team' && row.status === 'active' })
-      const memberIds = memberships.map((row) => row.user_id).sort()
-      const profiles = memberIds.length ? await collectPages((from, to) => withSignal(
-        client.from('profiles').select('id, full_name, email').in('id', memberIds).order('id').range(from, to), signal
-      ), { signal, label: 'Internal Work setup profiles', validate: (row) => memberIds.includes(row.id) }) : []
-      const departments = await collectPages((from, to) => withSignal(
-        client.from('departments').select('id, organization_id, name').eq('organization_id', organizationId).order('id').range(from, to), signal
-      ), { signal, label: 'Internal Work setup departments', validate: (row) => row.organization_id === organizationId && INTERNAL_WORK_DEPARTMENTS.includes(row.id) })
-      const names = new Map(profiles.map((row) => [row.id, row.full_name || row.email]))
+      const query = withSignal(client.rpc('get_internal_project_setup_options', {
+        p_organization_id: organizationId,
+      }), signal)
+      const { data, error, status } = await query
+      if (error) throw requestError({ ...error, status }, 'Unable to load Internal Work setup options.')
+      if (!Array.isArray(data?.members) || !Array.isArray(data?.departments)) {
+        throw Object.assign(new Error('Internal Work setup options returned an invalid result.'), { status: 409 })
+      }
+      const memberIds = new Set()
+      for (const member of data.members) {
+        if (!member?.id || memberIds.has(member.id)) throw Object.assign(new Error('Internal Work setup options returned duplicate or invalid members.'), { status: 409 })
+        memberIds.add(member.id)
+      }
+      const departmentIds = new Set()
+      for (const department of data.departments) {
+        if (!department?.id || department.organization_id !== organizationId
+          || !INTERNAL_WORK_DEPARTMENTS.includes(department.id) || departmentIds.has(department.id)) {
+          throw Object.assign(new Error('Internal Work setup options returned data outside the active organization.'), { status: 403, membershipMismatch: true })
+        }
+        departmentIds.add(department.id)
+      }
       return {
-        members: memberships.map((row) => ({ id: row.user_id, name: names.get(row.user_id) || 'Team member', role: row.role, departmentId: row.department_id })),
-        departments,
+        members: data.members.map((row) => ({
+          id: row.id,
+          name: row.name || 'Team member',
+          role: row.role,
+          departmentId: row.department_id,
+        })),
+        departments: data.departments,
       }
     },
 
