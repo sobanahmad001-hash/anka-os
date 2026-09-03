@@ -98,6 +98,17 @@ test('AI stores one canonical project with an optional consistent engagement ext
   assert.doesNotMatch(aiChat, /Select a project or an engagement, not both/)
 })
 
+test('AI mutual-exclusion constraint is removed before engagement run backfill', () => {
+  const obsoleteConstraintDrop = migration.indexOf(
+    'drop constraint ai_runs_single_commercial_context_check',
+  )
+  const aiRunBackfill = migration.indexOf('update public.ai_runs ai_run')
+
+  assert.notEqual(obsoleteConstraintDrop, -1)
+  assert.notEqual(aiRunBackfill, -1)
+  assert.ok(obsoleteConstraintDrop < aiRunBackfill)
+})
+
 test('Assistant presents one project context and derives its engagement extension', () => {
   assert.match(assistant, /engagement\.project_id === projectId/)
   assert.match(assistant, /Field label="Project context"/)
@@ -133,6 +144,7 @@ test('OAF2 verifier checks invariants and rolls all representative writes back',
     'one_living_record_per_project',
     'artifact_ownership_is_consistent',
     'work_item_ownership_is_consistent',
+    'engagement_ai_runs_are_backfilled',
     'portal_client_matches_commercial_client',
     ...alwaysEmittedRuntimeChecks,
   ]) {

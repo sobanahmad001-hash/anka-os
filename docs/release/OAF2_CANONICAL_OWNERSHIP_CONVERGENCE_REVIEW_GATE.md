@@ -67,6 +67,22 @@ Implementation head `a4acb34d93a3519c79047e6ee8883aedc4196675` passed the follow
 
 The final pull-request head must also pass CI after this documentation-only evidence commit. Runtime SQL behavior remains a post-apply approval gate because this branch host has neither a local database runtime nor authority to mutate the linked database.
 
+### Live preflight correction
+
+Admin/Testing's controlled preflight of head `605c71d7614c35baed267551b1c93e8cd858e0ed` found that the legacy `ai_runs_single_commercial_context_check` still prohibited the AI-run project backfill. The transaction rolled back cleanly: migration version `20260903050747` and all sampled OAF2 columns/functions remained absent.
+
+The corrected migration drops that exact obsolete constraint before updating `public.ai_runs`, then adds the replacement consistency check and composite foreign key in the later invariant section. A structural regression test enforces this order, and the rollback-safe verifier now explicitly requires every engagement-scoped AI run to have the matching canonical project.
+
+Post-correction local evidence before push:
+
+- Full Node suite: 347 passed, 0 failed.
+- ESLint: 0 errors; 284 pre-existing warnings.
+- Production build: passed (343 modules transformed).
+- `git diff --check`: passed.
+- Supabase CLI `2.115.0` linked migration dry-run: passed and reported only `20260903050747_canonical_ownership_convergence.sql` pending; no database push was performed.
+
+Exact-head CI and a fresh Admin/Testing-controlled live preflight are required before approval.
+
 ## Rollout order after approval
 
 1. Apply the database migration through the Admin/Testing-controlled release process.

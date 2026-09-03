@@ -77,7 +77,13 @@ insert into oaf2_runtime_checks values
     join public.engagements engagement
       on engagement.id = ai_run.engagement_id
      and engagement.organization_id = ai_run.organization_id
-    where engagement.project_id <> ai_run.project_id
+    where engagement.project_id is distinct from ai_run.project_id
+  )),
+  ('engagement_ai_runs_are_backfilled', not exists (
+    select 1
+    from public.ai_runs ai_run
+    where ai_run.engagement_id is not null
+      and ai_run.project_id is null
   )),
   ('portal_client_matches_commercial_client', not exists (
     select 1

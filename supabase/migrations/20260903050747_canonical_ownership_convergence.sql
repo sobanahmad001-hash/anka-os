@@ -196,6 +196,12 @@ from public.engagements engagement
 where work_item.engagement_id = engagement.id
   and work_item.organization_id = engagement.organization_id;
 
+-- Existing engagement-scoped AI runs are valid under the old model only while
+-- project_id is null. Remove that obsolete mutual-exclusion rule before
+-- backfilling the canonical project pair.
+alter table public.ai_runs
+  drop constraint ai_runs_single_commercial_context_check;
+
 update public.ai_runs ai_run
 set project_id = engagement.project_id
 from public.engagements engagement
@@ -273,9 +279,6 @@ alter table public.work_items
     foreign key (engagement_id, project_id, organization_id)
     references public.engagements(id, project_id, organization_id)
     on delete cascade;
-
-alter table public.ai_runs
-  drop constraint ai_runs_single_commercial_context_check;
 
 alter table public.ai_runs
   add constraint ai_runs_engagement_requires_project_check
