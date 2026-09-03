@@ -1,10 +1,10 @@
 # PLN2 — Versioned Pipeline Templates Review Gate
 
-Status: implemented locally for review; not pushed, merged, deployed, or applied to any database.
+Status: corrected and verified locally for review; not pushed, merged, deployed, or applied to any shared/live database.
 
 ## Review basis
 
-- Canonical base: `origin/main` at `762de0477f5cbbed7a5ec9bc65cd651fee494274`.
+- Canonical base: `origin/main` at `c30b4fab1cf95ed2eec88f7c211e05a2d9cd3607` (RET3 merge).
 - PLN branch: `feat/pln-pipeline-composition-audit` in the isolated `anka-os-pln` worktree.
 - This implementation follows the approved Product Design decision: a pipeline template is an immutable, versioned preset of selected services. It does not own a stage, dependency, or prerequisite graph.
 - Existing canonical delivery rules remain authoritative: `service_stage_rules`, `blueprint_stage_catalog`, and `blueprint_stage_dependencies` determine the journey at planning time.
@@ -23,6 +23,7 @@ Migration `20260903201500_pln2_versioned_pipeline_templates.sql` adds:
 - `create_pipeline_template_version(...)`: a role-checking draft/version action.
 - `publish_pipeline_template_version(...)`: a role-checking, replay-safe publication action.
 - RLS, grants, composite tenant foreign keys, foreign-key indexes, and append-only guards.
+- PLN-private authorization helpers that require an authenticated caller, active team-kind membership, active membership status, and an active organization. The shared foundation helpers remain unchanged.
 
 The repository adapter exposes organization-scoped reads and only those two database-owned mutations. It does not reproduce authorization in the browser.
 
@@ -51,8 +52,12 @@ The rollback-only SQL verifier checks:
 - canonical-rule manifest inputs and required hashes;
 - runtime role behavior for Department Manager, Operations Admin, and Contributor;
 - draft visibility, publication visibility, ordered service retention, idempotent publication replay, and rejected mutation/deletion.
+- actual policy expressions and enabled trigger type/function behavior, rather than catalog names alone;
+- privileged client-kind role denial, suspended and archived organization denial, suspended and revoked membership denial, cross-organization service/write/read denial, anonymous denial, and zero-row side effects;
+- authorization being re-evaluated before an existing publication is returned on replay;
+- actual valid index-prefix coverage for every PLN foreign key, including constraint-backed coverage, with no duplicate composition-request index or unreferenced publication identity constraint.
 
-The verifier starts a transaction and always rolls it back. It must never be run against a live or production database as part of this task; database execution remains with the source Admin.
+The verifier starts a transaction and always rolls it back. All 38 named checks passed against a separate disposable PostgreSQL 17.11 database restored from a schema-only snapshot and populated only with synthetic reference rows. No shared task database or production system was contacted. Live verification and application remain with the source Admin.
 
 ## Migration ordering
 
@@ -86,6 +91,18 @@ Database reviewers should inspect and, in an authorized disposable/local databas
 ```text
 supabase/verify_20260903201500_pln2_versioned_pipeline_templates.sql
 ```
+
+## Corrected local evidence
+
+- Focused PLN2 contracts: 11 passed, 0 failed.
+- Full Node suite: 464 passed, 0 failed.
+- Exact CI-configured frozen Deno suite: 143 passed, 0 failed on checksum-verified Deno 2.9.5.
+- Exact CI-configured Deno check: passed.
+- Production build: passed.
+- Lint: 0 errors and 347 pre-existing warnings.
+- Disposable PostgreSQL migration: applied successfully.
+- Rollback SQL verifier: all 38 named checks passed and rolled back.
+- Supabase CLI database lint could not run because the portable PostgreSQL distribution does not include `plpgsql_check`; no extension was installed and the direct PostgreSQL verifier result is reported separately.
 
 ## Decision gate for PLN3
 

@@ -21,6 +21,32 @@ test('PLN2 maps approved drafting and publication authority to established roles
   assert.doesNotMatch(migration, /array\['system_owner', 'operations_admin', 'executive'\]/)
 })
 
+test('PLN2 requires an active team member in an active organization', () => {
+  assert.match(migration, /create or replace function private\.is_active_pipeline_team_member/)
+  assert.match(migration, /create or replace function private\.has_active_pipeline_template_role/)
+  for (const required of [
+    /organization\.status = 'active'/,
+    /membership\.member_kind = 'team'/,
+    /membership\.status = 'active'/,
+    /membership\.user_id = \(select auth\.uid\(\)\)/,
+  ]) assert.match(migration, required)
+
+  const privateVisibility = migration.match(
+    /create or replace function private\.can_read_pipeline_template_version[\s\S]*?revoke all on function private\.can_read_pipeline_template_version/,
+  )?.[0] || ''
+  assert.match(privateVisibility, /private\.is_active_pipeline_team_member/)
+  assert.match(privateVisibility, /private\.has_active_pipeline_template_role/)
+  assert.doesNotMatch(privateVisibility, /public\.(?:is_team_organization_member|has_organization_role)/)
+
+  for (const rpc of ['create_pipeline_template_version', 'publish_pipeline_template_version']) {
+    const definition = migration.match(new RegExp(
+      `create or replace function public\\.${rpc}[\\s\\S]*?\\n\\$\\$;`,
+    ))?.[0] || ''
+    assert.match(definition, /private\.has_active_pipeline_template_role/)
+    assert.doesNotMatch(definition, /public\.has_organization_role/)
+  }
+})
+
 test('PLN2 normalizes one ordered unique service selection', () => {
   assert.deepEqual(normalizePipelineTemplateVersion({
     slug: ' Website_Delivery ', name: ' Website delivery ',
@@ -103,6 +129,18 @@ test('PLN2 stores immutable presets without creating a template-owned graph', ()
   assert.match(migration, /Canonical service rules remain the only journey graph authority/)
 })
 
+test('PLN2 keeps only real foreign-key coverage and non-redundant publication constraints', () => {
+  assert.match(migration, /create index idx_pipeline_templates_created_by/)
+  assert.doesNotMatch(migration, /create index idx_engagement_composition_requests_engagement_org_fk/)
+  const publications = migration.match(
+    /create table public\.pipeline_template_publications[\s\S]*?\n\);/,
+  )?.[0] || ''
+  assert.doesNotMatch(publications, /unique \(id, organization_id\)/)
+  assert.match(verifier, /from pg_index index_record/)
+  assert.match(verifier, /index_record\.indisvalid/)
+  assert.match(verifier, /foreign_keys\.conkey/)
+})
+
 test('PLN2 publication freezes selection and current-rule hashes for later drift notice', () => {
   assert.match(migration, /service_selection_sha256/)
   assert.match(migration, /published_rule_manifest/)
@@ -133,13 +171,22 @@ test('PLN2 keeps browser writes closed and preserves compose_engagement', () => 
 test('PLN2 verifier covers catalog ACL RLS role immutability tenant and negative gates', () => {
   for (const gate of [
     'all_tables_have_rls', 'rls_policy_matrix_is_exact', 'table_acl_matrix_is_exact',
-    'rpc_acl_matrix_is_exact', 'rpc_security_is_exact', 'append_only_guards_are_exact',
+    'rpc_acl_matrix_is_exact', 'rpc_security_is_exact', 'authorization_helpers_are_exact',
+    'append_only_guards_are_exact',
     'tenant_foreign_keys_are_exact', 'foreign_key_indexes_exist', 'no_template_owned_graph',
     'department_manager_can_draft', 'department_manager_cannot_publish',
     'operations_admin_can_publish', 'contributor_cannot_draft',
     'published_version_visible_to_contributor', 'unpublished_version_hidden_from_contributor',
     'version_update_is_rejected', 'publication_delete_is_rejected',
+    'privileged_client_membership_is_rejected', 'suspended_organization_is_rejected',
+    'archived_organization_is_rejected', 'suspended_membership_is_rejected',
+    'revoked_membership_is_rejected', 'cross_organization_service_is_rejected',
+    'cross_organization_write_is_rejected', 'cross_organization_reads_are_empty',
+    'anonymous_calls_are_rejected', 'rejected_calls_leave_no_rows',
+    'publish_replay_rechecks_authorization', 'inactive_context_reads_are_empty',
   ]) assert.match(verifier, new RegExp(`'${gate}'`))
+  assert.match(verifier, /pg_get_expr\(policy\.polqual/)
+  assert.match(verifier, /trigger_record\.tgtype = 27/)
   assert.match(verifier, /rollback;/)
   assert.doesNotMatch(verifier, /commit;/)
 })

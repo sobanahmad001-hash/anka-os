@@ -76,8 +76,7 @@ create table public.pipeline_template_publications (
     references public.pipeline_template_versions(id, pipeline_template_id, organization_id)
     on delete restrict,
   unique (pipeline_template_version_id),
-  unique (pipeline_template_id, publication_number),
-  unique (id, organization_id)
+  unique (pipeline_template_id, publication_number)
 );
 
 -- PLN3 will write one immutable provenance row when a preset-backed engagement
@@ -133,6 +132,8 @@ create table public.engagement_composition_requests (
 
 create index idx_pipeline_template_versions_template_org_fk
   on public.pipeline_template_versions(pipeline_template_id, organization_id);
+create index idx_pipeline_templates_created_by
+  on public.pipeline_templates(created_by);
 create index idx_pipeline_template_versions_source_org_fk
   on public.pipeline_template_versions(source_version_id, pipeline_template_id, organization_id)
   where source_version_id is not null;
@@ -162,8 +163,6 @@ create index idx_engagement_pipeline_origins_version_org_fk
   );
 create index idx_engagement_pipeline_origins_created_by
   on public.engagement_pipeline_origins(created_by);
-create index idx_engagement_composition_requests_engagement_org_fk
-  on public.engagement_composition_requests(engagement_id, organization_id);
 create index idx_engagement_composition_requests_requested_by
   on public.engagement_composition_requests(requested_by);
 
@@ -305,6 +304,62 @@ $$;
 revoke all on function private.pipeline_rule_manifest(uuid, uuid[])
   from public, anon, authenticated;
 
+create or replace function private.is_active_pipeline_team_member(
+  p_organization_id uuid
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select (select auth.uid()) is not null
+    and exists (
+      select 1
+      from public.organizations organization
+      join public.organization_memberships membership
+        on membership.organization_id = organization.id
+      where organization.id = p_organization_id
+        and organization.status = 'active'
+        and membership.user_id = (select auth.uid())
+        and membership.member_kind = 'team'
+        and membership.status = 'active'
+    );
+$$;
+
+revoke all on function private.is_active_pipeline_team_member(uuid)
+  from public, anon, authenticated, service_role;
+grant execute on function private.is_active_pipeline_team_member(uuid)
+  to authenticated, service_role;
+
+create or replace function private.has_active_pipeline_template_role(
+  p_organization_id uuid,
+  p_allowed_roles text[]
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select (select auth.uid()) is not null
+    and exists (
+      select 1
+      from public.organizations organization
+      join public.organization_memberships membership
+        on membership.organization_id = organization.id
+      where organization.id = p_organization_id
+        and organization.status = 'active'
+        and membership.user_id = (select auth.uid())
+        and membership.member_kind = 'team'
+        and membership.status = 'active'
+        and membership.role = any(p_allowed_roles)
+    );
+$$;
+
+revoke all on function private.has_active_pipeline_template_role(uuid, text[])
+  from public, anon, authenticated, service_role;
+
 create or replace function private.can_read_pipeline_template_version(
   p_version_id uuid,
   p_organization_id uuid
@@ -316,7 +371,7 @@ security definer
 set search_path = ''
 as $$
   select (select auth.uid()) is not null
-    and public.is_team_organization_member(p_organization_id)
+    and private.is_active_pipeline_team_member(p_organization_id)
     and exists (
       select 1
       from public.pipeline_template_versions version
@@ -324,7 +379,7 @@ as $$
         and version.organization_id = p_organization_id
         and (
           version.created_by = (select auth.uid())
-          or public.has_organization_role(
+          or private.has_active_pipeline_template_role(
             p_organization_id,
             array['system_owner', 'operations_admin', 'department_manager']
           )
@@ -369,7 +424,7 @@ begin
   if v_actor_id is null then
     raise exception 'Authentication required.' using errcode = '42501';
   end if;
-  if not public.has_organization_role(
+  if not private.has_active_pipeline_template_role(
     p_organization_id,
     array['system_owner', 'operations_admin', 'department_manager']
   ) then
@@ -497,7 +552,7 @@ begin
   if not found then
     raise exception 'Pipeline template version not found.' using errcode = 'P0002';
   end if;
-  if not public.has_organization_role(
+  if not private.has_active_pipeline_template_role(
     v_version.organization_id,
     array['system_owner', 'operations_admin']
   ) then
@@ -605,7 +660,7 @@ alter table public.engagement_composition_requests enable row level security;
 
 create policy "Team can read organization pipeline templates"
   on public.pipeline_templates for select to authenticated
-  using (public.is_team_organization_member(organization_id));
+  using (private.is_active_pipeline_team_member(organization_id));
 create policy "Authorized team can read pipeline template versions"
   on public.pipeline_template_versions for select to authenticated
   using (private.can_read_pipeline_template_version(id, organization_id));
@@ -616,10 +671,10 @@ create policy "Authorized team can read pipeline template services"
   ));
 create policy "Team can read pipeline template publications"
   on public.pipeline_template_publications for select to authenticated
-  using (public.is_team_organization_member(organization_id));
+  using (private.is_active_pipeline_team_member(organization_id));
 create policy "Team can read engagement pipeline provenance"
   on public.engagement_pipeline_origins for select to authenticated
-  using (public.is_team_organization_member(organization_id));
+  using (private.is_active_pipeline_team_member(organization_id));
 
 revoke all on
   public.pipeline_templates,

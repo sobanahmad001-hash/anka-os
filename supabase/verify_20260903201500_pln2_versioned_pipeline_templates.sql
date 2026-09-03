@@ -12,9 +12,11 @@ insert into pln2_checks (check_name) values
   ('table_acl_matrix_is_exact'),
   ('rpc_acl_matrix_is_exact'),
   ('rpc_security_is_exact'),
+  ('authorization_helpers_are_exact'),
   ('append_only_guards_are_exact'),
   ('tenant_foreign_keys_are_exact'),
   ('foreign_key_indexes_exist'),
+  ('no_redundant_catalog_constraints'),
   ('no_template_owned_graph'),
   ('canonical_composer_is_unchanged'),
   ('rule_manifest_uses_canonical_graph'),
@@ -30,7 +32,19 @@ insert into pln2_checks (check_name) values
   ('publication_replay_is_idempotent'),
   ('service_selection_order_is_preserved'),
   ('version_update_is_rejected'),
-  ('publication_delete_is_rejected');
+  ('publication_delete_is_rejected'),
+  ('privileged_client_membership_is_rejected'),
+  ('suspended_organization_is_rejected'),
+  ('archived_organization_is_rejected'),
+  ('suspended_membership_is_rejected'),
+  ('revoked_membership_is_rejected'),
+  ('cross_organization_service_is_rejected'),
+  ('cross_organization_write_is_rejected'),
+  ('cross_organization_reads_are_empty'),
+  ('anonymous_calls_are_rejected'),
+  ('rejected_calls_leave_no_rows'),
+  ('publish_replay_rechecks_authorization'),
+  ('inactive_context_reads_are_empty');
 
 update pln2_checks set passed = coalesce((
   select count(*) = 6 and bool_and(class.relrowsecurity)
@@ -46,15 +60,21 @@ update pln2_checks set passed = coalesce((
 ), false) where check_name = 'all_tables_have_rls';
 
 update pln2_checks set passed = (
-  with expected(table_name, policy_name) as (values
-    ('pipeline_templates', 'Team can read organization pipeline templates'),
-    ('pipeline_template_versions', 'Authorized team can read pipeline template versions'),
-    ('pipeline_template_version_services', 'Authorized team can read pipeline template services'),
-    ('pipeline_template_publications', 'Team can read pipeline template publications'),
-    ('engagement_pipeline_origins', 'Team can read engagement pipeline provenance')
+  with expected(table_name, policy_name, required_expression) as (values
+    ('pipeline_templates', 'Team can read organization pipeline templates',
+      'is_active_pipeline_team_member(organization_id)'),
+    ('pipeline_template_versions', 'Authorized team can read pipeline template versions',
+      'can_read_pipeline_template_version(id, organization_id)'),
+    ('pipeline_template_version_services', 'Authorized team can read pipeline template services',
+      'can_read_pipeline_template_version(pipeline_template_version_id, organization_id)'),
+    ('pipeline_template_publications', 'Team can read pipeline template publications',
+      'is_active_pipeline_team_member(organization_id)'),
+    ('engagement_pipeline_origins', 'Team can read engagement pipeline provenance',
+      'is_active_pipeline_team_member(organization_id)')
   ), actual as (
     select class.relname as table_name, policy.polname as policy_name,
-      policy.polcmd, policy.polroles, policy.polwithcheck
+      policy.polcmd, policy.polroles, policy.polwithcheck,
+      pg_get_expr(policy.polqual, policy.polrelid) as using_expression
     from pg_policy policy
     join pg_class class on class.oid = policy.polrelid
     join pg_namespace namespace on namespace.oid = class.relnamespace
@@ -71,6 +91,9 @@ update pln2_checks set passed = (
       actual.polcmd = 'r'
       and actual.polroles = array[(select oid from pg_roles where rolname = 'authenticated')]
       and actual.polwithcheck is null
+      and position(expected.required_expression in actual.using_expression) > 0
+      and position('is_team_organization_member' in actual.using_expression) = 0
+      and position('has_organization_role' in actual.using_expression) = 0
     )
   from expected left join actual using (table_name, policy_name)
 ) where check_name = 'rls_policy_matrix_is_exact';
@@ -126,12 +149,47 @@ update pln2_checks set passed = coalesce((
   select count(*) = 2
     and bool_and(procedure.prosecdef)
     and bool_and(procedure.proconfig = array['search_path=""'])
+    and bool_and(position('private.has_active_pipeline_template_role' in
+      pg_get_functiondef(procedure.oid)) > 0)
+    and bool_and(position('public.has_organization_role' in
+      pg_get_functiondef(procedure.oid)) = 0)
   from pg_proc procedure
   where procedure.oid = any(array[
     'public.create_pipeline_template_version(uuid,uuid,text,text,text,uuid[],uuid,text)'::regprocedure,
     'public.publish_pipeline_template_version(uuid)'::regprocedure
   ])
 ), false) where check_name = 'rpc_security_is_exact';
+
+update pln2_checks set passed = (
+  with helpers(signature, authenticated_execute, required_fragments) as (values
+    ('private.is_active_pipeline_team_member(uuid)', true,
+      array['organization.status = ''active''', 'membership.member_kind = ''team''',
+        'membership.status = ''active''', 'auth.uid()']),
+    ('private.has_active_pipeline_template_role(uuid,text[])', false,
+      array['organization.status = ''active''', 'membership.member_kind = ''team''',
+        'membership.status = ''active''', 'membership.role = any', 'auth.uid()']),
+    ('private.can_read_pipeline_template_version(uuid,uuid)', true,
+      array['private.is_active_pipeline_team_member',
+        'private.has_active_pipeline_template_role', 'auth.uid()'])
+  ), inspected as (
+    select helpers.*, procedure.oid, procedure.prosecdef, procedure.proconfig,
+      lower(pg_get_functiondef(procedure.oid)) as definition
+    from helpers
+    join pg_proc procedure on procedure.oid = helpers.signature::regprocedure
+  )
+  select count(*) = 3
+    and bool_and(inspected.prosecdef)
+    and bool_and(inspected.proconfig = array['search_path=""'])
+    and bool_and(has_function_privilege(
+      'authenticated', inspected.signature, 'EXECUTE'
+    ) = inspected.authenticated_execute)
+    and bool_and(not has_function_privilege('anon', inspected.signature, 'EXECUTE'))
+    and bool_and(not exists (
+      select 1 from unnest(inspected.required_fragments) fragment
+      where position(lower(fragment) in inspected.definition) = 0
+    ))
+  from inspected
+) where check_name = 'authorization_helpers_are_exact';
 
 update pln2_checks set passed = (
   with expected(trigger_name, table_oid) as (values
@@ -142,11 +200,24 @@ update pln2_checks set passed = (
     ('protect_engagement_pipeline_origins', 'public.engagement_pipeline_origins'::regclass),
     ('protect_engagement_composition_requests', 'public.engagement_composition_requests'::regclass)
   )
-  select count(*) = 6 and bool_and(not trigger_record.tgisinternal)
+  select count(*) = 6
+    and bool_and(not trigger_record.tgisinternal)
+    and bool_and(trigger_record.tgenabled = 'O')
+    and bool_and(trigger_record.tgtype = 27)
+    and bool_and(trigger_record.tgfoid =
+      'private.reject_pipeline_template_mutation()'::regprocedure)
   from expected
   join pg_trigger trigger_record
     on trigger_record.tgname = expected.trigger_name
    and trigger_record.tgrelid = expected.table_oid
+  cross join lateral (
+    select procedure.prorettype, procedure.prosecdef, procedure.proconfig
+    from pg_proc procedure
+    where procedure.oid = trigger_record.tgfoid
+  ) trigger_function
+  where trigger_function.prorettype = 'trigger'::regtype
+    and not trigger_function.prosecdef
+    and trigger_function.proconfig = array['search_path=""']
 ) where check_name = 'append_only_guards_are_exact';
 
 update pln2_checks set passed = (
@@ -197,22 +268,52 @@ update pln2_checks set passed = (
 ) where check_name = 'tenant_foreign_keys_are_exact';
 
 update pln2_checks set passed = (
-  with expected(index_name) as (values
-    ('idx_pipeline_template_versions_template_org_fk'),
-    ('idx_pipeline_template_versions_source_org_fk'),
-    ('idx_pipeline_template_services_version_org_fk'),
-    ('idx_pipeline_template_services_service_org_fk'),
-    ('idx_pipeline_publications_version_org_fk'),
-    ('idx_engagement_pipeline_origins_engagement_org_fk'),
-    ('idx_engagement_pipeline_origins_version_org_fk'),
-    ('idx_engagement_composition_requests_engagement_org_fk')
+  with target_tables(table_oid) as (values
+    ('public.pipeline_templates'::regclass),
+    ('public.pipeline_template_versions'::regclass),
+    ('public.pipeline_template_version_services'::regclass),
+    ('public.pipeline_template_publications'::regclass),
+    ('public.engagement_pipeline_origins'::regclass),
+    ('public.engagement_composition_requests'::regclass)
+  ), foreign_keys as (
+    select constraint_record.*
+    from pg_constraint constraint_record
+    join target_tables on target_tables.table_oid = constraint_record.conrelid
+    where constraint_record.contype = 'f'
   )
-  select count(index_record.indexname) = 8
-  from expected
-  left join pg_indexes index_record
-    on index_record.schemaname = 'public'
-   and index_record.indexname = expected.index_name
+  select count(*) = 15 and bool_and(exists (
+    select 1
+    from pg_index index_record
+    where index_record.indrelid = foreign_keys.conrelid
+      and index_record.indisvalid
+      and index_record.indisready
+      and index_record.indexprs is null
+      and (
+        index_record.indpred is null
+        or pg_get_expr(index_record.indpred, index_record.indrelid)
+          = '(source_version_id IS NOT NULL)'
+      )
+      and (
+        select array_agg(index_column.attnum::smallint order by index_column.ordinality)
+        from unnest(index_record.indkey) with ordinality
+          index_column(attnum, ordinality)
+        where index_column.ordinality <= cardinality(foreign_keys.conkey)
+      ) = foreign_keys.conkey
+  ))
+  from foreign_keys
 ) where check_name = 'foreign_key_indexes_exist';
+
+update pln2_checks set passed = not exists (
+  select 1 from pg_class class
+  join pg_namespace namespace on namespace.oid = class.relnamespace
+  where namespace.nspname = 'public'
+    and class.relname = 'idx_engagement_composition_requests_engagement_org_fk'
+) and not exists (
+  select 1 from pg_constraint constraint_record
+  where constraint_record.conrelid = 'public.pipeline_template_publications'::regclass
+    and constraint_record.contype = 'u'
+    and pg_get_constraintdef(constraint_record.oid) = 'UNIQUE (id, organization_id)'
+) where check_name = 'no_redundant_catalog_constraints';
 
 update pln2_checks set passed = not exists (
   select 1 from information_schema.tables
@@ -426,6 +527,304 @@ begin
   end;
   update pln2_checks set passed = v_publication_delete_rejected
     where check_name = 'publication_delete_is_rejected';
+end;
+$$;
+
+do $$
+declare
+  v_org_a uuid := gen_random_uuid();
+  v_org_b uuid := gen_random_uuid();
+  v_service_a uuid := gen_random_uuid();
+  v_service_b uuid := gen_random_uuid();
+  v_department_id text;
+  v_authorized uuid := gen_random_uuid();
+  v_other_admin uuid := gen_random_uuid();
+  v_client_role uuid := gen_random_uuid();
+  v_suspended_member uuid := gen_random_uuid();
+  v_revoked_member uuid := gen_random_uuid();
+  v_version_a jsonb;
+  v_version_b jsonb;
+  v_publication_a jsonb;
+  v_client_rejected boolean := false;
+  v_suspended_member_rejected boolean := false;
+  v_revoked_member_rejected boolean := false;
+  v_suspended_org_draft_rejected boolean := false;
+  v_suspended_org_publish_rejected boolean := false;
+  v_archived_org_rejected boolean := false;
+  v_cross_service_rejected boolean := false;
+  v_cross_write_rejected boolean := false;
+  v_anonymous_draft_rejected boolean := false;
+  v_anonymous_publish_rejected boolean := false;
+  v_anonymous_read_rejected boolean := false;
+  v_replay_rejected boolean := false;
+  v_cross_read_count integer := 0;
+  v_inactive_read_count integer := 0;
+  v_read_count integer := 0;
+  v_before_templates integer;
+  v_before_versions integer;
+  v_before_publications integer;
+  v_after_templates integer;
+  v_after_versions integer;
+  v_after_publications integer;
+begin
+  select department.id into v_department_id
+  from public.departments department
+  order by department.id
+  limit 1;
+  if v_department_id is null then
+    return;
+  end if;
+
+  insert into public.organizations (id, name, slug, status) values
+    (v_org_a, 'PLN2 security A', 'pln2_security_a_' || replace(v_org_a::text, '-', ''), 'active'),
+    (v_org_b, 'PLN2 security B', 'pln2_security_b_' || replace(v_org_b::text, '-', ''), 'active');
+  insert into public.service_catalog (
+    id, organization_id, department_id, slug, name, is_active
+  ) values
+    (v_service_a, v_org_a, v_department_id, 'pln2_service_a', 'PLN2 service A', true),
+    (v_service_b, v_org_b, v_department_id, 'pln2_service_b', 'PLN2 service B', true);
+  insert into auth.users (id) values
+    (v_authorized), (v_other_admin), (v_client_role),
+    (v_suspended_member), (v_revoked_member);
+  insert into public.organization_memberships (
+    organization_id, user_id, member_kind, role, department_id, status
+  ) values
+    (v_org_a, v_authorized, 'team', 'operations_admin', v_department_id, 'active'),
+    (v_org_b, v_other_admin, 'team', 'operations_admin', v_department_id, 'active'),
+    (v_org_a, v_client_role, 'client', 'operations_admin', null, 'active'),
+    (v_org_a, v_suspended_member, 'team', 'system_owner', v_department_id, 'suspended'),
+    (v_org_a, v_revoked_member, 'team', 'system_owner', v_department_id, 'revoked');
+
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', v_authorized, 'role', 'authenticated'
+  )::text, true);
+  set local role authenticated;
+  select public.create_pipeline_template_version(
+    v_org_a, null, 'pln2_security_a', 'PLN2 security A', '',
+    array[v_service_a], null, 'Security verifier fixture'
+  ) into v_version_a;
+  select public.publish_pipeline_template_version(
+    (v_version_a->>'pipeline_template_version_id')::uuid
+  ) into v_publication_a;
+  reset role;
+
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', v_other_admin, 'role', 'authenticated'
+  )::text, true);
+  set local role authenticated;
+  select public.create_pipeline_template_version(
+    v_org_b, null, 'pln2_security_b', 'PLN2 security B', '',
+    array[v_service_b], null, 'Cross-organization verifier fixture'
+  ) into v_version_b;
+  perform public.publish_pipeline_template_version(
+    (v_version_b->>'pipeline_template_version_id')::uuid
+  );
+  reset role;
+
+  select count(*) into v_before_templates from public.pipeline_templates;
+  select count(*) into v_before_versions from public.pipeline_template_versions;
+  select count(*) into v_before_publications from public.pipeline_template_publications;
+
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', v_client_role, 'role', 'authenticated'
+  )::text, true);
+  set local role authenticated;
+  begin
+    perform public.create_pipeline_template_version(
+      v_org_a, null, 'pln2_client_denied', 'Denied client', '',
+      array[v_service_a], null, ''
+    );
+  exception when insufficient_privilege then
+    v_client_rejected := true;
+  end;
+  select (select count(*) from public.pipeline_templates where organization_id = v_org_a)
+    + (select count(*) from public.pipeline_template_versions where organization_id = v_org_a)
+    + (select count(*) from public.pipeline_template_version_services where organization_id = v_org_a)
+    + (select count(*) from public.pipeline_template_publications where organization_id = v_org_a)
+    into v_read_count;
+  v_inactive_read_count := v_inactive_read_count + v_read_count;
+  reset role;
+
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', v_suspended_member, 'role', 'authenticated'
+  )::text, true);
+  set local role authenticated;
+  begin
+    perform public.create_pipeline_template_version(
+      v_org_a, null, 'pln2_suspended_denied', 'Denied suspended member', '',
+      array[v_service_a], null, ''
+    );
+  exception when insufficient_privilege then
+    v_suspended_member_rejected := true;
+  end;
+  select count(*) into v_read_count
+  from public.pipeline_templates where organization_id = v_org_a;
+  v_inactive_read_count := v_inactive_read_count + v_read_count;
+  reset role;
+
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', v_revoked_member, 'role', 'authenticated'
+  )::text, true);
+  set local role authenticated;
+  begin
+    perform public.create_pipeline_template_version(
+      v_org_a, null, 'pln2_revoked_denied', 'Denied revoked member', '',
+      array[v_service_a], null, ''
+    );
+  exception when insufficient_privilege then
+    v_revoked_member_rejected := true;
+  end;
+  select count(*) into v_read_count
+  from public.pipeline_templates where organization_id = v_org_a;
+  v_inactive_read_count := v_inactive_read_count + v_read_count;
+  reset role;
+
+  update public.organizations set status = 'suspended' where id = v_org_a;
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', v_authorized, 'role', 'authenticated'
+  )::text, true);
+  set local role authenticated;
+  begin
+    perform public.create_pipeline_template_version(
+      v_org_a, null, 'pln2_suspended_org_denied', 'Denied suspended organization', '',
+      array[v_service_a], null, ''
+    );
+  exception when insufficient_privilege then
+    v_suspended_org_draft_rejected := true;
+  end;
+  begin
+    perform public.publish_pipeline_template_version(
+      (v_version_a->>'pipeline_template_version_id')::uuid
+    );
+  exception when insufficient_privilege then
+    v_suspended_org_publish_rejected := true;
+  end;
+  select count(*) into v_read_count
+  from public.pipeline_templates where organization_id = v_org_a;
+  v_inactive_read_count := v_inactive_read_count + v_read_count;
+  reset role;
+
+  update public.organizations set status = 'archived' where id = v_org_a;
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', v_authorized, 'role', 'authenticated'
+  )::text, true);
+  set local role authenticated;
+  begin
+    perform public.create_pipeline_template_version(
+      v_org_a, null, 'pln2_archived_org_denied', 'Denied archived organization', '',
+      array[v_service_a], null, ''
+    );
+  exception when insufficient_privilege then
+    v_archived_org_rejected := true;
+  end;
+  select count(*) into v_read_count
+  from public.pipeline_templates where organization_id = v_org_a;
+  v_inactive_read_count := v_inactive_read_count + v_read_count;
+  reset role;
+  update public.organizations set status = 'active' where id = v_org_a;
+
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', v_authorized, 'role', 'authenticated'
+  )::text, true);
+  set local role authenticated;
+  begin
+    perform public.create_pipeline_template_version(
+      v_org_a, null, 'pln2_cross_service_denied', 'Denied cross service', '',
+      array[v_service_b], null, ''
+    );
+  exception when invalid_parameter_value then
+    v_cross_service_rejected := true;
+  end;
+  begin
+    perform public.create_pipeline_template_version(
+      v_org_b, null, 'pln2_cross_write_denied', 'Denied cross write', '',
+      array[v_service_b], null, ''
+    );
+  exception when insufficient_privilege then
+    v_cross_write_rejected := true;
+  end;
+  select (select count(*) from public.pipeline_templates where organization_id = v_org_b)
+    + (select count(*) from public.pipeline_template_versions where organization_id = v_org_b)
+    + (select count(*) from public.pipeline_template_version_services where organization_id = v_org_b)
+    + (select count(*) from public.pipeline_template_publications where organization_id = v_org_b)
+    into v_cross_read_count;
+  reset role;
+
+  update public.organization_memberships set status = 'revoked'
+  where organization_id = v_org_a and user_id = v_authorized;
+  perform set_config('request.jwt.claims', jsonb_build_object(
+    'sub', v_authorized, 'role', 'authenticated'
+  )::text, true);
+  set local role authenticated;
+  begin
+    perform public.publish_pipeline_template_version(
+      (v_version_a->>'pipeline_template_version_id')::uuid
+    );
+  exception when insufficient_privilege then
+    v_replay_rejected := true;
+  end;
+  reset role;
+  update public.organization_memberships set status = 'active'
+  where organization_id = v_org_a and user_id = v_authorized;
+
+  perform set_config('request.jwt.claims', '{}'::jsonb::text, true);
+  set local role anon;
+  begin
+    perform public.create_pipeline_template_version(
+      v_org_a, null, 'pln2_anon_denied', 'Denied anonymous', '',
+      array[v_service_a], null, ''
+    );
+  exception when insufficient_privilege then
+    v_anonymous_draft_rejected := true;
+  end;
+  begin
+    perform public.publish_pipeline_template_version(
+      (v_version_a->>'pipeline_template_version_id')::uuid
+    );
+  exception when insufficient_privilege then
+    v_anonymous_publish_rejected := true;
+  end;
+  begin
+    perform count(*) from public.pipeline_templates;
+  exception when insufficient_privilege then
+    v_anonymous_read_rejected := true;
+  end;
+  reset role;
+
+  select count(*) into v_after_templates from public.pipeline_templates;
+  select count(*) into v_after_versions from public.pipeline_template_versions;
+  select count(*) into v_after_publications from public.pipeline_template_publications;
+
+  update pln2_checks set passed = v_client_rejected
+    where check_name = 'privileged_client_membership_is_rejected';
+  update pln2_checks set passed =
+    v_suspended_org_draft_rejected and v_suspended_org_publish_rejected
+    where check_name = 'suspended_organization_is_rejected';
+  update pln2_checks set passed = v_archived_org_rejected
+    where check_name = 'archived_organization_is_rejected';
+  update pln2_checks set passed = v_suspended_member_rejected
+    where check_name = 'suspended_membership_is_rejected';
+  update pln2_checks set passed = v_revoked_member_rejected
+    where check_name = 'revoked_membership_is_rejected';
+  update pln2_checks set passed = v_cross_service_rejected
+    where check_name = 'cross_organization_service_is_rejected';
+  update pln2_checks set passed = v_cross_write_rejected
+    where check_name = 'cross_organization_write_is_rejected';
+  update pln2_checks set passed = v_cross_read_count = 0
+    where check_name = 'cross_organization_reads_are_empty';
+  update pln2_checks set passed =
+    v_anonymous_draft_rejected and v_anonymous_publish_rejected
+      and v_anonymous_read_rejected
+    where check_name = 'anonymous_calls_are_rejected';
+  update pln2_checks set passed =
+    v_before_templates = v_after_templates
+      and v_before_versions = v_after_versions
+      and v_before_publications = v_after_publications
+    where check_name = 'rejected_calls_leave_no_rows';
+  update pln2_checks set passed = v_replay_rejected
+    where check_name = 'publish_replay_rechecks_authorization';
+  update pln2_checks set passed = v_inactive_read_count = 0
+    where check_name = 'inactive_context_reads_are_empty';
 end;
 $$;
 
