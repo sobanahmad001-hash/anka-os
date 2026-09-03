@@ -232,6 +232,7 @@ test('QTS3 verifier is rollback-safe and covers lifecycle, privacy, purge, and c
     'retention_indexes_are_exact', 'controlled_purge_guard_is_exact',
     'ai_redaction_shape_is_exact', 'no_qts_write_policies_exist',
   ]) assert.match(qts3Verifier, new RegExp(check))
+  assert.match(qts3Verifier, /'MAINTAIN'/)
   assert.match(qts3Verifier, /jsonb_object_agg\(check_name, passed order by check_name\)/)
   assert.match(qts3Verifier, /raise exception 'QTS3 verification failed/)
   assert.match(qts3Verifier.trim(), /rollback;$/)

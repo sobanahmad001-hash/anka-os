@@ -497,7 +497,7 @@ select 'table_acls_remain_read_only', count(*) = 4 and bool_and(
   and coalesce((select array_agg(distinct grant_row.privilege_type order by grant_row.privilege_type)
     from direct_grants grant_row where grant_row.table_oid = scoped.table_oid
       and grant_row.grantee = (select oid from pg_roles where rolname = 'service_role')), '{}'::text[])
-    = array['DELETE','INSERT','REFERENCES','SELECT','TRIGGER','TRUNCATE','UPDATE']
+    = array['DELETE','INSERT','MAINTAIN','REFERENCES','SELECT','TRIGGER','TRUNCATE','UPDATE']
 )
 from scoped;
 
