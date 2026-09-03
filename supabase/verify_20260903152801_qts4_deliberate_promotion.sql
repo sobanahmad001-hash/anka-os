@@ -22,7 +22,7 @@ insert into qts4_checks values
 ('typed_foreign_keys_are_exact',(select count(*)=6 from pg_constraint where conrelid='public.quick_task_promotions'::regclass and contype='f')),
 ('supporting_indexes_exist',(select count(*)=6 from pg_indexes where schemaname='public' and indexname like 'idx_quick_task_promotions_%')),
 ('exact_target_constraint_exists',exists(select 1 from pg_constraint where conrelid='public.quick_task_promotions'::regclass and conname='quick_task_promotions_exact_target_check')),
-('created_via_constraint_is_exact',exists(select 1 from pg_constraint where conrelid='public.work_items'::regclass and conname='work_items_created_via_check' and pg_get_constraintdef(oid) like '%quick_task_promotion%')),
+('created_via_constraint_is_exact',coalesce((select pg_get_expr(rule.conbin,rule.conrelid,true) = '(created_via = ANY (ARRAY[''manual''::text, ''ai_chat_proposal''::text, ''automation_rule''::text, ''recurring_plan''::text, ''quick_task_promotion''::text]))' from pg_constraint rule where rule.conrelid='public.work_items'::regclass and rule.conname='work_items_created_via_check' and rule.contype='c'),false)),
 ('no_bypass_side_effects',position('security definer' in lower(pg_get_functiondef('public.promote_quick_task(uuid,uuid,text,text,jsonb,uuid,boolean,uuid)'::regprocedure)))=0);
 
 select jsonb_object_agg(check_name,passed order by check_name) as qts4_verification from qts4_checks;

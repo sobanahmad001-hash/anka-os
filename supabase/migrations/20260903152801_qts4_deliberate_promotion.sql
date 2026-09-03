@@ -5,7 +5,7 @@ set local statement_timeout = '60s';
 
 alter table public.work_items drop constraint work_items_created_via_check;
 alter table public.work_items add constraint work_items_created_via_check
-  check (created_via in ('manual', 'ai_chat_proposal', 'automation_rule', 'quick_task_promotion'));
+  check (created_via in ('manual', 'ai_chat_proposal', 'automation_rule', 'recurring_plan', 'quick_task_promotion'));
 
 create table public.quick_task_promotions (
   id uuid primary key default gen_random_uuid(),

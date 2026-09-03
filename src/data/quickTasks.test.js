@@ -21,6 +21,7 @@ const qts2Verifier = read('supabase/verify_20260903100732_qts2_sandbox_chat.sql'
 const packageJson = read('package.json')
 const qts3Migration = read('supabase/migrations/20260903113647_qts3_retention.sql')
 const qts3Verifier = read('supabase/verify_20260903113647_qts3_retention.sql')
+const ret2Migration = read('supabase/migrations/20260903123259_ret2_manual_period_generation.sql')
 const qts4Migration = read('supabase/migrations/20260903152801_qts4_deliberate_promotion.sql')
 const qts4Verifier = read('supabase/verify_20260903152801_qts4_deliberate_promotion.sql')
 const promotionPanel = read('src/components/QuickTaskPromotionPanel.jsx')
@@ -284,4 +285,16 @@ test('QTS4 verifier is rollback-only and fails closed across promotion boundarie
   assert.match(qts4Verifier.trim(), /rollback;$/)
   assert.doesNotMatch(qts4Verifier, /(^|\n)\s*commit\s*;/i)
   assert.doesNotMatch(qts4Verifier, /\bconstraint\./i)
+})
+test('QTS4 preserves every prior work-item created_via value and adds only promotion', () => {
+  const values = source => {
+    const constraint = source.match(/work_items_created_via_check[\s\S]{0,300}?check \(created_via in \(([^)]+)\)\)/)
+    assert.ok(constraint, 'created_via CHECK must be present')
+    return [...constraint[1].matchAll(/'([^']+)'/g)].map(match => match[1])
+  }
+  const prior = values(ret2Migration)
+  const qts4 = values(qts4Migration)
+  assert.deepEqual(prior, ['manual', 'ai_chat_proposal', 'automation_rule', 'recurring_plan'])
+  assert.deepEqual(qts4, [...prior, 'quick_task_promotion'])
+  assert.match(qts4Verifier, /pg_get_expr[\s\S]*manual[\s\S]*ai_chat_proposal[\s\S]*automation_rule[\s\S]*recurring_plan[\s\S]*quick_task_promotion/)
 })
