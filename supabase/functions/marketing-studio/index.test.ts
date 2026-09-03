@@ -4,6 +4,7 @@ import {
   fetchGoogleAdsCampaignSnapshot,
   handleRequest,
   hasMarketingAuthority,
+  requestedGoogleProviders,
   safeDateRange,
   validateBacklinkTarget,
   validateAdCampaign,
@@ -124,6 +125,70 @@ Deno.test('marketing report preserves source, period, insight, and recommended a
   })
   assertEquals(report.sources, ['GA4 · Primary'])
   assertThrows(() => safeDateRange('2026-09-01', '2026-08-01'), Error, 'ordered')
+  assertEquals(safeDateRange('2026-01-01', '2027-01-01'), { start: '2026-01-01', end: '2027-01-01' })
+  assertThrows(() => safeDateRange('2026-01-01', '2027-01-02'), Error, 'no more than 366 days')
+})
+
+Deno.test('unified dashboard requests only its fixed GA4 and Search Console providers', () => {
+  assertEquals(requestedGoogleProviders(['google_analytics', 'google_search_console']), ['google_analytics', 'google_search_console'])
+  assertEquals(requestedGoogleProviders(['google_ads', 'unknown']), ['google_ads'])
+  assertEquals(requestedGoogleProviders(undefined), ['google_analytics', 'google_search_console', 'google_ads'])
+})
+
+function crossOrganizationDashboardPath() {
+  const organizationId = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
+  const tables: string[] = []
+  const filters: Array<{ table: string; column: string; value: unknown }> = []
+  class Query {
+    constructor(private table: string) {}
+    select() { return this }
+    eq(column: string, value: unknown) {
+      filters.push({ table: this.table, column, value })
+      return this
+    }
+    async maybeSingle() {
+      if (this.table === 'organization_memberships') {
+        return { data: { organization_id: organizationId, role: 'contributor', department_id: 'marketing', status: 'active', member_kind: 'team' }, error: null }
+      }
+      if (this.table === 'engagements') {
+        const foreignEngagement = { id: 'foreign-engagement', organization_id: 'foreign-organization', brand_id: 'foreign-brand' }
+        const matchesEveryFilter = filters.filter(item => item.table === this.table)
+          .every(item => foreignEngagement[item.column as keyof typeof foreignEngagement] === item.value)
+        return { data: matchesEveryFilter ? foreignEngagement : null, error: null }
+      }
+      return { data: null, error: null }
+    }
+  }
+  const admin = { from: (table: string) => { tables.push(table); return new Query(table) } }
+  let clientCount = 0
+  const factory = () => clientCount++ === 0
+    ? { auth: { getUser: async () => ({ data: { user: { id: 'marketing-actor' } }, error: null }) } }
+    : admin
+  return { factory: factory as never, filters, tables, organizationId }
+}
+
+Deno.test('analytics dashboard auth path rejects a cross-organization engagement before connector reads', async () => {
+  const path = crossOrganizationDashboardPath()
+  const request = new Request('https://functions.example/marketing-studio', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer caller-jwt', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'analytics_dashboard', engagement_id: 'foreign-engagement',
+      start_date: '2026-08-01', end_date: '2026-08-31',
+      providers: ['google_analytics', 'google_search_console'],
+    }),
+  })
+  const response = await handleRequest(request, {
+    createClient: path.factory,
+    environment: { supabaseUrl: 'https://project.supabase.co', publishableKey: 'publishable', secretKey: 'secret' },
+  })
+  const body = await response.json() as { error?: string }
+  assertEquals(response.status, 404)
+  assertEquals(body.error, 'Engagement not found')
+  assertEquals(path.filters.some(item => item.table === 'engagements' && item.column === 'id' && item.value === 'foreign-engagement'), true)
+  assertEquals(path.filters.some(item => item.table === 'engagements' && item.column === 'organization_id' && item.value === path.organizationId), true)
+  assertEquals(path.tables.includes('integration_connection_engagements'), false)
+  assertEquals(path.tables.includes('integration_connections'), false)
 })
 
 Deno.test('Google reporting adapter calls only the approved read-report endpoints', async () => {
@@ -140,6 +205,9 @@ Deno.test('Google reporting adapter calls only the approved read-report endpoint
   ])
   assertEquals(calls.every(call => call.init?.method === 'POST'), true)
   assertEquals(calls.every(call => !/mutate|upload|delete|create/i.test(call.url)), true)
+  const searchConsoleBody = JSON.parse(String(calls[1].init?.body))
+  assertEquals(searchConsoleBody.dimensions, ['date'])
+  assertEquals(searchConsoleBody.rowLimit, 366)
 })
 
 Deno.test('Google Ads reporting never falls back to a mutating endpoint', async () => {
