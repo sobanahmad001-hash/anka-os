@@ -51,6 +51,22 @@ Status: branch-only implementation. Do not merge, deploy, or apply the migration
 - Runtime verifier output is required after Admin/Testing applies the migration through its controlled process.
 - Local database reset remains unavailable on this branch host because Docker/Podman is not installed.
 
+## Recorded correction evidence
+
+Implementation head `a4acb34d93a3519c79047e6ee8883aedc4196675` passed the following checks before this evidence-only documentation update:
+
+- Focused Node regression suite: 30 passed, 0 failed.
+- Full Node suite: 346 passed, 0 failed.
+- Exact-head GitHub Actions validation run `33808961347`: passed.
+- Full Deno suite in that run: 118 passed, 0 failed, including all 11 `ai-chat` tests and the five canonical context paths.
+- Full Deno type-check in that run: passed for every listed edge-function source and test file.
+- ESLint: 0 errors; 284 pre-existing warnings.
+- Production build: passed (343 modules transformed).
+- `git diff --check`: passed.
+- Supabase CLI `2.115.0` linked migration dry-run: passed and reported only `20260903050747_canonical_ownership_convergence.sql` pending; no database push was performed.
+
+The final pull-request head must also pass CI after this documentation-only evidence commit. Runtime SQL behavior remains a post-apply approval gate because this branch host has neither a local database runtime nor authority to mutate the linked database.
+
 ## Rollout order after approval
 
 1. Apply the database migration through the Admin/Testing-controlled release process.
