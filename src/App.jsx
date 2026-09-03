@@ -10,6 +10,7 @@ const AgencyCommandCenter = lazy(() => import('./apps/AgencyCommandCenter'))
 const UserManagement = lazy(() => import('./apps/UserManagement'))
 const OperatingSpine = lazy(() => import('./apps/OperatingSpine'))
 const PortfolioWorkspace = lazy(() => import('./apps/PortfolioWorkspace'))
+const ProjectEngagementWorkspace = lazy(() => import('./apps/ProjectEngagementWorkspace'))
 const DesignWorkshop = lazy(() => import('./apps/DesignWorkshop'))
 const DesignSystems = lazy(() => import('./apps/DesignSystems'))
 const MarketingStudio = lazy(() => import('./apps/MarketingStudio'))
@@ -68,6 +69,7 @@ export default function App() {
 
         {/* ANKA SPHERE */}
         <Route path="sphere/workspace" element={<PortfolioWorkspace />} />
+        <Route path="sphere/workspace/projects/:projectId" element={<ProjectEngagementWorkspace />} />
         <Route path="sphere/internal" element={<PortfolioWorkspace initialOwnerKind="internal" />} />
         <Route path="sphere/engagements" element={<OperatingSpine initialView="engagements" />} />
         <Route path="sphere/projects" element={<Navigate to="/sphere/workspace" replace />} />
