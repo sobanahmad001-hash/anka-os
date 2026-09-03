@@ -11,6 +11,7 @@ import {
   marketingArtifactResponseFormat,
   outputText,
   proposeArtifact,
+  resolveContentProposalLanguage,
   proposeWorkItem,
   rejectProposal,
   requireDepartmentEngagement,
@@ -18,6 +19,15 @@ import {
   selectSingleOpenAiModel,
   safeAttemptReason,
 } from './index.ts'
+
+Deno.test('B02 Content proposal language follows explicit, approved-brand, organization, then require-selection precedence', () => {
+  const context = [{ artifact_type: 'vision', content: { language: 'Arabic' } }]
+  assertEquals(resolveContentProposalLanguage({ language: 'Urdu' }, context, { default_language: 'French' }, 'discovery'), 'Urdu')
+  assertEquals(resolveContentProposalLanguage({}, context, { default_language: 'French' }, 'audience'), 'Arabic')
+  assertEquals(resolveContentProposalLanguage({}, [], { default_language: 'French' }, 'vision'), 'French')
+  assertEquals(resolveContentProposalLanguage({}, [], {}, 'content'), null)
+  assertThrows(() => resolveContentProposalLanguage({}, [], {}, 'discovery'), Error, 'Select a language')
+})
 import { contentArtifactResponseFormat } from '../_shared/contentArtifacts.ts'
 import { departmentChatProfile } from '../_shared/departmentChatProfiles.ts'
 import { developmentChatArtifactResponseFormat } from '../_shared/developmentChatArtifacts.ts'
@@ -195,6 +205,7 @@ for (const department of ['content','design','marketing','development']) {
       if (target === 'design_system') fixture.color_tokens[0].value = '#123456'
       await proposeArtifact({} as any, admin as any, {
         department_id: department, engagement_id: 'engagement-1', artifact_type: target,
+        language: department === 'content' && ['discovery', 'vision', 'audience'].includes(target) ? 'Urdu' : undefined,
         prompt: 'Fixture', prompt_safe_for_ai: true,
         organization_id: 'injected', project_id: 'injected', actor_id: 'injected', approval: true,
       }, 'member-1', ORGANIZATION_ID, async () => new Response(JSON.stringify({ output_text: JSON.stringify(fixture) })), contextDependencies)
@@ -207,6 +218,7 @@ for (const department of ['content','design','marketing','development']) {
       const invalid = proposalAdmin()
       await assertRejects(() => proposeArtifact({} as any, invalid.admin as any, {
         department_id: department, engagement_id: 'engagement-1', artifact_type: target,
+        language: department === 'content' && ['discovery', 'vision', 'audience'].includes(target) ? 'Urdu' : undefined,
         prompt: 'Fixture', prompt_safe_for_ai: true,
       }, 'member-1', ORGANIZATION_ID, async () => new Response(JSON.stringify({ output_text: '{}' })), contextDependencies))
       assertEquals(invalid.rpcCalls.length, 0)
@@ -253,7 +265,7 @@ for (const department of ['content','design','marketing','development']) {
         const { admin, rpcCalls } = proposalAdmin()
         let providerCalls=0
         const dependencies={...contextDependencies,resolveSingleOpenAiModel:(async () => selectSingleOpenAiModel(connections,department,() => index===2 ? undefined : 'test-key')) as any}
-        const body={department_id:department,engagement_id:'engagement-1',artifact_type:target,work_item_type:target,title:'Fixture',prompt:'Fixture',prompt_safe_for_ai:true}
+        const body={department_id:department,engagement_id:'engagement-1',artifact_type:target,work_item_type:target,title:'Fixture',prompt:'Fixture',prompt_safe_for_ai:true,language:department==='content'&&['discovery','vision','audience'].includes(target)?'Urdu':undefined}
         const fetcher=(async () => { providerCalls++; return new Response('{}') }) as typeof fetch
         await assertRejects(() => ['task','bug','request'].includes(target)
           ? proposeWorkItem({} as any,admin as any,body,'member-1',ORGANIZATION_ID,fetcher,dependencies)

@@ -53,6 +53,15 @@ export function brandBriefInput(body: Json) {
   }
 }
 
+export function requireBrandBriefMutationToken(existingUpdatedAt: unknown, requestedUpdatedAt: unknown) {
+  const existing = text(existingUpdatedAt, 80)
+  const requested = text(requestedUpdatedAt, 80)
+  if (existing ? requested !== existing : Boolean(requested)) {
+    throw Object.assign(new Error('This brief changed since you opened it. Reload before saving.'), { status: 409 })
+  }
+  return requested || null
+}
+
 export function compiledBrandStatement(brief: Json, contextManifest: Json) {
   const artifacts = contextManifest.artifacts && typeof contextManifest.artifacts === 'object'
     ? contextManifest.artifacts as Json : {}
@@ -388,16 +397,20 @@ async function saveArtifact(context: ServerOrganizationContext, body: Json, acto
 async function saveBrandBrief(context: ServerOrganizationContext, body: Json, actorId: string) {
   const engagement = await requireContentEngagement(context, text(body.engagement_id, 80))
   const input = brandBriefInput(body)
-  const { data: existing, error: existingError } = await context.admin.from('brand_briefs').select('id')
+  const { data: existing, error: existingError } = await context.admin.from('brand_briefs').select('id, updated_at')
     .eq('organization_id', context.organizationId).eq('brand_id', engagement.brand_id).maybeSingle()
   if (existingError) throw existingError
   if (existing) {
+    const expectedUpdatedAt = requireBrandBriefMutationToken(existing.updated_at, body.expected_updated_at)
     const { data, error } = await context.admin.from('brand_briefs').update({
       ...input, updated_at: new Date().toISOString(),
-    }).eq('id', existing.id).eq('organization_id', context.organizationId).select('*').single()
+    }).eq('id', existing.id).eq('organization_id', context.organizationId)
+      .eq('updated_at', expectedUpdatedAt).select('*').maybeSingle()
     if (error) throw error
+    if (!data) throw Object.assign(new Error('This brief changed since you opened it. Reload before saving.'), { status: 409 })
     return data
   }
+  requireBrandBriefMutationToken(null, body.expected_updated_at)
   const { data, error } = await context.admin.from('brand_briefs').insert({
     organization_id: context.organizationId, brand_id: engagement.brand_id,
     ...input, created_by: actorId,

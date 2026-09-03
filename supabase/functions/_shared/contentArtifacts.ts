@@ -14,6 +14,13 @@ export const CHAT_CONTENT_ARTIFACT_TYPE_SET = new Set(
   CONTENT_ARTIFACT_TYPES.filter(type => type !== 'brand_statement'),
 )
 
+const FOUNDATION_FIELDS: Record<string, string[]> = {
+  discovery: ['summary', 'objectives', 'offers', 'evidence', 'constraints'],
+  vision: ['vision_statement', 'positioning', 'value_proposition', 'differentiators', 'values', 'voice_principles', 'messaging_pillars'],
+  audience: ['primary_audience', 'segments', 'motivations', 'objections', 'desired_response', 'accessibility_considerations'],
+}
+const DISCOVERY_UNKNOWN_FIELDS = new Set(['evidence', 'constraints'])
+
 function text(value: unknown, max = 8000) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
 }
@@ -34,6 +41,66 @@ function requiredList(input: Json, key: string, maxItems = 80) {
   const value = list(input[key], maxItems)
   if (!value.length) throw new Error(`${key.replaceAll('_', ' ')} is required`)
   return value
+}
+
+function isUnknown(value: unknown) {
+  return typeof value === 'string' && value.trim().toLowerCase() === 'unknown'
+}
+
+function foundationExtras(type: string, input: Json) {
+  const fields = FOUNDATION_FIELDS[type]
+  if (!fields) return {}
+  for (const field of fields) {
+    const values = Array.isArray(input[field]) ? input[field] : [input[field]]
+    if (values.some(isUnknown) && !(type === 'discovery' && DISCOVERY_UNKNOWN_FIELDS.has(field))) {
+      throw new Error(`Unknown is not allowed for ${field.replaceAll('_', ' ')}`)
+    }
+  }
+  const extra: Json = {}
+  const language = text(input.language, 120)
+  if (language) extra.language = language
+  if (!Object.hasOwn(input, 'source_metadata')) return extra
+  const raw = input.source_metadata
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('source metadata must be an object')
+  const metadata = raw as Json
+  const unknownKeys = Object.keys(metadata).filter(key => !fields.includes(key))
+  if (unknownKeys.length) throw new Error(`source metadata contains unsupported field: ${unknownKeys[0]}`)
+  extra.source_metadata = Object.fromEntries(Object.entries(metadata).map(([field, value]) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`source metadata for ${field} is invalid`)
+    const entry = value as Json
+    const allowed = ['source_label', 'source_date', 'needs_confirmation', 'human_confirmed']
+    const unexpected = Object.keys(entry).filter(key => !allowed.includes(key))
+    if (unexpected.length || !allowed.every(key => Object.hasOwn(entry, key))) {
+      throw new Error(`source metadata for ${field} must contain exactly source label, source date, needs confirmation, and human confirmed`)
+    }
+    const sourceDate = entry.source_date === null ? null : text(entry.source_date, 10)
+    if (sourceDate && !/^\d{4}-\d{2}-\d{2}$/.test(sourceDate)) throw new Error(`source date for ${field} must use YYYY-MM-DD`)
+    if (typeof entry.needs_confirmation !== 'boolean' || typeof entry.human_confirmed !== 'boolean') {
+      throw new Error(`confirmation state for ${field} must be boolean`)
+    }
+    if (entry.needs_confirmation && entry.human_confirmed) {
+      throw new Error(`${field.replaceAll('_', ' ')} cannot be both confirmation-needed and human-confirmed`)
+    }
+    return [field, {
+      source_label: text(entry.source_label, 500), source_date: sourceDate,
+      needs_confirmation: entry.needs_confirmation, human_confirmed: entry.human_confirmed,
+    }]
+  }))
+  return extra
+}
+
+export function withGeneratedSourceMetadata(type: string, value: Json, sourceDate = new Date().toISOString().slice(0, 10)) {
+  const fields = FOUNDATION_FIELDS[type]
+  if (!fields) return value
+  const existing = value.source_metadata && typeof value.source_metadata === 'object' && !Array.isArray(value.source_metadata)
+    ? value.source_metadata as Json : {}
+  return {
+    ...value,
+    source_metadata: Object.fromEntries(fields.map(field => [field, existing[field] || {
+      source_label: 'Shared Department Chat proposal', source_date: sourceDate,
+      needs_confirmation: true, human_confirmed: false,
+    }])),
+  }
 }
 
 function requiredNullableText(input: Json, key: string, max = 240) {
@@ -129,17 +196,20 @@ export function validateContentArtifact(type: string, value: unknown): Json {
     summary: requiredText(input, 'summary'), objectives: requiredList(input, 'objectives'),
     offers: requiredList(input, 'offers'), evidence: requiredList(input, 'evidence'),
     constraints: requiredList(input, 'constraints'),
+    ...foundationExtras(type, input),
   }
   if (type === 'vision') return {
     vision_statement: requiredText(input, 'vision_statement'), positioning: requiredText(input, 'positioning'),
-    value_proposition: requiredText(input, 'value_proposition'), values: requiredList(input, 'values'),
-    voice_principles: requiredList(input, 'voice_principles'),
+    value_proposition: requiredText(input, 'value_proposition'), differentiators: requiredList(input, 'differentiators'),
+    values: requiredList(input, 'values'), voice_principles: requiredList(input, 'voice_principles'),
+    messaging_pillars: requiredList(input, 'messaging_pillars'), ...foundationExtras(type, input),
   }
   if (type === 'audience') return {
     primary_audience: requiredText(input, 'primary_audience'), segments: requiredList(input, 'segments'),
     motivations: requiredList(input, 'motivations'), objections: requiredList(input, 'objections'),
     desired_response: requiredText(input, 'desired_response'),
     accessibility_considerations: requiredList(input, 'accessibility_considerations'),
+    ...foundationExtras(type, input),
   }
   if (type === 'brand_statement') {
     const sourceManifest = input.source_manifest
@@ -200,7 +270,7 @@ export function contentArtifactResponseFormat(type: string) {
   if (!CHAT_CONTENT_ARTIFACT_TYPE_SET.has(type)) throw new Error('Unsupported Content chat artifact')
   const simple: Record<string, Json> = {
     discovery: { summary: stringSchema(), objectives: listSchema(), offers: listSchema(), evidence: listSchema(), constraints: listSchema() },
-    vision: { vision_statement: stringSchema(), positioning: stringSchema(), value_proposition: stringSchema(), values: listSchema(), voice_principles: listSchema() },
+    vision: { vision_statement: stringSchema(), positioning: stringSchema(), value_proposition: stringSchema(), differentiators: listSchema(), values: listSchema(), voice_principles: listSchema(), messaging_pillars: listSchema() },
     audience: { primary_audience: stringSchema(), segments: listSchema(), motivations: listSchema(), objections: listSchema(), desired_response: stringSchema(), accessibility_considerations: listSchema() },
     website_architecture: {
       pages: objectArray({
