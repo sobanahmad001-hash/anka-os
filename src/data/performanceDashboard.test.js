@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { buildPerformanceDashboard, collectionAgeState, collectPaginatedRows, shouldApplyDashboardResponse } from './performanceDashboard.js'
+import { loadPerformanceDashboard } from './performanceDashboardRepository.js'
 
 const read = relative => readFileSync(new URL(relative, import.meta.url), 'utf8')
 const repository = read('./performanceDashboardRepository.js')
@@ -13,6 +14,10 @@ const edge = read('../../supabase/functions/marketing-studio/index.ts')
 const organizationId = 'organization-a'
 const brand = { id: 'brand-a', name: 'Anka', organization_id: organizationId }
 const period = { start: '2026-08-01', end: '2026-08-31' }
+const emptyStoredSources = async () => ({
+  pageHealth: [], trackedKeywords: [], rankSnapshots: [], adCampaigns: [],
+  adSnapshots: [], metaConnections: [], metaSnapshots: [],
+})
 
 test('MK6c rolls up every fixed section and keeps unlike sources separate', () => {
   const dashboard = buildPerformanceDashboard({
@@ -230,6 +235,52 @@ test('MK6c ignores Google Ads report failures because paid uses stored MK3 snaps
   ])
   assert.equal(dashboard.sources.find(source => source.id === 'google_search_console:Search').error, 'Search unavailable')
   assert.match(repository, /providers: \['google_analytics', 'google_search_console'\]/)
+})
+
+test('MB06A production loader rejects wrong or missing Edge context envelopes before composing a dashboard', async () => {
+  const input = {
+    organizationId, engagementId: 'engagement-a', brand, period,
+    signal: new AbortController().signal,
+  }
+  const cases = [
+    { envelope: { engagement_id: 'engagement-a', brand_id: 'brand-b', reports: [] }, status: 403, membershipMismatch: true },
+    { envelope: { engagement_id: 'engagement-b', brand_id: brand.id, reports: [] }, status: 403, membershipMismatch: true },
+    { envelope: { reports: [] }, status: 502, membershipMismatch: undefined },
+  ]
+  for (const item of cases) {
+    await assert.rejects(
+      loadPerformanceDashboard(input, {
+        analyticsInvoker: async () => item.envelope,
+        storedSourceLoader: emptyStoredSources,
+      }),
+      error => {
+        assert.equal(error.status, item.status)
+        assert.equal(error.membershipMismatch, item.membershipMismatch)
+        return true
+      },
+    )
+  }
+
+  const accessError = Object.assign(new Error('Edge access denied'), {
+    status: 401,
+    membershipMismatch: true,
+  })
+  await assert.rejects(
+    loadPerformanceDashboard(input, {
+      analyticsInvoker: async () => { throw accessError },
+      storedSourceLoader: emptyStoredSources,
+    }),
+    error => error === accessError && error.status === 401 && error.membershipMismatch === true,
+  )
+
+  const dashboard = await loadPerformanceDashboard(input, {
+    analyticsInvoker: async () => ({
+      engagement_id: input.engagementId, brand_id: brand.id, reports: [],
+    }),
+    storedSourceLoader: emptyStoredSources,
+  })
+  assert.equal(dashboard.brand.id, brand.id)
+  assert.equal(dashboard.brand.organization_id, organizationId)
 })
 
 test('MK6c paginates beyond 1,000 rows and keeps complete totals and trends', async () => {
