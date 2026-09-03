@@ -34,7 +34,7 @@ test('session creation accepts only an active Design service from the same engag
   assert.match(edge, /requireActiveDesignService\(admin, engagementId, engagementServiceId\)[\s\S]*engagement_service_id: engagementServiceId[\s\S]*designEventLink\(session\.id, externalEventId, actorId\)/)
 })
 
-test('all eight seeded Design services retain the current three-direction flow', () => {
+test('DS1 service coverage remains intact while DS4 specializes only storyboard generation', () => {
   for (const slug of [
     'brand_visual_identity', 'design_systems', 'website_ux_ui', 'campaign_creative',
     'social_assets', 'advertising_assets', 'video_concepts_storyboards', 'visual_production',
@@ -42,9 +42,9 @@ test('all eight seeded Design services retain the current three-direction flow',
   assert.match(edge, /for \(let index = 0; index < LANES\.length; index \+= 1\)/)
   assert.match(edge, /direction_slot: index \+ 1/)
   assert.match(ui, /Generate three directions/)
-  // DS1 keeps the three-direction flow for every Design service. Later phases may
-  // add downstream workflows, but must not replace that shared generation path.
-  assert.doesNotMatch(edge, /storyboard sequence|design system library|production handoff/i)
+  assert.match(edge, /isStoryboardSession\(session\)/)
+  assert.match(edge, /if \(!storyboard && !directionsAreDistinct/)
+  assert.doesNotMatch(edge, /design system library|production handoff/i)
 })
 
 test('the UI and repository expose active engagement services instead of an output-family picker', () => {

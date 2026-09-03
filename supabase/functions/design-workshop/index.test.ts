@@ -1,5 +1,5 @@
 import { contentRequestMediaStoragePath, createSession, cropResizePng, designEventLink, directionSchema,
-  directionsAreDistinct, generateOpenAiImage, hasWorkshopAuthority, mediaPrompt, mediaStoragePath,
+  directionGenerationPrompt, directionsAreDistinct, generateOpenAiImage, hasWorkshopAuthority, isStoryboardSession, mediaPrompt, mediaStoragePath,
   mediaTargetColumns, outputFamilyForService, pngDimensions, requireActiveDesignService,
   requireReleasedVariantSource, runIndependentVariantJobs, sha256, similarity, variantFormatSpec, variantPrompt,
   VIDEO_UNAVAILABLE_MESSAGE } from './index.ts'
@@ -32,6 +32,34 @@ Deno.test('all eight Design services derive a compatible display family', () => 
   }
   for (const [slug, family] of Object.entries(expected)) assert.equal(outputFamilyForService(slug), family)
   assert.throws(() => outputFamilyForService('content_strategy'))
+})
+
+Deno.test('storyboard mode is isolated to the storyboard service family', () => {
+  assert.equal(isStoryboardSession({ output_family: 'video_motion' }), true)
+  assert.equal(isStoryboardSession({ output_family: 'marketing_asset' }, 'video_concepts_storyboards'), true)
+  for (const outputFamily of ['brand_identity', 'website_design', 'marketing_asset']) {
+    assert.equal(isStoryboardSession({ output_family: outputFamily }), false)
+  }
+})
+
+Deno.test('storyboard prompts carry exact prior-frame narrative context while comparisons stay distinct', () => {
+  const first = directionGenerationPrompt(true, 1, 3, [], 'unused comparison lane')
+  assert(first.instructions.includes('connected static sequence'))
+  assert(first.context.includes('1 of 3'))
+  assert(first.context.includes('Establish the opening frame'))
+  assert(!first.context.includes('materially different'))
+
+  const prior = { title: 'Arrival', creative_thesis: 'The courier enters the rain-lit city', palette: [{ name: 'Neon', hex: '#7c3aed' }] }
+  const second = directionGenerationPrompt(true, 2, 3, [prior], 'unused comparison lane')
+  assert(second.context.includes('Continue directly from the prior frame content'))
+  assert(second.context.includes('"frame_order":1'))
+  assert(second.context.includes('The courier enters the rain-lit city'))
+  assert(second.context.includes('Do not restart or propose an alternative concept'))
+
+  const comparison = directionGenerationPrompt(false, 2, 3, [prior], 'Pragmatic comparison lane')
+  assert(comparison.context.includes('MANDATORY DIRECTION LANE'))
+  assert(comparison.context.includes('materially different'))
+  assert(!comparison.context.includes('STORYBOARD SEQUENCE'))
 })
 
 Deno.test('session service validation accepts active Design service and rejects inactive service', async () => {

@@ -71,7 +71,7 @@ test('generation produces three attributed directions and rejects silent duplica
   assert.match(edge, /provider: model\.provider, model_id: model\.model_id/)
   assert.match(edge, /direction_slot: slot/)
   assert.match(edge, /status: duplicate \? 'rejected_duplicate' : 'completed'/)
-  assert.match(edge, /if \(!directionsAreDistinct/)
+  assert.match(edge, /if \(!storyboard && !directionsAreDistinct/)
   assert.match(ui, /Generate three directions/)
 })
 
