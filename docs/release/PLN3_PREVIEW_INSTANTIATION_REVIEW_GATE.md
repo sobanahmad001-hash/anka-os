@@ -60,8 +60,8 @@ The verifier passed against a fresh disposable PostgreSQL 17.11 cluster restored
 
 ## Local evidence
 
-- Focused PLN3 contracts: 6 passed, 0 failed.
-- Full Node suite: 519 passed, 0 failed.
+- Focused PLN3 contracts: 7 passed, 0 failed.
+- Full Node suite: 520 passed, 0 failed.
 - Exact CI-configured frozen Deno suite: 153 passed, 0 failed on checksum-verified Deno 2.9.5.
 - Exact CI-configured frozen Deno check: passed.
 - Production build: passed.
@@ -71,13 +71,15 @@ The verifier passed against a fresh disposable PostgreSQL 17.11 cluster restored
 
 ## Two-session concurrency evidence
 
-The approved table-lock strategy was exercised with two independent PostgreSQL sessions against the disposable cluster:
+The approved table-lock strategy was exercised twice with two independent PostgreSQL sessions per run against disposable clones created by the checked-in local-only verifier `scripts/pln3-concurrency.ts`:
 
 - Session 1 called the template composition wrapper inside an explicit transaction, then held the transaction open after composition returned.
 - Session 2 observed granted `ShareLock` entries for all four tables: `blueprint_stage_catalog`, `blueprint_stage_dependencies`, `service_catalog`, and `service_stage_rules`.
 - Separate `ROW EXCLUSIVE NOWAIT` attempts against every locked table failed while Session 1 remained open.
-- A real `service_stage_rules` update with `lock_timeout = '1s'` failed after 1,364 ms with `canceling statement due to lock timeout`.
+- A real `service_stage_rules` update with `lock_timeout = '1s'` failed after 1,005 ms and 1,008 ms respectively with `canceling statement due to lock timeout`.
 - Session 1 rolled back. Immediately afterward, the observed external lock count was zero, both composed engagement/request counts were zero, and the attempted rule change was absent.
+
+Each run returned `share_locks=4/4`, `nowait_writers_blocked=4/4`, `real_update_timed_out=true`, and `rollback_clean=true`. The harness refuses non-local hosts and non-`pln3_template_*` databases, creates only a random `pln3_verify_*` clone, applies no migration, and drops that clone in `finally`.
 
 The lock boundary is the complete database transaction containing `compose_engagement_from_pipeline_template(...)`, not only the function's planner statement. Callers should keep that transaction short. The tradeoff is intentional: canonical graph/catalog writes wait behind in-flight template composition so the unchanged composer cannot observe a post-preview rule state.
 
@@ -96,6 +98,18 @@ If another migration lands at or beyond this timestamp before merge, the source 
 - Any change to canonical `compose_engagement(...)` behavior or privileges.
 - Template-owned workflow graphs or ownership models.
 - Shared Supabase migration application, push, merge, deployment, or production configuration.
+
+## Exact review file list
+
+- `docs/release/PLN3_PREVIEW_INSTANTIATION_REVIEW_GATE.md`
+- `scripts/pln3-concurrency.ts`
+- `src/apps/OperatingSpine.jsx`
+- `src/components/PipelineTemplateJourneyPreview.jsx`
+- `src/data/pipelineTemplatePreview.test.js`
+- `src/data/pipelineTemplates.js`
+- `src/data/pipelineTemplatesRepository.js`
+- `supabase/migrations/20260904000717_pln3_preview_instantiation.sql`
+- `supabase/verify_20260904000717_pln3_preview_instantiation.sql`
 
 ## Review hold
 

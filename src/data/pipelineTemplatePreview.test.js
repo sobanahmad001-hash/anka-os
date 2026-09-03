@@ -11,6 +11,7 @@ import {
 const migration = readFileSync(new URL('../../supabase/migrations/20260904000717_pln3_preview_instantiation.sql', import.meta.url), 'utf8')
 const operatingSpine = readFileSync(new URL('../apps/OperatingSpine.jsx', import.meta.url), 'utf8')
 const previewComponent = readFileSync(new URL('../components/PipelineTemplateJourneyPreview.jsx', import.meta.url), 'utf8')
+const concurrency = readFileSync(new URL('../../scripts/pln3-concurrency.ts', import.meta.url), 'utf8')
 
 const IDS = Object.freeze({
   templateVersion: '11111111-1111-4111-8111-111111111111',
@@ -159,4 +160,17 @@ test('PLN3 UI keeps direct composition and gates template creation on a current 
   assert.match(previewComponent, /Historical preset/)
   assert.match(previewComponent, /Canonical rules have changed/)
   assert.match(previewComponent, /Read-only/)
+})
+
+test('PLN3 two-session verifier is local-only, observes every lock, and drops only its clone', () => {
+  assert.match(concurrency, /PLN3_LOCAL_TEMPLATE_URL/)
+  assert.match(concurrency, /localhost.*127\.0\.0\.1/)
+  assert.match(concurrency, /template\.startsWith\('pln3_template_'\)/)
+  assert.match(concurrency, /pln3_verify_/)
+  assert.match(concurrency, /mode='ShareLock'/)
+  assert.match(concurrency, /row exclusive mode nowait/)
+  assert.match(concurrency, /lock_timeout = '1s'/)
+  assert.match(concurrency, /rollback_clean=true/)
+  assert.match(concurrency, /DROP DATABASE/)
+  assert.doesNotMatch(concurrency, /supabase|fhoxaogfjszftoqtnbav|apply.*migration/i)
 })
