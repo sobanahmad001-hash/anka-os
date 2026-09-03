@@ -15,7 +15,7 @@ export default function DepartmentChat(props) {
   const identity = JSON.stringify([user?.id, activeOrganizationId, scopeRevision, props.engagement?.id, props.departmentId])
   if (!user?.id || !activeOrganizationId || requestSignal?.aborted
     || props.engagement?.organization_id !== activeOrganizationId) return null
-  return <ScopedDepartmentChat key={identity} {...props} requestSignal={requestSignal} handleOrganizationAccessError={handleOrganizationAccessError} />
+  return <ScopedDepartmentChat key={identity} {...props} organizationId={activeOrganizationId} requestSignal={requestSignal} handleOrganizationAccessError={handleOrganizationAccessError} />
 }
 
 function ScopedDepartmentChat({
@@ -26,10 +26,12 @@ function ScopedDepartmentChat({
   artifactForType = () => null,
   stageForType = () => null,
   onCreated,
+  organizationId,
   requestSignal,
   handleOrganizationAccessError,
 }) {
   const completion = useRef(null)
+  const requestScope = { organizationId, signal: requestSignal }
   useLayoutEffect(() => {
     const guard = createChatCompletionGuard(requestSignal)
     completion.current = guard
@@ -68,7 +70,7 @@ function ScopedDepartmentChat({
           prompt,
           prompt_safe_for_ai: safe,
           change_summary: 'Draft proposed via Shared Department Chat',
-        })
+        }, requestScope)
         : await departmentChat.proposeWorkItem(departmentId, {
           engagement_id: engagement.id,
           title: title || `${artifactDefinitions[artifactType]?.label || 'Work item'} request`,
@@ -76,7 +78,7 @@ function ScopedDepartmentChat({
           priority,
           prompt,
           prompt_safe_for_ai: safe,
-        })
+        }, requestScope)
       if (!isCurrent()) return
       setResult(proposed)
       setPrompt('')
@@ -96,8 +98,8 @@ function ScopedDepartmentChat({
     setError('')
     try {
       const decision = action === 'confirm'
-        ? await departmentChat.confirmProposal(result.proposal_id)
-        : await departmentChat.rejectProposal(result.proposal_id)
+        ? await departmentChat.confirmProposal(result.proposal_id, requestScope)
+        : await departmentChat.rejectProposal(result.proposal_id, requestScope)
       if (!isCurrent()) return
       setResult(current => ({ ...current, status: decision.outcome, decision }))
       if (decision.outcome === 'accepted' && isCurrent()) await onCreated?.(decision)
@@ -122,7 +124,7 @@ function ScopedDepartmentChat({
     setBusy(true)
     setError('')
     try {
-      const record = await departmentChat.getOfficialRecord(engagement.organization_id, result.decision)
+      const record = await departmentChat.getOfficialRecord(organizationId, result.decision, requestScope)
       if (isCurrent()) setOfficial(record)
     } catch (reason) {
       handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message))

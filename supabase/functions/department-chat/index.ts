@@ -22,7 +22,6 @@ import { namedKey, sha256 } from '../_shared/googleOAuthTokens.ts'
 type Client = ReturnType<typeof createClient<any>>
 type Json = Record<string, unknown>
 
-const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses'
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 export const ENABLED_DEPARTMENTS = new Set(['content', 'design', 'marketing', 'development'])
@@ -76,33 +75,44 @@ export function departmentChatExternalEndpoint() {
   return OPENAI_RESPONSES_URL
 }
 
-async function requireContext(request: Request) {
+type RequestClients = { userClient: Client, admin: Client }
+
+async function requireContext(request: Request, selectedOrganization: unknown, clients?: RequestClients) {
   const authorization = request.headers.get('Authorization') || ''
   if (!authorization.startsWith('Bearer ')) throw Object.assign(new Error('Authentication required'), { status: 401 })
+  const organizationId = text(selectedOrganization, 80)
+  if (!organizationId) throw Object.assign(new Error('Selected organization is required'), { status: 400 })
+  if (!clients) clients = createRequestClients(authorization)
+  const { userClient, admin } = clients
+  const { data: { user }, error } = await userClient.auth.getUser()
+  if (error || !user) throw Object.assign(new Error('Authentication required'), { status: 401 })
+  const { data: activeOrganization, error: organizationError } = await admin.from('organizations')
+    .select('id').eq('id', organizationId).eq('status', 'active').maybeSingle()
+  if (organizationError || !activeOrganization) throw Object.assign(new Error('Active organization required'), { status: 403 })
+  const { data: membership, error: membershipError } = await admin.from('organization_memberships')
+    .select('organization_id, role, department_id, status, member_kind')
+    .eq('organization_id', organizationId).eq('user_id', user.id).maybeSingle()
+  if (membershipError || !membership || membership.organization_id !== organizationId
+    || membership.status !== 'active' || membership.member_kind !== 'team') {
+    throw Object.assign(new Error('Active team membership required'), { status: 403 })
+  }
+  return { userClient, admin, user, membership, organizationId }
+}
+
+function createRequestClients(authorization: string): RequestClients {
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
   const publishableKey = namedKey('SUPABASE_PUBLISHABLE_KEYS', 'SUPABASE_ANON_KEY')
   const secretKey = namedKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY')
   if (!supabaseUrl || !publishableKey || !secretKey) throw new Error('Function environment is incomplete')
   const userClient = createClient(supabaseUrl, publishableKey, { global: { headers: { Authorization: authorization } } })
   const admin = createClient(supabaseUrl, secretKey, { auth: { persistSession: false, autoRefreshToken: false } })
-  const { data: { user }, error } = await userClient.auth.getUser()
-  if (error || !user) throw Object.assign(new Error('Authentication required'), { status: 401 })
-  const { data: activeOrganization, error: organizationError } = await admin.from('organizations')
-    .select('id').eq('id', ORGANIZATION_ID).eq('status', 'active').maybeSingle()
-  if (organizationError || !activeOrganization) throw Object.assign(new Error('Active organization required'), { status: 403 })
-  const { data: membership } = await admin.from('organization_memberships')
-    .select('organization_id, role, department_id, status, member_kind')
-    .eq('organization_id', ORGANIZATION_ID).eq('user_id', user.id).maybeSingle()
-  if (!membership || membership.status !== 'active' || membership.member_kind !== 'team') {
-    throw Object.assign(new Error('Active team membership required'), { status: 403 })
-  }
-  return { userClient, admin, user, membership }
+  return { userClient, admin }
 }
 
-export async function requireDepartmentEngagement(admin: Client, engagementId: string, departmentId: string) {
+export async function requireDepartmentEngagement(admin: Client, engagementId: string, departmentId: string, organizationId: string) {
   const { data: engagement, error } = await admin.from('engagements')
     .select('id, organization_id, client_id, project_id, brand_id, name, objective, status')
-    .eq('id', engagementId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+    .eq('id', engagementId).eq('organization_id', organizationId).maybeSingle()
   if (error || !engagement) throw Object.assign(new Error('Engagement not found'), { status: 404 })
   if (!engagement.client_id || !engagement.project_id || !engagement.brand_id) {
     throw Object.assign(new Error('Engagement canonical ownership is incomplete'), { status: 409 })
@@ -110,15 +120,16 @@ export async function requireDepartmentEngagement(admin: Client, engagementId: s
   const [agencyClientResult, projectResult, brandResult, serviceResult] = await Promise.all([
     admin.from('agency_clients')
       .select('id, organization_id, canonical_client_id, name, legal_name, status')
-      .eq('id', engagement.client_id).eq('organization_id', ORGANIZATION_ID).maybeSingle(),
+      .eq('id', engagement.client_id).eq('organization_id', organizationId).maybeSingle(),
     admin.from('projects')
       .select('id, organization_id, client_id, name, description, status, scope_statement, exclusions')
-      .eq('id', engagement.project_id).eq('organization_id', ORGANIZATION_ID).maybeSingle(),
+      .eq('id', engagement.project_id).eq('organization_id', organizationId).maybeSingle(),
     admin.from('brands')
       .select('id, organization_id, client_id, name, description, status')
-      .eq('id', engagement.brand_id).eq('organization_id', ORGANIZATION_ID).maybeSingle(),
+      .eq('id', engagement.brand_id).eq('organization_id', organizationId).maybeSingle(),
     admin.from('engagement_services')
       .select('id, status, service_catalog!inner(department_id, slug, name)').eq('engagement_id', engagementId)
+      .eq('organization_id', organizationId)
       .eq('status', 'active').eq('service_catalog.department_id', departmentId),
   ])
   for (const result of [agencyClientResult, projectResult, brandResult]) if (result.error) throw result.error
@@ -133,7 +144,7 @@ export async function requireDepartmentEngagement(admin: Client, engagementId: s
   }
   const { data: canonicalClient, error: canonicalClientError } = await admin.from('clients')
     .select('id, organization_id, name, company, industry, status')
-    .eq('id', agencyClient.canonical_client_id).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+    .eq('id', agencyClient.canonical_client_id).eq('organization_id', organizationId).maybeSingle()
   if (canonicalClientError) throw canonicalClientError
   if (!canonicalClient) throw Object.assign(new Error('Canonical client could not be resolved'), { status: 409 })
   const services = serviceResult.data
@@ -145,7 +156,7 @@ export async function requireDepartmentEngagement(admin: Client, engagementId: s
     engagement: { ...engagement, agency_clients: { name: agencyClient.name }, brands: { name: brand.name } },
     services,
     commercialContext: {
-      organization_id: ORGANIZATION_ID,
+      organization_id: organizationId,
       canonical_client: canonicalClient,
       agency_client: agencyClient,
       project,
@@ -155,16 +166,16 @@ export async function requireDepartmentEngagement(admin: Client, engagementId: s
   }
 }
 
-export async function resolveSingleOpenAiModel(admin: Client, engagementId: string, departmentId: string) {
+export async function resolveSingleOpenAiModel(admin: Client, engagementId: string, departmentId: string, organizationId: string, credentialFor?: (name: string) => string | undefined) {
   const { data: connections, error } = await admin.from('integration_connections')
     .select('id, public_config, secret_name, integration_connection_departments!inner(department_id), integration_connection_engagements!inner(engagement_id, department_id)')
-    .eq('organization_id', ORGANIZATION_ID).eq('provider', 'openai').eq('status', 'verified')
+    .eq('organization_id', organizationId).eq('provider', 'openai').eq('status', 'verified')
     .is('archived_at', null).eq('integration_connection_departments.department_id', departmentId)
     .eq('integration_connection_engagements.engagement_id', engagementId)
     .eq('integration_connection_engagements.department_id', departmentId)
     .order('updated_at', { ascending: false })
   if (error) throw error
-  return selectSingleOpenAiModel(connections || [], departmentId)
+  return selectSingleOpenAiModel(connections || [], departmentId, credentialFor)
 }
 
 export function selectSingleOpenAiModel(
@@ -190,11 +201,12 @@ export function selectSingleOpenAiModel(
   }
 }
 
-async function approvedSafeContext(admin: Client, engagementId: string, departmentId: string) {
+async function approvedSafeContext(admin: Client, engagementId: string, departmentId: string, organizationId: string) {
   const profile = departmentChatProfile(departmentId)
   const { data: approvals, error } = await admin.from('artifact_approvals')
     .select('artifact_id, artifact_version_id, approved_at, artifacts!inner(artifact_type, title, engagement_id), artifact_versions!inner(id, content, ai_use_allowed, data_classification)')
     .eq('engagement_id', engagementId).eq('artifacts.engagement_id', engagementId)
+    .eq('organization_id', organizationId)
     .in('artifacts.artifact_type', profile.contextArtifactTypes)
     .eq('artifact_versions.ai_use_allowed', true).neq('artifact_versions.data_classification', 'restricted')
     .order('approved_at', { ascending: false })
@@ -212,12 +224,12 @@ async function approvedSafeContext(admin: Client, engagementId: string, departme
   })
 }
 
-async function safeStage(admin: Client, engagementId: string, stageId: unknown, departmentId: string) {
+async function safeStage(admin: Client, engagementId: string, stageId: unknown, departmentId: string, organizationId: string) {
   const id = text(stageId, 80)
   if (!id) return null
   const { data: stage, error } = await admin.from('engagement_stage_instances')
     .select('id, accountable_department_id').eq('id', id).eq('engagement_id', engagementId)
-    .eq('organization_id', ORGANIZATION_ID).maybeSingle()
+    .eq('organization_id', organizationId).maybeSingle()
   if (error || !stage || stage.accountable_department_id !== departmentId) throw new Error(`${departmentId} stage does not match this engagement`)
   return stage.id
 }
@@ -316,6 +328,7 @@ export async function freezeDepartmentChatContext(input: {
 
 async function loadDepartmentChatContext(
   admin: Client,
+  organizationId: string,
   actorId: string,
   engagementId: string,
   departmentId: string,
@@ -323,12 +336,12 @@ async function loadDepartmentChatContext(
 ) {
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
   const { count: recentRuns, error: rateError } = await admin.from('ai_runs')
-    .select('id', { count: 'exact', head: true }).eq('user_id', actorId).gte('created_at', hourAgo)
+    .select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).eq('user_id', actorId).gte('created_at', hourAgo)
   if (rateError) throw rateError
   if ((recentRuns || 0) >= 20) throw Object.assign(new Error('Hourly AI run limit reached. Try again later.'), { status: 429 })
 
   const { data: organization, error: organizationError } = await admin.from('organizations')
-    .select('settings').eq('id', ORGANIZATION_ID).single()
+    .select('settings').eq('id', organizationId).single()
   if (organizationError) throw organizationError
 
   const monthlyBudget = Number(organization?.settings?.ai_monthly_budget_microusd)
@@ -336,7 +349,7 @@ async function loadDepartmentChatContext(
     const now = new Date()
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
     const { data: costRows, error: costError } = await admin.from('ai_runs')
-      .select('estimated_cost_microusd').eq('organization_id', ORGANIZATION_ID)
+      .select('estimated_cost_microusd').eq('organization_id', organizationId)
       .gte('created_at', monthStart).eq('status', 'completed')
     if (costError) throw costError
     const spent = (costRows || []).reduce((sum, run) => sum + Number(run.estimated_cost_microusd || 0), 0)
@@ -345,13 +358,14 @@ async function loadDepartmentChatContext(
     }
   }
 
-  const { engagement, services, commercialContext } = await (dependencies.requireDepartmentEngagement || requireDepartmentEngagement)(admin, engagementId, departmentId)
-  const context = await (dependencies.approvedSafeContext || approvedSafeContext)(admin, engagement.id, departmentId)
-  const provider = await (dependencies.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(admin, engagement.id, departmentId)
+  const { engagement, services, commercialContext } = await (dependencies.requireDepartmentEngagement || requireDepartmentEngagement)(admin, engagementId, departmentId, organizationId)
+  const context = await (dependencies.approvedSafeContext || approvedSafeContext)(admin, engagement.id, departmentId, organizationId)
+  const provider = await (dependencies.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(admin, engagement.id, departmentId, organizationId)
   return { engagement, services, commercialContext, context, provider }
 }
 
 async function persistDepartmentChatProposal(admin: Client, input: {
+  organizationId: string
   actorId: string
   departmentId: string
   proposalKind: 'artifact_version' | 'work_item'
@@ -371,7 +385,7 @@ async function persistDepartmentChatProposal(admin: Client, input: {
   outputTokens: number | null
 }, dependencies: ProposalDependencies) {
   const { data, error } = await admin.rpc('save_department_chat_proposal', {
-    p_organization_id: ORGANIZATION_ID,
+    p_organization_id: input.organizationId,
     p_engagement_id: input.engagementId,
     p_project_id: input.projectId,
     p_department_id: input.departmentId,
@@ -405,7 +419,7 @@ async function persistDepartmentChatProposal(admin: Client, input: {
   if (error) throw error
   return data as Json
 }
-export async function proposeArtifact(_userClient: Client, admin: Client, body: Json, actorId: string, fetcher: typeof fetch = fetch, dependencies: ProposalDependencies = {}) {
+export async function proposeArtifact(_userClient: Client, admin: Client, body: Json, actorId: string, organizationId: string, fetcher: typeof fetch = fetch, dependencies: ProposalDependencies = {}) {
   const startedAt = Date.now()
   const engagementId = text(body.engagement_id, 80)
   const departmentId = text(body.department_id, 40)
@@ -415,8 +429,8 @@ export async function proposeArtifact(_userClient: Client, admin: Client, body: 
   if (!isDepartmentChatArtifactType(departmentId, artifactType)) throw new Error('Unsupported ' + departmentId + ' artifact')
   if (!prompt) throw new Error('A draft prompt is required')
   if (body.prompt_safe_for_ai !== true) throw new Error('Confirm the prompt is safe to send to the configured model')
-  const { engagement, services, commercialContext, context, provider } = await loadDepartmentChatContext(admin, actorId, engagementId, departmentId, dependencies)
-  const stageId = await (dependencies.safeStage || safeStage)(admin, engagement.id, body.engagement_stage_instance_id, departmentId)
+  const { engagement, services, commercialContext, context, provider } = await loadDepartmentChatContext(admin, organizationId, actorId, engagementId, departmentId, dependencies)
+  const stageId = await (dependencies.safeStage || safeStage)(admin, engagement.id, body.engagement_stage_instance_id, departmentId, organizationId)
   const contextFreeze = await freezeDepartmentChatContext({
     departmentId, commercialContext, services, approvedContext: context, provider, stageId,
   })
@@ -463,7 +477,7 @@ export async function proposeArtifact(_userClient: Client, admin: Client, body: 
   const title = text(body.title, 240) || artifactType.replaceAll('_', ' ') + ' chat draft'
   const changeSummary = text(body.change_summary, 1000) || 'Draft proposed via Shared Department Chat'
   return persistDepartmentChatProposal(admin, {
-    actorId, departmentId, proposalKind: 'artifact_version', targetKey: artifactType,
+    organizationId, actorId, departmentId, proposalKind: 'artifact_version', targetKey: artifactType,
     engagementId: engagement.id,
     projectId: text((commercialContext.project as Json)?.id, 80),
     artifactId: text(body.artifact_id, 80) || null,
@@ -480,6 +494,7 @@ export async function proposeWorkItem(
   admin: Client,
   body: Json,
   actorId: string,
+  organizationId: string,
   fetcher: typeof fetch = fetch,
   dependencies: ProposalDependencies = {},
 ) {
@@ -496,7 +511,7 @@ export async function proposeWorkItem(
   if (body.prompt_safe_for_ai !== true) throw new Error('Confirm the prompt is safe to send to the configured model')
   if (!WORK_ITEM_TYPES.has(workItemType)) throw new Error('Unsupported work item type')
   if (!WORK_ITEM_PRIORITIES.has(priority)) throw new Error('Unsupported priority')
-  const { engagement, services, commercialContext, context, provider } = await loadDepartmentChatContext(admin, actorId, engagementId, departmentId, dependencies)
+  const { engagement, services, commercialContext, context, provider } = await loadDepartmentChatContext(admin, organizationId, actorId, engagementId, departmentId, dependencies)
   const contextFreeze = await freezeDepartmentChatContext({
     departmentId, commercialContext, services, approvedContext: context, provider,
   })
@@ -525,7 +540,7 @@ export async function proposeWorkItem(
   const description = text(outputText(result), 20000)
   if (!description) throw new Error('The configured model returned an empty work item description')
   return persistDepartmentChatProposal(admin, {
-    actorId, departmentId, proposalKind: 'work_item', targetKey: workItemType,
+    organizationId, actorId, departmentId, proposalKind: 'work_item', targetKey: workItemType,
     engagementId: engagement.id,
     projectId: text((commercialContext.project as Json)?.id, 80),
     artifactId: null, stageId: null,
@@ -536,11 +551,11 @@ export async function proposeWorkItem(
     outputTokens: result.usage?.output_tokens ?? null,
   }, dependencies)
 }
-async function proposalForDecision(admin: Client, proposalId: string) {
+async function proposalForDecision(admin: Client, proposalId: string, organizationId: string) {
   if (!proposalId) throw Object.assign(new Error('proposal_id is required'), { status: 400 })
   const { data, error } = await admin.from('department_chat_proposals')
     .select('id, organization_id, engagement_id, project_id, department_id, proposer_id, proposal_kind, target_key, artifact_id, engagement_stage_instance_id, context_checksum, connector_connection_id, model_id, status, expires_at')
-    .eq('id', proposalId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+    .eq('id', proposalId).eq('organization_id', organizationId).maybeSingle()
   if (error) throw error
   if (!data) throw Object.assign(new Error('Department Chat proposal not found'), { status: 404 })
   return data
@@ -553,7 +568,9 @@ export async function confirmProposal(
   membership: Json,
   dependencies: ProposalDependencies = {},
 ) {
-  const proposal = await proposalForDecision(admin, proposalId)
+  const organizationId = text(membership.organization_id, 80)
+  if (!organizationId) throw Object.assign(new Error('Selected organization is required'), { status: 400 })
+  const proposal = await proposalForDecision(admin, proposalId, organizationId)
   if (proposal.proposer_id !== actorId) {
     throw Object.assign(new Error('Only the proposer can confirm this proposal'), { status: 403 })
   }
@@ -583,22 +600,25 @@ export async function confirmProposal(
   const { provider, contextFreeze } = await (async () => {
   const { engagement, services, commercialContext } = await (
     dependencies.requireDepartmentEngagement || requireDepartmentEngagement
-  )(admin, proposal.engagement_id, proposal.department_id)
+  )(admin, proposal.engagement_id, proposal.department_id, organizationId)
   const context = await (dependencies.approvedSafeContext || approvedSafeContext)(
     admin,
     engagement.id,
     proposal.department_id,
+    organizationId,
   )
   const provider = await (dependencies.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(
     admin,
     engagement.id,
     proposal.department_id,
+    organizationId,
   )
   const stageId = await (dependencies.safeStage || safeStage)(
     admin,
     engagement.id,
     proposal.engagement_stage_instance_id,
     proposal.department_id,
+    organizationId,
   )
   const contextFreeze = await freezeDepartmentChatContext({
     departmentId: proposal.department_id,
@@ -644,7 +664,9 @@ export async function rejectProposal(
   actorId: string,
   membership: Json,
 ) {
-  const proposal = await proposalForDecision(admin, proposalId)
+  const organizationId = text(membership.organization_id, 80)
+  if (!organizationId) throw Object.assign(new Error('Selected organization is required'), { status: 400 })
+  const proposal = await proposalForDecision(admin, proposalId, organizationId)
   if (proposal.proposer_id !== actorId) {
     throw Object.assign(new Error('Only the proposer can reject this proposal'), { status: 403 })
   }
@@ -666,20 +688,20 @@ export async function rejectProposal(
   return data
 }
 
-export async function handleRequest(request: Request) {
+export async function handleRequest(request: Request, dependencies: { clients?: RequestClients, fetcher?: typeof fetch, proposal?: ProposalDependencies } = {}) {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (request.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
-  let auditContext: { admin: Client, actorId: string } | null = null
+  let auditContext: { admin: Client, actorId: string, organizationId: string } | null = null
   let previewAttempt = false
   try {
-    const { userClient, admin, user, membership } = await requireContext(request)
-    auditContext = { admin, actorId: user.id }
     const body = await request.json() as Json
+    const { userClient, admin, user, membership, organizationId } = await requireContext(request, body.organization_id, dependencies.clients)
+    auditContext = { admin, actorId: user.id, organizationId }
     const action = text(body.action, 60)
     previewAttempt = ['propose_artifact', 'propose_work_item'].includes(action)
-    if (previewAttempt) await auditAttempt(admin, user.id, 'preview_requested', '')
+    if (previewAttempt) await auditAttempt(admin, organizationId, user.id, 'preview_requested', '')
     if (action === 'confirm_proposal') {
-      return response({ data: await confirmProposal(admin, text(body.proposal_id, 80), user.id, membership) })
+      return response({ data: await confirmProposal(admin, text(body.proposal_id, 80), user.id, membership, dependencies.proposal) })
     }
     if (action === 'reject_proposal') {
       return response({ data: await rejectProposal(admin, text(body.proposal_id, 80), user.id, membership) })
@@ -689,14 +711,14 @@ export async function handleRequest(request: Request) {
     if (!hasDepartmentChatAuthority(membership, departmentId)) {
       throw Object.assign(new Error('Department policy denied'), { status: 403 })
     }
-    if (action === 'propose_artifact') return response({ data: await proposeArtifact(userClient, admin, body, user.id) })
-    if (action === 'propose_work_item') return response({ data: await proposeWorkItem(userClient, admin, body, user.id) })
+    if (action === 'propose_artifact') return response({ data: await proposeArtifact(userClient, admin, body, user.id, organizationId, dependencies.fetcher, dependencies.proposal) })
+    if (action === 'propose_work_item') return response({ data: await proposeWorkItem(userClient, admin, body, user.id, organizationId, dependencies.fetcher, dependencies.proposal) })
     return response({ error: 'Unsupported action' }, 400)
   } catch (error) {
     if (previewAttempt && auditContext) {
       const reason = safeAttemptReason(error)
       try {
-        await auditAttempt(auditContext.admin, auditContext.actorId,
+        await auditAttempt(auditContext.admin, auditContext.organizationId, auditContext.actorId,
           reason === 'provider_failed' || reason === 'invalid_output' ? 'preview_failed' : 'preview_blocked', reason)
       } catch {
         return response({ error: 'Department Chat audit could not be recorded' }, 503)
@@ -719,11 +741,11 @@ export function safeAttemptReason(error: unknown) {
   return 'policy_denied'
 }
 
-async function auditAttempt(admin: Client, actorId: string, kind: string, reason: string) {
+async function auditAttempt(admin: Client, organizationId: string, actorId: string, kind: string, reason: string) {
   const { error } = await admin.rpc('record_department_chat_attempt', {
-    p_organization_id: ORGANIZATION_ID, p_actor_id: actorId, p_event_kind: kind, p_reason_code: reason,
+    p_organization_id: organizationId, p_actor_id: actorId, p_event_kind: kind, p_reason_code: reason,
   })
   if (error) throw new Error('Department Chat audit could not be recorded')
 }
 
-if (import.meta.main) Deno.serve(handleRequest)
+if (import.meta.main) Deno.serve(request => handleRequest(request))

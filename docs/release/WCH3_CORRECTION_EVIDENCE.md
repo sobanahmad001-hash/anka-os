@@ -43,7 +43,7 @@ Rollback additions: any Admin forward rollback must also remove the WCH audit tr
 
 ## Narrow OAF error-path follow-up
 
-Based on accepted correction f25436457189dee0e3bacfeba9e6fa6e006cce82. The WCH transport now preserves FunctionsHttpError context status, response-envelope status, fallback error status/statusCode, and terminal outcome. Official-record PostgREST reads preserve envelope status as well. Shared DepartmentChat previews now use this same WCH transport directly because inherited studio adapters discarded error metadata; proposal inputs and department selection are unchanged.
+Based on correction f25436457189dee0e3bacfeba9e6fa6e006cce82, which passed automated checks but was not release accepted. The WCH transport preserves FunctionsHttpError context status, response-envelope status, fallback error status/statusCode, and terminal outcome. Official-record PostgREST reads preserve envelope status as well. Shared DepartmentChat previews use this same WCH transport directly because inherited studio adapters discarded error metadata. The replaced Marketing adapter supplied organization_id and signal, which this narrow error-path correction did not preserve. That separate scope gap is addressed only by the subsequent selected-organization correction documented in WCH_SELECTED_ORGANIZATION_EVIDENCE.md.
 
 Preview, confirm, reject and official-read catches call the existing organization access handler only while their captured identity/request remains current. They check again after recovery, which can synchronously abort the scope. No provider/global helper or WKS changes were made.
 
