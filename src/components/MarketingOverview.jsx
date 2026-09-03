@@ -11,7 +11,7 @@ const FACETS = Object.freeze([['due_work', 'Due work'], ['blockers', 'Blockers']
 const label = value => String(value || '').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
 const dueLabel = value => value ? new Date(`${value}T00:00:00Z`).toLocaleDateString() : 'No due date'
 
-export default function MarketingOverview({ organizationId, scopeRevision, signal, onAccessError, engagement, serviceId, campaignId, onOpenBrief, onOpenPrivate, onOpenConnections, onRefresh }) {
+export default function MarketingOverview({ organizationId, scopeRevision, signal, onAccessError, engagement, serviceId, onOpenBrief, onOpenPrivate, onOpenConnections, onRefresh }) {
   const [work, setWork] = useState(null)
   const [readiness, setReadiness] = useState([])
   const [sourceError, setSourceError] = useState('')
@@ -53,7 +53,7 @@ export default function MarketingOverview({ organizationId, scopeRevision, signa
   const refresh = () => { setRefreshKey(value => value + 1); onRefresh?.() }
   const sectionFailures = work?.sectionErrors ? Object.values(work.sectionErrors).filter(Boolean) : []
   const project = Array.isArray(engagement.projects) ? engagement.projects[0] : engagement.projects
-  const navigation = { organizationId, clientId: project?.client_id || '', projectId: engagement.project_id, engagementId: engagement.id, brandId: engagement.brand_id, serviceId, campaignId }
+  const navigation = { organizationId, clientId: project?.client_id || '', projectId: engagement.project_id, engagementId: engagement.id, brandId: engagement.brand_id, serviceId }
 
   if (loading && !work) return <OverviewSkeleton />
   return <section className="space-y-6">

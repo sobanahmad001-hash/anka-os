@@ -70,6 +70,21 @@ export function latestVersion(rows = []) {
   return [...rows].sort((left, right) => right.version_number - left.version_number)[0] || null
 }
 
+export function resolveMarketingArtifactDestination(workspace, output, campaignId = '') {
+  if (!output) return null
+  if (output.kind !== 'artifact' || !output.id || !output.versionId || !workspace?.engagement) return Object.freeze({ status: 'invalid' })
+  const organizationId = workspace.engagement.organization_id
+  const engagementId = workspace.engagement.id
+  const artifact = workspace.artifacts.find(item => item.id === output.id && item.organization_id === organizationId && item.engagement_id === engagementId)
+  const version = workspace.versions.find(item => item.id === output.versionId && item.organization_id === organizationId && item.artifact_id === artifact?.id)
+  if (!artifact || !version) return Object.freeze({ status: 'invalid' })
+  const links = workspace.links.filter(item => item.organization_id === organizationId && item.artifact_id === artifact.id)
+  const link = campaignId ? links.find(item => item.campaign_id === campaignId) : links.length === 1 ? links[0] : null
+  const campaign = workspace.campaigns.find(item => item.id === link?.campaign_id && item.organization_id === organizationId && item.engagement_id === engagementId)
+  if (!link || !campaign) return Object.freeze({ status: 'invalid' })
+  return Object.freeze({ status: 'ready', artifact, version, campaign, link })
+}
+
 export function defaultReportingPeriod(now = new Date(), timeZone = null) {
   if (!timeZone) return { start: '', end: '', timeZone: null, automatic: false }
   let parts
