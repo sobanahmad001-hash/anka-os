@@ -35,8 +35,11 @@ function scoped(rows, organizationId) {
   return (rows || []).filter(row => row.organization_id === organizationId)
 }
 
-export function shouldApplyDashboardResponse(response, request, activeGeneration) {
-  return request.generation === activeGeneration && response?.brand?.id === request.brandId
+export function shouldApplyDashboardResponse(response, request, activeGeneration, activeScopeRevision = request.scopeRevision) {
+  return request.generation === activeGeneration &&
+    request.scopeRevision === activeScopeRevision &&
+    response?.brand?.id === request.brandId &&
+    response?.brand?.organization_id === request.organizationId
 }
 
 export async function collectPaginatedRows(fetchPage, pageSize = 500) {

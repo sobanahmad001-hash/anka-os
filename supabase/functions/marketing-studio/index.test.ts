@@ -60,6 +60,7 @@ Deno.test('backlink targets preserve unknown metrics and validate URLs, scores, 
 
 function backlinkServerPath(membership: Record<string, unknown>) {
   const writes: Array<Record<string, unknown>> = []
+  const filters: Array<{ table: string; column: string; value: unknown }> = []
   let clientCount = 0
   const userClient = {
     auth: { getUser: async () => ({ data: { user: { id: 'actor-id' } }, error: null }) },
@@ -69,10 +70,17 @@ function backlinkServerPath(membership: Record<string, unknown>) {
       let inserted: Record<string, unknown> | null = null
       const builder = {
         select() { return builder },
-        eq() { return builder },
+        eq(column: string, value: unknown) { filters.push({ table, column, value }); return builder },
         insert(value: Record<string, unknown>) { inserted = value; writes.push(value); return builder },
         async maybeSingle() {
-          if (table === 'organization_memberships') return { data: membership, error: null }
+          if (table === 'organization_memberships') {
+            const matches = filters.filter(item => item.table === table).every(item => {
+              if (item.column === 'organization.status') return ((membership.organization as Record<string, unknown> | undefined)?.status || 'active') === item.value
+              if (item.column === 'user_id') return item.value === 'actor-id'
+              return membership[item.column] === item.value
+            })
+            return { data: matches ? membership : null, error: null }
+          }
           if (table === 'brands') return { data: { id: 'brand-id', organization_id: membership.organization_id, name: 'Brand' }, error: null }
           return { data: null, error: null }
         },
@@ -84,16 +92,16 @@ function backlinkServerPath(membership: Record<string, unknown>) {
     },
   }
   const factory = () => clientCount++ === 0 ? userClient : admin
-  return { factory: factory as never, writes }
+  return { factory: factory as never, writes, filters }
 }
 
-async function createBacklinkThroughServer(membership: Record<string, unknown>) {
+async function createBacklinkThroughServer(membership: Record<string, unknown>, organizationId = String(membership.organization_id || '')) {
   const path = backlinkServerPath(membership)
   const request = new Request('https://functions.example/marketing-studio', {
     method: 'POST',
     headers: { Authorization: 'Bearer caller-jwt', 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      action: 'create_backlink_target', brand_id: 'brand-id',
+      action: 'create_backlink_target', organization_id: organizationId, brand_id: 'brand-id',
       target: { site_name: 'Industry journal', site_url: 'https://journal.example.com' },
     }),
   })
@@ -115,6 +123,21 @@ Deno.test('handleRequest permits Marketing and leadership backlink writes and de
   assertEquals(leadership.writes.length, 1)
   assertEquals(unrelated.response.status, 403)
   assertEquals(unrelated.writes.length, 0)
+})
+
+Deno.test('selected organization requires exact active team membership and drives the write tenant', async () => {
+  const organizationB = 'organization-b'
+  const base = { organization_id: organizationB, role: 'contributor', department_id: 'marketing', member_kind: 'team' }
+  const valid = await createBacklinkThroughServer({ ...base, status: 'active' }, organizationB)
+  const nonMember = await createBacklinkThroughServer({ ...base, status: 'active' }, 'organization-c')
+  const revoked = await createBacklinkThroughServer({ ...base, status: 'revoked' }, organizationB)
+  const suspended = await createBacklinkThroughServer({ ...base, status: 'suspended' }, organizationB)
+  assertEquals(valid.response.status, 200)
+  assertEquals(valid.writes[0]?.organization_id, organizationB)
+  assertEquals(nonMember.response.status, 403)
+  assertEquals(revoked.response.status, 403)
+  assertEquals(suspended.response.status, 403)
+  assertEquals(nonMember.writes.length + revoked.writes.length + suspended.writes.length, 0)
 })
 
 Deno.test('marketing report preserves source, period, insight, and recommended action', () => {
@@ -173,7 +196,7 @@ Deno.test('analytics dashboard auth path rejects a cross-organization engagement
     method: 'POST',
     headers: { Authorization: 'Bearer caller-jwt', 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      action: 'analytics_dashboard', engagement_id: 'foreign-engagement',
+      action: 'analytics_dashboard', organization_id: path.organizationId, engagement_id: 'foreign-engagement',
       start_date: '2026-08-01', end_date: '2026-08-31',
       providers: ['google_analytics', 'google_search_console'],
     }),
@@ -315,7 +338,7 @@ Deno.test('UW4 Marketing creates a campaign with only its active service and no 
     method: 'POST',
     headers: { Authorization: 'Bearer caller-jwt', 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      action: 'create_campaign', engagement_id: 'marketing-engagement',
+      action: 'create_campaign', organization_id: '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25', engagement_id: 'marketing-engagement',
       campaign: {
         name: 'Standalone launch', objective: 'Generate qualified consultation requests.',
         planned_channels: ['email', 'search'], planned_budget: 1200, currency_code: 'USD', status: 'draft',

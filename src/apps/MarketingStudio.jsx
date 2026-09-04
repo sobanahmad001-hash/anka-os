@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { useOrganization } from '../context/OrganizationContext.jsx'
 
 import {
   AD_CAMPAIGN_TYPES,
@@ -59,6 +60,10 @@ function Notice({ error, message }) {
 
 export default function MarketingStudio() {
   const [searchParams] = useSearchParams()
+  const {
+    activeOrganizationId, selectionRequired, loading: organizationLoading,
+    handleOrganizationAccessError, scopeRevision, requestSignal,
+  } = useOrganization()
   const requestedEngagementId = searchParams.get('engagement') || ''
   const [engagements, setEngagements] = useState([])
   const [brands, setBrands] = useState([])
@@ -71,53 +76,119 @@ export default function MarketingStudio() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const scope = useRef({ organizationId: activeOrganizationId, revision: scopeRevision })
+  scope.current = { organizationId: activeOrganizationId, revision: scopeRevision }
+  const organizationReady = Boolean(activeOrganizationId) && !organizationLoading && !selectionRequired
+  const studio = useMemo(() => organizationReady
+    ? marketingStudio.forOrganization(activeOrganizationId, { signal: requestSignal })
+    : null, [activeOrganizationId, organizationReady, requestSignal])
+  const workspaceGeneration = useRef(0)
 
-  async function loadWorkspace(id, preferredCampaignId = '') {
+  function currentScope(request) {
+    return !request.signal?.aborted &&
+      scope.current.organizationId === request.organizationId &&
+      scope.current.revision === request.revision
+  }
+
+  function organizationMismatch(rows) {
+    return (rows || []).some(row => row.organization_id !== activeOrganizationId)
+  }
+
+  useLayoutEffect(() => {
+    workspaceGeneration.current += 1
+    setEngagements([]); setBrands([]); setBacklinkBrandId(''); setEngagementId('')
+    setWorkspace(null); setCampaignId(''); setTab('campaigns')
+    setLoading(organizationReady); setSaving(false); setError(''); setMessage('')
+  }, [activeOrganizationId, organizationReady, scopeRevision])
+
+  async function loadWorkspace(id, preferredCampaignId = '', inheritedRequest = null) {
     if (!id) return setWorkspace(null)
+    if (!studio || !organizationReady) return
+    const generation = ++workspaceGeneration.current
+    const request = inheritedRequest || {
+      organizationId: activeOrganizationId, revision: scopeRevision, signal: requestSignal,
+    }
     setLoading(true)
     setError('')
     try {
-      const result = await marketingStudio.load(id)
+      const result = await studio.load(id)
+      const mismatch = result?.engagement?.organization_id !== request.organizationId
+      if (mismatch) throw Object.assign(new Error('Marketing workspace organization mismatch'), { status: 403, membershipMismatch: true })
+      if (!currentScope(request) || generation !== workspaceGeneration.current) return
       setWorkspace(result)
       const nextCampaign = result.campaigns.find(item => item.id === preferredCampaignId)?.id || result.campaigns[0]?.id || ''
       setCampaignId(nextCampaign)
     } catch (loadError) {
+      if (!currentScope(request) || loadError?.name === 'AbortError') return
+      handleOrganizationAccessError(loadError, { membershipMismatch: loadError?.membershipMismatch === true })
       setError(loadError.message)
     } finally {
-      setLoading(false)
+      if (currentScope(request) && generation === workspaceGeneration.current) setLoading(false)
     }
   }
 
   useEffect(() => {
+    if (!studio || !organizationReady) return undefined
     let active = true
-    Promise.all([marketingStudio.listEngagements(), marketingStudio.listBrands()]).then(([rows, brandRows]) => {
-      if (!active) return
+    const request = { organizationId: activeOrganizationId, revision: scopeRevision, signal: requestSignal }
+    Promise.all([studio.listEngagements(), studio.listBrands()]).then(([rows, brandRows]) => {
+      const mismatch = organizationMismatch(rows) || organizationMismatch(brandRows)
+      if (mismatch) throw Object.assign(new Error('Marketing catalogue organization mismatch'), { status: 403, membershipMismatch: true })
+      if (!active || !currentScope(request)) return
       setEngagements(rows || [])
       setBrands(brandRows || [])
       setBacklinkBrandId(brandRows?.[0]?.id || '')
-      const first = rows?.find(item => item.id === requestedEngagementId)?.id || rows?.[0]?.id || ''
+      const requested = rows?.find(item => item.id === requestedEngagementId)?.id || ''
+      if (requestedEngagementId && !requested) {
+        setEngagementId(''); setWorkspace(null); setLoading(false)
+        setError('The requested Marketing engagement is not available in the active organization.')
+        return
+      }
+      const first = requested || rows?.[0]?.id || ''
       setEngagementId(first)
-      if (first) loadWorkspace(first)
+      if (first) loadWorkspace(first, '', request)
       else setLoading(false)
-    }).catch(loadError => { if (active) { setError(loadError.message); setLoading(false) } })
+    }).catch(loadError => {
+      if (active && currentScope(request) && loadError?.name !== 'AbortError') {
+        handleOrganizationAccessError(loadError, { membershipMismatch: loadError?.membershipMismatch === true })
+        setError(loadError.message); setLoading(false)
+      }
+    })
     return () => { active = false }
-  }, [])
+  }, [activeOrganizationId, organizationReady, requestedEngagementId, requestSignal, scopeRevision, studio])
 
   const selectedCampaign = workspace?.campaigns.find(item => item.id === campaignId) || null
 
   async function act(callback, success, preferredCampaign = '') {
+    if (!studio || !organizationReady) return null
+    const request = { organizationId: activeOrganizationId, revision: scopeRevision, signal: requestSignal }
     setSaving(true); setError(''); setMessage('')
     try {
       const result = await callback()
+      if (!currentScope(request)) return null
       setMessage(success)
-      await loadWorkspace(engagementId, preferredCampaign || result?.id || campaignId)
+      await loadWorkspace(engagementId, preferredCampaign || result?.id || campaignId, request)
       return result
     } catch (actionError) {
+      if (!currentScope(request) || actionError?.name === 'AbortError') return null
+      handleOrganizationAccessError(actionError, { membershipMismatch: actionError?.membershipMismatch === true })
       setError(actionError.message)
       return null
     } finally {
-      setSaving(false)
+      if (currentScope(request)) setSaving(false)
     }
+  }
+
+  async function reportMarketingAccess(callback) {
+    try { return await callback() }
+    catch (actionError) {
+      handleOrganizationAccessError(actionError, { membershipMismatch: actionError?.membershipMismatch === true })
+      throw actionError
+    }
+  }
+
+  if (!organizationReady) {
+    return <div className="flex h-full items-center justify-center bg-slate-950 p-6 text-sm text-slate-400">{organizationLoading ? 'Loading organization access…' : 'Choose an active organization before opening Marketing Studio.'}</div>
   }
 
   return (
@@ -151,26 +222,26 @@ export default function MarketingStudio() {
         </nav>
 
         {loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Marketing Studio…</div> : tab === 'backlinks' ? (
-          <BacklinkOutreach brands={brands} brandId={backlinkBrandId} setBrandId={setBacklinkBrandId} />
+          <BacklinkOutreach key={`${activeOrganizationId}:${scopeRevision}`} studio={studio} brands={brands} brandId={backlinkBrandId} setBrandId={setBacklinkBrandId} onAccessError={handleOrganizationAccessError} />
         ) : !workspace ? (
           <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Select an engagement with a Marketing service to begin.</div>
         ) : tab === 'campaigns' ? (
-          <Campaigns workspace={workspace} campaignId={campaignId} setCampaignId={setCampaignId} selected={selectedCampaign} saving={saving} act={act} />
+          <Campaigns studio={studio} workspace={workspace} campaignId={campaignId} setCampaignId={setCampaignId} selected={selectedCampaign} saving={saving} act={act} />
         ) : tab === 'ad-tracking' ? (
-          <AdCampaignTracking workspace={workspace} saving={saving} act={act} />
+          <AdCampaignTracking studio={studio} workspace={workspace} saving={saving} act={act} />
         ) : tab === 'artifacts' ? (
-          <Artifacts workspace={workspace} campaign={selectedCampaign} saving={saving} act={act} setTab={setTab} onRefresh={() => loadWorkspace(engagementId, campaignId)} />
+          <Artifacts studio={studio} workspace={workspace} campaign={selectedCampaign} saving={saving} act={act} setTab={setTab} onRefresh={() => loadWorkspace(engagementId, campaignId)} />
         ) : tab === 'chat' ? (
-          <DepartmentChat departmentId="marketing" engagement={workspace.engagement} artifactTypes={['channel_strategy', 'campaign_brief', 'measurement_plan']} artifactDefinitions={MARKETING_ARTIFACT_FORMS} artifactForType={artifactType => workspace.artifacts.find(item => item.artifact_type === artifactType)} stageForType={() => null} onPropose={marketingStudio.proposeArtifact} onProposeWorkItem={marketingStudio.proposeWorkItem} onCreated={() => loadWorkspace(engagementId, campaignId)} />
+          <DepartmentChat departmentId="marketing" engagement={workspace.engagement} artifactTypes={['channel_strategy', 'campaign_brief', 'measurement_plan']} artifactDefinitions={MARKETING_ARTIFACT_FORMS} artifactForType={artifactType => workspace.artifacts.find(item => item.artifact_type === artifactType)} stageForType={() => null} onPropose={input => reportMarketingAccess(() => studio.proposeArtifact(input))} onProposeWorkItem={input => reportMarketingAccess(() => studio.proposeWorkItem(input))} onCreated={() => loadWorkspace(engagementId, campaignId)} />
         ) : (
-          <Analytics key={`${engagementId}:${workspace.engagement.brand_id}`} engagementId={engagementId} brand={{ id: workspace.engagement.brand_id, name: workspace.engagement.brands?.name || 'Brand', organization_id: workspace.engagement.organization_id }} />
+          <Analytics key={`${activeOrganizationId}:${scopeRevision}:${engagementId}:${workspace.engagement.brand_id}`} organizationId={activeOrganizationId} scopeRevision={scopeRevision} signal={requestSignal} onAccessError={handleOrganizationAccessError} engagementId={engagementId} brand={{ id: workspace.engagement.brand_id, name: workspace.engagement.brands?.name || 'Brand', organization_id: workspace.engagement.organization_id }} />
         )}
       </main>
     </div>
   )
 }
 
-function Campaigns({ workspace, campaignId, setCampaignId, selected, saving, act }) {
+function Campaigns({ studio, workspace, campaignId, setCampaignId, selected, saving, act }) {
   const [creating, setCreating] = useState(!selected)
   const [form, setForm] = useState(campaignEditor(selected))
   useEffect(() => { setCreating(!selected); setForm(campaignEditor(selected)) }, [selected])
@@ -179,7 +250,7 @@ function Campaigns({ workspace, campaignId, setCampaignId, selected, saving, act
     event.preventDefault()
     const payload = { ...form, planned_channels: lines(form.planned_channels) }
     const result = await act(
-      () => creating ? marketingStudio.createCampaign(workspace.engagement.id, payload) : marketingStudio.updateCampaign(selected.id, payload),
+      () => creating ? studio.createCampaign(workspace.engagement.id, payload) : studio.updateCampaign(selected.id, payload),
       creating ? 'Campaign created and recorded in the engagement timeline.' : 'Campaign planning record updated.',
     )
     if (result) { setCampaignId(result.id); setCreating(false) }
@@ -214,7 +285,7 @@ function Campaigns({ workspace, campaignId, setCampaignId, selected, saving, act
   </div>
 }
 
-function BacklinkOutreach({ brands, brandId, setBrandId }) { // eslint-disable-line no-unused-vars
+function BacklinkOutreach({ studio, brands, brandId, setBrandId, onAccessError }) { // eslint-disable-line no-unused-vars
   const [targets, setTargets] = useState([])
   const [selectedId, setSelectedId] = useState('')
   const [creating, setCreating] = useState(true)
@@ -229,8 +300,17 @@ function BacklinkOutreach({ brands, brandId, setBrandId }) { // eslint-disable-l
   async function loadTargets(nextBrandId = brandId) {
     if (!nextBrandId) { setTargets([]); return }
     setLoading(true); setError('')
-    try { setTargets(await marketingStudio.listBacklinkTargets(nextBrandId)) }
-    catch (loadError) { setError(loadError.message) }
+    try {
+      const rows = await studio.listBacklinkTargets(nextBrandId)
+      if (rows.some(row => row.organization_id !== studio.organizationId)) {
+        throw Object.assign(new Error('Backlink catalogue organization mismatch'), { status: 403, membershipMismatch: true })
+      }
+      setTargets(rows)
+    }
+    catch (loadError) {
+      onAccessError(loadError, { membershipMismatch: loadError?.membershipMismatch === true })
+      setError(loadError.message)
+    }
     finally { setLoading(false) }
   }
 
@@ -239,12 +319,22 @@ function BacklinkOutreach({ brands, brandId, setBrandId }) { // eslint-disable-l
     if (!brandId) { setTargets([]); return undefined }
     let active = true
     setLoading(true); setError('')
-    marketingStudio.listBacklinkTargets(brandId)
-      .then(rows => { if (active) setTargets(rows) })
-      .catch(loadError => { if (active) setError(loadError.message) })
+    studio.listBacklinkTargets(brandId)
+      .then(rows => {
+        if (rows.some(row => row.organization_id !== studio.organizationId)) {
+          throw Object.assign(new Error('Backlink catalogue organization mismatch'), { status: 403, membershipMismatch: true })
+        }
+        if (active) setTargets(rows)
+      })
+      .catch(loadError => {
+        if (active) {
+          onAccessError(loadError, { membershipMismatch: loadError?.membershipMismatch === true })
+          setError(loadError.message)
+        }
+      })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [brandId])
+  }, [brandId, onAccessError, studio])
 
   function editTarget(target) {
     setSelectedId(target.id); setCreating(false); setForm(backlinkTargetEditor(target)); setMessage('')
@@ -254,12 +344,15 @@ function BacklinkOutreach({ brands, brandId, setBrandId }) { // eslint-disable-l
     event.preventDefault(); setSaving(true); setError(''); setMessage('')
     try {
       const result = creating
-        ? await marketingStudio.createBacklinkTarget(brandId, form)
-        : await marketingStudio.updateBacklinkTarget(selectedId, form)
+        ? await studio.createBacklinkTarget(brandId, form)
+        : await studio.updateBacklinkTarget(selectedId, form)
       setSelectedId(result.id); setCreating(false); setForm(backlinkTargetEditor(result))
       setMessage(creating ? 'Backlink target added.' : 'Backlink target updated.')
       await loadTargets(brandId)
-    } catch (saveError) { setError(saveError.message) }
+    } catch (saveError) {
+      onAccessError(saveError, { membershipMismatch: saveError?.membershipMismatch === true })
+      setError(saveError.message)
+    }
     finally { setSaving(false) }
   }
 
@@ -328,7 +421,7 @@ function metric(value, kind = 'number') {
   return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 
-function AdCampaignTracking({ workspace, saving, act }) {
+function AdCampaignTracking({ studio, workspace, saving, act }) {
   const [selectedId, setSelectedId] = useState(workspace.adCampaigns[0]?.id || '')
   const [creating, setCreating] = useState(workspace.adCampaigns.length === 0)
   const selected = useMemo(() => workspace.adCampaigns.find(item => item.id === selectedId) || null, [workspace.adCampaigns, selectedId])
@@ -368,8 +461,8 @@ function AdCampaignTracking({ workspace, saving, act }) {
     const payload = { ...form, location_targeting: lines(form.location_targeting) }
     const result = await act(
       () => creating
-        ? marketingStudio.createAdCampaign(workspace.engagement.id, payload)
-        : marketingStudio.updateAdCampaign(workspace.engagement.id, selected.id, payload),
+        ? studio.createAdCampaign(workspace.engagement.id, payload)
+        : studio.updateAdCampaign(workspace.engagement.id, selected.id, payload),
       creating ? 'Google Ads planning campaign created.' : 'Google Ads planning campaign updated.',
     )
     if (result) { setSelectedId(result.id); setCreating(false) }
@@ -383,7 +476,7 @@ function AdCampaignTracking({ workspace, saving, act }) {
   async function removeCampaign() {
     if (!selected || !window.confirm(`Delete the local planning record “${selected.campaign_name}” and its local descendants? Google Ads will not be changed.`)) return
     const nextCampaign = campaignAfterDeletion(workspace.adCampaigns, selected.id)
-    const result = await act(() => marketingStudio.deleteAdCampaign(workspace.engagement.id, selected.id), 'Local ad campaign planning record deleted.')
+    const result = await act(() => studio.deleteAdCampaign(workspace.engagement.id, selected.id), 'Local ad campaign planning record deleted.')
     if (result) {
       setSelectedId(nextCampaign?.id || '')
       setCreating(!nextCampaign)
@@ -394,7 +487,7 @@ function AdCampaignTracking({ workspace, saving, act }) {
   async function saveGroup(event) {
     event.preventDefault()
     const result = await act(
-      () => marketingStudio.saveAdGroup(workspace.engagement.id, selected.id, groupId, groupForm),
+      () => studio.saveAdGroup(workspace.engagement.id, selected.id, groupId, groupForm),
       groupId ? 'Ad group planning record updated.' : 'Ad group planning record created.',
     )
     if (result) setGroupId(result.id)
@@ -402,26 +495,26 @@ function AdCampaignTracking({ workspace, saving, act }) {
 
   async function removeGroup() {
     if (!selectedGroup || !window.confirm(`Delete local ad group “${selectedGroup.name}” and its keywords?`)) return
-    const result = await act(() => marketingStudio.deleteAdGroup(workspace.engagement.id, selectedGroup.id), 'Local ad group deleted.')
+    const result = await act(() => studio.deleteAdGroup(workspace.engagement.id, selectedGroup.id), 'Local ad group deleted.')
     if (result) { setGroupId(''); setGroupForm({ name: '', status: 'draft' }) }
   }
 
   async function saveKeyword(event) {
     event.preventDefault()
     const result = await act(
-      () => marketingStudio.saveAdKeyword(workspace.engagement.id, selectedGroup.id, keywordId, keywordForm),
+      () => studio.saveAdKeyword(workspace.engagement.id, selectedGroup.id, keywordId, keywordForm),
       keywordId ? 'Keyword planning record updated.' : 'Keyword planning record added.',
     )
     if (result) { setKeywordId(''); setKeywordForm({ keyword: '', match_type: 'phrase', is_negative: false }) }
   }
 
   async function removeKeyword(id) {
-    await act(() => marketingStudio.deleteAdKeyword(workspace.engagement.id, id), 'Keyword planning record deleted.')
+    await act(() => studio.deleteAdKeyword(workspace.engagement.id, id), 'Keyword planning record deleted.')
   }
 
   async function importSnapshot() {
     const result = await act(
-      () => marketingStudio.importAdPerformance(workspace.engagement.id, selected.id, snapshotDate),
+      () => studio.importAdPerformance(workspace.engagement.id, selected.id, snapshotDate),
       'Read-only Google Ads performance import completed.',
     )
     if (result && !result.imported) window.alert('That campaign/date snapshot already exists. The immutable original was kept.')
@@ -488,7 +581,7 @@ function MetricCard({ label, value }) {
   return <div className="rounded-xl bg-slate-950 p-4"><p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">{label}</p><p className="mt-1 text-xl font-semibold">{value}</p></div>
 }
 
-function Artifacts({ workspace, campaign, saving, act, setTab, onRefresh }) {
+function Artifacts({ studio, workspace, campaign, saving, act, setTab, onRefresh }) {
   const [type, setType] = useState('channel_strategy')
   const links = campaign ? workspace.links.filter(item => item.campaign_id === campaign.id) : []
   const artifact = workspace.artifacts.find(item => links.some(link => link.artifact_id === item.id) && item.artifact_type === type)
@@ -504,7 +597,7 @@ function Artifacts({ workspace, campaign, saving, act, setTab, onRefresh }) {
   async function save(event) {
     event.preventDefault()
     const content = Object.fromEntries(definition.fields.map(([key, , kind]) => [key, kind === 'list' ? lines(form[key]) : form[key]]))
-    await act(() => marketingStudio.saveArtifact({
+    await act(() => studio.saveArtifact({
       engagement_id: workspace.engagement.id, campaign_id: campaign.id, artifact_id: artifact?.id || null,
       artifact_type: type, title: `${campaign.name} — ${definition.label}`,
       content, change_summary: latest ? 'Marketing Studio revision' : 'Initial Marketing Studio version', ai_use_allowed: false,
@@ -519,11 +612,11 @@ function Artifacts({ workspace, campaign, saving, act, setTab, onRefresh }) {
     <div><form onSubmit={save} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6"><div className="flex flex-wrap justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Immutable artifact</p><h2 className="mt-1 text-xl font-semibold">{definition.label}</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">{definition.description}</p></div><div className="text-right text-xs text-slate-500"><p>{latest ? `Version ${latest.version_number}` : 'No version yet'}</p><p className={approval ? 'mt-1 text-emerald-400' : 'mt-1 text-amber-400'}>{approval ? 'Exact version approved' : 'Approval pending'}</p></div></div>
       <div className="mt-6 grid gap-4 md:grid-cols-2">{definition.fields.map(([key, label, kind]) => <div key={key} className={kind === 'textarea' || kind === 'list' ? 'md:col-span-2' : ''}><Field label={label} hint={kind === 'list' ? 'One item per line' : ''}>{kind === 'textarea' || kind === 'list' ? <textarea required className={`${INPUT} min-h-28`} value={form[key] || ''} onChange={event => setForm({ ...form, [key]: event.target.value })} /> : <input required type={kind} className={INPUT} value={form[key] || ''} onChange={event => setForm({ ...form, [key]: event.target.value })} />}</Field></div>)}</div>
       <div className="mt-6 flex flex-wrap items-center justify-end gap-3 border-t border-slate-800 pt-5"><button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : latest ? 'Create new version' : 'Save first version'}</button></div>
-    </form><ArtifactApprovalPanel version={latest} approval={approval} theme="emerald" singleApprovalLabel={`Approve version ${latest?.version_number}`} onSingleApprove={() => act(() => marketingStudio.approveArtifact(latest.id), `${definition.label} exact version approved.`, campaign.id)} onChanged={onRefresh} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="marketing" theme="emerald" /></div>
+    </form><ArtifactApprovalPanel version={latest} approval={approval} theme="emerald" singleApprovalLabel={`Approve version ${latest?.version_number}`} onSingleApprove={() => act(() => studio.approveArtifact(latest.id), `${definition.label} exact version approved.`, campaign.id)} onChanged={onRefresh} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="marketing" theme="emerald" /></div>
   </div>
 }
 
-function Analytics({ engagementId, brand }) {
+function Analytics({ organizationId, scopeRevision, signal, onAccessError, engagementId, brand }) {
   const initial = useMemo(() => defaultReportingPeriod(), [])
   const [period, setPeriod] = useState(initial)
   const [dashboard, setDashboard] = useState(null)
@@ -534,17 +627,23 @@ function Analytics({ engagementId, brand }) {
     requestGeneration.current += 1
     setDashboard(null); setError(''); setLoading(false)
     return () => { requestGeneration.current += 1 }
-  }, [engagementId, brand.id, period.start, period.end])
+  }, [engagementId, brand.id, organizationId, period.start, period.end, scopeRevision])
   async function load() {
-    const request = { generation: ++requestGeneration.current, brandId: brand.id }
+    const request = {
+      generation: ++requestGeneration.current, brandId: brand.id,
+      organizationId, scopeRevision,
+    }
     setLoading(true); setError('')
     try {
-      const result = await loadPerformanceDashboard({ engagementId, brand, period })
-      if (shouldApplyDashboardResponse(result, request, requestGeneration.current)) setDashboard(result)
+      const result = await loadPerformanceDashboard({ organizationId, engagementId, brand, period, signal })
+      if (!signal.aborted && shouldApplyDashboardResponse(result, request, requestGeneration.current, scopeRevision)) setDashboard(result)
     } catch (loadError) {
-      if (request.generation === requestGeneration.current) setError(loadError.message)
+      if (!signal.aborted && request.generation === requestGeneration.current && request.scopeRevision === scopeRevision) {
+        onAccessError(loadError, { membershipMismatch: loadError?.membershipMismatch === true })
+        setError(loadError.message)
+      }
     } finally {
-      if (request.generation === requestGeneration.current) setLoading(false)
+      if (!signal.aborted && request.generation === requestGeneration.current && request.scopeRevision === scopeRevision) setLoading(false)
     }
   }
   return <section className="space-y-5"><div className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="mr-auto"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">{brand.name}</p><h2 className="mt-1 font-semibold">Unified performance dashboard</h2><p className="mt-1 max-w-2xl text-sm leading-6 text-slate-400">Live, read-only reporting across organic visibility, technical health, paid campaigns, and Meta. Every section reads its existing source; no rollup is stored.</p><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">Data may be momentarily incomplete during an active import; refresh to update.</p></div><Field label="From"><input type="date" className={INPUT} value={period.start} onChange={event => setPeriod({ ...period, start: event.target.value })} /></Field><Field label="To"><input type="date" className={INPUT} value={period.end} onChange={event => setPeriod({ ...period, end: event.target.value })} /></Field><button onClick={load} disabled={loading} className={PRIMARY}>{loading ? 'Loading sources…' : 'Load dashboard'}</button></div>
