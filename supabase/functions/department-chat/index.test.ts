@@ -178,18 +178,19 @@ Deno.test('selected B work-item preview keeps save and audit in B', async () => 
   assertEquals(fixture.rpcCalls.at(-1)!.args.p_proposal_kind, 'work_item')
 })
 
-function schemaFixture(schema: any): any {
+function schemaFixture(schema: any, propertyName = ''): any {
   if (schema.enum) return schema.enum[0]
-  if (schema.anyOf) return schemaFixture(schema.anyOf.find((item: any) => item.type === 'null') || schema.anyOf[0])
+  if (schema.anyOf) return schemaFixture(schema.anyOf.find((item: any) => item.type === 'null') || schema.anyOf[0], propertyName)
   if (Array.isArray(schema.type)) {
     if (schema.type.includes('null')) return null
-    return schemaFixture({ ...schema, type: schema.type[0] })
+    return schemaFixture({ ...schema, type: schema.type[0] }, propertyName)
   }
-  if (schema.type === 'object') return Object.fromEntries(Object.entries(schema.properties).map(([key, value]) => [key, schemaFixture(value)]))
-  if (schema.type === 'array') return [schemaFixture(schema.items)]
+  if (schema.type === 'object') return Object.fromEntries(Object.entries(schema.properties).map(([key, value]) => [key, schemaFixture(value, key)]))
+  if (schema.type === 'array') return [schemaFixture(schema.items, propertyName)]
   if (schema.type === 'number' || schema.type === 'integer') return 1
   if (schema.type === 'boolean') return false
   if (schema.type === 'null') return null
+  if (schema.format === 'date' || propertyName === 'starts_on' || propertyName === 'ends_on') return '2026-09-04'
   return 'fixture'
 }
 

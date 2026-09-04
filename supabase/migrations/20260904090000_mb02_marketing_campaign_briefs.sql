@@ -27,6 +27,12 @@ create table public.marketing_brief_save_requests (
 create index idx_marketing_brief_save_requests_expiry
   on public.marketing_brief_save_requests (expires_at);
 
+create unique index uq_marketing_campaign_artifacts_campaign_brief_lineage
+  on public.marketing_campaign_artifacts (organization_id, campaign_id)
+  where relation_type = 'campaign_brief';
+create unique index uq_marketing_campaign_artifacts_artifact_lineage
+  on public.marketing_campaign_artifacts (organization_id, artifact_id);
+
 alter table public.marketing_brief_save_requests enable row level security;
 revoke all on public.marketing_brief_save_requests from anon, authenticated;
 grant all on public.marketing_brief_save_requests to service_role;
@@ -59,6 +65,7 @@ declare
   v_latest public.artifact_versions%rowtype;
   v_version public.artifact_versions%rowtype;
   v_replay public.marketing_brief_save_requests%rowtype;
+  v_canonical_artifact_id uuid;
   v_asset_ids uuid[] := '{}'::uuid[];
 begin
   if p_organization_id is null or p_actor_id is null or p_idempotency_key is null then
@@ -73,9 +80,14 @@ begin
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
     p_organization_id::text || ':' || p_actor_id::text || ':save_campaign_brief:' || p_idempotency_key::text, 0));
 
+  delete from public.marketing_brief_save_requests
+  where organization_id = p_organization_id and actor_id = p_actor_id
+    and action = 'save_campaign_brief' and idempotency_key = p_idempotency_key
+    and expires_at <= pg_catalog.clock_timestamp();
   select * into v_replay from public.marketing_brief_save_requests
   where organization_id = p_organization_id and actor_id = p_actor_id
-    and action = 'save_campaign_brief' and idempotency_key = p_idempotency_key;
+    and action = 'save_campaign_brief' and idempotency_key = p_idempotency_key
+    and expires_at > pg_catalog.clock_timestamp();
   if found then
     if v_replay.payload_checksum <> p_payload_checksum then
       raise exception 'Idempotency key was already used with a different payload' using errcode = '23505';
@@ -104,6 +116,20 @@ begin
   where id = p_campaign_id and organization_id = p_organization_id for share;
   if not found or v_campaign.engagement_id <> p_engagement_id or v_campaign.brand_id <> v_engagement.brand_id then
     raise exception 'Campaign does not match this Marketing engagement';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
+    p_organization_id::text || ':' || p_campaign_id::text || ':campaign_brief_lineage', 0));
+  select artifact_id into v_canonical_artifact_id
+  from public.marketing_campaign_artifacts
+  where organization_id = p_organization_id and campaign_id = p_campaign_id
+    and relation_type = 'campaign_brief'
+  for update;
+  if p_artifact_id is null and v_canonical_artifact_id is not null then
+    raise exception 'This campaign already has a canonical campaign brief; reload before saving';
+  end if;
+  if p_artifact_id is not null and v_canonical_artifact_id is distinct from p_artifact_id then
+    raise exception 'Campaign brief is not the exact canonical lineage for this campaign';
   end if;
 
   if jsonb_typeof(coalesce(p_content->'existing_asset_version_ids', '[]'::jsonb)) <> 'array' then
@@ -148,8 +174,8 @@ begin
   ) returning * into v_version;
 
   insert into public.marketing_campaign_artifacts (organization_id, campaign_id, artifact_id, relation_type, linked_by)
-  values (p_organization_id, p_campaign_id, v_artifact.id, 'campaign_brief', p_actor_id)
-  on conflict (campaign_id, artifact_id) do nothing;
+  select p_organization_id, p_campaign_id, v_artifact.id, 'campaign_brief', p_actor_id
+  where p_artifact_id is null;
 
   insert into public.engagement_events (organization_id, engagement_id, event_type, actor_id, payload)
   values (p_organization_id, p_engagement_id, 'artifact_version_created', p_actor_id,

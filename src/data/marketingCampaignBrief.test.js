@@ -6,6 +6,10 @@ import { selectedCampaignBriefSuggestions, validateCampaignBriefDraft } from './
 
 const approvalEdge = readFileSync(new URL('../../supabase/functions/artifact-approvals/index.ts', import.meta.url), 'utf8')
 const migration = readFileSync(new URL('../../supabase/migrations/20260904090000_mb02_marketing_campaign_briefs.sql', import.meta.url), 'utf8')
+const studio = readFileSync(new URL('../apps/MarketingStudio.jsx', import.meta.url), 'utf8')
+const main = readFileSync(new URL('../main.jsx', import.meta.url), 'utf8')
+const brief = readFileSync(new URL('../components/MarketingCampaignBrief.jsx', import.meta.url), 'utf8')
+const concurrency = readFileSync(new URL('../../scripts/mb02-concurrency.ts', import.meta.url), 'utf8')
 
 test('campaign brief requires only a goal and at least one channel', () => {
   const result = validateCampaignBriefDraft({ campaign_goal: 'Launch', channels: ['Email'] })
@@ -39,4 +43,38 @@ test('campaign brief one-approver policy is isolated and server-governed', () =>
   assert.match(migration, /membership\.department_id = 'marketing' and membership\.role = 'department_manager'/)
   assert.match(migration, /cardinality\(p_required_approver_ids\) < 1/)
   assert.match(migration, /revoke all on function public\.create_marketing_campaign_brief_approval_request[\s\S]*from public, anon, authenticated/)
+})
+
+test('save RPC expires replay keys atomically and enforces one canonical campaign lineage', () => {
+  assert.match(migration, /pg_advisory_xact_lock[\s\S]*save_campaign_brief/)
+  assert.match(migration, /delete from public\.marketing_brief_save_requests[\s\S]*expires_at <= pg_catalog\.clock_timestamp\(\)/)
+  assert.match(migration, /expires_at > pg_catalog\.clock_timestamp\(\)/)
+  assert.match(migration, /pg_advisory_xact_lock[\s\S]*campaign_brief_lineage/)
+  assert.match(migration, /uq_marketing_campaign_artifacts_campaign_brief_lineage[\s\S]*where relation_type = 'campaign_brief'/)
+  assert.match(migration, /uq_marketing_campaign_artifacts_artifact_lineage/)
+  assert.match(migration, /v_canonical_artifact_id is distinct from p_artifact_id/)
+  assert.doesNotMatch(migration, /on conflict \(campaign_id, artifact_id\) do nothing/)
+})
+
+test('two-session concurrency harness is disposable and refuses remote databases', () => {
+  assert.match(concurrency, /MB02_LOCAL_TEMPLATE_URL/)
+  assert.match(concurrency, /localhost.*127\.0\.0\.1.*\[::1\]/)
+  assert.match(concurrency, /CREATE DATABASE[\s\S]*TEMPLATE/)
+  assert.match(concurrency, /DROP DATABASE/)
+  assert.match(concurrency, /Promise\.allSettled/)
+  assert.match(concurrency, /Promise\.all\(/)
+  assert.match(concurrency, /already has a canonical campaign brief/)
+  assert.match(concurrency, /expired_key_race=one_write_one_replay/)
+})
+
+test('unsaved brief uses the router blocker for every SPA transition and beforeunload for document exit', () => {
+  assert.match(main, /createBrowserRouter/)
+  assert.match(main, /<RouterProvider router=\{router\}/)
+  assert.match(studio, /useBlocker\(briefDirty\)/)
+  assert.match(studio, /navigationBlocker\.reset\(\)/)
+  assert.equal((studio.match(/navigationBlocker\.proceed\(\)/g) || []).length, 2)
+  assert.doesNotMatch(studio, /setPendingNavigation|runNavigation/)
+  assert.match(studio, /<Link to="\/sphere\/marketing"/)
+  assert.match(studio, /<WorkshopContextShell[\s\S]*returnTarget=\{returnTarget\}/)
+  assert.match(brief, /beforeunload/)
 })

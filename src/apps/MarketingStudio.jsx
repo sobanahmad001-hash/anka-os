@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useBlocker, useSearchParams } from 'react-router-dom'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 
 import {
@@ -120,8 +120,8 @@ export default function MarketingStudio() {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [briefDirty, setBriefDirty] = useState(false)
-  const [pendingNavigation, setPendingNavigation] = useState(null)
   const briefSaveRef = useRef(null)
+  const navigationBlocker = useBlocker(briefDirty)
   const scope = useRef({ organizationId: activeOrganizationId, revision: scopeRevision })
   scope.current = { organizationId: activeOrganizationId, revision: scopeRevision }
   const organizationReady = Boolean(activeOrganizationId) && !organizationLoading && !selectionRequired
@@ -287,19 +287,11 @@ export default function MarketingStudio() {
     </WorkshopContextShell><div className="mt-5 text-center"><button type="button" onClick={() => setSearchParams({})} className={BUTTON}>Choose permitted work</button></div></MarketingEntryShell>
   }
 
-  function runNavigation(action) {
-    if (tab === 'brief' && briefDirty) { setPendingNavigation(() => action); return }
-    action()
-  }
-
   function selectTab(nextTab) {
     if (nextTab === tab) return
-    runNavigation(() => {
-    setTab(nextTab)
     if (context.engagement) setSearchParams(marketingSelectionParams(navigationContext, context.engagement, activeOrganizationId, {
       workshopTab: nextTab === 'overview' ? '' : nextTab,
     }), { replace: true })
-    })
   }
 
   function openMarketingBrief() {
@@ -324,7 +316,7 @@ export default function MarketingStudio() {
         <Notice error={error} message={message} />
         <section className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
           <label className="min-w-72 flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Marketing engagement
-            <select value={engagementId} onChange={event => { const item = engagements.find(candidate => candidate.id === event.target.value); runNavigation(() => setSearchParams(item ? marketingSelectionParams(navigationContext, item, activeOrganizationId) : {})) }} className={`${INPUT} mt-2 normal-case tracking-normal`}>
+            <select value={engagementId} onChange={event => { const item = engagements.find(candidate => candidate.id === event.target.value); setSearchParams(item ? marketingSelectionParams(navigationContext, item, activeOrganizationId) : {}) }} className={`${INPUT} mt-2 normal-case tracking-normal`}>
               <option value="">Choose work</option>
               {engagements.map(item => <option key={item.id} value={item.id}>{item.name} · {item.brands?.name || 'Brand'}</option>)}
             </select>
@@ -390,7 +382,7 @@ export default function MarketingStudio() {
         )}
         </WorkshopContextShell>
       </main>
-      {pendingNavigation && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-5"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">Unsaved campaign brief</p><h2 className="mt-2 text-xl font-semibold">Keep, save, or discard your changes?</h2><p className="mt-2 text-sm text-slate-400">The current context will not change until you choose.</p><div className="mt-6 flex flex-wrap justify-end gap-2"><button type="button" className={BUTTON} onClick={() => setPendingNavigation(null)}>Stay</button><button type="button" className={BUTTON} onClick={() => { const action = pendingNavigation; setPendingNavigation(null); setBriefDirty(false); action() }}>Discard and continue</button><button type="button" className={PRIMARY} disabled={saving} onClick={async () => { const result = await briefSaveRef.current?.(); if (result) { const action = pendingNavigation; setPendingNavigation(null); setBriefDirty(false); action() } }}>{saving ? 'Saving…' : 'Save current and continue'}</button></div></section></div>}
+      {navigationBlocker.state === 'blocked' && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-5"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">Unsaved campaign brief</p><h2 className="mt-2 text-xl font-semibold">Keep, save, or discard your changes?</h2><p className="mt-2 text-sm text-slate-400">The current context will not change until you choose.</p><div className="mt-6 flex flex-wrap justify-end gap-2"><button type="button" className={BUTTON} onClick={() => navigationBlocker.reset()}>Stay</button><button type="button" className={BUTTON} onClick={() => { setBriefDirty(false); navigationBlocker.proceed() }}>Discard and continue</button><button type="button" className={PRIMARY} disabled={saving} onClick={async () => { const result = await briefSaveRef.current?.(); if (result) { setBriefDirty(false); navigationBlocker.proceed() } }}>{saving ? 'Saving…' : 'Save current and continue'}</button></div></section></div>}
     </div>
   )
 }

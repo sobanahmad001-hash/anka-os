@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import App from './App.jsx';
 import AppErrorBoundary from './components/AppErrorBoundary.jsx';
 import { AuthProvider } from './context/AuthContext.jsx';
@@ -19,9 +19,8 @@ window.addEventListener('vite:preloadError', (event) => {
   }
 })
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <BrowserRouter>
+function ApplicationProviders() {
+  return (
       <AuthProvider>
         <OrganizationProvider>
           <ThemeProvider>
@@ -31,7 +30,14 @@ createRoot(document.getElementById('root')).render(
           </ThemeProvider>
         </OrganizationProvider>
       </AuthProvider>
-    </BrowserRouter>
+  )
+}
+
+const router = createBrowserRouter([{ path: '*', element: <ApplicationProviders /> }])
+
+createRoot(document.getElementById('root')).render(
+  <StrictMode>
+    <RouterProvider router={router} />
   </StrictMode>,
 );
 

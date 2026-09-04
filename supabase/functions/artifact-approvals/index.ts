@@ -18,6 +18,11 @@ function text(value: unknown, max = 240) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
 }
 
+function relationRow(value: unknown): Json | null {
+  const candidate = Array.isArray(value) ? value[0] : value
+  return candidate && typeof candidate === 'object' ? candidate as Json : null
+}
+
 export function approvalRequestInput(input: Json, minimumApprovers = 2) {
   const artifactVersionId = text(input.artifact_version_id, 80)
   const approvalPolicy = text(input.approval_policy, 30)
@@ -90,7 +95,7 @@ async function createRequest(userClient: Client, admin: Client, body: Json, acto
   const artifactVersionId = text(body.artifact_version_id, 80)
   if (!artifactVersionId) throw new Error('Artifact version is required')
   const version = await readableVersion(userClient, artifactVersionId)
-  const isCampaignBrief = String((version.artifacts as Json)?.artifact_type) === 'campaign_brief'
+  const isCampaignBrief = String(relationRow(version.artifacts)?.artifact_type) === 'campaign_brief'
   const input = approvalRequestInput(body, isCampaignBrief ? 1 : 2)
   await requireTeam(admin, String(version.organization_id), actorId)
   const rpc = isCampaignBrief
