@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { buildPerformanceDashboard, collectPaginatedRows, shouldApplyDashboardResponse } from './performanceDashboard.js'
+import { buildPerformanceDashboard, collectionAgeState, collectPaginatedRows, shouldApplyDashboardResponse } from './performanceDashboard.js'
 
 const read = relative => readFileSync(new URL(relative, import.meta.url), 'utf8')
 const repository = read('./performanceDashboardRepository.js')
@@ -78,6 +78,84 @@ test('MK6c rolls up every fixed section and keeps unlike sources separate', () =
   assert.equal(dashboard.social.engagement_rate, 0.1)
 })
 
+test('MB06A keeps same-provider accounts separate and exposes no combined total', () => {
+  const dashboard = buildPerformanceDashboard({
+    brand, period, now: new Date('2026-09-01T12:00:00Z'),
+    googleDashboard: { brand_id: brand.id, reports: [
+      { provider: 'google_analytics', connection_id: 'ga-a', connection_name: 'GA property A', totals: { sessions: 11 }, rows: [] },
+      { provider: 'google_analytics', connection_id: 'ga-b', connection_name: 'GA property B', totals: { sessions: 22 }, rows: [] },
+    ] },
+    adCampaigns: [
+      { id: 'campaign-a', organization_id: organizationId, brand_id: brand.id, provider_connection_id: 'ads-a', external_account_id: '111' },
+      { id: 'campaign-b', organization_id: organizationId, brand_id: brand.id, provider_connection_id: 'ads-b', external_account_id: '222' },
+    ],
+    adSnapshots: [
+      { organization_id: organizationId, ad_campaign_id: 'campaign-a', snapshot_date: '2026-08-31', created_at: '2026-09-01T11:00:00Z', cost: 10 },
+      { organization_id: organizationId, ad_campaign_id: 'campaign-b', snapshot_date: '2026-08-31', created_at: '2026-09-01T10:00:00Z', cost: 20 },
+    ],
+  })
+  const analytics = dashboard.sources.filter(source => source.provider === 'google_analytics')
+  const ads = dashboard.sources.filter(source => source.provider === 'google_ads')
+  assert.deepEqual(analytics.map(source => source.connectionId), ['ga-a', 'ga-b'])
+  assert.deepEqual(analytics.map(source => source.metrics.find(metric => metric.key === 'sessions').value), [11, 22])
+  assert.deepEqual(ads.map(source => source.id), ['google_ads:ads-a:111', 'google_ads:ads-b:222'])
+  assert.deepEqual(ads.map(source => source.metrics.find(metric => metric.key === 'spend').value), [10, 20])
+  assert.equal(dashboard.comparison_enabled, false)
+  assert.equal(dashboard.sources.some(source => source.id.includes('combined')), false)
+})
+
+test('MB06A distinguishes current, stale, and unknown collection age', () => {
+  const now = new Date('2026-09-02T12:00:00Z')
+  assert.equal(collectionAgeState('2026-09-01T13:00:00Z', now).status, 'current')
+  assert.equal(collectionAgeState('2026-09-01T11:59:59Z', now).status, 'stale')
+  assert.deepEqual(collectionAgeState(null, now), { status: 'unknown', age_hours: null, threshold_hours: 24 })
+})
+
+test('MB06A keeps zero-denominator ratios and unavailable provenance explicit', () => {
+  const dashboard = buildPerformanceDashboard({
+    brand, period,
+    googleDashboard: { brand_id: brand.id, reports: [
+      { provider: 'google_search_console', connection_id: 'gsc-a', connection_name: 'Search property', totals: { clicks: 0, impressions: 0 }, rows: [] },
+    ] },
+    adCampaigns: [
+      { id: 'campaign-a', organization_id: organizationId, brand_id: brand.id, provider_connection_id: 'ads-a', external_account_id: '111' },
+    ],
+    adSnapshots: [
+      { organization_id: organizationId, ad_campaign_id: 'campaign-a', snapshot_date: '2026-08-31', impressions: 0, clicks: 0, cost: 0, conversions: 0 },
+    ],
+  })
+  const search = dashboard.sources.find(source => source.id === 'google_search_console:gsc-a')
+  const ads = dashboard.sources.find(source => source.id === 'google_ads:ads-a:111')
+  assert.deepEqual({
+    accountId: search.accountId,
+    reportingTimezone: search.reportingTimezone,
+    retrievedAt: search.retrievedAt,
+    dataThrough: search.dataThrough,
+    currencyCode: search.currencyCode,
+  }, {
+    accountId: null, reportingTimezone: null, retrievedAt: null, dataThrough: null, currencyCode: null,
+  })
+  assert.equal(ads.metrics.find(metric => metric.key === 'ctr').value, null)
+  assert.equal(ads.currencyCode, null)
+  assert.match(ui, /currency unavailable/)
+  assert.match(ui, /value \|\| 'Unavailable'/)
+})
+
+test('MB06A does not present planning-only campaigns as measured performance', () => {
+  const dashboard = buildPerformanceDashboard({
+    brand, period,
+    adCampaigns: [
+      { id: 'planning-only', organization_id: organizationId, brand_id: brand.id },
+      { id: 'linked-empty', organization_id: organizationId, brand_id: brand.id, provider_connection_id: 'ads-a', external_account_id: '111' },
+    ],
+  })
+  const ads = dashboard.sources.filter(source => source.provider === 'google_ads')
+  assert.equal(ads.length, 1)
+  assert.equal(ads[0].available, false)
+  assert.deepEqual(ads[0].metrics, [])
+  assert.match(ads[0].notes.join(' '), /no dated measurements are available/)
+})
+
 test('MK6c rejects stale or wrong-brand async dashboard responses', () => {
   const request = { generation: 4, brandId: brand.id, organizationId, scopeRevision: 9 }
   assert.equal(shouldApplyDashboardResponse({ brand }, request, 4, 9), true)
@@ -135,8 +213,8 @@ test('MK6c distinguishes configured snapshot sources from no data in the selecte
   assert.equal(dashboard.social.available, true)
   assert.equal(dashboard.social.has_period_data, false)
   assert.equal(dashboard.social.reach, null)
-  assert.match(ui, /No dated Google Ads snapshots fall within this period/)
-  assert.match(ui, /no rank data in this period/)
+  assert.match(ui, /No dated data is available for this source account/)
+  assert.match(ui, /Missing values are not treated as zero/)
 })
 
 test('MK6c ignores Google Ads report failures because paid uses stored MK3 snapshots', () => {
@@ -150,6 +228,7 @@ test('MK6c ignores Google Ads report failures because paid uses stored MK3 snaps
   assert.deepEqual(dashboard.source_errors, [
     { provider: 'google_search_console', connection_name: 'Search', error: 'Search unavailable' },
   ])
+  assert.equal(dashboard.sources.find(source => source.id === 'google_search_console:Search').error, 'Search unavailable')
   assert.match(repository, /providers: \['google_analytics', 'google_search_console'\]/)
 })
 
@@ -188,7 +267,7 @@ test('MK6c paginates beyond 1,000 rows and keeps complete totals and trends', as
 })
 
 test('MK6c discloses eventual consistency during an active import', () => {
-  assert.equal(ui.includes('Data may be momentarily incomplete during an active import; refresh to update.'), true)
+  assert.equal(ui.includes('Data may be momentarily incomplete during an active import.'), true)
 })
 
 test('MK6c returns honest empty states when connectors or source rows are missing', () => {
@@ -208,15 +287,19 @@ test('MK6c stays live-computed, RLS-backed, fixed, and read-only', () => {
     assert.match(repository, new RegExp(`'${source}'`))
   }
   assert.match(repository, /analytics_dashboard/)
+  assert.match(repository, /integration_connection_id/)
   assert.match(repository, /\.eq\('brand_id', brand\.id\)/)
   assert.match(repository, /\.gte\('snapshot_date', period\.start\)/)
   assert.match(repository, /\.lte\('snapshot_date', period\.end\)/)
   assert.doesNotMatch(repository, /\.insert\(|\.update\(|\.upsert\(|\.delete\(|\.rpc\(/)
   assert.doesNotMatch(repository, /localStorage|sessionStorage|indexedDB|cache/i)
-  assert.match(ui, /Organic visibility/)
-  assert.match(ui, /Technical health/)
-  assert.match(ui, /Paid performance/)
-  assert.match(ui, /Social performance/)
+  assert.match(ui, /Performance by source account/)
+  assert.match(ui, /Choose a source account/)
+  assert.match(ui, /No cross-account total is shown/)
+  assert.match(ui, /Reporting timezone unavailable — choose exact dates/)
+  assert.match(ui, /Comparison is off/)
+  assert.match(ui, /Refresh failed/)
+  assert.doesNotMatch(ui, /Download|Export/)
   assert.doesNotMatch(ui, /add widget|configure widget|widget builder/i)
   assert.match(edge, /dimensions: \['date'\]/)
   assert.doesNotMatch(edge, /mutateCampaigns|sitemaps\/(submit|delete)|instagram_content_publish/)

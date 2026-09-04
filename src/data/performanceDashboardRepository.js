@@ -62,13 +62,13 @@ export async function loadPerformanceDashboard({ organizationId, engagementId, b
       .order('keyword')
       .order('id'), options),
     paginatedRows(() => supabase.from('ad_campaigns')
-      .select('id, organization_id, brand_id, campaign_name, status')
+      .select('id, organization_id, brand_id, provider_connection_id, external_account_id, campaign_name, status')
       .eq('organization_id', organizationId)
       .eq('brand_id', brand.id)
       .order('campaign_name')
       .order('id'), options),
     paginatedRows(() => supabase.from('meta_connections')
-      .select('id, organization_id, brand_id, facebook_page_id, instagram_account_id')
+      .select('id, organization_id, integration_connection_id, brand_id, facebook_page_id, instagram_account_id')
       .eq('organization_id', organizationId)
       .eq('brand_id', brand.id)
       .order('id'), options),
@@ -77,17 +77,17 @@ export async function loadPerformanceDashboard({ organizationId, engagementId, b
   const [rankSnapshots, adSnapshots, metaSnapshots] = await Promise.all([
     rowsForParents(
       'keyword_rank_snapshots',
-      'id, organization_id, tracked_keyword_id, snapshot_date, position, search_console_clicks, search_console_impressions',
+      'id, organization_id, tracked_keyword_id, snapshot_date, position, search_console_clicks, search_console_impressions, fetched_at',
       'tracked_keyword_id', trackedKeywords.map(row => row.id), period, organizationId, options,
     ),
     rowsForParents(
       'ad_campaign_performance_snapshots',
-      'id, organization_id, ad_campaign_id, snapshot_date, impressions, clicks, cost, conversions',
+      'id, organization_id, ad_campaign_id, snapshot_date, impressions, clicks, cost, conversions, provider_connection_id, external_campaign_id, created_at',
       'ad_campaign_id', adCampaigns.map(row => row.id), period, organizationId, options,
     ),
     rowsForParents(
       'meta_performance_snapshots',
-      'id, organization_id, meta_connection_id, snapshot_date, platform, reach, impressions, engagement',
+      'id, organization_id, meta_connection_id, snapshot_date, platform, reach, impressions, engagement, created_at',
       'meta_connection_id', metaConnections.map(row => row.id), period, organizationId, options,
     ),
   ])

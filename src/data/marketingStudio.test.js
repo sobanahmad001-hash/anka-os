@@ -88,9 +88,18 @@ test('UW2 reuses Shared Department Chat for confirmed Marketing planning drafts 
   assert.doesNotMatch(chat, /googleads|googleapis|facebook|instagram|tiktok|wordpress|send_email|\/mutate/i)
 })
 
-test('reporting period defaults to 28 completed days', () => {
+test('reporting period requires exact dates when timezone is unavailable', () => {
   assert.deepEqual(defaultReportingPeriod(new Date('2026-08-27T12:00:00Z')), {
-    start: '2026-07-30', end: '2026-08-26',
+    start: '', end: '', timeZone: null, automatic: false,
+  })
+})
+
+test('reporting period uses 30 complete calendar days in a verified source timezone', () => {
+  assert.deepEqual(defaultReportingPeriod(new Date('2026-08-27T20:30:00Z'), 'Asia/Karachi'), {
+    start: '2026-07-29', end: '2026-08-27', timeZone: 'Asia/Karachi', automatic: true,
+  })
+  assert.deepEqual(defaultReportingPeriod(new Date('2026-08-27T12:00:00Z'), 'Not/A_Timezone'), {
+    start: '', end: '', timeZone: null, automatic: false,
   })
 })
 

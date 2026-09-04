@@ -35,6 +35,61 @@ function scoped(rows, organizationId) {
   return (rows || []).filter(row => row.organization_id === organizationId)
 }
 
+function latestValue(rows, field) {
+  return rows.map(row => String(row[field] || '')).filter(Boolean).sort().at(-1) || null
+}
+
+export function collectionAgeState(retrievedAt, now = new Date(), thresholdHours = 24) {
+  const retrieved = retrievedAt ? new Date(retrievedAt) : null
+  const current = now instanceof Date ? now : new Date(now)
+  if (!retrieved || !Number.isFinite(retrieved.getTime()) || !Number.isFinite(current.getTime())) {
+    return { status: 'unknown', age_hours: null, threshold_hours: thresholdHours }
+  }
+  const ageHours = Math.max(0, (current.getTime() - retrieved.getTime()) / 3_600_000)
+  return { status: ageHours > thresholdHours ? 'stale' : 'current', age_hours: ageHours, threshold_hours: thresholdHours }
+}
+
+function sourceAccount({
+  id, provider, connectionId = null, accountId = null, accountLabel, brand, period,
+  reportingTimezone = null, retrievedAt = null, dataThrough = null,
+  currencyCode = null, metrics = [], trend: sourceTrend = null,
+  notes = [], error = null, now, thresholdHours,
+}) {
+  return {
+    id, provider, connectionId,
+    accountId, accountLabel,
+    brandId: brand.id, organizationId: brand.organization_id,
+    periodStart: period.start, periodEnd: period.end,
+    reportingTimezone, retrievedAt,
+    dataThrough, currencyCode,
+    freshness: collectionAgeState(retrievedAt, now, thresholdHours),
+    metrics, trend: sourceTrend, notes, error, available: !error && metrics.length > 0,
+  }
+}
+
+function googleSource(report, brand, period, now, thresholdHours) {
+  const common = {
+    id: `${report.provider}:${report.connection_id || report.connection_name || 'unmapped'}`,
+    provider: report.provider, connectionId: report.connection_id || null,
+    accountId: report.account_id || null,
+    accountLabel: report.connection_name || report.account_id || 'Unnamed connection',
+    brand, period, reportingTimezone: report.reporting_timezone || null,
+    retrievedAt: report.retrieved_at || null,
+    dataThrough: report.data_through || latestValue(report.rows || [], 'date'),
+    currencyCode: report.currency_code || null,
+    notes: report.notes || [], error: report.error || null, now, thresholdHours,
+  }
+  if (report.provider === 'google_analytics') return sourceAccount({ ...common, metrics: [
+    { key: 'active_users', label: 'Active users', value: report.totals?.active_users ?? null, unit: 'number' },
+    { key: 'sessions', label: 'Sessions', value: report.totals?.sessions ?? null, unit: 'number' },
+    { key: 'events', label: 'Events', value: report.totals?.events ?? null, unit: 'number' },
+  ], trend: { points: report.rows || [], series: [['active_users', 'Active users', '#34d399'], ['sessions', 'Sessions', '#38bdf8']] } })
+  return sourceAccount({ ...common, metrics: [
+    { key: 'clicks', label: 'Clicks', value: report.totals?.clicks ?? null, unit: 'number' },
+    { key: 'impressions', label: 'Impressions', value: report.totals?.impressions ?? null, unit: 'number' },
+  ], trend: { points: report.rows || [], series: [['clicks', 'Clicks', '#34d399'], ['impressions', 'Impressions', '#38bdf8']] } })
+}
+
 export function shouldApplyDashboardResponse(response, request, activeGeneration, activeScopeRevision = request.scopeRevision) {
   return request.generation === activeGeneration &&
     request.scopeRevision === activeScopeRevision &&
@@ -62,6 +117,8 @@ export function buildPerformanceDashboard({
   adSnapshots = [],
   metaConnections = [],
   metaSnapshots = [],
+  now = new Date(),
+  staleThresholdHours = 24,
 }) {
   const organizationId = brand.organization_id
   const pages = scoped(pageHealth, organizationId).filter(row => row.brand_id === brand.id)
@@ -103,9 +160,102 @@ export function buildPerformanceDashboard({
   const socialImpressions = sum(socialRows, 'impressions')
   const socialEngagement = sum(socialRows, 'engagement')
 
+  const sources = reports
+    .filter(report => ['google_analytics', 'google_search_console'].includes(report.provider))
+    .map(report => googleSource(report, brand, period, now, staleThresholdHours))
+
+  if (pages.length) sources.push(sourceAccount({
+    id: `technical_seo:${brand.id}`, provider: 'technical_seo', accountId: brand.id,
+    accountLabel: `${brand.name} tracked pages`, brand, period,
+    dataThrough: latestValue(pages, 'audit_date'), now, thresholdHours: staleThresholdHours,
+    metrics: [
+      { key: 'tracked_pages', label: 'Tracked pages', value: pages.length, unit: 'number' },
+      { key: 'pages_with_open_issues', label: 'Pages with open issues', value: pagesWithIssues.length, unit: 'number' },
+      { key: 'open_issues', label: 'Open issues', value: sum(pages, 'open_issue_count'), unit: 'number' },
+      { key: 'needs_attention', label: 'Need attention', value: needsAttention.length, unit: 'number' },
+    ], notes: ['Retrieval time and reporting timezone are unavailable for this stored technical-health view.'],
+  }))
+
+  if (keywords.length) sources.push(sourceAccount({
+    id: `keyword_tracking:${brand.id}`, provider: 'keyword_tracking', accountId: brand.id,
+    accountLabel: `${brand.name} tracked keywords`, brand, period,
+    retrievedAt: latestValue(ranks, 'fetched_at'), dataThrough: latestValue(ranks, 'snapshot_date'),
+    now, thresholdHours: staleThresholdHours,
+    metrics: [
+      { key: 'tracked', label: 'Tracked keywords', value: keywords.length, unit: 'number' },
+      { key: 'ranked', label: 'Ranked', value: knownPositions.length, unit: 'number' },
+      { key: 'top_10', label: 'Top 10', value: knownPositions.filter(position => position <= 10).length, unit: 'number' },
+      { key: 'average_position', label: 'Average position', value: average(knownPositions), unit: 'number' },
+    ], notes: ['Search engine, device, and reporting timezone are unavailable in the current stored tracking scope.'],
+  }))
+
+  const paidAccounts = new Map()
+  for (const campaign of campaigns.filter(item => item.provider_connection_id && item.external_account_id)) {
+    const key = `${campaign.provider_connection_id}:${campaign.external_account_id}`
+    const account = paidAccounts.get(key) || { campaigns: [], rows: [] }
+    account.campaigns.push(campaign)
+    account.rows.push(...paidRows.filter(row => row.ad_campaign_id === campaign.id))
+    paidAccounts.set(key, account)
+  }
+  for (const [key, account] of paidAccounts) {
+    const [connectionId, accountId] = key.split(':')
+    const impressions = sum(account.rows, 'impressions')
+    const clicks = sum(account.rows, 'clicks')
+    sources.push(sourceAccount({
+      id: `google_ads:${connectionId}:${accountId}`, provider: 'google_ads', connectionId, accountId,
+      accountLabel: `Google Ads ${accountId}`, brand, period,
+      retrievedAt: latestValue(account.rows, 'created_at'), dataThrough: latestValue(account.rows, 'snapshot_date'),
+      now, thresholdHours: staleThresholdHours,
+      metrics: account.rows.length ? [
+        { key: 'spend', label: 'Spend', value: sum(account.rows, 'cost'), unit: 'currency' },
+        { key: 'impressions', label: 'Impressions', value: impressions, unit: 'number' },
+        { key: 'clicks', label: 'Clicks', value: clicks, unit: 'number' },
+        { key: 'conversions', label: 'Conversions', value: sum(account.rows, 'conversions'), unit: 'number' },
+        { key: 'ctr', label: 'CTR', value: impressions ? clicks / impressions : null, unit: 'percent' },
+      ] : [],
+      trend: account.rows.length ? { points: trend(account.rows, ['cost', 'conversions']), series: [['cost', 'Spend', '#fbbf24'], ['conversions', 'Conversions', '#a78bfa']] } : null,
+      notes: [
+        'Currency and reporting timezone are unavailable in the current stored Google Ads snapshot contract.',
+        ...(account.rows.length ? [] : [`${account.campaigns.length} linked campaign${account.campaigns.length === 1 ? '' : 's'}; no dated measurements are available.`]),
+      ],
+    }))
+  }
+
+  for (const connection of meta) {
+    const rows = socialRows.filter(row => row.meta_connection_id === connection.id)
+    const impressions = sum(rows, 'impressions')
+    const engagement = sum(rows, 'engagement')
+    sources.push(sourceAccount({
+      id: `meta:${connection.id}`, provider: 'meta',
+      connectionId: connection.integration_connection_id || connection.id,
+      accountId: connection.instagram_account_id || connection.facebook_page_id || null,
+      accountLabel: connection.instagram_account_id
+        ? `Instagram ${connection.instagram_account_id}`
+        : connection.facebook_page_id ? `Facebook ${connection.facebook_page_id}` : `Meta connection ${connection.id}`,
+      brand, period, retrievedAt: latestValue(rows, 'created_at'), dataThrough: latestValue(rows, 'snapshot_date'),
+      now, thresholdHours: staleThresholdHours,
+      metrics: rows.length ? [
+        { key: 'reach', label: 'Reach', value: sum(rows, 'reach'), unit: 'number' },
+        { key: 'impressions', label: 'Impressions', value: impressions, unit: 'number' },
+        { key: 'engagement', label: 'Engagement', value: engagement, unit: 'number' },
+        { key: 'engagement_rate', label: 'Engagement rate', value: impressions ? engagement / impressions : null, unit: 'percent' },
+      ] : [],
+      trend: rows.length ? { points: trend(rows, ['reach', 'engagement']), series: [['reach', 'Reach', '#fb7185'], ['engagement', 'Engagement', '#c084fc']] } : null,
+      notes: ['Currency, reporting timezone, and provider finality are unavailable in the current stored Meta snapshot contract.'],
+    }))
+  }
+
+  sources.push(sourceAccount({
+    id: 'manual_evidence:reporting', provider: 'manual_evidence', accountLabel: 'Manual evidence',
+    brand, period, error: 'Manual evidence is labeled for report authoring and is not a live performance source.',
+    notes: ['No file, export, or official report is created in MB06A.'], now, thresholdHours: staleThresholdHours,
+  }))
+
   return {
     brand: { id: brand.id, name: brand.name, organization_id: organizationId },
     period,
+    comparison_enabled: false,
+    sources,
     organic: {
       available: gscReports.length > 0 || ga4Reports.length > 0 || keywords.length > 0,
       gsc: {

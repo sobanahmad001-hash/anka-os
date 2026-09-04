@@ -70,9 +70,21 @@ export function latestVersion(rows = []) {
   return [...rows].sort((left, right) => right.version_number - left.version_number)[0] || null
 }
 
-export function defaultReportingPeriod(now = new Date()) {
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1))
+export function defaultReportingPeriod(now = new Date(), timeZone = null) {
+  if (!timeZone) return { start: '', end: '', timeZone: null, automatic: false }
+  let parts
+  try {
+    parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+      timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(now).filter(part => part.type !== 'literal').map(part => [part.type, Number(part.value)]))
+  } catch {
+    return { start: '', end: '', timeZone: null, automatic: false }
+  }
+  const end = new Date(Date.UTC(parts.year, parts.month - 1, parts.day - 1))
   const start = new Date(end)
-  start.setUTCDate(start.getUTCDate() - 27)
-  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) }
+  start.setUTCDate(start.getUTCDate() - 29)
+  return {
+    start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10),
+    timeZone, automatic: true,
+  }
 }

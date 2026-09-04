@@ -620,15 +620,20 @@ function Analytics({ organizationId, scopeRevision, signal, onAccessError, engag
   const initial = useMemo(() => defaultReportingPeriod(), [])
   const [period, setPeriod] = useState(initial)
   const [dashboard, setDashboard] = useState(null)
+  const [sourceId, setSourceId] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const requestGeneration = useRef(0)
   useEffect(() => {
     requestGeneration.current += 1
-    setDashboard(null); setError(''); setLoading(false)
+    setDashboard(null); setSourceId(''); setError(''); setLoading(false)
     return () => { requestGeneration.current += 1 }
   }, [engagementId, brand.id, organizationId, period.start, period.end, scopeRevision])
   async function load() {
+    if (!period.start || !period.end) {
+      setError('Reporting timezone unavailable — choose exact dates')
+      return
+    }
     const request = {
       generation: ++requestGeneration.current, brandId: brand.id,
       organizationId, scopeRevision,
@@ -636,7 +641,10 @@ function Analytics({ organizationId, scopeRevision, signal, onAccessError, engag
     setLoading(true); setError('')
     try {
       const result = await loadPerformanceDashboard({ organizationId, engagementId, brand, period, signal })
-      if (!signal.aborted && shouldApplyDashboardResponse(result, request, requestGeneration.current, scopeRevision)) setDashboard(result)
+      if (!signal.aborted && shouldApplyDashboardResponse(result, request, requestGeneration.current, scopeRevision)) {
+        setDashboard(result)
+        setSourceId(current => result.sources.some(source => source.id === current) ? current : '')
+      }
     } catch (loadError) {
       if (!signal.aborted && request.generation === requestGeneration.current && request.scopeRevision === scopeRevision) {
         onAccessError(loadError, { membershipMismatch: loadError?.membershipMismatch === true })
@@ -646,77 +654,45 @@ function Analytics({ organizationId, scopeRevision, signal, onAccessError, engag
       if (!signal.aborted && request.generation === requestGeneration.current && request.scopeRevision === scopeRevision) setLoading(false)
     }
   }
-  return <section className="space-y-5"><div className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="mr-auto"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">{brand.name}</p><h2 className="mt-1 font-semibold">Unified performance dashboard</h2><p className="mt-1 max-w-2xl text-sm leading-6 text-slate-400">Live, read-only reporting across organic visibility, technical health, paid campaigns, and Meta. Every section reads its existing source; no rollup is stored.</p><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">Data may be momentarily incomplete during an active import; refresh to update.</p></div><Field label="From"><input type="date" className={INPUT} value={period.start} onChange={event => setPeriod({ ...period, start: event.target.value })} /></Field><Field label="To"><input type="date" className={INPUT} value={period.end} onChange={event => setPeriod({ ...period, end: event.target.value })} /></Field><button onClick={load} disabled={loading} className={PRIMARY}>{loading ? 'Loading sources…' : 'Load dashboard'}</button></div>
-    {error && <Notice error={error} />}
-    {!dashboard ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Choose a period to read the brand's current source data. Missing connectors will appear as calm empty states, not fabricated metrics.</div> : <PerformanceSections dashboard={dashboard} />}
+  return <section className="space-y-5"><div className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="mr-auto"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">{brand.name}</p><h2 className="mt-1 font-semibold">Performance by source account</h2><p className="mt-1 max-w-2xl text-sm leading-6 text-slate-400">Choose exact dates, load approved read-only sources, then select one account. Accounts, currencies, and reporting timezones are never silently combined.</p><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">Reporting timezone unavailable — choose exact dates. Comparison is off. Data may be momentarily incomplete during an active import.</p></div><Field label="From"><input required type="date" className={INPUT} value={period.start} onChange={event => setPeriod({ ...period, start: event.target.value, automatic: false })} /></Field><Field label="To"><input required type="date" className={INPUT} value={period.end} onChange={event => setPeriod({ ...period, end: event.target.value, automatic: false })} /></Field><button onClick={load} disabled={loading || !period.start || !period.end} className={PRIMARY}>{loading ? 'Loading sources…' : dashboard ? 'Refresh sources' : 'Load sources'}</button></div>
+    {error && dashboard ? <div className="rounded-xl border border-amber-900/60 bg-amber-950/30 px-4 py-3 text-sm text-amber-200">Refresh failed: {error}. The last successful current-context result remains visible with its known collection age.</div> : error ? <Notice error={error} /> : null}
+    {!dashboard ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Choose exact dates to read the brand's current source data. Missing connectors appear as unavailable, not fabricated metrics.</div> : <PerformanceSections dashboard={dashboard} sourceId={sourceId} setSourceId={setSourceId} />}
   </section>
 }
 
-function PerformanceSections({ dashboard }) {
-  const { organic, technical, paid, social } = dashboard
+function PerformanceSections({ dashboard, sourceId, setSourceId }) {
+  const source = dashboard.sources.find(item => item.id === sourceId) || null
   return <div className="space-y-5">
-    {dashboard.source_errors.map(source => <div key={`${source.provider}-${source.connection_name}`} className="rounded-xl border border-amber-900/50 bg-amber-950/20 px-4 py-3 text-sm text-amber-200">{source.connection_name || titleize(source.provider)} could not be read: {source.error}</div>)}
-    <div className="grid gap-5 xl:grid-cols-2">
-      <DashboardSection eyebrow="Organic visibility" title="Search and site activity" available={organic.available} empty="No Search Console, GA4, or tracked-keyword data is available for this brand.">
-        <MetricGrid items={[
-          ['GSC clicks', organic.gsc.connected ? metric(organic.gsc.clicks) : 'Not connected'],
-          ['GSC impressions', organic.gsc.connected ? metric(organic.gsc.impressions) : 'Not connected'],
-          ['GA4 sessions', organic.ga4.connected ? metric(organic.ga4.sessions) : 'Not connected'],
-          ['GA4 active users', organic.ga4.connected ? metric(organic.ga4.active_users) : 'Not connected'],
-        ]} />
-        <TrendChart points={organic.gsc.trend} series={[['clicks', 'Clicks', '#34d399'], ['impressions', 'Impressions', '#38bdf8']]} />
-        <div className="grid grid-cols-2 gap-3 border-t border-slate-800 pt-4 sm:grid-cols-4">
-          <CompactMetric label="Tracked keywords" value={organic.keywords.tracked} />
-          <CompactMetric label="Top 10" value={organic.keywords.top_10} />
-          <CompactMetric label="Average position" value={organic.keywords.average_position === null ? '—' : metric(organic.keywords.average_position)} />
-          <CompactMetric label="Improved in period" value={organic.keywords.improved_in_period} />
-        </div>
-        {organic.keywords.no_rank_data_in_period > 0 && <p className="text-xs text-slate-500">{organic.keywords.no_rank_data_in_period} tracked keyword{organic.keywords.no_rank_data_in_period === 1 ? '' : 's'} has no rank data in this period.</p>}
-      </DashboardSection>
-
-      <DashboardSection eyebrow="Technical health" title="Pages needing attention" available={technical.available} empty="No tracked pages exist for this brand yet.">
-        <MetricGrid items={[
-          ['Tracked pages', metric(technical.tracked_pages)],
-          ['Pages with open issues', metric(technical.pages_with_open_issues)],
-          ['Open issues', metric(technical.open_issues)],
-          ['Need attention', metric(technical.needs_attention)],
-        ]} />
-        <div className="space-y-2">
-          {technical.pages.slice(0, 5).map(page => <div key={page.id} className="flex items-center gap-3 rounded-xl bg-slate-950 px-3 py-2.5 text-xs"><span className="min-w-0 flex-1 truncate text-slate-300">{page.page_url}</span><span className="shrink-0 text-amber-300">{page.open_issue_count} issue{page.open_issue_count === 1 ? '' : 's'}</span></div>)}
-          {technical.pages.length === 0 && <p className="rounded-xl bg-slate-950 px-3 py-4 text-center text-xs text-emerald-300">No tracked page currently needs attention.</p>}
-          {technical.pages.length > 5 && <p className="text-xs text-slate-500">And {technical.pages.length - 5} more page{technical.pages.length - 5 === 1 ? '' : 's'} needing attention.</p>}
-        </div>
-      </DashboardSection>
-
-      <DashboardSection eyebrow="Paid performance" title="Google Ads snapshots" available={paid.available} empty="No Google Ads planning campaign exists for this brand.">
-        {paid.has_period_data ? <><MetricGrid items={[
-          ['Spend (account currency)', metric(paid.spend, 'money')], ['Impressions', metric(paid.impressions)],
-          ['Clicks', metric(paid.clicks)], ['Conversions', metric(paid.conversions)],
-        ]} /><TrendChart points={paid.trend} series={[['cost', 'Spend', '#fbbf24'], ['conversions', 'Conversions', '#a78bfa']]} /></> : <div className="rounded-xl border border-dashed border-slate-700 px-4 py-8 text-center text-sm leading-6 text-slate-500">No dated Google Ads snapshots fall within this period. Campaign configuration is available, but performance is not measured as zero.</div>}
-        <p className="text-xs text-slate-500">{paid.active_campaigns} active of {paid.campaigns} tracked campaign{paid.campaigns === 1 ? '' : 's'} · CTR {metric(paid.ctr, 'percent')}</p>
-      </DashboardSection>
-
-      <DashboardSection eyebrow="Social performance" title="Meta organic snapshots" available={social.available} empty="No Meta connection exists for this brand.">
-        {social.has_period_data ? <><MetricGrid items={[
-          ['Reach', metric(social.reach)], ['Impressions', metric(social.impressions)],
-          ['Engagement', metric(social.engagement)], ['Engagement rate', metric(social.engagement_rate, 'percent')],
-        ]} /><TrendChart points={social.trend} series={[['reach', 'Reach', '#fb7185'], ['engagement', 'Engagement', '#c084fc']]} /></> : <div className="rounded-xl border border-dashed border-slate-700 px-4 py-8 text-center text-sm leading-6 text-slate-500">No dated Meta snapshots fall within this period. The connection exists, but performance is not measured as zero.</div>}
-        <p className="text-xs text-slate-500">{social.connections} Meta connection{social.connections === 1 ? '' : 's'} · {social.platforms.length ? social.platforms.map(titleize).join(' + ') : 'No dated snapshots in this period'}</p>
-      </DashboardSection>
-    </div>
+    {dashboard.source_errors.map(item => <div key={`${item.provider}-${item.connection_name}`} className="rounded-xl border border-amber-900/50 bg-amber-950/20 px-4 py-3 text-sm text-amber-200">{item.connection_name || titleize(item.provider)} could not be read: {item.error}</div>)}
+    <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+      <Field label="Source account"><select className={INPUT} value={sourceId} onChange={event => setSourceId(event.target.value)}><option value="">Choose a source account</option>{dashboard.sources.map(item => <option key={item.id} value={item.id}>{titleize(item.provider)} · {item.accountLabel}</option>)}</select></Field>
+      {!source ? <p className="mt-5 rounded-xl border border-dashed border-slate-700 px-4 py-10 text-center text-sm text-slate-500">Select one source account. No cross-account total is shown.</p> : <SourcePerformance source={source} />}
+    </section>
   </div>
 }
 
-function DashboardSection({ eyebrow, title, available, empty, children }) {
-  return <article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="mb-5 flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">{eyebrow}</p><h3 className="mt-1 font-semibold text-white">{title}</h3></div><span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${available ? 'bg-emerald-950 text-emerald-300' : 'bg-slate-950 text-slate-500'}`}>{available ? 'Available' : 'No source'}</span></div>{available ? <div className="space-y-4">{children}</div> : <div className="rounded-xl border border-dashed border-slate-700 px-4 py-10 text-center text-sm leading-6 text-slate-500">{empty}</div>}</article>
+function sourceMetric(item, currencyCode) {
+  if (item.value === null || item.value === undefined) return 'Unavailable'
+  if (item.unit === 'percent') return metric(item.value, 'percent')
+  if (item.unit === 'currency') return currencyCode ? `${currencyCode} ${metric(item.value, 'money')}` : `${metric(item.value, 'money')} · currency unavailable`
+  return metric(item.value)
 }
 
-function MetricGrid({ items }) {
-  return <div className="grid grid-cols-2 gap-3">{items.map(([label, value]) => <div key={label} className="rounded-xl bg-slate-950 p-3"><p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">{label}</p><p className="mt-1 text-lg font-semibold text-white">{value}</p></div>)}</div>
+function SourcePerformance({ source }) {
+  const stale = source.freshness.status === 'stale'
+  return <div className="mt-5 space-y-5 border-t border-slate-800 pt-5">
+    <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">{titleize(source.provider)}</p><h3 className="mt-1 text-lg font-semibold">{source.accountLabel}</h3><p className="mt-1 text-xs text-slate-500">Account {source.accountId || 'unavailable'} · {source.periodStart} to {source.periodEnd}</p></div><span className={`rounded-full px-3 py-1.5 text-xs ${stale ? 'bg-amber-950 text-amber-200' : source.freshness.status === 'current' ? 'bg-emerald-950 text-emerald-300' : 'bg-slate-950 text-slate-400'}`}>{stale ? `Stale · over ${source.freshness.threshold_hours}h` : source.freshness.status === 'current' ? 'Collection current' : 'Collection age unknown'}</span></div>
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{source.metrics.map(item => <div key={item.key} className="rounded-xl bg-slate-950 p-3"><p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">{item.label}</p><p className="mt-1 text-lg font-semibold text-white">{sourceMetric(item, source.currencyCode)}</p></div>)}</div>
+    {source.error && <div className="rounded-xl border border-amber-900/50 bg-amber-950/20 px-4 py-3 text-sm text-amber-200">{source.error}</div>}
+    {!source.error && !source.metrics.length && <div className="rounded-xl border border-dashed border-slate-700 px-4 py-8 text-center text-sm text-slate-500">No dated data is available for this source account. Missing values are not treated as zero.</div>}
+    {source.trend && <TrendChart points={source.trend.points} series={source.trend.series} />}
+    <dl className="grid gap-3 rounded-xl border border-slate-800 p-4 text-xs sm:grid-cols-2 lg:grid-cols-4"><Provenance label="Reporting timezone" value={source.reportingTimezone} /><Provenance label="Retrieved" value={source.retrievedAt} /><Provenance label="Data through" value={source.dataThrough} /><Provenance label="Currency" value={source.currencyCode} /></dl>
+    {source.notes.map(note => <p key={note} className="text-xs leading-5 text-slate-500">{note}</p>)}
+  </div>
 }
 
-function CompactMetric({ label, value }) {
-  return <div><p className="text-[10px] uppercase tracking-[0.1em] text-slate-600">{label}</p><p className="mt-1 text-sm font-semibold text-slate-200">{value}</p></div>
+function Provenance({ label, value }) {
+  return <div><dt className="uppercase tracking-[0.1em] text-slate-600">{label}</dt><dd className="mt-1 break-words text-slate-300">{value || 'Unavailable'}</dd></div>
 }
 
 function TrendChart({ points, series }) {
