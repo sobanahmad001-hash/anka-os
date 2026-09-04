@@ -70,13 +70,38 @@ export function buildContentHomeIndex(workspace = {}) {
   }))
 }
 
-export function contentSourceReadiness(workspace = {}, artifactType, usedVersionId = null) {
-  const artifact = (workspace.artifacts || []).find(item => item.artifact_type === artifactType)
+export function contentSourceReadiness(workspace = {}, artifactType, selection = {}) {
+  const normalizedSelection = typeof selection === 'string'
+    ? { usedVersionId: selection }
+    : (selection || {})
+  const { artifactId = null, usedVersionId = null } = normalizedSelection
+  const artifacts = workspace.artifacts || []
+  const candidates = artifacts.filter(item => item.artifact_type === artifactType)
+
+  if (!artifactId && candidates.length > 1) return Object.freeze({
+    status: 'selection_required', label: 'Selection required', artifactId: null, versionId: null,
+    candidateArtifactIds: Object.freeze(candidates.map(item => item.id).sort()), usedVersionId,
+  })
+
+  const artifact = artifactId
+    ? candidates.find(item => item.id === artifactId)
+    : candidates[0]
+  if (artifactId && !artifact) return Object.freeze({
+    status: 'invalid_selection', label: 'Invalid selection', artifactId, versionId: null,
+    usedVersionId, reason: 'The selected artifact does not match the required source type.',
+  })
+
   const versions = (workspace.versions || []).filter(version => version.artifact_id === artifact?.id)
   const currentVersion = latestVersion(versions)
 
   if (!artifact || !currentVersion) return Object.freeze({
     status: 'missing', label: 'Missing', artifactId: artifact?.id || null, versionId: null,
+  })
+
+  if (usedVersionId && !versions.some(version => version.id === usedVersionId)) return Object.freeze({
+    status: 'invalid_selection', label: 'Invalid selection', artifactId: artifact.id,
+    versionId: currentVersion.id, usedVersionId,
+    reason: 'The used version does not belong to the selected artifact.',
   })
 
   if (usedVersionId && currentVersion.id !== usedVersionId) return Object.freeze({
@@ -129,13 +154,23 @@ export function contentHomeAccessState(context = {}, { mode = 'project' } = {}) 
 export function contentActionReadiness(workspace = {}, request = {}) {
   const access = contentHomeAccessState(workspace.context, { mode: request.mode })
   const missingFields = (request.requiredFields || []).filter(field => !String(request.values?.[field] || '').trim())
-  const missingSources = (request.requiredSourceTypes || []).filter(type =>
-    contentSourceReadiness(workspace, type).status === 'missing')
+  const sourceReadiness = Object.fromEntries((request.requiredSourceTypes || []).map(type => [
+    type,
+    contentSourceReadiness(workspace, type, request.sourceSelections?.[type]),
+  ]))
+  const missingSources = Object.entries(sourceReadiness)
+    .filter(([, readiness]) => readiness.status === 'missing')
+    .map(([type]) => type)
+  const unresolvedSources = Object.entries(sourceReadiness)
+    .filter(([, readiness]) => ['selection_required', 'invalid_selection'].includes(readiness.status))
+    .map(([type]) => type)
   return Object.freeze({
     ...access,
     canRun: (request.mode === 'private' ? access.canCreatePrivate : access.canCreateOfficial)
-      && missingFields.length === 0 && missingSources.length === 0,
+      && missingFields.length === 0 && missingSources.length === 0 && unresolvedSources.length === 0,
     missingFields: Object.freeze(missingFields),
     missingSources: Object.freeze(missingSources),
+    unresolvedSources: Object.freeze(unresolvedSources),
+    sourceReadiness: Object.freeze(sourceReadiness),
   })
 }

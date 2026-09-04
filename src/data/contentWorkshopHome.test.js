@@ -88,6 +88,7 @@ test('CONTENT B01 keeps private work non-official and does not impose unrelated 
   })
   assert.equal(isolatedSocial.canRun, true)
   assert.deepEqual(isolatedSocial.missingSources, [])
+  assert.deepEqual(isolatedSocial.unresolvedSources, [])
 })
 
 test('CONTENT B01 blocks only sources and fields required by the selected action', () => {
@@ -98,4 +99,94 @@ test('CONTENT B01 blocks only sources and fields required by the selected action
   assert.equal(websiteCopy.canRun, false)
   assert.deepEqual(websiteCopy.missingFields, ['language'])
   assert.deepEqual(websiteCopy.missingSources, ['website_architecture'])
+})
+
+test('CONTENT B01 requires an exact selection when a source type has multiple artifacts', () => {
+  const duplicateWorkspace = {
+    ...workspace,
+    artifacts: [
+      ...workspace.artifacts,
+      { id: 'discovery-new', artifact_type: 'discovery', title: 'New discovery' },
+    ],
+    versions: [
+      ...workspace.versions,
+      { id: 'discovery-new-v1', artifact_id: 'discovery-new', version_number: 1 },
+    ],
+    approvals: [
+      ...workspace.approvals,
+      { artifact_id: 'discovery-new', artifact_version_id: 'discovery-new-v1' },
+    ],
+  }
+
+  assert.deepEqual(contentSourceReadiness(duplicateWorkspace, 'discovery'), {
+    status: 'selection_required', label: 'Selection required', artifactId: null, versionId: null,
+    candidateArtifactIds: ['discovery', 'discovery-new'], usedVersionId: null,
+  })
+  assert.equal(contentSourceReadiness(duplicateWorkspace, 'discovery', {
+    artifactId: 'discovery-new',
+  }).status, 'approved')
+
+  const action = contentActionReadiness(duplicateWorkspace, {
+    requiredSourceTypes: ['discovery'],
+  })
+  assert.equal(action.canRun, false)
+  assert.deepEqual(action.unresolvedSources, ['discovery'])
+  assert.equal(action.sourceReadiness.discovery.status, 'selection_required')
+
+  const selectedAction = contentActionReadiness(duplicateWorkspace, {
+    requiredSourceTypes: ['discovery'],
+    sourceSelections: { discovery: { artifactId: 'discovery-new' } },
+  })
+  assert.equal(selectedAction.canRun, true)
+  assert.deepEqual(selectedAction.unresolvedSources, [])
+  assert.equal(selectedAction.sourceReadiness.discovery.artifactId, 'discovery-new')
+})
+
+test('CONTENT B01 rejects cross-type artifacts and versions from another same-type artifact', () => {
+  const duplicateWorkspace = {
+    ...workspace,
+    artifacts: [...workspace.artifacts, { id: 'discovery-new', artifact_type: 'discovery' }],
+    versions: [
+      ...workspace.versions,
+      { id: 'discovery-new-v1', artifact_id: 'discovery-new', version_number: 1 },
+    ],
+  }
+
+  assert.equal(contentSourceReadiness(duplicateWorkspace, 'discovery', {
+    artifactId: 'keywords',
+  }).status, 'invalid_selection')
+  assert.deepEqual(contentSourceReadiness(duplicateWorkspace, 'discovery', {
+    artifactId: 'discovery', usedVersionId: 'discovery-new-v1',
+  }), {
+    status: 'invalid_selection', label: 'Invalid selection', artifactId: 'discovery',
+    versionId: 'discovery-v2', usedVersionId: 'discovery-new-v1',
+    reason: 'The used version does not belong to the selected artifact.',
+  })
+})
+
+test('CONTENT B01 source selection is independent of artifact ordering', () => {
+  const artifacts = [
+    { id: 'discovery-old', artifact_type: 'discovery' },
+    { id: 'discovery-new', artifact_type: 'discovery' },
+  ]
+  const duplicateWorkspace = {
+    ...workspace,
+    artifacts,
+    versions: [
+      { id: 'discovery-old-v1', artifact_id: 'discovery-old', version_number: 1 },
+      { id: 'discovery-new-v1', artifact_id: 'discovery-new', version_number: 1 },
+    ],
+    approvals: [{ artifact_id: 'discovery-new', artifact_version_id: 'discovery-new-v1' }],
+  }
+
+  for (const orderedArtifacts of [artifacts, [...artifacts].reverse()]) {
+    const orderedWorkspace = { ...duplicateWorkspace, artifacts: orderedArtifacts }
+    assert.equal(contentSourceReadiness(orderedWorkspace, 'discovery').status, 'selection_required')
+    assert.equal(contentSourceReadiness(orderedWorkspace, 'discovery', {
+      artifactId: 'discovery-new',
+    }).status, 'approved')
+    assert.equal(contentSourceReadiness(orderedWorkspace, 'discovery', {
+      artifactId: 'discovery-old',
+    }).status, 'available')
+  }
 })
