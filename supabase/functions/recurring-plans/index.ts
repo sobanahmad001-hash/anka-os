@@ -2,7 +2,10 @@ import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { namedKey } from '../_shared/googleOAuthTokens.ts'
 
 type Json = Record<string, unknown>
-const ACTIONS = new Set(['create_plan', 'create_version', 'approve_version', 'reassign_template_item', 'transition_plan'])
+const ACTIONS = new Set([
+  'create_plan', 'create_version', 'approve_version', 'reassign_template_item',
+  'transition_plan', 'preview_period', 'confirm_period',
+])
 const FREQUENCIES = new Set(['weekly', 'monthly'])
 const STATUSES = new Set(['active', 'paused', 'ended', 'archived'])
 const ITEM_TYPES = new Set(['task', 'bug', 'request'])
@@ -31,6 +34,18 @@ function date(value: unknown, label: string, optional = false) {
   const normalized = text(value, 10)
   if (!normalized && optional) return null
   if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) throw new Error(`${label} must be an ISO date`)
+  const parsed = new Date(`${normalized}T00:00:00.000Z`)
+  if (Number.isNaN(parsed.valueOf()) || parsed.toISOString().slice(0, 10) !== normalized) {
+    throw new Error(`${label} must be a real ISO date`)
+  }
+  return normalized
+}
+
+function uuid(value: unknown, label: string) {
+  const normalized = id(value, label)
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)) {
+    throw new Error(`${label} must be a UUID`)
+  }
   return normalized
 }
 
@@ -100,6 +115,16 @@ export function normalizeTransitionInput(input: Json) {
   return { p_status: status, p_reason: reason, p_impact: text(input.impact, 5000) }
 }
 
+export function normalizePeriodInput(input: Json, confirm = false) {
+  const normalized: Json = {
+    p_plan_id: uuid(input.planId, 'Recurring plan'),
+    p_period_start: date(input.periodStart, 'Period start') as string,
+    p_past_period_reason: text(input.pastPeriodReason, 2000),
+  }
+  if (confirm) normalized.p_request_key = uuid(input.requestKey, 'Request key')
+  return normalized
+}
+
 async function requireContext(request: Request) {
   const authorization = request.headers.get('Authorization') || ''
   if (!authorization.startsWith('Bearer ')) throw Object.assign(new Error('Authentication required'), { status: 401 })
@@ -124,7 +149,13 @@ export async function handleRequest(request: Request) {
     const { admin, user } = await requireContext(request)
     let functionName: string
     let input: Json
-    if (action === 'create_plan') {
+    if (action === 'preview_period') {
+      functionName = 'preview_recurring_work_period'
+      input = normalizePeriodInput(body)
+    } else if (action === 'confirm_period') {
+      functionName = 'confirm_recurring_work_period'
+      input = normalizePeriodInput(body, true)
+    } else if (action === 'create_plan') {
       functionName = 'create_recurring_work_plan'
       input = { p_engagement_service_id: id(body.engagementServiceId, 'Activated service'), ...normalizePlanVersionInput(body) }
     } else if (action === 'create_version') {

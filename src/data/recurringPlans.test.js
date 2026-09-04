@@ -5,6 +5,9 @@ import assert from 'node:assert/strict'
 const repository = readFileSync(new URL('./recurringPlansRepository.js', import.meta.url), 'utf8')
 const migration = readFileSync(new URL('../../supabase/migrations/20260903071706_ret1_recurring_plan_foundation.sql', import.meta.url), 'utf8')
 const verifier = readFileSync(new URL('../../supabase/verify_20260903071706_ret1_recurring_plan_foundation.sql', import.meta.url), 'utf8')
+const ret2Migration = readFileSync(new URL('../../supabase/migrations/20260903123259_ret2_manual_period_generation.sql', import.meta.url), 'utf8')
+const ret2Verifier = readFileSync(new URL('../../supabase/verify_20260903123259_ret2_manual_period_generation.sql', import.meta.url), 'utf8')
+const ret2Gate = readFileSync(new URL('../../docs/release/RET2_MANUAL_PERIOD_GENERATION_REVIEW_GATE.md', import.meta.url), 'utf8')
 const config = readFileSync(new URL('../../supabase/config.toml', import.meta.url), 'utf8')
 
 test('repository exposes reads and only the narrow RET1 actions', () => {
@@ -15,7 +18,7 @@ test('repository exposes reads and only the narrow RET1 actions', () => {
   for (const action of ['create_plan', 'create_version', 'approve_version', 'reassign_template_item', 'transition_plan']) {
     assert.match(repository, new RegExp(`'${action}'`))
   }
-  assert.doesNotMatch(repository, /generate|schedule|cron|occurrence/i)
+  assert.doesNotMatch(repository, /cron|schedulePeriod|bulkGenerate/i)
 })
 
 test('recurring-plans is enabled with JWT verification and the exact entrypoint', () => {
@@ -107,4 +110,67 @@ test('RET1 verifier exhaustively checks catalog security and fails closed after 
   assert.match(verifier, /raise exception 'RET1 verification failed: %'/)
   assert.match(verifier, /rollback;\s*$/)
   assert.doesNotMatch(verifier, /commit;/i)
+})
+
+test('repository exposes only explicit RET2 preview and confirmation actions', () => {
+  for (const table of ['recurring_work_occurrences', 'recurring_work_generation_attempts']) {
+    assert.match(repository, new RegExp(`from\\('${table}'\\)`))
+  }
+  assert.match(repository, /invoke\('preview_period'/)
+  assert.match(repository, /invoke\('confirm_period'/)
+  assert.doesNotMatch(repository, /cron|schedulePeriod|bulkGenerate/i)
+})
+
+test('RET2 generation is plan-period idempotent, atomic, and keeps canonical provenance', () => {
+  assert.match(ret2Migration, /unique \(organization_id, plan_id, period_start\)/)
+  assert.match(ret2Migration, /work_items_recurring_template_unique/)
+  assert.match(ret2Migration, /pg_advisory_xact_lock/)
+  assert.match(ret2Migration, /created_via[^;]+recurring_plan/s)
+  assert.match(ret2Migration, /recurring_occurrence_id/)
+  assert.match(ret2Migration, /recurring_plan_version_id/)
+  assert.match(ret2Migration, /Recurring period is not eligible/)
+  assert.doesNotMatch(ret2Migration, /cron\.schedule|pg_cron|scheduled generation/i)
+})
+
+test('RET2 uses plan-aligned half-open periods and preserves monthly anchor after clamping', () => {
+  assert.match(ret2Migration, /mod\(p_period_start - p_anchor, 7\)/)
+  assert.match(ret2Migration, /private\.recurring_month_anchor\(p_anchor, v_month_offset \+ 1\)/)
+  assert.match(ret2Migration, /least\(extract\(day from p_anchor\).*v_last_day\)/s)
+  assert.match(ret2Migration, /Exclusive local-date boundary for the half-open occurrence window/)
+  assert.match(ret2Migration, /now\(\) at time zone v_version\.timezone/)
+})
+
+test('RET2 fails closed on lifecycle, ownership, assignee, and past-period rules', () => {
+  for (const reason of [
+    'plan_not_active', 'engagement_not_active', 'engagement_service_not_active',
+    'service_catalog_not_active', 'template_assignee_not_active',
+    'past_period_reason_required', 'period_start_is_not_canonical',
+  ]) assert.match(ret2Migration, new RegExp(`'${reason}'`))
+  assert.match(ret2Migration, /Only the current activated service owner can generate/)
+  assert.match(ret2Migration, /version\.effective_start <= p_period_start/)
+  assert.match(ret2Migration, /version\.effective_end is null or version\.effective_end >= p_period_start/)
+})
+
+test('RET2 verifier is rollback-safe and names concurrency, atomicity, and security gates', () => {
+  for (const checkName of [
+    'monthly_short_month_clamps_without_drift',
+    'preview_is_read_only_and_returns_exact_dates',
+    'same_request_replays_identical_ids',
+    'new_request_same_period_replays_one_occurrence',
+    'partial_failure_rolls_back_every_business_row',
+    'wrong_actor_is_rejected', 'inactive_plan_is_rejected',
+    'table_acl_matrix_is_exact', 'rpc_acl_matrix_is_exact',
+    'tenant_composite_foreign_keys_are_exact', 'tenant_foreign_key_indexes_are_exact',
+  ]) assert.match(ret2Verifier, new RegExp(`'${checkName}'`))
+  assert.match(ret2Verifier, /^begin;/m)
+  assert.match(ret2Verifier, /raise exception 'RET2 verification failed: %'/)
+  assert.match(ret2Verifier, /rollback;\s*$/)
+  assert.doesNotMatch(ret2Verifier, /commit;/i)
+})
+
+test('RET2 review gate preserves the manual-only release boundary', () => {
+  assert.match(ret2Gate, /preview-and-confirm generation for one recurring plan period/)
+  assert.match(ret2Gate, /no automatic or bulk catch-up/i)
+  assert.match(ret2Gate, /no schedule may be created/i)
+  assert.match(ret2Gate, /Admin\/Testing retains authority for merge/)
 })

@@ -1,4 +1,4 @@
-import { normalizePlanVersionInput, normalizeTransitionInput } from './index.ts'
+import { normalizePeriodInput, normalizePlanVersionInput, normalizeTransitionInput } from './index.ts'
 
 function equal(actual: unknown, expected: unknown) {
   if (actual !== expected) throw new Error(`Expected ${String(expected)}, received ${String(actual)}`)
@@ -41,4 +41,24 @@ Deno.test('accepts only lifecycle targets exposed by RET1 and requires reasons',
   equal(normalizeTransitionInput({ status: 'paused', reason: 'Capacity review' }).p_reason, 'Capacity review')
   throws(() => normalizeTransitionInput({ status: 'approved' }), /Unsupported/)
   throws(() => normalizeTransitionInput({ status: 'ended' }), /reason is required/)
+})
+
+Deno.test('normalizes one explicit RET2 preview and confirmation period', () => {
+  const planId = '11111111-1111-4111-8111-111111111111'
+  const requestKey = '22222222-2222-4222-8222-222222222222'
+  const preview = normalizePeriodInput({
+    planId, periodStart: '2026-09-07', pastPeriodReason: ' Approved recovery ',
+  })
+  equal(preview.p_plan_id, planId)
+  equal(preview.p_period_start, '2026-09-07')
+  equal(preview.p_past_period_reason, 'Approved recovery')
+  const confirm = normalizePeriodInput({ planId, periodStart: '2026-09-07', requestKey }, true)
+  equal(confirm.p_request_key, requestKey)
+})
+
+Deno.test('rejects malformed RET2 dates and request identities', () => {
+  const planId = '11111111-1111-4111-8111-111111111111'
+  throws(() => normalizePeriodInput({ planId, periodStart: '2026-02-30' }), /real ISO date/)
+  throws(() => normalizePeriodInput({ planId: 'not-an-id', periodStart: '2026-09-07' }), /must be a UUID/)
+  throws(() => normalizePeriodInput({ planId, periodStart: '2026-09-07', requestKey: 'bad' }, true), /must be a UUID/)
 })

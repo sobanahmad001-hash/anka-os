@@ -30,6 +30,14 @@ export const recurringPlans = Object.freeze({
     supabase.from('recurring_work_plan_version_approvals').select('*')
       .eq('plan_id', planId).order('approved_at').order('id')
   ),
+  listOccurrences: planId => dataOrThrow(
+    supabase.from('recurring_work_occurrences').select('*')
+      .eq('plan_id', planId).order('period_start').order('id')
+  ),
+  listGenerationAttempts: planId => dataOrThrow(
+    supabase.from('recurring_work_generation_attempts').select('*')
+      .eq('plan_id', planId).order('requested_at').order('id')
+  ),
   create: input => invoke('create_plan', input),
   createVersion: input => invoke('create_version', input),
   approveVersion: (planId, planVersionId, approvalNote = '') =>
@@ -38,4 +46,8 @@ export const recurringPlans = Object.freeze({
     invoke('reassign_template_item', { planId, templateKey, assigneeId }),
   transition: (planId, status, reason = '', impact = '') =>
     invoke('transition_plan', { planId, status, reason, impact }),
+  previewPeriod: (planId, periodStart, pastPeriodReason = '') =>
+    invoke('preview_period', { planId, periodStart, pastPeriodReason }),
+  confirmPeriod: (planId, periodStart, requestKey, pastPeriodReason = '') =>
+    invoke('confirm_period', { planId, periodStart, requestKey, pastPeriodReason }),
 })
