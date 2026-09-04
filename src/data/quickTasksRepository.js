@@ -20,7 +20,11 @@ export const quickTasks = Object.freeze({
   revision: revisionId => dataOrThrow(
     supabase.from('quick_task_revisions').select('*').eq('id', revisionId).single()
   ),
+  messages: quickTaskId => dataOrThrow(
+    supabase.from('quick_task_messages').select('*').eq('quick_task_id', quickTaskId).order('created_at')
+  ),
   create: input => invoke('create', input),
   append: input => invoke('append', input),
   fork: input => invoke('fork', input),
+  chat: input => invoke('chat', input),
 })

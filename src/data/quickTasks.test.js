@@ -16,6 +16,9 @@ const edge = read('supabase/functions/quick-tasks/index.ts')
 const config = read('supabase/config.toml')
 const verifier = read('supabase/verify_20260903071848_qts1_private_core.sql')
 const ci = read('.github/workflows/ci.yml')
+const qts2Migration = read('supabase/migrations/20260903100732_qts2_sandbox_chat.sql')
+const qts2Verifier = read('supabase/verify_20260903100732_qts2_sandbox_chat.sql')
+const packageJson = read('package.json')
 
 test('QTS1 content normalization is bounded and predictable', () => {
   const content = quickTaskContent({ notes: ' idea ', checklist: [{ text: ' ship ', done: 1 }, { text: '' }] })
@@ -98,4 +101,66 @@ test('QTS1 verifier is rollback-safe, exhaustive, and fails closed', () => {
   assert.doesNotMatch(verifier, /update public\.organization_memberships|delete from public\.organization_memberships/i)
   assert.match(verifier.trim(), /rollback;$/)
   assert.doesNotMatch(verifier, /(^|\n)\s*commit\s*;/i)
+})
+
+test('QTS2 sandbox chat has no canonical context or action surface', () => {
+  assert.match(edge, /store:\s*false/)
+  assert.match(edge, /record_quick_task_chat_failure/)
+  assert.match(edge, /capability:\s*'quick_task_chat'|record_quick_task_chat_success/)
+  assert.doesNotMatch(edge, /\.from\(['"](?:artifacts|work_items|tasks|engagements|content_requests)['"]\)/)
+  assert.doesNotMatch(edge, /save_work_item|createContentArtifactVersion|propose_artifact|propose_work_item/)
+  assert.doesNotMatch(qts2Migration, /insert into public\.(?:artifacts|work_items|tasks|engagements|projects|content_requests)/)
+})
+
+test('QTS2 persists only owner-private append-only messages and validated sandbox revisions', () => {
+  assert.match(qts2Migration, /create table public\.quick_task_messages/)
+  assert.match(qts2Migration, /Owners can read their Quick Task messages/)
+  assert.match(qts2Migration, /trg_quick_task_messages_append_only/)
+  assert.match(qts2Migration, /idx_quick_task_messages_owner/)
+  assert.match(qts2Migration, /source_kind in \('manual', 'quick_chat', 'copied_general_request', 'copied_department_chat'\)/)
+  assert.match(qts2Migration, /private\.is_valid_quick_task_sandbox_content/)
+  assert.match(qts2Migration, /record_quick_task_chat_success/)
+  assert.match(qts2Migration, /record_quick_task_chat_failure/)
+  const failure = qts2Migration.slice(qts2Migration.indexOf('create function public.record_quick_task_chat_failure'))
+  assert.doesNotMatch(failure, /update public\.quick_tasks/)
+})
+
+test('QTS2 uses organization and department model mapping with retained-disabled audited AI', () => {
+  assert.match(edge, /integration_connection_departments!inner\(department_id\)/)
+  assert.doesNotMatch(edge, /integration_connection_engagements/)
+  assert.match(edge, /Hourly AI run limit reached/)
+  assert.match(edge, /Organization AI budget has been reached/)
+  assert.match(edge, /store:\s*false/)
+  assert.match(qts2Migration, /'quick_task_chat'/)
+  assert.match(qts2Migration, /input_text, output_text, context_manifest/)
+  assert.match(qts2Migration, /input_tokens, output_tokens, estimated_cost_microusd/)
+  assert.match(qts2Migration, /capability <> 'quick_task_chat'/)
+})
+
+test('QTS2 UI and manifests expose sandbox chat without promotion', () => {
+  assert.match(repository, /messages: quickTaskId/)
+  assert.match(repository, /chat: input => invoke\('chat'/)
+  assert.match(screen, /Sandbox chat/)
+  assert.match(screen, /Create sandbox revision/)
+  assert.match(screen, /promotion is (?:intentionally )?unavailable/i)
+  assert.match(config, /\[functions\.quick-tasks\][\s\S]*verify_jwt = true/)
+  assert.match(packageJson, /supabase functions deploy quick-tasks/)
+})
+
+test('QTS2 verifier is rollback-only, exhaustive, and fails closed', () => {
+  for (const check of [
+    'success_is_atomic_and_audited', 'failure_is_audited_without_activity',
+    'owner_only_transcript_and_ai_content', 'wrong_department_rejected',
+    'message_update_rejected', 'message_delete_rejected', 'no_canonical_side_effects',
+    'message_rls_enabled', 'message_policy_is_owner_only', 'leader_ai_policy_excludes_qts',
+    'message_table_acls_are_exact', 'rpc_execute_acls_are_exact',
+    'qts_foreign_keys_are_tenant_exact', 'qts_fk_indexes_exist', 'messages_are_append_only',
+    'ai_capability_and_context_are_explicit', 'no_message_write_policies',
+  ]) assert.match(qts2Verifier, new RegExp(check))
+  assert.match(qts2Verifier, /jsonb_object_agg\(check_name, passed order by check_name\)/)
+  assert.match(qts2Verifier, /raise exception 'QTS2 verification failed/)
+  assert.match(qts2Verifier.trim(), /rollback;$/)
+  assert.doesNotMatch(qts2Verifier, /(^|\n)\s*commit\s*;/i)
+  assert.doesNotMatch(qts2Verifier, /\bconstraint\./i)
+  assert.doesNotMatch(qts2Verifier, /from\s+pg_constraint\s+constraint\b/i)
 })
