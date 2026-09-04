@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 const repository = readFileSync(new URL('./recurringPlansRepository.js', import.meta.url), 'utf8')
 const migration = readFileSync(new URL('../../supabase/migrations/20260903071706_ret1_recurring_plan_foundation.sql', import.meta.url), 'utf8')
 const verifier = readFileSync(new URL('../../supabase/verify_20260903071706_ret1_recurring_plan_foundation.sql', import.meta.url), 'utf8')
+const config = readFileSync(new URL('../../supabase/config.toml', import.meta.url), 'utf8')
 
 test('repository exposes reads and only the narrow RET1 actions', () => {
   for (const table of ['recurring_work_plans', 'recurring_work_plan_versions',
@@ -15,6 +16,15 @@ test('repository exposes reads and only the narrow RET1 actions', () => {
     assert.match(repository, new RegExp(`'${action}'`))
   }
   assert.doesNotMatch(repository, /generate|schedule|cron|occurrence/i)
+})
+
+test('recurring-plans is enabled with JWT verification and the exact entrypoint', () => {
+  const blocks = [...config.matchAll(/(?:^|\r?\n)\[functions\.recurring-plans\]\r?\n([\s\S]*?)(?=\r?\n\[|$)/g)]
+  assert.equal(blocks.length, 1)
+  assert.match(blocks[0][1], /^enabled = true$/m)
+  assert.match(blocks[0][1], /^verify_jwt = true$/m)
+  assert.match(blocks[0][1], /^entrypoint = "\.\/functions\/recurring-plans\/index\.ts"$/m)
+  assert.doesNotMatch(blocks[0][1], /^verify_jwt = false$/m)
 })
 
 test('migration binds plans to canonical ownership and keeps content append-only', () => {
