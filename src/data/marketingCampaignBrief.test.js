@@ -6,6 +6,7 @@ import { selectedCampaignBriefSuggestions, validateCampaignBriefDraft } from './
 
 const approvalEdge = readFileSync(new URL('../../supabase/functions/artifact-approvals/index.ts', import.meta.url), 'utf8')
 const migration = readFileSync(new URL('../../supabase/migrations/20260904090000_mb02_marketing_campaign_briefs.sql', import.meta.url), 'utf8')
+const verifier = readFileSync(new URL('../../supabase/verify_20260904090000_mb02_marketing_campaign_briefs.sql', import.meta.url), 'utf8')
 const studio = readFileSync(new URL('../apps/MarketingStudio.jsx', import.meta.url), 'utf8')
 const main = readFileSync(new URL('../main.jsx', import.meta.url), 'utf8')
 const brief = readFileSync(new URL('../components/MarketingCampaignBrief.jsx', import.meta.url), 'utf8')
@@ -65,6 +66,29 @@ test('two-session concurrency harness is disposable and refuses remote databases
   assert.match(concurrency, /Promise\.all\(/)
   assert.match(concurrency, /already has a canonical campaign brief/)
   assert.match(concurrency, /expired_key_race=one_write_one_replay/)
+})
+
+test('rollback verifier is exhaustive, named, fail-closed, and ends in PASS', () => {
+  for (const check of [
+    'ledger_exact_columns_types_defaults', 'ledger_defaults_exact', 'ledger_checks_exact',
+    'ledger_foreign_keys_exact', 'ledger_uniqueness_exact', 'ledger_expiry_index_exact',
+    'canonical_lineage_indexes_exact', 'ledger_rls_and_policies_exact', 'ledger_acl_exact',
+    'ledger_is_metadata_only', 'rpc_exact_signatures_exist',
+    'rpc_owner_invoker_search_path_volatility_exact', 'rpc_acl_exact',
+    'generic_two_approver_rpc_preserved', 'expiry_and_concurrency_guards_present',
+    'first_save_is_single_unapproved_lineage', 'unexpired_request_replays_exact_version',
+    'expired_request_does_not_replay_and_key_is_reusable',
+    'reused_key_replays_new_version_under_lock', 'conflicting_unexpired_reuse_rejected',
+    'duplicate_first_save_rejected', 'artifact_rebind_rejected', 'cross_tenant_save_rejected',
+    'foreign_asset_version_rejected', 'immutable_version_update_rejected',
+    'campaign_brief_one_eligible_approver_succeeds',
+    'campaign_brief_ineligible_approver_rejected', 'generic_one_approver_still_rejected',
+    'sequential_lineage_cardinality_exact',
+  ]) assert.match(verifier, new RegExp(check))
+  assert.match(verifier, /where not passed/)
+  assert.match(verifier, /raise exception 'MB02B verification failed:/)
+  assert.match(verifier, /select 'PASS' as mb02b_final_result/)
+  assert.match(verifier, /rollback;/)
 })
 
 test('unsaved brief uses the router blocker for every SPA transition and beforeunload for document exit', () => {
