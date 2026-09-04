@@ -241,6 +241,53 @@ Deno.test("same-shaped A/B artifact-version roots derive the complete caller-rea
 for (
   const scenario of [
     {
+      name: "artifact identity mismatch",
+      version: {
+        ...artifactVersion("version-b", "org-b", "b"),
+        artifact_id: "artifact-injected",
+      },
+    },
+    {
+      name: "artifact organization mismatch",
+      version: {
+        ...artifactVersion("version-b", "org-b", "b"),
+        artifact: {
+          ...(artifactVersion("version-b", "org-b", "b").artifact as Row),
+          organization_id: "org-a",
+        },
+      },
+    },
+  ]
+) {
+  Deno.test(`artifact-version ${scenario.name} fails before privileged or side-effect access`, async () => {
+    const path = fixture({
+      roots: { artifact_versions: [scenario.version] },
+      memberships: [activeMembership("org-b")],
+    });
+    await assertRejects(
+      () =>
+        resolveServerOrganizationContext(request(), {
+          root: { kind: "artifact_version", id: "version-b" },
+          requestedOrganizationId: "org-b",
+        }, path.dependencies),
+      Error,
+      "Artifact version root is unavailable",
+    );
+    assertEquals(path.factoryCalls, 1);
+    assertEquals(path.calls.some((call) => call.client === "admin"), false);
+    assertEquals(
+      path.calls.some((call) =>
+        ["insert", "update", "delete"].includes(call.operation) ||
+        /provider|storage/i.test(call.table)
+      ),
+      false,
+    );
+  });
+}
+
+for (
+  const scenario of [
+    {
       name: "queue requested-org mismatch",
       roots: {
         content_queue_entries: [
@@ -612,10 +659,9 @@ Deno.test("field definitions are organization constrained and must match the art
     "does not match the artifact type",
   );
   assertEquals(
-    path.calls.filter((call) =>
-      call.client === "admin" && call.table === "artifact_custom_field_defs"
-    ).every((call) =>
-      call.operation !== "eq" || call.column !== "organization_id" ||
+    path.calls.some((call) =>
+      call.client === "admin" && call.table === "artifact_custom_field_defs" &&
+      call.operation === "eq" && call.column === "organization_id" &&
       call.value === "org-b"
     ),
     true,
