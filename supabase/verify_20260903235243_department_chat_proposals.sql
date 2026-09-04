@@ -133,6 +133,8 @@ insert into wch3_checks values
   ),
   ('confirmation_is_proposer_only',
     position('Only the proposer can confirm' in pg_get_functiondef('public.confirm_department_chat_proposal(uuid,uuid,text,uuid,text)'::regprocedure)) > 0
+    and position('private.department_chat_context_versions_match' in pg_get_functiondef('public.confirm_department_chat_proposal(uuid,uuid,text,uuid,text)'::regprocedure)) > 0
+    and position('for update' in lower(pg_get_functiondef('public.confirm_department_chat_proposal(uuid,uuid,text,uuid,text)'::regprocedure))) > 0
   ),
   ('tasks_are_untouched',
     position('public.tasks' in pg_get_functiondef('public.save_department_chat_proposal(uuid,uuid,uuid,text,uuid,text,text,uuid,uuid,jsonb,jsonb,jsonb,uuid[],text,uuid,text,uuid,text,text,integer,integer,integer,bigint)'::regprocedure)) = 0
@@ -575,6 +577,59 @@ begin
   end loop;
   execute 'reset role';
   insert into wch3_checks values('full_audit_vocabulary_and_rpc_acl',true);
+end;
+$$;
+
+do $$
+declare
+  f wch3_fixture;
+  p jsonb;
+  decision jsonb;
+  context_artifact_id uuid;
+  context_version_id uuid;
+  brand_id uuid;
+  before_work_items bigint;
+  passed boolean := false;
+begin
+  select * into f from wch3_fixture where department_id = 'development';
+  begin
+    p := pg_temp.wch_preview(f, 'work_item', 'task');
+
+    -- Represents authoritative context changing after the Edge process resolved its
+    -- checksum/version set but before the confirmation RPC begins.
+    select engagement.brand_id into brand_id from public.engagements engagement where engagement.id = f.engagement_id;
+    insert into public.artifacts(organization_id, project_id, engagement_id, brand_id, artifact_type, title, created_by)
+    values(f.organization_id, f.project_id, f.engagement_id, brand_id, 'brand_statement', 'TOCTOU context', f.actor_id)
+    returning id into context_artifact_id;
+    insert into public.artifact_versions(
+      organization_id, artifact_id, version_number, content, content_checksum,
+      ai_use_allowed, data_classification, created_by
+    ) values (
+      f.organization_id, context_artifact_id, 1, '{"changed":true}', repeat('7',64),
+      true, 'internal', f.actor_id
+    ) returning id into context_version_id;
+    insert into public.artifact_approvals(organization_id, artifact_id, artifact_version_id, engagement_id, approved_by)
+    values(f.organization_id, context_artifact_id, context_version_id, f.engagement_id, f.actor_id);
+
+    select count(*) into before_work_items from public.work_items;
+    decision := public.confirm_department_chat_proposal(
+      (p->>'proposal_id')::uuid, f.actor_id, repeat('a',64),
+      f.connector_id, 'wch-fixture-model'
+    );
+    if decision->>'outcome' <> 'stale'
+      or (select count(*) from public.work_items) <> before_work_items
+      or exists (
+        select 1 from public.department_chat_proposals proposal
+        where proposal.id = (p->>'proposal_id')::uuid
+          and proposal.accepted_work_item_id is not null
+      ) then
+      raise exception 'Authoritative context TOCTOU created an official record';
+    end if;
+    raise exception using errcode = 'Z0001', message = 'rollback successful TOCTOU fixture';
+  exception when sqlstate 'Z0001' then
+    passed := true;
+  end;
+  insert into wch3_checks values('approved_context_toctou_creates_no_record', passed);
 end;
 $$;
 

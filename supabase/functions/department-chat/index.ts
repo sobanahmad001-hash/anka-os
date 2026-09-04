@@ -209,7 +209,7 @@ async function approvedSafeContext(admin: Client, engagementId: string, departme
     .eq('organization_id', organizationId)
     .in('artifacts.artifact_type', profile.contextArtifactTypes)
     .eq('artifact_versions.ai_use_allowed', true).neq('artifact_versions.data_classification', 'restricted')
-    .order('approved_at', { ascending: false })
+    .order('approved_at', { ascending: false }).order('id', { ascending: false })
   if (error) throw error
   const seen = new Set<string>()
   return (approvals || []).flatMap(item => {
@@ -733,11 +733,13 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
 
 export function safeAttemptReason(error: unknown) {
   const message = error instanceof Error ? error.message : ''
+  const normalized = message.toLowerCase()
   if (message.includes('credential')) return 'credential_missing'
   if (message.includes('model_id')) return 'model_missing'
   if (message.includes('connector')) return 'connector_unavailable'
   if (message.includes('OpenAI')) return 'provider_failed'
-  if (error instanceof SyntaxError || message.includes('requires') || message.includes('schema')) return 'invalid_output'
+  if (error instanceof SyntaxError || ['required', 'requires', 'must be', 'invalid', 'empty', 'schema']
+    .some(fragment => normalized.includes(fragment))) return 'invalid_output'
   return 'policy_denied'
 }
 

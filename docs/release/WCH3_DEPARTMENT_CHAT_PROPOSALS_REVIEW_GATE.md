@@ -57,7 +57,7 @@ It fails closed unless all of these hold:
 - legacy tasks are untouched;
 - the entire verifier ends with ROLLBACK.
 
-Admin/Testing must apply the migration in an approved non-production environment, run the verifier in the same reviewed schema state, inspect its JSON result, and require every named check to be true before release. Local implementation verification used an isolated portable PostgreSQL 17 cluster on localhost:55436: all 24 named checks passed and the verifier rolled back. This local compatibility result does not replace Admin validation against the exact release schema.
+Admin/Testing must apply the migration in an approved non-production environment, run the verifier in the same reviewed schema state, inspect its JSON result, and require every named check to be true before release. Local implementation verification used an isolated portable PostgreSQL 17 cluster on localhost:55436: all 25 named checks passed, including the approved-context TOCTOU zero-write regression, and the verifier rolled back. This local compatibility result does not replace Admin validation against the exact release schema.
 
 ## Local gate results
 

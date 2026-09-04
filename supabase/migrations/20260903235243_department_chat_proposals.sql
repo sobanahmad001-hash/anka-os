@@ -209,6 +209,50 @@ create trigger trg_department_chat_proposals_protect
 before update on public.department_chat_proposals
 for each row execute function private.protect_department_chat_proposal();
 
+-- Caller checksums detect Edge-observed changes. This database-owned check independently
+-- resolves the immutable approved versions while the engagement row is update-locked,
+-- preventing a new approval from entering between validation and the official write.
+create or replace function private.department_chat_context_versions_match(
+  p_organization_id uuid, p_engagement_id uuid, p_department_id text,
+  p_expected_artifact_version_ids uuid[]
+)
+returns boolean
+language sql
+security invoker
+set search_path = ''
+as $$
+  with latest_per_artifact as (
+    select distinct on (approval.artifact_id) approval.artifact_version_id
+    from public.artifact_approvals approval
+    join public.artifacts artifact
+      on artifact.id = approval.artifact_id
+     and artifact.organization_id = approval.organization_id
+     and artifact.engagement_id = approval.engagement_id
+    join public.artifact_versions version
+      on version.id = approval.artifact_version_id
+     and version.organization_id = approval.organization_id
+     and version.artifact_id = approval.artifact_id
+    where approval.organization_id = p_organization_id
+      and approval.engagement_id = p_engagement_id
+      and version.ai_use_allowed
+      and version.data_classification <> 'restricted'
+      and artifact.artifact_type = any(case p_department_id
+        when 'content' then array['discovery','vision','audience','brand_statement','website_architecture','keyword_strategy','content','campaign_messaging','scripts']
+        when 'design' then array['discovery','vision','audience','brand_statement','website_architecture','content','campaign_messaging','design_system']
+        when 'marketing' then array['discovery','vision','audience','brand_statement','website_architecture','keyword_strategy','content','campaign_messaging','scripts','channel_strategy','campaign_brief','measurement_plan']
+        when 'development' then array['brand_statement','website_architecture','keyword_strategy','content','design_system','technical_brief','launch_checklist']
+        else array[]::text[] end)
+    order by approval.artifact_id, approval.approved_at desc, approval.id desc
+  )
+  select coalesce(array_agg(artifact_version_id order by artifact_version_id), '{}'::uuid[])
+    = array(select id from unnest(coalesce(p_expected_artifact_version_ids, '{}'::uuid[])) id order by id)
+  from latest_per_artifact;
+$$;
+revoke all on function private.department_chat_context_versions_match(uuid, uuid, text, uuid[])
+  from public, anon, authenticated;
+grant execute on function private.department_chat_context_versions_match(uuid, uuid, text, uuid[])
+  to service_role;
+
 create or replace function public.save_department_chat_proposal(
   p_organization_id uuid, p_engagement_id uuid, p_project_id uuid,
   p_department_id text, p_actor_id uuid, p_proposal_kind text,
@@ -419,9 +463,22 @@ begin
     where id = v_proposal.ai_run_id;
     return jsonb_build_object('outcome', 'expired', 'proposal_id', v_proposal.id);
   end if;
+  select engagement.* into v_engagement
+  from public.engagements engagement
+  where engagement.id = v_proposal.engagement_id
+    and engagement.project_id = v_proposal.project_id
+    and engagement.organization_id = v_proposal.organization_id
+  for update;
+  if not found then
+    raise exception 'Department Chat engagement context changed.' using errcode = '23514';
+  end if;
   if v_proposal.context_checksum is distinct from p_context_checksum
      or v_proposal.connector_connection_id is distinct from p_connector_connection_id
-     or v_proposal.model_id is distinct from p_model_id then
+     or v_proposal.model_id is distinct from p_model_id
+     or not private.department_chat_context_versions_match(
+       v_proposal.organization_id, v_proposal.engagement_id,
+       v_proposal.department_id, v_proposal.context_artifact_version_ids
+     ) then
     update public.department_chat_proposals
     set status = 'stale', decided_by = p_actor_id, decided_at = now(),
         failure_reason = 'context_changed_regenerate'
@@ -475,16 +532,6 @@ begin
       and catalog.department_id = v_proposal.department_id
   ) then
     raise exception 'Department Chat connector or service policy changed.' using errcode = '23514';
-  end if;
-
-  select engagement.* into v_engagement
-  from public.engagements engagement
-  where engagement.id = v_proposal.engagement_id
-    and engagement.project_id = v_proposal.project_id
-    and engagement.organization_id = v_proposal.organization_id
-  for share;
-  if not found then
-    raise exception 'Department Chat engagement context changed.' using errcode = '23514';
   end if;
 
   begin

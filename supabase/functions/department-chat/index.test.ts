@@ -238,6 +238,13 @@ Deno.test('audit reasons never contain provider secrets or raw failures', () => 
   }
 })
 
+Deno.test('model-output validator failures are classified as invalid output', () => {
+  for (const message of [
+    'headline is required', 'color tokens must be an array',
+    'Website page 1 is invalid', 'The configured model returned an empty draft',
+  ]) assertEquals(safeAttemptReason(new Error(message)), 'invalid_output')
+})
+
 for (const department of ['content','design','marketing','development']) {
   Deno.test('connector failures call no provider or proposal path for ' + department, async () => {
     const badConnections = [[], [{id:'one'},{id:'two'}], [{id:'one',secret_name:'KEY',public_config:{model_id:'explicit'}}], [{id:'one',secret_name:'KEY',public_config:{}}]]
