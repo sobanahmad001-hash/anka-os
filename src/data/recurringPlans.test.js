@@ -8,6 +8,10 @@ const verifier = readFileSync(new URL('../../supabase/verify_20260903071706_ret1
 const ret2Migration = readFileSync(new URL('../../supabase/migrations/20260903123259_ret2_manual_period_generation.sql', import.meta.url), 'utf8')
 const ret2Verifier = readFileSync(new URL('../../supabase/verify_20260903123259_ret2_manual_period_generation.sql', import.meta.url), 'utf8')
 const ret2Gate = readFileSync(new URL('../../docs/release/RET2_MANUAL_PERIOD_GENERATION_REVIEW_GATE.md', import.meta.url), 'utf8')
+const ret3Migration = readFileSync(new URL('../../supabase/migrations/20260903185206_ret3_monthly_planning_preview.sql', import.meta.url), 'utf8')
+const ret3Verifier = readFileSync(new URL('../../supabase/verify_20260903185206_ret3_monthly_planning_preview.sql', import.meta.url), 'utf8')
+const ret3Gate = readFileSync(new URL('../../docs/release/RET3_MONTHLY_RETAINER_PLANNING_REVIEW_GATE.md', import.meta.url), 'utf8')
+const retainerPanel = readFileSync(new URL('../components/RetainerPlanningPanel.jsx', import.meta.url), 'utf8')
 const config = readFileSync(new URL('../../supabase/config.toml', import.meta.url), 'utf8')
 
 test('repository exposes reads and only the narrow RET1 actions', () => {
@@ -173,4 +177,46 @@ test('RET2 review gate preserves the manual-only release boundary', () => {
   assert.match(ret2Gate, /no automatic or bulk catch-up/i)
   assert.match(ret2Gate, /no schedule may be created/i)
   assert.match(ret2Gate, /Admin\/Testing retains authority for merge/)
+})
+
+test('RET3 adds one read-only plan-local month action without scheduling', () => {
+  assert.match(repository, /invoke\('preview_month'/)
+  assert.match(repository, /from\('work_items'\)[\s\S]*recurring_plan_id/)
+  assert.match(repository, /from\('organization_memberships'\)/)
+  assert.match(ret3Migration, /create or replace function public\.preview_recurring_work_month/)
+  assert.match(ret3Migration, /membership_rule', 'period_start_in_month'/)
+  assert.match(ret3Migration, /private\.build_recurring_period_preview/)
+  assert.match(ret3Migration, /security invoker/i)
+  assert.doesNotMatch(ret3Migration, /create table|insert into|update |delete from|cron\.schedule|pg_cron/i)
+  assert.match(ret3Migration, /revoke all on function public\.preview_recurring_work_month[\s\S]*anon, authenticated/)
+  assert.match(ret3Migration, /grant execute on function public\.preview_recurring_work_month[\s\S]*service_role/)
+})
+
+test('RET3 UI is isolated, one-period manual, and preserves review and exception boundaries', () => {
+  assert.match(retainerPanel, /Monthly retainer planning/)
+  assert.match(retainerPanel, /crypto\.randomUUID\(\)/)
+  assert.match(retainerPanel, /Confirm one period/)
+  assert.match(retainerPanel, /Only the current Service Owner/)
+  assert.doesNotMatch(retainerPanel, /bulk|select all|schedule|cron/i)
+  assert.match(ret3Gate, /read-only display of existing immutable plan-version approval facts/i)
+  assert.match(ret3Gate, /computed current-state warnings/i)
+  assert.match(ret3Gate, /No RET4/i)
+})
+
+test('RET3 verifier covers exact month membership, anchors, ACLs, authority, and rollback', () => {
+  for (const checkName of [
+    'rpc_exists_and_is_stable_invoker',
+    'rpc_acl_is_service_role_only',
+    'month_start_must_be_first_day',
+    'weekly_period_starts_in_selected_month',
+    'monthly_short_month_anchor_does_not_drift',
+    'preview_matches_ret2_period_contract',
+    'preview_is_read_only',
+    'wrong_actor_is_rejected',
+    'no_approved_version_is_explicit',
+  ]) assert.match(ret3Verifier, new RegExp("'" + checkName + "'"))
+  assert.match(ret3Verifier, /^begin;/m)
+  assert.match(ret3Verifier, /raise exception 'RET3 verification failed: %'/)
+  assert.match(ret3Verifier, /rollback;\s*$/)
+  assert.doesNotMatch(ret3Verifier, /commit;/i)
 })

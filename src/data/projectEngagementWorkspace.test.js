@@ -81,4 +81,6 @@ test('WKS2 route and UI preserve distinct Project Task and Engagement Work Item 
   assert.match(workspace, /Project Tasks/)
   assert.match(workspace, /Engagement Work Items/)
   assert.match(workspace, /No engagement data has been fabricated/)
+  assert.match(workspace, /Retainer Planning/)
+  assert.match(workspace, /showRetainerPlanning/)
 })

@@ -38,6 +38,16 @@ export const recurringPlans = Object.freeze({
     supabase.from('recurring_work_generation_attempts').select('*')
       .eq('plan_id', planId).order('requested_at').order('id')
   ),
+  listGeneratedWork: planId => dataOrThrow(
+    supabase.from('work_items').select(
+      'id, organization_id, project_id, engagement_id, title, status, priority, assignee_id, start_date, due_date, created_via, recurring_occurrence_id, recurring_plan_id, recurring_plan_version_id, recurring_template_key, deleted_at',
+    ).eq('recurring_plan_id', planId).is('deleted_at', null).order('position').order('id')
+  ),
+  listTeamMemberships: organizationId => dataOrThrow(
+    supabase.from('organization_memberships')
+      .select('organization_id, user_id, member_kind, status, department_id')
+      .eq('organization_id', organizationId).eq('member_kind', 'team')
+  ),
   create: input => invoke('create_plan', input),
   createVersion: input => invoke('create_version', input),
   approveVersion: (planId, planVersionId, approvalNote = '') =>
@@ -48,6 +58,8 @@ export const recurringPlans = Object.freeze({
     invoke('transition_plan', { planId, status, reason, impact }),
   previewPeriod: (planId, periodStart, pastPeriodReason = '') =>
     invoke('preview_period', { planId, periodStart, pastPeriodReason }),
+  previewMonth: (planId, monthStart, pastPeriodReason = '') =>
+    invoke('preview_month', { planId, monthStart, pastPeriodReason }),
   confirmPeriod: (planId, periodStart, requestKey, pastPeriodReason = '') =>
     invoke('confirm_period', { planId, periodStart, requestKey, pastPeriodReason }),
 })
