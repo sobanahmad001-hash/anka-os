@@ -21,6 +21,10 @@ const qts2Verifier = read('supabase/verify_20260903100732_qts2_sandbox_chat.sql'
 const packageJson = read('package.json')
 const qts3Migration = read('supabase/migrations/20260903113647_qts3_retention.sql')
 const qts3Verifier = read('supabase/verify_20260903113647_qts3_retention.sql')
+const ret2Migration = read('supabase/migrations/20260903123259_ret2_manual_period_generation.sql')
+const qts4Migration = read('supabase/migrations/20260903152801_qts4_deliberate_promotion.sql')
+const qts4Verifier = read('supabase/verify_20260903152801_qts4_deliberate_promotion.sql')
+const promotionPanel = read('src/components/QuickTaskPromotionPanel.jsx')
 
 test('QTS1 content normalization is bounded and predictable', () => {
   const content = quickTaskContent({ notes: ' idea ', checklist: [{ text: ' ship ', done: 1 }, { text: '' }] })
@@ -70,12 +74,10 @@ test('QTS1 Edge Function is covered by frozen CI tests and checks', () => {
 
 test('QTS1 ships standalone UI and does not register or mutate canonical records', () => {
   assert.match(screen, /export default function QuickTasks/)
-  assert.match(screen, /promotion is intentionally unavailable/i)
   assert.match(repository, /\.from\('quick_tasks'\)/)
   assert.match(repository, /functions\.invoke\('quick-tasks'/)
-  for (const source of [migration, repository, edge, screen]) {
-    assert.doesNotMatch(source, /from\(['"](artifacts|work_items|tasks|engagements)['"]\).*\.(insert|update|upsert|delete)/is)
-  }
+  assert.doesNotMatch(migration, /insert into public\.(?:artifacts|work_items|tasks|engagements|projects|content_requests)/)
+  assert.doesNotMatch(edge, /\.from\(['"](artifacts|work_items|tasks|engagements)['"]\).*\.(insert|update|upsert|delete)/is)
   for (const owned of ['src/App.jsx', 'src/config/environmentNav.js', 'src/components/Sidebar.jsx', 'src/components/Header.jsx']) {
     assert.ok(fs.existsSync(path.join(root, owned)))
   }
@@ -139,12 +141,11 @@ test('QTS2 uses organization and department model mapping with retained-disabled
   assert.match(qts2Migration, /capability <> 'quick_task_chat'/)
 })
 
-test('QTS2 UI and manifests expose sandbox chat without promotion', () => {
+test('QTS2 sandbox UI and manifests remain available after promotion ships', () => {
   assert.match(repository, /messages: quickTaskId/)
   assert.match(repository, /chat: input => invoke\('chat'/)
   assert.match(screen, /Sandbox chat/)
   assert.match(screen, /Create sandbox revision/)
-  assert.match(screen, /promotion is (?:intentionally )?unavailable/i)
   assert.match(config, /\[functions\.quick-tasks\][\s\S]*verify_jwt = true/)
   assert.match(packageJson, /supabase functions deploy quick-tasks/)
 })
@@ -199,7 +200,7 @@ test('QTS3 purge removes every recoverable payload copy and keeps only tombstone
   assert.doesNotMatch(qts3Migration, /insert into public\.(?:artifacts|work_items|tasks|engagements|projects|content_requests)/)
 })
 
-test('QTS3 UI exposes lifecycle recovery without exposing batch scheduling or promotion', () => {
+test('QTS3 UI exposes lifecycle recovery without exposing batch scheduling', () => {
   assert.match(repository, /lifecycle: \(action, quickTaskId\) => invoke\(action/)
   for (const action of ['preserve', 'unpreserve', 'discard', 'restore', 'expire', 'purge']) {
     assert.match(edge, new RegExp(`${action}: '${action}_quick_task'`))
@@ -209,7 +210,6 @@ test('QTS3 UI exposes lifecycle recovery without exposing batch scheduling or pr
   assert.match(screen, /Restore preserved/)
   assert.match(screen, /Purge payload/)
   assert.match(screen, /scheduling is not enabled/i)
-  assert.match(screen, /promotion is intentionally unavailable/i)
   assert.doesNotMatch(edge, /expire_due_quick_tasks|purge_due_quick_tasks/)
 })
 
@@ -239,4 +239,87 @@ test('QTS3 verifier is rollback-safe and covers lifecycle, privacy, purge, and c
   assert.doesNotMatch(qts3Verifier, /(^|\n)\s*commit\s*;/i)
   assert.doesNotMatch(qts3Verifier, /\bconstraint\./i)
   assert.doesNotMatch(qts3Verifier, /from\s+pg_constraint\s+constraint\b/i)
+})
+test('QTS4 promotion is explicit, exact, atomic, and service-role only', () => {
+  assert.match(qts4Migration, /create table public\.quick_task_promotions/)
+  assert.match(qts4Migration, /for update/)
+  assert.match(qts4Migration, /current_revision_id <> p_expected_revision_id/)
+  assert.match(qts4Migration, /source_content_sha256/)
+  assert.match(qts4Migration, /unique \(quick_task_id\)/)
+  assert.match(qts4Migration, /unique \(organization_id, idempotency_key\)/)
+  assert.match(qts4Migration, /case when v_client_id is null then 'internal' else 'project' end/)
+  assert.match(qts4Migration, /p_created_via => 'quick_task_promotion'/)
+  assert.doesNotMatch(qts4Migration, /insert into public\.(?:tasks|engagements|workstreams)/)
+  assert.doesNotMatch(qts4Migration, /security definer/i)
+  assert.match(qts4Migration, /to service_role/)
+})
+
+test('QTS4 UI requires a human-reviewed exact revision and typed destination mapping', () => {
+  assert.match(repository, /promotionOptions:/)
+  assert.match(repository, /promote: input => invoke\('promote'/)
+  assert.match(edge, /action === 'promote'/)
+  assert.match(edge, /normalizeQuickTaskPromotionInput/)
+  assert.match(promotionPanel, /Destination mapping diff/)
+  assert.match(promotionPanel, /expectedContentSha256: revision\.content_sha256/)
+  assert.match(promotionPanel, /humanConfirmed: confirmed/)
+  assert.match(promotionPanel, /crypto\.randomUUID\(\)/)
+  assert.match(screen, /QuickTaskPromotionPanel/)
+})
+
+test('QTS4 verifier is rollback-only and fails closed across promotion boundaries', () => {
+  for (const check of [
+    'project_atomic_and_type_exact', 'project_creates_no_engagement_or_projection',
+    'work_item_only_and_provenance', 'artifact_is_internal_unapproved_unreleased',
+    'exact_revision_and_checksum_required', 'inactive_states_rejected',
+    'retry_is_idempotent', 'conflicting_retry_rejected',
+    'cross_tenant_and_foreign_mapping_rejected', 'source_is_terminal_provenance',
+    'destination_and_promotion_rollback_together', 'ledger_is_append_only',
+    'leadership_metadata_only', 'promotion_table_rls_enabled',
+    'promotion_policy_is_metadata_only', 'table_acl_is_exact',
+    'promotion_rpc_acl_is_exact', 'typed_foreign_keys_are_exact',
+    'supporting_indexes_exist', 'exact_target_constraint_exists',
+    'created_via_constraint_is_exact', 'no_bypass_side_effects',
+  ]) assert.match(qts4Verifier, new RegExp(check))
+  assert.match(qts4Verifier, /jsonb_object_agg\(check_name,passed order by check_name\)/)
+  assert.match(qts4Verifier, /raise exception 'QTS4 verification failed/)
+  assert.match(qts4Verifier.trim(), /rollback;$/)
+  assert.doesNotMatch(qts4Verifier, /(^|\n)\s*commit\s*;/i)
+  assert.doesNotMatch(qts4Verifier, /\bconstraint\./i)
+})
+test('QTS4 preserves every prior work-item created_via value and adds only promotion', () => {
+  const values = source => {
+    const constraint = source.match(/work_items_created_via_check[\s\S]{0,300}?check \(created_via in \(([^)]+)\)\)/)
+    assert.ok(constraint, 'created_via CHECK must be present')
+    return [...constraint[1].matchAll(/'([^']+)'/g)].map(match => match[1])
+  }
+  const prior = values(ret2Migration)
+  const qts4 = values(qts4Migration)
+  assert.deepEqual(prior, ['manual', 'ai_chat_proposal', 'automation_rule', 'recurring_plan'])
+  assert.deepEqual(qts4, [...prior, 'quick_task_promotion'])
+  assert.match(qts4Verifier, /pg_get_expr[\s\S]*manual[\s\S]*ai_chat_proposal[\s\S]*automation_rule[\s\S]*recurring_plan[\s\S]*quick_task_promotion/)
+})
+test('QTS4 verifier matches PostgreSQL 17 catalog shapes exactly', () => {
+  assert.ok(qts4Verifier.includes('regexp_replace(btrim(pg_get_expr'))
+  assert.ok(qts4Verifier.includes("= 'created_via = ANY (ARRAY["))
+  assert.ok(!qts4Verifier.includes("= '(created_via = ANY"))
+  assert.ok(qts4Verifier.includes('(select count(*) from actual)=8'))
+  assert.ok(qts4Verifier.includes('select relationship.conname as constraint_name'))
+  assert.ok(qts4Verifier.includes('count(actual.constraint_name)=8'))
+  assert.ok(qts4Verifier.includes('left join actual using(constraint_name)'))
+  assert.ok(!qts4Verifier.includes('select relationship.conname,relationship.confrelid'))
+  for (const name of [
+    'quick_task_promotions_owner_id_fkey',
+    'quick_task_promotions_source_task_fkey',
+    'quick_task_promotions_source_revision_fkey',
+    'quick_task_promotions_project_fkey',
+    'quick_task_promotions_work_item_fkey',
+    'quick_task_promotions_artifact_fkey',
+    'quick_task_promotions_artifact_version_fkey',
+    'quick_task_promotions_promoted_by_fkey',
+  ]) assert.match(qts4Verifier, new RegExp(name))
+  assert.ok(qts4Verifier.includes("confdeltype='r'"))
+  assert.ok(qts4Verifier.includes("confupdtype='a'"))
+  assert.ok(qts4Verifier.includes("confmatchtype='s'"))
+  assert.ok(qts4Verifier.includes('not actual.condeferrable'))
+  assert.ok(!qts4Verifier.includes('count(*)=6 from pg_constraint'))
 })

@@ -3,6 +3,7 @@ import {
   normalizeQuickTaskChatInput,
   normalizeQuickTaskInput,
   normalizeQuickTaskLifecycleInput,
+  normalizeQuickTaskPromotionInput,
   normalizeSandboxContent,
   quickTaskChatExternalEndpoint,
   quickTaskChatResponseFormat,
@@ -40,6 +41,56 @@ Deno.test('QTS3 maps only the six owner lifecycle actions', () => {
   }
   throws(() => normalizeQuickTaskLifecycleInput('preserve', {}), /Quick Task is required/)
   throws(() => normalizeQuickTaskLifecycleInput('toString', { quickTaskId: 'task' }), /Unsupported lifecycle action/)
+})
+
+Deno.test('QTS4 normalizes only explicit human-confirmed project and work-item promotion mappings', () => {
+  const checksum = 'a'.repeat(64)
+  const project = normalizeQuickTaskPromotionInput({
+    quickTaskId: 'task', expectedRevisionId: 'revision', expectedContentSha256: checksum,
+    targetKind: 'project', idempotencyKey: '11111111-1111-4111-8111-111111111111', humanConfirmed: true,
+    mapping: { name: ' Official project ', clientId: '', description: 'Notes' },
+  })
+  equal(project.p_target_kind, 'project')
+  equal((project.p_mapping as Record<string, unknown>).name, 'Official project')
+  equal((project.p_mapping as Record<string, unknown>).client_id, null)
+  const workItem = normalizeQuickTaskPromotionInput({
+    quickTaskId: 'task', expectedRevisionId: 'revision', expectedContentSha256: checksum,
+    targetKind: 'work_item', idempotencyKey: '22222222-2222-4222-8222-222222222222', humanConfirmed: true,
+    mapping: { engagementId: 'engagement', title: 'Ship', assigneeId: 'person', assigneeConfirmed: true },
+  })
+  equal((workItem.p_mapping as Record<string, unknown>).assignee_confirmed, true)
+  throws(() => normalizeQuickTaskPromotionInput({
+    quickTaskId: 'task', expectedRevisionId: 'revision', expectedContentSha256: checksum,
+    targetKind: 'work_item', idempotencyKey: '33333333-3333-4333-8333-333333333333', humanConfirmed: true,
+    mapping: { engagementId: 'engagement', title: 'Ship', assigneeId: 'person' },
+  }), /confirm the mapped assignee/i)
+})
+
+Deno.test('QTS4 validates artifact mappings through the selected department contract', () => {
+  const base = {
+    quickTaskId: 'task', expectedRevisionId: 'revision', expectedContentSha256: 'b'.repeat(64),
+    targetKind: 'artifact', idempotencyKey: '44444444-4444-4444-8444-444444444444', humanConfirmed: true,
+  }
+  const artifact = normalizeQuickTaskPromotionInput({ ...base, mapping: {
+    engagementId: 'engagement', departmentId: 'development', artifactType: 'technical_brief',
+    title: 'Technical brief', content: { notes: 'Build safely', checklist: ['Review'] },
+  } })
+  equal((artifact.p_mapping as Record<string, unknown>).artifact_type, 'technical_brief')
+  throws(() => normalizeQuickTaskPromotionInput({ ...base, mapping: {
+    engagementId: 'engagement', departmentId: 'design', artifactType: 'technical_brief',
+    title: 'Wrong department', content: { notes: 'x', checklist: [] },
+  } }), /not supported/)
+})
+
+Deno.test('QTS4 rejects stale-shaped or unconfirmed promotion requests before the RPC', () => {
+  const input = {
+    quickTaskId: 'task', expectedRevisionId: 'revision', expectedContentSha256: 'c'.repeat(64),
+    targetKind: 'project', idempotencyKey: '55555555-5555-4555-8555-555555555555',
+    mapping: { name: 'Project' },
+  }
+  throws(() => normalizeQuickTaskPromotionInput(input), /explicitly confirm/)
+  throws(() => normalizeQuickTaskPromotionInput({ ...input, humanConfirmed: true, expectedContentSha256: 'bad' }), /checksum/)
+  throws(() => normalizeQuickTaskPromotionInput({ ...input, humanConfirmed: true, targetKind: 'task' }), /Unsupported promotion target/)
 })
 
 Deno.test('sandbox chat requires exact revision, department, prompt, and AI-safe confirmation', () => {
