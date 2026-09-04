@@ -35,11 +35,11 @@ Deno.test('DS5 accepts only the exact manual design-system content shape', () =>
 })
 
 Deno.test('DS5 authoring is Design/leadership scoped and release requires Design management', () => {
-  assertEquals(hasDesignSystemsAuthority({ role: 'contributor', department_id: 'design' }, 'save_design_system'), true)
-  assertEquals(hasDesignSystemsAuthority({ role: 'contributor', department_id: 'content' }, 'save_design_system'), false)
-  assertEquals(hasDesignSystemsAuthority({ role: 'contributor', department_id: 'design' }, 'release_design_system'), false)
-  assertEquals(hasDesignSystemsAuthority({ role: 'department_manager', department_id: 'design' }, 'release_design_system'), true)
-  assertEquals(hasDesignSystemsAuthority({ role: 'executive', department_id: null }, 'release_design_system'), true)
+  assertEquals(hasDesignSystemsAuthority({ member_kind: 'team', role: 'contributor', department_id: 'design' }, 'save_design_system'), true)
+  assertEquals(hasDesignSystemsAuthority({ member_kind: 'team', role: 'contributor', department_id: 'content' }, 'save_design_system'), false)
+  assertEquals(hasDesignSystemsAuthority({ member_kind: 'team', role: 'contributor', department_id: 'design' }, 'release_design_system'), false)
+  assertEquals(hasDesignSystemsAuthority({ member_kind: 'team', role: 'department_manager', department_id: 'design' }, 'release_design_system'), true)
+  assertEquals(hasDesignSystemsAuthority({ member_kind: 'team', role: 'executive', department_id: null }, 'release_design_system'), true)
 })
 
 Deno.test('DS5 reuses active Design service validation and requires the design_systems slug', async () => {

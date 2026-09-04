@@ -26,7 +26,7 @@ test('DS5 migration adds only the design_system artifact vocabulary', () => {
 
 test('DS5 reuses the DS1 active-service validator without a Workshop generation path', () => {
   assert.match(edge, /import[\s\S]*requireActiveDesignService[\s\S]*from '\.\.\/design-workshop\/index\.ts'/)
-  assert.match(edge, /await requireActiveDesignService\(admin, engagementId, engagementServiceId\)/)
+  assert.match(edge, /await requireActiveDesignService\(\{ admin, organizationId: ORGANIZATION_ID \}, engagementId, engagementServiceId\)/)
   assert.match(edge, /result\.catalog\?\.slug !== DESIGN_SYSTEM_SERVICE/)
   assert.doesNotMatch(edge, /generateDirections|generateOne|directionSchema|createSession/)
 })

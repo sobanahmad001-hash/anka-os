@@ -105,7 +105,7 @@ export async function requireActiveDesignSystemsService(
   engagementId: string,
   engagementServiceId: string,
 ) {
-  const result = await requireActiveDesignService(admin, engagementId, engagementServiceId)
+  const result = await requireActiveDesignService({ admin, organizationId: ORGANIZATION_ID }, engagementId, engagementServiceId)
   if (result.catalog?.slug !== DESIGN_SYSTEM_SERVICE) {
     throw new Error('Select the active Design Systems service for this engagement')
   }

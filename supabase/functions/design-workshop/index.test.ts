@@ -1,8 +1,8 @@
-import { contentRequestMediaStoragePath, createSession, cropResizePng, designEventLink, directionSchema,
+import { contentRequestMediaStoragePath, createSession, cropResizePng, designEventLink, designWorkshopScope, directionSchema,
   directionGenerationPrompt, directionsAreDistinct, generateOpenAiImage, hasWorkshopAuthority, isStoryboardSession, mediaPrompt, mediaStoragePath,
   mediaTargetColumns, outputFamilyForService, pngDimensions, requireActiveDesignService,
   requireReleasedVariantSource, runIndependentVariantJobs, sha256, similarity, variantFormatSpec, variantPrompt,
-  VIDEO_UNAVAILABLE_MESSAGE } from './index.ts'
+  VIDEO_UNAVAILABLE_MESSAGE, handler } from './index.ts'
 import { compileApprovedArtifactContext } from '../_shared/approvedArtifactContext.ts'
 
 function assert(value: unknown, message = 'Expected value to be truthy') {
@@ -18,9 +18,13 @@ assert.throws = (callback: () => unknown) => {
   throw new Error('Expected callback to throw')
 }
 
+Deno.test('client memberships cannot cross the original team-only Workshop boundary', () => {
+  assert.equal(hasWorkshopAuthority({ member_kind: 'client', role: 'contributor', department_id: 'design' }, 'generate_image'), false)
+  assert.equal(hasWorkshopAuthority({ member_kind: 'client', role: 'client_viewer', department_id: null }, 'sign_media_assets'), false)
+})
 Deno.test('Content members cannot call Design Workshop actions after authoring relocation', () => {
-  assert.equal(hasWorkshopAuthority({ role: 'member', department_id: 'content' }, 'create_session'), false)
-  assert.equal(hasWorkshopAuthority({ role: 'department_manager', department_id: 'content' }, 'generate_directions'), false)
+  assert.equal(hasWorkshopAuthority({ member_kind: 'team', role: 'member', department_id: 'content' }, 'create_session'), false)
+  assert.equal(hasWorkshopAuthority({ member_kind: 'team', role: 'department_manager', department_id: 'content' }, 'generate_directions'), false)
 })
 
 Deno.test('all eight Design services derive a compatible display family', () => {
@@ -73,13 +77,13 @@ Deno.test('session service validation accepts active Design service and rejects 
     id: 'active-service', engagement_id: 'engagement-1', status: 'active',
     service_catalog: { slug: 'brand_visual_identity', department_id: 'design', is_active: true },
   }
-  const accepted = await requireActiveDesignService({ from: () => new Query(active) } as never, 'engagement-1', 'active-service')
+  const accepted = await requireActiveDesignService({ admin: { from: () => new Query(active) } as never, organizationId: 'org-1' }, 'engagement-1', 'active-service')
   assert.equal(accepted.outputFamily, 'brand_identity')
 
   const inactive = { ...active, id: 'inactive-service', status: 'planned' }
   let rejected = false
   try {
-    await requireActiveDesignService({ from: () => new Query(inactive) } as never, 'engagement-1', 'inactive-service')
+    await requireActiveDesignService({ admin: { from: () => new Query(inactive) } as never, organizationId: 'org-1' }, 'engagement-1', 'inactive-service')
   } catch (error) {
     rejected = error instanceof Error && error.message.includes('not active')
   }
@@ -139,7 +143,7 @@ Deno.test('session creation combines active service enforcement with optional ev
       design_model_registry: [{ id: 'model-1', is_active: true, supported_output_types: ['design_direction'] }],
       artifacts, artifact_approvals: approvals, artifact_versions: versions,
     }
-    const admin = { from: (table: string) => new Query(table, fixtures) }
+    const admin = { organizationId: 'org-1', from: (table: string) => new Query(table, fixtures) }
     const session = await createSession(admin as never, {
       engagement_id: 'engagement-1', brand_id: 'brand-1',
       engagement_service_id: `${serviceSlug}-engagement-service`,
@@ -159,7 +163,7 @@ Deno.test('session creation combines active service enforcement with optional ev
 })
 
 Deno.test('CP1 grants Content only its request-scoped media actions', () => {
-  const member = { role: 'member', department_id: 'content' }
+  const member = { member_kind: 'team', role: 'member', department_id: 'content' }
   assert.equal(hasWorkshopAuthority(member, 'generate_content_request_image'), true)
   assert.equal(hasWorkshopAuthority(member, 'create_content_request_video_placeholder'), true)
   assert.equal(hasWorkshopAuthority(member, 'generate_image'), false)
@@ -229,12 +233,12 @@ Deno.test('shared compiler selects the latest approved exact version for every r
 })
 
 Deno.test('design release preserves accountable human authority', () => {
-  assert.equal(hasWorkshopAuthority({ role: 'member', department_id: 'design' }, 'release_direction'), false)
-  assert.equal(hasWorkshopAuthority({ role: 'department_manager', department_id: 'design' }, 'release_direction'), true)
+  assert.equal(hasWorkshopAuthority({ member_kind: 'team', role: 'member', department_id: 'design' }, 'release_direction'), false)
+  assert.equal(hasWorkshopAuthority({ member_kind: 'team', role: 'department_manager', department_id: 'design' }, 'release_direction'), true)
 })
 
 Deno.test('an invited cross-functional reviewer may request promotion but not Design authoring', () => {
-  const reviewer = { role: 'contributor', department_id: 'marketing' }
+  const reviewer = { member_kind: 'team', role: 'contributor', department_id: 'marketing' }
   assert.equal(hasWorkshopAuthority(reviewer, 'promote_direction_experiment'), true)
   assert.equal(hasWorkshopAuthority(reviewer, 'list_experiment_reviewers'), true)
   assert.equal(hasWorkshopAuthority(reviewer, 'create_direction_revision'), false)
@@ -244,13 +248,13 @@ Deno.test('media defaults come from the exact direction version and storage stay
   assert.equal(mediaPrompt({ imagery_direction: 'Documentary portraits', creative_thesis: 'Human expertise, made visible' }, ''),
     'Documentary portraits\n\nHuman expertise, made visible')
   assert.equal(mediaPrompt({ imagery_direction: 'Ignored' }, 'Explicit campaign key visual'), 'Explicit campaign key visual')
-  assert(mediaStoragePath('version-1', 'asset-1').endsWith('/version-1/asset-1.png'))
+  assert(mediaStoragePath('org-1', 'version-1', 'asset-1').endsWith('/version-1/asset-1.png'))
   assert.equal(mediaTargetColumns('version-1', null).design_direction_version_id, 'version-1')
   assert.equal('content_request_id' in mediaTargetColumns('version-1', null), false)
 })
 
 Deno.test('content-request media uses the same private bucket namespace with exactly one target', () => {
-  assert(contentRequestMediaStoragePath('request-1', 'asset-1').endsWith('/content-requests/request-1/asset-1.png'))
+  assert(contentRequestMediaStoragePath('org-1', 'request-1', 'asset-1').endsWith('/content-requests/request-1/asset-1.png'))
   assert.equal(mediaTargetColumns(null, 'request-1').content_request_id, 'request-1')
   assert.throws(() => mediaTargetColumns(null, null))
   assert.throws(() => mediaTargetColumns('version-1', 'request-1'))
@@ -311,7 +315,7 @@ Deno.test('variant source validation rejects drafts and non-variant services', a
     design_workshop_sessions: { id: 'session-1', engagement_id: 'engagement-1', engagement_service_id: 'service-1' },
   }
   const userClient = { from: (table: string) => new Query(userFixtures[table] || null) }
-  const admin = (released: boolean, slug = 'social_assets') => ({ from: (table: string) => new Query(
+  const admin = (released: boolean, slug = 'social_assets') => ({ organizationId: 'org-1', from: (table: string) => new Query(
     table === 'design_direction_releases' ? (released ? { id: 'release-1', direction_version_id: 'version-1' } : null)
       : table === 'engagement_services' ? { id: 'service-1', service_catalog: { slug } } : null,
   ) })
@@ -346,15 +350,162 @@ Deno.test('one failed variant does not block sibling formats in the same request
 Deno.test('video placeholder is explicit and signing is available to invited reviewers', () => {
   assert.equal(VIDEO_UNAVAILABLE_MESSAGE,
     'Video generation is not yet configured. An API key and provider need to be added before this works.')
-  assert.equal(hasWorkshopAuthority({ role: 'contributor', department_id: 'marketing' }, 'sign_media_assets'), true)
+  assert.equal(hasWorkshopAuthority({ member_kind: 'team', role: 'contributor', department_id: 'marketing' }, 'sign_media_assets'), true)
 })
 
 Deno.test('event-linked sessions use one exact identity and keep ordinary sessions optional', () => {
-  const link = designEventLink('session-1', 'event-1', 'actor-1')
+  const link = designEventLink('org-1', 'session-1', 'event-1', 'actor-1')
   assert.equal(link.id, 'session-1')
   assert.equal(link.external_event_id, 'event-1')
-  assert.equal(link.organization_id, '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25')
+  assert.equal(link.organization_id, 'org-1')
   assert.equal(link.content_type, 'design_asset')
   assert.equal(link.linked_work_item_id, null)
   assert.equal(link.status, 'in_progress')
+})
+
+
+class ScopeQuery {
+  private equals: Array<[string, unknown]> = []
+  private included: Array<[string, unknown[]]> = []
+  constructor(private rows: Array<Record<string, unknown>>) {}
+  select() { return this }
+  eq(column: string, value: unknown) { this.equals.push([column, value]); return this }
+  in(column: string, values: unknown[]) { this.included.push([column, values]); return this }
+  private result() {
+    return this.rows.filter(row => this.equals.every(([column, value]) => row[column] === value)
+      && this.included.every(([column, values]) => values.includes(row[column])))
+  }
+  async maybeSingle() { return { data: this.result()[0] || null, error: null } }
+  then(resolve: (value: unknown) => unknown) { return Promise.resolve(resolve({ data: this.result(), error: null })) }
+}
+
+function scopeClient(fixtures: Record<string, Array<Record<string, unknown>>>) {
+  return { from: (table: string) => new ScopeQuery(fixtures[table] || []) }
+}
+
+function scopeFixtures() {
+  return {
+    engagements: [
+      { id: 'engagement-1', organization_id: 'org-1', brand_id: 'brand-1' },
+      { id: 'engagement-2', organization_id: 'org-2', brand_id: 'brand-2' },
+    ],
+    design_workshop_sessions: [
+      { id: 'session-1', organization_id: 'org-1', engagement_id: 'engagement-1', brand_id: 'brand-1' },
+      { id: 'session-2', organization_id: 'org-2', engagement_id: 'engagement-2', brand_id: 'brand-2' },
+    ],
+    design_directions: [
+      { id: 'direction-1', organization_id: 'org-1', session_id: 'session-1' },
+      { id: 'direction-2', organization_id: 'org-2', session_id: 'session-2' },
+    ],
+    design_direction_versions: [
+      { id: 'version-1', organization_id: 'org-1', direction_id: 'direction-1' },
+      { id: 'version-2', organization_id: 'org-2', direction_id: 'direction-2' },
+    ],
+    design_direction_releases: [
+      { id: 'release-1', organization_id: 'org-1', direction_version_id: 'version-1' },
+      { id: 'release-2', organization_id: 'org-2', direction_version_id: 'version-2' },
+    ],
+    content_requests: [
+      { id: 'request-1', organization_id: 'org-1', engagement_id: 'engagement-1', brand_id: 'brand-1' },
+    ],
+    design_media_assets: [
+      { id: 'asset-1', organization_id: 'org-1', design_direction_version_id: 'version-1', content_request_id: null, storage_path: 'org-1/version-1/asset-1.png' },
+      { id: 'asset-2', organization_id: 'org-2', design_direction_version_id: 'version-2', content_request_id: null, storage_path: 'org-2/version-2/asset-2.png' },
+    ],
+  }
+}
+
+Deno.test('Design Workshop maps every action family to a closed caller-readable root', async () => {
+  const client = scopeClient(scopeFixtures()) as never
+  const cases: Array<[Record<string, unknown>, string | null, string | null]> = [
+    [{ action: 'create_page_flow', engagement_id: 'engagement-1' }, 'engagement', 'engagement-1'],
+    [{ action: 'create_session', engagement_id: 'engagement-1' }, 'engagement', 'engagement-1'],
+    [{ action: 'generate_directions', session_id: 'session-1' }, 'engagement', 'engagement-1'],
+    [{ action: 'select_direction', session_id: 'session-1' }, 'engagement', 'engagement-1'],
+    [{ action: 'release_direction', session_id: 'session-1' }, 'engagement', 'engagement-1'],
+    [{ action: 'create_direction_revision', direction_id: 'direction-1' }, 'engagement', 'engagement-1'],
+    [{ action: 'promote_direction_experiment', direction_version_id: 'version-1' }, 'engagement', 'engagement-1'],
+    [{ action: 'generate_image', direction_version_id: 'version-1' }, 'engagement', 'engagement-1'],
+    [{ action: 'create_video_placeholder', direction_version_id: 'version-1' }, 'engagement', 'engagement-1'],
+    [{ action: 'generate_variants', source_direction_version_id: 'version-1' }, 'engagement', 'engagement-1'],
+    [{ action: 'generate_content_request_image', content_request_id: 'request-1' }, 'content_request', 'request-1'],
+    [{ action: 'create_content_request_video_placeholder', content_request_id: 'request-1' }, 'content_request', 'request-1'],
+    [{ action: 'sign_media_assets', asset_ids: ['asset-1'] }, 'engagement', 'engagement-1'],
+    [{ action: 'list_experiment_reviewers', organization_id: 'org-1' }, null, null],
+  ]
+  for (const [body, kind, id] of cases) {
+    const scope = await designWorkshopScope(client, { ...body, organization_id: body.organization_id || 'org-1' })
+    assert.equal(scope.root?.kind || null, kind)
+    assert.equal(scope.root?.id || null, id)
+  }
+})
+
+Deno.test('only explicit team operations may use a selected-organization rootless scope', async () => {
+  const client = scopeClient(scopeFixtures()) as never
+  const reviewers = await designWorkshopScope(client, { action: 'list_experiment_reviewers', organization_id: 'org-1' })
+  assert.equal(reviewers.root, null)
+  const emptySigning = await designWorkshopScope(client, { action: 'sign_media_assets', asset_ids: [], organization_id: 'org-1' })
+  assert.equal(emptySigning.root, null)
+  let missingRootRejected = false
+  try { await designWorkshopScope(client, { action: 'create_session', organization_id: 'org-1' }) } catch (error) {
+    missingRootRejected = error instanceof Error && error.message.includes('Engagement is required')
+  }
+  assert(missingRootRejected, 'Expected a root-bound action without its root to be rejected')
+})
+
+Deno.test('caller-visible canonical validation rejects unreadable and injected related roots', async () => {
+  const fixtures = scopeFixtures()
+  const client = scopeClient(fixtures) as never
+  let unreadable = false
+  try { await designWorkshopScope(client, { action: 'generate_directions', session_id: 'missing' }) } catch (error) {
+    unreadable = error instanceof Error && error.message.includes('not found')
+  }
+  assert(unreadable, 'Expected unreadable session rejection')
+
+  fixtures.design_direction_versions[0] = { id: 'version-1', organization_id: 'org-2', direction_id: 'direction-1' }
+  let mismatched = false
+  try { await designWorkshopScope(scopeClient(fixtures) as never, { action: 'generate_image', direction_version_id: 'version-1' }) } catch (error) {
+    mismatched = error instanceof Error && error.message.includes('invalid organization chain')
+  }
+  assert(mismatched, 'Expected injected version/direction chain rejection')
+})
+
+Deno.test('same-shaped cross-organization media graphs are rejected before signing', async () => {
+  let rejected = false
+  try {
+    await designWorkshopScope(scopeClient(scopeFixtures()) as never, {
+      action: 'sign_media_assets', organization_id: 'org-1', asset_ids: ['asset-1', 'asset-2'],
+    })
+  } catch (error) {
+    rejected = error instanceof Error && error.message.includes('one organization')
+  }
+  assert(rejected, 'Expected cross-organization media graph rejection')
+})
+
+Deno.test('released variants reject a release/version organization mismatch', async () => {
+  const fixtures = scopeFixtures()
+  fixtures.design_direction_releases[0] = { id: 'release-1', organization_id: 'org-2', direction_version_id: 'version-1' }
+  let rejected = false
+  try {
+    await designWorkshopScope(scopeClient(fixtures) as never, {
+      action: 'generate_variants', source_direction_version_id: 'version-1', organization_id: 'org-1',
+    })
+  } catch (error) {
+    rejected = error instanceof Error && error.message.includes('release')
+  }
+  assert(rejected, 'Expected release/version canonical-chain rejection')
+})
+
+Deno.test('unknown actions and missing roots stop before privileged context creation', async () => {
+  let privilegedCalls = 0
+  const request = new Request('https://example.test/design-workshop', {
+    method: 'POST', headers: { Authorization: 'Bearer caller-token', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'unknown_design_action', organization_id: 'org-1' }),
+  })
+  const result = await handler(request, {
+    createCallerClient: async () => scopeClient(scopeFixtures()) as never,
+    resolveContext: async () => { privilegedCalls += 1; throw new Error('must not run') },
+  })
+  assert.equal(result.status, 400)
+  assert.equal(privilegedCalls, 0)
 })
