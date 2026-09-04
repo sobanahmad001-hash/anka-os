@@ -9,6 +9,11 @@ const sameOrg = (record, root) => record?.organization_id === root.organization_
 const sameProject = (record, root) => sameOrg(record, root) && record.project_id === root.id
 const onTime = (value, today) => !value || new Date(`${value.slice(0, 10)}T00:00:00Z`) >= today
 const ownerLabel = (profile) => profile?.full_name || profile?.email || 'Unassigned'
+const clampProgress = (value) => value === null || value === undefined || value === ''
+  ? null
+  : Number.isFinite(Number(value))
+    ? Math.min(100, Math.max(0, Number(value)))
+    : null
 
 function groupBy(records, key) {
   return records.reduce((map, record) => {
@@ -42,6 +47,17 @@ export function buildProjectEngagementWorkspace(snapshot, options = {}) {
   })
 
   const services = engagement ? snapshot.services.filter((item) => sameOrg(item, project) && item.engagement_id === engagement.id).map((item) => ({ ...item, owner: owner(item.owner_id) })) : []
+  const activeServices = services.filter((item) => item.status === 'active')
+  const existingAssets = engagement ? (snapshot.engagementAssets || []).filter((item) => sameOrg(item, project) && item.engagement_id === engagement.id) : []
+  const pipelineOrigin = engagement && sameOrg(snapshot.pipelineOrigin, project) && snapshot.pipelineOrigin.engagement_id === engagement.id
+    ? snapshot.pipelineOrigin
+    : null
+  const pipelineVersion = pipelineOrigin && sameOrg(snapshot.pipelineVersion, project) && snapshot.pipelineVersion.id === pipelineOrigin.pipeline_template_version_id
+    ? snapshot.pipelineVersion
+    : null
+  const pipelineTemplate = pipelineVersion && sameOrg(snapshot.pipelineTemplate, project) && snapshot.pipelineTemplate.id === pipelineVersion.pipeline_template_id
+    ? snapshot.pipelineTemplate
+    : null
   const stages = engagement ? snapshot.stages.filter((item) => sameOrg(item, project) && item.engagement_id === engagement.id) : []
   const stageIds = new Set(stages.map((item) => item.id))
   const dependencies = engagement ? snapshot.stageDependencies.filter((item) => sameOrg(item, project) && item.engagement_id === engagement.id && stageIds.has(item.stage_instance_id) && stageIds.has(item.depends_on_stage_instance_id)) : []
@@ -78,6 +94,33 @@ export function buildProjectEngagementWorkspace(snapshot, options = {}) {
   if (journey.some((item) => item.status === 'blocked')) attentionSignals.push('The engagement journey includes blocked stages')
   if (reviewQueue.length) attentionSignals.push(`${reviewQueue.length} deliverable version${reviewQueue.length === 1 ? '' : 's'} in review or revision`)
 
+  const hasOfficialServiceIdentity = Boolean(client && brand && engagement)
+  const deliveryShape = !engagement
+    ? {
+        kind: 'project_only',
+        label: project.engagement_type === 'internal' ? 'Internal project delivery' : 'Project-only delivery',
+        note: 'No operating engagement or service journey is attached; canonical project work remains valid.',
+      }
+    : activeServices.length === 0
+      ? { kind: 'unconfigured', label: 'No active services', note: 'The engagement exists, but it has no active service selection.' }
+      : activeServices.length === 1 && hasOfficialServiceIdentity
+        ? { kind: 'isolated', label: 'Isolated service', note: 'One active service is attached to a real client, brand, and engagement.' }
+        : activeServices.length === 1
+          ? { kind: 'single_service', label: 'Single active service', note: 'Official isolated-service identity is incomplete, so no isolated label is inferred.' }
+          : {
+              kind: 'connected',
+              label: 'Connected service selection',
+              note: 'The record does not store whether this selection is full or partial, so the workspace does not invent that label.',
+            }
+
+  const workType = project.engagement_type === 'internal'
+    ? 'Internal Work'
+    : client
+      ? 'Client Work'
+      : 'Unclassified Work'
+  const projectOwner = owner(project.owner_id)
+  const engagementOwner = engagement ? owner(engagement.lead_owner_id) : null
+
   const workshopPaths = { content: '/sphere/content', design: '/sphere/design', development: '/sphere/delivery', marketing: '/sphere/marketing' }
   const workshopLinks = [...new Set(services.filter((item) => item.status === 'active').map((item) => item.service_catalog?.department_id).filter(Boolean))]
     .filter((department) => workshopPaths[department])
@@ -102,12 +145,22 @@ export function buildProjectEngagementWorkspace(snapshot, options = {}) {
     })
 
   return {
-    project: { ...project, owner: owner(project.owner_id) },
+    project: { ...project, owner: projectOwner },
     identity: {
-      workType: project.engagement_type === 'internal' ? 'Internal Work' : 'Client Work',
+      workType,
       clientName: client?.company || client?.name || null,
       brandName: brand?.name || null,
       hasEngagement: Boolean(engagement),
+    },
+    context: {
+      client,
+      brand,
+      projectOwner,
+      engagementOwner,
+      brief: project.description || '',
+      objective: engagement?.objective || '',
+      scope: project.scope_statement || '',
+      exclusions: project.exclusions || '',
     },
     engagement,
     workstreams,
@@ -115,6 +168,12 @@ export function buildProjectEngagementWorkspace(snapshot, options = {}) {
     projectTasks: tasks,
     engagementWorkItems: workItems,
     services,
+    activeServices,
+    existingAssets,
+    pipelineOrigin,
+    pipelineVersion,
+    pipelineTemplate,
+    deliveryShape,
     journey,
     prerequisites,
     deliverables: delivery,
@@ -130,6 +189,7 @@ export function buildProjectEngagementWorkspace(snapshot, options = {}) {
       totalJourneyStages: journey.length,
       openMilestones: openMilestones.length,
       reviewQueue: reviewQueue.length,
+      progress: clampProgress(project.progress),
     },
   }
 }

@@ -23,6 +23,10 @@ function fixture(overrides = {}) {
     memberships: [{ organization_id: 'org-a', user_id: 'owner-a' }],
     profiles: [{ id: 'owner-a', full_name: 'Ava Owner', email: 'ava@example.com' }],
     services: [{ id: 'service-a', organization_id: 'org-a', engagement_id: 'engagement-a', owner_id: 'owner-a', status: 'active', service_catalog: { id: 'catalog-a', name: 'Design', department_id: 'design' } }],
+    engagementAssets: [{ id: 'asset-a', organization_id: 'org-a', engagement_id: 'engagement-a', asset_kind: 'approved_content', name: 'Approved launch copy', source_url: 'https://example.com/copy' }],
+    pipelineOrigin: { engagement_id: 'engagement-a', organization_id: 'org-a', pipeline_template_id: 'pipeline-a', pipeline_template_version_id: 'pipeline-version-a', was_customized: false, customization_provenance: [] },
+    pipelineVersion: { id: 'pipeline-version-a', organization_id: 'org-a', pipeline_template_id: 'pipeline-a', version_number: 2, name: 'Website delivery' },
+    pipelineTemplate: { id: 'pipeline-a', organization_id: 'org-a', slug: 'website_delivery' },
     stages: [{ id: 'stage-a', organization_id: 'org-a', engagement_id: 'engagement-a', name: 'Design review', accountable_department_id: 'design', stage_kind: 'delivery', position: 0, status: 'blocked' }],
     stageDependencies: [],
     prerequisites: [{ id: 'prereq-a', organization_id: 'org-a', engagement_id: 'engagement-a', prerequisite_key: 'brand', status: 'satisfied', satisfaction_method: 'existing_asset', target_stage_instance_id: 'stage-a' }],
@@ -43,6 +47,10 @@ test('WKS2 composes one canonical project with its validated engagement extensio
   assert.equal(workspace.summary.openEngagementWorkItems, 1)
   assert.equal(workspace.summary.reviewQueue, 1)
   assert.equal(workspace.workshopArtifacts[0].approvedVersions, 1)
+  assert.equal(workspace.existingAssets[0].name, 'Approved launch copy')
+  assert.equal(workspace.deliveryShape.kind, 'isolated')
+  assert.equal(workspace.pipelineVersion.version_number, 2)
+  assert.equal(workspace.summary.progress, 25)
   assert.deepEqual(workspace.activity.map((item) => item.source), ['Engagement', 'Project'])
   assert.equal(workspace.workshopLinks.length, 1)
   assert.equal(workspace.workshopLinks[0].department, 'design')
@@ -68,6 +76,25 @@ test("Internal Work depends only on projects.engagement_type='internal' and need
   assert.equal(unclassified.identity.workType, 'Client Work')
 })
 
+test('P3 does not invent full or partial labels for a connected service selection', () => {
+  const secondService = { ...fixture().services[0], id: 'service-b', service_catalog: { id: 'catalog-b', name: 'Content', department_id: 'content' } }
+  const workspace = buildProjectEngagementWorkspace(fixture({ services: [...fixture().services, secondService] }), { today: '2026-09-03' })
+  assert.equal(workspace.deliveryShape.kind, 'connected')
+  assert.equal(workspace.deliveryShape.label, 'Connected service selection')
+  assert.match(workspace.deliveryShape.note, /does not store whether this selection is full or partial/)
+})
+
+test('P3 treats clientless non-internal projects as unclassified and clamps stored progress', () => {
+  const workspace = buildProjectEngagementWorkspace(fixture({
+    project: { ...fixture().project, client_id: null, engagement_type: null, progress: 140 },
+    client: null,
+    engagement: null,
+  }))
+  assert.equal(workspace.identity.workType, 'Unclassified Work')
+  assert.equal(workspace.deliveryShape.kind, 'project_only')
+  assert.equal(workspace.summary.progress, 100)
+})
+
 test('WKS2 rejects cross-organization extension data in the read model', () => {
   const workspace = buildProjectEngagementWorkspace(fixture({ engagement: { ...fixture().engagement, organization_id: 'org-b' } }), { today: '2026-09-03' })
   assert.equal(workspace.engagement, null)
@@ -76,9 +103,9 @@ test('WKS2 rejects cross-organization extension data in the read model', () => {
   assert.equal(workspace.workshopArtifacts.length, 0)
 })
 
-test('WKS2 repository is read-only and independent of RET1 and QTS1', () => {
+test('P3 repository reads canonical setup context and remains read-only', () => {
   const repository = readFileSync(new URL('./projectEngagementWorkspaceRepository.js', import.meta.url), 'utf8')
-  for (const table of ['projects', 'engagements', 'tasks', 'work_items', 'engagement_stage_instances', 'deliverables', 'activity_events']) assert.match(repository, new RegExp(`from\\('${table}'\\)`))
+  for (const table of ['projects', 'engagements', 'engagement_assets', 'engagement_pipeline_origins', 'pipeline_template_versions', 'pipeline_templates', 'tasks', 'work_items', 'engagement_stage_instances', 'deliverables', 'activity_events']) assert.match(repository, new RegExp(`from\\('${table}'\\)`))
   assert.doesNotMatch(repository, /\.(insert|update|upsert|delete|rpc|functions)\s*\(/)
   assert.doesNotMatch(repository, /recurring_plan|quick_task|sandbox/i)
 })
@@ -92,6 +119,10 @@ test('WKS2 route and UI preserve distinct Project Task and Engagement Work Item 
   assert.match(workspace, /Project Tasks/)
   assert.match(workspace, /Engagement Work Items/)
   assert.match(workspace, /No engagement data has been fabricated/)
+  assert.match(workspace, /Setup & context/)
+  assert.match(workspace, /Refresh failed; showing previously loaded data/)
+  assert.match(workspace, /Generation, approval, client release, and completion are separate states/)
+  assert.match(workspace, /role="tab"/)
   assert.match(workspace, /Retainer Planning/)
   assert.match(workspace, /showRetainerPlanning/)
 })

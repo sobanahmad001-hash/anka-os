@@ -54,13 +54,23 @@ assertProjectId(projectId)
     supabase.from('engagement_stage_instances').select('id, organization_id, engagement_id, name, accountable_department_id, stage_kind, position, status').eq('organization_id', organizationId).abortSignal(signal).eq('engagement_id', engagementId).eq('organization_id', org).order('position'),
     supabase.from('engagement_stage_dependencies').select('organization_id, engagement_id, stage_instance_id, depends_on_stage_instance_id, dependency_kind, reason').eq('organization_id', organizationId).abortSignal(signal).eq('engagement_id', engagementId).eq('organization_id', org),
     supabase.from('engagement_prerequisites').select('id, organization_id, engagement_id, prerequisite_key, description, status, satisfaction_method, target_stage_instance_id, prerequisite_stage_instance_id').eq('organization_id', organizationId).abortSignal(signal).eq('engagement_id', engagementId).eq('organization_id', org).order('recorded_at'),
+    supabase.from('engagement_assets').select('id, organization_id, engagement_id, asset_kind, name, source_url, notes, supplied_by, created_at').eq('organization_id', organizationId).abortSignal(signal).eq('engagement_id', engagementId).eq('organization_id', org).order('created_at'),
     supabase.from('work_items').select('id, organization_id, project_id, engagement_id, department_id, title, description, status, priority, assignee_id, due_date, automation_flagged_at, linked_artifact_id, linked_engagement_stage_instance_id, deleted_at').eq('organization_id', organizationId).abortSignal(signal).eq('engagement_id', engagementId).eq('project_id', projectId).eq('organization_id', org).is('deleted_at', null).order('position'),
     supabase.from('artifacts').select('id, organization_id, project_id, engagement_id, engagement_stage_instance_id, artifact_type, title, created_at').eq('organization_id', organizationId).abortSignal(signal).eq('engagement_id', engagementId).eq('project_id', projectId).eq('organization_id', org).order('created_at', { ascending: false }),
     supabase.from('artifact_approvals').select('id, organization_id, artifact_id, artifact_version_id, engagement_id, decision, notes, approved_by, approved_at').eq('organization_id', organizationId).abortSignal(signal).eq('engagement_id', engagementId).eq('organization_id', org).order('approved_at', { ascending: false }),
     supabase.from('engagement_events').select('id, organization_id, engagement_id, event_type, actor_id, payload, occurred_at').eq('organization_id', organizationId).abortSignal(signal).eq('engagement_id', engagementId).eq('organization_id', org).order('occurred_at', { ascending: false }).limit(100),
-  ] : Array.from({ length: 9 }, () => Promise.resolve(EMPTY))
+    supabase.from('engagement_pipeline_origins').select('engagement_id, organization_id, pipeline_template_id, pipeline_template_version_id, was_customized, customization_provenance, created_at').eq('organization_id', organizationId).abortSignal(signal).eq('engagement_id', engagementId).eq('organization_id', org).maybeSingle(),
+  ] : Array.from({ length: 11 }, () => Promise.resolve(EMPTY))
 
-  const [brand, services, stages, stageDependencies, prerequisites, workItems, artifacts, artifactApprovals, engagementActivity] = await Promise.all(extensionQueries)
+  const [brand, services, stages, stageDependencies, prerequisites, engagementAssets, workItems, artifacts, artifactApprovals, engagementActivity, pipelineOriginResult] = await Promise.all(extensionQueries)
+  const pipelineOrigin = row(pipelineOriginResult, 'pipeline origin')
+  const pipelineVersionResult = pipelineOrigin
+    ? await supabase.from('pipeline_template_versions').select('id, organization_id, pipeline_template_id, version_number, name, description, created_at').eq('organization_id', organizationId).abortSignal(signal).eq('id', pipelineOrigin.pipeline_template_version_id).eq('organization_id', org).maybeSingle()
+    : EMPTY
+  const pipelineVersion = row(pipelineVersionResult, 'pipeline template version')
+  const pipelineTemplateResult = pipelineVersion
+    ? await supabase.from('pipeline_templates').select('id, organization_id, slug, created_at').eq('organization_id', organizationId).abortSignal(signal).eq('id', pipelineVersion.pipeline_template_id).eq('organization_id', org).maybeSingle()
+    : EMPTY
   const artifactRows = rows(artifacts, 'artifacts')
   const artifactVersions = artifactRows.length
     ? await supabase.from('artifact_versions').select('id, organization_id, artifact_id, version_number, change_summary, data_classification, created_at').eq('organization_id', organizationId).abortSignal(signal).eq('organization_id', org).in('artifact_id', artifactRows.map((item) => item.id)).order('created_at', { ascending: false })
@@ -73,8 +83,11 @@ assertProjectId(projectId)
     workstreams: rows(workstreams, 'workstreams'), tasks: rows(tasks, 'Project Tasks'), milestones: rows(milestones, 'milestones'),
     deliverables: rows(deliverables, 'deliverables'), deliverableVersions: rows(deliverableVersions, 'deliverable versions'), projectActivity: rows(projectActivity, 'project activity'),
     memberships: rows(memberships, 'memberships'), profiles: rows(profiles, 'profiles'), services: rows(services, 'services'), stages: rows(stages, 'journey stages'),
-    stageDependencies: rows(stageDependencies, 'stage dependencies'), prerequisites: rows(prerequisites, 'prerequisites'), workItems: rows(workItems, 'Engagement Work Items'),
+    stageDependencies: rows(stageDependencies, 'stage dependencies'), prerequisites: rows(prerequisites, 'prerequisites'), engagementAssets: rows(engagementAssets, 'engagement assets'), workItems: rows(workItems, 'Engagement Work Items'),
     artifacts: artifactRows, artifactVersions: rows(artifactVersions, 'artifact versions'), artifactApprovals: rows(artifactApprovals, 'artifact approvals'), engagementActivity: rows(engagementActivity, 'engagement activity'),
+    pipelineOrigin,
+    pipelineVersion,
+    pipelineTemplate: row(pipelineTemplateResult, 'pipeline template'),
   }
 
 }
