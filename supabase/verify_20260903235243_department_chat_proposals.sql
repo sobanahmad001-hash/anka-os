@@ -97,6 +97,19 @@ insert into wch3_checks values
   ('proposal_table_rls_enabled', (
     select relrowsecurity from pg_class where oid = 'public.department_chat_proposals'::regclass
   )),
+  ('audit_scope_constraints_and_indexes',
+    (select pg_get_constraintdef(oid) = 'FOREIGN KEY (proposal_id, organization_id) REFERENCES department_chat_proposals(id, organization_id) ON DELETE RESTRICT'
+      from pg_constraint where conrelid = 'public.department_chat_audit_events'::regclass
+        and conname = 'department_chat_audit_proposal_scope_fkey')
+    and (select pg_get_constraintdef(oid) = 'FOREIGN KEY (ai_run_id, organization_id) REFERENCES ai_runs(id, organization_id) ON DELETE RESTRICT'
+      from pg_constraint where conrelid = 'public.department_chat_audit_events'::regclass
+        and conname = 'department_chat_audit_ai_run_scope_fkey')
+    and to_regclass('public.idx_department_chat_proposals_ai_run_fk') is null
+    and (select pg_get_indexdef(indexrelid) like '%(proposal_id, organization_id, created_at)%'
+      from pg_index where indexrelid = 'public.department_chat_audit_proposal_idx'::regclass)
+    and (select pg_get_indexdef(indexrelid) like '%(ai_run_id, organization_id)% WHERE (ai_run_id IS NOT NULL)'
+      from pg_index where indexrelid = 'public.department_chat_audit_ai_run_idx'::regclass)
+  ),
   ('browser_acl_is_read_only',
     has_table_privilege('authenticated', 'public.department_chat_proposals', 'SELECT')
     and not has_table_privilege('authenticated', 'public.department_chat_proposals', 'INSERT')
@@ -562,6 +575,37 @@ begin
   end loop;
   execute 'reset role';
   insert into wch3_checks values('full_audit_vocabulary_and_rpc_acl',true);
+end;
+$$;
+
+do $$
+declare
+  source_proposal public.department_chat_proposals%rowtype;
+  other wch3_fixture;
+  proposal_mismatch_denied boolean := false;
+  ai_run_mismatch_denied boolean := false;
+begin
+  select proposal.* into source_proposal
+  from public.department_chat_proposals proposal
+  order by proposal.created_at
+  limit 1;
+  select * into other from wch3_fixture where organization_id <> source_proposal.organization_id limit 1;
+
+  begin
+    insert into public.department_chat_audit_events(organization_id, actor_id, proposal_id, event_kind)
+    values(other.organization_id, other.actor_id, source_proposal.id, 'replay');
+  exception when foreign_key_violation then proposal_mismatch_denied := true;
+  end;
+  begin
+    insert into public.department_chat_audit_events(organization_id, actor_id, ai_run_id, event_kind)
+    values(other.organization_id, other.actor_id, source_proposal.ai_run_id, 'preview_generated');
+  exception when foreign_key_violation then ai_run_mismatch_denied := true;
+  end;
+  if not proposal_mismatch_denied or not ai_run_mismatch_denied then
+    raise exception 'Cross-organization audit reference was accepted';
+  end if;
+  update wch3_checks set passed = passed and proposal_mismatch_denied and ai_run_mismatch_denied
+  where check_name = 'audit_scope_constraints_and_indexes';
 end;
 $$;
 

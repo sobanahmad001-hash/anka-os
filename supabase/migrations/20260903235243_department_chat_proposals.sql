@@ -88,7 +88,6 @@ create table public.department_chat_proposals (
 create index idx_department_chat_proposals_proposer_pending on public.department_chat_proposals(proposer_id, expires_at, created_at desc) where status = 'pending';
 create index idx_department_chat_proposals_engagement on public.department_chat_proposals(organization_id, engagement_id, created_at desc);
 create index idx_department_chat_proposals_project_fk on public.department_chat_proposals(project_id, organization_id);
-create index idx_department_chat_proposals_ai_run_fk on public.department_chat_proposals(ai_run_id, organization_id);
 create index idx_department_chat_proposals_connector_fk on public.department_chat_proposals(connector_connection_id, organization_id);
 create index idx_department_chat_proposals_artifact_fk on public.department_chat_proposals(artifact_id, organization_id) where artifact_id is not null;
 create index idx_department_chat_proposals_stage_fk on public.department_chat_proposals(engagement_stage_instance_id, organization_id) where engagement_stage_instance_id is not null;
@@ -153,13 +152,18 @@ create table public.department_chat_audit_events (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id),
   actor_id uuid not null references auth.users(id),
-  proposal_id uuid references public.department_chat_proposals(id),
-  ai_run_id uuid references public.ai_runs(id),
+  proposal_id uuid,
+  ai_run_id uuid,
   event_kind text not null check (event_kind in ('preview_requested', 'preview_generated', 'preview_blocked', 'preview_failed', 'confirmed', 'rejected', 'expired', 'stale', 'replay', 'official_record_created', 'atomic_failure')),
   reason_code text not null default '' check (reason_code in ('', 'policy_denied', 'connector_unavailable', 'model_missing', 'credential_missing', 'invalid_output', 'provider_failed', 'context_changed', 'proposal_expired', 'atomic_write_failed')),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  constraint department_chat_audit_proposal_scope_fkey foreign key (proposal_id, organization_id)
+    references public.department_chat_proposals(id, organization_id) on delete restrict,
+  constraint department_chat_audit_ai_run_scope_fkey foreign key (ai_run_id, organization_id)
+    references public.ai_runs(id, organization_id) on delete restrict
 );
-create index department_chat_audit_proposal_idx on public.department_chat_audit_events(proposal_id, created_at);
+create index department_chat_audit_proposal_idx on public.department_chat_audit_events(proposal_id, organization_id, created_at);
+create index department_chat_audit_ai_run_idx on public.department_chat_audit_events(ai_run_id, organization_id) where ai_run_id is not null;
 create index department_chat_audit_org_idx on public.department_chat_audit_events(organization_id, created_at);
 alter table public.department_chat_audit_events enable row level security;
 revoke all on public.department_chat_audit_events from public, anon, authenticated, service_role;
