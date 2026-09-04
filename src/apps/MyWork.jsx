@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useOrganization } from '../context/OrganizationContext.jsx'
 import { delivery } from '../data/delivery.js'
 import { TASK_TRANSITIONS } from '../data/deliveryRepository.js'
 
 const TABS = [
-  ['tasks', 'Assigned Tasks'],
+  ['overview', 'Readiness'],
+  ['tasks', 'Project Tasks'],
+  ['engagement-work', 'Engagement Work Items'],
   ['handoffs', 'Requests & Handoffs'],
   ['deliverables', 'My Deliverables'],
   ['review', 'Internal Review'],
@@ -12,13 +15,44 @@ const TABS = [
 ]
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-purple-500'
 
+const isAbortedRequest = (error, signal) => Boolean(signal?.aborted || error?.name === 'AbortError' || error?.cause?.name === 'AbortError')
+const isCurrentOrganizationScope = (request, current) => Boolean(
+  request?.organizationId &&
+  request.organizationId === current?.organizationId &&
+  request.revision === current?.revision &&
+  !request.signal?.aborted
+)
+const isBefore = (value, today) => Boolean(value && new Date(`${value.slice(0, 10)}T00:00:00Z`) < today)
+const readinessFor = (rows, isOpen, dateField, today) => {
+  const open = rows.filter(isOpen)
+  return {
+    total: open.length,
+    blocked: open.filter(item => item.status === 'blocked').length,
+    overdue: open.filter(item => isBefore(item[dateField], today)).length,
+  }
+}
+const buildMyWorkReadiness = (workspace = {}) => {
+  const today = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`)
+  return {
+    projectTasks: readinessFor(workspace.tasks || [], item => !['done', 'cancelled'].includes(item.status), 'due_date', today),
+    engagementWorkItems: readinessFor(workspace.workItems || [], item => item.status !== 'done', 'due_date', today),
+    requests: readinessFor(workspace.requests || [], item => !['completed', 'declined', 'withdrawn'].includes(item.status), 'required_by', today),
+    deliverables: readinessFor(workspace.deliverables || [], item => !['delivered_published', 'withdrawn', 'archived'].includes(item.status), 'due_date', today),
+    internalReviews: { total: (workspace.reviewVersions || []).length },
+    controlledReleases: { total: (workspace.releaseVersions || []).length },
+  }
+}
+
 const labelize = value => String(value || '').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
 const dateLabel = value => value ? new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(new Date(`${value}T00:00:00`)) : 'No deadline'
 
 export default function MyWork() {
   const { user } = useAuth()
+  const { activeOrganizationId, selectionRequired, loading: organizationLoading, handleOrganizationAccessError, scopeRevision, requestSignal } = useOrganization()
+  const currentScope = useRef(null)
+  currentScope.current = { organizationId: activeOrganizationId, revision: scopeRevision }
   const [workspace, setWorkspace] = useState(null)
-  const [activeTab, setActiveTab] = useState('tasks')
+  const [activeTab, setActiveTab] = useState('overview')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState('')
   const [error, setError] = useState('')
@@ -27,21 +61,30 @@ export default function MyWork() {
   const [reviewTarget, setReviewTarget] = useState(null)
   const [reviewForm, setReviewForm] = useState({ decision: 'approved', rationale: '', quality: true, brief: true, technical: true })
 
-  useEffect(() => {
-    if (user?.id) loadWorkspace()
-  }, [user?.id])
-
-  async function loadWorkspace() {
+  const loadWorkspace = useCallback(async () => {
+    if (!user?.id || organizationLoading || selectionRequired || !activeOrganizationId) return
+    const requestedScope = { organizationId: activeOrganizationId, revision: scopeRevision, signal: requestSignal }
     setLoading(true)
     setError('')
     try {
-      setWorkspace(await delivery.getMyWork(user.id))
+      const next = await delivery.getMyWork(user.id, activeOrganizationId, { signal: requestSignal })
+      if (isCurrentOrganizationScope(requestedScope, currentScope.current)) setWorkspace(next)
     } catch (loadError) {
-      setError(loadError.message)
+      if (!isAbortedRequest(loadError, requestSignal) && isCurrentOrganizationScope(requestedScope, currentScope.current)) {
+        handleOrganizationAccessError(loadError, { membershipMismatch: loadError.membershipMismatch })
+        setError(loadError.message)
+      }
     } finally {
-      setLoading(false)
+      if (isCurrentOrganizationScope(requestedScope, currentScope.current)) setLoading(false)
     }
-  }
+  }, [activeOrganizationId, handleOrganizationAccessError, organizationLoading, requestSignal, scopeRevision, selectionRequired, user?.id])
+
+  useEffect(() => {
+    setWorkspace(null); setActiveTab('overview'); setLoading(true); setSaving(''); setError('')
+    setVersionTarget(null); setVersionForm({ title: '', changeSummary: '', previewUrl: '', file: null })
+    setReviewTarget(null); setReviewForm({ decision: 'approved', rationale: '', quality: true, brief: true, technical: true })
+    if (user?.id && !organizationLoading && !selectionRequired && activeOrganizationId) loadWorkspace()
+  }, [activeOrganizationId, loadWorkspace, organizationLoading, scopeRevision, selectionRequired, user?.id])
 
   async function mutate(key, action) {
     setSaving(key)
@@ -50,6 +93,7 @@ export default function MyWork() {
       await action()
       await loadWorkspace()
     } catch (mutationError) {
+      handleOrganizationAccessError(mutationError, { membershipMismatch: mutationError.membershipMismatch })
       setError(mutationError.message)
     } finally {
       setSaving('')
@@ -91,17 +135,17 @@ export default function MyWork() {
     })
   }
 
-  const urgentCount = useMemo(() => (workspace?.tasks || []).filter(item => item.status === 'blocked' || (item.due_date && new Date(item.due_date) < new Date())).length, [workspace])
+  const readiness = useMemo(() => buildMyWorkReadiness(workspace || {}), [workspace])
 
-  if (loading) return <div className="flex h-full items-center justify-center bg-slate-950"><div className="h-8 w-8 animate-spin rounded-full border-b-2 border-purple-500" /></div>
+  if (organizationLoading || loading) return <div className="flex h-full items-center justify-center bg-slate-950"><div className="h-8 w-8 animate-spin rounded-full border-b-2 border-purple-500" /></div>
 
   return (
     <div className="min-h-full bg-slate-950 text-white">
       <header className="border-b border-slate-800 bg-slate-950/95 px-6 py-5">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-400">Personal operating queue</p>
         <div className="mt-1 flex flex-wrap items-end justify-between gap-4">
-          <div><h1 className="text-2xl font-semibold">My Work</h1><p className="mt-1 text-sm text-slate-400">Assignments, handoffs, reviews, and client-ready releases in one place.</p></div>
-          <div className="flex gap-3"><Metric label="Assigned" value={workspace?.tasks.length || 0} /><Metric label="Urgent" value={urgentCount} /><Metric label="Awaiting review" value={workspace?.reviewVersions.length || 0} /></div>
+          <div><h1 className="text-2xl font-semibold">My Work</h1><p className="mt-1 text-sm text-slate-400">Personal readiness and supported actions across assignments, handoffs, exact-version review, and controlled release.</p></div>
+          <div className="flex flex-wrap gap-3"><Metric label="Project Tasks" value={readiness.projectTasks.total} /><Metric label="Engagement Work Items" value={readiness.engagementWorkItems.total} /><Metric label="Awaiting review" value={readiness.internalReviews.total} /><Metric label="Ready to release" value={readiness.controlledReleases.total} /></div>
         </div>
       </header>
 
@@ -112,7 +156,9 @@ export default function MyWork() {
       </nav>
 
       <main className="p-6">
+        {activeTab === 'overview' && <ReadinessOverview readiness={readiness} />}
         {activeTab === 'tasks' && <TaskQueue tasks={workspace?.tasks || []} saving={saving} onTransition={(task, status) => mutate(`task-${task.id}`, () => delivery.transitionTask(task.id, status))} />}
+        {activeTab === 'engagement-work' && <WorkItemQueue items={workspace?.workItems || []} />}
         {activeTab === 'handoffs' && <RequestQueue requests={workspace?.requests || []} />}
         {activeTab === 'deliverables' && <DeliverableQueue deliverables={workspace?.deliverables || []} saving={saving} onCreateVersion={item => { setVersionTarget(item); setVersionForm({ title: item.title, changeSummary: '', previewUrl: '', file: null }) }} onSubmitReview={version => mutate(`submit-${version.id}`, () => delivery.transitionDeliverableVersion(version.id, 'ready_for_internal_review'))} />}
         {activeTab === 'review' && <ReviewQueue versions={workspace?.reviewVersions || []} onReview={setReviewTarget} />}
@@ -127,7 +173,21 @@ export default function MyWork() {
 }
 
 function TaskQueue({ tasks, saving, onTransition }) {
-  return <Section title="Assigned tasks" description="Only valid lifecycle moves are shown; internal review is never skipped.">{tasks.length ? tasks.map(task => <Card key={task.id} title={task.title} context={`${task.projects?.name || 'Project'} · ${task.workstreams?.name || labelize(task.department_id)}`} status={task.status} meta={`Due ${dateLabel(task.due_date)}`}><div className="mt-3 flex flex-wrap gap-2">{(TASK_TRANSITIONS[task.status] || []).map(status => <button key={status} disabled={saving === `task-${task.id}`} onClick={() => onTransition(task, status)} className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-purple-500 hover:text-white disabled:opacity-50">Move to {labelize(status)}</button>)}</div></Card>) : <Empty text="No assigned tasks." />}</Section>
+  return <Section title="Project Tasks" description="Canonical Project Tasks assigned through assigned_to. Only existing valid lifecycle moves are shown.">{tasks.length ? tasks.map(task => <Card key={task.id} title={task.title} context={`${task.projects?.name || 'Project'} · ${task.workstreams?.name || labelize(task.department_id)}`} status={task.status} meta={`Due ${dateLabel(task.due_date)}`}><div className="mt-3 flex flex-wrap gap-2">{(TASK_TRANSITIONS[task.status] || []).map(status => <button key={status} disabled={saving === `task-${task.id}`} onClick={() => onTransition(task, status)} className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-purple-500 hover:text-white disabled:opacity-50">Move to {labelize(status)}</button>)}</div></Card>) : <Empty text="No assigned Project Tasks." />}</Section>
+}
+
+function WorkItemQueue({ items }) {
+  return <Section title="Engagement Work Items" description="Engagement-level assignments use assignee_id and remain separate from Project Tasks. Supported actions stay in the owning engagement.">{items.length ? items.map(item => <Card key={item.id} title={item.title} context={`${item.projects?.name || 'Project'} · ${item.engagements?.name || 'Engagement'}`} status={item.status} meta={`Due ${dateLabel(item.due_date)}`}><p className="mt-3 text-sm text-slate-400">{item.description || 'No description provided.'}</p></Card>) : <Empty text="No assigned Engagement Work Items." />}</Section>
+}
+
+function ReadinessOverview({ readiness }) {
+  const rows = [
+    ['Project Tasks', readiness.projectTasks, 'Assigned through the canonical Project Task owner field.'],
+    ['Engagement Work Items', readiness.engagementWorkItems, 'Assigned through the engagement Work Item assignee field.'],
+    ['Requests & handoffs', readiness.requests, 'Owned by you or requested by you.'],
+    ['My deliverables', readiness.deliverables, 'Deliverables using the existing owner field.'],
+  ]
+  return <Section title="Personal readiness" description="Each work system remains separately counted so the next supported action is clear."><div className="grid gap-3 md:grid-cols-2">{rows.map(([title, item, note]) => <div key={title} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><div className="flex items-center justify-between gap-3"><p className="font-medium">{title}</p><span className="text-2xl font-semibold">{item.total}</span></div><p className="mt-2 text-xs text-slate-500">{item.blocked || 0} blocked · {item.overdue || 0} overdue</p><p className="mt-3 text-sm leading-6 text-slate-400">{note}</p></div>)}</div><div className="mt-3 grid gap-3 md:grid-cols-2"><div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><p className="font-medium">Exact-version internal review</p><p className="mt-2 text-2xl font-semibold">{readiness.internalReviews.total}</p></div><div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><p className="font-medium">Controlled client release</p><p className="mt-2 text-2xl font-semibold">{readiness.controlledReleases.total}</p></div></div></Section>
 }
 
 function RequestQueue({ requests }) {

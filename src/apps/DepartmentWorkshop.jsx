@@ -1,48 +1,68 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import DepartmentConnectors from '../components/DepartmentConnectors.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useOrganization } from '../context/OrganizationContext.jsx'
 import { delivery } from '../data/delivery.js'
 import { TASK_TRANSITIONS } from '../data/deliveryRepository.js'
 
+const ALL_DEPARTMENT_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
+const canViewDepartment = (membership, departmentId) => Boolean(
+  membership && (ALL_DEPARTMENT_ROLES.has(membership.role) || membership.departmentId === departmentId)
+)
+const isAbortedRequest = (error, signal) => Boolean(signal?.aborted || error?.name === 'AbortError' || error?.cause?.name === 'AbortError')
+const isCurrentOrganizationScope = (request, current) => Boolean(
+  request?.organizationId &&
+  request.organizationId === current?.organizationId &&
+  request.revision === current?.revision &&
+  !request.signal?.aborted
+)
+
 const DEPARTMENT_CONFIG = {
   content: {
-    name: 'Content Workshop',
+    name: 'Content Department',
     shortName: 'Content',
     accent: 'amber',
     accentClass: 'text-amber-400',
     description: 'Research, strategy, messaging, writing, editing, and publishing handoffs connected to each engagement.',
+    specialists: [{ name: 'Content Studio', description: 'Authoring, requests, and publishing preparation.', path: '/sphere/content/studio' }],
   },
   design: {
-    name: 'Design Workshop',
+    name: 'Design Department',
     shortName: 'Design',
     accent: 'pink',
     accentClass: 'text-pink-400',
     description: 'Creative briefs, identity systems, concepts, production, review targets, and approved design outputs.',
+    specialists: [{ name: 'Design Workshop', description: 'Direction generation, comparison, proofing, and release.', path: '/sphere/design/workshop' }, { name: 'Design Systems', description: 'Released design-system specifications and reuse.', path: '/sphere/design/systems' }],
   },
   marketing: {
-    name: 'Marketing Workshop',
+    name: 'Marketing Department',
     shortName: 'Marketing',
     accent: 'emerald',
     accentClass: 'text-emerald-400',
     description: 'Campaign planning, channel execution, distribution, optimization, reporting, and cross-department requests.',
+    specialists: [{ name: 'Marketing Studio', description: 'Campaign, reporting, planning, and optimization tools.', path: '/sphere/marketing/studio' }, { name: 'Technical SEO', description: 'Page health, inspection, and search tracking.', path: '/sphere/marketing/seo' }],
   },
   development: {
-    name: 'Development Studio',
+    name: 'Development Department',
     shortName: 'Development',
     accent: 'blue',
     accentClass: 'text-blue-400',
     description: 'WordPress delivery, cross-engagement development queues, QA, launch readiness, maintenance, and technical handoffs.',
+    specialists: [],
   },
 }
 
 const TABS = [
-  ['tasks', 'Work Queue'],
+  ['tasks', 'Project Tasks'],
+  ['engagement-work', 'Engagement Work Items'],
+  ['services', 'Services & Stages'],
   ['research', 'Research'],
   ['deliverables', 'Deliverables'],
   ['requests', 'Requests'],
   ['milestones', 'Milestones'],
+  ['specialists', 'Specialist Queues'],
   ['connectors', 'Connectors'],
 ]
 
@@ -89,7 +109,11 @@ const initialRequest = { title: '', requestedOutput: '', receivingWorkstreamId: 
 
 export default function DepartmentWorkshop({ departmentId }) {
   const { user } = useAuth()
+  const { activeMembership, activeOrganizationId, selectionRequired, loading: organizationLoading, handleOrganizationAccessError, scopeRevision, requestSignal } = useOrganization()
+  const currentScope = useRef(null)
+  currentScope.current = { organizationId: activeOrganizationId, revision: scopeRevision }
   const config = DEPARTMENT_CONFIG[departmentId]
+  const departmentAllowed = canViewDepartment(activeMembership, departmentId)
   const [workspace, setWorkspace] = useState(null)
   const [activeTab, setActiveTab] = useState('tasks')
   const [selectedWorkstreamId, setSelectedWorkstreamId] = useState('')
@@ -101,15 +125,14 @@ export default function DepartmentWorkshop({ departmentId }) {
   const [deliverableForm, setDeliverableForm] = useState(initialDeliverable)
   const [requestForm, setRequestForm] = useState(initialRequest)
 
-  useEffect(() => {
-    loadWorkspace()
-  }, [departmentId])
-
-  async function loadWorkspace() {
+  const loadWorkspace = useCallback(async () => {
+    if (organizationLoading || selectionRequired || !activeOrganizationId || !departmentAllowed) return
+    const requestedScope = { organizationId: activeOrganizationId, revision: scopeRevision, signal: requestSignal }
     setLoading(true)
     setError('')
     try {
-      const result = await delivery.getDepartmentWorkspace(departmentId)
+      const result = await delivery.getDepartmentWorkspace(departmentId, activeOrganizationId, { signal: requestSignal })
+      if (!isCurrentOrganizationScope(requestedScope, currentScope.current)) return
       setWorkspace(result)
       setSelectedWorkstreamId((current) => (
         result.workstreams.some((workstream) => workstream.id === current)
@@ -117,22 +140,36 @@ export default function DepartmentWorkshop({ departmentId }) {
           : result.workstreams[0]?.id || ''
       ))
     } catch (loadError) {
-      setError(loadError.message)
+      if (!isAbortedRequest(loadError, requestSignal) && isCurrentOrganizationScope(requestedScope, currentScope.current)) {
+        handleOrganizationAccessError(loadError, { membershipMismatch: loadError.membershipMismatch })
+        setError(loadError.message)
+      }
     } finally {
-      setLoading(false)
+      if (isCurrentOrganizationScope(requestedScope, currentScope.current)) setLoading(false)
     }
-  }
+  }, [activeOrganizationId, departmentAllowed, departmentId, handleOrganizationAccessError, organizationLoading, requestSignal, scopeRevision, selectionRequired])
+
+  useEffect(() => {
+    setWorkspace(null); setActiveTab('tasks'); setSelectedWorkstreamId(''); setLoading(true); setSaving(false); setError('')
+    setTaskForm(initialTask); setResearchForm(initialResearch); setDeliverableForm(initialDeliverable); setRequestForm(initialRequest)
+    if (!organizationLoading && !selectionRequired && activeOrganizationId && departmentAllowed) loadWorkspace()
+    else if (!organizationLoading) setLoading(false)
+  }, [activeOrganizationId, departmentAllowed, departmentId, loadWorkspace, organizationLoading, scopeRevision, selectionRequired])
 
   const selectedWorkstream = workspace?.workstreams.find((workstream) => workstream.id === selectedWorkstreamId)
   const projectId = selectedWorkstream?.project_id
   const projectName = selectedWorkstream?.projects?.name || 'Project'
 
   const visibleData = useMemo(() => {
-    if (!workspace) return { tasks: [], research: [], deliverables: [], requests: [], milestones: [] }
+    if (!workspace) return { tasks: [], workItems: [], services: [], stages: [], research: [], deliverables: [], requests: [], milestones: [] }
     if (!selectedWorkstreamId) return workspace
+    const engagementIds = workspace.engagements.filter((engagement) => engagement.project_id === projectId).map((engagement) => engagement.id)
     return {
       ...workspace,
       tasks: workspace.tasks.filter((item) => item.workstream_id === selectedWorkstreamId),
+      workItems: workspace.workItems.filter((item) => item.project_id === projectId && engagementIds.includes(item.engagement_id)),
+      services: workspace.services.filter((item) => engagementIds.includes(item.engagement_id)),
+      stages: workspace.stages.filter((item) => engagementIds.includes(item.engagement_id)),
       research: workspace.research.filter((item) => item.workstream_id === null || item.workstream_id === selectedWorkstreamId),
       deliverables: workspace.deliverables.filter((item) => item.workstream_id === selectedWorkstreamId),
       requests: workspace.requests.filter((item) => item.requesting_workstream_id === selectedWorkstreamId || item.receiving_workstream_id === selectedWorkstreamId),
@@ -212,11 +249,14 @@ export default function DepartmentWorkshop({ departmentId }) {
 
   if (!config) return null
 
-  if (loading) {
+  if (organizationLoading || loading) {
     return <div className="flex h-full items-center justify-center bg-slate-950"><div className="h-9 w-9 animate-spin rounded-full border-2 border-slate-700 border-t-purple-500" /></div>
   }
 
-  const overdue = workspace.tasks.filter((task) => task.due_date && task.status !== 'done' && new Date(task.due_date) < new Date()).length
+  if (!departmentAllowed) return <div className="flex h-full items-center justify-center bg-slate-950 p-6 text-center"><div><h1 className="text-xl font-semibold text-white">Department workspace unavailable</h1><p className="mt-2 text-sm text-slate-400">Your active team membership does not include this department.</p></div></div>
+
+  const projectTaskOverdue = workspace.tasks.filter((task) => task.due_date && !['done', 'cancelled'].includes(task.status) && new Date(task.due_date) < new Date()).length
+  const workItemOverdue = workspace.workItems.filter((item) => item.due_date && item.status !== 'done' && new Date(item.due_date) < new Date()).length
   const incoming = workspace.requests.filter((request) => workspace.workstreams.some((workstream) => workstream.id === request.receiving_workstream_id) && !['completed', 'declined', 'withdrawn'].includes(request.status)).length
 
   return (
@@ -233,10 +273,12 @@ export default function DepartmentWorkshop({ departmentId }) {
 
         {error && <div className="mt-5 rounded-xl border border-red-900/60 bg-red-950/50 px-4 py-3 text-sm text-red-300">{error}</div>}
 
-        <div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
           <Stat label="Active workstreams" value={workspace.workstreams.length} note="Across current engagements" />
-          <Stat label="Open tasks" value={workspace.tasks.filter((task) => !['done', 'cancelled'].includes(task.status)).length} note="Department execution queue" />
-          <Stat label="Overdue" value={overdue} note="Needs scheduling attention" />
+          <Stat label="Project Tasks" value={workspace.tasks.filter((task) => !['done', 'cancelled'].includes(task.status)).length} note={`${projectTaskOverdue} overdue`} />
+          <Stat label="Engagement Work Items" value={workspace.workItems.filter((item) => item.status !== 'done').length} note={`${workItemOverdue} overdue`} />
+          <Stat label="Service commitments" value={workspace.services.length} note="Planned and active scope" />
+          <Stat label="Active stages" value={workspace.stages.filter((stage) => !['completed', 'cancelled'].includes(stage.status)).length} note="Accountable journey stages" />
           <Stat label="Incoming requests" value={incoming} note="Cross-department handoffs" />
         </div>
 
@@ -246,6 +288,8 @@ export default function DepartmentWorkshop({ departmentId }) {
 
         {activeTab === 'connectors' ? (
           <div className="mt-6"><DepartmentConnectors departmentId={departmentId} departmentName={config.shortName} /></div>
+        ) : activeTab === 'specialists' ? (
+          <div className="mt-6"><SpecialistQueues config={config} /></div>
         ) : workspace.workstreams.length === 0 ? (
           <div className="mt-7"><Empty title={`No active ${config.shortName} workstreams`} description="Create an engagement and activate this department's services. The work will appear here automatically. Department connectors remain available from the Connectors tab." /></div>
         ) : (
@@ -283,8 +327,12 @@ function WorkspaceList({ activeTab, data, workspace, selectedWorkstreamId, onTra
   const workstreamNames = new Map(workspace.relatedWorkstreams.map((workstream) => [workstream.id, workstream.name]))
 
   if (activeTab === 'tasks') {
-    return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><Header title="Work queue" description="Only tasks owned by this department workstream." />{data.tasks.length === 0 ? <Empty title="No tasks in this workstream" description="Add the first task using the action panel." /> : <div className="space-y-3">{data.tasks.map((task) => <div key={task.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium text-white">{task.title}</p><p className="mt-1 text-xs text-slate-500">{projectNames.get(task.project_id)} · Due {dateLabel(task.due_date)}</p></div><Badge tone={task.status === 'blocked' ? 'red' : task.status === 'done' ? 'emerald' : 'blue'}>{labelize(task.status)}</Badge></div>{task.acceptance_criteria && <p className="mt-3 text-sm leading-6 text-slate-400">Acceptance: {task.acceptance_criteria}</p>}<div className="mt-4 flex flex-wrap gap-2">{(TASK_TRANSITIONS[task.status] || []).map((status) => <button disabled={saving} type="button" key={status} onClick={() => onTransition(task.id, status)} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:border-purple-600 hover:text-white disabled:opacity-50">Move to {labelize(status)}</button>)}</div></div>)}</div>}</section>
+    return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><Header title="Project Tasks" description="Canonical project-level tasks owned by this department workstream." />{data.tasks.length === 0 ? <Empty title="No Project Tasks in this workstream" description="Add the first task using the action panel." /> : <div className="space-y-3">{data.tasks.map((task) => <div key={task.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium text-white">{task.title}</p><p className="mt-1 text-xs text-slate-500">{projectNames.get(task.project_id)} · Due {dateLabel(task.due_date)}</p></div><Badge tone={task.status === 'blocked' ? 'red' : task.status === 'done' ? 'emerald' : 'blue'}>{labelize(task.status)}</Badge></div>{task.acceptance_criteria && <p className="mt-3 text-sm leading-6 text-slate-400">Acceptance: {task.acceptance_criteria}</p>}<div className="mt-4 flex flex-wrap gap-2">{(TASK_TRANSITIONS[task.status] || []).map((status) => <button disabled={saving} type="button" key={status} onClick={() => onTransition(task.id, status)} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:border-purple-600 hover:text-white disabled:opacity-50">Move to {labelize(status)}</button>)}</div></div>)}</div>}</section>
   }
+
+  if (activeTab === 'engagement-work') return <ListSection title="Engagement Work Items" description="Engagement-level commitments remain separate from Project Tasks and are managed in their owning engagement." emptyTitle="No Engagement Work Items">{data.workItems.map((item) => <Record key={item.id} title={item.title} meta={`${item.engagements?.name || 'Engagement'} · Due ${dateLabel(item.due_date)}`} badge={item.status}><p>{item.description || 'No description provided.'}</p></Record>)}</ListSection>
+
+  if (activeTab === 'services') return <section className="space-y-5"><ListSection title="Service commitments" description="Existing services whose catalogue ownership belongs to this department." emptyTitle="No service commitments">{data.services.map((item) => <Record key={item.id} title={item.service_catalog?.name || 'Service'} meta={`Target ${dateLabel(item.target_date)}`} badge={item.status}><p>{item.service_catalog?.slug || 'Canonical service'}</p></Record>)}</ListSection><ListSection title="Accountable stages" description="Existing engagement stages assigned to this department." emptyTitle="No accountable stages">{data.stages.map((item) => <Record key={item.id} title={item.name} meta={`${labelize(item.stage_kind)} · Position ${item.position + 1}`} badge={item.status}><p>Journey stage for the selected engagement.</p></Record>)}</ListSection></section>
 
   if (activeTab === 'research') {
     return <ListSection title="Research" description="Shared project evidence and department-specific research." emptyTitle="No research records">{data.research.map((item) => <Record key={item.id} title={item.title} meta={`${labelize(item.research_type)} · ${item.workstream_id ? 'Department-owned' : 'Shared project research'}`} badge={item.status}><p>{item.findings || item.question || 'Research record created; findings pending.'}</p></Record>)}</ListSection>
@@ -317,10 +365,15 @@ function Record({ title, meta, badge, children }) {
 function ActionPanel(props) {
   const { activeTab, saving } = props
   if (activeTab === 'milestones') return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><Header title="Engagement-level control" description="Milestones span departments. Manage them from the engagement workspace to keep one accountable journey." /><Link to="/sphere/engagements" className="block rounded-xl bg-purple-600 px-4 py-2.5 text-center text-sm font-semibold text-white hover:bg-purple-500">Open engagement workspace</Link></section>
+  if (activeTab === 'engagement-work' || activeTab === 'services') return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><Header title="Existing authority retained" description="This coordination view is read-only for engagement services, stages, and Work Items. Use the owning engagement or specialist workspace for supported actions." /><Link to="/sphere/engagements" className="block rounded-xl bg-purple-600 px-4 py-2.5 text-center text-sm font-semibold text-white hover:bg-purple-500">Open engagement workspace</Link></section>
   if (activeTab === 'tasks') return <FormShell title="Add task" description="Creates internal department work." onSubmit={props.onCreateTask} saving={saving}><Field label="Task title"><input required className={INPUT_CLASS} value={props.taskForm.title} onChange={(event) => props.setTaskForm({ ...props.taskForm, title: event.target.value })} /></Field><Field label="Acceptance criteria"><textarea className={`${INPUT_CLASS} min-h-24`} value={props.taskForm.acceptanceCriteria} onChange={(event) => props.setTaskForm({ ...props.taskForm, acceptanceCriteria: event.target.value })} /></Field><div className="grid grid-cols-2 gap-3"><Field label="Priority"><select className={INPUT_CLASS} value={props.taskForm.priority} onChange={(event) => props.setTaskForm({ ...props.taskForm, priority: event.target.value })}><option>low</option><option>medium</option><option>high</option><option>urgent</option></select></Field><Field label="Due"><input type="date" className={INPUT_CLASS} value={props.taskForm.dueDate} onChange={(event) => props.setTaskForm({ ...props.taskForm, dueDate: event.target.value })} /></Field></div></FormShell>
   if (activeTab === 'research') return <FormShell title="Add research" description="Evidence remains shared with the project." onSubmit={props.onCreateResearch} saving={saving}><Field label="Title"><input required className={INPUT_CLASS} value={props.researchForm.title} onChange={(event) => props.setResearchForm({ ...props.researchForm, title: event.target.value })} /></Field><Field label="Type"><select className={INPUT_CLASS} value={props.researchForm.researchType} onChange={(event) => props.setResearchForm({ ...props.researchForm, researchType: event.target.value })}><option>general</option><option>market</option><option>competitor</option><option>audience</option><option>keyword</option><option>visual</option><option>technical</option></select></Field><Field label="Question"><textarea className={`${INPUT_CLASS} min-h-20`} value={props.researchForm.question} onChange={(event) => props.setResearchForm({ ...props.researchForm, question: event.target.value })} /></Field><Field label="Findings"><textarea className={`${INPUT_CLASS} min-h-24`} value={props.researchForm.findings} onChange={(event) => props.setResearchForm({ ...props.researchForm, findings: event.target.value })} /></Field></FormShell>
   if (activeTab === 'deliverables') return <FormShell title="Add deliverable" description="Creates the output identity; version review comes next." onSubmit={props.onCreateDeliverable} saving={saving}><Field label="Title"><input required className={INPUT_CLASS} value={props.deliverableForm.title} onChange={(event) => props.setDeliverableForm({ ...props.deliverableForm, title: event.target.value })} /></Field><Field label="Type"><input className={INPUT_CLASS} value={props.deliverableForm.deliverableType} onChange={(event) => props.setDeliverableForm({ ...props.deliverableForm, deliverableType: event.target.value })} /></Field><Field label="Due"><input type="date" className={INPUT_CLASS} value={props.deliverableForm.dueDate} onChange={(event) => props.setDeliverableForm({ ...props.deliverableForm, dueDate: event.target.value })} /></Field></FormShell>
   return <FormShell title="Create request" description="Send a structured output request to another workstream." onSubmit={props.onCreateRequest} saving={saving}><Field label="Title"><input required className={INPUT_CLASS} value={props.requestForm.title} onChange={(event) => props.setRequestForm({ ...props.requestForm, title: event.target.value })} /></Field><Field label="Receiving workstream"><select required className={INPUT_CLASS} value={props.requestForm.receivingWorkstreamId} onChange={(event) => props.setRequestForm({ ...props.requestForm, receivingWorkstreamId: event.target.value })}><option value="">Select receiving team</option>{props.receivingWorkstreams.map((workstream) => <option key={workstream.id} value={workstream.id}>{workstream.name}</option>)}</select></Field><Field label="Requested output"><textarea required className={`${INPUT_CLASS} min-h-24`} value={props.requestForm.requestedOutput} onChange={(event) => props.setRequestForm({ ...props.requestForm, requestedOutput: event.target.value })} /></Field><div className="grid grid-cols-2 gap-3"><Field label="Priority"><select className={INPUT_CLASS} value={props.requestForm.priority} onChange={(event) => props.setRequestForm({ ...props.requestForm, priority: event.target.value })}><option>low</option><option>medium</option><option>high</option><option>urgent</option></select></Field><Field label="Required by"><input type="date" className={INPUT_CLASS} value={props.requestForm.requiredBy} onChange={(event) => props.setRequestForm({ ...props.requestForm, requiredBy: event.target.value })} /></Field></div></FormShell>
+}
+
+function SpecialistQueues({ config }) {
+  return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><Header title="Specialist queues" description="Department coordination stays here; specialist production behavior remains in its existing Studio or Workshop." />{config.specialists.length ? <div className="grid gap-3 md:grid-cols-2">{config.specialists.map((item) => <Link key={item.path} to={item.path} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4 hover:border-purple-600"><p className="font-medium text-white">{item.name}</p><p className="mt-2 text-sm leading-6 text-slate-400">{item.description}</p></Link>)}</div> : <Empty title="No separate specialist queue" description="Development coordination and its existing supported actions remain on this workspace." />}</section>
 }
 
 function FormShell({ title, description, onSubmit, saving, children }) {

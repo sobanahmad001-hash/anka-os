@@ -15,11 +15,16 @@ test('My Work is an active canonical route', () => {
 })
 
 test('daily queue reads assignments, handoffs, deliverables, and reviews', () => {
-  assert.match(repository, /async getMyWork\(userId\)/)
+  assert.match(repository, /async getMyWork\(userId, activeOrganizationId, \{ signal \} = \{\}\)/)
+  assert.match(screen, /delivery\.getMyWork\(user\.id, activeOrganizationId, \{ signal: requestSignal \}\)/)
   assert.match(repository, /\.eq\('assigned_to', userId\)/)
+  assert.match(repository, /from\('work_items'\)[\s\S]*?\.eq\('assignee_id', userId\)/)
   assert.match(repository, /owner_id\.eq\.\$\{userId\},requested_by\.eq\.\$\{userId\}/)
   assert.match(repository, /ready_for_internal_review/)
   assert.match(repository, /ready_for_client_review/)
+  assert.match(screen, /Project Tasks/)
+  assert.match(screen, /Engagement Work Items/)
+  assert.match(screen, /Exact-version internal review/)
 })
 
 test('deliverable quality flow records an immutable human approval before release', () => {

@@ -7,6 +7,7 @@ import {
   TASK_TRANSITIONS,
   createDeliveryRepository,
 } from './deliveryRepository.js'
+import { isOrganizationAccessError } from './organizationScope.js'
 
 function createFakeClient(tableResults = {}) {
   const calls = []
@@ -18,8 +19,10 @@ function createFakeClient(tableResults = {}) {
       insert(...args) { calls.push([table, 'insert', ...args]); return builder },
       update(...args) { calls.push([table, 'update', ...args]); return builder },
       eq(...args) { calls.push([table, 'eq', ...args]); return builder },
+      or(...args) { calls.push([table, 'or', ...args]); return builder },
       is(...args) { calls.push([table, 'is', ...args]); return builder },
       in(...args) { calls.push([table, 'in', ...args]); return builder },
+      abortSignal(...args) { calls.push([table, 'abortSignal', ...args]); return builder },
       order(...args) { calls.push([table, 'order', ...args]); return builder },
       limit(...args) { calls.push([table, 'limit', ...args]); return builder },
       single() { calls.push([table, 'single']); return builder },
@@ -36,6 +39,15 @@ function createFakeClient(tableResults = {}) {
       return makeBuilder(table)
     },
   }
+}
+
+function queryChains(calls) {
+  const chains = []
+  for (const call of calls) {
+    if (call[1] === 'from') chains.push([call])
+    else if (chains.length) chains.at(-1).push(call)
+  }
+  return chains
 }
 
 test('delivery runtime composes approval support without mutating the frozen repository', () => {
@@ -126,10 +138,14 @@ test('workstream creation deduplicates departments and stays client-hidden', asy
 test('department workspace composes shared records without legacy tables', async () => {
   const client = createFakeClient({
     workstreams: {
-      data: [{ id: 'content-stream', project_id: 'project-1', department_id: 'content' }],
+      data: [{ id: 'content-stream', organization_id: 'org-a', project_id: 'project-1', department_id: 'content' }],
       error: null,
     },
-    tasks: { data: [{ id: 'task-1', workstream_id: 'content-stream' }], error: null },
+    engagements: { data: [{ id: 'engagement-1', organization_id: 'org-a', project_id: 'project-1' }], error: null },
+    tasks: { data: [{ id: 'task-1', organization_id: 'org-a', workstream_id: 'content-stream' }], error: null },
+    work_items: { data: [{ id: 'item-1', organization_id: 'org-a', engagement_id: 'engagement-1', department_id: 'content' }], error: null },
+    engagement_services: { data: [{ id: 'service-1', organization_id: 'org-a', engagement_id: 'engagement-1' }], error: null },
+    engagement_stage_instances: { data: [{ id: 'stage-1', organization_id: 'org-a', engagement_id: 'engagement-1' }], error: null },
     research_records: {
       data: [
         { id: 'shared-research', workstream_id: null },
@@ -148,15 +164,20 @@ test('department workspace composes shared records without legacy tables', async
   })
   const repository = createDeliveryRepository(client)
 
-  const workspace = await repository.getDepartmentWorkspace('content')
+  const signal = new AbortController().signal
+  const workspace = await repository.getDepartmentWorkspace('content', 'org-a', { signal })
   const tables = client.calls
     .filter(([, operation]) => operation === 'from')
     .map(([table]) => table)
 
   assert.deepEqual(tables, [
     'workstreams',
+    'engagements',
     'workstreams',
     'tasks',
+    'work_items',
+    'engagement_services',
+    'engagement_stage_instances',
     'research_records',
     'milestones',
     'deliverables',
@@ -167,7 +188,66 @@ test('department workspace composes shared records without legacy tables', async
     'content-research',
   ])
   assert.deepEqual(workspace.requests.map((request) => request.id), ['incoming'])
+  assert.deepEqual(workspace.workItems.map((item) => item.id), ['item-1'])
+  assert.deepEqual(workspace.services.map((item) => item.id), ['service-1'])
+  assert.deepEqual(workspace.stages.map((item) => item.id), ['stage-1'])
+  for (const chain of queryChains(client.calls)) {
+    const table = chain[0][0]
+    assert.ok(chain.some(([, operation, field, value]) => operation === 'eq' && field === 'organization_id' && value === 'org-a'), `${table} query must use the selected organization`)
+    assert.ok(chain.some(([, operation, value]) => operation === 'abortSignal' && value === signal), `${table} query must receive the scope signal`)
+  }
   assert.equal(tables.some((table) => table.startsWith('as_')), false)
+})
+
+test('My Work scopes every tenant root and keeps organization A and B isolated', async () => {
+  const signalA = new AbortController().signal
+  const signalB = new AbortController().signal
+  const clientA = createFakeClient({ tasks: { data: [{ id: 'task-a', organization_id: 'org-a' }], error: null } })
+  const clientB = createFakeClient({ tasks: { data: [{ id: 'task-b', organization_id: 'org-b' }], error: null } })
+
+  const workspaceA = await createDeliveryRepository(clientA).getMyWork('user-1', 'org-a', { signal: signalA })
+  const workspaceB = await createDeliveryRepository(clientB).getMyWork('user-1', 'org-b', { signal: signalB })
+
+  assert.deepEqual(workspaceA.tasks.map(item => item.id), ['task-a'])
+  assert.deepEqual(workspaceB.tasks.map(item => item.id), ['task-b'])
+  for (const [client, organizationId, signal] of [[clientA, 'org-a', signalA], [clientB, 'org-b', signalB]]) {
+    for (const chain of queryChains(client.calls)) {
+      const table = chain[0][0]
+      assert.ok(chain.some(([, operation, field, value]) => operation === 'eq' && field === 'organization_id' && value === organizationId), `${table} query must use ${organizationId}`)
+      assert.ok(chain.some(([, operation, value]) => operation === 'abortSignal' && value === signal), `${table} query must receive its scope signal`)
+    }
+  }
+})
+
+test('WKS5 issues zero tenant queries without a selected organization and rejects foreign results', async () => {
+  const emptyClient = createFakeClient()
+  const repository = createDeliveryRepository(emptyClient)
+  await assert.rejects(repository.getDepartmentWorkspace('content', null), /organizationId is required/)
+  await assert.rejects(repository.getMyWork('user-1', null), /organizationId is required/)
+  assert.equal(emptyClient.calls.length, 0)
+
+  const foreignClient = createFakeClient({
+    tasks: { data: [{ id: 'foreign-task', organization_id: 'org-b' }], error: null },
+  })
+  await assert.rejects(
+    createDeliveryRepository(foreignClient).getMyWork('user-1', 'org-a'),
+    error => error.status === 403 && error.membershipMismatch === true,
+  )
+})
+
+test('WKS5 preserves response-level access status for the organization consumer path', async () => {
+  const client = createFakeClient({
+    tasks: {
+      data: null,
+      error: { message: 'Permission denied' },
+      status: 403,
+    },
+  })
+
+  await assert.rejects(
+    createDeliveryRepository(client).getMyWork('user-1', 'org-a'),
+    error => error.status === 403 && isOrganizationAccessError(error),
+  )
 })
 
 test('unknown departments are rejected before querying Supabase', async () => {
