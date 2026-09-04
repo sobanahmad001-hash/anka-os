@@ -10,7 +10,9 @@ export type ServerOrganizationRoot =
   | { kind: "project"; id: string }
   | { kind: "brand"; id: string }
   | { kind: "artifact"; id: string }
-  | { kind: "content_request"; id: string };
+  | { kind: "content_request"; id: string }
+  | { kind: "content_queue_entry"; id: string }
+  | { kind: "artifact_version"; id: string };
 
 export type ServerOrganizationScope =
   | { root: ServerOrganizationRoot; requestedOrganizationId?: string | null }
@@ -33,6 +35,8 @@ export type ServerOrganizationContext = {
   projectId?: string;
   engagementId?: string;
   brandId?: string;
+  artifactId?: string;
+  artifactType?: string;
 };
 
 export type ServerOrganizationDependencies = {
@@ -51,14 +55,14 @@ type RootRow = {
   engagement_id?: string | null;
   brand_id?: string | null;
   engagement?: { project_id?: string | null } | null;
+  artifact_id?: string | null;
+  artifact_type?: string | null;
+  artifact?: RootRow | RootRow[] | null;
 };
 
 export type SameOrganizationResource =
-  | { kind: "engagement"; id: string }
-  | { kind: "project"; id: string }
-  | { kind: "brand"; id: string }
-  | { kind: "artifact"; id: string }
-  | { kind: "content_request"; id: string };
+  | ServerOrganizationRoot
+  | { kind: "artifact_custom_field_definition"; id: string };
 
 function httpError(message: string, status: number) {
   return Object.assign(new Error(message), { status });
@@ -93,16 +97,24 @@ function rootQuery(userClient: Client, root: ServerOrganizationRoot) {
         .select("id, organization_id").eq("id", id).maybeSingle();
     case "artifact":
       return userClient.from("artifacts")
-        .select("id, organization_id, project_id, engagement_id, brand_id").eq(
-          "id",
-          id,
-        ).maybeSingle();
+        .select(
+          "id, organization_id, project_id, engagement_id, brand_id, artifact_type",
+        ).eq("id", id).maybeSingle();
     case "content_request":
       return userClient.from("content_requests")
         .select(
           "id, organization_id, engagement_id, brand_id, engagement:engagements(project_id)",
         ).eq("id", id)
         .maybeSingle();
+    case "content_queue_entry":
+      return userClient.from("content_queue_entries")
+        .select("id, organization_id, brand_id").eq("id", id).maybeSingle();
+    case "artifact_version":
+      return userClient.from("artifact_versions")
+        .select(
+          "id, organization_id, artifact_id, artifact:artifacts!inner(id, organization_id, project_id, engagement_id, brand_id, artifact_type)",
+        )
+        .eq("id", id).maybeSingle();
   }
 }
 
@@ -127,7 +139,9 @@ function relatedQuery(
         .eq("id", id).eq("organization_id", organizationId).maybeSingle();
     case "artifact":
       return admin.from("artifacts")
-        .select("id, organization_id, project_id, engagement_id, brand_id")
+        .select(
+          "id, organization_id, project_id, engagement_id, brand_id, artifact_type",
+        )
         .eq("id", id).eq("organization_id", organizationId).maybeSingle();
     case "content_request":
       return admin.from("content_requests")
@@ -135,7 +149,47 @@ function relatedQuery(
           "id, organization_id, engagement_id, brand_id, engagement:engagements(project_id)",
         )
         .eq("id", id).eq("organization_id", organizationId).maybeSingle();
+    case "content_queue_entry":
+      return admin.from("content_queue_entries")
+        .select("id, organization_id, brand_id")
+        .eq("id", id).eq("organization_id", organizationId).maybeSingle();
+    case "artifact_version":
+      return admin.from("artifact_versions")
+        .select(
+          "id, organization_id, artifact_id, artifact:artifacts!inner(id, organization_id, project_id, engagement_id, brand_id, artifact_type)",
+        )
+        .eq("id", id).eq("organization_id", organizationId).maybeSingle();
+    case "artifact_custom_field_definition":
+      return admin.from("artifact_custom_field_defs")
+        .select("id, organization_id, artifact_type")
+        .eq("id", id).eq("organization_id", organizationId).maybeSingle();
   }
+}
+
+function oneRelatedRow(value: RootRow | RootRow[] | null | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function canonicalResourceRow(
+  kind: ServerOrganizationRoot["kind"] | SameOrganizationResource["kind"],
+  row: RootRow,
+) {
+  if (kind !== "artifact_version") return row;
+  const artifact = oneRelatedRow(row.artifact);
+  if (
+    !artifact || artifact.id !== row.artifact_id ||
+    artifact.organization_id !== row.organization_id
+  ) {
+    throw httpError("Artifact version root is unavailable", 404);
+  }
+  return {
+    ...row,
+    artifact_id: artifact.id,
+    artifact_type: artifact.artifact_type,
+    project_id: artifact.project_id,
+    engagement_id: artifact.engagement_id,
+    brand_id: artifact.brand_id,
+  };
 }
 
 function rootContext(root: ServerOrganizationRoot, row: RootRow) {
@@ -152,6 +206,8 @@ function rootContext(root: ServerOrganizationRoot, row: RootRow) {
       return { brandId: row.id };
     case "artifact":
       return {
+        artifactId: row.id,
+        artifactType: row.artifact_type || undefined,
         projectId: row.project_id || undefined,
         engagementId: row.engagement_id || undefined,
         brandId: row.brand_id || undefined,
@@ -159,6 +215,16 @@ function rootContext(root: ServerOrganizationRoot, row: RootRow) {
     case "content_request":
       return {
         projectId: row.engagement?.project_id || undefined,
+        engagementId: row.engagement_id || undefined,
+        brandId: row.brand_id || undefined,
+      };
+    case "content_queue_entry":
+      return { brandId: row.brand_id || undefined };
+    case "artifact_version":
+      return {
+        artifactId: row.artifact_id || undefined,
+        artifactType: row.artifact_type || undefined,
+        projectId: row.project_id || undefined,
         engagementId: row.engagement_id || undefined,
         brandId: row.brand_id || undefined,
       };
@@ -198,8 +264,26 @@ function assertCanonicalRelationship(
   ) {
     throw httpError("Related brand does not belong to this root", 409);
   }
+  if (
+    related.kind === "artifact_version" && context.artifactId &&
+    row.artifact_id !== context.artifactId
+  ) {
+    throw httpError(
+      "Related artifact version does not belong to this root",
+      409,
+    );
+  }
+  if (
+    related.kind === "artifact_custom_field_definition" &&
+    context.artifactType && row.artifact_type !== context.artifactType
+  ) {
+    throw httpError(
+      "Custom field definition does not match the artifact type",
+      409,
+    );
+  }
   const hasProjectChain = related.kind === "engagement" ||
-    related.kind === "artifact";
+    related.kind === "artifact" || related.kind === "artifact_version";
   const relatedProjectId = related.kind === "content_request"
     ? row.engagement?.project_id
     : row.project_id;
@@ -215,7 +299,8 @@ function assertCanonicalRelationship(
   }
   if (
     context.engagementId &&
-    (related.kind === "artifact" || related.kind === "content_request") &&
+    (related.kind === "artifact" || related.kind === "content_request" ||
+      related.kind === "artifact_version") &&
     row.engagement_id !== context.engagementId
   ) {
     throw httpError(
@@ -226,7 +311,9 @@ function assertCanonicalRelationship(
   if (
     context.brandId &&
     (related.kind === "engagement" || related.kind === "artifact" ||
-      related.kind === "content_request") &&
+      related.kind === "content_request" ||
+      related.kind === "content_queue_entry" ||
+      related.kind === "artifact_version") &&
     row.brand_id !== context.brandId
   ) {
     throw httpError("Related resource brand does not belong to this root", 409);
@@ -243,7 +330,10 @@ export async function requireSameOrganizationResource(
     context.organizationId,
   );
   if (error || !data) throw httpError("Related resource not found", 404);
-  const row = assertSameOrganization(context, data as RootRow);
+  const row = assertSameOrganization(
+    context,
+    canonicalResourceRow(related.kind, data as RootRow),
+  );
   assertCanonicalRelationship(context, related, row);
   return row;
 }
@@ -296,7 +386,7 @@ export async function resolveServerOrganizationContext(
   if (scope.root) {
     const { data, error } = await rootQuery(userClient, scope.root);
     if (error || !data) throw httpError("Root resource not found", 404);
-    const row = data as RootRow;
+    const row = canonicalResourceRow(scope.root.kind, data as RootRow);
     organizationId = requiredId(row.organization_id, "Root organization");
     const requestedOrganizationId = scope.requestedOrganizationId?.trim() || "";
     if (requestedOrganizationId && requestedOrganizationId !== organizationId) {

@@ -126,6 +126,27 @@ function activeMembership(organizationId: string, overrides: Row = {}) {
   };
 }
 
+function artifactVersion(
+  id: string,
+  organizationId: string,
+  suffix: string,
+  artifactType = "content",
+) {
+  return {
+    id,
+    organization_id: organizationId,
+    artifact_id: `artifact-${suffix}`,
+    artifact: {
+      id: `artifact-${suffix}`,
+      organization_id: organizationId,
+      project_id: `project-${suffix}`,
+      engagement_id: `engagement-${suffix}`,
+      brand_id: `brand-${suffix}`,
+      artifact_type: artifactType,
+    },
+  };
+}
+
 Deno.test("root-bound resolution derives the exact caller-readable A/B root, never requested organization authority", async () => {
   const path = fixture({
     roots: {
@@ -169,6 +190,144 @@ Deno.test("root-bound resolution derives the exact caller-readable A/B root, nev
     false,
   );
 });
+
+Deno.test("same-shaped A/B queue roots derive only the caller-readable entry organization and brand", async () => {
+  const path = fixture({
+    roots: {
+      content_queue_entries: [
+        { id: "queue-a", organization_id: "org-a", brand_id: "brand-a" },
+        { id: "queue-b", organization_id: "org-b", brand_id: "brand-b" },
+      ],
+    },
+    memberships: [activeMembership("org-a"), activeMembership("org-b")],
+  });
+  const context = await resolveServerOrganizationContext(request(), {
+    root: { kind: "content_queue_entry", id: "queue-b" },
+    requestedOrganizationId: "org-b",
+  }, path.dependencies);
+  assertEquals(context.organizationId, "org-b");
+  assertEquals(context.brandId, "brand-b");
+  assertEquals(
+    path.calls.some((call) =>
+      call.client === "user" && call.table === "content_queue_entries" &&
+      call.column === "id" && call.value === "queue-b"
+    ),
+    true,
+  );
+});
+
+Deno.test("same-shaped A/B artifact-version roots derive the complete caller-readable artifact chain", async () => {
+  const path = fixture({
+    roots: {
+      artifact_versions: [
+        artifactVersion("version-a", "org-a", "a"),
+        artifactVersion("version-b", "org-b", "b"),
+      ],
+    },
+    memberships: [activeMembership("org-a"), activeMembership("org-b")],
+  });
+  const context = await resolveServerOrganizationContext(request(), {
+    root: { kind: "artifact_version", id: "version-b" },
+    requestedOrganizationId: "org-b",
+  }, path.dependencies);
+  assertEquals(context.organizationId, "org-b");
+  assertEquals(context.artifactId, "artifact-b");
+  assertEquals(context.artifactType, "content");
+  assertEquals(context.projectId, "project-b");
+  assertEquals(context.engagementId, "engagement-b");
+  assertEquals(context.brandId, "brand-b");
+});
+
+for (
+  const scenario of [
+    {
+      name: "queue requested-org mismatch",
+      roots: {
+        content_queue_entries: [
+          { id: "queue-b", organization_id: "org-b", brand_id: "brand-b" },
+        ],
+      },
+      root: { kind: "content_queue_entry", id: "queue-b" } as const,
+    },
+    {
+      name: "version requested-org mismatch",
+      roots: {
+        artifact_versions: [artifactVersion("version-b", "org-b", "b")],
+      },
+      root: { kind: "artifact_version", id: "version-b" } as const,
+    },
+  ]
+) {
+  Deno.test(`${scenario.name} fails before privileged or side-effect access`, async () => {
+    const path = fixture({
+      roots: scenario.roots as unknown as Record<string, Row[]>,
+      memberships: [activeMembership("org-b")],
+    });
+    await assertRejects(
+      () =>
+        resolveServerOrganizationContext(request(), {
+          root: scenario.root,
+          requestedOrganizationId: "org-a",
+        }, path.dependencies),
+      Error,
+      "Requested organization does not match",
+    );
+    assertEquals(path.factoryCalls, 1);
+    assertEquals(path.calls.some((call) => call.client === "admin"), false);
+    assertEquals(
+      path.calls.some((call) =>
+        ["insert", "update", "delete"].includes(call.operation) ||
+        /provider|storage/i.test(call.table)
+      ),
+      false,
+    );
+  });
+}
+
+for (
+  const scenario of [
+    {
+      name: "unreadable queue",
+      roots: { content_queue_entries: [] },
+      root: { kind: "content_queue_entry", id: "queue-foreign" } as const,
+      membership: activeMembership("org-b"),
+    },
+    {
+      name: "unreadable version",
+      roots: { artifact_versions: [] },
+      root: { kind: "artifact_version", id: "version-foreign" } as const,
+      membership: activeMembership("org-b"),
+    },
+    {
+      name: "client-only queue",
+      roots: { content_queue_entries: [] },
+      root: { kind: "content_queue_entry", id: "queue-b" } as const,
+      membership: activeMembership("org-b", {
+        member_kind: "client",
+        role: "client_viewer",
+        department_id: null,
+      }),
+    },
+  ]
+) {
+  Deno.test(`${scenario.name} fails at caller-readable root before privileged access`, async () => {
+    const path = fixture({
+      roots: scenario.roots as unknown as Record<string, Row[]>,
+      memberships: [scenario.membership],
+    });
+    await assertRejects(
+      () =>
+        resolveServerOrganizationContext(request(), {
+          root: scenario.root,
+          requestedOrganizationId: "org-b",
+        }, path.dependencies),
+      Error,
+      "Root resource not found",
+    );
+    assertEquals(path.factoryCalls, 1);
+    assertEquals(path.calls.some((call) => call.client === "admin"), false);
+  });
+}
 
 Deno.test("multi-org rootless resolution requires explicit selection and never picks first membership", async () => {
   const path = fixture({
@@ -398,6 +557,77 @@ Deno.test("same-organization helpers reject foreign rows and cross-org related-r
   );
 });
 
+Deno.test("field definitions are organization constrained and must match the artifact-version type", async () => {
+  const path = fixture({
+    roots: {
+      artifact_versions: [
+        artifactVersion("version-b", "org-b", "b", "content"),
+      ],
+      artifact_custom_field_defs: [
+        {
+          id: "definition-a",
+          organization_id: "org-a",
+          artifact_type: "content",
+        },
+        {
+          id: "definition-b",
+          organization_id: "org-b",
+          artifact_type: "content",
+        },
+        {
+          id: "definition-wrong",
+          organization_id: "org-b",
+          artifact_type: "scripts",
+        },
+      ],
+    },
+    memberships: [activeMembership("org-b")],
+  });
+  const context = await resolveServerOrganizationContext(request(), {
+    root: { kind: "artifact_version", id: "version-b" },
+    requestedOrganizationId: "org-b",
+  }, path.dependencies);
+
+  const definition = await requireSameOrganizationResource(context, {
+    kind: "artifact_custom_field_definition",
+    id: "definition-b",
+  });
+  assertEquals(definition.id, "definition-b");
+  await assertRejects(
+    () =>
+      requireSameOrganizationResource(context, {
+        kind: "artifact_custom_field_definition",
+        id: "definition-a",
+      }),
+    Error,
+    "Related resource not found",
+  );
+  await assertRejects(
+    () =>
+      requireSameOrganizationResource(context, {
+        kind: "artifact_custom_field_definition",
+        id: "definition-wrong",
+      }),
+    Error,
+    "does not match the artifact type",
+  );
+  assertEquals(
+    path.calls.filter((call) =>
+      call.client === "admin" && call.table === "artifact_custom_field_defs"
+    ).every((call) =>
+      call.operation !== "eq" || call.column !== "organization_id" ||
+      call.value === "org-b"
+    ),
+    true,
+  );
+  assertEquals(
+    path.calls.some((call) =>
+      ["insert", "update", "delete"].includes(call.operation)
+    ),
+    false,
+  );
+});
+
 Deno.test("same-org related rows must still match the root canonical chain", async () => {
   const path = fixture({
     roots: {
@@ -423,6 +653,9 @@ Deno.test("same-org related rows must still match the root canonical chain", asy
         brand_id: "brand-other",
         engagement: { project_id: "project-other" },
       }],
+      artifact_versions: [
+        artifactVersion("version-other", "org-b", "other", "content"),
+      ],
     },
     memberships: [activeMembership("org-b")],
   });
@@ -434,6 +667,15 @@ Deno.test("same-org related rows must still match the root canonical chain", asy
       requireSameOrganizationResource(context, {
         kind: "artifact",
         id: "artifact-other",
+      }),
+    Error,
+    "does not belong to this root",
+  );
+  await assertRejects(
+    () =>
+      requireSameOrganizationResource(context, {
+        kind: "artifact_version",
+        id: "version-other",
       }),
     Error,
     "does not belong to this root",
