@@ -21,3 +21,14 @@ Deno.test('D4 requires a valid policy and at least two unique approvers', () => 
     artifact_version_id: 'version', approval_policy: 'parallel', required_approver_ids: ['one', 'one'],
   }), Error, 'unique')
 })
+
+Deno.test('MB02B permits one approver only through the explicit campaign-brief minimum', () => {
+  assertEquals(approvalRequestInput({
+    artifact_version_id: 'version', approval_policy: 'parallel', required_approver_ids: ['leader'],
+  }, 1), {
+    artifactVersionId: 'version', approvalPolicy: 'parallel', approverIds: ['leader'],
+  })
+  assertThrows(() => approvalRequestInput({
+    artifact_version_id: 'version', approval_policy: 'parallel', required_approver_ids: ['leader'],
+  }), Error, 'between 2 and 50')
+})

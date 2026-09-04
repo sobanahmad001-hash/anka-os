@@ -165,8 +165,94 @@ begin
 end;
 $$;
 
+create or replace function public.create_marketing_campaign_brief_approval_request(
+  p_artifact_version_id uuid,
+  p_approval_policy text,
+  p_required_approver_ids uuid[],
+  p_requested_by uuid
+)
+returns jsonb
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_version record;
+  v_request public.artifact_approval_requests%rowtype;
+  v_approver_count integer;
+begin
+  if p_approval_policy not in ('sequential', 'parallel') then
+    raise exception 'Approval policy must be sequential or parallel';
+  end if;
+  if p_required_approver_ids is null
+    or cardinality(p_required_approver_ids) < 1
+    or cardinality(p_required_approver_ids) > 50
+    or array_position(p_required_approver_ids, null) is not null
+  then
+    raise exception 'Select between 1 and 50 required approvers';
+  end if;
+  select count(distinct approver_id) into v_approver_count
+  from unnest(p_required_approver_ids) approver_id;
+  if v_approver_count <> cardinality(p_required_approver_ids) then
+    raise exception 'Required approvers must be unique';
+  end if;
+
+  select av.id, av.organization_id, av.artifact_id
+  into v_version
+  from public.artifact_versions av
+  join public.artifacts a
+    on a.id = av.artifact_id and a.organization_id = av.organization_id
+  where av.id = p_artifact_version_id and a.artifact_type = 'campaign_brief'
+  for update of av;
+  if not found then raise exception 'Campaign brief artifact version not found'; end if;
+
+  if not exists (
+    select 1 from public.organization_memberships
+    where organization_id = v_version.organization_id and user_id = p_requested_by
+      and member_kind = 'team' and status = 'active'
+  ) then
+    raise exception 'Requester must be an active team member';
+  end if;
+  if exists (
+    select 1 from unnest(p_required_approver_ids) approver_id
+    where not exists (
+      select 1 from public.organization_memberships membership
+      where membership.organization_id = v_version.organization_id
+        and membership.user_id = approver_id
+        and membership.member_kind = 'team' and membership.status = 'active'
+        and (
+          membership.role in ('system_owner', 'operations_admin', 'executive')
+          or (membership.department_id = 'marketing' and membership.role = 'department_manager')
+        )
+    )
+  ) then
+    raise exception 'Campaign brief approvers must be leaders or the Marketing department manager';
+  end if;
+  if exists (select 1 from public.artifact_approvals where artifact_version_id = v_version.id) then
+    raise exception 'This artifact version is already approved';
+  end if;
+
+  insert into public.artifact_approval_requests (
+    organization_id, artifact_version_id, approval_policy, requested_by
+  ) values (
+    v_version.organization_id, v_version.id, p_approval_policy, p_requested_by
+  ) returning * into v_request;
+
+  insert into public.artifact_approval_signoffs (
+    organization_id, request_id, required_approver_id, sequence_position
+  )
+  select v_version.organization_id, v_request.id, approver_id,
+    case when p_approval_policy = 'sequential' then ordinal::integer else null end
+  from unnest(p_required_approver_ids) with ordinality selected(approver_id, ordinal);
+
+  return to_jsonb(v_request);
+end;
+$$;
+
 revoke all on function public.save_marketing_campaign_brief(uuid,uuid,uuid,uuid,uuid,text,jsonb,text,text,boolean,uuid,text,uuid) from public, anon, authenticated;
 grant execute on function public.save_marketing_campaign_brief(uuid,uuid,uuid,uuid,uuid,text,jsonb,text,text,boolean,uuid,text,uuid) to service_role;
+revoke all on function public.create_marketing_campaign_brief_approval_request(uuid,text,uuid[],uuid) from public, anon, authenticated;
+grant execute on function public.create_marketing_campaign_brief_approval_request(uuid,text,uuid[],uuid) to service_role;
 
 comment on table public.marketing_brief_save_requests is
   'Metadata-only, actor-scoped 30-day replay ledger for atomic governed campaign-brief saves; no brief payload is stored.';
