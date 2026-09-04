@@ -27,4 +27,5 @@ export const quickTasks = Object.freeze({
   append: input => invoke('append', input),
   fork: input => invoke('fork', input),
   chat: input => invoke('chat', input),
+  lifecycle: (action, quickTaskId) => invoke(action, { quickTaskId }),
 })

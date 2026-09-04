@@ -2,6 +2,7 @@ import {
   hasSandboxDepartmentAuthority,
   normalizeQuickTaskChatInput,
   normalizeQuickTaskInput,
+  normalizeQuickTaskLifecycleInput,
   normalizeSandboxContent,
   quickTaskChatExternalEndpoint,
   quickTaskChatResponseFormat,
@@ -25,6 +26,20 @@ Deno.test('requires object content and explicit revision concurrency', () => {
 })
 Deno.test('fork requires an exact source revision', () => {
   throws(() => normalizeQuickTaskInput('fork', { quickTaskId: 'task' }), /source revision/)
+})
+
+Deno.test('QTS3 maps only the six owner lifecycle actions', () => {
+  for (const [action, rpc] of Object.entries({
+    preserve: 'preserve_quick_task', unpreserve: 'unpreserve_quick_task',
+    discard: 'discard_quick_task', restore: 'restore_quick_task',
+    expire: 'expire_quick_task', purge: 'purge_quick_task',
+  })) {
+    const normalized = normalizeQuickTaskLifecycleInput(action, { quickTaskId: 'task' })
+    equal(normalized.rpc, rpc)
+    equal(normalized.input.p_quick_task_id, 'task')
+  }
+  throws(() => normalizeQuickTaskLifecycleInput('preserve', {}), /Quick Task is required/)
+  throws(() => normalizeQuickTaskLifecycleInput('toString', { quickTaskId: 'task' }), /Unsupported lifecycle action/)
 })
 
 Deno.test('sandbox chat requires exact revision, department, prompt, and AI-safe confirmation', () => {
