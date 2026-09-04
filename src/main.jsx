@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App.jsx';
 import AppErrorBoundary from './components/AppErrorBoundary.jsx';
 import { AuthProvider } from './context/AuthContext.jsx';
+import { OrganizationProvider } from './context/OrganizationContext.jsx';
 import { ThemeProvider } from './hooks/useTheme.jsx';
 import './index.css';
 
@@ -22,11 +23,13 @@ createRoot(document.getElementById('root')).render(
   <StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <ThemeProvider>
-          <AppErrorBoundary>
-            <App />
-          </AppErrorBoundary>
-        </ThemeProvider>
+        <OrganizationProvider>
+          <ThemeProvider>
+            <AppErrorBoundary>
+              <App />
+            </AppErrorBoundary>
+          </ThemeProvider>
+        </OrganizationProvider>
       </AuthProvider>
     </BrowserRouter>
   </StrictMode>,

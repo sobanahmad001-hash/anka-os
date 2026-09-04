@@ -1,12 +1,14 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useOrganization } from '../context/OrganizationContext.jsx'
 import { environmentNav } from '../config/environmentNav'
 import { featureFlags } from '../config/featureFlags'
 import { useNotifications } from '../hooks/useNotifications'
 
 export default function Header() {
   const { profile, signOut } = useAuth()
+  const { memberships, activeOrganizationId, selectionRequired, loading: organizationLoading, error: organizationError, selectOrganization } = useOrganization()
   const navigate = useNavigate()
   const location = useLocation()
   const [showNotifications, setShowNotifications] = useState(false)
@@ -112,6 +114,20 @@ export default function Header() {
 
       {/* Right side */}
       <div className="ml-auto flex shrink-0 items-center gap-2">
+
+        <label className="min-w-0">
+          <span className="sr-only">Active organization</span>
+          <select aria-label="Active organization" value={activeOrganizationId || ''}
+            disabled={organizationLoading || Boolean(organizationError) || memberships.length === 0}
+            onChange={(event) => selectOrganization(event.target.value)}
+            className="h-9 max-w-40 rounded-xl border border-white/[0.06] bg-white/[0.025] px-2.5 text-xs font-medium text-slate-300 outline-none focus:border-violet-500/60 disabled:text-slate-600 sm:max-w-52">
+            {organizationLoading && <option value="">Loading organizations...</option>}
+            {organizationError && <option value="">Organizations unavailable</option>}
+            {!organizationLoading && !organizationError && memberships.length === 0 && <option value="">No organizations</option>}
+            {selectionRequired && <option value="">Choose organization</option>}
+            {memberships.map(item => <option key={item.organizationId} value={item.organizationId}>{item.organization.name}</option>)}
+          </select>
+        </label>
 
         {/* Notification bell */}
         <div className="relative" ref={notifRef}>
