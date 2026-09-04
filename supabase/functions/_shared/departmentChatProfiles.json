@@ -1,0 +1,30 @@
+{
+  "version": "wch2-v1",
+  "work_item_types": ["task", "bug", "request"],
+  "departments": {
+    "content": {
+      "label": "Content",
+      "mount": "content_studio",
+      "artifact_types": ["discovery", "vision", "audience", "website_architecture", "keyword_strategy", "content", "campaign_messaging", "scripts"],
+      "context_artifact_types": ["discovery", "vision", "audience", "brand_statement", "website_architecture", "keyword_strategy", "content", "campaign_messaging", "scripts"]
+    },
+    "design": {
+      "label": "Design",
+      "mount": "design_systems",
+      "artifact_types": ["design_system"],
+      "context_artifact_types": ["discovery", "vision", "audience", "brand_statement", "website_architecture", "content", "campaign_messaging", "design_system"]
+    },
+    "marketing": {
+      "label": "Marketing",
+      "mount": "marketing_studio",
+      "artifact_types": ["channel_strategy", "campaign_brief", "measurement_plan"],
+      "context_artifact_types": ["discovery", "vision", "audience", "brand_statement", "website_architecture", "keyword_strategy", "content", "campaign_messaging", "scripts", "channel_strategy", "campaign_brief", "measurement_plan"]
+    },
+    "development": {
+      "label": "Development",
+      "mount": "development_tracking_panel",
+      "artifact_types": ["technical_brief", "launch_checklist"],
+      "context_artifact_types": ["brand_statement", "website_architecture", "keyword_strategy", "content", "design_system", "technical_brief", "launch_checklist"]
+    }
+  }
+}

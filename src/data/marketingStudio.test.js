@@ -16,6 +16,7 @@ const googleOauth = read('supabase/functions/google-oauth/index.ts')
 const googleTokens = read('supabase/functions/_shared/googleOAuthTokens.ts')
 const ui = read('src/apps/MarketingStudio.jsx')
 const chat = read('supabase/functions/department-chat/index.ts')
+const chatProfiles = JSON.parse(read('supabase/functions/_shared/departmentChatProfiles.json'))
 const repository = read('src/data/marketingStudioRepository.js')
 const app = read('src/App.jsx')
 const navigation = read('src/config/environmentNav.js')
@@ -76,12 +77,12 @@ test('Marketing Studio is a distinct lazy route while the department queue remai
 
 test('UW2 reuses Shared Department Chat for confirmed Marketing planning drafts only', () => {
   for (const type of ['channel_strategy', 'campaign_brief', 'measurement_plan']) {
-    assert.match(chat, new RegExp(`'${type}'`))
+    assert.equal(chatProfiles.departments.marketing.artifact_types.includes(type), true)
   }
   assert.match(chat, /ENABLED_DEPARTMENTS = new Set\(\['content', 'design', 'marketing'\]\)/)
   assert.match(ui, /Shared Department Chat/)
   assert.match(repository, /department-chat/)
-  assert.doesNotMatch(chat.match(/CHAT_MARKETING_ARTIFACT_TYPE_SET = new Set\(\[[\s\S]*?\]\)/)?.[0] || '', /marketing_report/)
+  assert.equal(chatProfiles.departments.marketing.artifact_types.includes('marketing_report'), false)
   assert.doesNotMatch(chat, /googleads|googleapis|facebook|instagram|tiktok|wordpress|send_email|\/mutate/i)
 })
 

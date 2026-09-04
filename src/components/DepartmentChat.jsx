@@ -1,13 +1,14 @@
 import { useState } from 'react'
 
+import { departmentChatProfile } from '../data/departmentChatProfiles.js'
+
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20'
 const PRIMARY = 'rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50'
 
 export default function DepartmentChat({
   departmentId,
-  departmentLabel = departmentId,
+  departmentLabel,
   engagement,
-  artifactTypes = [],
   artifactDefinitions = {},
   artifactForType = () => null,
   stageForType = () => null,
@@ -15,7 +16,9 @@ export default function DepartmentChat({
   onProposeWorkItem,
   onCreated,
 }) {
-  const [artifactType, setArtifactType] = useState(artifactTypes[0] || '')
+  const profile = departmentChatProfile(departmentId)
+  const resolvedDepartmentLabel = departmentLabel || profile.label
+  const [artifactType, setArtifactType] = useState(profile.artifactTypes[0] || '')
   const [proposalMode, setProposalMode] = useState('artifact')
   const [prompt, setPrompt] = useState('')
   const [safe, setSafe] = useState(false)
@@ -41,7 +44,7 @@ export default function DepartmentChat({
           artifact_id: (artifactForType(artifactType) || {}).id || null,
           engagement_stage_instance_id: (stageForType(artifactType) || {}).id || null,
           artifact_type: artifactType,
-          title: (artifactForType(artifactType)?.title) || `${artifactDefinitions[artifactType]?.label || departmentLabel} artifact`,
+          title: (artifactForType(artifactType)?.title) || `${artifactDefinitions[artifactType]?.label || resolvedDepartmentLabel} artifact`,
           prompt,
           prompt_safe_for_ai: safe,
           change_summary: 'Draft proposed via Shared Department Chat',
@@ -92,9 +95,7 @@ export default function DepartmentChat({
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Work item type
                 <select className={`${INPUT} mt-2 normal-case tracking-normal`} value={workItemType} onChange={event => setWorkItemType(event.target.value)}>
-                  <option value="task">Task</option>
-                  <option value="bug">Bug</option>
-                  <option value="request">Request</option>
+                  {profile.workItemTypes.map(type => <option key={type} value={type}>{type[0].toUpperCase() + type.slice(1)}</option>)}
                 </select>
               </label>
               <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Priority
@@ -111,11 +112,11 @@ export default function DepartmentChat({
           <>
             <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Artifact type
               <select className={`${INPUT} mt-2 normal-case tracking-normal`} value={artifactType} onChange={event => setArtifactType(event.target.value)}>
-                {artifactTypes.map(type => <option key={type} value={type}>{artifactDefinitions[type]?.label || type}</option>)}
+                {profile.artifactTypes.map(type => <option key={type} value={type}>{artifactDefinitions[type]?.label || type}</option>)}
               </select>
             </label>
             <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Artifact title
-              <input className={`${INPUT} mt-2 normal-case tracking-normal`} value={artifactForType(artifactType)?.title || `${artifactDefinitions[artifactType]?.label || departmentLabel} artifact`} readOnly />
+              <input className={`${INPUT} mt-2 normal-case tracking-normal`} value={artifactForType(artifactType)?.title || `${artifactDefinitions[artifactType]?.label || resolvedDepartmentLabel} artifact`} readOnly />
             </label>
           </>
         )}
@@ -126,7 +127,7 @@ export default function DepartmentChat({
 
         <label className="flex items-start gap-3 rounded-xl border border-amber-900/50 bg-amber-950/20 p-4 text-sm leading-6 text-amber-200">
           <input required type="checkbox" className="mt-1" checked={safe} onChange={event => setSafe(event.target.checked)} />
-          <span>I confirm this prompt is safe to send to the engagement-mapped {departmentLabel} model. Restricted artifact versions are never included automatically.</span>
+          <span>I confirm this prompt is safe to send to the engagement-mapped {resolvedDepartmentLabel} model. Restricted artifact versions are never included automatically.</span>
         </label>
 
         <button
