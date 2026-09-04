@@ -1,5 +1,5 @@
 import { assertEquals, assertThrows } from 'jsr:@std/assert@1.0.14'
-import { brandBriefInput, compiledBrandStatement, customFieldDefinitionInput, handleRequest, hasContentAuthority,
+import { brandBriefInput, compiledBrandStatement, contentStudioScope, customFieldDefinitionInput, handleRequest, hasContentAuthority,
   figmaHandoffUrl, validateContentRequestInput, validateQueueEntryInput } from './index.ts'
 
 import { CHAT_CONTENT_ARTIFACT_TYPE_SET, CONTENT_ARTIFACT_TYPES, contentArtifactResponseFormat, validateContentArtifact } from '../_shared/contentArtifacts.ts'
@@ -9,6 +9,51 @@ Deno.test('Content authority keeps exact-version approval manager-controlled', (
   assertEquals(hasContentAuthority({ role: 'contributor', department_id: 'content' }, 'approve_artifact'), false)
   assertEquals(hasContentAuthority({ role: 'department_manager', department_id: 'content' }, 'approve_artifact'), true)
   assertEquals(hasContentAuthority({ role: 'executive', department_id: null }, 'approve_artifact'), true)
+})
+
+Deno.test('Gate 0 maps every legacy Content action to a closed literal organization root', () => {
+  const organization_id = 'org-b'
+  const requestFields = { organization_id, output_path: 'internal_engine', format: 'reel', brief: 'Brief' }
+  assertEquals(contentStudioScope({ action: 'save_artifact', engagement_id: 'engagement-b' }), {
+    root: { kind: 'engagement', id: 'engagement-b' }, requestedOrganizationId: null,
+  })
+  assertEquals(contentStudioScope({ action: 'save_artifact', artifact_id: 'artifact-b' }), {
+    root: { kind: 'artifact', id: 'artifact-b' }, requestedOrganizationId: null,
+  })
+  assertEquals(contentStudioScope({ action: 'create_content_request', mode: 'project', engagement_id: 'engagement-b', ...requestFields }), {
+    root: { kind: 'engagement', id: 'engagement-b' }, requestedOrganizationId: organization_id,
+  })
+  assertEquals(contentStudioScope({ action: 'create_content_request', mode: 'general', brand_id: 'brand-b', ...requestFields }), {
+    root: { kind: 'brand', id: 'brand-b' }, requestedOrganizationId: organization_id,
+  })
+  assertEquals(contentStudioScope({ action: 'create_content_request', mode: 'general', ...requestFields }), {
+    root: null, requestedOrganizationId: organization_id,
+  })
+  assertEquals(contentStudioScope({ action: 'create_queue_entry', brand_id: 'brand-b', planned_date: '2026-09-04', format: 'reel' }), {
+    root: { kind: 'brand', id: 'brand-b' }, requestedOrganizationId: null,
+  })
+  for (const action of ['action_queue_entry', 'skip_queue_entry']) {
+    assertEquals(contentStudioScope({ action, queue_entry_id: 'queue-b' }), {
+      root: { kind: 'content_queue_entry', id: 'queue-b' }, requestedOrganizationId: null,
+    })
+  }
+  assertEquals(contentStudioScope({ action: 'ensure_figma_handoff', content_request_id: 'request-b' }), {
+    root: { kind: 'content_request', id: 'request-b' }, requestedOrganizationId: null,
+  })
+  for (const action of ['save_brand_brief', 'generate_brand_statement']) {
+    assertEquals(contentStudioScope({ action, engagement_id: 'engagement-b' }), {
+      root: { kind: 'engagement', id: 'engagement-b' }, requestedOrganizationId: null,
+    })
+  }
+  for (const action of ['approve_artifact', 'save_custom_field_value']) {
+    assertEquals(contentStudioScope({ action, artifact_version_id: 'version-b' }), {
+      root: { kind: 'artifact_version', id: 'version-b' }, requestedOrganizationId: null,
+    })
+  }
+  assertEquals(contentStudioScope({
+    action: 'create_custom_field_definition', organization_id,
+    artifact_type: 'content', name: 'channel', field_type: 'text',
+  }), { root: null, requestedOrganizationId: organization_id })
 })
 
 Deno.test('CP1 validates linked and unlinked project requests without client-type assumptions', () => {
@@ -206,13 +251,173 @@ function isolatedContentServerPath() {
     return new Response(null, { status: 201 })
   }
   return {
-    writes, tables, artifactTypeReads, activeServices,
+    writes, tables, organizationId, artifactTypeReads, activeServices,
     restore() {
       globalThis.fetch = originalFetch
       Deno.env.get = originalEnvGet
     },
   }
 }
+
+function organizationBoundaryPath(options: {
+  rows?: Record<string, Array<Record<string, unknown>>>,
+  organizations?: Record<string, string>,
+} = {}) {
+  const calls: Array<{ client: string, table: string, method: string, body?: Record<string, unknown> }> = []
+  const originalFetch = globalThis.fetch
+  const originalEnvGet = Deno.env.get
+  const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
+    status, headers: { 'Content-Type': 'application/json' },
+  })
+  Deno.env.get = (name: string) => ({
+    SUPABASE_URL: 'https://content-boundary.example',
+    SUPABASE_ANON_KEY: 'publishable',
+    SUPABASE_SERVICE_ROLE_KEY: 'secret',
+  } as Record<string, string>)[name]
+  globalThis.fetch = async (input: Request | URL | string, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(input, init)
+    const url = new URL(request.url)
+    if (url.pathname === '/auth/v1/user') return json({ id: 'content-actor' })
+    const table = decodeURIComponent(url.pathname.replace('/rest/v1/', ''))
+    const client = request.headers.get('apikey') === 'secret' ? 'admin' : 'user'
+    const body = request.method === 'GET' ? undefined : await request.json() as Record<string, unknown>
+    calls.push({ client, table, method: request.method, body })
+    if (request.method === 'GET') {
+      let rows = [...(options.rows?.[table] || [])]
+      for (const [column, raw] of url.searchParams.entries()) {
+        if (!raw.startsWith('eq.')) continue
+        const value = raw.slice(3)
+        if (column === 'organization.status') {
+          rows = rows.filter(row => options.organizations?.[String(row.organization_id)] === value)
+        } else rows = rows.filter(row => String(row[column] ?? '') === value)
+      }
+      return json(rows)
+    }
+    if (table === 'rpc/action_content_queue_entry') return json({ request: { id: 'request-b' } })
+    if (table === 'artifact_approvals') return json({ id: 'approval-b', ...body }, 201)
+    return json(body || {}, 201)
+  }
+  return {
+    calls,
+    restore() {
+      globalThis.fetch = originalFetch
+      Deno.env.get = originalEnvGet
+    },
+  }
+}
+
+function boundaryRequest(body: Record<string, unknown>) {
+  return new Request('https://functions.example/content-studio', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer caller-jwt', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+Deno.test('Gate 0 rootless Content actions require explicit active team organization before side effects', async () => {
+  for (const scenario of [
+    { name: 'missing selection', organization_id: undefined, memberships: [] },
+    { name: 'inactive or revoked membership', organization_id: 'org-b', memberships: [] },
+    { name: 'client-only membership', organization_id: 'org-b', memberships: [{
+      organization_id: 'org-b', user_id: 'content-actor', role: 'client_viewer',
+      department_id: null, status: 'active', member_kind: 'client',
+    }] },
+  ]) {
+    const path = organizationBoundaryPath({
+      rows: { organization_memberships: scenario.memberships },
+      organizations: { 'org-b': 'active' },
+    })
+    try {
+      const response = await handleRequest(boundaryRequest({
+        action: 'create_content_request', organization_id: scenario.organization_id,
+        mode: 'general', output_path: 'internal_engine', format: 'reel', brief: scenario.name,
+      }))
+      assertEquals(response.status, scenario.organization_id ? 403 : 400)
+      assertEquals(path.calls.some(call => call.client === 'admin'), false)
+      assertEquals(path.calls.some(call => call.method !== 'GET'), false)
+    } finally { path.restore() }
+  }
+})
+
+Deno.test('Gate 0 queue actions derive organization B and reject requested A before RPC or admin access', async () => {
+  const rows = {
+    content_queue_entries: [{ id: 'same-shaped-queue', organization_id: 'org-b', brand_id: 'brand-b' }],
+    organization_memberships: [{
+      organization_id: 'org-b', user_id: 'content-actor', role: 'contributor',
+      department_id: 'content', status: 'active', member_kind: 'team',
+    }],
+  }
+  const accepted = organizationBoundaryPath({ rows, organizations: { 'org-b': 'active' } })
+  try {
+    const response = await handleRequest(boundaryRequest({
+      action: 'action_queue_entry', organization_id: 'org-b',
+      queue_entry_id: 'same-shaped-queue', output_path: 'internal_engine',
+    }))
+    assertEquals(response.status, 200)
+    const rpc = accepted.calls.find(call => call.table === 'rpc/action_content_queue_entry')
+    assertEquals(rpc?.body?.p_organization_id, 'org-b')
+  } finally { accepted.restore() }
+
+  const mismatched = organizationBoundaryPath({ rows, organizations: { 'org-b': 'active' } })
+  try {
+    const response = await handleRequest(boundaryRequest({
+      action: 'skip_queue_entry', organization_id: 'org-a', queue_entry_id: 'same-shaped-queue',
+    }))
+    assertEquals(response.status, 403)
+    assertEquals(mismatched.calls.some(call => call.client === 'admin'), false)
+    assertEquals(mismatched.calls.some(call => call.table.startsWith('rpc/')), false)
+  } finally { mismatched.restore() }
+})
+
+Deno.test('Gate 0 unreadable queue and artifact-version roots fail before privileged access', async () => {
+  for (const body of [
+    { action: 'skip_queue_entry', organization_id: 'org-b', queue_entry_id: 'foreign-queue' },
+    { action: 'approve_artifact', organization_id: 'org-b', artifact_version_id: 'foreign-version' },
+  ]) {
+    const path = organizationBoundaryPath({
+      rows: { organization_memberships: [{
+        organization_id: 'org-b', user_id: 'content-actor', role: 'department_manager',
+        department_id: 'content', status: 'active', member_kind: 'team',
+      }] },
+      organizations: { 'org-b': 'active' },
+    })
+    try {
+      const response = await handleRequest(boundaryRequest(body))
+      assertEquals(response.status, 404)
+      assertEquals(path.calls.some(call => call.client === 'admin'), false)
+      assertEquals(path.calls.some(call => call.method !== 'GET'), false)
+    } finally { path.restore() }
+  }
+})
+
+Deno.test('Gate 0 version-rooted custom values reject foreign field definitions before RPC', async () => {
+  const path = organizationBoundaryPath({
+    rows: {
+      artifact_versions: [{
+        id: 'version-b', organization_id: 'org-b', artifact_id: 'artifact-b',
+        artifact: { id: 'artifact-b', organization_id: 'org-b', project_id: 'project-b',
+          engagement_id: 'engagement-b', brand_id: 'brand-b', artifact_type: 'content' },
+      }],
+      organization_memberships: [{
+        organization_id: 'org-b', user_id: 'content-actor', role: 'contributor',
+        department_id: 'content', status: 'active', member_kind: 'team',
+      }],
+      artifact_custom_field_defs: [{
+        id: 'field-a', organization_id: 'org-a', artifact_type: 'content',
+      }],
+    },
+    organizations: { 'org-b': 'active' },
+  })
+  try {
+    const response = await handleRequest(boundaryRequest({
+      action: 'save_custom_field_value', organization_id: 'org-b',
+      artifact_version_id: 'version-b', field_def_id: 'field-a', value: 'blocked',
+    }))
+    assertEquals(response.status, 404)
+    assertEquals(path.calls.some(call => call.table === 'rpc/save_artifact_custom_field_value'), false)
+    assertEquals(path.calls.some(call => ['provider', 'storage'].some(name => call.table.includes(name))), false)
+  } finally { path.restore() }
+})
 
 Deno.test('UW4 Content saves website content with only its active service and no upstream artifacts', async () => {
   const path = isolatedContentServerPath()
@@ -241,6 +446,7 @@ Deno.test('UW4 Content saves website content with only its active service and no
     assertEquals(path.writes.artifacts?.[0]?.brand_id, 'content-brand')
     assertEquals(path.writes.artifact_versions?.length, 1)
     assertEquals(path.writes.engagement_events?.length, 1)
+    assertEquals(path.writes.engagement_events?.[0]?.organization_id, path.organizationId)
     assertEquals(path.tables.includes('brand_briefs'), false)
     assertEquals(path.activeServices.length, 1)
     assertEquals(path.activeServices[0].service_catalog.slug, 'website_content')

@@ -34,9 +34,9 @@ test('CP2 general request serialization requires no engagement and keeps brand o
 })
 
 test('CP2 uses the one existing CP1 creation action without parallel insert logic', () => {
-  assert.match(panel, /contentRequests\.create\(serializeGeneralContentRequest\(form\)\)/)
-  assert.match(repository, /create: input => invoke\('content-studio', 'create_content_request', input\)/)
-  assert.match(edge, /action === 'create_content_request'[\s\S]*createContentRequest\(admin, body, user\.id\)/)
+  assert.match(panel, /repository\.create\(serializeGeneralContentRequest\(form\)\)/)
+  assert.match(repository, /create: input => invoke\(organizationId, 'content-studio', 'create_content_request', input, options\)/)
+  assert.match(edge, /action === 'create_content_request'[\s\S]*createContentRequest\(context, body, context\.user\.id\)/)
   assert.doesNotMatch(panel + repository, /\.from\('content_requests'\)\.insert|\.insert\([^)]*content_requests/i)
 })
 
@@ -49,7 +49,7 @@ test('general requests are a flat RLS-filtered organization list sorted newest f
 
 test('general mode is directly usable before an engagement workspace exists', () => {
   assert.match(studio, /Make a post \/ reel/)
-  assert.match(studio, /tab === 'general' \? <GeneralContentRequestsPanel \/> : loading/)
+  assert.match(studio, /tab === 'general' \? <GeneralContentRequestsPanel[\s\S]*?repository=\{repositories\.requests\} \/> : loading/)
   assert.match(studio, /\['general', 'General requests'\]/)
   assert.match(panel, /No brand selected/)
   assert.match(panel, /What do you need\?/)

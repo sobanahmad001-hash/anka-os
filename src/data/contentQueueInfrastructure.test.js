@@ -27,7 +27,7 @@ test('CP4 actioning reuses CP1 atomically and skipping has no request insert pat
   assert.match(migration, /set status = 'actioned', fulfilled_by_request_id/)
   const skipBody = migration.match(/create or replace function public\.skip_content_queue_entry[\s\S]*?\n\$\$;/)?.[0] || ''
   assert.doesNotMatch(skipBody, /content_requests|content_event_links/)
-  assert.match(edge, /action === 'action_queue_entry'[\s\S]*actionQueueEntry\(admin, body, user\.id\)/)
+  assert.match(edge, /action === 'action_queue_entry'[\s\S]*actionQueueEntry\(context, body, context\.user\.id\)/)
   assert.doesNotMatch(edge, /from\('content_requests'\)\.insert/)
 })
 
