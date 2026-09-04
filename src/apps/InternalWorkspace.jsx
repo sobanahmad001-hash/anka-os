@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { Link, useNavigate } from 'react-router-dom'
 import { internalWorkspace } from '../data/internalWorkspace'
+import InternalProjectSetupPanel from './InternalProjectSetupPanel.jsx'
 
 const TABS = [['overview', 'Overview'], ['tasks', 'Project Tasks'], ['engagement-work', 'Engagement Work Items'], ['coordination', 'Milestones & Requests'], ['deliverables', 'Deliverables'], ['records', 'Activity & Records']]
 const INPUT = 'rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20'
@@ -23,6 +24,8 @@ export default function InternalWorkspace() {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [ownerId, setOwnerId] = useState('all')
+  const [showSetup, setShowSetup] = useState(false)
+  const [setupResult, setSetupResult] = useState(null)
   const load = useCallback(async () => {
     if (organizationLoading || selectionRequired || !activeOrganizationId || requestSignal?.aborted) return
     const scope = currentRequest.current
@@ -56,6 +59,8 @@ export default function InternalWorkspace() {
     setQuery('')
     setStatus('all')
     setOwnerId('all')
+    setShowSetup(false)
+    setSetupResult(null)
     setLoading(true)
     load()
     return () => { requestGeneration.current += 1 }
@@ -70,6 +75,12 @@ export default function InternalWorkspace() {
       && (ownerId === 'all' || (project.owner.id || 'unassigned') === ownerId))
   }, [ownerId, query, status, workspace])
 
+  async function completeSetup(result) {
+    setShowSetup(false)
+    setSetupResult(result)
+    await load()
+  }
+
   if (organizationLoading) return <State title="Resolving organization">Internal Work will load after the active organization is confirmed.</State>
   if (selectionRequired || !activeOrganizationId) return <State title="Choose an organization">Internal Work never chooses or switches an organization from a link.</State>
   if (loading && !workspace) return <State title="Loading Internal Work">Loading authorized internal projects for the active organization.</State>
@@ -79,8 +90,10 @@ export default function InternalWorkspace() {
   const visibleWorkspace = { ...workspace, projects: filteredProjects, dueWork: workspace.dueWork.filter((row) => filteredProjectIds.has(row.project_id)), activity: workspace.activity.filter((row) => filteredProjectIds.has(row.project_id)) }
   return <main className="min-h-full bg-[#090c13] p-4 text-slate-100 sm:p-6 lg:p-8"><div className="mx-auto max-w-[1600px]">
     <DirectoryNavigation />
-    <header className="mt-6 flex flex-wrap items-start justify-between gap-5"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-300">Workspace directory</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">Internal Work</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Canonical projects explicitly classified as internal. Project Tasks remain separate from any legitimate Engagement Work Items.</p></div><button type="button" onClick={load} disabled={loading} className="rounded-xl border border-white/10 px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-50">{loading ? 'Refreshing...' : 'Refresh'}</button></header>
+    <header className="mt-6 flex flex-wrap items-start justify-between gap-5"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-300">Workspace directory</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">Internal Work</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Canonical projects explicitly classified as internal. Project Tasks remain separate from any legitimate Engagement Work Items.</p></div><div className="flex flex-wrap gap-3"><button type="button" onClick={() => { setShowSetup(true); setSetupResult(null) }} disabled={loading || showSetup} className="rounded-xl bg-amber-300 px-4 py-2 text-sm font-semibold text-slate-950 outline-none focus:ring-2 focus:ring-amber-100 disabled:opacity-40">New Internal Work</button><button type="button" onClick={load} disabled={loading} className="rounded-xl border border-white/10 px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-50">{loading ? 'Refreshing...' : 'Refresh'}</button></div></header>
     {error && <div role="alert" className="mt-5 rounded-xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>}
+    {setupResult && <div role="status" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-400/25 bg-emerald-500/10 p-4 text-sm text-emerald-100"><p>Internal Work created atomically with {setupResult.workstreams.length} initial workstream{setupResult.workstreams.length === 1 ? '' : 's'}{setupResult.idempotent_replay ? ' from the original confirmed request' : ''}.</p><button type="button" onClick={() => navigate(`/sphere/workspace/projects/${setupResult.project_id}`)} className="rounded-lg border border-emerald-200/20 px-3 py-2 font-medium outline-none focus:ring-2 focus:ring-emerald-300">Open project workspace</button></div>}
+    {showSetup && <InternalProjectSetupPanel activeOrganization={activeOrganizationId} scopeRevision={scopeRevision} requestSignal={requestSignal} onCreated={completeSetup} onCancel={() => setShowSetup(false)} onAccessError={handleOrganizationAccessError} />}
     <section aria-label="Internal Work summary" className="mt-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-7"><Metric title="Active projects" value={summary.activeProjects} /><Metric title="Project Tasks" value={summary.openProjectTasks} /><Metric title="Engagement Work Items" value={summary.openEngagementWorkItems} /><Metric title="Milestones" value={summary.openMilestones} /><Metric title="Requests" value={summary.openRequests} /><Metric title="Deliverables" value={summary.activeDeliverables} /><Metric title="Living Records" value={summary.livingRecords} /></section>
     <p className="mt-3 text-xs leading-5 text-slate-500">Counts cover all authorized, non-archived projects with engagement_type = internal in the active organization. Open counts exclude completed or cancelled records. Dates are stored due or target dates; overdue is evaluated against today.</p>
     <section aria-label="Filter Internal Work" className="mt-6 grid gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4 md:grid-cols-[minmax(0,1fr)_220px_220px]"><label className="text-xs font-semibold text-slate-400">Search projects, workstreams, or owners<input className={INPUT + ' mt-2 w-full'} value={query} onChange={(event) => setQuery(event.target.value)} type="search" placeholder="Search Internal Work" /></label><Filter title="Project status" value={status} onChange={setStatus} options={statuses.map((value) => [value, label(value)])} /><Filter title="Owner" value={ownerId} onChange={setOwnerId} options={owners.map(([id, owner]) => [id, owner.name])} /></section>
