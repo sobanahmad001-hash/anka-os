@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase.js'
+import { requireQuickTaskCopyResult } from './quickTaskCopy.js'
 
 async function dataOrThrow(query) {
   const { data, error } = await query
@@ -13,7 +14,18 @@ async function invoke(action, input) {
   return data?.data
 }
 
+async function copyGeneralRequest(input) {
+  const { data, error } = await supabase.functions.invoke('quick-tasks', { body: { action: 'copy_general', ...input } })
+  if (error || data?.error) {
+    throw Object.assign(new Error(data?.error || error?.message || 'Copy failed'), {
+      status: error?.context?.status || error?.status || data?.status,
+    })
+  }
+  return requireQuickTaskCopyResult(data?.data)
+}
+
 export const quickTasks = Object.freeze({
+  copyGeneralRequest,
   list: organizationId => dataOrThrow(
     supabase.from('quick_tasks').select('*').eq('organization_id', organizationId).order('updated_at', { ascending: false })
   ),
