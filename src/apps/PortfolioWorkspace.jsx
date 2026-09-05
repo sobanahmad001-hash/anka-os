@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useRef, useMemo, useState } from 'react'
+import { useOrganization } from '../context/OrganizationContext.jsx'
 import { useNavigate } from 'react-router-dom'
 import { filterPortfolioRows, PORTFOLIO_DUE_FILTERS } from '../data/portfolioWorkspaceModel'
 import { portfolioWorkspace } from '../data/portfolioWorkspace'
@@ -8,20 +9,48 @@ const metric = (title, value, note) => ({ title, value, note })
 
 export default function PortfolioWorkspace({ initialOwnerKind = 'all' }) {
   const navigate = useNavigate()
+
+  const { activeOrganizationId, selectionRequired, loading: organizationLoading, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
+  const currentRequest = useRef(null)
+  currentRequest.current = { organizationId: activeOrganizationId, revision: scopeRevision, recordId: null }
+  const requestGeneration = useRef(0)
   const [snapshot, setSnapshot] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [filters, setFilters] = useState({ ownerKind: initialOwnerKind, status: 'all', due: 'all', owner: 'all', sort: 'due' })
 
   const load = useCallback(async () => {
+    if (organizationLoading || selectionRequired || !activeOrganizationId || requestSignal?.aborted) return
+    const scope = currentRequest.current
+    const generation = ++requestGeneration.current
+    const isCurrent = () => generation === requestGeneration.current && !requestSignal?.aborted
+      && scope.organizationId === currentRequest.current.organizationId
+      && scope.revision === currentRequest.current.revision
+      && scope.recordId === currentRequest.current.recordId
     setLoading(true)
     setError('')
-    try { setSnapshot(await portfolioWorkspace.getSnapshot()) }
-    catch (cause) { setError(cause.message || 'Unable to load the portfolio.') }
-    finally { setLoading(false) }
-  }, [])
+    try {
+      const result = await portfolioWorkspace.getSnapshot(activeOrganizationId, { signal: requestSignal })
+      if (isCurrent()) setSnapshot(result)
+    } catch (cause) {
+      if (isCurrent() && cause.name !== 'AbortError' && cause.cause?.name !== 'AbortError') {
+        handleOrganizationAccessError(cause, { membershipMismatch: cause.membershipMismatch })
+        setError(cause.message || 'Unable to load this workspace.')
+      }
+    } finally {
+      if (isCurrent()) setLoading(false)
+    }
+  }, [activeOrganizationId, handleOrganizationAccessError, organizationLoading, requestSignal, scopeRevision, selectionRequired])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    setSnapshot(null)
+    setFilters({ ownerKind: initialOwnerKind, status: 'all', due: 'all', owner: 'all', sort: 'due' })
+    setError('')
+    setLoading(true)
+    load()
+    return () => { requestGeneration.current += 1 }
+  }, [load, initialOwnerKind])
+
   useEffect(() => { setFilters((current) => ({ ...current, ownerKind: initialOwnerKind })) }, [initialOwnerKind])
 
   const rows = useMemo(() => filterPortfolioRows(snapshot?.rows || [], { ...filters, today: snapshot?.today }), [snapshot, filters])

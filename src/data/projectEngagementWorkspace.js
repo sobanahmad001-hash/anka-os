@@ -2,7 +2,7 @@ import { fetchProjectEngagementSnapshot } from './projectEngagementWorkspaceRepo
 import { buildProjectEngagementWorkspace } from './projectEngagementWorkspaceModel'
 
 export const projectEngagementWorkspace = {
-  async get(projectId, options = {}) {
-    return buildProjectEngagementWorkspace(await fetchProjectEngagementSnapshot(projectId), options)
+  async get(projectId, organizationId, options = {}) {
+    return buildProjectEngagementWorkspace(await fetchProjectEngagementSnapshot(projectId, organizationId, { signal: options.signal }), options)
   },
 }

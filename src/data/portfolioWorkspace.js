@@ -2,7 +2,7 @@ import { fetchPortfolioWorkspaceSnapshot } from './portfolioWorkspaceRepository'
 import { buildPortfolioWorkspace } from './portfolioWorkspaceModel'
 
 export const portfolioWorkspace = {
-  async getSnapshot(options = {}) {
-    return buildPortfolioWorkspace(await fetchPortfolioWorkspaceSnapshot(), options)
+  async getSnapshot(organizationId, options = {}) {
+    return buildPortfolioWorkspace(await fetchPortfolioWorkspaceSnapshot(organizationId, { signal: options.signal }), options)
   },
 }

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useOrganization } from '../context/OrganizationContext.jsx'
 import { useNavigate, useParams } from 'react-router-dom'
 import { clientWorkspace } from '../data/clientWorkspace'
 
@@ -9,15 +10,47 @@ const date = (value) => value ? new Date(`${value.slice(0, 10)}T00:00:00Z`).toLo
 export default function ClientWorkspace() {
   const { clientId } = useParams()
   const navigate = useNavigate()
+
+  const { activeOrganizationId, selectionRequired, loading: organizationLoading, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
+  const currentRequest = useRef(null)
+  currentRequest.current = { organizationId: activeOrganizationId, revision: scopeRevision, recordId: clientId }
+  const requestGeneration = useRef(0)
   const [workspace, setWorkspace] = useState(null)
   const [tab, setTab] = useState('overview')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const load = useCallback(async () => {
-    setLoading(true); setError('')
-    try { setWorkspace(await clientWorkspace.get(clientId)) } catch (cause) { setError(cause.message || 'Unable to load this client workspace.') } finally { setLoading(false) }
-  }, [clientId])
-  useEffect(() => { load() }, [load])
+    if (organizationLoading || selectionRequired || !activeOrganizationId || requestSignal?.aborted) return
+    const scope = currentRequest.current
+    const generation = ++requestGeneration.current
+    const isCurrent = () => generation === requestGeneration.current && !requestSignal?.aborted
+      && scope.organizationId === currentRequest.current.organizationId
+      && scope.revision === currentRequest.current.revision
+      && scope.recordId === currentRequest.current.recordId
+    setLoading(true)
+    setError('')
+    try {
+      const result = await clientWorkspace.get(clientId, activeOrganizationId, { signal: requestSignal })
+      if (isCurrent()) setWorkspace(result)
+    } catch (cause) {
+      if (isCurrent() && cause.name !== 'AbortError' && cause.cause?.name !== 'AbortError') {
+        handleOrganizationAccessError(cause, { membershipMismatch: cause.membershipMismatch })
+        setError(cause.message || 'Unable to load this workspace.')
+      }
+    } finally {
+      if (isCurrent()) setLoading(false)
+    }
+  }, [activeOrganizationId, handleOrganizationAccessError, organizationLoading, requestSignal, scopeRevision, selectionRequired, clientId])
+
+  useEffect(() => {
+    setWorkspace(null)
+    setTab('overview')
+    setError('')
+    setLoading(true)
+    load()
+    return () => { requestGeneration.current += 1 }
+  }, [load])
+
   if (loading && !workspace) return <State>Loading client workspace…</State>
   if (!workspace) return <State error={error} action={() => navigate('/sphere/clients')}>Return to Clients</State>
   const { client, summary } = workspace
