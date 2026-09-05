@@ -1,5 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { namedKey } from '../_shared/googleOAuthTokens.ts'
+import { validateScheduleDefinition } from './schedule.ts'
 
 type Json = Record<string, unknown>
 const ACTIONS = new Set([
@@ -66,7 +67,7 @@ export function normalizePlanVersionInput(input: Json) {
   if (!FREQUENCIES.has(frequency)) throw new Error('Frequency must be weekly or monthly')
   if (!timezone) throw new Error('Timezone is required')
   if (effectiveEnd && effectiveEnd < effectiveStart) throw new Error('Effective end cannot precede effective start')
-  const scheduleDefinition = input.scheduleDefinition ?? {}
+  const scheduleDefinition = validateScheduleDefinition(input.scheduleDefinition ?? {})
   if (!scheduleDefinition || Array.isArray(scheduleDefinition) || typeof scheduleDefinition !== 'object') {
     throw new Error('Schedule definition must be an object')
   }
