@@ -3,12 +3,14 @@ import { Link, useSearchParams } from 'react-router-dom'
 
 import DevelopmentTrackingPanel from '../components/DevelopmentTrackingPanel.jsx'
 import OrganizationGate from '../components/OrganizationGate.jsx'
+import PipelineTemplateJourneyPreview from '../components/PipelineTemplateJourneyPreview.jsx'
 import PortfolioDashboard from '../components/PortfolioDashboard.jsx'
 import WorkItemsPanel from '../components/WorkItemsPanel.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { OPERATING_DEPARTMENTS, pipelineDepartmentFlags } from '../data/operatingSpineRepository.js'
 import { operatingSpine } from '../data/operatingSpine.js'
+import { pipelineTemplates } from '../data/pipelineTemplates.js'
 
 const INPUT = 'w-full rounded-xl border border-white/10 bg-black/20 px-3.5 py-2.5 text-sm text-white outline-none transition focus:border-violet-500/60 focus:ring-2 focus:ring-violet-500/10'
 const LABEL = 'mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500'
@@ -18,7 +20,7 @@ const INITIAL_BRAND = { clientId: '', name: '', description: '', websiteUrl: '' 
 const INITIAL_ENGAGEMENT = {
   clientId: '', brandId: '', name: '', engagementType: 'project', objective: '',
   leadOwnerId: '', startDate: '', targetDate: '', serviceIds: [], serviceOwners: {},
-  existingAssets: [],
+  existingAssets: [], pipelineTemplateVersionId: '', originalServiceIds: [], requestId: '',
 }
 
 const labelize = value => String(value || '').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
@@ -47,8 +49,13 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
   const [clientForm, setClientForm] = useState(INITIAL_CLIENT)
   const [brandForm, setBrandForm] = useState(INITIAL_BRAND)
   const [engagementForm, setEngagementForm] = useState(INITIAL_ENGAGEMENT)
+  const [templateCatalog, setTemplateCatalog] = useState({ templates: [], versions: [], selections: [], publications: [] })
+  const [journeyPreview, setJourneyPreview] = useState(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState('')
   const catalogGeneration = useRef(0)
   const workspaceGeneration = useRef(0)
+  const previewGeneration = useRef(0)
 
   useEffect(() => {
     loadAll(requestSignal)
@@ -56,6 +63,7 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
     return () => {
       catalogGeneration.current += 1
       workspaceGeneration.current += 1
+      previewGeneration.current += 1
     }
     // The organization gate remounts this subtree on the same scope boundary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -70,23 +78,38 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
   const selectedClient = clients.find(client => client.id === engagementForm.clientId)
   const availableBrands = selectedClient?.brands || []
 
+  function invalidateJourneyPreview() {
+    previewGeneration.current += 1
+    setJourneyPreview(null)
+    setPreviewLoading(false)
+    setPreviewError('')
+  }
+
   async function loadAll(signal = requestSignal) {
     const generation = ++catalogGeneration.current
     setLoading(true)
     setError('')
     try {
       const options = { signal }
-      const [clientRows, serviceRows, ownerRows, portfolioRows] = await Promise.all([
-        operatingSpine.listClientsAndBrands(activeOrganizationId, options),
-        operatingSpine.listServices(activeOrganizationId, options),
-        operatingSpine.listOwners(activeOrganizationId, options),
-        operatingSpine.getPortfolioSnapshot(activeOrganizationId, options),
+      const [operatingResult, templateResult] = await Promise.allSettled([
+        Promise.all([
+          operatingSpine.listClientsAndBrands(activeOrganizationId, options),
+          operatingSpine.listServices(activeOrganizationId, options),
+          operatingSpine.listOwners(activeOrganizationId, options),
+          operatingSpine.getPortfolioSnapshot(activeOrganizationId, options),
+        ]),
+        pipelineTemplates.list(activeOrganizationId, options),
       ])
       if (signal.aborted || generation !== catalogGeneration.current) return
+      if (operatingResult.status === 'rejected') throw operatingResult.reason
+      const [clientRows, serviceRows, ownerRows, portfolioRows] = operatingResult.value
       setClients(clientRows || [])
       setServices(serviceRows || [])
       setOwners(ownerRows || [])
       setPortfolioSnapshot(portfolioRows || { engagements: [], workItems: [], stages: [] })
+      setTemplateCatalog(templateResult.status === 'fulfilled' && templateResult.value
+        ? templateResult.value
+        : { templates: [], versions: [], selections: [], publications: [] })
     } catch (loadError) {
       if (signal.aborted || generation !== catalogGeneration.current) return
       handleOrganizationAccessError(loadError)
@@ -135,6 +158,7 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
   }
 
   function toggleService(serviceId) {
+    invalidateJourneyPreview()
     setEngagementForm(current => {
       const selected = current.serviceIds.includes(serviceId)
       const serviceIds = selected
@@ -154,10 +178,12 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
   }
 
   function addAsset() {
+    invalidateJourneyPreview()
     setEngagementForm(current => ({ ...current, existingAssets: [...current.existingAssets, { ...EMPTY_ASSET }] }))
   }
 
   function updateAsset(index, field, value) {
+    invalidateJourneyPreview()
     setEngagementForm(current => ({
       ...current,
       existingAssets: current.existingAssets.map((asset, assetIndex) => assetIndex === index ? { ...asset, [field]: value } : asset),
@@ -165,6 +191,7 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
   }
 
   function removeAsset(index) {
+    invalidateJourneyPreview()
     setEngagementForm(current => ({ ...current, existingAssets: current.existingAssets.filter((_, assetIndex) => assetIndex !== index) }))
   }
 
@@ -172,9 +199,17 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
     event.preventDefault()
     setSaving(true); setError(''); setNotice('')
     try {
-      const engagementId = await operatingSpine.composeEngagement(engagementForm, activeOrganizationId, { signal: requestSignal })
+      const result = engagementForm.pipelineTemplateVersionId
+        ? await pipelineTemplates.compose({
+          ...engagementForm,
+          requestId: engagementForm.requestId || crypto.randomUUID(),
+          previewRuleSha256: journeyPreview?.preview_rule_sha256,
+        }, activeOrganizationId, { signal: requestSignal })
+        : await operatingSpine.composeEngagement(engagementForm, activeOrganizationId, { signal: requestSignal })
+      const engagementId = result?.engagement_id || result
       if (requestSignal.aborted) return
       setEngagementForm(INITIAL_ENGAGEMENT)
+      invalidateJourneyPreview()
       setModal('')
       await loadAll()
       await openEngagement(engagementId)
@@ -182,6 +217,45 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
     } catch (saveError) {
       if (!requestSignal.aborted) { handleOrganizationAccessError(saveError); setError(saveError.message) }
     } finally { if (!requestSignal.aborted) setSaving(false) }
+  }
+
+  function chooseTemplate(versionId) {
+    const selections = templateCatalog.selections
+      .filter(item => item.pipeline_template_version_id === versionId)
+      .sort((left, right) => left.position - right.position)
+      .map(item => item.service_id)
+    invalidateJourneyPreview()
+    setEngagementForm(current => ({
+      ...current,
+      pipelineTemplateVersionId: versionId,
+      originalServiceIds: selections,
+      serviceIds: selections,
+      serviceOwners: {},
+      requestId: versionId ? crypto.randomUUID() : '',
+    }))
+  }
+
+  async function previewTemplateJourney() {
+    const generation = ++previewGeneration.current
+    setPreviewLoading(true)
+    setPreviewError('')
+    setJourneyPreview(null)
+    try {
+      const preview = await pipelineTemplates.preview({
+        pipelineTemplateVersionId: engagementForm.pipelineTemplateVersionId,
+        originalServiceIds: engagementForm.originalServiceIds,
+        serviceIds: engagementForm.serviceIds,
+        existingAssets: engagementForm.existingAssets,
+      }, activeOrganizationId, { signal: requestSignal })
+      if (!requestSignal.aborted && generation === previewGeneration.current) setJourneyPreview(preview)
+    } catch (previewFailure) {
+      if (!requestSignal.aborted && generation === previewGeneration.current) {
+        handleOrganizationAccessError(previewFailure)
+        setPreviewError(previewFailure.message)
+      }
+    } finally {
+      if (!requestSignal.aborted && generation === previewGeneration.current) setPreviewLoading(false)
+    }
   }
 
   async function openEngagement(id, { quiet = false, signal = requestSignal } = {}) {
@@ -236,7 +310,7 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
 
       {modal === 'client' && <Modal title="Create client and first brand" onClose={() => setModal('')}><ClientForm form={clientForm} setForm={setClientForm} onSubmit={createClient} saving={saving} /></Modal>}
       {modal === 'brand' && <Modal title="Add brand" onClose={() => setModal('')}><BrandForm form={brandForm} setForm={setBrandForm} clients={clients} onSubmit={createBrand} saving={saving} /></Modal>}
-      {modal === 'engagement' && <Modal title="Compose engagement" onClose={() => setModal('')} wide><EngagementComposer form={engagementForm} setForm={setEngagementForm} clients={clients} brands={availableBrands} services={services} owners={ownerOptions} chooseClient={chooseClient} toggleService={toggleService} setServiceOwner={setServiceOwner} addAsset={addAsset} updateAsset={updateAsset} removeAsset={removeAsset} onSubmit={createEngagement} saving={saving} /></Modal>}
+      {modal === 'engagement' && <Modal title="Compose engagement" onClose={() => setModal('')} wide><EngagementComposer form={engagementForm} setForm={setEngagementForm} clients={clients} brands={availableBrands} services={services} owners={ownerOptions} chooseClient={chooseClient} toggleService={toggleService} setServiceOwner={setServiceOwner} addAsset={addAsset} updateAsset={updateAsset} removeAsset={removeAsset} onSubmit={createEngagement} saving={saving} templateCatalog={templateCatalog} chooseTemplate={chooseTemplate} journeyPreview={journeyPreview} previewLoading={previewLoading} previewError={previewError} onPreview={previewTemplateJourney} /></Modal>}
     </div>
   )
 }
@@ -340,8 +414,11 @@ function ClientForm({ form, setForm, onSubmit, saving }) { return <form onSubmit
 
 function BrandForm({ form, setForm, clients, onSubmit, saving }) { return <form onSubmit={onSubmit} className="space-y-4"><Field label="Client"><select required className={INPUT} value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}><option value="">Select client</option>{clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}</select></Field><Field label="Brand name"><input required className={INPUT} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field><Field label="Website"><input type="url" className={INPUT} value={form.websiteUrl} onChange={e => setForm({ ...form, websiteUrl: e.target.value })} /></Field><Field label="Description"><textarea rows="3" className={INPUT} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></Field><button disabled={saving} className="w-full rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold disabled:opacity-50">Add brand</button></form> }
 
-function EngagementComposer({ form, setForm, clients, brands, services, owners, chooseClient, toggleService, setServiceOwner, addAsset, updateAsset, removeAsset, onSubmit, saving }) {
-  return <form onSubmit={onSubmit} className="space-y-7"><section className="grid gap-4 sm:grid-cols-2"><Field label="Client"><select required className={INPUT} value={form.clientId} onChange={e => chooseClient(e.target.value)}><option value="">Select client</option>{clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}</select></Field><Field label="Brand"><select required className={INPUT} value={form.brandId} onChange={e => setForm({ ...form, brandId: e.target.value })}><option value="">Select brand</option>{brands.map(brand => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select></Field><Field label="Engagement name"><input required className={INPUT} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field><Field label="Commercial type"><select className={INPUT} value={form.engagementType} onChange={e => setForm({ ...form, engagementType: e.target.value })}><option value="project">Project</option><option value="retainer">Retainer</option></select></Field><Field label="Lead owner"><select className={INPUT} value={form.leadOwnerId} onChange={e => setForm({ ...form, leadOwnerId: e.target.value })}><option value="">Use current user</option>{owners.map(owner => <option key={owner.id} value={owner.id}>{owner.label}</option>)}</select></Field><div className="grid grid-cols-2 gap-3"><Field label="Start date"><input type="date" className={INPUT} value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} /></Field><Field label="Target date"><input type="date" className={INPUT} value={form.targetDate} onChange={e => setForm({ ...form, targetDate: e.target.value })} /></Field></div><div className="sm:col-span-2"><Field label="Objective"><textarea rows="3" className={INPUT} value={form.objective} onChange={e => setForm({ ...form, objective: e.target.value })} /></Field></div></section><section><div className="flex items-end justify-between"><div><h3 className="font-semibold">Purchased services</h3><p className="mt-1 text-xs text-slate-500">Choose any combination. Unselected departments and stages are not created.</p></div><Badge>{form.serviceIds.length} selected</Badge></div><div className="mt-4 grid gap-4 lg:grid-cols-2">{OPERATING_DEPARTMENTS.map(department => <div key={department.id} className="rounded-2xl border border-white/[0.07] p-4"><p className="text-xs font-semibold uppercase tracking-wider text-violet-400">{department.name}</p><div className="mt-3 space-y-2">{services.filter(service => service.department_id === department.id).map(service => { const selected = form.serviceIds.includes(service.id); return <div key={service.id} className={`rounded-xl border p-3 ${selected ? 'border-violet-500/35 bg-violet-500/10' : 'border-white/[0.06] bg-white/[0.02]'}`}><label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1" checked={selected} onChange={() => toggleService(service.id)} /><span><span className="block text-sm font-medium">{service.name}</span><span className="mt-1 block text-xs leading-5 text-slate-500">{service.description}</span></span></label>{selected && <select aria-label={`Owner for ${service.name}`} className={`${INPUT} mt-3`} value={form.serviceOwners[service.id] || ''} onChange={e => setServiceOwner(service.id, e.target.value)}><option value="">Use engagement lead</option>{owners.filter(owner => !owner.department || owner.department === department.id).map(owner => <option key={owner.id} value={owner.id}>{owner.label}</option>)}</select>}</div>})}</div></div>)}</div></section><section><div className="flex items-end justify-between"><div><h3 className="font-semibold">Existing assets</h3><p className="mt-1 text-xs text-slate-500">Supplied context can satisfy prerequisites without adding a full upstream cycle.</p></div><button type="button" onClick={addAsset} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold">Add asset</button></div><div className="mt-3 space-y-3">{form.existingAssets.map((asset, index) => <div key={index} className="grid gap-3 rounded-xl border border-white/[0.07] p-3 sm:grid-cols-[1fr_1fr_1.2fr_auto]"><select className={INPUT} value={asset.asset_kind} onChange={e => updateAsset(index, 'asset_kind', e.target.value)}><option value="brand_context">Brand context</option><option value="discovery_statement">Discovery statement</option><option value="audience_context">Audience context</option><option value="approved_content">Approved content</option><option value="approved_design">Approved design</option><option value="technical_brief">Technical brief</option><option value="campaign_brief">Campaign brief</option></select><input required placeholder="Asset name" className={INPUT} value={asset.name} onChange={e => updateAsset(index, 'name', e.target.value)} /><input type="url" placeholder="Optional link" className={INPUT} value={asset.source_url} onChange={e => updateAsset(index, 'source_url', e.target.value)} /><button type="button" onClick={() => removeAsset(index)} className="px-2 text-xs text-red-300">Remove</button></div>)}</div></section><button disabled={saving || !form.clientId || !form.brandId || !form.serviceIds.length} className="w-full rounded-xl bg-violet-500 px-4 py-3 text-sm font-semibold disabled:opacity-40">Create engagement and instantiate journey</button></form>
+function EngagementComposer({ form, setForm, clients, brands, services, owners, chooseClient, toggleService, setServiceOwner, addAsset, updateAsset, removeAsset, onSubmit, saving, templateCatalog, chooseTemplate, journeyPreview, previewLoading, previewError, onPreview }) {
+  const publishedVersionIds = new Set(templateCatalog.publications.map(item => item.pipeline_template_version_id))
+  const templateById = new Map(templateCatalog.templates.map(item => [item.id, item]))
+  const publishedVersions = templateCatalog.versions.filter(item => publishedVersionIds.has(item.id))
+  return <form onSubmit={onSubmit} className="space-y-7"><section><Field label="Pipeline template (optional)"><select className={INPUT} value={form.pipelineTemplateVersionId} onChange={event => chooseTemplate(event.target.value)}><option value="">Direct service selection</option>{publishedVersions.map(version => <option key={version.id} value={version.id}>{templateById.get(version.pipeline_template_id)?.slug || 'Pipeline'} · v{version.version_number} · {version.name}</option>)}</select></Field><p className="mt-2 text-xs text-slate-500">Templates provide a reusable service preset. Current canonical rules still determine the journey.</p></section><section className="grid gap-4 sm:grid-cols-2"><Field label="Client"><select required className={INPUT} value={form.clientId} onChange={e => chooseClient(e.target.value)}><option value="">Select client</option>{clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}</select></Field><Field label="Brand"><select required className={INPUT} value={form.brandId} onChange={e => setForm({ ...form, brandId: e.target.value })}><option value="">Select brand</option>{brands.map(brand => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select></Field><Field label="Engagement name"><input required className={INPUT} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field><Field label="Commercial type"><select className={INPUT} value={form.engagementType} onChange={e => setForm({ ...form, engagementType: e.target.value })}><option value="project">Project</option><option value="retainer">Retainer</option></select></Field><Field label="Lead owner"><select className={INPUT} value={form.leadOwnerId} onChange={e => setForm({ ...form, leadOwnerId: e.target.value })}><option value="">Use current user</option>{owners.map(owner => <option key={owner.id} value={owner.id}>{owner.label}</option>)}</select></Field><div className="grid grid-cols-2 gap-3"><Field label="Start date"><input type="date" className={INPUT} value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} /></Field><Field label="Target date"><input type="date" className={INPUT} value={form.targetDate} onChange={e => setForm({ ...form, targetDate: e.target.value })} /></Field></div><div className="sm:col-span-2"><Field label="Objective"><textarea rows="3" className={INPUT} value={form.objective} onChange={e => setForm({ ...form, objective: e.target.value })} /></Field></div></section><section><div className="flex items-end justify-between"><div><h3 className="font-semibold">Purchased services</h3><p className="mt-1 text-xs text-slate-500">Choose any combination. Unselected departments and stages are not created.</p></div><Badge>{form.serviceIds.length} selected</Badge></div><div className="mt-4 grid gap-4 lg:grid-cols-2">{OPERATING_DEPARTMENTS.map(department => <div key={department.id} className="rounded-2xl border border-white/[0.07] p-4"><p className="text-xs font-semibold uppercase tracking-wider text-violet-400">{department.name}</p><div className="mt-3 space-y-2">{services.filter(service => service.department_id === department.id).map(service => { const selected = form.serviceIds.includes(service.id); return <div key={service.id} className={`rounded-xl border p-3 ${selected ? 'border-violet-500/35 bg-violet-500/10' : 'border-white/[0.06] bg-white/[0.02]'}`}><label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1" checked={selected} onChange={() => toggleService(service.id)} /><span><span className="block text-sm font-medium">{service.name}</span><span className="mt-1 block text-xs leading-5 text-slate-500">{service.description}</span></span></label>{selected && <select aria-label={`Owner for ${service.name}`} className={`${INPUT} mt-3`} value={form.serviceOwners[service.id] || ''} onChange={e => setServiceOwner(service.id, e.target.value)}><option value="">Use engagement lead</option>{owners.filter(owner => !owner.department || owner.department === department.id).map(owner => <option key={owner.id} value={owner.id}>{owner.label}</option>)}</select>}</div>})}</div></div>)}</div></section><section><div className="flex items-end justify-between"><div><h3 className="font-semibold">Existing assets</h3><p className="mt-1 text-xs text-slate-500">Supplied context can satisfy prerequisites without adding a full upstream cycle.</p></div><button type="button" onClick={addAsset} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold">Add asset</button></div><div className="mt-3 space-y-3">{form.existingAssets.map((asset, index) => <div key={index} className="grid gap-3 rounded-xl border border-white/[0.07] p-3 sm:grid-cols-[1fr_1fr_1.2fr_auto]"><select className={INPUT} value={asset.asset_kind} onChange={e => updateAsset(index, 'asset_kind', e.target.value)}><option value="brand_context">Brand context</option><option value="discovery_statement">Discovery statement</option><option value="audience_context">Audience context</option><option value="approved_content">Approved content</option><option value="approved_design">Approved design</option><option value="technical_brief">Technical brief</option><option value="campaign_brief">Campaign brief</option></select><input required placeholder="Asset name" className={INPUT} value={asset.name} onChange={e => updateAsset(index, 'name', e.target.value)} /><input type="url" placeholder="Optional link" className={INPUT} value={asset.source_url} onChange={e => updateAsset(index, 'source_url', e.target.value)} /><button type="button" onClick={() => removeAsset(index)} className="px-2 text-xs text-red-300">Remove</button></div>)}</div></section>{form.pipelineTemplateVersionId && <PipelineTemplateJourneyPreview preview={journeyPreview} loading={previewLoading} error={previewError} onPreview={onPreview} />}<button disabled={saving || !form.clientId || !form.brandId || !form.serviceIds.length || (form.pipelineTemplateVersionId && !journeyPreview)} className="w-full rounded-xl bg-violet-500 px-4 py-3 text-sm font-semibold disabled:opacity-40">Create engagement and instantiate journey</button></form>
 }
 
 function Modal({ title, onClose, children, wide = false }) { return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"><div className={`max-h-[92vh] w-full overflow-y-auto rounded-2xl border border-white/10 bg-[#111520] p-6 shadow-2xl ${wide ? 'max-w-6xl' : 'max-w-2xl'}`}><div className="mb-6 flex items-center justify-between gap-4"><h2 className="text-xl font-semibold">{title}</h2><button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-white">Close</button></div>{children}</div></div> }
