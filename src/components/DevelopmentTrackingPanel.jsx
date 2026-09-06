@@ -9,8 +9,10 @@ import {
   latestArtifactVersion,
 } from '../data/developmentStudio.js'
 import { developmentStudio } from '../data/developmentStudioRepository.js'
+import { departmentChat } from '../data/departmentChatRepository.js'
 import ArtifactApprovalPanel from './ArtifactApprovalPanel.jsx'
 import ArtifactRelationsPanel from './ArtifactRelationsPanel.jsx'
+import DepartmentChat from './DepartmentChat.jsx'
 
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20'
 const PRIMARY = 'rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50'
@@ -44,6 +46,23 @@ export default function DevelopmentTrackingPanel({ workspace, onRefresh }) {
       <div><h2 className="text-lg font-semibold">Development stages</h2><p className="mt-1 text-xs text-slate-500">Four status choices and one notes field per instantiated Development stage.</p></div>
       <div className="mt-4 grid gap-4 xl:grid-cols-3">{stages.map(stage => <StageCard key={`${stage.id}:${stage.status}:${stage.team_notes}`} stage={stage} saving={saving} onSave={(status, notes) => act(() => developmentStudio.updateStage({ stage_id: stage.id, status, notes }), `${stage.name} tracking updated.`)} />)}</div>
       {!stages.length && <div className="mt-4 rounded-2xl border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500">No Development stage was instantiated for this engagement.</div>}
+    </section>
+    <section>
+      <DepartmentChat
+        key={workspace.engagement.organization_id + ':' + workspace.engagement.id + ':development'}
+        departmentId="development"
+        departmentLabel="Development"
+        engagement={workspace.engagement}
+        artifactDefinitions={DEVELOPMENT_ARTIFACTS}
+        artifactForType={type => workspace.developmentArtifacts.find(item => item.artifact_type === type)}
+        stageForType={type => {
+          const artifact = workspace.developmentArtifacts.find(item => item.artifact_type === type)
+          return stages.find(stage => stage.id === artifact?.engagement_stage_instance_id) || stages[0] || null
+        }}
+        onPropose={input => departmentChat.proposeArtifact('development', input)}
+        onProposeWorkItem={input => departmentChat.proposeWorkItem('development', input)}
+        onCreated={onRefresh}
+      />
     </section>
     <ArtifactPanel workspace={workspace} stages={stages} saving={saving} act={act} onRefresh={onRefresh} />
   </div>

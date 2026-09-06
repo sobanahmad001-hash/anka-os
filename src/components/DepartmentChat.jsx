@@ -1,21 +1,42 @@
-import { useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useAuth } from '../context/AuthContext.jsx'
+import { useOrganization } from '../context/OrganizationContext.jsx'
+import { createChatCompletionGuard, handleCurrentChatFailure } from '../data/departmentChatIdentity.js'
 
 import { departmentChatProfile } from '../data/departmentChatProfiles.js'
+import { departmentChat } from '../data/departmentChatRepository.js'
 
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20'
 const PRIMARY = 'rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50'
 
-export default function DepartmentChat({
+export default function DepartmentChat(props) {
+  const { user } = useAuth()
+  const { activeOrganizationId, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
+  const identity = JSON.stringify([user?.id, activeOrganizationId, scopeRevision, props.engagement?.id, props.departmentId])
+  if (!user?.id || !activeOrganizationId || requestSignal?.aborted
+    || props.engagement?.organization_id !== activeOrganizationId) return null
+  return <ScopedDepartmentChat key={identity} {...props} organizationId={activeOrganizationId} requestSignal={requestSignal} handleOrganizationAccessError={handleOrganizationAccessError} />
+}
+
+function ScopedDepartmentChat({
   departmentId,
   departmentLabel,
   engagement,
   artifactDefinitions = {},
   artifactForType = () => null,
   stageForType = () => null,
-  onPropose,
-  onProposeWorkItem,
   onCreated,
+  organizationId,
+  requestSignal,
+  handleOrganizationAccessError,
 }) {
+  const completion = useRef(null)
+  const requestScope = { organizationId, signal: requestSignal }
+  useLayoutEffect(() => {
+    const guard = createChatCompletionGuard(requestSignal)
+    completion.current = guard
+    return () => guard.dispose()
+  }, [requestSignal])
   const profile = departmentChatProfile(departmentId)
   const resolvedDepartmentLabel = departmentLabel || profile.label
   const [artifactType, setArtifactType] = useState(profile.artifactTypes[0] || '')
@@ -25,21 +46,22 @@ export default function DepartmentChat({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
+  const [official, setOfficial] = useState(null)
   const [title, setTitle] = useState('')
   const [workItemType, setWorkItemType] = useState('task')
   const [priority, setPriority] = useState('medium')
 
   async function submit(event) {
     event.preventDefault()
+    const isCurrent = completion.current.begin()
+    if (!isCurrent()) return
     setBusy(true)
     setError('')
     setResult(null)
+    setOfficial(null)
     try {
-      if (!onProposeWorkItem && proposalMode === 'work_item') {
-        throw new Error('Work-item proposal is not available for this workflow.')
-      }
       const proposed = proposalMode === 'artifact'
-        ? await onPropose({
+        ? await departmentChat.proposeArtifact(departmentId, {
           engagement_id: engagement.id,
           artifact_id: (artifactForType(artifactType) || {}).id || null,
           engagement_stage_instance_id: (stageForType(artifactType) || {}).id || null,
@@ -48,37 +70,78 @@ export default function DepartmentChat({
           prompt,
           prompt_safe_for_ai: safe,
           change_summary: 'Draft proposed via Shared Department Chat',
-        })
-        : await onProposeWorkItem({
+        }, requestScope)
+        : await departmentChat.proposeWorkItem(departmentId, {
           engagement_id: engagement.id,
           title: title || `${artifactDefinitions[artifactType]?.label || 'Work item'} request`,
           work_item_type: workItemType,
           priority,
           prompt,
           prompt_safe_for_ai: safe,
-        })
+        }, requestScope)
+      if (!isCurrent()) return
       setResult(proposed)
       setPrompt('')
       setSafe(false)
-      await onCreated(proposed)
     } catch (reason) {
-      setError(reason.message)
+      handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message))
     } finally {
-      setBusy(false)
+      if (isCurrent()) setBusy(false)
+    }
+  }
+
+  async function decide(action) {
+    if (!result?.proposal_id) return
+    const isCurrent = completion.current.begin()
+    if (!isCurrent()) return
+    setBusy(true)
+    setError('')
+    try {
+      const decision = action === 'confirm'
+        ? await departmentChat.confirmProposal(result.proposal_id, requestScope)
+        : await departmentChat.rejectProposal(result.proposal_id, requestScope)
+      if (!isCurrent()) return
+      setResult(current => ({ ...current, status: decision.outcome, decision }))
+      if (decision.outcome === 'accepted' && isCurrent()) await onCreated?.(decision)
+    } catch (reason) {
+      handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => {
+        if (['stale', 'expired', 'rejected'].includes(failure.outcome)) {
+          setResult(current => ({ ...current, status: failure.outcome }))
+        }
+        setError(failure.message)
+      })
+    } finally {
+      if (isCurrent()) setBusy(false)
     }
   }
 
   const isWorkItemMode = proposalMode === 'work_item'
+
+  async function openOfficial(event) {
+    event.preventDefault()
+    const isCurrent = completion.current.begin()
+    if (!isCurrent() || result?.status !== 'accepted') return
+    setBusy(true)
+    setError('')
+    try {
+      const record = await departmentChat.getOfficialRecord(organizationId, result.decision, requestScope)
+      if (isCurrent()) setOfficial(record)
+    } catch (reason) {
+      handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message))
+    } finally {
+      if (isCurrent()) setBusy(false)
+    }
+  }
 
   return <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
     <form onSubmit={submit} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-400">Shared Department Chat · {departmentId}</p>
         <h2 className="mt-2 text-2xl font-semibold text-white">Propose a structured artifact or work item</h2>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">The single configured model receives this engagement and approved AI-safe context. It creates one ordinary unapproved draft or work item; it cannot approve, release, publish, call a business connector, or perform external work.</p>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">The configured model prepares a preview using this engagement and approved AI-safe context. Review and confirm it to create an unapproved artifact version or a work item that has not started.</p>
       </div>
       {error && <div className="mt-5 rounded-xl border border-red-900/60 bg-red-950/40 p-3 text-sm text-red-300">{error}</div>}
-      {result && <div className="mt-5 rounded-xl border border-emerald-900/60 bg-emerald-950/30 p-4 text-sm text-emerald-300">{result.version?.version_number ? `Draft version ${result.version.version_number} created. It remains unapproved and must follow the normal human review gate.` : `Work item "${result.title}" was created in \"not_started\" state. Review manually before execution.`}</div>}
+      {result && <ProposalPreview result={result} official={official} onOpenOfficial={openOfficial} busy={busy} onConfirm={() => decide('confirm')} onReject={() => decide('reject')} />}
       <div className="mt-6 space-y-5">
         <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Proposal mode
           <select className={`${INPUT} mt-2 normal-case tracking-normal`} value={proposalMode} onChange={event => setProposalMode(event.target.value)}>
@@ -134,7 +197,7 @@ export default function DepartmentChat({
           disabled={busy || !safe || (isWorkItemMode && !title.trim()) || (!isWorkItemMode && !artifactType)}
           className={`${PRIMARY} w-full`}
         >
-          {busy ? 'Creating unapproved draft…' : isWorkItemMode ? 'Propose draft work item' : 'Propose draft artifact'}
+          {busy ? 'Generating safe preview…' : isWorkItemMode ? 'Preview draft work item' : 'Preview draft artifact'}
         </button>
       </div>
     </form>
@@ -149,5 +212,27 @@ export default function DepartmentChat({
         <p className="mt-2">The human user is recorded as the timeline actor. The model run is separately traceable. Approval remains available only through the normal exact-version manager action.</p>
       </div>
     </aside>
+  </div>
+}
+
+function ProposalPreview({ result, official, onOpenOfficial, busy, onConfirm, onReject }) {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    setNow(Date.now())
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, new Date(result.expires_at).getTime() - Date.now()) + 1)
+    return () => clearTimeout(timer)
+  }, [result.proposal_id, result.expires_at])
+  const pending = result.status === 'pending' && new Date(result.expires_at).getTime() > now
+  const accepted = result.status === 'accepted'
+  return <div className="mt-5 rounded-xl border border-amber-900/60 bg-amber-950/25 p-4 text-sm text-amber-100">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div><p className="font-semibold">{accepted ? 'Official unapproved record created' : 'Preview only'}</p><p className="mt-1 text-xs text-amber-300/80">{pending ? 'Expires ' + new Date(result.expires_at).toLocaleString() : 'Status: ' + result.status}</p></div>
+      {pending && <div className="flex gap-2"><button type="button" disabled={busy} onClick={onConfirm} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Confirm official draft</button><button type="button" disabled={busy} onClick={onReject} className="rounded-lg border border-amber-700 px-3 py-2 text-xs disabled:opacity-50">Reject</button></div>}
+    </div>
+    {result.preview && <pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950/60 p-3 text-xs leading-5 text-slate-200">{JSON.stringify(result.preview, null, 2)}</pre>}
+    {result.decision?.replayed && <p className="mt-3 text-xs text-slate-400">This confirmation was already completed; the existing official record was returned.</p>}
+    {accepted && <p className="mt-3 text-xs text-emerald-300">Confirmation is not approval, release, publication, deployment, launch, or stage completion.</p>}
+    {accepted && <a className="mt-3 block underline" aria-disabled={busy} onClick={event => { if (busy) event.preventDefault(); else onOpenOfficial(event) }} href={'#wch-official-' + (result.decision.artifact_version_id || result.decision.work_item_id)}>Open official {result.decision.artifact_version_id ? 'artifact version' : 'work item'} · {result.decision.artifact_version_id || result.decision.work_item_id}</a>}
+    {official && <section id={'wch-official-' + official.id} className="mt-4 rounded-lg border border-emerald-700 p-3"><p className="font-semibold">Saved official record · {official.id}</p><pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(official.content || { title: official.title, description: official.description, status: official.status, work_item_type: official.work_item_type }, null, 2)}</pre></section>}
   </div>
 }

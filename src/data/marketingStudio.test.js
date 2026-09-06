@@ -79,7 +79,9 @@ test('UW2 reuses Shared Department Chat for confirmed Marketing planning drafts 
   for (const type of ['channel_strategy', 'campaign_brief', 'measurement_plan']) {
     assert.equal(chatProfiles.departments.marketing.artifact_types.includes(type), true)
   }
-  assert.match(chat, /ENABLED_DEPARTMENTS = new Set\(\['content', 'design', 'marketing'\]\)/)
+  assert.ok(chat.includes("ENABLED_DEPARTMENTS = new Set(['content', 'design', 'marketing', 'development'])"))
+  assert.match(chat, /save_department_chat_proposal/)
+  assert.match(chat, /confirm_department_chat_proposal/)
   assert.match(ui, /Shared Department Chat/)
   assert.match(repository, /department-chat/)
   assert.equal(chatProfiles.departments.marketing.artifact_types.includes('marketing_report'), false)

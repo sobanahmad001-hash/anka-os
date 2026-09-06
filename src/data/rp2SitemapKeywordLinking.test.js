@@ -29,7 +29,8 @@ test('RP2 validates both required JSON shapes in the canonical server save path'
   assert.match(sharedContent, /parent slug .*does not reference/)
   assert.match(sharedContent, /industry.*brand.*volume/)
   assert.match(contentStudio, /visibilityClient: userClient/)
-  assert.match(departmentChat, /visibilityClient: userClient/)
+  assert.match(departmentChat, /validateContentArtifact/)
+  assert.match(departmentChat, /p_validated_payload: input\.payload/)
 })
 
 test('RP2 checks target slugs and creates one queryable targets_page relation', () => {
