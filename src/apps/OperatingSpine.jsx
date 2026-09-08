@@ -6,6 +6,7 @@ import OrganizationGate from '../components/OrganizationGate.jsx'
 import PipelineTemplateJourneyPreview from '../components/PipelineTemplateJourneyPreview.jsx'
 import PortfolioDashboard from '../components/PortfolioDashboard.jsx'
 import WorkItemsPanel from '../components/WorkItemsPanel.jsx'
+import ClientWorkDirectory from './ClientWorkDirectory.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { OPERATING_DEPARTMENTS, pipelineDepartmentFlags } from '../data/operatingSpineRepository.js'
@@ -26,6 +27,7 @@ const INITIAL_ENGAGEMENT = {
 const labelize = value => String(value || '').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
 
 export default function OperatingSpine(props) {
+  if (props.initialView === 'clients') return <ClientWorkDirectory />
   return <OrganizationGate><ScopedOperatingSpine {...props} /></OrganizationGate>
 }
 

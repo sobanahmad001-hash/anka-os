@@ -62,9 +62,9 @@ test('WKS4 does not fabricate a client, agency-client, or engagement extension',
   assert.equal('agencyClient' in project, false)
 })
 
-test('WKS4 repository is read-only and independent of client, RET, and QTS models', () => {
+test('WKS4 repository keeps its read-only table surface independent of client, RET, and QTS models', () => {
   const repository = readFileSync(new URL('./internalWorkspaceRepository.js', import.meta.url), 'utf8')
-  for (const table of ['projects', 'workstreams', 'tasks', 'milestones', 'requests', 'deliverables', 'activity_events', 'living_project_documents']) assert.match(repository, new RegExp(`from\\('${table}'\\)`))
+  for (const table of ['projects', 'workstreams', 'tasks', 'milestones', 'requests', 'deliverables', 'activity_events', 'living_project_documents']) assert.match(repository, new RegExp(`page\\('${table}'`))
   assert.match(repository, /\.eq\('engagement_type', 'internal'\)/)
   assert.doesNotMatch(repository, /from\('(clients|agency_clients|brands|recurring_plans|quick_tasks)'\)/)
   assert.doesNotMatch(repository, /\.(insert|update|upsert|delete|rpc|functions)\s*\(/)
