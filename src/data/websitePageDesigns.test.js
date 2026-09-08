@@ -47,6 +47,18 @@ test('architecture extraction reads pages from the newest version using slug', (
   assert.deepEqual(latestArchitecturePages(artifacts, versions), [{ slug: 'home' }])
 })
 
+test('Website Page Designs derives caller roots before scoped privileged work', () => {
+  assert.match(edge, /resolveServerOrganizationContext/)
+  assert.match(edge, /callerDirectionVersionRoot/)
+  assert.match(edge, /callerPageDesignRoot/)
+  assert.match(edge, /root: \{ kind: 'engagement'/)
+  assert.doesNotMatch(edge, /const ORGANIZATION_ID|8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25/)
+  assert.doesNotMatch(edge, /SUPABASE_SERVICE_ROLE_KEY/)
+  assert.match(edge, /organization_id: admin\.organizationId/)
+  assert.match(edge, /\.eq\('design_direction_version_id', visible\.design_direction_version_id\)\.eq\('status', expected\)/)
+  assert.match(edge, /startsWith\(admin\.organizationId \+ '\/'\)/)
+})
+
 test('rollback-safe verification names the required schema and security checks', () => {
   assert.match(verification.trimEnd(), /rollback;$/)
   for (const name of ['multiple_attempts_are_append_created', 'd2_visibility_is_inherited', 'new_attempt_defaults_to_draft', 'slug_column_is_canonical', 'rls_enabled', 'browser_is_read_only', 'html_css_model_registered']) assert.match(verification, new RegExp(name))

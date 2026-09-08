@@ -19,7 +19,8 @@ export const environmentNav = [
     description: 'Client delivery',
     items: [
       { label: 'Coordination', path: null, dept: null, isHeader: true },
-      { label: 'Portfolio', path: '/sphere/workspace', dept: null },
+      { label: 'Home', path: '/sphere/workspace', dept: null },
+      { label: 'Portfolio', path: '/sphere/portfolio', dept: null },
       { label: 'Client Work', path: '/sphere/clients', dept: null },
       { label: 'Internal Work', path: '/sphere/internal', dept: null },
       { label: 'My Work', path: '/sphere/my-work', dept: null },

@@ -30,16 +30,36 @@ test('native export is provider-neutral and requires no paid API key in browser 
 })
 
 test('only approved pages can export and completion is an atomic service-only database boundary', () => {
-  assert.match(edge, /data\.status !== 'approved'/)
+  assert.match(edge, /design\.status !== 'approved'/)
   assert.match(migration, /and status = 'approved'/)
   assert.match(migration, /complete_native_wordpress_export/)
   assert.match(migration, /revoke all on function public\.complete_native_wordpress_export[\s\S]*from public, anon, authenticated/)
 })
 
+test('Gate 0 derives tenant authority from caller-readable canonical roots before privileged access', () => {
+  assert.doesNotMatch(edge, /const ORGANIZATION_ID/)
+  assert.match(edge, /resolveServerOrganizationContext/)
+  assert.match(edge, /wordpressExportScope\(userClient, body\)/)
+  assert.match(edge, /root: \{ kind: 'engagement', id: root\.engagementId \}/)
+  assert.match(edge, /Requested organization does not match the root resource/)
+  assert.match(edge, /organization:organizations!inner\(id, status\)/)
+  assert.match(edge, /\.eq\('member_kind', 'team'\)\.eq\('organization\.status', 'active'\)/)
+  assert.match(edge, /preflightWordPressExportRequest[\s\S]*resolveServerOrganizationContext/)
+})
+
+test('Gate 0 scopes exact approved sources, writes, RPC completion, and private storage paths', () => {
+  assert.match(edge, /\.eq\('design_direction_version_id', preflight\.directionVersionId\)\.eq\('status', 'approved'\)/)
+  assert.match(edge, /\.eq\('organization_id', admin\.organizationId\)/)
+  assert.match(edge, /p_organization_id: admin\.organizationId/)
+  assert.match(edge, /expectedExportPrefix\(organizationId, designId, jobId\)/)
+  assert.match(edge, /assertExportStoragePath\(storagePath, admin\.organizationId/)
+  assert.match(edge, /WordPress source references media outside its organization and direction version/)
+})
+
 test('private artifacts use short-lived signed URLs that are never persisted', () => {
   assert.match(migration, /'wordpress-theme-exports'[\s\S]*false/)
   assert.match(edge, /createSignedUrl\(storagePath, 600/)
-  assert.match(edge, /createSignedUrl\(job\.storage_path, 600/)
+  assert.match(edge, /createSignedUrl\(storagePath, 600/)
   assert.doesNotMatch(migration, /\n\s+download_url text/)
   assert.match(migration, /storage:\/\/wordpress-theme-exports/)
 })

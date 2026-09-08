@@ -44,7 +44,8 @@ test('video is an auditable unavailable placeholder and makes no video provider 
   assert.match(edge, /media_type: 'video', status: 'unavailable'/)
   assert.match(edge, /Video generation is not yet configured\. An API key and provider need to be added before this works\./)
   assert.doesNotMatch(edge, /api\.openai\.com\/v1\/videos|generativelanguage|sora-2/i)
-  assert.match(ui, />Generate video</)
+  assert.match(ui, /Video not configured/)
+  assert.doesNotMatch(ui, />Generate video</)
 })
 
 test('media stays attached to the exact immutable version and failures remain visible', () => {

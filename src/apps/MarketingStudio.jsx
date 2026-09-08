@@ -25,7 +25,22 @@ import {
 import { marketingStudio } from '../data/marketingStudioRepository.js'
 import { shouldApplyDashboardResponse } from '../data/performanceDashboard.js'
 import { loadPerformanceDashboard } from '../data/performanceDashboardRepository.js'
+import { shouldApplyKeywordResearchResponse } from '../data/marketingKeywordResearch.js'
+import { loadMarketingKeywordResearch } from '../data/marketingKeywordResearchRepository.js'
+import { canManageMarketingConnections } from '../data/marketingConnectionReadiness.js'
+import {
+  marketingSelectionParams,
+  privateMarketingParams,
+  reportAuthorizedMarketingAction,
+  resolveMarketingContext,
+  resolveMarketingNavigationScope,
+  runAuthorizedMarketingAction,
+  selectableMarketingEngagements,
+} from '../data/marketingWorkshopContext.js'
+import { parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
 import DepartmentChat from '../components/DepartmentChat.jsx' // eslint-disable-line no-unused-vars
+import MarketingConnectionReadinessPanel from '../components/MarketingConnectionReadinessPanel.jsx'
+import WorkshopContextShell from '../components/WorkshopContextShell.jsx'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'
@@ -33,6 +48,16 @@ import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
 const BUTTON = 'rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-emerald-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50'
 const PRIMARY = 'rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50'
+const MARKETING_TABS = Object.freeze([
+  ['campaigns', 'Campaigns'],
+  ['ad-tracking', 'Ad campaign tracking'],
+  ['seo-keywords', 'SEO keyword history'],
+  ['backlinks', 'Backlink outreach'],
+  ['artifacts', 'Artifacts'],
+  ['chat', 'Shared Department Chat'],
+  ['analytics', 'Performance dashboard'],
+  ['connections', 'Connections'],
+])
 
 function blankCampaign() {
   return { name: '', objective: '', planned_channels: '', starts_on: '', ends_on: '', planned_budget: '', currency_code: 'USD', status: 'draft' }
@@ -59,19 +84,31 @@ function Notice({ error, message }) {
 }
 
 export default function MarketingStudio() {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const {
     activeOrganizationId, selectionRequired, loading: organizationLoading,
-    handleOrganizationAccessError, scopeRevision, requestSignal,
+    handleOrganizationAccessError, scopeRevision, requestSignal, activeMembership,
   } = useOrganization()
-  const requestedEngagementId = searchParams.get('engagement') || ''
+  const navigationContext = useMemo(() => parseWorkshopNavigation(searchParams), [searchParams])
+  const requestedPrivate = searchParams.get('mode') === 'private'
+  const requestedTab = MARKETING_TABS.some(([id]) => id === navigationContext.workshopTab)
+    ? navigationContext.workshopTab : 'campaigns'
+  const navigationLoadKey = useMemo(() => JSON.stringify({
+    organizationId: navigationContext.organizationId,
+    clientId: navigationContext.clientId,
+    projectId: navigationContext.projectId,
+    engagementId: navigationContext.engagementId,
+    brandId: navigationContext.brandId,
+    activeServiceId: navigationContext.activeServiceId,
+    stageId: navigationContext.stageId,
+    workRecord: navigationContext.workRecord,
+    output: navigationContext.output,
+    draft: navigationContext.draft,
+  }), [navigationContext])
   const [engagements, setEngagements] = useState([])
-  const [brands, setBrands] = useState([])
-  const [backlinkBrandId, setBacklinkBrandId] = useState('')
-  const [engagementId, setEngagementId] = useState('')
   const [workspace, setWorkspace] = useState(null)
   const [campaignId, setCampaignId] = useState('')
-  const [tab, setTab] = useState('campaigns')
+  const [tab, setTab] = useState(requestedTab)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -83,6 +120,24 @@ export default function MarketingStudio() {
     ? marketingStudio.forOrganization(activeOrganizationId, { signal: requestSignal })
     : null, [activeOrganizationId, organizationReady, requestSignal])
   const workspaceGeneration = useRef(0)
+  const context = useMemo(
+    () => resolveMarketingContext(navigationContext, engagements, activeOrganizationId, requestedPrivate),
+    [activeOrganizationId, engagements, navigationContext, requestedPrivate],
+  )
+  const engagementId = context.engagement?.id || ''
+  const selectableEngagements = useMemo(
+    () => selectableMarketingEngagements(navigationContext, engagements),
+    [engagements, navigationContext],
+  )
+  const canonicalScope = useMemo(
+    () => resolveMarketingNavigationScope(navigationContext, workspace, activeOrganizationId),
+    [activeOrganizationId, navigationContext, workspace],
+  )
+  const contextValidation = validateWorkshopNavigation(navigationContext, canonicalScope)
+  const sameOrganization = !navigationContext.organizationId || navigationContext.organizationId === activeOrganizationId
+  const returnTarget = workspaceReturnTarget(contextValidation.context ? contextValidation : {}, {
+    fallbackProjectId: sameOrganization ? context.engagement?.project_id : '',
+  })
 
   function currentScope(request) {
     return !request.signal?.aborted &&
@@ -96,7 +151,7 @@ export default function MarketingStudio() {
 
   useLayoutEffect(() => {
     workspaceGeneration.current += 1
-    setEngagements([]); setBrands([]); setBacklinkBrandId(''); setEngagementId('')
+    setEngagements([])
     setWorkspace(null); setCampaignId(''); setTab('campaigns')
     setLoading(organizationReady); setSaving(false); setError(''); setMessage('')
   }, [activeOrganizationId, organizationReady, scopeRevision])
@@ -111,7 +166,7 @@ export default function MarketingStudio() {
     setLoading(true)
     setError('')
     try {
-      const result = await studio.load(id)
+      const result = await studio.load(id, navigationContext)
       const mismatch = result?.engagement?.organization_id !== request.organizationId
       if (mismatch) throw Object.assign(new Error('Marketing workspace organization mismatch'), { status: 403, membershipMismatch: true })
       if (!currentScope(request) || generation !== workspaceGeneration.current) return
@@ -131,23 +186,12 @@ export default function MarketingStudio() {
     if (!studio || !organizationReady) return undefined
     let active = true
     const request = { organizationId: activeOrganizationId, revision: scopeRevision, signal: requestSignal }
-    Promise.all([studio.listEngagements(), studio.listBrands()]).then(([rows, brandRows]) => {
-      const mismatch = organizationMismatch(rows) || organizationMismatch(brandRows)
+    studio.listEngagements().then(rows => {
+      const mismatch = organizationMismatch(rows)
       if (mismatch) throw Object.assign(new Error('Marketing catalogue organization mismatch'), { status: 403, membershipMismatch: true })
       if (!active || !currentScope(request)) return
       setEngagements(rows || [])
-      setBrands(brandRows || [])
-      setBacklinkBrandId(brandRows?.[0]?.id || '')
-      const requested = rows?.find(item => item.id === requestedEngagementId)?.id || ''
-      if (requestedEngagementId && !requested) {
-        setEngagementId(''); setWorkspace(null); setLoading(false)
-        setError('The requested Marketing engagement is not available in the active organization.')
-        return
-      }
-      const first = requested || rows?.[0]?.id || ''
-      setEngagementId(first)
-      if (first) loadWorkspace(first, '', request)
-      else setLoading(false)
+      setLoading(false)
     }).catch(loadError => {
       if (active && currentScope(request) && loadError?.name !== 'AbortError') {
         handleOrganizationAccessError(loadError, { membershipMismatch: loadError?.membershipMismatch === true })
@@ -155,19 +199,32 @@ export default function MarketingStudio() {
       }
     })
     return () => { active = false }
-  }, [activeOrganizationId, organizationReady, requestedEngagementId, requestSignal, scopeRevision, studio])
+  }, [activeOrganizationId, organizationReady, requestSignal, scopeRevision, studio])
+
+  useEffect(() => {
+    if (engagementId) loadWorkspace(engagementId)
+    else setWorkspace(null)
+    // Exact record and output pointers must be re-resolved when navigation changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engagementId, navigationLoadKey, studio])
+
+  useEffect(() => { setTab(requestedTab) }, [requestedTab])
 
   const selectedCampaign = workspace?.campaigns.find(item => item.id === campaignId) || null
 
-  async function act(callback, success, preferredCampaign = '') {
+  async function act(callback, success, preferredCampaign = '', refreshWorkspace = true) {
     if (!studio || !organizationReady) return null
+    if (contextValidation.status !== 'ready') {
+      setError('Official Marketing changes require a current authorized work context.')
+      return null
+    }
     const request = { organizationId: activeOrganizationId, revision: scopeRevision, signal: requestSignal }
     setSaving(true); setError(''); setMessage('')
     try {
-      const result = await callback()
+      const result = await runAuthorizedMarketingAction(contextValidation, () => currentScope(request), callback)
       if (!currentScope(request)) return null
       setMessage(success)
-      await loadWorkspace(engagementId, preferredCampaign || result?.id || campaignId, request)
+      if (refreshWorkspace) await loadWorkspace(engagementId, preferredCampaign || result?.id || campaignId, request)
       return result
     } catch (actionError) {
       if (!currentScope(request) || actionError?.name === 'AbortError') return null
@@ -180,15 +237,50 @@ export default function MarketingStudio() {
   }
 
   async function reportMarketingAccess(callback) {
-    try { return await callback() }
-    catch (actionError) {
+    const request = { organizationId: activeOrganizationId, revision: scopeRevision, signal: requestSignal }
+    return reportAuthorizedMarketingAction(contextValidation, () => currentScope(request), callback, actionError => {
       handleOrganizationAccessError(actionError, { membershipMismatch: actionError?.membershipMismatch === true })
-      throw actionError
-    }
+    })
   }
 
   if (!organizationReady) {
     return <div className="flex h-full items-center justify-center bg-slate-950 p-6 text-sm text-slate-400">{organizationLoading ? 'Loading organization access…' : 'Choose an active organization before opening Marketing Studio.'}</div>
+  }
+
+  if (!loading && context.mode === 'choose') return <MarketingEntryShell>
+    <section className="mx-auto max-w-3xl rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Marketing Studio</p>
+      <h1 className="mt-2 text-2xl font-semibold">Choose Marketing work</h1>
+      <p className="mt-2 text-sm text-slate-400">Select an authorized engagement. Marketing Studio will not choose work silently.</p>
+      <div className="mt-5 grid gap-3">{selectableEngagements.map(item => <button type="button" key={item.id} onClick={() => setSearchParams(marketingSelectionParams(navigationContext, item, activeOrganizationId))} className="rounded-xl border border-slate-700 px-4 py-3 text-left text-sm font-semibold text-slate-200 hover:border-emerald-500">{item.name} · {item.brands?.name || 'Brand'}</button>)}</div>
+      {!selectableEngagements.length && <p className="mt-5 text-sm text-slate-500">No active Marketing engagement is available in this organization.</p>}
+      <button type="button" onClick={() => setSearchParams(privateMarketingParams(navigationContext, activeOrganizationId))} className={BUTTON + ' mt-5'}>Open private experiment</button>
+    </section>
+  </MarketingEntryShell>
+
+  if (!loading && context.mode === 'private') return <MarketingEntryShell>
+    <section className="mx-auto max-w-2xl rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Private experiment</p>
+      <h1 className="mt-2 text-2xl font-semibold">Private Marketing workspace</h1>
+      <p className="mt-2 text-sm leading-6 text-slate-400">This private entry has no official project, engagement, brand, provider account, or save target. Choose authorized work before creating any official Marketing record.</p>
+      <button type="button" onClick={() => setSearchParams({})} className={BUTTON + ' mt-5'}>Choose official work</button>
+    </section>
+  </MarketingEntryShell>
+
+  if (!loading && context.mode === 'denied') {
+    const rejected = navigationContext.organizationId && navigationContext.organizationId !== activeOrganizationId
+      ? validateWorkshopNavigation(navigationContext, { status: 'ready', activeOrganizationId, organizationId: activeOrganizationId })
+      : validateWorkshopNavigation(navigationContext, { status: 'denied' })
+    return <MarketingEntryShell><WorkshopContextShell navigation={navigationContext} validation={rejected} returnTarget={workspaceReturnTarget(rejected)}>
+      <div />
+    </WorkshopContextShell><div className="mt-5 text-center"><button type="button" onClick={() => setSearchParams({})} className={BUTTON}>Choose permitted work</button></div></MarketingEntryShell>
+  }
+
+  function selectTab(nextTab) {
+    setTab(nextTab)
+    if (context.engagement) setSearchParams(marketingSelectionParams(navigationContext, context.engagement, activeOrganizationId, {
+      workshopTab: nextTab === 'campaigns' ? '' : nextTab,
+    }), { replace: true })
   }
 
   return (
@@ -205,10 +297,12 @@ export default function MarketingStudio() {
       </header>
 
       <main className="mx-auto max-w-7xl space-y-6 px-6 py-6">
+        <WorkshopContextShell navigation={navigationContext} validation={contextValidation} returnTarget={returnTarget} projectName={context.engagement?.name}>
         <Notice error={error} message={message} />
         <section className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
           <label className="min-w-72 flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Marketing engagement
-            <select value={engagementId} onChange={event => { setEngagementId(event.target.value); loadWorkspace(event.target.value) }} className={`${INPUT} mt-2 normal-case tracking-normal`}>
+            <select value={engagementId} onChange={event => { const item = engagements.find(candidate => candidate.id === event.target.value); setSearchParams(item ? marketingSelectionParams(navigationContext, item, activeOrganizationId) : {}) }} className={`${INPUT} mt-2 normal-case tracking-normal`}>
+              <option value="">Choose work</option>
               {engagements.map(item => <option key={item.id} value={item.id}>{item.name} · {item.brands?.name || 'Brand'}</option>)}
             </select>
           </label>
@@ -216,29 +310,53 @@ export default function MarketingStudio() {
         </section>
 
         <nav className="flex gap-2 overflow-x-auto border-b border-slate-800">
-          {[['campaigns', 'Campaigns'], ['ad-tracking', 'Ad campaign tracking'], ['backlinks', 'Backlink outreach'], ['artifacts', 'Artifacts'], ['chat', 'Shared Department Chat'], ['analytics', 'Performance dashboard']].map(([id, label]) => (
-            <button key={id} onClick={() => setTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-emerald-400 text-emerald-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>
+          {MARKETING_TABS.map(([id, label]) => (
+            <button key={id} onClick={() => selectTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-emerald-400 text-emerald-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>
           ))}
         </nav>
 
-        {loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Marketing Studio…</div> : tab === 'backlinks' ? (
-          <BacklinkOutreach key={`${activeOrganizationId}:${scopeRevision}`} studio={studio} brands={brands} brandId={backlinkBrandId} setBrandId={setBacklinkBrandId} onAccessError={handleOrganizationAccessError} />
-        ) : !workspace ? (
+        {loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Marketing Studio…</div> : !workspace ? (
           <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Select an engagement with a Marketing service to begin.</div>
+        ) : tab === 'backlinks' ? (
+          <BacklinkOutreach key={`${activeOrganizationId}:${scopeRevision}:${workspace.engagement.brand_id}`} studio={studio} brand={{ id: workspace.engagement.brand_id, name: workspace.engagement.brands?.name || 'Brand' }} act={act} onAccessError={handleOrganizationAccessError} />
+        ) : tab === 'seo-keywords' ? (
+          <SeoKeywordHistory
+            key={activeOrganizationId + ':' + scopeRevision + ':' + workspace.engagement.brand_id}
+            organizationId={activeOrganizationId}
+            scopeRevision={scopeRevision}
+            signal={requestSignal}
+            onAccessError={handleOrganizationAccessError}
+            brand={{ id: workspace.engagement.brand_id, name: workspace.engagement.brands?.name || 'Brand', organization_id: workspace.engagement.organization_id }}
+          />
         ) : tab === 'campaigns' ? (
           <Campaigns studio={studio} workspace={workspace} campaignId={campaignId} setCampaignId={setCampaignId} selected={selectedCampaign} saving={saving} act={act} />
         ) : tab === 'ad-tracking' ? (
           <AdCampaignTracking studio={studio} workspace={workspace} saving={saving} act={act} />
         ) : tab === 'artifacts' ? (
-          <Artifacts studio={studio} workspace={workspace} campaign={selectedCampaign} saving={saving} act={act} setTab={setTab} onRefresh={() => loadWorkspace(engagementId, campaignId)} />
+          <Artifacts studio={studio} workspace={workspace} campaign={selectedCampaign} saving={saving} act={act} setTab={selectTab} onRefresh={() => loadWorkspace(engagementId, campaignId)} />
         ) : tab === 'chat' ? (
           <DepartmentChat departmentId="marketing" engagement={workspace.engagement} artifactTypes={['channel_strategy', 'campaign_brief', 'measurement_plan']} artifactDefinitions={MARKETING_ARTIFACT_FORMS} artifactForType={artifactType => workspace.artifacts.find(item => item.artifact_type === artifactType)} stageForType={() => null} onPropose={input => reportMarketingAccess(() => studio.proposeArtifact(input))} onProposeWorkItem={input => reportMarketingAccess(() => studio.proposeWorkItem(input))} onCreated={() => loadWorkspace(engagementId, campaignId)} />
+        ) : tab === 'connections' ? (
+          <MarketingConnectionReadinessPanel
+            key={activeOrganizationId + ':' + scopeRevision + ':' + workspace.engagement.brand_id}
+            organizationId={activeOrganizationId}
+            scopeRevision={scopeRevision}
+            signal={requestSignal}
+            onAccessError={handleOrganizationAccessError}
+            canManage={canManageMarketingConnections(activeMembership)}
+            brand={{ id: workspace.engagement.brand_id, name: workspace.engagement.brands?.name || 'Brand', organization_id: workspace.engagement.organization_id }}
+          />
         ) : (
           <Analytics key={`${activeOrganizationId}:${scopeRevision}:${engagementId}:${workspace.engagement.brand_id}`} organizationId={activeOrganizationId} scopeRevision={scopeRevision} signal={requestSignal} onAccessError={handleOrganizationAccessError} engagementId={engagementId} brand={{ id: workspace.engagement.brand_id, name: workspace.engagement.brands?.name || 'Brand', organization_id: workspace.engagement.organization_id }} />
         )}
+        </WorkshopContextShell>
       </main>
     </div>
   )
+}
+
+function MarketingEntryShell({ children }) {
+  return <div className="h-full overflow-y-auto bg-slate-950 px-6 py-12 text-white">{children}</div>
 }
 
 function Campaigns({ studio, workspace, campaignId, setCampaignId, selected, saving, act }) {
@@ -285,7 +403,7 @@ function Campaigns({ studio, workspace, campaignId, setCampaignId, selected, sav
   </div>
 }
 
-function BacklinkOutreach({ studio, brands, brandId, setBrandId, onAccessError }) { // eslint-disable-line no-unused-vars
+function BacklinkOutreach({ studio, brand, act, onAccessError }) { // eslint-disable-line no-unused-vars
   const [targets, setTargets] = useState([])
   const [selectedId, setSelectedId] = useState('')
   const [creating, setCreating] = useState(true)
@@ -297,29 +415,12 @@ function BacklinkOutreach({ studio, brands, brandId, setBrandId, onAccessError }
   const [message, setMessage] = useState('')
   const visibleTargets = useMemo(() => filterBacklinkTargets(targets, filters), [targets, filters])
 
-  async function loadTargets(nextBrandId = brandId) {
-    if (!nextBrandId) { setTargets([]); return }
-    setLoading(true); setError('')
-    try {
-      const rows = await studio.listBacklinkTargets(nextBrandId)
-      if (rows.some(row => row.organization_id !== studio.organizationId)) {
-        throw Object.assign(new Error('Backlink catalogue organization mismatch'), { status: 403, membershipMismatch: true })
-      }
-      setTargets(rows)
-    }
-    catch (loadError) {
-      onAccessError(loadError, { membershipMismatch: loadError?.membershipMismatch === true })
-      setError(loadError.message)
-    }
-    finally { setLoading(false) }
-  }
-
   useEffect(() => {
     setSelectedId(''); setCreating(true); setForm(blankBacklinkTarget()); setMessage('')
-    if (!brandId) { setTargets([]); return undefined }
+    if (!brand.id) { setTargets([]); return undefined }
     let active = true
     setLoading(true); setError('')
-    studio.listBacklinkTargets(brandId)
+    studio.listBacklinkTargets(brand.id)
       .then(rows => {
         if (rows.some(row => row.organization_id !== studio.organizationId)) {
           throw Object.assign(new Error('Backlink catalogue organization mismatch'), { status: 403, membershipMismatch: true })
@@ -334,7 +435,7 @@ function BacklinkOutreach({ studio, brands, brandId, setBrandId, onAccessError }
       })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [brandId, onAccessError, studio])
+  }, [brand.id, onAccessError, studio])
 
   function editTarget(target) {
     setSelectedId(target.id); setCreating(false); setForm(backlinkTargetEditor(target)); setMessage('')
@@ -343,12 +444,14 @@ function BacklinkOutreach({ studio, brands, brandId, setBrandId, onAccessError }
   async function submit(event) {
     event.preventDefault(); setSaving(true); setError(''); setMessage('')
     try {
-      const result = creating
-        ? await studio.createBacklinkTarget(brandId, form)
-        : await studio.updateBacklinkTarget(selectedId, form)
+      const result = await act(
+        () => creating ? studio.createBacklinkTarget(brand.id, form) : studio.updateBacklinkTarget(selectedId, form),
+        creating ? 'Backlink target added.' : 'Backlink target updated.', '', false,
+      )
+      if (!result) return
       setSelectedId(result.id); setCreating(false); setForm(backlinkTargetEditor(result))
       setMessage(creating ? 'Backlink target added.' : 'Backlink target updated.')
-      await loadTargets(brandId)
+      setTargets(current => creating ? [result, ...current] : current.map(target => target.id === result.id ? result : target))
     } catch (saveError) {
       onAccessError(saveError, { membershipMismatch: saveError?.membershipMismatch === true })
       setError(saveError.message)
@@ -356,11 +459,11 @@ function BacklinkOutreach({ studio, brands, brandId, setBrandId, onAccessError }
     finally { setSaving(false) }
   }
 
-  if (!brands.length) return <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Create a brand before recording backlink opportunities.</div>
+  if (!brand.id) return <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">This engagement needs a brand before recording backlink opportunities.</div>
 
   return <div className="space-y-6">
     <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-      <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Manual research log</p><h2 className="mt-1 text-xl font-semibold">Backlink outreach</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Qualify opportunities and track human outreach. This area does not scrape sites, send messages, or verify backlinks.</p></div><Field label="Brand"><select className={`${INPUT} min-w-64`} value={brandId} onChange={event => setBrandId(event.target.value)}>{brands.map(brand => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select></Field></div>
+      <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Manual research log</p><h2 className="mt-1 text-xl font-semibold">Backlink outreach</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Qualify opportunities and track human outreach. This area does not scrape sites, send messages, or verify backlinks.</p></div><div className="rounded-xl bg-slate-950 px-4 py-3 text-sm text-slate-400">Engagement brand <span className="ml-2 font-semibold text-white">{brand.name}</span></div></div>
       <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <Field label="Status"><select className={INPUT} value={filters.outreach_status} onChange={event => setFilters({ ...filters, outreach_status: event.target.value })}><option value="">All statuses</option>{BACKLINK_STATUSES.map(value => <option key={value} value={value}>{titleize(value)}</option>)}</select></Field>
         <Field label="Link type"><select className={INPUT} value={filters.link_type} onChange={event => setFilters({ ...filters, link_type: event.target.value })}><option value="">All link types</option>{BACKLINK_LINK_TYPES.map(value => <option key={value} value={value}>{titleize(value)}</option>)}</select></Field>
@@ -616,19 +719,127 @@ function Artifacts({ studio, workspace, campaign, saving, act, setTab, onRefresh
   </div>
 }
 
+function SeoKeywordHistory({ organizationId, scopeRevision, signal, onAccessError, brand }) {
+  const [research, setResearch] = useState(null)
+  const [selectedId, setSelectedId] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const generation = useRef(0)
+  const current = useRef({ organizationId, brandId: brand.id, revision: scopeRevision })
+  current.current = { organizationId, brandId: brand.id, revision: scopeRevision }
+
+  useEffect(() => {
+    const requestGeneration = ++generation.current
+    const request = { organizationId, brandId: brand.id, revision: scopeRevision, signal }
+    setResearch(null); setSelectedId(''); setLoading(true); setError('')
+    loadMarketingKeywordResearch({ organizationId, brand, signal }).then(result => {
+      if (!shouldApplyKeywordResearchResponse(request, current.current, requestGeneration, generation.current)) return
+      setResearch(result)
+      setSelectedId(result.trackedKeywords[0]?.id || '')
+    }).catch(loadError => {
+      if (!shouldApplyKeywordResearchResponse(request, current.current, requestGeneration, generation.current) || loadError?.name === 'AbortError') return
+      onAccessError(loadError, { membershipMismatch: loadError?.membershipMismatch === true })
+      setError(loadError.message)
+    }).finally(() => {
+      if (shouldApplyKeywordResearchResponse(request, current.current, requestGeneration, generation.current)) setLoading(false)
+    })
+    return () => { generation.current += 1 }
+  }, [brand, organizationId, onAccessError, scopeRevision, signal])
+
+  const selected = research?.trackedKeywords.find(item => item.id === selectedId) || null
+  const rank = snapshot => snapshot?.position == null ? 'Rank unknown' : 'Position ' + snapshot.position
+  const metric = value => value == null ? 'Unknown' : Number(value).toLocaleString()
+
+  if (loading) return <div className="py-20 text-center text-sm text-slate-500">Loading SEO keyword history…</div>
+  if (error) return <Notice error={error} />
+
+  return <div className="space-y-6">
+    <section className="rounded-2xl border border-sky-900/60 bg-sky-950/30 p-5">
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-sky-300">Read-only SEO identity</p>
+      <h2 className="mt-1 text-xl font-semibold">{brand.name} keyword history</h2>
+      <p className="mt-2 text-sm leading-6 text-slate-400">Tracked SEO keywords retain their own identity, target page, Content keyword-strategy source, and dated rank observations. They are separate from Google Ads planning keywords.</p>
+    </section>
+
+    {!research?.trackedKeywords.length ? (
+      <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-14 text-center text-sm text-slate-500">No tracked SEO keywords are recorded for this brand.</div>
+    ) : (
+      <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
+        <section className="space-y-3">
+          {research.trackedKeywords.map(item => (
+            <button key={item.id} onClick={() => setSelectedId(item.id)} className={'w-full rounded-2xl border p-4 text-left transition ' + (selectedId === item.id ? 'border-sky-500 bg-sky-950/40' : 'border-slate-800 bg-slate-900/70 hover:border-slate-600')}>
+              <div className="flex items-start justify-between gap-3">
+                <p className="font-semibold text-white">{item.keyword}</p>
+                <span className={'rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ' + (item.active ? 'bg-emerald-950 text-emerald-300' : 'bg-slate-800 text-slate-400')}>{item.active ? 'Active' : 'Inactive'}</span>
+              </div>
+              <p className="mt-2 break-all text-xs text-slate-400">{item.pageTarget?.url || 'Tracked page unavailable'}</p>
+              <p className="mt-2 text-xs text-slate-500">{rank(item.latestSnapshot)} · {item.history.length} dated observation{item.history.length === 1 ? '' : 's'}</p>
+            </button>
+          ))}
+        </section>
+
+        {selected && <section className="space-y-5 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-xl font-semibold">{selected.keyword}</h3>
+              {!selected.active && <span className="rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-400">Inactive keyword retained</span>}
+            </div>
+            <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+              <div className="rounded-xl bg-slate-950 p-3"><dt className="text-xs uppercase tracking-wide text-slate-500">Canonical page target</dt><dd className="mt-1 break-all text-slate-200">{selected.pageTarget?.url || 'Unavailable'}</dd></div>
+              <div className="rounded-xl bg-slate-950 p-3"><dt className="text-xs uppercase tracking-wide text-slate-500">Page type</dt><dd className="mt-1 text-slate-200">{titleize(selected.pageTarget?.pageType || 'unknown')}</dd></div>
+              <div className="rounded-xl bg-slate-950 p-3"><dt className="text-xs uppercase tracking-wide text-slate-500">Target tier</dt><dd className="mt-1 text-slate-200">{selected.targetRankTier ? titleize(selected.targetRankTier) : 'Not set'}</dd></div>
+              <div className="rounded-xl bg-slate-950 p-3"><dt className="text-xs uppercase tracking-wide text-slate-500">Content source</dt><dd className="mt-1 text-slate-200">{selected.sourceArtifact?.title || 'No keyword-strategy artifact linked'}</dd></div>
+            </dl>
+          </div>
+
+          <div>
+            <h4 className="font-semibold">Dated rank history</h4>
+            {!selected.history.length ? <p className="mt-3 rounded-xl border border-dashed border-slate-700 p-5 text-sm text-slate-500">No rank observations have been recorded.</p> : (
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full min-w-[620px] text-left text-sm">
+                  <thead className="border-b border-slate-700 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Date</th><th className="px-3 py-2">Rank</th><th className="px-3 py-2">Clicks</th><th className="px-3 py-2">Impressions</th></tr></thead>
+                  <tbody>{selected.history.map(snapshot => <tr key={snapshot.id} className="border-b border-slate-800"><td className="px-3 py-3">{snapshot.date}</td><td className="px-3 py-3 font-semibold text-white">{rank(snapshot)}</td><td className="px-3 py-3">{metric(snapshot.clicks)}</td><td className="px-3 py-3">{metric(snapshot.impressions)}</td></tr>)}</tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </section>}
+      </div>
+    )}
+
+    <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+      <h3 className="font-semibold">Recorded backlink evidence</h3>
+      <p className="mt-1 text-sm text-slate-500">Existing research facts are shown separately. This view does not generate or save interpretations.</p>
+      {!research?.backlinkEvidence.length ? <p className="mt-4 text-sm text-slate-500">No backlink evidence is recorded for this brand.</p> : (
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {research.backlinkEvidence.map(item => <article key={item.id} className="rounded-xl bg-slate-950 p-4 text-sm">
+            <p className="font-semibold text-white">{item.siteName}</p>
+            <p className="mt-1 break-all text-xs text-slate-500">{item.siteUrl || 'URL unknown'}</p>
+            <p className="mt-3 text-slate-400">Status: {titleize(item.outreachStatus)} · Authority: {metric(item.domainAuthority)} · Relevance: {metric(item.relevanceScore)}</p>
+          </article>)}
+        </div>
+      )}
+    </section>
+  </div>
+}
+
 function Analytics({ organizationId, scopeRevision, signal, onAccessError, engagementId, brand }) {
   const initial = useMemo(() => defaultReportingPeriod(), [])
   const [period, setPeriod] = useState(initial)
   const [dashboard, setDashboard] = useState(null)
+  const [sourceId, setSourceId] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const requestGeneration = useRef(0)
   useEffect(() => {
     requestGeneration.current += 1
-    setDashboard(null); setError(''); setLoading(false)
+    setDashboard(null); setSourceId(''); setError(''); setLoading(false)
     return () => { requestGeneration.current += 1 }
   }, [engagementId, brand.id, organizationId, period.start, period.end, scopeRevision])
   async function load() {
+    if (!period.start || !period.end) {
+      setError('Reporting timezone unavailable — choose exact dates')
+      return
+    }
     const request = {
       generation: ++requestGeneration.current, brandId: brand.id,
       organizationId, scopeRevision,
@@ -636,7 +847,10 @@ function Analytics({ organizationId, scopeRevision, signal, onAccessError, engag
     setLoading(true); setError('')
     try {
       const result = await loadPerformanceDashboard({ organizationId, engagementId, brand, period, signal })
-      if (!signal.aborted && shouldApplyDashboardResponse(result, request, requestGeneration.current, scopeRevision)) setDashboard(result)
+      if (!signal.aborted && shouldApplyDashboardResponse(result, request, requestGeneration.current, scopeRevision)) {
+        setDashboard(result)
+        setSourceId(current => result.sources.some(source => source.id === current) ? current : '')
+      }
     } catch (loadError) {
       if (!signal.aborted && request.generation === requestGeneration.current && request.scopeRevision === scopeRevision) {
         onAccessError(loadError, { membershipMismatch: loadError?.membershipMismatch === true })
@@ -646,77 +860,45 @@ function Analytics({ organizationId, scopeRevision, signal, onAccessError, engag
       if (!signal.aborted && request.generation === requestGeneration.current && request.scopeRevision === scopeRevision) setLoading(false)
     }
   }
-  return <section className="space-y-5"><div className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="mr-auto"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">{brand.name}</p><h2 className="mt-1 font-semibold">Unified performance dashboard</h2><p className="mt-1 max-w-2xl text-sm leading-6 text-slate-400">Live, read-only reporting across organic visibility, technical health, paid campaigns, and Meta. Every section reads its existing source; no rollup is stored.</p><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">Data may be momentarily incomplete during an active import; refresh to update.</p></div><Field label="From"><input type="date" className={INPUT} value={period.start} onChange={event => setPeriod({ ...period, start: event.target.value })} /></Field><Field label="To"><input type="date" className={INPUT} value={period.end} onChange={event => setPeriod({ ...period, end: event.target.value })} /></Field><button onClick={load} disabled={loading} className={PRIMARY}>{loading ? 'Loading sources…' : 'Load dashboard'}</button></div>
-    {error && <Notice error={error} />}
-    {!dashboard ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Choose a period to read the brand's current source data. Missing connectors will appear as calm empty states, not fabricated metrics.</div> : <PerformanceSections dashboard={dashboard} />}
+  return <section className="space-y-5"><div className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="mr-auto"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">{brand.name}</p><h2 className="mt-1 font-semibold">Performance by source account</h2><p className="mt-1 max-w-2xl text-sm leading-6 text-slate-400">Choose exact dates, load approved read-only sources, then select one account. Accounts, currencies, and reporting timezones are never silently combined.</p><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">Reporting timezone unavailable — choose exact dates. Comparison is off. Data may be momentarily incomplete during an active import.</p></div><Field label="From"><input required type="date" className={INPUT} value={period.start} onChange={event => setPeriod({ ...period, start: event.target.value, automatic: false })} /></Field><Field label="To"><input required type="date" className={INPUT} value={period.end} onChange={event => setPeriod({ ...period, end: event.target.value, automatic: false })} /></Field><button onClick={load} disabled={loading || !period.start || !period.end} className={PRIMARY}>{loading ? 'Loading sources…' : dashboard ? 'Refresh sources' : 'Load sources'}</button></div>
+    {error && dashboard ? <div className="rounded-xl border border-amber-900/60 bg-amber-950/30 px-4 py-3 text-sm text-amber-200">Refresh failed: {error}. The last successful current-context result remains visible with its known collection age.</div> : error ? <Notice error={error} /> : null}
+    {!dashboard ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Choose exact dates to read the brand's current source data. Missing connectors appear as unavailable, not fabricated metrics.</div> : <PerformanceSections dashboard={dashboard} sourceId={sourceId} setSourceId={setSourceId} />}
   </section>
 }
 
-function PerformanceSections({ dashboard }) {
-  const { organic, technical, paid, social } = dashboard
+function PerformanceSections({ dashboard, sourceId, setSourceId }) {
+  const source = dashboard.sources.find(item => item.id === sourceId) || null
   return <div className="space-y-5">
-    {dashboard.source_errors.map(source => <div key={`${source.provider}-${source.connection_name}`} className="rounded-xl border border-amber-900/50 bg-amber-950/20 px-4 py-3 text-sm text-amber-200">{source.connection_name || titleize(source.provider)} could not be read: {source.error}</div>)}
-    <div className="grid gap-5 xl:grid-cols-2">
-      <DashboardSection eyebrow="Organic visibility" title="Search and site activity" available={organic.available} empty="No Search Console, GA4, or tracked-keyword data is available for this brand.">
-        <MetricGrid items={[
-          ['GSC clicks', organic.gsc.connected ? metric(organic.gsc.clicks) : 'Not connected'],
-          ['GSC impressions', organic.gsc.connected ? metric(organic.gsc.impressions) : 'Not connected'],
-          ['GA4 sessions', organic.ga4.connected ? metric(organic.ga4.sessions) : 'Not connected'],
-          ['GA4 active users', organic.ga4.connected ? metric(organic.ga4.active_users) : 'Not connected'],
-        ]} />
-        <TrendChart points={organic.gsc.trend} series={[['clicks', 'Clicks', '#34d399'], ['impressions', 'Impressions', '#38bdf8']]} />
-        <div className="grid grid-cols-2 gap-3 border-t border-slate-800 pt-4 sm:grid-cols-4">
-          <CompactMetric label="Tracked keywords" value={organic.keywords.tracked} />
-          <CompactMetric label="Top 10" value={organic.keywords.top_10} />
-          <CompactMetric label="Average position" value={organic.keywords.average_position === null ? '—' : metric(organic.keywords.average_position)} />
-          <CompactMetric label="Improved in period" value={organic.keywords.improved_in_period} />
-        </div>
-        {organic.keywords.no_rank_data_in_period > 0 && <p className="text-xs text-slate-500">{organic.keywords.no_rank_data_in_period} tracked keyword{organic.keywords.no_rank_data_in_period === 1 ? '' : 's'} has no rank data in this period.</p>}
-      </DashboardSection>
-
-      <DashboardSection eyebrow="Technical health" title="Pages needing attention" available={technical.available} empty="No tracked pages exist for this brand yet.">
-        <MetricGrid items={[
-          ['Tracked pages', metric(technical.tracked_pages)],
-          ['Pages with open issues', metric(technical.pages_with_open_issues)],
-          ['Open issues', metric(technical.open_issues)],
-          ['Need attention', metric(technical.needs_attention)],
-        ]} />
-        <div className="space-y-2">
-          {technical.pages.slice(0, 5).map(page => <div key={page.id} className="flex items-center gap-3 rounded-xl bg-slate-950 px-3 py-2.5 text-xs"><span className="min-w-0 flex-1 truncate text-slate-300">{page.page_url}</span><span className="shrink-0 text-amber-300">{page.open_issue_count} issue{page.open_issue_count === 1 ? '' : 's'}</span></div>)}
-          {technical.pages.length === 0 && <p className="rounded-xl bg-slate-950 px-3 py-4 text-center text-xs text-emerald-300">No tracked page currently needs attention.</p>}
-          {technical.pages.length > 5 && <p className="text-xs text-slate-500">And {technical.pages.length - 5} more page{technical.pages.length - 5 === 1 ? '' : 's'} needing attention.</p>}
-        </div>
-      </DashboardSection>
-
-      <DashboardSection eyebrow="Paid performance" title="Google Ads snapshots" available={paid.available} empty="No Google Ads planning campaign exists for this brand.">
-        {paid.has_period_data ? <><MetricGrid items={[
-          ['Spend (account currency)', metric(paid.spend, 'money')], ['Impressions', metric(paid.impressions)],
-          ['Clicks', metric(paid.clicks)], ['Conversions', metric(paid.conversions)],
-        ]} /><TrendChart points={paid.trend} series={[['cost', 'Spend', '#fbbf24'], ['conversions', 'Conversions', '#a78bfa']]} /></> : <div className="rounded-xl border border-dashed border-slate-700 px-4 py-8 text-center text-sm leading-6 text-slate-500">No dated Google Ads snapshots fall within this period. Campaign configuration is available, but performance is not measured as zero.</div>}
-        <p className="text-xs text-slate-500">{paid.active_campaigns} active of {paid.campaigns} tracked campaign{paid.campaigns === 1 ? '' : 's'} · CTR {metric(paid.ctr, 'percent')}</p>
-      </DashboardSection>
-
-      <DashboardSection eyebrow="Social performance" title="Meta organic snapshots" available={social.available} empty="No Meta connection exists for this brand.">
-        {social.has_period_data ? <><MetricGrid items={[
-          ['Reach', metric(social.reach)], ['Impressions', metric(social.impressions)],
-          ['Engagement', metric(social.engagement)], ['Engagement rate', metric(social.engagement_rate, 'percent')],
-        ]} /><TrendChart points={social.trend} series={[['reach', 'Reach', '#fb7185'], ['engagement', 'Engagement', '#c084fc']]} /></> : <div className="rounded-xl border border-dashed border-slate-700 px-4 py-8 text-center text-sm leading-6 text-slate-500">No dated Meta snapshots fall within this period. The connection exists, but performance is not measured as zero.</div>}
-        <p className="text-xs text-slate-500">{social.connections} Meta connection{social.connections === 1 ? '' : 's'} · {social.platforms.length ? social.platforms.map(titleize).join(' + ') : 'No dated snapshots in this period'}</p>
-      </DashboardSection>
-    </div>
+    {dashboard.source_errors.map(item => <div key={`${item.provider}-${item.connection_name}`} className="rounded-xl border border-amber-900/50 bg-amber-950/20 px-4 py-3 text-sm text-amber-200">{item.connection_name || titleize(item.provider)} could not be read: {item.error}</div>)}
+    <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+      <Field label="Source account"><select className={INPUT} value={sourceId} onChange={event => setSourceId(event.target.value)}><option value="">Choose a source account</option>{dashboard.sources.map(item => <option key={item.id} value={item.id}>{titleize(item.provider)} · {item.accountLabel}</option>)}</select></Field>
+      {!source ? <p className="mt-5 rounded-xl border border-dashed border-slate-700 px-4 py-10 text-center text-sm text-slate-500">Select one source account. No cross-account total is shown.</p> : <SourcePerformance source={source} />}
+    </section>
   </div>
 }
 
-function DashboardSection({ eyebrow, title, available, empty, children }) {
-  return <article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="mb-5 flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">{eyebrow}</p><h3 className="mt-1 font-semibold text-white">{title}</h3></div><span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${available ? 'bg-emerald-950 text-emerald-300' : 'bg-slate-950 text-slate-500'}`}>{available ? 'Available' : 'No source'}</span></div>{available ? <div className="space-y-4">{children}</div> : <div className="rounded-xl border border-dashed border-slate-700 px-4 py-10 text-center text-sm leading-6 text-slate-500">{empty}</div>}</article>
+function sourceMetric(item, currencyCode) {
+  if (item.value === null || item.value === undefined) return 'Unavailable'
+  if (item.unit === 'percent') return metric(item.value, 'percent')
+  if (item.unit === 'currency') return currencyCode ? `${currencyCode} ${metric(item.value, 'money')}` : `${metric(item.value, 'money')} · currency unavailable`
+  return metric(item.value)
 }
 
-function MetricGrid({ items }) {
-  return <div className="grid grid-cols-2 gap-3">{items.map(([label, value]) => <div key={label} className="rounded-xl bg-slate-950 p-3"><p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">{label}</p><p className="mt-1 text-lg font-semibold text-white">{value}</p></div>)}</div>
+function SourcePerformance({ source }) {
+  const stale = source.freshness.status === 'stale'
+  return <div className="mt-5 space-y-5 border-t border-slate-800 pt-5">
+    <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">{titleize(source.provider)}</p><h3 className="mt-1 text-lg font-semibold">{source.accountLabel}</h3><p className="mt-1 text-xs text-slate-500">Account {source.accountId || 'unavailable'} · {source.periodStart} to {source.periodEnd}</p></div><span className={`rounded-full px-3 py-1.5 text-xs ${stale ? 'bg-amber-950 text-amber-200' : source.freshness.status === 'current' ? 'bg-emerald-950 text-emerald-300' : 'bg-slate-950 text-slate-400'}`}>{stale ? `Stale · over ${source.freshness.threshold_hours}h` : source.freshness.status === 'current' ? 'Collection current' : 'Collection age unknown'}</span></div>
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{source.metrics.map(item => <div key={item.key} className="rounded-xl bg-slate-950 p-3"><p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">{item.label}</p><p className="mt-1 text-lg font-semibold text-white">{sourceMetric(item, source.currencyCode)}</p></div>)}</div>
+    {source.error && <div className="rounded-xl border border-amber-900/50 bg-amber-950/20 px-4 py-3 text-sm text-amber-200">{source.error}</div>}
+    {!source.error && !source.metrics.length && <div className="rounded-xl border border-dashed border-slate-700 px-4 py-8 text-center text-sm text-slate-500">No dated data is available for this source account. Missing values are not treated as zero.</div>}
+    {source.trend && <TrendChart points={source.trend.points} series={source.trend.series} />}
+    <dl className="grid gap-3 rounded-xl border border-slate-800 p-4 text-xs sm:grid-cols-2 lg:grid-cols-4"><Provenance label="Reporting timezone" value={source.reportingTimezone} /><Provenance label="Retrieved" value={source.retrievedAt} /><Provenance label="Data through" value={source.dataThrough} /><Provenance label="Currency" value={source.currencyCode} /></dl>
+    {source.notes.map(note => <p key={note} className="text-xs leading-5 text-slate-500">{note}</p>)}
+  </div>
 }
 
-function CompactMetric({ label, value }) {
-  return <div><p className="text-[10px] uppercase tracking-[0.1em] text-slate-600">{label}</p><p className="mt-1 text-sm font-semibold text-slate-200">{value}</p></div>
+function Provenance({ label, value }) {
+  return <div><dt className="uppercase tracking-[0.1em] text-slate-600">{label}</dt><dd className="mt-1 break-words text-slate-300">{value || 'Unavailable'}</dd></div>
 }
 
 function TrendChart({ points, series }) {

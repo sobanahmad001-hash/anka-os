@@ -11,7 +11,7 @@ export default function Layout() {
       <OrganizationGate>
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <Sidebar />
-          <main className="anka-workspace relative min-h-0 min-w-0 flex-1 overflow-hidden">
+          <main id="main-workspace" className="anka-workspace relative min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain" tabIndex="-1">
             <Outlet />
           </main>
         </div>

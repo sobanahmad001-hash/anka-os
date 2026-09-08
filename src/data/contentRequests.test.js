@@ -72,7 +72,7 @@ test('the Design Media boundary migration is isolated and enforces exactly one c
 test('existing Design Workshop generation remains direction-scoped and unchanged at its public action', () => {
   assert.match(designEdge, /generate_image: \(\) => generateImage\(admin, userClient, body, user\.id\)/)
   assert.match(designEdge, /directionVersionId: version\.id,[\s\S]*contentRequestId: null/)
-  assert.match(designEdge, /mediaStoragePath\(input\.directionVersionId, asset\.id\)/)
+  assert.match(designEdge, /mediaStoragePath\(admin\.organizationId, input\.directionVersionId, asset\.id\)/)
   assert.match(designEdge, /createVideoPlaceholder[\s\S]*design_direction_version_id: version\.id/)
   assert.match(designEdge, /generateOpenAiImage\(credential, model\.model_id, input\.prompt\)/)
 })

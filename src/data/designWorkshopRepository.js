@@ -1,96 +1,108 @@
 import { supabase } from '../lib/supabase.js'
+import { invokeDesignFunction } from './designWorkshopRequest.js'
 
-async function dataOrThrow(query) {
-  const { data, error } = await query
-  if (error) throw new Error(error.message || 'Design Workshop query failed')
-  return data
+function requireOrganization(organizationId) {
+  if (typeof organizationId !== 'string' || !organizationId.trim()) throw new TypeError('Active organization is required')
 }
 
-async function invoke(action, input = {}) {
-  const { data, error } = await supabase.functions.invoke('design-workshop', { body: { action, ...input } })
-  if (error) throw new Error(error.message || 'Design Workshop function failed')
-  if (data?.error) throw new Error(data.error)
-  return data?.data
-}
+export function createDesignWorkshopScope(organizationId, { signal, client = supabase } = {}) {
+  requireOrganization(organizationId)
+  const scopedFrom = table => ({
+    select(columns, options) {
+      return client.from(table).select(columns, options).eq('organization_id', organizationId)
+    },
+  })
+  async function dataOrThrow(query) {
+    if (signal && typeof query.abortSignal === 'function') query = query.abortSignal(signal)
+    const response = await query
+    const { data, error } = response
+    if (error) throw Object.assign(new Error(error.message || 'Design Workshop query failed'), { cause: error, status: response.status || error.status })
+    const rows = Array.isArray(data) ? data : data ? [data] : []
+    if (rows.some(row => row?.organization_id && row.organization_id !== organizationId)) {
+      throw Object.assign(new Error('Design Workshop record does not belong to the active organization.'), { status: 403, membershipMismatch: true })
+    }
+    return data
+  }
+  async function invoke(action, input = {}) {
+    return invokeDesignFunction(client, 'design-workshop', organizationId, action, input, { signal, fallbackMessage: 'Design Workshop function failed' })
+  }
+  async function invokePageDesigns(action, input = {}) {
+    return invokeDesignFunction(client, 'website-page-designs', organizationId, action, input, { signal, fallbackMessage: 'Website page design function failed' })
+  }
+  async function invokeWordPressExport(action, input = {}) {
+    return invokeDesignFunction(client, 'wordpress-export', organizationId, action, input, { signal, fallbackMessage: 'WordPress export function failed' })
+  }
 
-async function invokePageDesigns(action, input = {}) {
-  const { data, error } = await supabase.functions.invoke('website-page-designs', { body: { action, ...input } })
-  if (error) throw new Error(error.message || 'Website page design function failed')
-  if (data?.error) throw new Error(data.error)
-  return data?.data
-}
-
-async function invokeWordPressExport(action, input = {}) {
-  const { data, error } = await supabase.functions.invoke('wordpress-export', { body: { action, ...input } })
-  if (error) throw new Error(error.message || 'WordPress export function failed')
-  if (data?.error) throw new Error(data.error)
-  return data?.data
-}
-
-export const designWorkshop = Object.freeze({
+  return Object.freeze({
   async listEngagements() {
-    return dataOrThrow(supabase.from('engagements')
-      .select('id, name, brand_id, status, agency_clients(name), brands(name), engagement_services!inner(id, status, service_catalog!inner(name, department_id, is_active))')
+    return dataOrThrow(scopedFrom('engagements')
+      .select('id, organization_id, project_id, name, brand_id, status, agency_clients(name), brands(name), projects(client_id), engagement_services!inner(id, status, service_catalog!inner(name, department_id, is_active))')
       .eq('engagement_services.status', 'active')
       .eq('engagement_services.service_catalog.department_id', 'design')
       .eq('engagement_services.service_catalog.is_active', true)
       .order('updated_at', { ascending: false }))
   },
 
-  async load(engagementId) {
-    const [engagement, stages, artifacts, versions, approvals, models, designServices, sessions, pageFlows, experimentReviewers] = await Promise.all([
-      dataOrThrow(supabase.from('engagements').select('*, agency_clients(name), brands(name)').eq('id', engagementId).single()),
-      dataOrThrow(supabase.from('engagement_stage_instances').select('*').eq('engagement_id', engagementId).order('position')),
-      dataOrThrow(supabase.from('artifacts').select('*').eq('engagement_id', engagementId).order('created_at')),
-      dataOrThrow(supabase.from('artifact_versions').select('*, artifacts!inner(engagement_id)').eq('artifacts.engagement_id', engagementId).order('version_number')),
-      dataOrThrow(supabase.from('artifact_approvals').select('*').eq('engagement_id', engagementId).order('approved_at')),
-      dataOrThrow(supabase.from('design_model_registry').select('*').eq('is_active', true).order('display_name')),
-      dataOrThrow(supabase.from('engagement_services')
+  async load(engagementId, navigation = {}) {
+    const recordQuery = navigation.workRecord?.kind === 'project_task'
+      ? dataOrThrow(scopedFrom('tasks').select('id, organization_id, project_id').eq('id', navigation.workRecord.id).is('archived_at', null).maybeSingle())
+      : navigation.workRecord?.kind === 'engagement_work_item'
+        ? dataOrThrow(scopedFrom('work_items').select('id, organization_id, project_id, engagement_id').eq('id', navigation.workRecord.id).is('deleted_at', null).maybeSingle())
+        : Promise.resolve(null)
+    const [engagement, stages, artifacts, versions, approvals, models, designServices, sessions, pageFlows, experimentReviewers, navigationRecord] = await Promise.all([
+      dataOrThrow(scopedFrom('engagements').select('*, agency_clients(name), brands(name), projects(client_id)').eq('id', engagementId).single()),
+      dataOrThrow(scopedFrom('engagement_stage_instances').select('*').eq('engagement_id', engagementId).order('position')),
+      dataOrThrow(scopedFrom('artifacts').select('*').eq('engagement_id', engagementId).order('created_at')),
+      dataOrThrow(scopedFrom('artifact_versions').select('*, artifacts!inner(engagement_id)').eq('artifacts.engagement_id', engagementId).order('version_number')),
+      dataOrThrow(scopedFrom('artifact_approvals').select('*').eq('engagement_id', engagementId).order('approved_at')),
+      dataOrThrow(scopedFrom('design_model_registry').select('*').eq('is_active', true).order('display_name')),
+      dataOrThrow(scopedFrom('engagement_services')
         .select('id, engagement_id, service_id, status, service_catalog!inner(id, name, slug, department_id, is_active)')
         .eq('engagement_id', engagementId).eq('status', 'active')
         .eq('service_catalog.department_id', 'design').eq('service_catalog.is_active', true)
         .order('activated_at')),
-      dataOrThrow(supabase.from('design_workshop_sessions').select('*').eq('engagement_id', engagementId).order('created_at', { ascending: false })),
-      dataOrThrow(supabase.from('design_page_flows').select('*').eq('engagement_id', engagementId).order('created_at', { ascending: false })),
+      dataOrThrow(scopedFrom('design_workshop_sessions').select('*').eq('engagement_id', engagementId).order('created_at', { ascending: false })),
+      dataOrThrow(scopedFrom('design_page_flows').select('*').eq('engagement_id', engagementId).order('created_at', { ascending: false })),
       invoke('list_experiment_reviewers'),
+      recordQuery,
     ])
     const sessionIds = sessions.map(item => item.id)
-    const externalEvents = await dataOrThrow(supabase.from('external_events').select('id, event_name, event_category, start_date, end_date')
+    const externalEvents = await dataOrThrow(scopedFrom('external_events').select('id, event_name, event_category, start_date, end_date')
       .eq('brand_id', engagement.brand_id).order('start_date').order('event_name'))
     const directionData = sessionIds.length ? await Promise.all([
-      dataOrThrow(supabase.from('design_workshop_context_versions').select('*').in('session_id', sessionIds)),
-      dataOrThrow(supabase.from('design_workshop_model_selections').select('*, design_model_registry(*)').in('session_id', sessionIds).order('position')),
-      dataOrThrow(supabase.from('design_generation_runs').select('*').in('session_id', sessionIds).order('created_at')),
-      dataOrThrow(supabase.from('design_directions').select('*').in('session_id', sessionIds).order('direction_slot')),
-      dataOrThrow(supabase.from('design_direction_selections').select('*').in('session_id', sessionIds)),
-      dataOrThrow(supabase.from('design_direction_releases').select('*').in('session_id', sessionIds)),
+      dataOrThrow(scopedFrom('design_workshop_context_versions').select('*').in('session_id', sessionIds)),
+      dataOrThrow(scopedFrom('design_workshop_model_selections').select('*, design_model_registry(*)').in('session_id', sessionIds).order('position')),
+      dataOrThrow(scopedFrom('design_generation_runs').select('*').in('session_id', sessionIds).order('created_at')),
+      dataOrThrow(scopedFrom('design_directions').select('*').in('session_id', sessionIds).order('direction_slot')),
+      dataOrThrow(scopedFrom('design_direction_selections').select('*').in('session_id', sessionIds)),
+      dataOrThrow(scopedFrom('design_direction_releases').select('*').in('session_id', sessionIds)),
     ]) : [[], [], [], [], [], []]
     const directions = directionData[3]
     const releaseIds = directionData[5].map(item => item.id)
     const [directionVersions, experimentalDirectionVersions] = directions.length
       ? await Promise.all([
-          dataOrThrow(supabase.from('design_direction_versions').select('*').in('direction_id', directions.map(item => item.id)).eq('is_experimental', false).order('version_number')),
-          dataOrThrow(supabase.from('design_direction_versions').select('*').in('direction_id', directions.map(item => item.id)).eq('is_experimental', true).order('version_number')),
+          dataOrThrow(scopedFrom('design_direction_versions').select('*').in('direction_id', directions.map(item => item.id)).eq('is_experimental', false).order('version_number')),
+          dataOrThrow(scopedFrom('design_direction_versions').select('*').in('direction_id', directions.map(item => item.id)).eq('is_experimental', true).order('version_number')),
         ])
       : [[], []]
     const visibleDirectionVersionIds = [...directionVersions, ...experimentalDirectionVersions].map(item => item.id)
     const [mediaAssets, pageDesigns, variants] = visibleDirectionVersionIds.length
       ? await Promise.all([
-          dataOrThrow(supabase.from('design_media_assets').select('*')
+          dataOrThrow(scopedFrom('design_media_assets').select('*')
             .in('design_direction_version_id', visibleDirectionVersionIds).order('created_at', { ascending: false })),
-          dataOrThrow(supabase.from('website_page_designs').select('*')
+          dataOrThrow(scopedFrom('website_page_designs').select('*')
             .in('design_direction_version_id', visibleDirectionVersionIds).order('created_at', { ascending: false })),
-          dataOrThrow(supabase.from('design_direction_variants').select('*')
+          dataOrThrow(scopedFrom('design_direction_variants').select('*')
             .in('source_direction_version_id', visibleDirectionVersionIds).order('created_at', { ascending: false })),
         ])
       : [[], [], []]
     const wordpressExportJobs = pageDesigns.length
-      ? await dataOrThrow(supabase.from('wordpress_export_jobs').select('*')
+      ? await dataOrThrow(scopedFrom('wordpress_export_jobs').select('*')
         .in('website_page_design_id', pageDesigns.map(item => item.id))
         .order('requested_at', { ascending: false }))
       : []
     const handoffPackages = releaseIds.length
-      ? await dataOrThrow(supabase.from('production_handoff_packages').select([
+      ? await dataOrThrow(scopedFrom('production_handoff_packages').select([
         'id',
         'organization_id',
         'design_direction_release_id',
@@ -115,6 +127,13 @@ export const designWorkshop = Object.freeze({
       contextVersions: directionData[0], modelSelections: directionData[1], runs: directionData[2],
       directions, selections: directionData[4], releases: directionData[5], directionVersions,
       experimentalDirectionVersions, experimentReviewers,
+      navigationWorkRecord: navigationRecord ? {
+        kind: navigation.workRecord.kind,
+        id: navigationRecord.id,
+        organizationId: navigationRecord.organization_id,
+        projectId: navigationRecord.project_id,
+        engagementId: navigationRecord.engagement_id,
+      } : null,
       mediaAssets: mediaAssets.map(item => ({ ...item, signed_url: signedMedia?.signed_urls?.[item.id] || null })),
       variants,
       handoffPackages,
@@ -166,4 +185,7 @@ export const designWorkshop = Object.freeze({
   getWordPressExportDownload: wordpressExportJobId => invokeWordPressExport('get_download', {
     wordpress_export_job_id: wordpressExportJobId,
   }),
-})
+  })
+}
+
+export const designWorkshop = Object.freeze({ forOrganization: createDesignWorkshopScope })

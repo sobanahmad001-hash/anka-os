@@ -1,10 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { OUTPUT_FAMILIES, latestByVersion } from '../data/designWorkshop.js'
+import { canRequestDesignExperimentPromotion, designAllowedActions, designCapabilities, designSelectionParams, loadDesignEngagements, privateDesignParams, resolveDesignContext, resolveDesignNavigationScope, selectableDesignEngagements } from '../data/designWorkshopContext.js'
 import { designWorkshop } from '../data/designWorkshopRepository.js'
 import { productionHandoffs } from '../data/productionHandoffsRepository.js'
+import { parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
 import { composePageDesignPreview } from '../data/websitePageDesigns.js'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useOrganization } from '../context/OrganizationContext.jsx'
+import WorkshopContextShell from '../components/WorkshopContextShell.jsx'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import ProductionHandoffPanel from '../components/ProductionHandoffPanel.jsx'
@@ -19,37 +23,111 @@ const VARIANT_FORMATS = [
 
 export default function DesignWorkshop() {
   const { user } = useAuth()
-  const [searchParams] = useSearchParams()
-  const requestedEngagementId = searchParams.get('engagement') || ''
-  const requestedSessionId = searchParams.get('session') || ''
+  const { activeOrganizationId, activeOrganization, activeMembership, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const navigationContext = useMemo(() => parseWorkshopNavigation(searchParams), [searchParams])
+  const requestedPrivate = searchParams.get('mode') === 'private'
+  const studio = useMemo(() => activeOrganizationId ? designWorkshop.forOrganization(activeOrganizationId, { signal: requestSignal }) : null, [activeOrganizationId, requestSignal])
+  const capabilities = useMemo(() => designCapabilities(activeMembership), [activeMembership])
+  const allowedActions = useMemo(() => designAllowedActions(capabilities), [capabilities])
+  const requestGeneration = useRef(0)
+  const deferredContext = useRef(null)
   const [engagements, setEngagements] = useState([])
-  const [engagementId, setEngagementId] = useState('')
   const [workspace, setWorkspace] = useState(null)
-  const [tab, setTab] = useState('artifacts')
+  const requestedTab = ['artifacts', 'workshop'].includes(navigationContext.workshopTab) ? navigationContext.workshopTab : 'artifacts'
+  const [tab, setTab] = useState(requestedTab)
   const [modal, setModal] = useState(null)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
+  const [filter, setFilter] = useState('')
+  const [engagementLoadState, setEngagementLoadState] = useState('loading')
+  const [workspaceLoadState, setWorkspaceLoadState] = useState('idle')
+  const [engagementRetry, setEngagementRetry] = useState(0)
+  const [pendingSelection, setPendingSelection] = useState(null)
+  const context = useMemo(() => resolveDesignContext(navigationContext, engagements, activeOrganizationId, requestedPrivate), [activeOrganizationId, engagements, navigationContext, requestedPrivate])
+  const selectableEngagements = useMemo(() => selectableDesignEngagements(navigationContext, engagements), [engagements, navigationContext])
+  const engagementId = context.engagement?.id || ''
+  const canonicalScope = useMemo(() => resolveDesignNavigationScope(
+    navigationContext, workspace, activeOrganizationId, capabilities, allowedActions,
+  ), [activeOrganizationId, allowedActions, capabilities, navigationContext, workspace])
+  const navigationValidation = validateWorkshopNavigation(navigationContext,
+    workspaceLoadState === 'error' && !workspace
+      ? { status: 'error', error: new Error(error || 'Design context load failed') }
+      : canonicalScope)
+  const officialReady = context.officialReady && navigationValidation.status === 'ready'
+  const sameOrganization = !navigationContext.organizationId || navigationContext.organizationId === activeOrganizationId
+  const returnTarget = workspaceReturnTarget(
+    navigationValidation.context ? navigationValidation : {},
+    { fallbackProjectId: sameOrganization ? context.projectId : '' },
+  )
 
-  useEffect(() => { designWorkshop.listEngagements().then(items => {
-    const designItems = items.filter(item => (item.engagement_services || []).some(service => {
-      const catalog = Array.isArray(service.service_catalog) ? service.service_catalog[0] : service.service_catalog
-      return catalog?.department_id === 'design'
-    }))
-    setEngagements(designItems)
-    const requested = designItems.find(item => item.id === requestedEngagementId)
-    if (requested || designItems[0]) setEngagementId((requested || designItems[0]).id)
-  }).catch(capture) }, [])
-  useEffect(() => { if (engagementId) refresh() }, [engagementId])
+  useEffect(() => {
+    const generation = ++requestGeneration.current
+    deferredContext.current = null
+    setEngagements([]); setWorkspace(null); setModal(null); setPendingSelection(null); setEngagementLoadState(studio ? 'loading' : 'error'); setWorkspaceLoadState('idle'); setBusy(studio ? 'load' : ''); setError('')
+    if (!studio) return undefined
+    loadDesignEngagements(studio, { signal: requestSignal, isCurrent: () => generation === requestGeneration.current }).then(result => {
+      if (result.status === 'stale') return
+      if (result.status === 'ready') { setEngagements(result.items); setEngagementLoadState('ready'); return }
+      handleOrganizationAccessError(result.error, { membershipMismatch: result.error?.membershipMismatch })
+      setEngagementLoadState('error'); setError('Design work could not be loaded for the active organization.')
+    }).finally(() => {
+      if (!requestSignal.aborted && generation === requestGeneration.current) setBusy('')
+    })
+    return () => { requestGeneration.current += 1 }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeRevision, studio, engagementRetry])
+  useEffect(() => { setTab(requestedTab) }, [requestedTab])
+  useEffect(() => { if (engagementId) refresh(); else { setWorkspace(null); setWorkspaceLoadState('idle') } }, [engagementId, navigationContext]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  function capture(reason) { setError(reason instanceof Error ? reason.message : String(reason)); setBusy('') }
-  async function refresh() { setError(''); setBusy('load'); try { setWorkspace(await designWorkshop.load(engagementId)) } catch (reason) { capture(reason) } finally { setBusy('') } }
-  async function act(key, action) { setBusy(key); setError(''); try { await action(); setModal(null); await refresh() } catch (reason) { capture(reason) } finally { setBusy('') } }
+  function capture(reason, generation = requestGeneration.current) {
+    if (requestSignal.aborted || generation !== requestGeneration.current) return
+    handleOrganizationAccessError(reason, { membershipMismatch: reason?.membershipMismatch })
+    setError(reason instanceof Error ? reason.message : String(reason)); setBusy('')
+  }
+  async function refresh() {
+    const generation = ++requestGeneration.current
+    setError(''); setBusy('load'); setWorkspaceLoadState('loading')
+    try {
+      const result = await studio.load(engagementId, navigationContext)
+      if (!requestSignal.aborted && generation === requestGeneration.current) { setWorkspace(result); setWorkspaceLoadState('ready') }
+    } catch (reason) { if (!requestSignal.aborted && generation === requestGeneration.current) setWorkspaceLoadState('error'); capture(reason, generation) }
+    finally { if (!requestSignal.aborted && generation === requestGeneration.current) setBusy('') }
+  }
+  async function act(key, action, capability = 'createDraft') {
+    if (!officialReady) { setError(`Official save is blocked. Missing: ${context.missing.join(', ') || 'an authorized exact work context'}.`); return }
+    if (!capabilities[capability]) { setError('Your existing server role does not permit this action in Design.'); return }
+    setBusy(key); setError('')
+    try {
+      await action(); setModal(null)
+      if (deferredContext.current) {
+        const next = deferredContext.current
+        deferredContext.current = null
+        setPendingSelection(null); setWorkspace(null); setSearchParams(next)
+      } else await refresh()
+    } catch (reason) { deferredContext.current = null; capture(reason) } finally { setBusy('') }
+  }
+  function requestSelection(params) {
+    if (modal) setPendingSelection({ params })
+    else { setWorkspace(null); setSearchParams(params) }
+  }
+  function saveCurrentAndSwitch() {
+    if (!context.accessValid || !officialReady || !capabilities.createDraft) return
+    deferredContext.current = pendingSelection?.params || new URLSearchParams()
+    setPendingSelection(null)
+    document.querySelector('.fixed.inset-0 form')?.requestSubmit()
+  }
+  function discardAndSwitch() {
+    const next = pendingSelection?.params || new URLSearchParams()
+    deferredContext.current = null; setPendingSelection(null); setModal(null); setWorkspace(null); setSearchParams(next)
+  }
   async function prepareHandoff(release) {
+    if (!officialReady || !capabilities.createDraft) { setError('An authorized official Design context is required before saving a handoff.'); return }
     setBusy(`handoff-${release.id}`); setError('')
     try { await productionHandoffs.create(release.id, engagementId); await refresh() }
     catch (reason) {
       const message = reason instanceof Error ? reason.message : String(reason)
-      try { setWorkspace(await designWorkshop.load(engagementId)) } catch { /* Keep the packaging failure primary. */ }
+      try { setWorkspace(await studio.load(engagementId, navigationContext)) } catch { /* Keep the packaging failure primary. */ }
       setError(message)
     } finally { setBusy('') }
   }
@@ -61,21 +139,63 @@ export default function DesignWorkshop() {
     } catch (reason) { capture(reason) } finally { setBusy('') }
   }
 
+  if (engagementLoadState === 'error') return <Shell><div role="alert" className="mx-auto max-w-xl rounded-2xl border border-red-500/20 bg-red-500/10 p-6 text-center"><h1 className="text-xl font-semibold text-red-100">Design work could not be loaded</h1><p className="mt-2 text-sm text-red-200">The active organization could not be checked. No work has been selected.</p><button type="button" onClick={() => setEngagementRetry(value => value + 1)} className={`${BUTTON} mt-5`}>Retry</button></div></Shell>
+  if (busy === 'load' && !engagements.length) return <Shell><Empty title="Loading Design work" text="Checking authorized engagements in the active organization." /></Shell>
+  if (context.mode === 'choose') return <Shell><ChooseWork engagements={selectableEngagements} filter={filter} setFilter={setFilter} onSelect={item => setSearchParams(designSelectionParams(navigationContext, item, activeOrganizationId))} onPrivate={() => setSearchParams(privateDesignParams(navigationContext, activeOrganizationId))} /></Shell>
+  if (context.mode === 'private') return <Shell><PrivateDesk draft={navigationContext.draft} returnTarget={workspaceReturnTarget(navigationContext)} onChoose={() => setSearchParams({})} /></Shell>
+  if (context.mode === 'denied') {
+    const rejected = navigationContext.organizationId && navigationContext.organizationId !== activeOrganizationId
+      ? validateWorkshopNavigation(navigationContext, { status: 'ready', activeOrganizationId, organizationId: activeOrganizationId })
+      : validateWorkshopNavigation(navigationContext, { status: 'denied' })
+    return <Shell><WorkshopContextShell navigation={navigationContext} validation={rejected} returnTarget={workspaceReturnTarget(rejected)}><Empty title="This Design context is unavailable" text="The requested project, engagement, brand, service, or work identity does not match authorized work in the active organization." /></WorkshopContextShell><div className="flex justify-center"><button type="button" onClick={() => setSearchParams({})} className={BUTTON}>Choose permitted work</button></div></Shell>
+  }
   if (!engagements.length && !error) return <Shell><Empty title="No Design engagement yet" text="Activate at least one Design service on an engagement before opening the Workshop." /></Shell>
+  if (workspaceLoadState === 'loading' && !workspace) return <Shell><Empty title="Loading exact Design context" text="Resolving the selected work record, output, version, and draft." /></Shell>
   return <Shell>
+    <WorkshopContextShell navigation={navigationContext} validation={navigationValidation} returnTarget={returnTarget} projectName={context.engagement?.name}>
     <div className="flex flex-col gap-4 border-b border-white/10 pb-5 lg:flex-row lg:items-end lg:justify-between">
       <div><p className="text-xs font-semibold uppercase tracking-[.24em] text-violet-400">Designer-controlled environment</p><h1 className="mt-2 text-3xl font-semibold">Design Workshop</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Approved human context becomes traceable design directions or an ordered storyboard sequence. Nothing is approved or released automatically.</p></div>
-      <Field label="Engagement"><select className={`${INPUT} min-w-72`} value={engagementId} onChange={event => setEngagementId(event.target.value)}>{engagements.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
+      <Field label="Authorized work"><select className={`${INPUT} min-w-72`} value={engagementId} onChange={event => { const item = engagements.find(candidate => candidate.id === event.target.value); requestSelection(item ? designSelectionParams(navigationContext, item, activeOrganizationId) : new URLSearchParams()) }}><option value="">Choose work</option>{engagements.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
     </div>
-    {error && <div className="mt-5 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">{error}</div>}
-    <div className="mt-5 flex gap-2">{[['artifacts', 'Approved Content context'], ['workshop', 'Direction workshop']].map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${tab === id ? 'bg-white text-slate-950' : 'bg-white/5 text-slate-300'}`}>{label}</button>)}</div>
+    <ContextStrip context={context} navigation={navigationContext} organizationName={activeOrganization?.name} unsaved={Boolean(modal)} capabilities={capabilities} officialReady={officialReady} />
+    {error && <div role="alert" className="mt-5 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">{error}</div>}
+    {!officialReady && <div role="alert" className="mt-5 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-100">Official save is blocked. Complete: {context.missing.join(', ') || 'the exact shared work context'}. Browsing remains available.</div>}
+    <div className="mt-5 flex gap-2 overflow-x-auto">{[['artifacts', 'References'], ['workshop', 'Design desk']].map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold ${tab === id ? 'bg-white text-slate-950' : 'bg-white/5 text-slate-300'}`}>{label}</button>)}</div>
     {busy === 'load' || !workspace ? <div className="py-20 text-center text-sm text-slate-500">Loading exact versions…</div>
       : tab === 'artifacts' ? <ArtifactWorkspace workspace={workspace} />
-        : <WorkshopWorkspace workspace={workspace} focusedSessionId={requestedSessionId} currentUserId={user?.id} onCreateFlow={() => setModal({ kind: 'flow' })} onCreate={() => setModal({ kind: 'session' })} onGenerate={session => act(`generate-${session.id}`, () => designWorkshop.generateDirections(session.id))} onGenerateImage={(version, modelId, prompt) => act(`image-${version.id}`, () => designWorkshop.generateImage(version.id, modelId, prompt))} onGenerateVariants={(versionId, modelId, formats) => act(`variants-${versionId}`, () => designWorkshop.generateVariants(versionId, modelId, formats))} onGenerateVideo={(version, prompt) => act(`video-${version.id}`, () => designWorkshop.createVideoPlaceholder(version.id, prompt))} onGeneratePage={(versionId, slug, modelId) => act('generate-page', () => designWorkshop.generatePageDesign(versionId, slug, modelId))} onSubmitPage={designId => act(`submit-page-${designId}`, () => designWorkshop.submitPageDesignReview(designId))} onApprovePage={designId => act(`approve-page-${designId}`, () => designWorkshop.approvePageDesign(designId))} onExportPage={designId => act(`export-page-${designId}`, () => designWorkshop.exportPageDesign(designId))} onDownloadExport={jobId => act(`download-export-${jobId}`, async () => { const result = await designWorkshop.getWordPressExportDownload(jobId); window.location.assign(result.download_url) })} onPrepareHandoff={prepareHandoff} onDownloadHandoff={downloadHandoff} onRefine={(direction, version) => setModal({ kind: 'refine', direction, version })} onPromote={version => act(`promote-${version.id}`, () => designWorkshop.promoteDirectionExperiment(version.id))} onSelect={(session, version) => act(`select-${version.id}`, () => designWorkshop.selectDirection(session.id, version.id))} onRelease={session => act(`release-${session.id}`, () => designWorkshop.releaseDirection(session.id, 'Released by the accountable human reviewer.'))} busy={busy} />}
-    {modal?.kind === 'flow' && <FlowModal workspace={workspace} busy={busy} onClose={() => setModal(null)} onSave={input => act('create-flow', () => designWorkshop.createPageFlow(input))} />}
-    {modal?.kind === 'session' && <SessionModal workspace={workspace} busy={busy} onClose={() => setModal(null)} onSave={input => act('create-session', () => designWorkshop.createSession(input))} />}
-    {modal?.kind === 'refine' && <RefineModal {...modal} reviewers={workspace.experimentReviewers || []} currentUserId={user?.id} busy={busy} onClose={() => setModal(null)} onSave={(content, experiment) => act('refine', () => designWorkshop.createDirectionRevision(modal.direction.id, modal.version.id, content, experiment))} />}
+        : <WorkshopWorkspace workspace={workspace} focusedSessionId={navigationContext.output?.kind === 'design_session' ? navigationContext.output.id : ''} focusedVersionId={navigationContext.output?.versionId || ''} focusedDraftId={navigationContext.draft?.kind === 'private_experiment' ? navigationContext.draft.id : ''} canPromoteExperiment={version => canRequestDesignExperimentPromotion(activeMembership, version, user?.id)} onCreateFlow={() => setModal({ kind: 'flow' })} onCreate={() => setModal({ kind: 'session' })} onGenerate={session => act(`generate-${session.id}`, () => studio.generateDirections(session.id), 'executeGeneration')} onGenerateImage={(version, modelId, prompt) => act(`image-${version.id}`, () => studio.generateImage(version.id, modelId, prompt), 'executeGeneration')} onGenerateVariants={(versionId, modelId, formats) => act(`variants-${versionId}`, () => studio.generateVariants(versionId, modelId, formats), 'executeGeneration')} onGenerateVideo={(version, prompt) => act(`video-${version.id}`, () => studio.createVideoPlaceholder(version.id, prompt), 'executeGeneration')} onGeneratePage={(versionId, slug, modelId) => act('generate-page', () => studio.generatePageDesign(versionId, slug, modelId), 'executeGeneration')} onSubmitPage={designId => act(`submit-page-${designId}`, () => studio.submitPageDesignReview(designId))} onApprovePage={designId => act(`approve-page-${designId}`, () => studio.approvePageDesign(designId), 'release')} onExportPage={designId => act(`export-page-${designId}`, () => studio.exportPageDesign(designId), 'release')} onDownloadExport={jobId => act(`download-export-${jobId}`, async () => { const result = await studio.getWordPressExportDownload(jobId); window.location.assign(result.download_url) })} onPrepareHandoff={prepareHandoff} onDownloadHandoff={downloadHandoff} onRefine={(direction, version) => setModal({ kind: 'refine', direction, version })} onPromote={version => act(`promote-${version.id}`, () => studio.promoteDirectionExperiment(version.id), 'promoteExperiment')} onSelect={(session, version) => act(`select-${version.id}`, () => studio.selectDirection(session.id, version.id), 'selectDirection')} onRelease={session => act(`release-${session.id}`, () => studio.releaseDirection(session.id, 'Released by the accountable human reviewer.'), 'release')} busy={busy} />}
+    {modal?.kind === 'flow' && <FlowModal workspace={workspace} busy={busy} onClose={() => setModal(null)} onSave={input => act('create-flow', () => studio.createPageFlow(input))} />}
+    {modal?.kind === 'session' && <SessionModal workspace={workspace} busy={busy} onClose={() => setModal(null)} onSave={input => act('create-session', () => studio.createSession(input))} />}
+    {modal?.kind === 'refine' && <RefineModal {...modal} reviewers={workspace.experimentReviewers || []} currentUserId={user?.id} busy={busy} onClose={() => setModal(null)} onSave={(content, experiment) => act('refine', () => studio.createDirectionRevision(modal.direction.id, modal.version.id, content, experiment))} />}
+    {modal && !pendingSelection && <button type="button" onClick={() => requestSelection(new URLSearchParams())} className="fixed right-24 top-4 z-[55] rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm font-semibold text-violet-200 shadow-xl">Change work</button>}
+    {pendingSelection && <ContextSwitchDialog canSave={context.accessValid && officialReady && capabilities.createDraft} onStay={() => setPendingSelection(null)} onSave={saveCurrentAndSwitch} onDiscard={discardAndSwitch} />}
+    </WorkshopContextShell>
   </Shell>
+}
+
+function ChooseWork({ engagements, filter, setFilter, onSelect, onPrivate }) {
+  const term = filter.trim().toLowerCase()
+  const visible = engagements.filter(item => !term || [item.name, item.agency_clients?.name, item.brands?.name].filter(Boolean).some(value => value.toLowerCase().includes(term)))
+  return <div className="mx-auto max-w-5xl"><p className="text-xs font-semibold uppercase tracking-[.24em] text-violet-400">Design S01</p><h1 className="mt-2 text-3xl font-semibold">Choose work</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Select an authorized project engagement or deliberately enter a Private experiment. Design never opens the last client automatically.</p><div className="mt-6 grid gap-5 lg:grid-cols-[1.4fr_.8fr]"><Panel><Field label="Search authorized work"><input className={INPUT} value={filter} onChange={event => setFilter(event.target.value)} placeholder="Project, client, brand, or engagement" /></Field><div className="mt-4 space-y-3">{visible.map(item => <button type="button" key={item.id} onClick={() => onSelect(item)} className="w-full rounded-xl border border-white/10 bg-white/[0.025] p-4 text-left hover:border-violet-500/40"><span className="font-semibold text-white">{item.name}</span><span className="mt-1 block text-xs text-slate-400">{[item.agency_clients?.name, item.brands?.name].filter(Boolean).join(' · ') || 'Authorized Design engagement'}</span></button>)}{!visible.length && <Empty compact title="No authorized work matches" text="Clear the search or ask an administrator to verify the project and active Design service." />}</div></Panel><div className="space-y-5"><Panel><h2 className="font-semibold">Private experiment</h2><p className="mt-2 text-sm leading-6 text-slate-400">Explore without creating an official deliverable. Promotion remains a separate authorized action.</p><button type="button" onClick={onPrivate} className={`${BUTTON} mt-4 w-full`}>Enter Private experiment</button></Panel><Panel><h2 className="font-semibold">Available without a target</h2><div className="mt-3 flex flex-col gap-2"><Link to="/sphere/design/systems" className="text-sm font-semibold text-violet-300">Browse Design systems</Link><span className="text-sm text-slate-400">Video not configured</span><span className="text-xs text-slate-500">Official save and submission remain blocked until valid work is selected.</span></div></Panel></div></div></div>
+}
+
+function PrivateDesk({ draft, returnTarget, onChoose }) {
+  return <div className="mx-auto max-w-5xl"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[.24em] text-amber-300">Private experiment</p><h1 className="mt-2 text-3xl font-semibold">Design desk</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">This isolated space is not an official client, brand, engagement, task, or work item.</p></div><div className="flex gap-2"><Link to={returnTarget} className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold">Back to work</Link><button type="button" onClick={onChoose} className={BUTTON}>Choose work</button></div></div><div className="mt-6 grid gap-5 md:grid-cols-3"><Panel><h2 className="font-semibold">Brief</h2><p className="mt-2 text-sm text-slate-400">{draft ? `Durable P9 draft pointer ${draft.id} is preserved; unsaved text is never inferred.` : 'A durable draft is restored only from an explicit P9 pointer.'}</p></Panel><Panel><h2 className="font-semibold">Chat and tools</h2><p className="mt-2 text-sm text-slate-400">Browse permitted references without creating official output.</p></Panel><Panel><h2 className="font-semibold">Outputs</h2><p className="mt-2 text-sm text-slate-400">Nothing has been generated or promoted.</p></Panel></div><p className="mt-5 text-sm font-semibold text-slate-400">Video not configured</p></div>
+}
+
+function ContextStrip({ context, navigation, organizationName, unsaved, capabilities, officialReady }) {
+  const serviceNames = (context.services || []).map(item => serviceCatalog(item)?.name || item.id).filter(Boolean)
+  const serviceLabel = serviceNames.length > 1 ? `${serviceNames.length} active Design services` : serviceNames[0]
+  return <section aria-label="Current Design context" className="mt-5 grid gap-3 rounded-2xl border border-white/10 bg-white/[0.025] p-4 sm:grid-cols-2 xl:grid-cols-6"><ContextValue label="Organization" value={organizationName || navigation.organizationId} /><ContextValue label="Project" value={context.projectId} /><ContextValue label="Engagement" value={context.engagement?.name} /><ContextValue label="Brand" value={context.engagement?.brands?.name || context.brandId} /><ContextValue label="Service" value={serviceLabel} title={serviceNames.join(', ')} /><ContextValue label="State" value={unsaved ? 'Unsaved changes' : officialReady ? 'Official context ready' : 'Official save blocked'} tone={unsaved ? 'amber' : officialReady ? 'green' : 'red'} /><p className="text-xs text-slate-500 sm:col-span-2 xl:col-span-6">Actions use existing server permissions: {capabilities.createDraft ? 'draft enabled' : 'read only'} · {capabilities.executeGeneration ? 'configured generation permitted' : 'generation denied'} · {capabilities.release ? 'release permitted' : 'release denied'}.</p></section>
+}
+
+function ContextValue({ label, value, tone = 'slate', title = '' }) {
+  const colors = tone === 'amber' ? 'text-amber-300' : tone === 'green' ? 'text-emerald-300' : tone === 'red' ? 'text-red-300' : 'text-slate-200'
+  return <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</p><p title={title || value || ''} className={`mt-1 truncate text-sm font-semibold ${colors}`}>{value || 'Not selected'}</p></div>
+}
+
+function ContextSwitchDialog({ canSave, onStay, onSave, onDiscard }) {
+  return <div role="dialog" aria-modal="true" aria-labelledby="design-context-switch-title" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4"><section className="w-full max-w-lg rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl"><h2 id="design-context-switch-title" className="text-xl font-semibold">You have unsaved changes</h2><p className="mt-2 text-sm leading-6 text-slate-400">Choose what happens before Design changes organization, project, engagement, brand, service, or work identity. Attachments and pending confirmations never carry into the next context.</p><div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" onClick={onStay} className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold">Stay</button><button type="button" disabled={!canSave} title={canSave ? '' : 'Save is unavailable because current access or official context is no longer valid.'} onClick={onSave} className={`${BUTTON} bg-slate-700`}>Save to current context</button><button type="button" onClick={onDiscard} className="rounded-xl border border-red-500/30 px-4 py-2.5 text-sm font-semibold text-red-200">Discard</button></div></section></div>
 }
 
 function ArtifactWorkspace({ workspace }) {
@@ -91,11 +211,12 @@ function ArtifactWorkspace({ workspace }) {
   })}</div></div>
 }
 
-function WorkshopWorkspace({ workspace, focusedSessionId, currentUserId, onCreateFlow, onCreate, onGenerate, onGenerateImage, onGenerateVariants, onGenerateVideo, onGeneratePage, onSubmitPage, onApprovePage, onExportPage, onDownloadExport, onPrepareHandoff, onDownloadHandoff, onRefine, onPromote, onSelect, onRelease, busy }) {
+function WorkshopWorkspace({ workspace, focusedSessionId, focusedVersionId, focusedDraftId, canPromoteExperiment, onCreateFlow, onCreate, onGenerate, onGenerateImage, onGenerateVariants, onGenerateVideo, onGeneratePage, onSubmitPage, onApprovePage, onExportPage, onDownloadExport, onPrepareHandoff, onDownloadHandoff, onRefine, onPromote, onSelect, onRelease, busy }) {
   const approvedTypes = new Set(workspace.approvals.map(approval => workspace.artifacts.find(item => item.id === approval.artifact_id)?.artifact_type).filter(Boolean))
   const ready = ['discovery', 'vision', 'audience'].every(type => approvedTypes.has(type))
   const [flowSessionId, setFlowSessionId] = useState('')
   const session = workspace.sessions.find(item => item.id === flowSessionId) || workspace.sessions.find(item => item.id === focusedSessionId) || workspace.sessions[0]
+  const experimentVersions = [...workspace.experimentalDirectionVersions].sort((left, right) => Number(right.id === focusedDraftId) - Number(left.id === focusedDraftId))
   const directions = session ? workspace.directions.filter(item => item.session_id === session.id).sort((left, right) => left.direction_slot - right.direction_slot) : []
   const selection = session && workspace.selections.find(item => item.session_id === session.id)
   const release = session && workspace.releases.find(item => item.session_id === session.id)
@@ -108,10 +229,10 @@ function WorkshopWorkspace({ workspace, focusedSessionId, currentUserId, onCreat
     {!session ? <Panel><h2 className="text-xl font-semibold">Compile approved context</h2><p className="mt-2 text-sm text-slate-400">The session snapshots exact approved Discovery, Vision and Audience versions, then adds an output brief and designer-safe instructions.</p>{createSessionAction}</Panel>
       : <Panel><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-violet-400">Compiled session</p><h2 className="mt-2 text-xl font-semibold">{sessionServiceLabel(session, workspace.designServices)}</h2><p className="mt-2 text-sm text-slate-400">Context {session.context_checksum.slice(0, 12)}… · {Object.keys(session.context_manifest?.artifacts || {}).length} exact approved inputs</p></div><Badge tone={release ? 'green' : session.status === 'generation_failed' ? 'red' : 'violet'}>{release ? 'Released' : session.status.replaceAll('_', ' ')}</Badge></div><p className="mt-4 rounded-xl bg-white/[0.03] p-4 text-sm leading-6 text-slate-300">{session.designer_instructions}</p>{!directions.length && <button disabled={busy === `generate-${session.id}` || !['ready', 'generation_failed'].includes(session.status)} onClick={() => onGenerate(session)} className={`${BUTTON} mt-4`}>{busy === `generate-${session.id}` ? (storyboard ? 'Generating connected storyboard frames…' : 'Generating three distinct directions…') : (storyboard ? 'Generate storyboard sequence' : 'Generate three directions')}</button>}</Panel>}
     {session && <Panel><h2 className="text-xl font-semibold">Compile approved context</h2><p className="mt-2 text-sm text-slate-400">The session snapshots exact approved Discovery, Vision and Audience versions, then adds an output brief and designer-safe instructions.</p>{createSessionAction}</Panel>}
-    {!!directions.length && <section aria-label={storyboard ? 'Storyboard sequence' : 'Design direction comparison'}>{storyboard && <div className="mb-4"><p className="text-xs font-semibold uppercase tracking-wider text-violet-300">Ordered storyboard sequence</p><h2 className="mt-2 text-xl font-semibold">Static frames in narrative order</h2><p className="mt-2 text-sm text-slate-400">Direction slots are frame order for this service. Scroll through the filmstrip from frame 1 onward; each frame keeps its own proofing comments.</p></div>}<div className={storyboard ? 'grid auto-cols-[min(82vw,26rem)] grid-flow-col gap-5 overflow-x-auto pb-3' : 'grid gap-5 xl:grid-cols-3'}>{directions.map(direction => { const versions = workspace.directionVersions.filter(item => item.direction_id === direction.id); const version = latestByVersion(versions); const selected = selection?.direction_version_id === version?.id; return <DirectionCard key={direction.id} direction={direction} versions={versions} version={version} models={workspace.models} mediaAssets={workspace.mediaAssets} storyboard={storyboard} selected={selected} released={release?.direction_version_id === version?.id} onGenerateImage={(modelId, prompt) => onGenerateImage(version, modelId, prompt)} onGenerateVideo={prompt => onGenerateVideo(version, prompt)} onRefine={() => onRefine(direction, version)} onSelect={() => onSelect(session, version)} canSelect={!selection} busy={busy} /> })}</div></section>}
+    {!!directions.length && <section aria-label={storyboard ? 'Storyboard sequence' : 'Design direction comparison'}>{storyboard && <div className="mb-4"><p className="text-xs font-semibold uppercase tracking-wider text-violet-300">Ordered storyboard sequence</p><h2 className="mt-2 text-xl font-semibold">Static frames in narrative order</h2><p className="mt-2 text-sm text-slate-400">Direction slots are frame order for this service. Scroll through the filmstrip from frame 1 onward; each frame keeps its own proofing comments.</p></div>}<div className={storyboard ? 'grid auto-cols-[min(82vw,26rem)] grid-flow-col gap-5 overflow-x-auto pb-3' : 'grid gap-5 xl:grid-cols-3'}>{directions.map(direction => { const versions = workspace.directionVersions.filter(item => item.direction_id === direction.id); const version = versions.find(item => item.id === focusedVersionId) || latestByVersion(versions); const selected = selection?.direction_version_id === version?.id; return <DirectionCard key={direction.id} direction={direction} versions={versions} version={version} models={workspace.models} mediaAssets={workspace.mediaAssets} storyboard={storyboard} selected={selected} released={release?.direction_version_id === version?.id} onGenerateImage={(modelId, prompt) => onGenerateImage(version, modelId, prompt)} onGenerateVideo={prompt => onGenerateVideo(version, prompt)} onRefine={() => onRefine(direction, version)} onSelect={() => onSelect(session, version)} canSelect={!selection} busy={busy} /> })}</div></section>}
     {release && variantEligible && <VariantWorkspace key={release.direction_version_id} workspace={workspace} release={release} onGenerate={onGenerateVariants} busy={busy} />}
     {release && <ProductionHandoffPanel release={release} packages={workspace.handoffPackages} busy={busy} onPrepare={onPrepareHandoff} onDownload={onDownloadHandoff} />}
-    {!!workspace.experimentalDirectionVersions.length && <Panel><div><p className="text-xs font-semibold uppercase tracking-wider text-amber-300">Private experiments</p><h2 className="mt-2 text-xl font-semibold">Experimental versions</h2><p className="mt-2 text-sm text-slate-400">Visible only to each creator and invited reviewers. Experiments stay outside the main history until promoted.</p></div><div className="mt-5 grid gap-4 lg:grid-cols-2">{workspace.experimentalDirectionVersions.map(version => { const direction = directions.find(item => item.id === version.direction_id); const canPromote = version.created_by === currentUserId || (version.experiment_visibility || []).includes(currentUserId); return <ExperimentCard key={version.id} direction={direction} version={version} models={workspace.models} mediaAssets={workspace.mediaAssets} storyboard={storyboard} canPromote={canPromote} onGenerateImage={(modelId, prompt) => onGenerateImage(version, modelId, prompt)} onGenerateVideo={prompt => onGenerateVideo(version, prompt)} onPromote={() => onPromote(version)} busy={busy} /> })}</div></Panel>}
+    {!!experimentVersions.length && <Panel><div><p className="text-xs font-semibold uppercase tracking-wider text-amber-300">Private experiments</p><h2 className="mt-2 text-xl font-semibold">Experimental versions</h2><p className="mt-2 text-sm text-slate-400">Visible only to each creator and invited reviewers. Experiments stay outside the main history until promoted.</p></div><div className="mt-5 grid gap-4 lg:grid-cols-2">{experimentVersions.map(version => { const direction = directions.find(item => item.id === version.direction_id); const canPromote = canPromoteExperiment(version); return <ExperimentCard key={version.id} direction={direction} version={version} models={workspace.models} mediaAssets={workspace.mediaAssets} storyboard={storyboard} focused={version.id === focusedDraftId} canPromote={canPromote} onGenerateImage={(modelId, prompt) => onGenerateImage(version, modelId, prompt)} onGenerateVideo={prompt => onGenerateVideo(version, prompt)} onPromote={() => onPromote(version)} busy={busy} /> })}</div></Panel>}
     {!!directions.length && <PageDesignWorkspace workspace={workspace} onGenerate={onGeneratePage} onSubmit={onSubmitPage} onApprove={onApprovePage} onExport={onExportPage} onDownload={onDownloadExport} busy={busy} />}
     {selection && !release && <Panel><h3 className="font-semibold">{storyboard ? 'Storyboard sequence ready for release' : 'Human selection recorded'}</h3><p className="mt-2 text-sm text-slate-400">{storyboard ? 'The selected exact frame version anchors the existing session-level release record; release applies to the whole ordered sequence.' : 'Selection does not equal release. The accountable Design manager must perform the separate release action.'}</p><button disabled={busy === `release-${session.id}`} onClick={() => onRelease(session)} className={`${BUTTON} mt-4`}>{storyboard ? 'Release whole storyboard sequence' : 'Release selected exact version'}</button></Panel>}
   </div>
@@ -161,9 +282,9 @@ function WordPressExportStatus({ job }) {
   return <div className={`border-b p-4 text-sm ${job.status === 'failed' ? 'border-red-500/20 bg-red-500/5' : 'border-emerald-500/20 bg-emerald-500/5'}`}><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-semibold text-slate-100">Native WordPress export · {job.status}</p><p className="mt-1 text-xs text-slate-400">Private theme artifact · signed download links expire after 10 minutes</p></div><Badge tone={complete ? 'green' : job.status === 'failed' ? 'red' : 'amber'}>{job.provider}</Badge></div>{job.failure_reason && <p className="mt-3 text-red-200">{job.failure_reason}</p>}{complete && <div className="mt-3 grid gap-2 sm:grid-cols-2">{wordpressSeoRows(job.seo_verification).map(check => <p key={check.id} className={check.passed ? 'text-emerald-300' : 'text-red-300'}>{check.passed ? '✓' : '×'} {check.label}</p>)}</div>}{complete && <p className="mt-3 text-xs leading-5 text-slate-400">Before publishing, install the theme on a test WordPress site and visually re-check the title, meta description, heading order, and image alt text.</p>}</div>
 }
 
-function ExperimentCard({ direction, version, models, mediaAssets, storyboard, canPromote, onGenerateImage, onGenerateVideo, onPromote, busy }) {
+function ExperimentCard({ direction, version, models, mediaAssets, storyboard, focused, canPromote, onGenerateImage, onGenerateVideo, onPromote, busy }) {
   const content = version.content || {}
-  return <section className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.04] p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-wider text-amber-300">{storyboard ? 'Frame' : 'Direction'} {direction?.direction_slot} · experimental v{version.version_number}</p><h3 className="mt-2 text-lg font-semibold">{content.title}</h3></div><Badge tone="amber">Experiment</Badge></div><p className="mt-3 text-sm leading-6 text-slate-400">{content.rationale}</p><p className="mt-3 text-xs text-slate-500">Immutable version {version.id.slice(0, 8)} · {version.experiment_visibility?.length || 0} invited reviewer(s)</p><DesignMediaPanel key={version.id} version={version} models={models} assets={mediaAssets} onGenerateImage={onGenerateImage} onGenerateVideo={onGenerateVideo} allowVideo={!storyboard} busy={busy} />{canPromote && <button disabled={busy === `promote-${version.id}`} onClick={onPromote} className={`${BUTTON} mt-4`}>{busy === `promote-${version.id}` ? 'Promoting…' : 'Promote to main version'}</button>}<VersionProofingPanel targetKind="design_direction" versions={[version]} initialVersionId={version.id} department="design" theme="violet" /></section>
+  return <section className={`rounded-2xl border bg-amber-400/[0.04] p-4 ${focused ? 'border-violet-400 ring-2 ring-violet-400/30' : 'border-amber-400/20'}`}><div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-wider text-amber-300">{storyboard ? 'Frame' : 'Direction'} {direction?.direction_slot} · experimental v{version.version_number}</p><h3 className="mt-2 text-lg font-semibold">{content.title}</h3></div><Badge tone={focused ? 'violet' : 'amber'}>{focused ? 'Restored draft' : 'Experiment'}</Badge></div><p className="mt-3 text-sm leading-6 text-slate-400">{content.rationale}</p><p className="mt-3 text-xs text-slate-500">Immutable version {version.id.slice(0, 8)} · {version.experiment_visibility?.length || 0} invited reviewer(s)</p><DesignMediaPanel key={version.id} version={version} models={models} assets={mediaAssets} onGenerateImage={onGenerateImage} onGenerateVideo={onGenerateVideo} allowVideo={!storyboard} busy={busy} />{canPromote && <button disabled={busy === `promote-${version.id}`} onClick={onPromote} className={`${BUTTON} mt-4`}>{busy === `promote-${version.id}` ? 'Promoting…' : 'Promote to main version'}</button>}<VersionProofingPanel targetKind="design_direction" versions={[version]} initialVersionId={version.id} department="design" theme="violet" /></section>
 }
 
 function DirectionCard({ direction, versions, version, models, mediaAssets, storyboard, selected, released, onGenerateImage, onGenerateVideo, onRefine, onSelect, canSelect, busy }) {
@@ -173,12 +294,12 @@ function DirectionCard({ direction, versions, version, models, mediaAssets, stor
   return <Panel><div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-wider text-slate-500">{storyboard ? 'Frame' : 'Direction'} {direction.direction_slot} · v{version?.version_number}</p><h3 className="mt-2 text-xl font-semibold">{content.title}</h3></div>{(selected || released) && <Badge tone="green">{storyboard ? (released ? 'Sequence released' : 'Release anchor') : (released ? 'Released' : 'Selected')}</Badge>}</div><div role="button" tabIndex="0" aria-label={`Click to anchor a proofing comment on ${storyboard ? 'this frame' : 'this direction'}`} onClick={anchorAt} onKeyDown={event => { if (event.key === 'Enter') setAnchor({ x: 0.5, y: 0.5 }) }} className="relative mt-4 cursor-crosshair overflow-hidden rounded-2xl border border-white/10" style={{ background: content.preview_spec?.background || '#111827' }}><div className="p-5"><div className="h-2 w-16 rounded-full" style={{ background: content.preview_spec?.accent || '#8b5cf6' }} /><p className="mt-10 text-2xl font-bold text-white">{content.creative_thesis}</p><p className="mt-3 text-sm text-white/70">{content.preview_spec?.composition}</p></div><div className="flex">{palette.map((color, index) => <div key={index} title={`${color.name}: ${color.hex}`} className="h-10 flex-1" style={{ background: color.hex }} />)}</div>{anchor && <span className="pointer-events-none absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-violet-500 shadow-lg" style={{ left: `${anchor.x * 100}%`, top: `${anchor.y * 100}%` }} />}</div><p className="mt-2 text-[11px] text-violet-300">Click the {storyboard ? 'frame' : 'direction'} preview to anchor a positional comment.</p><DesignMediaPanel key={version.id} version={version} models={models} assets={mediaAssets} onGenerateImage={onGenerateImage} onGenerateVideo={onGenerateVideo} allowVideo={!storyboard} busy={busy} /><p className="mt-4 text-sm leading-6 text-slate-400">{content.rationale}</p><div className="mt-4 flex flex-wrap gap-2">{(content.visual_principles || []).map(item => <Badge key={item}>{item}</Badge>)}</div><p className="mt-4 text-xs text-slate-500">Model run {version?.generation_run_id?.slice(0, 8) || 'human refinement'} · immutable version {version?.id?.slice(0, 8)}</p><div className="mt-5 flex gap-2"><button onClick={onRefine} className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold">Refine as new version</button>{canSelect && <button disabled={busy === `select-${version.id}`} onClick={onSelect} className={BUTTON}>{storyboard ? 'Use as sequence release anchor' : 'Select this version'}</button>}</div><VersionProofingPanel targetKind="design_direction" versions={versions} initialVersionId={version?.id} department="design" theme="violet" visualAnchor={anchor} visualAnchorVersionId={version?.id} onClearVisualAnchor={() => setAnchor(null)} /></Panel>
 }
 
-function DesignMediaPanel({ version, models, assets, onGenerateImage, onGenerateVideo, allowVideo = true, busy }) {
+function DesignMediaPanel({ version, models, assets, onGenerateImage, allowVideo = true, busy }) {
   const imageModels = models.filter(model => model.supported_output_types?.includes('image'))
   const versionAssets = assets.filter(asset => asset.design_direction_version_id === version.id)
   const [prompt, setPrompt] = useState([version.content?.imagery_direction, version.content?.creative_thesis].filter(Boolean).join('\n\n'))
   const [modelId, setModelId] = useState(imageModels[0]?.id || '')
-  return <section className="mt-4 rounded-2xl border border-violet-400/15 bg-slate-950/50 p-3"><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-violet-300">Generated media</p><p className="mt-1 text-[11px] text-slate-500">Attached only to immutable version {version.id.slice(0, 8)}</p></div><Badge tone="violet">{versionAssets.length} outputs</Badge></div><textarea rows="3" className={`${INPUT} mt-3`} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={allowVideo ? 'Image or video generation prompt' : 'Static frame image prompt'} />{imageModels.length ? <select className={`${INPUT} mt-2`} value={modelId} onChange={event => setModelId(event.target.value)}>{imageModels.map(model => <option key={model.id} value={model.id}>{model.display_name}</option>)}</select> : <p className="mt-2 text-xs text-amber-300">No active image model is registered yet.</p>}<div className="mt-2 flex flex-wrap gap-2"><button disabled={!prompt.trim() || !modelId || busy === `image-${version.id}`} onClick={() => onGenerateImage(modelId, prompt)} className={BUTTON}>{busy === `image-${version.id}` ? 'Generating image…' : 'Generate image'}</button>{allowVideo && <button disabled={!prompt.trim() || busy === `video-${version.id}`} onClick={() => onGenerateVideo(prompt)} className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold disabled:opacity-40">Generate video</button>}</div><div className="mt-3 grid gap-3">{versionAssets.map(asset => <MediaAsset key={asset.id} asset={asset} />)}</div></section>
+  return <section className="mt-4 rounded-2xl border border-violet-400/15 bg-slate-950/50 p-3"><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-violet-300">Generated media</p><p className="mt-1 text-[11px] text-slate-500">Attached only to immutable version {version.id.slice(0, 8)}</p></div><Badge tone="violet">{versionAssets.length} outputs</Badge></div><textarea rows="3" className={`${INPUT} mt-3`} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="Static image generation prompt" />{imageModels.length ? <select className={`${INPUT} mt-2`} value={modelId} onChange={event => setModelId(event.target.value)}>{imageModels.map(model => <option key={model.id} value={model.id}>{model.display_name}</option>)}</select> : <p className="mt-2 text-xs text-amber-300">No active image model is registered yet.</p>}<div className="mt-2 flex flex-wrap items-center gap-3"><button disabled={!prompt.trim() || !modelId || busy === `image-${version.id}`} onClick={() => onGenerateImage(modelId, prompt)} className={BUTTON}>{busy === `image-${version.id}` ? 'Generating image…' : 'Generate image'}</button>{allowVideo && <span className="text-sm font-semibold text-slate-500">Video not configured</span>}</div><div className="mt-3 grid gap-3">{versionAssets.map(asset => <MediaAsset key={asset.id} asset={asset} />)}</div></section>
 }
 
 function MediaAsset({ asset }) {

@@ -77,7 +77,7 @@ test('security remediation keeps legacy organization-less tables server-only', (
 
 test('the engagement compatibility route remains while the old projects URL opens Portfolio Workspace', () => {
   assert.match(app, /path="sphere\/engagements" element={<OperatingSpine initialView="engagements" \/>}/)
-  assert.match(app, /path="sphere\/projects" element={<Navigate to="\/sphere\/workspace" replace \/>}/)
+  assert.match(app, /path="sphere\/projects" element={<Navigate to="\/sphere\/portfolio" replace \/>}/)
 })
 
 test('engagement composition rejects an empty service selection before calling Supabase', async () => {
@@ -129,7 +129,8 @@ assert.ok(operatingSpineView.includes('to={`/sphere/engagements?engagement=${eng
   assert.match(operatingSpineView, /function PipelineWorkspace\(\{ workspace \}\)/)
   const marketingStudioView = readFileSync(new URL('../apps/MarketingStudio.jsx', import.meta.url), 'utf8')
   assert.match(marketingStudioView, /useSearchParams/)
-  assert.match(marketingStudioView, /requestedEngagementId/)
+  assert.match(marketingStudioView, /navigationContext/)
+  assert.match(marketingStudioView, /resolveMarketingContext/)
 })
 function readOnlyPipelineClient(visibleRows) {
   const calls = []

@@ -283,7 +283,7 @@ export function createDeliveryRepository(client) {
       const workstreams = await load(
         client
           .from('workstreams')
-          .select('*, projects(id, organization_id, name, status, priority, health, due_date, engagement_type)')
+          .select('*, projects(id, organization_id, client_id, name, status, priority, health, due_date, engagement_type)')
           .eq('organization_id', organizationId)
           .eq('department_id', departmentId)
           .in('status', ['planned', 'active', 'on_hold'])
@@ -313,7 +313,7 @@ export function createDeliveryRepository(client) {
       const engagements = await load(
         client
           .from('engagements')
-          .select('id, organization_id, project_id, name, status')
+          .select('id, organization_id, project_id, brand_id, name, status')
           .eq('organization_id', organizationId)
           .in('project_id', projectIds)
       ) || []

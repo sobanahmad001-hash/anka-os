@@ -25,13 +25,13 @@ test('DS1 adds only the nullable organization-safe service link and bounded dire
 })
 
 test('session creation accepts only an active Design service from the same engagement', () => {
-  assert.match(edge, /requireActiveDesignService\(admin, engagementId, engagementServiceId\)/)
+  assert.match(edge, /requireActiveDesignService\(\{ admin, organizationId: admin\.organizationId \}, engagementId, engagementServiceId\)/)
   assert.match(edge, /from\('engagement_services'\)[\s\S]*eq\('engagement_id', engagementId\)[\s\S]*eq\('status', 'active'\)/)
   assert.match(edge, /eq\('service_catalog\.department_id', 'design'\)[\s\S]*eq\('service_catalog\.is_active', true\)/)
   assert.match(edge, /engagement_service_id: engagementServiceId[\s\S]*output_family: outputFamily/)
   assert.match(edgeTest, /rejects inactive service[\s\S]*status: 'planned'[\s\S]*Expected inactive engagement service to be rejected/)
   assert.match(edgeTest, /combines active service enforcement with optional event linking[\s\S]*brand_visual_identity[\s\S]*campaign_creative/)
-  assert.match(edge, /requireActiveDesignService\(admin, engagementId, engagementServiceId\)[\s\S]*engagement_service_id: engagementServiceId[\s\S]*designEventLink\(session\.id, externalEventId, actorId\)/)
+  assert.match(edge, /requireActiveDesignService\(\{ admin, organizationId: admin\.organizationId \}, engagementId, engagementServiceId\)[\s\S]*engagement_service_id: engagementServiceId[\s\S]*designEventLink\(admin\.organizationId, session\.id, externalEventId, actorId\)/)
 })
 
 test('DS1 service coverage remains intact while DS4 specializes only storyboard generation', () => {

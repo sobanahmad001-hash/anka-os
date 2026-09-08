@@ -56,7 +56,7 @@ test('variant generation reuses the installed image adapter, storage path, asset
   assert.match(edge, /providerSize: spec\.providerSize,[\s\S]*targetWidth: spec\.width,[\s\S]*targetHeight: spec\.height/)
   assert.match(edge, /contentRequestId: request\.id,[\s\S]*engagementId: request\.engagement_id/)
   assert.match(edge, /from\('design_media_assets'\)\.insert/)
-  assert.match(edge, /mediaStoragePath\(input\.directionVersionId, asset\.id\)/)
+  assert.match(edge, /mediaStoragePath\(admin\.organizationId, input\.directionVersionId, asset\.id\)/)
   assert.match(edge, /createSignedUrls/)
   assert.doesNotMatch(edge, /VARIANT_[A-Z_]*BUCKET|variant-generated-media/)
 })
@@ -75,7 +75,7 @@ test('variants are exact-size PNG exports and status transitions check database 
 test('batch formats are independent and the UI keeps variants outside direction comparison', () => {
   assert.match(edge, /runIndependentVariantJobs\(requestedFormats/)
   assert.match(edgeTest, /one failed variant does not block sibling formats in the same request/)
-  assert.match(repository, /from\('design_direction_variants'\)/)
+  assert.match(repository, /scopedFrom\('design_direction_variants'\)/)
   assert.match(repository, /generateVariants:/)
   assert.match(ui, /Released-format variants/)
   assert.match(ui, /remains separate from direction comparison/)

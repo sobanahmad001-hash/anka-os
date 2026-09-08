@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import DepartmentConnectors from '../components/DepartmentConnectors.jsx'
+import WorkshopContextShell from '../components/WorkshopContextShell.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { delivery } from '../data/delivery.js'
 import { TASK_TRANSITIONS } from '../data/deliveryRepository.js'
+import { appendWorkshopNavigation, parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
 
 const ALL_DEPARTMENT_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 const canViewDepartment = (membership, departmentId) => Boolean(
@@ -109,13 +111,16 @@ const initialRequest = { title: '', requestedOutput: '', receivingWorkstreamId: 
 
 export default function DepartmentWorkshop({ departmentId }) {
   const { user } = useAuth()
+  const [searchParams] = useSearchParams()
+  const navigationContext = parseWorkshopNavigation(searchParams)
   const { activeMembership, activeOrganizationId, selectionRequired, loading: organizationLoading, handleOrganizationAccessError, scopeRevision, requestSignal } = useOrganization()
   const currentScope = useRef(null)
   currentScope.current = { organizationId: activeOrganizationId, revision: scopeRevision }
   const config = DEPARTMENT_CONFIG[departmentId]
   const departmentAllowed = canViewDepartment(activeMembership, departmentId)
   const [workspace, setWorkspace] = useState(null)
-  const [activeTab, setActiveTab] = useState('tasks')
+  const initialTab = TABS.some(([id]) => id === navigationContext.workshopTab) ? navigationContext.workshopTab : 'tasks'
+  const [activeTab, setActiveTab] = useState(initialTab)
   const [selectedWorkstreamId, setSelectedWorkstreamId] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -134,10 +139,18 @@ export default function DepartmentWorkshop({ departmentId }) {
       const result = await delivery.getDepartmentWorkspace(departmentId, activeOrganizationId, { signal: requestSignal })
       if (!isCurrentOrganizationScope(requestedScope, currentScope.current)) return
       setWorkspace(result)
+      const requestedEngagement = navigationContext.engagementId
+        ? result.engagements.find(engagement => engagement.id === navigationContext.engagementId)
+        : null
+      const requestedWorkstream = requestedEngagement
+        ? result.workstreams.find(workstream => workstream.project_id === requestedEngagement.project_id)
+        : navigationContext.projectId
+          ? result.workstreams.find(workstream => workstream.project_id === navigationContext.projectId)
+          : null
       setSelectedWorkstreamId((current) => (
         result.workstreams.some((workstream) => workstream.id === current)
           ? current
-          : result.workstreams[0]?.id || ''
+          : requestedWorkstream?.id || (navigationContext.projectId || navigationContext.engagementId ? '' : result.workstreams[0]?.id || '')
       ))
     } catch (loadError) {
       if (!isAbortedRequest(loadError, requestSignal) && isCurrentOrganizationScope(requestedScope, currentScope.current)) {
@@ -147,14 +160,15 @@ export default function DepartmentWorkshop({ departmentId }) {
     } finally {
       if (isCurrentOrganizationScope(requestedScope, currentScope.current)) setLoading(false)
     }
-  }, [activeOrganizationId, departmentAllowed, departmentId, handleOrganizationAccessError, organizationLoading, requestSignal, scopeRevision, selectionRequired])
+  }, [activeOrganizationId, departmentAllowed, departmentId, handleOrganizationAccessError, navigationContext.engagementId, navigationContext.projectId, organizationLoading, requestSignal, scopeRevision, selectionRequired])
 
   useEffect(() => {
     setWorkspace(null); setActiveTab('tasks'); setSelectedWorkstreamId(''); setLoading(true); setSaving(false); setError('')
+    if (initialTab !== 'tasks') setActiveTab(initialTab)
     setTaskForm(initialTask); setResearchForm(initialResearch); setDeliverableForm(initialDeliverable); setRequestForm(initialRequest)
     if (!organizationLoading && !selectionRequired && activeOrganizationId && departmentAllowed) loadWorkspace()
     else if (!organizationLoading) setLoading(false)
-  }, [activeOrganizationId, departmentAllowed, departmentId, loadWorkspace, organizationLoading, scopeRevision, selectionRequired])
+  }, [activeOrganizationId, departmentAllowed, departmentId, initialTab, loadWorkspace, organizationLoading, scopeRevision, selectionRequired])
 
   const selectedWorkstream = workspace?.workstreams.find((workstream) => workstream.id === selectedWorkstreamId)
   const projectId = selectedWorkstream?.project_id
@@ -268,6 +282,52 @@ export default function DepartmentWorkshop({ departmentId }) {
   const projectTaskOverdue = workspace.tasks.filter((task) => task.due_date && !['done', 'cancelled'].includes(task.status) && new Date(task.due_date) < new Date()).length
   const workItemOverdue = workspace.workItems.filter((item) => item.due_date && item.status !== 'done' && new Date(item.due_date) < new Date()).length
   const incoming = workspace.requests.filter((request) => workspace.workstreams.some((workstream) => workstream.id === request.receiving_workstream_id) && !['completed', 'declined', 'withdrawn'].includes(request.status)).length
+  const linkedProject = navigationContext.projectId
+    ? workspace.workstreams.find(item => item.project_id === navigationContext.projectId)
+    : selectedWorkstream
+  const linkedEngagement = navigationContext.engagementId
+    ? workspace.engagements.find(item => item.id === navigationContext.engagementId)
+    : workspace.engagements.find(item => item.project_id === linkedProject?.project_id)
+  const linkedService = navigationContext.activeServiceId
+    ? workspace.services.find(item => item.id === navigationContext.activeServiceId)
+    : null
+  const linkedStage = navigationContext.stageId
+    ? workspace.stages.find(item => item.id === navigationContext.stageId)
+    : null
+  const linkedRecordRow = navigationContext.workRecord?.kind === 'project_task'
+    ? workspace.tasks.find(item => item.id === navigationContext.workRecord.id)
+    : navigationContext.workRecord?.kind === 'engagement_work_item'
+      ? workspace.workItems.find(item => item.id === navigationContext.workRecord.id)
+      : null
+  const resolvedWorkRecord = linkedRecordRow ? {
+    kind: navigationContext.workRecord.kind,
+    id: linkedRecordRow.id,
+    organizationId: linkedRecordRow.organization_id,
+    projectId: linkedRecordRow.project_id,
+    engagementId: linkedRecordRow.engagement_id,
+  } : null
+  const canonicalScope = {
+    status: 'ready',
+    activeOrganizationId,
+    organizationId: linkedProject?.projects?.organization_id || linkedEngagement?.organization_id || activeOrganizationId,
+    clientId: linkedProject?.projects?.client_id || '',
+    projectId: linkedProject?.project_id || '',
+    engagementId: linkedEngagement?.id || '',
+    brandId: linkedEngagement?.brand_id || '',
+    activeServiceId: linkedService?.engagement_id === linkedEngagement?.id ? linkedService.id : '',
+    stageId: linkedStage?.engagement_id === linkedEngagement?.id ? linkedStage.id : '',
+    workRecord: resolvedWorkRecord,
+    permissions: { viewDepartment: departmentAllowed },
+    allowedActions: [],
+  }
+  const contextValidation = validateWorkshopNavigation(navigationContext, error
+    ? { status: 'error', error: new Error(error), lastGoodScope: canonicalScope }
+    : canonicalScope)
+  const sameOrganization = !navigationContext.organizationId || navigationContext.organizationId === activeOrganizationId
+  const returnTarget = workspaceReturnTarget(
+    contextValidation.context ? contextValidation : {},
+    { fallbackProjectId: sameOrganization ? linkedProject?.project_id : '' },
+  )
 
   return (
     <div className="h-full overflow-y-auto bg-slate-950 text-white">
@@ -282,6 +342,7 @@ export default function DepartmentWorkshop({ departmentId }) {
         </div>
 
         {error && <div className="mt-5 rounded-xl border border-red-900/60 bg-red-950/50 px-4 py-3 text-sm text-red-300">{error}</div>}
+        <WorkshopContextShell navigation={navigationContext} validation={contextValidation} returnTarget={returnTarget} projectName={linkedProject?.projects?.name}>
 
         <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
           <Stat label="Active workstreams" value={workspace.workstreams.length} note="Across current engagements" />
@@ -292,14 +353,14 @@ export default function DepartmentWorkshop({ departmentId }) {
           <Stat label="Incoming requests" value={incoming} note="Cross-department handoffs" />
         </div>
 
-        <div className="mt-6 flex gap-1 overflow-x-auto border-b border-slate-800">
+        <nav aria-label="Department workspace sections" className="mt-6 flex gap-1 overflow-x-auto border-b border-slate-800">
           {TABS.map(([id, label]) => <button key={id} type="button" onClick={() => setActiveTab(id)} className={`whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium ${activeTab === id ? 'border-purple-500 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>{label}</button>)}
-        </div>
+        </nav>
 
         {activeTab === 'connectors' ? (
           <div className="mt-6"><DepartmentConnectors departmentId={departmentId} departmentName={config.shortName} /></div>
         ) : activeTab === 'specialists' ? (
-          <div className="mt-6"><SpecialistQueues config={config} /></div>
+          <div className="mt-6"><SpecialistQueues config={config} navigationContext={navigationContext.status === 'empty' ? navigationContext : contextValidation.context} /></div>
         ) : workspace.workstreams.length === 0 ? (
           <div className="mt-7"><Empty title={`No active ${config.shortName} workstreams`} description="Create an engagement and activate this department's services. The work will appear here automatically. Department connectors remain available from the Connectors tab." /></div>
         ) : (
@@ -327,6 +388,7 @@ export default function DepartmentWorkshop({ departmentId }) {
             </div>
           </>
         )}
+        </WorkshopContextShell>
       </div>
     </div>
   )
@@ -382,8 +444,8 @@ function ActionPanel(props) {
   return <FormShell title="Create request" description="Send a structured output request to another workstream." onSubmit={props.onCreateRequest} saving={saving}><Field label="Title"><input required className={INPUT_CLASS} value={props.requestForm.title} onChange={(event) => props.setRequestForm({ ...props.requestForm, title: event.target.value })} /></Field><Field label="Receiving workstream"><select required className={INPUT_CLASS} value={props.requestForm.receivingWorkstreamId} onChange={(event) => props.setRequestForm({ ...props.requestForm, receivingWorkstreamId: event.target.value })}><option value="">Select receiving team</option>{props.receivingWorkstreams.map((workstream) => <option key={workstream.id} value={workstream.id}>{workstream.name}</option>)}</select></Field><Field label="Requested output"><textarea required className={`${INPUT_CLASS} min-h-24`} value={props.requestForm.requestedOutput} onChange={(event) => props.setRequestForm({ ...props.requestForm, requestedOutput: event.target.value })} /></Field><div className="grid grid-cols-2 gap-3"><Field label="Priority"><select className={INPUT_CLASS} value={props.requestForm.priority} onChange={(event) => props.setRequestForm({ ...props.requestForm, priority: event.target.value })}><option>low</option><option>medium</option><option>high</option><option>urgent</option></select></Field><Field label="Required by"><input type="date" className={INPUT_CLASS} value={props.requestForm.requiredBy} onChange={(event) => props.setRequestForm({ ...props.requestForm, requiredBy: event.target.value })} /></Field></div></FormShell>
 }
 
-function SpecialistQueues({ config }) {
-  return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><Header title="Specialist queues" description="Department coordination stays here; specialist production behavior remains in its existing Studio or Workshop." />{config.specialists.length ? <div className="grid gap-3 md:grid-cols-2">{config.specialists.map((item) => <Link key={item.path} to={item.path} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4 hover:border-purple-600"><p className="font-medium text-white">{item.name}</p><p className="mt-2 text-sm leading-6 text-slate-400">{item.description}</p></Link>)}</div> : <Empty title="No separate specialist queue" description="Development coordination and its existing supported actions remain on this workspace." />}</section>
+function SpecialistQueues({ config, navigationContext }) {
+  return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><Header title="Specialist queues" description="Department coordination stays here; specialist production behavior remains in its existing Studio or Workshop." />{config.specialists.length ? <div className="grid gap-3 md:grid-cols-2">{config.specialists.map((item) => <Link key={item.path} to={appendWorkshopNavigation(item.path, { ...navigationContext, workshopTab: '' })} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4 hover:border-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-500"><p className="font-medium text-white">{item.name}</p><p className="mt-2 text-sm leading-6 text-slate-400">{item.description}</p></Link>)}</div> : <Empty title="No separate specialist queue" description="Development coordination and its existing supported actions remain on this workspace." />}</section>
 }
 
 function FormShell({ title, description, onSubmit, saving, children }) {
