@@ -45,6 +45,9 @@ test('migration adds one mutable brand brief per brand with organization RLS', (
 test('brand brief updates one row while statements use immutable artifact versions', () => {
   assert.match(contentEdge, /from\('brand_briefs'\)\.update/)
   assert.match(contentEdge, /\.eq\('id', existing\.id\)/)
+  assert.match(contentEdge, /requireBrandBriefMutationToken/)
+  assert.match(contentEdge, /\.eq\('updated_at', expectedUpdatedAt\)/)
+  assert.match(contentEdge, /status: 409/)
   assert.match(contentEdge, /artifactType: 'brand_statement'/)
   assert.match(contentEdge, /createContentArtifactVersion/)
   assert.match(sharedArtifacts, /from\('artifact_versions'\)\.insert/)

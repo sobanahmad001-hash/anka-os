@@ -22,12 +22,16 @@ import {
 import {
   CONTENT_ARTIFACT_FORMS,
   CONTENT_ARTIFACT_TYPES,
+  CONTENT_FOUNDATION_TYPES,
+  DEFAULT_DISCOVERY_TEMPLATE,
   approvalForVersion,
+  approvedVisionLanguage,
   bestContentStage,
   buildContentPageTracking,
   contentArtifactEditor,
   latestVersion,
   newContentRecord,
+  resolveContentLanguage,
   serializeContentArtifact,
 } from '../data/contentStudio.js'
 import { contentStudio } from '../data/contentStudioRepository.js'
@@ -206,6 +210,7 @@ export default function ContentStudio() {
       <p className="mt-2 text-sm text-slate-400">Select an authorized engagement. Content Studio will not choose work silently.</p>
       <div className="mt-5 grid gap-3">{selectableEngagements.map(item => <button type="button" key={item.id} onClick={() => setSearchParams(contentSelectionParams(navigationContext, item, activeOrganizationId))} className="rounded-xl border border-slate-700 px-4 py-3 text-left text-sm font-semibold text-slate-200 hover:border-amber-500">{item.name} · {item.brands?.name || 'Brand'}</button>)}</div>
       {!selectableEngagements.length && <p className="mt-5 text-sm text-slate-500">No active Content engagement is available in this organization.</p>}
+      <div className="mt-6 border-t border-slate-800 pt-5"><p className="text-sm text-slate-400">Exploring an idea before it belongs to official work?</p><Link to="/sphere/quick-tasks" className={`${BUTTON} mt-3 inline-flex`}>Start private Content exploration</Link></div>
     </section>
   </ContentEntryShell>
 
@@ -267,10 +272,17 @@ function BrandBriefWorkspace({ studio, workspace, saving, act, onRefresh }) {
 
   async function saveBrief(event) {
     event.preventDefault()
-    await act(() => studio.saveBrandBrief({ engagement_id: workspace.engagement.id, ...serializeBrandBrief(brief) }), 'Brand brief updated in place.')
+    const effect = workspace.brandBrief ? 'update the mutable brand brief in place' : 'create the first mutable brand brief'
+    if (!globalThis.confirm(`Confirm: ${effect}. This does not create an artifact version.`)) return
+    await act(() => studio.saveBrandBrief({
+      engagement_id: workspace.engagement.id,
+      expected_updated_at: workspace.brandBrief?.updated_at || null,
+      ...serializeBrandBrief(brief),
+    }), workspace.brandBrief ? 'Brand brief updated in place.' : 'Brand brief created.')
   }
 
   async function generateStatement() {
+    if (!globalThis.confirm('Confirm: compile a separate immutable brand-statement artifact version from the saved brief and exact approved sources.')) return
     await act(() => studio.generateBrandStatement({
       engagement_id: workspace.engagement.id,
       engagement_stage_instance_id: bestContentStage(workspace.stages, BRAND_STATEMENT_TYPE)?.id || null,
@@ -313,6 +325,7 @@ function BrandStatementReview({ studio, workspace, artifact, versions, latest, a
 
   async function save(event) {
     event.preventDefault()
+    if (!globalThis.confirm(`Confirm: create immutable brand-statement version ${latest.version_number + 1}.`)) return
     await act(() => studio.saveArtifact({
       engagement_id: workspace.engagement.id, artifact_id: artifact.id,
       engagement_stage_instance_id: bestContentStage(workspace.stages, BRAND_STATEMENT_TYPE)?.id || null,
@@ -337,7 +350,7 @@ function BrandStatementReview({ studio, workspace, artifact, versions, latest, a
       <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Change summary<input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={summary} onChange={event => setSummary(event.target.value)} /></label>
     </div>
     <div className="mt-6 flex justify-end border-t border-slate-800 pt-5"><button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : 'Save reviewed version'}</button></div>
-  </form><ArtifactApprovalPanel version={latest} approval={approval} theme="amber" onSingleApprove={() => act(() => studio.approveArtifact(latest.id), 'Brand statement exact version approved.')} onChanged={onRefresh} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest.id} department="content" theme="amber" /></div>
+  </form><ArtifactApprovalPanel version={latest} approval={approval} theme="amber" singleApprovalLabel={`Use single-manager route for version ${latest.version_number}`} onSingleApprove={() => act(() => studio.approveArtifact(latest.id), 'Brand statement exact version approved.')} onChanged={onRefresh} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest.id} department="content" theme="amber" /></div>
 }
 
 function TextField({ label, value, onChange }) {
@@ -374,7 +387,16 @@ function ArtifactWorkspace({ studio, customFields, workspace, type, setType, sav
 
 function ArtifactForm({ studio, customFields, workspace, type, artifact, versions, latest, approval, saving, act, onRefresh, originLinkId }) {
   const definition = CONTENT_ARTIFACT_FORMS[type]
-  const [form, setForm] = useState(contentArtifactEditor(type, latest?.content))
+  const foundation = CONTENT_FOUNDATION_TYPES.includes(type)
+  const languageResolution = resolveContentLanguage({
+    explicitLanguage: latest?.content?.language,
+    approvedBrandLanguage: approvedVisionLanguage(workspace),
+    organizationDefaultLanguage: workspace.organizationSettings?.content_language || workspace.organizationSettings?.default_language,
+  })
+  const [form, setForm] = useState(() => ({
+    ...contentArtifactEditor(type, latest?.content),
+    ...(foundation ? { language: latest?.content?.language || languageResolution.language } : {}),
+  }))
   const [summary, setSummary] = useState(latest ? `Revision from version ${latest.version_number}` : 'Initial Content Studio version')
   const [classification, setClassification] = useState(latest?.data_classification || 'internal')
   const [aiSafe, setAiSafe] = useState(latest?.ai_use_allowed || false)
@@ -382,6 +404,8 @@ function ArtifactForm({ studio, customFields, workspace, type, artifact, version
 
   async function save(event) {
     event.preventDefault()
+    const versionNumber = latest ? latest.version_number + 1 : 1
+    if (!globalThis.confirm(`Confirm: create immutable ${definition.label} version ${versionNumber}. The mutable brand brief is not changed.`)) return
     await act(async () => {
       const result = await studio.saveArtifact({
       engagement_id: workspace.engagement.id, artifact_id: artifact?.id || null,
@@ -408,11 +432,28 @@ function ArtifactForm({ studio, customFields, workspace, type, artifact, version
 
   return <div><form onSubmit={save} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
     <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Canonical immutable artifact</p><h2 className="mt-1 text-2xl font-semibold">{definition.label}</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">{definition.description}</p></div><div className="text-right text-xs text-slate-500"><p>{latest ? `Version ${latest.version_number}` : 'No version yet'}</p><p className={approval ? 'mt-1 text-emerald-400' : 'mt-1 text-amber-400'}>{approval ? 'Exact version approved' : 'Approval pending'}</p></div></div>
-    <div className="mt-6 space-y-5">{definition.fields.map(field => <ArtifactField key={field.key} field={field} value={form[field.key]} pageSlugs={(workspace.versions.filter(version => version.artifact_id === workspace.artifacts.find(item => item.artifact_type === 'website_architecture')?.id).sort((left, right) => right.version_number - left.version_number)[0]?.content?.pages || []).map(page => page.slug)} onChange={value => setForm(current => ({ ...current, [field.key]: value }))} />)}</div>
+    {type === 'discovery' && <div className="mt-5 rounded-xl border border-amber-500/20 bg-amber-950/20 p-4 text-sm text-amber-100"><p className="font-semibold">{DEFAULT_DISCOVERY_TEMPLATE.label}</p><p className="mt-1 text-xs text-amber-200/70">All five canonical fields are required. “Unknown” is permitted only for Evidence and Constraints.</p></div>}
+    {foundation && <label className="mt-5 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Working language<input required maxLength="120" placeholder="Select or enter a language" className={`${INPUT} mt-2 normal-case tracking-normal`} value={form.language || ''} onChange={event => setForm(current => ({ ...current, language: event.target.value }))} /><span className="mt-2 block font-normal normal-case tracking-normal text-slate-500">Precedence: explicit selection, approved Vision value, then organization default. No language is assumed.</span></label>}
+    <div className="mt-6 space-y-5">{definition.fields.map(field => <div key={field.key}><ArtifactField field={field} value={form[field.key]} pageSlugs={(workspace.versions.filter(version => version.artifact_id === workspace.artifacts.find(item => item.artifact_type === 'website_architecture')?.id).sort((left, right) => right.version_number - left.version_number)[0]?.content?.pages || []).map(page => page.slug)} onChange={value => setForm(current => ({ ...current, [field.key]: value }))} />{foundation && <SourceMetadataField field={field} value={form.source_metadata?.[field.key]} onChange={value => setForm(current => ({ ...current, source_metadata: { ...current.source_metadata, [field.key]: value } }))} />}</div>)}</div>
     <div className="mt-6 grid gap-4 md:grid-cols-2"><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Change summary<input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={summary} onChange={event => setSummary(event.target.value)} /></label><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Data classification<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={classification} onChange={event => setClassification(event.target.value)}><option>internal</option><option>confidential</option><option>public</option><option>restricted</option></select></label></div>
     <label className="mt-4 flex items-start gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300"><input type="checkbox" className="mt-1" checked={aiSafe} onChange={event => setAiSafe(event.target.checked)} /><span>Explicitly allow this exact version to be included in approved AI context. Restricted versions remain excluded.</span></label>
     <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-800 pt-5"><button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : latest ? 'Create new version' : 'Save first version'}</button></div>
-  </form><ArtifactApprovalPanel version={latest} approval={approval} theme="amber" onSingleApprove={() => act(async () => { const result = await studio.approveArtifact(latest.id); if (originLink) await studio.updateBlogEventLink(originLink, 'ready'); return result }, `${definition.label} exact version approved.${originLink ? ' The originating blog event is ready.' : ''}`)} onChanged={onRefresh} />{['website_architecture', 'content'].includes(type) && <ContentPageTrackingPanel studio={studio} workspace={workspace} saving={saving} act={act} />}<ContentCustomFieldsPanel repository={customFields} artifactType={type} versions={versions} initialVersionId={latest?.id} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="content" theme="amber" regionsByVersion={regionsByVersion} /></div>
+  </form><ArtifactApprovalPanel version={latest} approval={approval} theme="amber" singleApprovalLabel={`Use single-manager route for version ${latest?.version_number}`} onSingleApprove={() => act(async () => { const result = await studio.approveArtifact(latest.id); if (originLink) await studio.updateBlogEventLink(originLink, 'ready'); return result }, `${definition.label} exact version approved.${originLink ? ' The originating blog event is ready.' : ''}`)} onChanged={onRefresh} />{['website_architecture', 'content'].includes(type) && <ContentPageTrackingPanel studio={studio} workspace={workspace} saving={saving} act={act} />}<ContentCustomFieldsPanel repository={customFields} artifactType={type} versions={versions} initialVersionId={latest?.id} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="content" theme="amber" regionsByVersion={regionsByVersion} /></div>
+}
+
+function SourceMetadataField({ field, value = {}, onChange }) {
+  const needsConfirmation = value.needs_confirmation === true
+  const humanConfirmed = value.human_confirmed === true
+  return <details className={`mt-2 rounded-xl border p-3 ${needsConfirmation ? 'border-amber-500/40 bg-amber-950/20' : 'border-slate-800 bg-slate-950/40'}`}>
+    <summary className="cursor-pointer text-xs font-semibold text-slate-300">Source and confirmation {needsConfirmation ? '· confirmation needed' : humanConfirmed ? '· human confirmed' : ''}</summary>
+    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      <label className="text-xs text-slate-500">Source label<input maxLength="500" className={`${INPUT} mt-1`} value={value.source_label || ''} onChange={event => onChange({ ...value, source_label: event.target.value })} /></label>
+      <label className="text-xs text-slate-500">Source date<input type="date" className={`${INPUT} mt-1`} value={value.source_date || ''} onChange={event => onChange({ ...value, source_date: event.target.value })} /></label>
+      <label className="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" checked={needsConfirmation} onChange={event => onChange({ ...value, needs_confirmation: event.target.checked, human_confirmed: event.target.checked ? false : humanConfirmed })} />Needs confirmation</label>
+      <label className="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" checked={humanConfirmed} onChange={event => onChange({ ...value, human_confirmed: event.target.checked, needs_confirmation: event.target.checked ? false : needsConfirmation })} />Human confirmed</label>
+    </div>
+    {field.unknownAllowed && <p className="mt-3 text-xs text-slate-500">This approved template field permits the literal value “Unknown”.</p>}
+  </details>
 }
 
 function ContentPageTrackingPanel({ studio, workspace, saving, act }) {
@@ -437,7 +478,7 @@ function ContentPageTrackingPanel({ studio, workspace, saving, act }) {
 function ArtifactField({ field, value, pageSlugs, onChange }) {
   if (field.kind === 'records') return <div><div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{field.label}</p><button type="button" className={BUTTON} onClick={() => onChange([...(value || []), newContentRecord(field)])}>{field.addLabel}</button></div><div className="mt-3 space-y-4">{(value || []).map((record, index) => <RecordEditor key={index} index={index} field={field} records={value} pageSlugs={pageSlugs} record={record} onChange={next => onChange(value.map((item, itemIndex) => itemIndex === index ? next : item))} onRemove={() => onChange(value.filter((_, itemIndex) => itemIndex !== index))} />)}{!(value || []).length && <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-sm text-slate-500">Add at least one structured record.</div>}</div></div>
   const textarea = field.kind === 'textarea' || field.kind === 'list'
-  return <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{field.label}{field.kind === 'list' && <span className="ml-2 font-normal normal-case tracking-normal text-slate-600">One item per line</span>}{textarea ? <textarea required rows={field.kind === 'list' ? 4 : 5} className={`${INPUT} mt-2 normal-case tracking-normal`} value={value || ''} onChange={event => onChange(event.target.value)} /> : <input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={value || ''} onChange={event => onChange(event.target.value)} />}</label>
+  return <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{field.label}{field.kind === 'list' && <span className="ml-2 font-normal normal-case tracking-normal text-slate-600">One item per line</span>}{field.unknownAllowed && <span className="ml-2 font-normal normal-case tracking-normal text-amber-400">Unknown allowed</span>}{textarea ? <textarea required rows={field.kind === 'list' ? 4 : 5} className={`${INPUT} mt-2 normal-case tracking-normal`} value={value || ''} onChange={event => onChange(event.target.value)} /> : <input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={value || ''} onChange={event => onChange(event.target.value)} />}</label>
 }
 
 function RecordEditor({ index, field, records, pageSlugs, record, onChange, onRemove }) {

@@ -1,8 +1,65 @@
 import { assertEquals, assertThrows } from 'jsr:@std/assert@1.0.14'
-import { brandBriefInput, compiledBrandStatement, contentStudioScope, customFieldDefinitionInput, handleRequest, hasContentAuthority,
+import { brandBriefInput, compiledBrandStatement, contentStudioScope, customFieldDefinitionInput, handleRequest, hasContentAuthority, requireBrandBriefMutationToken,
   figmaHandoffUrl, validateContentRequestInput, validateQueueEntryInput } from './index.ts'
 
-import { CHAT_CONTENT_ARTIFACT_TYPE_SET, CONTENT_ARTIFACT_TYPES, contentArtifactResponseFormat, validateContentArtifact } from '../_shared/contentArtifacts.ts'
+import { CHAT_CONTENT_ARTIFACT_TYPE_SET, CONTENT_ARTIFACT_TYPES, contentArtifactResponseFormat, validateContentArtifact, withGeneratedSourceMetadata } from '../_shared/contentArtifacts.ts'
+
+Deno.test('B02 foundation contract preserves language and exact per-field source state', () => {
+  const discovery = validateContentArtifact('discovery', {
+    summary: 'Accepted context', objectives: ['Grow'], offers: ['Advisory'], evidence: ['Unknown'], constraints: ['Budget'],
+    language: 'Urdu',
+    source_metadata: { evidence: {
+      source_label: 'Client workshop', source_date: '2026-09-04',
+      needs_confirmation: true, human_confirmed: false,
+    } },
+  })
+  assertEquals(discovery.language, 'Urdu')
+  assertEquals((discovery.source_metadata as Record<string, any>).evidence.needs_confirmation, true)
+  assertThrows(() => validateContentArtifact('discovery', {
+    summary: 'Unknown', objectives: ['Grow'], offers: ['Advisory'], evidence: ['Known'], constraints: ['Known'],
+  }), Error, 'Unknown is not allowed')
+  const audience = (sourceDate: string | null) => ({
+    primary_audience: 'Leaders', segments: ['Operators'], motivations: ['Clarity'], objections: ['Time'],
+    desired_response: 'Book', accessibility_considerations: ['Plain language'],
+    source_metadata: { primary_audience: {
+      source_label: 'Interview', source_date: sourceDate, needs_confirmation: false, human_confirmed: true,
+    } },
+  })
+  assertThrows(() => validateContentArtifact('audience', audience('04/09/2026')), Error, 'real calendar date')
+  assertThrows(() => validateContentArtifact('audience', audience('2026-99-99')), Error, 'real calendar date')
+  assertThrows(() => validateContentArtifact('audience', audience('2026-02-30')), Error, 'real calendar date')
+  assertEquals((validateContentArtifact('audience', audience('2028-02-29')).source_metadata as Record<string, any>).primary_audience.source_date, '2028-02-29')
+  assertEquals((validateContentArtifact('audience', audience(null)).source_metadata as Record<string, any>).primary_audience.source_date, null)
+})
+
+Deno.test('B02 Vision owns differentiators and messaging pillars', () => {
+  const vision = validateContentArtifact('vision', {
+    vision_statement: 'A calmer future', positioning: 'Calm operators', value_proposition: 'Complex work made clear',
+    differentiators: ['Evidence-led'], values: ['Care'], voice_principles: ['Direct'], messaging_pillars: ['Clarity'],
+  })
+  assertEquals(vision.differentiators, ['Evidence-led'])
+  assertEquals(contentArtifactResponseFormat('vision').schema.required.includes('messaging_pillars'), true)
+})
+
+Deno.test('B02 generated foundations are visibly confirmation-needed', () => {
+  const generated = withGeneratedSourceMetadata('audience', {
+    primary_audience: 'Leaders', segments: ['Operators'], motivations: ['Clarity'], objections: ['Time'],
+    desired_response: 'Book', accessibility_considerations: ['Plain language'],
+  }, '2026-09-04')
+  assertEquals((generated.source_metadata as Record<string, any>).primary_audience, {
+    source_label: 'Shared Department Chat proposal', source_date: '2026-09-04',
+    needs_confirmation: true, human_confirmed: false,
+  })
+})
+
+Deno.test('B02 mutable brief updates require the exact prior updated_at', () => {
+  assertEquals(requireBrandBriefMutationToken('2026-09-04T10:00:00Z', '2026-09-04T10:00:00Z'), '2026-09-04T10:00:00Z')
+  assertEquals(requireBrandBriefMutationToken(null, null), null)
+  assertThrows(() => requireBrandBriefMutationToken('2026-09-04T10:00:00Z', null), Error, 'Reload before saving')
+  try { requireBrandBriefMutationToken('2026-09-04T10:00:00Z', '2026-09-04T09:00:00Z') } catch (error) {
+    assertEquals((error as { status?: number }).status, 409)
+  }
+})
 
 Deno.test('Content authority keeps exact-version approval manager-controlled', () => {
   assertEquals(hasContentAuthority({ role: 'contributor', department_id: 'content' }, 'save_artifact'), true)

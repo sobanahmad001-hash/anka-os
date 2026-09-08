@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url'
 
 import {
   CONTENT_ARTIFACT_TYPES,
+  DEFAULT_DISCOVERY_TEMPLATE,
   bestContentStage,
+  resolveContentLanguage,
   serializeContentArtifact,
 } from './contentStudio.js'
 
@@ -20,6 +22,53 @@ test('Content Studio covers all eight agreed artifact types', () => {
     'discovery', 'vision', 'audience', 'website_architecture',
     'keyword_strategy', 'content', 'campaign_messaging', 'scripts',
   ])
+})
+
+test('B02 uses one canonical discovery template and limits Unknown explicitly', () => {
+  assert.equal(DEFAULT_DISCOVERY_TEMPLATE.id, 'content-discovery-default-v1')
+  assert.deepEqual(DEFAULT_DISCOVERY_TEMPLATE.fields.filter(field => field.unknownAllowed).map(field => field.key), ['evidence', 'constraints'])
+  assert.equal(DEFAULT_DISCOVERY_TEMPLATE.fields.every(field => field.required), true)
+})
+
+test('B02 language precedence never invents English', () => {
+  assert.deepEqual(resolveContentLanguage({ explicitLanguage: 'Urdu', approvedBrandLanguage: 'Arabic', organizationDefaultLanguage: 'French' }), {
+    status: 'ready', source: 'explicit_request', language: 'Urdu',
+  })
+  assert.equal(resolveContentLanguage({ approvedBrandLanguage: 'Arabic', organizationDefaultLanguage: 'French' }).language, 'Arabic')
+  assert.equal(resolveContentLanguage({ organizationDefaultLanguage: 'French' }).language, 'French')
+  assert.deepEqual(resolveContentLanguage(), { status: 'selection_required', source: null, language: '' })
+})
+
+test('B02 persists optional source metadata and explicit Vision fields in artifact content', () => {
+  const content = serializeContentArtifact('vision', {
+    vision_statement: 'Future', positioning: 'Position', value_proposition: 'Value',
+    differentiators: 'Evidence-led', values: 'Care', voice_principles: 'Direct', messaging_pillars: 'Clarity',
+    language: 'Urdu', source_metadata: { differentiators: {
+      source_label: 'Workshop', source_date: '2026-09-04', needs_confirmation: false, human_confirmed: true,
+    } },
+  })
+  assert.deepEqual(content.differentiators, ['Evidence-led'])
+  assert.deepEqual(content.messaging_pillars, ['Clarity'])
+  assert.equal(content.language, 'Urdu')
+  assert.equal(content.source_metadata.differentiators.human_confirmed, true)
+})
+
+test('B02 exposes deliberate private exploration and separate confirmed official effects', () => {
+  const app = read('src/App.jsx')
+  const ui = read('src/apps/ContentStudio.jsx')
+  const quickTasks = read('src/apps/QuickTasks.jsx')
+  const chatUi = read('src/components/DepartmentChat.jsx')
+  const chatServer = read('supabase/functions/department-chat/index.ts')
+  assert.match(app, /sphere\/quick-tasks/)
+  assert.match(ui, /Start private Content exploration/)
+  assert.match(ui, /This does not create an artifact version/)
+  assert.match(ui, /create immutable .* version/)
+  assert.match(ui, /Use single-manager route/)
+  assert.match(ui, /expected_updated_at/)
+  assert.match(quickTasks, /This source is terminal after promotion/)
+  assert.match(chatUi, /approved Vision or organization default/)
+  assert.match(chatServer, /Produce one structured/)
+  assert.match(chatServer, /proposalKind: 'artifact_version'/)
 })
 
 test('Content vocabulary migration is an isolated additive CHECK change', () => {

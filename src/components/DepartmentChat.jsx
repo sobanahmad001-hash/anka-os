@@ -50,6 +50,7 @@ function ScopedDepartmentChat({
   const [title, setTitle] = useState('')
   const [workItemType, setWorkItemType] = useState('task')
   const [priority, setPriority] = useState('medium')
+  const [language, setLanguage] = useState('')
 
   async function submit(event) {
     event.preventDefault()
@@ -66,6 +67,7 @@ function ScopedDepartmentChat({
           artifact_id: (artifactForType(artifactType) || {}).id || null,
           engagement_stage_instance_id: (stageForType(artifactType) || {}).id || null,
           artifact_type: artifactType,
+          language,
           title: (artifactForType(artifactType)?.title) || `${artifactDefinitions[artifactType]?.label || resolvedDepartmentLabel} artifact`,
           prompt,
           prompt_safe_for_ai: safe,
@@ -116,6 +118,7 @@ function ScopedDepartmentChat({
   }
 
   const isWorkItemMode = proposalMode === 'work_item'
+  const requiresContentLanguage = departmentId === 'content' && ['discovery', 'vision', 'audience'].includes(artifactType)
 
   async function openOfficial(event) {
     event.preventDefault()
@@ -181,6 +184,10 @@ function ScopedDepartmentChat({
             <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Artifact title
               <input className={`${INPUT} mt-2 normal-case tracking-normal`} value={artifactForType(artifactType)?.title || `${artifactDefinitions[artifactType]?.label || resolvedDepartmentLabel} artifact`} readOnly />
             </label>
+            {requiresContentLanguage && <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Language
+              <input maxLength="120" className={`${INPUT} mt-2 normal-case tracking-normal`} value={language} onChange={event => setLanguage(event.target.value)} placeholder="Optional only when approved Vision or organization default supplies it" />
+              <span className="mt-2 block font-normal normal-case tracking-normal text-slate-500">Explicit choice wins; otherwise the server uses the approved brand value, then the organization default. If none exists, selection is required.</span>
+            </label>}
           </>
         )}
 

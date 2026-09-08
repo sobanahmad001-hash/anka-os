@@ -51,7 +51,7 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
       : navigation.workRecord?.kind === 'engagement_work_item'
         ? dataOrThrow(supabase.from('work_items').select('id, organization_id, project_id, engagement_id').eq('organization_id', organizationId).eq('id', navigation.workRecord.id).is('deleted_at', null).maybeSingle(), options)
         : Promise.resolve(null)
-    const [engagement, stages, artifacts, versions, approvals, contentTasks, contentServices, navigationRecord] = await Promise.all([
+    const [engagement, stages, artifacts, versions, approvals, contentTasks, contentServices, navigationRecord, organization] = await Promise.all([
       dataOrThrow(supabase.from('engagements').select('*, agency_clients(name), brands(name), projects(client_id)').eq('organization_id', organizationId).eq('id', engagementId).single(), options),
       dataOrThrow(supabase.from('engagement_stage_instances').select('*').eq('organization_id', organizationId).eq('engagement_id', engagementId).order('position'), options),
       dataOrThrow(supabase.from('artifacts').select('*').eq('organization_id', organizationId).eq('engagement_id', engagementId).in('artifact_type', CONTENT_WORKSPACE_TYPES).order('created_at'), options),
@@ -60,6 +60,7 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
       dataOrThrow(supabase.from('work_items').select('*').eq('organization_id', organizationId).eq('engagement_id', engagementId).not('linked_page_path', 'is', null).is('deleted_at', null).order('position'), options),
       dataOrThrow(supabase.from('engagement_services').select('id, organization_id, engagement_id, service_id, status, service_catalog!inner(id, department_id, is_active)').eq('organization_id', organizationId).eq('engagement_id', engagementId).eq('status', 'active').eq('service_catalog.department_id', 'content').eq('service_catalog.is_active', true), options),
       recordQuery,
+      dataOrThrow(supabase.from('organizations').select('settings').eq('id', organizationId).single(), options),
     ])
     const [brandBrief, brandSourceArtifacts] = await Promise.all([
       dataOrThrow(supabase.from('brand_briefs').select('*').eq('organization_id', organizationId).eq('brand_id', engagement.brand_id).maybeSingle(), options),
@@ -78,7 +79,8 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
         organizationId: navigationRecord.organization_id, projectId: navigationRecord.project_id,
         engagementId: navigationRecord.engagement_id,
       } : null,
-      brandBrief, brandSourceArtifacts, brandSourceApprovals, blogEventLinks }
+      brandBrief, brandSourceArtifacts, brandSourceApprovals, blogEventLinks,
+      organizationSettings: organization?.settings || {} }
   },
 
   saveArtifact: input => invoke(organizationId, 'content-studio', 'save_artifact', input, options),

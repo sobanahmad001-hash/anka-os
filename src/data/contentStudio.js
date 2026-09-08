@@ -5,8 +5,8 @@ export const CONTENT_ARTIFACT_FORMS = Object.freeze({
       { key: 'summary', label: 'Discovery statement', kind: 'textarea' },
       { key: 'objectives', label: 'Objectives', kind: 'list' },
       { key: 'offers', label: 'Offers and services', kind: 'list' },
-      { key: 'evidence', label: 'Evidence', kind: 'list' },
-      { key: 'constraints', label: 'Constraints', kind: 'list' },
+      { key: 'evidence', label: 'Evidence', kind: 'list', unknownAllowed: true },
+      { key: 'constraints', label: 'Constraints', kind: 'list', unknownAllowed: true },
     ]),
   }),
   vision: Object.freeze({
@@ -15,8 +15,10 @@ export const CONTENT_ARTIFACT_FORMS = Object.freeze({
       { key: 'vision_statement', label: 'Vision statement', kind: 'textarea' },
       { key: 'positioning', label: 'Positioning', kind: 'textarea' },
       { key: 'value_proposition', label: 'Value proposition', kind: 'textarea' },
+      { key: 'differentiators', label: 'Differentiators', kind: 'list' },
       { key: 'values', label: 'Values', kind: 'list' },
       { key: 'voice_principles', label: 'Voice principles', kind: 'list' },
+      { key: 'messaging_pillars', label: 'Messaging pillars', kind: 'list' },
     ]),
   }),
   audience: Object.freeze({
@@ -91,6 +93,64 @@ export const CONTENT_ARTIFACT_FORMS = Object.freeze({
 })
 
 export const CONTENT_ARTIFACT_TYPES = Object.freeze(Object.keys(CONTENT_ARTIFACT_FORMS))
+export const CONTENT_FOUNDATION_TYPES = Object.freeze(['discovery', 'vision', 'audience'])
+
+export const DEFAULT_DISCOVERY_TEMPLATE = Object.freeze({
+  id: 'content-discovery-default-v1',
+  label: 'Default Content discovery',
+  fields: Object.freeze(CONTENT_ARTIFACT_FORMS.discovery.fields.map(field => Object.freeze({
+    key: field.key,
+    required: true,
+    unknownAllowed: field.unknownAllowed === true,
+  }))),
+})
+
+export function resolveContentLanguage({ explicitLanguage, approvedBrandLanguage, organizationDefaultLanguage } = {}) {
+  const choices = [
+    ['explicit_request', explicitLanguage],
+    ['approved_brand_value', approvedBrandLanguage],
+    ['organization_default', organizationDefaultLanguage],
+  ]
+  const selected = choices.find(([, value]) => String(value || '').trim())
+  return selected
+    ? { status: 'ready', source: selected[0], language: String(selected[1]).trim() }
+    : { status: 'selection_required', source: null, language: '' }
+}
+
+export function approvedVisionLanguage(workspace = {}) {
+  const visionIds = (workspace.artifacts || []).filter(item => item.artifact_type === 'vision').map(item => item.id)
+  const approval = [...(workspace.approvals || [])]
+    .filter(item => visionIds.includes(item.artifact_id))
+    .sort((left, right) => new Date(right.approved_at) - new Date(left.approved_at))[0]
+  const version = (workspace.versions || []).find(item => item.id === approval?.artifact_version_id)
+  return String(version?.content?.language || '').trim()
+}
+
+function sourceMetadataEditor(type, value = {}) {
+  return Object.fromEntries((CONTENT_ARTIFACT_FORMS[type]?.fields || []).map(field => {
+    const entry = value?.[field.key] || {}
+    return [field.key, {
+      source_label: entry.source_label || '', source_date: entry.source_date || '',
+      needs_confirmation: entry.needs_confirmation === true,
+      human_confirmed: entry.human_confirmed === true,
+    }]
+  }))
+}
+
+function serializeSourceMetadata(type, value = {}) {
+  const entries = (CONTENT_ARTIFACT_FORMS[type]?.fields || []).map(field => {
+    const entry = value[field.key] || {}
+    const normalized = {
+      source_label: String(entry.source_label || '').trim(),
+      source_date: String(entry.source_date || '').trim() || null,
+      needs_confirmation: entry.needs_confirmation === true,
+      human_confirmed: entry.human_confirmed === true,
+    }
+    const used = normalized.source_label || normalized.source_date || normalized.needs_confirmation || normalized.human_confirmed
+    return used ? [field.key, normalized] : null
+  }).filter(Boolean)
+  return entries.length ? Object.fromEntries(entries) : null
+}
 
 export function blankContentArtifact(type) {
   return Object.fromEntries((CONTENT_ARTIFACT_FORMS[type]?.fields || []).map(field => [
@@ -101,17 +161,22 @@ export function blankContentArtifact(type) {
 export function contentArtifactEditor(type, content = null) {
   const source = content || blankContentArtifact(type)
   const definition = CONTENT_ARTIFACT_FORMS[type]
-  return Object.fromEntries(definition.fields.map(field => {
+  const editor = Object.fromEntries(definition.fields.map(field => {
     const value = source[field.key]
     if (field.kind === 'list') return [field.key, Array.isArray(value) ? value.join('\n') : '']
     if (field.kind === 'records') return [field.key, Array.isArray(value) ? value.map(record => ({ ...record })) : []]
     return [field.key, value || '']
   }))
+  if (CONTENT_FOUNDATION_TYPES.includes(type)) {
+    editor.language = String(source.language || '')
+    editor.source_metadata = sourceMetadataEditor(type, source.source_metadata)
+  }
+  return editor
 }
 
 export function serializeContentArtifact(type, editor) {
   const definition = CONTENT_ARTIFACT_FORMS[type]
-  return Object.fromEntries(definition.fields.map(field => {
+  const content = Object.fromEntries(definition.fields.map(field => {
     const value = editor[field.key]
     if (field.kind === 'list') return [field.key, lines(value)]
     if (field.kind === 'records') return [field.key, (value || []).map(record => Object.fromEntries(
@@ -124,6 +189,12 @@ export function serializeContentArtifact(type, editor) {
     ))]
     return [field.key, String(value || '').trim()]
   }))
+  if (CONTENT_FOUNDATION_TYPES.includes(type)) {
+    content.language = String(editor.language || '').trim()
+    const metadata = serializeSourceMetadata(type, editor.source_metadata)
+    if (metadata) content.source_metadata = metadata
+  }
+  return content
 }
 
 export function newContentRecord(field) {
