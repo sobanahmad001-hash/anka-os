@@ -19,6 +19,7 @@ function label(approver) {
 
 export default function ArtifactApprovalPanel({
   version, approval, theme = 'amber', onSingleApprove, singleApprovalLabel, onChanged,
+  approverFilter = null, minimumApprovers = 2, requestLabel = 'Create multi-approver request',
 }) {
   const { user } = useAuth()
   const colors = THEMES[theme] || THEMES.amber
@@ -39,6 +40,7 @@ export default function ArtifactApprovalPanel({
 
   useEffect(() => { load() }, [load])
 
+  const eligibleApprovers = useMemo(() => approverFilter ? state.approvers.filter(approverFilter) : state.approvers, [approverFilter, state.approvers])
   const approverById = useMemo(() => new Map(
     state.approvers.map(approver => [approver.user_id, approver]),
   ), [state.approvers])
@@ -81,8 +83,8 @@ export default function ArtifactApprovalPanel({
     </div> : <div className="mt-4 space-y-4">
       <div className="flex flex-wrap gap-2">{onSingleApprove && <button type="button" disabled={busy} onClick={() => run(onSingleApprove)} className={SECONDARY}>{singleApprovalLabel || `Approve version ${version.version_number}`}</button>}<p className="self-center text-xs text-slate-500">Or create a governed request for multiple named approvers.</p></div>
       <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Policy<select value={policy} onChange={event => setPolicy(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm normal-case tracking-normal text-white"><option value="sequential">Sequential — sign in supplied order</option><option value="parallel">Parallel — sign in any order</option></select></label>
-      <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Required approvers <span className="font-normal normal-case tracking-normal">({selected.length} selected)</span></p><div className="mt-2 space-y-2">{state.approvers.map(approver => { const chosenIndex = selected.indexOf(approver.user_id); return <div key={approver.user_id} className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/50 p-3"><label className="flex min-w-0 flex-1 items-center gap-3 text-sm text-slate-300"><input type="checkbox" checked={chosenIndex >= 0} onChange={() => toggle(approver.user_id)} /><span>{label(approver)}{approver.user_id === user?.id ? ' (you)' : ''}</span></label>{policy === 'sequential' && chosenIndex >= 0 && <><span className="text-xs font-semibold text-slate-500">#{chosenIndex + 1}</span><button type="button" aria-label="Move approver earlier" disabled={chosenIndex === 0} className={SECONDARY} onClick={() => setSelected(current => moveApprover(current, approver.user_id, -1))}>↑</button><button type="button" aria-label="Move approver later" disabled={chosenIndex === selected.length - 1} className={SECONDARY} onClick={() => setSelected(current => moveApprover(current, approver.user_id, 1))}>↓</button></>}</div>})}</div></div>
-      <button type="button" disabled={busy || selected.length < 2} onClick={() => run(() => artifactApprovals.createRequest(version.id, policy, selected))} className={`rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${colors.button}`}>{busy ? 'Creating request…' : 'Create multi-approver request'}</button>
+      <div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Required approvers <span className="font-normal normal-case tracking-normal">({selected.length} selected)</span></p><div className="mt-2 space-y-2">{eligibleApprovers.map(approver => { const chosenIndex = selected.indexOf(approver.user_id); return <div key={approver.user_id} className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/50 p-3"><label className="flex min-w-0 flex-1 items-center gap-3 text-sm text-slate-300"><input type="checkbox" checked={chosenIndex >= 0} onChange={() => toggle(approver.user_id)} /><span>{label(approver)}{approver.user_id === user?.id ? ' (you)' : ''}</span></label>{policy === 'sequential' && chosenIndex >= 0 && <><span className="text-xs font-semibold text-slate-500">#{chosenIndex + 1}</span><button type="button" aria-label="Move approver earlier" disabled={chosenIndex === 0} className={SECONDARY} onClick={() => setSelected(current => moveApprover(current, approver.user_id, -1))}>↑</button><button type="button" aria-label="Move approver later" disabled={chosenIndex === selected.length - 1} className={SECONDARY} onClick={() => setSelected(current => moveApprover(current, approver.user_id, 1))}>↓</button></>}</div>})}</div></div>
+      <button type="button" disabled={busy || selected.length < minimumApprovers} onClick={() => run(() => artifactApprovals.createRequest(version.id, policy, selected))} className={`rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${colors.button}`}>{busy ? 'Creating request…' : requestLabel}</button>
     </div>}
   </section>
 }

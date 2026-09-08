@@ -18,7 +18,12 @@ function text(value: unknown, max = 240) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
 }
 
-export function approvalRequestInput(input: Json) {
+function relationRow(value: unknown): Json | null {
+  const candidate = Array.isArray(value) ? value[0] : value
+  return candidate && typeof candidate === 'object' ? candidate as Json : null
+}
+
+export function approvalRequestInput(input: Json, minimumApprovers = 2) {
   const artifactVersionId = text(input.artifact_version_id, 80)
   const approvalPolicy = text(input.approval_policy, 30)
   const approverIds = Array.isArray(input.required_approver_ids)
@@ -26,7 +31,8 @@ export function approvalRequestInput(input: Json) {
     : []
   if (!artifactVersionId) throw new Error('Artifact version is required')
   if (!POLICIES.has(approvalPolicy)) throw new Error('Approval policy must be sequential or parallel')
-  if (approverIds.length < 2 || approverIds.length > 50) throw new Error('Select between 2 and 50 required approvers')
+  const minimum = minimumApprovers === 1 ? 1 : 2
+  if (approverIds.length < minimum || approverIds.length > 50) throw new Error(`Select between ${minimum} and 50 required approvers`)
   if (new Set(approverIds).size !== approverIds.length) throw new Error('Required approvers must be unique')
   return { artifactVersionId, approvalPolicy, approverIds }
 }
@@ -86,10 +92,16 @@ async function listApprovers(admin: Client, organizationId: string) {
 }
 
 async function createRequest(userClient: Client, admin: Client, body: Json, actorId: string) {
-  const input = approvalRequestInput(body)
-  const version = await readableVersion(userClient, input.artifactVersionId)
+  const artifactVersionId = text(body.artifact_version_id, 80)
+  if (!artifactVersionId) throw new Error('Artifact version is required')
+  const version = await readableVersion(userClient, artifactVersionId)
+  const isCampaignBrief = String(relationRow(version.artifacts)?.artifact_type) === 'campaign_brief'
+  const input = approvalRequestInput(body, isCampaignBrief ? 1 : 2)
   await requireTeam(admin, String(version.organization_id), actorId)
-  const { data, error } = await admin.rpc('create_artifact_approval_request', {
+  const rpc = isCampaignBrief
+    ? 'create_marketing_campaign_brief_approval_request'
+    : 'create_artifact_approval_request'
+  const { data, error } = await admin.rpc(rpc, {
     p_artifact_version_id: input.artifactVersionId,
     p_approval_policy: input.approvalPolicy,
     p_required_approver_ids: input.approverIds,

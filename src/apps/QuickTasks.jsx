@@ -16,14 +16,14 @@ function taskTiming(item) {
   return item.state
 }
 
-export default function QuickTasks({ organizationId }) {
+export default function QuickTasks({ organizationId, defaultDepartment = 'content' }) {
   const [items, setItems] = useState([])
   const [selectedId, setSelectedId] = useState('')
   const [draft, setDraft] = useState({ title: '', notes: '' })
   const [messages, setMessages] = useState([])
   const [sourceRevision, setSourceRevision] = useState(null)
   const [chatPrompt, setChatPrompt] = useState('')
-  const [chatDepartment, setChatDepartment] = useState('content')
+  const [chatDepartment, setChatDepartment] = useState(departments.includes(defaultDepartment) ? defaultDepartment : 'content')
   const [promptSafeForAi, setPromptSafeForAi] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)

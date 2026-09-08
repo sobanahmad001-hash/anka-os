@@ -140,6 +140,46 @@ Deno.test('selected organization requires exact active team membership and drive
   assertEquals(nonMember.writes.length + revoked.writes.length + suspended.writes.length, 0)
 })
 
+Deno.test('authenticated legacy save_artifact rejects campaign_brief before every canonical or ledger mutation', async () => {
+  const organizationId = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
+  const sideEffects: string[] = []
+  let clientCount = 0
+  const userClient = { auth: { getUser: async () => ({ data: { user: { id: 'actor-id' } }, error: null }) } }
+  const admin = {
+    from(table: string) {
+      const builder: any = {
+        select: () => builder,
+        eq: () => builder,
+        insert: () => { sideEffects.push('insert:' + table); return builder },
+        upsert: () => { sideEffects.push('upsert:' + table); return builder },
+        update: () => { sideEffects.push('update:' + table); return builder },
+        delete: () => { sideEffects.push('delete:' + table); return builder },
+        maybeSingle: async () => ({ data: table === 'organization_memberships' ? {
+          organization_id: organizationId, user_id: 'actor-id', member_kind: 'team', role: 'contributor',
+          department_id: 'marketing', status: 'active', organization: { status: 'active' },
+        } : null, error: null }),
+        single: async () => ({ data: null, error: null }),
+      }
+      return builder
+    },
+    async rpc(name: string) { sideEffects.push('rpc:' + name); return { data: null, error: null } },
+  }
+  const response = await handleRequest(new Request('https://functions.example/marketing-studio', {
+    method: 'POST', headers: { Authorization: 'Bearer caller-jwt', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'save_artifact', organization_id: organizationId, engagement_id: 'engagement-id',
+      campaign_id: 'campaign-id', artifact_type: 'campaign_brief', title: 'Bypass attempt',
+      content: { campaign_goal: 'Launch', channels: ['email'], existing_asset_version_ids: [] },
+    }),
+  }), {
+    createClient: (() => clientCount++ === 0 ? userClient : admin) as never,
+    environment: { supabaseUrl: 'https://project.supabase.co', publishableKey: 'publishable', secretKey: 'secret' },
+  })
+  assertEquals(response.status, 409)
+  assertEquals((await response.json()).error, 'Campaign briefs must be saved through the governed campaign brief workflow')
+  assertEquals(sideEffects, [])
+})
+
 Deno.test('marketing report preserves source, period, insight, and recommended action', () => {
   const report = validateMarketingArtifact('marketing_report', {
     sources: ['GA4 · Primary'], period_start: '2026-08-01', period_end: '2026-08-27',

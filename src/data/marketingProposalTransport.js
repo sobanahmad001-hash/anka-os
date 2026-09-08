@@ -14,5 +14,6 @@ export function createMarketingProposalTransport(client, organizationId, options
   return Object.freeze({
     proposeArtifact: input => invokeMarketingProposal(client, organizationId, 'propose_artifact', input, options),
     proposeWorkItem: input => invokeMarketingProposal(client, organizationId, 'propose_work_item', input, options),
+    rejectProposal: proposalId => invokeMarketingProposal(client, organizationId, 'reject_proposal', { proposal_id: proposalId }, options),
   })
 }

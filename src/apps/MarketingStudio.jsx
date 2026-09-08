@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useBlocker, useSearchParams } from 'react-router-dom'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 
 import {
@@ -42,6 +42,8 @@ import { parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTar
 import DepartmentChat from '../components/DepartmentChat.jsx' // eslint-disable-line no-unused-vars
 import MarketingConnectionReadinessPanel from '../components/MarketingConnectionReadinessPanel.jsx'
 import MarketingOverview from '../components/MarketingOverview.jsx'
+import MarketingCampaignBrief from '../components/MarketingCampaignBrief.jsx'
+import QuickTasks from './QuickTasks.jsx'
 import WorkshopContextShell from '../components/WorkshopContextShell.jsx'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
@@ -52,6 +54,7 @@ const BUTTON = 'rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibo
 const PRIMARY = 'rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50'
 const MARKETING_TABS = Object.freeze([
   ['overview', 'Overview'],
+  ['brief', 'Campaign brief'],
   ['campaigns', 'Campaigns'],
   ['ad-tracking', 'Ad campaign tracking'],
   ['seo-keywords', 'SEO keyword history'],
@@ -116,6 +119,9 @@ export default function MarketingStudio() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [briefDirty, setBriefDirty] = useState(false)
+  const briefSaveRef = useRef(null)
+  const navigationBlocker = useBlocker(briefDirty)
   const scope = useRef({ organizationId: activeOrganizationId, revision: scopeRevision })
   scope.current = { organizationId: activeOrganizationId, revision: scopeRevision }
   const organizationReady = Boolean(activeOrganizationId) && !organizationLoading && !selectionRequired
@@ -263,12 +269,13 @@ export default function MarketingStudio() {
   </MarketingEntryShell>
 
   if (!loading && context.mode === 'private') return <MarketingEntryShell>
-    <section className="mx-auto max-w-2xl rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+    <section className="mx-auto max-w-7xl rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Private experiment</p>
       <h1 className="mt-2 text-2xl font-semibold">Private Marketing workspace</h1>
-      <p className="mt-2 text-sm leading-6 text-slate-400">This private entry has no official project, engagement, brand, provider account, or save target. Choose authorized work before creating any official Marketing record.</p>
+      <p className="mt-2 text-sm leading-6 text-slate-400">Quick Tasks is the sole private Marketing mode. It receives no project, engagement, brand, provider account, or official save target.</p>
       <button type="button" onClick={() => setSearchParams({})} className={BUTTON + ' mt-5'}>Choose official work</button>
     </section>
+    <QuickTasks organizationId={activeOrganizationId} defaultDepartment="marketing" />
   </MarketingEntryShell>
 
   if (!loading && context.mode === 'denied') {
@@ -281,16 +288,14 @@ export default function MarketingStudio() {
   }
 
   function selectTab(nextTab) {
-    setTab(nextTab)
+    if (nextTab === tab) return
     if (context.engagement) setSearchParams(marketingSelectionParams(navigationContext, context.engagement, activeOrganizationId, {
       workshopTab: nextTab === 'overview' ? '' : nextTab,
     }), { replace: true })
   }
 
   function openMarketingBrief() {
-    const params = marketingSelectionParams(navigationContext, context.engagement, activeOrganizationId, { workshopTab: 'artifacts' })
-    params.set('artifact', 'campaign_brief')
-    setSearchParams(params)
+    selectTab('brief')
   }
 
   return (
@@ -354,6 +359,8 @@ export default function MarketingStudio() {
           />
         ) : tab === 'campaigns' ? (
           <Campaigns studio={studio} workspace={workspace} campaignId={campaignId} setCampaignId={setCampaignId} selected={selectedCampaign} saving={saving} act={act} />
+        ) : tab === 'brief' ? (
+          <MarketingCampaignBrief studio={studio} workspace={workspace} campaign={selectedCampaign} saving={saving} act={act} onRefresh={() => loadWorkspace(engagementId, campaignId)} onDirtyChange={setBriefDirty} saveHandleRef={briefSaveRef} />
         ) : tab === 'ad-tracking' ? (
           <AdCampaignTracking studio={studio} workspace={workspace} saving={saving} act={act} />
         ) : tab === 'artifacts' ? (
@@ -375,6 +382,7 @@ export default function MarketingStudio() {
         )}
         </WorkshopContextShell>
       </main>
+      {navigationBlocker.state === 'blocked' && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-5"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">Unsaved campaign brief</p><h2 className="mt-2 text-xl font-semibold">Keep, save, or discard your changes?</h2><p className="mt-2 text-sm text-slate-400">The current context will not change until you choose.</p><div className="mt-6 flex flex-wrap justify-end gap-2"><button type="button" className={BUTTON} onClick={() => navigationBlocker.reset()}>Stay</button><button type="button" className={BUTTON} onClick={() => { setBriefDirty(false); navigationBlocker.proceed() }}>Discard and continue</button><button type="button" className={PRIMARY} disabled={saving} onClick={async () => { const result = await briefSaveRef.current?.(); if (result) { setBriefDirty(false); navigationBlocker.proceed() } }}>{saving ? 'Saving…' : 'Save current and continue'}</button></div></section></div>}
     </div>
   )
 }
@@ -738,7 +746,7 @@ function Artifacts({ studio, workspace, campaign, saving, act, setTab, initialTy
   }
 
   return <div className="grid gap-6 xl:grid-cols-[300px_1fr]">
-    <section className="space-y-3"><div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Campaign</p><p className="mt-1 font-semibold text-white">{resolvedCampaign.name}</p></div>{Object.entries(MARKETING_ARTIFACT_FORMS).map(([id, item]) => {
+    <section className="space-y-3"><div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Campaign</p><p className="mt-1 font-semibold text-white">{resolvedCampaign.name}</p></div>{Object.entries(MARKETING_ARTIFACT_FORMS).filter(([id]) => id !== 'campaign_brief').map(([id, item]) => {
       const linkedArtifact = workspace.artifacts.find(candidate => links.some(link => link.artifact_id === candidate.id) && candidate.artifact_type === id)
       return <button key={id} onClick={() => setType(id)} className={`w-full rounded-2xl border p-4 text-left ${type === id ? 'border-emerald-500/60 bg-emerald-950/20' : 'border-slate-800 bg-slate-900/70'}`}><div className="flex justify-between gap-3"><span className="font-semibold text-white">{item.label}</span><span className="text-[10px] uppercase text-slate-500">{linkedArtifact ? 'Versioned' : 'Not started'}</span></div><p className="mt-2 text-xs leading-5 text-slate-500">{item.description}</p></button>
     })}</section>
