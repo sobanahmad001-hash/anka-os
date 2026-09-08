@@ -24,6 +24,7 @@ const FigmaHandoff = lazy(() => import('./apps/FigmaHandoff'))
 const ArtifactDetail = lazy(() => import('./apps/ArtifactDetail'))
 const DepartmentWorkshop = lazy(() => import('./apps/DepartmentWorkshop'))
 const MyWork = lazy(() => import('./apps/MyWork'))
+const WorkItemDetail = lazy(() => import('./apps/WorkItemDetail'))
 const AnkaSpherePortal = lazy(() => import('./apps/AnkaSpherePortal'))
 const AnkaAssistant = lazy(() => import('./apps/AnkaAssistant'))
 const LivingProductDocument = lazy(() => import('./apps/LivingProductDocument'))
@@ -79,6 +80,7 @@ export default function App() {
         <Route path="sphere/engagements" element={<OperatingSpine initialView="engagements" />} />
         <Route path="sphere/projects" element={<Navigate to="/sphere/portfolio" replace />} />
         <Route path="sphere/my-work" element={<MyWork />} />
+        <Route path="sphere/workspace/items/:recordKind/:recordId" element={<WorkItemDetail />} />
         <Route path="sphere/content" element={<DepartmentWorkshop departmentId="content" />} />
         <Route path="sphere/content/studio" element={<ContentStudio />} />
         <Route path="sphere/quick-tasks" element={<QuickTasksWorkspace />} />

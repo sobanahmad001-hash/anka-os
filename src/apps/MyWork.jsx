@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { delivery } from '../data/delivery.js'
 import { TASK_TRANSITIONS } from '../data/deliveryRepository.js'
+import { buildMyWorkPlan, WORK_RECORD_TYPES, workRecordPath } from '../data/workItemExperience.js'
 
 const TABS = [
   ['overview', 'Readiness'],
@@ -136,8 +138,12 @@ export default function MyWork() {
   }
 
   const readiness = useMemo(() => buildMyWorkReadiness(workspace || {}), [workspace])
+  const plan = useMemo(() => buildMyWorkPlan(workspace || {}), [workspace])
 
-  if (organizationLoading || loading) return <div className="flex h-full items-center justify-center bg-slate-950"><div className="h-8 w-8 animate-spin rounded-full border-b-2 border-purple-500" /></div>
+  if (organizationLoading) return <QueueState title="Loading My Work" message="Checking your organization access…" busy />
+  if (selectionRequired || !activeOrganizationId) return <QueueState title="Choose an organization" message="My Work stays closed until an active organization is selected." />
+  if (loading) return <QueueState title="Loading My Work" message="Loading your active-organization personal queues…" busy />
+  if (error && !workspace) return <QueueState title="My Work could not be loaded" message={error} retry={loadWorkspace} />
 
   return (
     <div className="min-h-full bg-slate-950 text-white">
@@ -149,14 +155,14 @@ export default function MyWork() {
         </div>
       </header>
 
-      {error && <div className="mx-6 mt-4 rounded-xl border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">{error}</div>}
+      {error && <div role="status" className="mx-6 mt-4 rounded-xl border border-amber-900 bg-amber-950/50 px-4 py-3 text-sm text-amber-200">The queue could not refresh. The last loaded organization-scoped results remain visible. {error}</div>}
 
       <nav className="flex gap-1 overflow-x-auto border-b border-slate-800 px-6 pt-4">
         {TABS.map(([id, label]) => <button key={id} onClick={() => setActiveTab(id)} className={`whitespace-nowrap border-b-2 px-4 py-3 text-sm ${activeTab === id ? 'border-purple-500 text-white' : 'border-transparent text-slate-500 hover:text-slate-200'}`}>{label}</button>)}
       </nav>
 
       <main className="p-6">
-        {activeTab === 'overview' && <ReadinessOverview readiness={readiness} />}
+        {activeTab === 'overview' && <ReadinessOverview readiness={readiness} plan={plan} />}
         {activeTab === 'tasks' && <TaskQueue tasks={workspace?.tasks || []} saving={saving} onTransition={(task, status) => mutate(`task-${task.id}`, () => delivery.transitionTask(task.id, status))} />}
         {activeTab === 'engagement-work' && <WorkItemQueue items={workspace?.workItems || []} />}
         {activeTab === 'handoffs' && <RequestQueue requests={workspace?.requests || []} />}
@@ -173,22 +179,24 @@ export default function MyWork() {
 }
 
 function TaskQueue({ tasks, saving, onTransition }) {
-  return <Section title="Project Tasks" description="Canonical Project Tasks assigned through assigned_to. Only existing valid lifecycle moves are shown.">{tasks.length ? tasks.map(task => <Card key={task.id} title={task.title} context={`${task.projects?.name || 'Project'} · ${task.workstreams?.name || labelize(task.department_id)}`} status={task.status} meta={`Due ${dateLabel(task.due_date)}`}><div className="mt-3 flex flex-wrap gap-2">{(TASK_TRANSITIONS[task.status] || []).map(status => <button key={status} disabled={saving === `task-${task.id}`} onClick={() => onTransition(task, status)} className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-purple-500 hover:text-white disabled:opacity-50">Move to {labelize(status)}</button>)}</div></Card>) : <Empty text="No assigned Project Tasks." />}</Section>
+  return <Section title="Project Tasks" description="Canonical Project Tasks assigned through assigned_to. Only existing valid lifecycle moves are shown.">{tasks.length ? tasks.map(task => <Card key={task.id} title={<Link className="hover:text-purple-300" to={workRecordPath(WORK_RECORD_TYPES.PROJECT_TASK, task.id)}>{task.title}</Link>} context={`${task.projects?.name || 'Project'} · ${task.workstreams?.name || labelize(task.department_id)}`} status={task.status} meta={`Due ${dateLabel(task.due_date)}`}><div className="mt-3 flex flex-wrap gap-2">{(TASK_TRANSITIONS[task.status] || []).map(status => <button key={status} disabled={saving === `task-${task.id}`} onClick={() => onTransition(task, status)} className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-purple-500 hover:text-white disabled:opacity-50">Move to {labelize(status)}</button>)}</div></Card>) : <Empty text="No assigned Project Tasks." />}</Section>
 }
 
 function WorkItemQueue({ items }) {
-  return <Section title="Engagement Work Items" description="Engagement-level assignments use assignee_id and remain separate from Project Tasks. Supported actions stay in the owning engagement.">{items.length ? items.map(item => <Card key={item.id} title={item.title} context={`${item.projects?.name || 'Project'} · ${item.engagements?.name || 'Engagement'}`} status={item.status} meta={`Due ${dateLabel(item.due_date)}`}><p className="mt-3 text-sm text-slate-400">{item.description || 'No description provided.'}</p></Card>) : <Empty text="No assigned Engagement Work Items." />}</Section>
+  return <Section title="Engagement Work Items" description="Engagement-level assignments use assignee_id and remain separate from Project Tasks. Supported actions stay in the owning engagement.">{items.length ? items.map(item => <Card key={item.id} title={<Link className="hover:text-purple-300" to={workRecordPath(WORK_RECORD_TYPES.ENGAGEMENT_WORK_ITEM, item.id)}>{item.title}</Link>} context={`${item.projects?.name || 'Project'} · ${item.engagements?.name || 'Engagement'}`} status={item.status} meta={`Due ${dateLabel(item.due_date)}`}><p className="mt-3 text-sm text-slate-400">{item.description || 'No description provided.'}</p></Card>) : <Empty text="No assigned Engagement Work Items." />}</Section>
 }
 
-function ReadinessOverview({ readiness }) {
+function ReadinessOverview({ readiness, plan }) {
   const rows = [
     ['Project Tasks', readiness.projectTasks, 'Assigned through the canonical Project Task owner field.'],
     ['Engagement Work Items', readiness.engagementWorkItems, 'Assigned through the engagement Work Item assignee field.'],
     ['Requests & handoffs', readiness.requests, 'Owned by you or requested by you.'],
     ['My deliverables', readiness.deliverables, 'Deliverables using the existing owner field.'],
   ]
-  return <Section title="Personal readiness" description="Each work system remains separately counted so the next supported action is clear."><div className="grid gap-3 md:grid-cols-2">{rows.map(([title, item, note]) => <div key={title} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><div className="flex items-center justify-between gap-3"><p className="font-medium">{title}</p><span className="text-2xl font-semibold">{item.total}</span></div><p className="mt-2 text-xs text-slate-500">{item.blocked || 0} blocked · {item.overdue || 0} overdue</p><p className="mt-3 text-sm leading-6 text-slate-400">{note}</p></div>)}</div><div className="mt-3 grid gap-3 md:grid-cols-2"><div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><p className="font-medium">Exact-version internal review</p><p className="mt-2 text-2xl font-semibold">{readiness.internalReviews.total}</p></div><div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><p className="font-medium">Controlled client release</p><p className="mt-2 text-2xl font-semibold">{readiness.controlledReleases.total}</p></div></div></Section>
+  return <div className="mx-auto max-w-5xl space-y-6"><section><div className="mb-4"><h2 className="text-lg font-semibold">What to do next</h2><p className="mt-1 text-sm text-slate-500">{plan.scope}. Next-up range: {plan.range}. Later and undated work remain visible.</p></div><div className="grid gap-3 lg:grid-cols-3"><NextActionGroup title="Overdue" rows={plan.overdue} tone="red" empty="Nothing overdue." /><NextActionGroup title={`Due in ${plan.horizonDays} days`} rows={plan.next} tone="purple" empty="Nothing due in this range." /><NextActionGroup title="Blocked" rows={plan.blocked} tone="amber" empty="Nothing blocked." /></div><div className="mt-3 rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 text-sm text-slate-400">Beyond the next-up range: <span className="font-semibold text-white">{plan.later.length}</span> later-dated · <span className="font-semibold text-white">{plan.undated.length}</span> undated</div></section><section><div className="mb-4"><h2 className="text-lg font-semibold">Personal readiness</h2><p className="mt-1 text-sm text-slate-500">Each work system remains separately counted.</p></div><div className="grid gap-3 md:grid-cols-2">{rows.map(([title, item, note]) => <div key={title} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><div className="flex items-center justify-between gap-3"><p className="font-medium">{title}</p><span className="text-2xl font-semibold">{item.total}</span></div><p className="mt-2 text-xs text-slate-500">{item.blocked || 0} blocked · {item.overdue || 0} overdue</p><p className="mt-3 text-sm leading-6 text-slate-400">{note}</p></div>)}</div><div className="mt-3 grid gap-3 md:grid-cols-2"><div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><p className="font-medium">Exact-version internal review</p><p className="mt-2 text-2xl font-semibold">{readiness.internalReviews.total}</p></div><div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><p className="font-medium">Controlled client release</p><p className="mt-2 text-2xl font-semibold">{readiness.controlledReleases.total}</p></div></div></section></div>
 }
+
+function NextActionGroup({ title, rows, tone, empty }) { const palette = tone === 'red' ? 'border-red-900/60' : tone === 'amber' ? 'border-amber-900/60' : 'border-purple-900/60'; return <section className={`rounded-2xl border ${palette} bg-slate-900/70 p-4`}><div className="flex items-center justify-between"><h3 className="font-semibold">{title}</h3><span className="rounded-full bg-slate-800 px-2 py-0.5 text-xs">{rows.length}</span></div><div className="mt-3 space-y-2">{rows.length ? rows.slice(0, 5).map(item => <Link key={`${item.kind}-${item.id}`} to={item.path} className="block rounded-xl bg-slate-950/70 px-3 py-2 hover:bg-slate-950"><p className="truncate text-sm font-medium">{item.title}</p><p className="mt-1 text-[11px] text-slate-500">{item.kind === WORK_RECORD_TYPES.PROJECT_TASK ? 'Project Task' : 'Engagement Work Item'} · {item.dueDate ? `Due ${dateLabel(item.dueDate)}` : 'No deadline'}</p></Link>) : <p className="py-4 text-center text-sm text-slate-500">{empty}</p>}</div></section> }
 
 function RequestQueue({ requests }) {
   return <Section title="Requests and handoffs" description="Incoming work and requests you created remain linked to the project.">{requests.length ? requests.map(item => <Card key={item.id} title={item.title} context={item.projects?.name || 'Project'} status={item.status} meta={`${labelize(item.request_type)} · Due ${dateLabel(item.required_by)}`}><p className="mt-3 text-sm text-slate-400">{item.requested_output}</p></Card>) : <Empty text="No requests assigned or created by you." />}</Section>
@@ -212,3 +220,4 @@ function Empty({ text }) { return <div className="rounded-2xl border border-dash
 function Metric({ label, value }) { return <div className="min-w-24 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2"><p className="text-lg font-semibold">{value}</p><p className="text-[10px] uppercase tracking-wider text-slate-500">{label}</p></div> }
 function Field({ label, children }) { return <label><span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">{label}</span>{children}</label> }
 function Modal({ title, onClose, children }) { return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"><div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><div className="mb-5 flex justify-between gap-4"><h2 className="text-lg font-semibold">{title}</h2><button onClick={onClose} className="text-slate-500 hover:text-white">Close</button></div>{children}</div></div> }
+function QueueState({ title, message, busy, retry }) { return <div className="flex min-h-full items-center justify-center bg-slate-950 px-4 py-16 text-white"><div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900/70 p-8 text-center">{busy && <div className="mx-auto mb-5 h-8 w-8 animate-spin rounded-full border-b-2 border-purple-500" />}<p className="text-xs font-semibold uppercase tracking-[0.16em] text-purple-400">Personal operating queue</p><h1 className="mt-2 text-xl font-semibold">{title}</h1><p className="mt-3 text-sm leading-6 text-slate-400">{message}</p>{retry && <button type="button" onClick={retry} className="mt-6 rounded-xl bg-purple-600 px-4 py-2 text-sm font-semibold">Try again</button>}</div></div> }
