@@ -13,6 +13,7 @@ import {
   defaultReportingPeriod,
   latestVersion,
   lines,
+  resolveMarketingArtifactDestination,
 } from '../data/marketingStudio.js'
 import {
   BACKLINK_COST_TYPES,
@@ -40,6 +41,7 @@ import {
 import { parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
 import DepartmentChat from '../components/DepartmentChat.jsx' // eslint-disable-line no-unused-vars
 import MarketingConnectionReadinessPanel from '../components/MarketingConnectionReadinessPanel.jsx'
+import MarketingOverview from '../components/MarketingOverview.jsx'
 import WorkshopContextShell from '../components/WorkshopContextShell.jsx'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
@@ -49,6 +51,7 @@ const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-
 const BUTTON = 'rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-emerald-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50'
 const PRIMARY = 'rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50'
 const MARKETING_TABS = Object.freeze([
+  ['overview', 'Overview'],
   ['campaigns', 'Campaigns'],
   ['ad-tracking', 'Ad campaign tracking'],
   ['seo-keywords', 'SEO keyword history'],
@@ -92,7 +95,7 @@ export default function MarketingStudio() {
   const navigationContext = useMemo(() => parseWorkshopNavigation(searchParams), [searchParams])
   const requestedPrivate = searchParams.get('mode') === 'private'
   const requestedTab = MARKETING_TABS.some(([id]) => id === navigationContext.workshopTab)
-    ? navigationContext.workshopTab : 'campaigns'
+    ? navigationContext.workshopTab : 'overview'
   const navigationLoadKey = useMemo(() => JSON.stringify({
     organizationId: navigationContext.organizationId,
     clientId: navigationContext.clientId,
@@ -152,7 +155,7 @@ export default function MarketingStudio() {
   useLayoutEffect(() => {
     workspaceGeneration.current += 1
     setEngagements([])
-    setWorkspace(null); setCampaignId(''); setTab('campaigns')
+    setWorkspace(null); setCampaignId(''); setTab('overview')
     setLoading(organizationReady); setSaving(false); setError(''); setMessage('')
   }, [activeOrganizationId, organizationReady, scopeRevision])
 
@@ -171,7 +174,8 @@ export default function MarketingStudio() {
       if (mismatch) throw Object.assign(new Error('Marketing workspace organization mismatch'), { status: 403, membershipMismatch: true })
       if (!currentScope(request) || generation !== workspaceGeneration.current) return
       setWorkspace(result)
-      const nextCampaign = result.campaigns.find(item => item.id === preferredCampaignId)?.id || result.campaigns[0]?.id || ''
+      const requestedCampaignId = preferredCampaignId || searchParams.get('campaign') || ''
+      const nextCampaign = result.campaigns.find(item => item.id === requestedCampaignId)?.id || result.campaigns[0]?.id || ''
       setCampaignId(nextCampaign)
     } catch (loadError) {
       if (!currentScope(request) || loadError?.name === 'AbortError') return
@@ -279,8 +283,14 @@ export default function MarketingStudio() {
   function selectTab(nextTab) {
     setTab(nextTab)
     if (context.engagement) setSearchParams(marketingSelectionParams(navigationContext, context.engagement, activeOrganizationId, {
-      workshopTab: nextTab === 'campaigns' ? '' : nextTab,
+      workshopTab: nextTab === 'overview' ? '' : nextTab,
     }), { replace: true })
+  }
+
+  function openMarketingBrief() {
+    const params = marketingSelectionParams(navigationContext, context.engagement, activeOrganizationId, { workshopTab: 'artifacts' })
+    params.set('artifact', 'campaign_brief')
+    setSearchParams(params)
   }
 
   return (
@@ -317,6 +327,20 @@ export default function MarketingStudio() {
 
         {loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Marketing Studio…</div> : !workspace ? (
           <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Select an engagement with a Marketing service to begin.</div>
+        ) : tab === 'overview' ? (
+          <MarketingOverview
+            key={`${activeOrganizationId}:${scopeRevision}:${engagementId}`}
+            organizationId={activeOrganizationId}
+            scopeRevision={scopeRevision}
+            signal={requestSignal}
+            onAccessError={handleOrganizationAccessError}
+            engagement={workspace.engagement}
+            serviceId={context.service?.id || ''}
+            onOpenBrief={openMarketingBrief}
+            onOpenPrivate={() => setSearchParams(privateMarketingParams(navigationContext, activeOrganizationId))}
+            onOpenConnections={() => selectTab('connections')}
+            onRefresh={() => loadWorkspace(engagementId, campaignId)}
+          />
         ) : tab === 'backlinks' ? (
           <BacklinkOutreach key={`${activeOrganizationId}:${scopeRevision}:${workspace.engagement.brand_id}`} studio={studio} brand={{ id: workspace.engagement.brand_id, name: workspace.engagement.brands?.name || 'Brand' }} act={act} onAccessError={handleOrganizationAccessError} />
         ) : tab === 'seo-keywords' ? (
@@ -333,7 +357,7 @@ export default function MarketingStudio() {
         ) : tab === 'ad-tracking' ? (
           <AdCampaignTracking studio={studio} workspace={workspace} saving={saving} act={act} />
         ) : tab === 'artifacts' ? (
-          <Artifacts studio={studio} workspace={workspace} campaign={selectedCampaign} saving={saving} act={act} setTab={selectTab} onRefresh={() => loadWorkspace(engagementId, campaignId)} />
+          <Artifacts studio={studio} workspace={workspace} campaign={selectedCampaign} saving={saving} act={act} setTab={selectTab} initialType={searchParams.get('artifact')} requestedOutput={contextValidation.context?.output || null} requestedCampaignId={searchParams.get('campaign') || ''} onRefresh={() => loadWorkspace(engagementId, campaignId)} />
         ) : tab === 'chat' ? (
           <DepartmentChat departmentId="marketing" engagement={workspace.engagement} artifactTypes={['channel_strategy', 'campaign_brief', 'measurement_plan']} artifactDefinitions={MARKETING_ARTIFACT_FORMS} artifactForType={artifactType => workspace.artifacts.find(item => item.artifact_type === artifactType)} stageForType={() => null} onPropose={input => reportMarketingAccess(() => studio.proposeArtifact(input))} onProposeWorkItem={input => reportMarketingAccess(() => studio.proposeWorkItem(input))} onCreated={() => loadWorkspace(engagementId, campaignId)} />
         ) : tab === 'connections' ? (
@@ -684,38 +708,44 @@ function MetricCard({ label, value }) {
   return <div className="rounded-xl bg-slate-950 p-4"><p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">{label}</p><p className="mt-1 text-xl font-semibold">{value}</p></div>
 }
 
-function Artifacts({ studio, workspace, campaign, saving, act, setTab, onRefresh }) {
-  const [type, setType] = useState('channel_strategy')
-  const links = campaign ? workspace.links.filter(item => item.campaign_id === campaign.id) : []
-  const artifact = workspace.artifacts.find(item => links.some(link => link.artifact_id === item.id) && item.artifact_type === type)
+function Artifacts({ studio, workspace, campaign, saving, act, setTab, initialType, requestedOutput, requestedCampaignId, onRefresh }) {
+  const destination = resolveMarketingArtifactDestination(workspace, requestedOutput, requestedCampaignId)
+  const resolvedCampaign = destination?.status === 'ready' ? destination.campaign : campaign
+  const [type, setType] = useState(destination?.artifact?.artifact_type || (MARKETING_ARTIFACT_FORMS[initialType] ? initialType : 'channel_strategy'))
+  useEffect(() => { if (destination?.status === 'ready') setType(destination.artifact.artifact_type) }, [destination?.artifact?.artifact_type, destination?.status])
+  const links = resolvedCampaign ? workspace.links.filter(item => item.campaign_id === resolvedCampaign.id) : []
+  const artifact = destination?.status === 'ready' && destination.artifact.artifact_type === type
+    ? destination.artifact : workspace.artifacts.find(item => links.some(link => link.artifact_id === item.id) && item.artifact_type === type)
   const versions = artifact ? workspace.versions.filter(item => item.artifact_id === artifact.id) : []
   const latest = latestVersion(versions)
-  const approval = latest ? workspace.approvals.find(item => item.artifact_version_id === latest.id) : null
-  const [form, setForm] = useState(artifactEditor(type, latest?.content))
-  useEffect(() => { setForm(artifactEditor(type, latest?.content)) }, [type, latest?.id])
+  const openedVersion = destination?.status === 'ready' && destination.artifact.id === artifact?.id ? destination.version : latest
+  const approval = openedVersion ? workspace.approvals.find(item => item.artifact_version_id === openedVersion.id) : null
+  const [form, setForm] = useState(artifactEditor(type, openedVersion?.content))
+  useEffect(() => { setForm(artifactEditor(type, openedVersion?.content)) }, [type, openedVersion?.content, openedVersion?.id])
   const definition = MARKETING_ARTIFACT_FORMS[type]
 
-  if (!campaign) return <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center"><p className="text-sm text-slate-400">Create or select a campaign before linking its artifacts.</p><button onClick={() => setTab('campaigns')} className={`${PRIMARY} mt-4`}>Go to campaigns</button></div>
+  if (requestedOutput && destination?.status !== 'ready') return <div role="alert" className="rounded-2xl border border-dashed border-amber-500/40 px-6 py-16 text-center"><p className="font-semibold text-amber-100">The requested artifact version is not visible in this Marketing context.</p><p className="mt-2 text-sm text-amber-200/80">Return to the originating work record or choose currently authorized work.</p></div>
+  if (!resolvedCampaign) return <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center"><p className="text-sm text-slate-400">Create or select a campaign before linking its artifacts.</p><button onClick={() => setTab('campaigns')} className={`${PRIMARY} mt-4`}>Go to campaigns</button></div>
 
   async function save(event) {
     event.preventDefault()
     const content = Object.fromEntries(definition.fields.map(([key, , kind]) => [key, kind === 'list' ? lines(form[key]) : form[key]]))
     await act(() => studio.saveArtifact({
-      engagement_id: workspace.engagement.id, campaign_id: campaign.id, artifact_id: artifact?.id || null,
-      artifact_type: type, title: `${campaign.name} — ${definition.label}`,
+      engagement_id: workspace.engagement.id, campaign_id: resolvedCampaign.id, artifact_id: artifact?.id || null,
+      artifact_type: type, title: `${resolvedCampaign.name} — ${definition.label}`,
       content, change_summary: latest ? 'Marketing Studio revision' : 'Initial Marketing Studio version', ai_use_allowed: false,
-    }), `${definition.label} saved as a new immutable version.`, campaign.id)
+    }), `${definition.label} saved as a new immutable version.`, resolvedCampaign.id)
   }
 
   return <div className="grid gap-6 xl:grid-cols-[300px_1fr]">
-    <section className="space-y-3"><div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Campaign</p><p className="mt-1 font-semibold text-white">{campaign.name}</p></div>{Object.entries(MARKETING_ARTIFACT_FORMS).map(([id, item]) => {
+    <section className="space-y-3"><div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Campaign</p><p className="mt-1 font-semibold text-white">{resolvedCampaign.name}</p></div>{Object.entries(MARKETING_ARTIFACT_FORMS).map(([id, item]) => {
       const linkedArtifact = workspace.artifacts.find(candidate => links.some(link => link.artifact_id === candidate.id) && candidate.artifact_type === id)
       return <button key={id} onClick={() => setType(id)} className={`w-full rounded-2xl border p-4 text-left ${type === id ? 'border-emerald-500/60 bg-emerald-950/20' : 'border-slate-800 bg-slate-900/70'}`}><div className="flex justify-between gap-3"><span className="font-semibold text-white">{item.label}</span><span className="text-[10px] uppercase text-slate-500">{linkedArtifact ? 'Versioned' : 'Not started'}</span></div><p className="mt-2 text-xs leading-5 text-slate-500">{item.description}</p></button>
     })}</section>
-    <div><form onSubmit={save} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6"><div className="flex flex-wrap justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Immutable artifact</p><h2 className="mt-1 text-xl font-semibold">{definition.label}</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">{definition.description}</p></div><div className="text-right text-xs text-slate-500"><p>{latest ? `Version ${latest.version_number}` : 'No version yet'}</p><p className={approval ? 'mt-1 text-emerald-400' : 'mt-1 text-amber-400'}>{approval ? 'Exact version approved' : 'Approval pending'}</p></div></div>
+    <div><form onSubmit={save} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6"><div className="flex flex-wrap justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Immutable artifact</p><h2 className="mt-1 text-xl font-semibold">{definition.label}</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">{definition.description}</p></div><div className="text-right text-xs text-slate-500"><p>{openedVersion ? `Version ${openedVersion.version_number}${openedVersion.id !== latest?.id ? ' · historical exact version' : ''}` : 'No version yet'}</p><p className={approval ? 'mt-1 text-emerald-400' : 'mt-1 text-amber-400'}>{approval ? 'Exact version approved' : 'Approval pending'}</p></div></div>
       <div className="mt-6 grid gap-4 md:grid-cols-2">{definition.fields.map(([key, label, kind]) => <div key={key} className={kind === 'textarea' || kind === 'list' ? 'md:col-span-2' : ''}><Field label={label} hint={kind === 'list' ? 'One item per line' : ''}>{kind === 'textarea' || kind === 'list' ? <textarea required className={`${INPUT} min-h-28`} value={form[key] || ''} onChange={event => setForm({ ...form, [key]: event.target.value })} /> : <input required type={kind} className={INPUT} value={form[key] || ''} onChange={event => setForm({ ...form, [key]: event.target.value })} />}</Field></div>)}</div>
       <div className="mt-6 flex flex-wrap items-center justify-end gap-3 border-t border-slate-800 pt-5"><button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : latest ? 'Create new version' : 'Save first version'}</button></div>
-    </form><ArtifactApprovalPanel version={latest} approval={approval} theme="emerald" singleApprovalLabel={`Approve version ${latest?.version_number}`} onSingleApprove={() => act(() => studio.approveArtifact(latest.id), `${definition.label} exact version approved.`, campaign.id)} onChanged={onRefresh} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="marketing" theme="emerald" /></div>
+    </form><ArtifactApprovalPanel version={openedVersion} approval={approval} theme="emerald" singleApprovalLabel={`Approve version ${openedVersion?.version_number}`} onSingleApprove={() => act(() => studio.approveArtifact(openedVersion.id), `${definition.label} exact version approved.`, resolvedCampaign.id)} onChanged={onRefresh} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={openedVersion?.id} department="marketing" theme="emerald" /></div>
   </div>
 }
 

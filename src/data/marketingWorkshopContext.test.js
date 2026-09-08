@@ -76,6 +76,16 @@ test('canonical scope validates exact typed work and rejects unavailable pointer
   assert.equal(validateWorkshopNavigation(navigation, resolveMarketingNavigationScope(navigation, { ...workspace, stages: [] }, 'org-1')).reason, 'context_mismatch')
 })
 
+test('canonical scope resolves an exact Marketing artifact and version output', () => {
+  const navigation = parseWorkshopNavigation('ctxOrg=org-1&ctxClient=client-1&ctxProject=project-1&ctxEngagement=eng-1&ctxBrand=brand-1&ctxService=service-1&ctxOutputKind=artifact&ctxOutputId=artifact-1&ctxVersionId=version-1')
+  const workspace = {
+    engagement, stages: [], marketingServices: [{ id: 'service-1', engagement_id: 'eng-1' }], navigationWorkRecord: null,
+    navigationOutput: { kind: 'artifact', id: 'artifact-1', versionId: 'version-1', organizationId: 'org-1', engagementId: 'eng-1' },
+  }
+  assert.equal(validateWorkshopNavigation(navigation, resolveMarketingNavigationScope(navigation, workspace, 'org-1')).status, 'ready')
+  assert.equal(validateWorkshopNavigation(navigation, resolveMarketingNavigationScope(navigation, { ...workspace, navigationOutput: { ...workspace.navigationOutput, versionId: 'other' } }, 'org-1')).reason, 'context_mismatch')
+})
+
 test('Marketing consumer imports P9 once and preserves approved feature tabs', () => {
   const ui = readFileSync(new URL('../apps/MarketingStudio.jsx', import.meta.url), 'utf8')
   const repository = readFileSync(new URL('./marketingStudioRepository.js', import.meta.url), 'utf8')

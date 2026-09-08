@@ -193,7 +193,7 @@ test('MK6c blocks queries until selection resolves, clears scope state, and neve
   assert.match(ui, /const organizationReady = Boolean\(activeOrganizationId\) && !organizationLoading && !selectionRequired/)
   assert.match(ui, /if \(!studio \|\| !organizationReady\) return undefined/)
   assert.match(ui, /useLayoutEffect\(\(\) => \{[\s\S]*?setEngagements\(\[\]\)[\s\S]*?setWorkspace\(null\)/)
-  assert.match(ui, /setWorkspace\(null\); setCampaignId\(''\); setTab\('campaigns'\)/)
+  assert.match(ui, /setWorkspace\(null\); setCampaignId\(''\); setTab\('overview'\)/)
   assert.match(ui, /setLoading\(organizationReady\); setSaving\(false\); setError\(''\); setMessage\(''\)/)
   assert.match(ui, /const engagementId = context\.engagement\?\.id \|\| ''/)
   assert.match(ui, /Choose Marketing work/)

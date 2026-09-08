@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-import { MARKETING_ARTIFACT_FORMS, adPerformanceMetrics, blankMarketingArtifact, campaignAfterDeletion, defaultReportingPeriod } from './marketingStudio.js'
+import { MARKETING_ARTIFACT_FORMS, adPerformanceMetrics, blankMarketingArtifact, campaignAfterDeletion, defaultReportingPeriod, resolveMarketingArtifactDestination } from './marketingStudio.js'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const read = path => readFileSync(`${root}${path}`, 'utf8')
@@ -53,6 +53,36 @@ test('marketing artifacts reuse canonical immutable versions and approvals', () 
   assert.doesNotMatch(schemaMigration, /create table public\.marketing_artifact/)
   assert.match(ui, /Create new version/)
   assert.match(ui, /Approve version/)
+})
+
+test('exact Marketing output resolves canonical campaign and non-latest version in a multi-campaign workspace', () => {
+  const workspace = {
+    engagement: { id: 'eng-a', organization_id: 'org-a' },
+    campaigns: [
+      { id: 'campaign-a', organization_id: 'org-a', engagement_id: 'eng-a' },
+      { id: 'campaign-b', organization_id: 'org-a', engagement_id: 'eng-a' },
+    ],
+    artifacts: [
+      { id: 'artifact-a', organization_id: 'org-a', engagement_id: 'eng-a', artifact_type: 'campaign_brief' },
+      { id: 'artifact-b', organization_id: 'org-a', engagement_id: 'eng-a', artifact_type: 'campaign_brief' },
+    ],
+    versions: [
+      { id: 'version-a1', organization_id: 'org-a', artifact_id: 'artifact-a', version_number: 1 },
+      { id: 'version-a2', organization_id: 'org-a', artifact_id: 'artifact-a', version_number: 2 },
+      { id: 'version-b1', organization_id: 'org-a', artifact_id: 'artifact-b', version_number: 1 },
+    ],
+    links: [
+      { id: 'link-a', organization_id: 'org-a', campaign_id: 'campaign-a', artifact_id: 'artifact-a' },
+      { id: 'link-b', organization_id: 'org-a', campaign_id: 'campaign-b', artifact_id: 'artifact-b' },
+    ],
+  }
+  const result = resolveMarketingArtifactDestination(workspace, { kind: 'artifact', id: 'artifact-a', versionId: 'version-a1' }, 'campaign-a')
+  assert.equal(result.status, 'ready')
+  assert.equal(result.campaign.id, 'campaign-a')
+  assert.equal(result.version.id, 'version-a1')
+  assert.equal(result.version.version_number, 1)
+  assert.equal(resolveMarketingArtifactDestination(workspace, { kind: 'artifact', id: 'artifact-a', versionId: 'version-b1' }, 'campaign-a').status, 'invalid')
+  assert.equal(resolveMarketingArtifactDestination(workspace, { kind: 'artifact', id: 'artifact-a', versionId: 'version-a1' }, 'campaign-b').status, 'invalid')
 })
 
 test('Google reporting reuses the encrypted OAuth store and remains externally read-only', () => {
