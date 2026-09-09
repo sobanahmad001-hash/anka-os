@@ -54,7 +54,6 @@ create table public.deliverable_review_assignments (
   nominated_by uuid references auth.users(id) on delete set null,
   status text not null default 'current' check(status in ('current','reassigned','completed')),
   reason text not null default '', assigned_at timestamptz not null default now(), ended_at timestamptz,
-  unique(id,organization_id),
   foreign key(project_id,organization_id) references public.projects(id,organization_id) on delete restrict,
   foreign key(client_id,organization_id) references public.clients(id,organization_id) on delete restrict,
   foreign key(deliverable_id,project_id,workstream_id,organization_id)
@@ -67,6 +66,20 @@ create unique index deliverable_review_assignments_one_current_idx
   on public.deliverable_review_assignments(deliverable_version_id) where status='current';
 create index deliverable_review_assignments_reviewer_idx
   on public.deliverable_review_assignments(organization_id,reviewer_id,status,assigned_at);
+create index deliverable_review_assignments_project_fk_idx
+  on public.deliverable_review_assignments(project_id,organization_id);
+create index deliverable_review_assignments_client_fk_idx
+  on public.deliverable_review_assignments(client_id,organization_id) where client_id is not null;
+create index deliverable_review_assignments_deliverable_fk_idx
+  on public.deliverable_review_assignments(deliverable_id,project_id,workstream_id,organization_id);
+create index deliverable_review_assignments_version_fk_idx
+  on public.deliverable_review_assignments(deliverable_version_id,deliverable_id,project_id,organization_id);
+create index deliverable_review_assignments_reviewer_fk_idx
+  on public.deliverable_review_assignments(reviewer_id);
+create index deliverable_review_assignments_assigned_by_fk_idx
+  on public.deliverable_review_assignments(assigned_by);
+create index deliverable_review_assignments_nominated_by_fk_idx
+  on public.deliverable_review_assignments(nominated_by) where nominated_by is not null;
 
 create table public.deliverable_lifecycle_events (
   id uuid primary key default gen_random_uuid(),
@@ -81,7 +94,7 @@ create table public.deliverable_lifecycle_events (
   actor_id uuid references auth.users(id) on delete restrict,
   actor_kind text not null check(actor_kind in ('team','client','legacy')),
   metadata jsonb not null default '{}'::jsonb check(jsonb_typeof(metadata)='object'),
-  occurred_at timestamptz not null default now(), unique(id,organization_id),
+  occurred_at timestamptz not null default now(),
   foreign key(project_id,organization_id) references public.projects(id,organization_id) on delete restrict,
   foreign key(client_id,organization_id) references public.clients(id,organization_id) on delete restrict,
   foreign key(deliverable_id,project_id,workstream_id,organization_id)
@@ -94,6 +107,16 @@ create unique index deliverable_lifecycle_events_terminal_idx
   where event_type in ('delivered','published','legacy_status_marker');
 create index deliverable_lifecycle_events_version_idx
   on public.deliverable_lifecycle_events(organization_id,deliverable_version_id,occurred_at);
+create index deliverable_lifecycle_events_project_fk_idx
+  on public.deliverable_lifecycle_events(project_id,organization_id);
+create index deliverable_lifecycle_events_client_fk_idx
+  on public.deliverable_lifecycle_events(client_id,organization_id) where client_id is not null;
+create index deliverable_lifecycle_events_deliverable_fk_idx
+  on public.deliverable_lifecycle_events(deliverable_id,project_id,workstream_id,organization_id);
+create index deliverable_lifecycle_events_version_fk_idx
+  on public.deliverable_lifecycle_events(deliverable_version_id,deliverable_id,project_id,organization_id);
+create index deliverable_lifecycle_events_actor_fk_idx
+  on public.deliverable_lifecycle_events(actor_id) where actor_id is not null;
 
 create table public.deliverable_action_requests (
   id uuid primary key default gen_random_uuid(),
@@ -110,6 +133,8 @@ create table public.deliverable_action_requests (
 );
 create index deliverable_action_requests_created_idx
   on public.deliverable_action_requests(organization_id,created_at);
+create index deliverable_action_requests_actor_fk_idx
+  on public.deliverable_action_requests(actor_id);
 
 alter table public.deliverable_review_assignments enable row level security;
 alter table public.deliverable_lifecycle_events enable row level security;
@@ -490,6 +515,7 @@ create function public.get_deliverable_version_capabilities(
 declare actor uuid:=auth.uid(); c record; membership record; assigned uuid;
   client_allowed boolean:=false; feature_enabled boolean:=false;
   client_approved boolean:=false; released boolean:=false;
+  delivered_fact boolean:=false; published_fact boolean:=false;
 begin
   if actor is null then raise exception 'Authentication required.' using errcode='42501'; end if;
   select v.*,d.owner_id deliverable_owner_id,d.workstream_id,w.department_id,
@@ -508,6 +534,8 @@ begin
   from public.organizations where id=p_organization_id and status='active';
   select exists(select 1 from public.approvals where deliverable_version_id=p_deliverable_version_id and approval_type='client_approval' and decision='approved') into client_approved;
   select exists(select 1 from public.deliverable_lifecycle_events where deliverable_version_id=p_deliverable_version_id and event_type='released') into released;
+  select exists(select 1 from public.deliverable_lifecycle_events where deliverable_version_id=p_deliverable_version_id and event_type='delivered') into delivered_fact;
+  select exists(select 1 from public.deliverable_lifecycle_events where deliverable_version_id=p_deliverable_version_id and event_type='published') into published_fact;
   select exists(
     select 1 from public.client_contacts contact
     join public.project_client_access access on access.client_contact_id=contact.id
@@ -533,8 +561,14 @@ begin
       and private.p7_eligible_reviewer(p_organization_id,c.project_id,c.department_id,c.created_by,c.deliverable_owner_id,actor),
     'can_release',c.review_status='ready_for_client_review' and c.client_id is not null and private.p7_release_authority(p_organization_id,c.project_id,actor),
     'can_client_decide',c.review_status='client_reviewing' and feature_enabled and client_allowed and membership.role in ('client_admin','client_approver'),
-    'can_mark_delivered',released and c.review_status in ('client_reviewing','client_approved') and private.p7_release_authority(p_organization_id,c.project_id,actor) and not(c.client_approval_required and feature_enabled and not client_approved),
-    'can_mark_published',released and c.review_status in ('client_reviewing','client_approved','delivered_published') and private.p7_release_authority(p_organization_id,c.project_id,actor) and not(c.client_approval_required and feature_enabled and not client_approved)
+    'can_mark_delivered',released and not delivered_fact
+      and c.review_status in ('client_reviewing','client_approved','delivered_published')
+      and private.p7_release_authority(p_organization_id,c.project_id,actor)
+      and not(c.client_approval_required and feature_enabled and not client_approved),
+    'can_mark_published',released and not published_fact
+      and c.review_status in ('client_reviewing','client_approved','delivered_published')
+      and private.p7_release_authority(p_organization_id,c.project_id,actor)
+      and not(c.client_approval_required and feature_enabled and not client_approved)
   );
 end; $$;
 

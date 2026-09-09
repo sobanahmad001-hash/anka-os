@@ -69,6 +69,54 @@ select pg_temp.check_p7('one_current_reviewer_and_terminal_facts_are_unique',
   to_regclass('public.deliverable_review_assignments_one_current_idx') is not null
   and to_regclass('public.deliverable_lifecycle_events_terminal_idx') is not null);
 
+select pg_temp.check_p7('surrogate_keys_have_no_redundant_tenant_unique_constraints',
+  not exists (
+    select 1 from pg_constraint c
+    where c.contype='u'
+      and c.conrelid in (
+        'public.deliverable_review_assignments'::regclass,
+        'public.deliverable_lifecycle_events'::regclass
+      )
+      and (select array_agg(a.attname order by key.ordinality)
+           from unnest(c.conkey) with ordinality key(attnum,ordinality)
+           join pg_attribute a on a.attrelid=c.conrelid and a.attnum=key.attnum)
+          = array['id','organization_id']::name[]
+  ));
+
+select pg_temp.check_p7('new_foreign_keys_have_nonredundant_leading_indexes',
+  (select count(*)=13 and bool_and(
+     case i.relname
+       when 'deliverable_review_assignments_project_fk_idx' then cols=array['project_id','organization_id']::name[] and predicate is null
+       when 'deliverable_review_assignments_client_fk_idx' then cols=array['client_id','organization_id']::name[] and predicate='(client_id IS NOT NULL)'
+       when 'deliverable_review_assignments_deliverable_fk_idx' then cols=array['deliverable_id','project_id','workstream_id','organization_id']::name[] and predicate is null
+       when 'deliverable_review_assignments_version_fk_idx' then cols=array['deliverable_version_id','deliverable_id','project_id','organization_id']::name[] and predicate is null
+       when 'deliverable_review_assignments_reviewer_fk_idx' then cols=array['reviewer_id']::name[] and predicate is null
+       when 'deliverable_review_assignments_assigned_by_fk_idx' then cols=array['assigned_by']::name[] and predicate is null
+       when 'deliverable_review_assignments_nominated_by_fk_idx' then cols=array['nominated_by']::name[] and predicate='(nominated_by IS NOT NULL)'
+       when 'deliverable_lifecycle_events_project_fk_idx' then cols=array['project_id','organization_id']::name[] and predicate is null
+       when 'deliverable_lifecycle_events_client_fk_idx' then cols=array['client_id','organization_id']::name[] and predicate='(client_id IS NOT NULL)'
+       when 'deliverable_lifecycle_events_deliverable_fk_idx' then cols=array['deliverable_id','project_id','workstream_id','organization_id']::name[] and predicate is null
+       when 'deliverable_lifecycle_events_version_fk_idx' then cols=array['deliverable_version_id','deliverable_id','project_id','organization_id']::name[] and predicate is null
+       when 'deliverable_lifecycle_events_actor_fk_idx' then cols=array['actor_id']::name[] and predicate='(actor_id IS NOT NULL)'
+       when 'deliverable_action_requests_actor_fk_idx' then cols=array['actor_id']::name[] and predicate is null
+       else false end)
+   from (
+     select i.indexrelid, i.indrelid,
+       array(select a.attname from unnest(i.indkey::smallint[]) with ordinality key(attnum,ordinality)
+             join pg_attribute a on a.attrelid=i.indrelid and a.attnum=key.attnum order by key.ordinality) cols,
+       pg_get_expr(i.indpred,i.indrelid) predicate
+     from pg_index i
+   ) x join pg_class i on i.oid=x.indexrelid
+   where i.relname in (
+     'deliverable_review_assignments_project_fk_idx','deliverable_review_assignments_client_fk_idx',
+     'deliverable_review_assignments_deliverable_fk_idx','deliverable_review_assignments_version_fk_idx',
+     'deliverable_review_assignments_reviewer_fk_idx','deliverable_review_assignments_assigned_by_fk_idx',
+     'deliverable_review_assignments_nominated_by_fk_idx','deliverable_lifecycle_events_project_fk_idx',
+     'deliverable_lifecycle_events_client_fk_idx','deliverable_lifecycle_events_deliverable_fk_idx',
+     'deliverable_lifecycle_events_version_fk_idx','deliverable_lifecycle_events_actor_fk_idx',
+     'deliverable_action_requests_actor_fk_idx'
+   )));
+
 select pg_temp.check_p7('tenant_safe_composite_foreign_keys_cover_new_relations',
   (select count(*)=8
    from pg_constraint c
@@ -97,11 +145,14 @@ declare
   client_user uuid:=gen_random_uuid(); outsider uuid:=gen_random_uuid();
   client_id uuid:=gen_random_uuid(); project_id uuid:=gen_random_uuid();
   stream_id uuid:=gen_random_uuid(); deliverable_id uuid:=gen_random_uuid();
-  contact_id uuid:=gen_random_uuid(); version_id uuid;
+  contact_id uuid:=gen_random_uuid(); version_id uuid; version2_id uuid;
   create_key uuid:=gen_random_uuid(); submit_key uuid:=gen_random_uuid();
   review_key uuid:=gen_random_uuid(); release_key uuid:=gen_random_uuid();
   client_key uuid:=gen_random_uuid(); delivered_key uuid:=gen_random_uuid();
   published_key uuid:=gen_random_uuid(); result jsonb; replay jsonb;
+  create2_key uuid:=gen_random_uuid(); submit2_key uuid:=gen_random_uuid();
+  review2_key uuid:=gen_random_uuid(); release2_key uuid:=gen_random_uuid();
+  published2_key uuid:=gen_random_uuid(); delivered2_key uuid:=gen_random_uuid();
   denied boolean; n bigint;
 begin
   insert into auth.users(id) values(creator),(owner_id),(manager),(other_manager),(client_user),(outsider);
@@ -249,6 +300,43 @@ begin
     and replay->>'event_type'=result->>'event_type'
     and (replay->>'idempotent_replay')::boolean);
 
+  perform set_config('request.jwt.claims',jsonb_build_object('sub',creator,'role','authenticated')::text,true);
+  set local role authenticated;
+  result:=public.create_governed_deliverable_version(org,deliverable_id,'Version two','Publish first',null,'{}',false,create2_key);
+  reset role;
+  version2_id:=(result->>'deliverable_version_id')::uuid;
+  set local role authenticated;
+  result:=public.submit_governed_deliverable_version(org,version2_id,1,manager,submit2_key);
+  reset role;
+  perform set_config('request.jwt.claims',jsonb_build_object('sub',manager,'role','authenticated')::text,true);
+  set local role authenticated;
+  result:=public.review_governed_deliverable_version(org,version2_id,2,'approved','Ready','{}',review2_key);
+  reset role;
+  perform set_config('request.jwt.claims',jsonb_build_object('sub',owner_id,'role','authenticated')::text,true);
+  set local role authenticated;
+  result:=public.release_governed_deliverable_version(org,version2_id,3,false,'Release',release2_key);
+  result:=public.get_deliverable_version_capabilities(org,version2_id);
+  reset role;
+  perform pg_temp.check_p7('released_version_initially_permits_both_terminal_facts',
+    (result->>'can_mark_delivered')::boolean and (result->>'can_mark_published')::boolean);
+
+  set local role authenticated;
+  result:=public.mark_governed_deliverable_published(org,version2_id,4,'{"channel":"web"}',published2_key);
+  result:=public.get_deliverable_version_capabilities(org,version2_id);
+  reset role;
+  perform pg_temp.check_p7('publishing_first_still_permits_later_delivered_fact',
+    (result->>'can_mark_delivered')::boolean and not (result->>'can_mark_published')::boolean);
+
+  set local role authenticated;
+  result:=public.mark_governed_deliverable_delivered(org,version2_id,5,'{"channel":"handoff"}',delivered2_key);
+  result:=public.get_deliverable_version_capabilities(org,version2_id);
+  reset role;
+  perform pg_temp.check_p7('published_then_delivered_records_both_facts_once',
+    not (result->>'can_mark_delivered')::boolean and not (result->>'can_mark_published')::boolean
+    and (select count(*)=2 and count(distinct event_type)=2
+      from public.deliverable_lifecycle_events
+      where deliverable_version_id=version2_id and event_type in ('delivered','published')));
+
   denied:=false;
   perform set_config('request.jwt.claims',jsonb_build_object('sub',outsider,'role','authenticated')::text,true);
   set local role authenticated;
@@ -263,7 +351,7 @@ begin
   perform pg_temp.check_p7('lifecycle_evidence_is_append_only',denied);
   select count(*) into n from public.deliverable_action_requests where organization_id=org;
   perform pg_temp.check_p7('one_content_free_replay_record_per_action',
-    n=7 and not exists(select 1 from public.deliverable_action_requests request
+    n=13 and not exists(select 1 from public.deliverable_action_requests request
       where request.result ?| array['title','rationale','change_summary','metadata']));
 end $$;
 

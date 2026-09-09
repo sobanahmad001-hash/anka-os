@@ -81,6 +81,9 @@ test('P7 uses separate atomic actions and independent delivered/published facts'
   assert.doesNotMatch(migration, /cross join\(values\([^\n]*'published'::text/)
   assert.match(migration, /client_approval_required boolean not null default false/)
   assert.match(migration, /Client approval requirement is immutable after first release/)
+  assert.match(migration, /can_mark_delivered',released and not delivered_fact/)
+  assert.match(migration, /c\.review_status in \('client_reviewing','client_approved','delivered_published'\)/)
+  assert.match(migration, /can_mark_published',released and not published_fact/)
 })
 
 test('P7 consumers use server capabilities and never compose governed writes', () => {
