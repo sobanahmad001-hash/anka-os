@@ -45,7 +45,7 @@ test('MK6a UI supports manual page-scoped tracking and distinguishes no rank fro
   assert.match(repository, /fetch_keyword_ranks/)
   assert.match(ui, /Keyword rank tracking/)
   assert.match(ui, /No Keyword Strategy source/)
-  assert.match(ui, /Not yet ranking — no Search Console impressions yet/)
+  assert.match(ui, /Rank unknown — Google Search Console returned no row/)
   assert.match(ui, /Rank appears after the first fetch/)
 })
 

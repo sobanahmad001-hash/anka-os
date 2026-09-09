@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { buildMarketingKeywordResearch, shouldApplyKeywordResearchResponse } from './marketingKeywordResearch.js'
+import { buildMarketingKeywordResearch, keywordDuplicateCounts, shouldApplyKeywordResearchResponse } from './marketingKeywordResearch.js'
 import { collectKeywordResearchPages } from './marketingKeywordResearchRepository.js'
 
 const orgA = 'org-a'
@@ -46,6 +46,16 @@ test('SEO keyword identity keeps duplicate-looking records distinct and retains 
   assert.equal(model.trackedKeywords[0].pageTarget.url, 'https://anka.test/one')
   assert.equal(model.trackedKeywords[1].pageTarget.url, 'https://anka.test/two')
   assert.equal(model.trackedKeywords[1].active, false)
+})
+
+test('duplicate warnings are presentation-only, page-specific, and case-insensitive', () => {
+  const rows = [
+    { id: 'a', tracked_page_id: 'page-1', keyword: 'Growth  Strategy' },
+    { id: 'b', tracked_page_id: 'page-1', keyword: ' growth strategy ' },
+    { id: 'c', tracked_page_id: 'page-2', keyword: 'growth strategy' },
+  ]
+  assert.deepEqual([...keywordDuplicateCounts(rows)], [['a', 2], ['b', 2], ['c', 1]])
+  assert.equal(rows.length, 3)
 })
 
 test('rank history is dated, chronological, and preserves unknown rank explicitly', () => {
@@ -103,4 +113,7 @@ test('production path is read-only, cancellable, paginated, and explicitly scope
   assert.match(studio, /Tracked SEO keywords[\s\S]*separate from Google Ads planning keywords/)
   assert.match(studio, /This view does not generate or save interpretations/)
   assert.match(studio, /shouldApplyKeywordResearchResponse/)
+  assert.match(studio, /Market, language, and device detail is not stored/)
+  assert.match(studio, /Pause tracking/)
+  assert.doesNotMatch(studio, /deleteKeyword|mergeKeyword/)
 })

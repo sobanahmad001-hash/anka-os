@@ -14,7 +14,8 @@ async function invoke(action, input = {}) {
 }
 
 export const technicalSeo = Object.freeze({
-  listBrands: () => dataOrThrow(supabase.from('brands').select('id, organization_id, name').order('name')),
+  listBrands: organizationId => dataOrThrow(supabase.from('brands').select('id, organization_id, name')
+    .eq('organization_id', organizationId).order('name')),
   listHealth: brandId => dataOrThrow(supabase.from('tracked_page_current_health').select('*')
     .eq('brand_id', brandId).order('page_url')),
   listAudits: pageId => dataOrThrow(supabase.from('tracked_page_audits').select('*')
@@ -29,5 +30,6 @@ export const technicalSeo = Object.freeze({
   listKeywordSources: brandId => dataOrThrow(supabase.from('artifacts').select('id, title, artifact_type, brand_id')
     .eq('brand_id', brandId).eq('artifact_type', 'keyword_strategy').order('created_at', { ascending: false })),
   saveKeyword: input => invoke('save_keyword', input),
+  setKeywordActive: (keywordId, active) => invoke('set_keyword_active', { keywordId, active }),
   fetchKeywordRanks: pageId => invoke('fetch_keyword_ranks', { pageId }),
 })

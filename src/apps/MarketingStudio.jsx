@@ -28,6 +28,7 @@ import { shouldApplyDashboardResponse } from '../data/performanceDashboard.js'
 import { loadPerformanceDashboard } from '../data/performanceDashboardRepository.js'
 import { shouldApplyKeywordResearchResponse } from '../data/marketingKeywordResearch.js'
 import { loadMarketingKeywordResearch } from '../data/marketingKeywordResearchRepository.js'
+import { technicalSeo } from '../data/technicalSeoRepository.js'
 import { canManageMarketingConnections } from '../data/marketingConnectionReadiness.js'
 import {
   marketingSelectionParams,
@@ -762,6 +763,9 @@ function SeoKeywordHistory({ organizationId, scopeRevision, signal, onAccessErro
   const [selectedId, setSelectedId] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [statusBusyId, setStatusBusyId] = useState('')
+  const [statusMessage, setStatusMessage] = useState('')
+  const [statusError, setStatusError] = useState('')
   const generation = useRef(0)
   const current = useRef({ organizationId, brandId: brand.id, revision: scopeRevision })
   current.current = { organizationId, brandId: brand.id, revision: scopeRevision }
@@ -788,6 +792,29 @@ function SeoKeywordHistory({ organizationId, scopeRevision, signal, onAccessErro
   const rank = snapshot => snapshot?.position == null ? 'Rank unknown' : 'Position ' + snapshot.position
   const metric = value => value == null ? 'Unknown' : Number(value).toLocaleString()
 
+  async function setActive(item) {
+    const requestGeneration = generation.current
+    const request = { organizationId, brandId: brand.id, revision: scopeRevision, signal }
+    setStatusBusyId(item.id); setStatusMessage(''); setStatusError('')
+    try {
+      const updated = await technicalSeo.setKeywordActive(item.id, !item.active)
+      if (!shouldApplyKeywordResearchResponse(request, current.current, requestGeneration, generation.current)) return
+      setResearch(existing => existing && Object.freeze({
+        ...existing,
+        trackedKeywords: Object.freeze(existing.trackedKeywords.map(keyword => keyword.id === item.id
+          ? Object.freeze({ ...keyword, active: updated.active !== false })
+          : keyword)),
+      }))
+      setStatusMessage(`${item.keyword} ${updated.active === false ? 'paused' : 'resumed'}. Existing rank history was retained.`)
+    } catch (statusError) {
+      if (!shouldApplyKeywordResearchResponse(request, current.current, requestGeneration, generation.current) || statusError?.name === 'AbortError') return
+      onAccessError(statusError, { membershipMismatch: statusError?.membershipMismatch === true })
+      setStatusError(statusError.message)
+    } finally {
+      if (shouldApplyKeywordResearchResponse(request, current.current, requestGeneration, generation.current)) setStatusBusyId('')
+    }
+  }
+
   if (loading) return <div className="py-20 text-center text-sm text-slate-500">Loading SEO keyword history…</div>
   if (error) return <Notice error={error} />
 
@@ -796,7 +823,12 @@ function SeoKeywordHistory({ organizationId, scopeRevision, signal, onAccessErro
       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-sky-300">Read-only SEO identity</p>
       <h2 className="mt-1 text-xl font-semibold">{brand.name} keyword history</h2>
       <p className="mt-2 text-sm leading-6 text-slate-400">Tracked SEO keywords retain their own identity, target page, Content keyword-strategy source, and dated rank observations. They are separate from Google Ads planning keywords.</p>
+      <p className="mt-2 text-xs leading-5 text-sky-200">Source: Google Search Console final data. Each fetch covers the previous 28 days through yesterday and filters to the exact page and query. Market, language, and device detail is not stored; displayed values are provider aggregates.</p>
+      <Link to={`/sphere/marketing/seo?brand=${encodeURIComponent(brand.id)}`} className={BUTTON + ' mt-4 inline-flex'}>Open Technical SEO tracking</Link>
     </section>
+
+    {statusMessage && <div className="rounded-xl border border-emerald-900 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">{statusMessage}</div>}
+    {statusError && <div className="rounded-xl border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">{statusError}</div>}
 
     {!research?.trackedKeywords.length ? (
       <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-14 text-center text-sm text-slate-500">No tracked SEO keywords are recorded for this brand.</div>
@@ -811,6 +843,7 @@ function SeoKeywordHistory({ organizationId, scopeRevision, signal, onAccessErro
               </div>
               <p className="mt-2 break-all text-xs text-slate-400">{item.pageTarget?.url || 'Tracked page unavailable'}</p>
               <p className="mt-2 text-xs text-slate-500">{rank(item.latestSnapshot)} · {item.history.length} dated observation{item.history.length === 1 ? '' : 's'}</p>
+              {item.duplicateCount > 1 && <p className="mt-2 text-xs text-amber-300">Possible duplicate on this page · {item.duplicateCount} separate records retained</p>}
             </button>
           ))}
         </section>
@@ -827,6 +860,8 @@ function SeoKeywordHistory({ organizationId, scopeRevision, signal, onAccessErro
               <div className="rounded-xl bg-slate-950 p-3"><dt className="text-xs uppercase tracking-wide text-slate-500">Target tier</dt><dd className="mt-1 text-slate-200">{selected.targetRankTier ? titleize(selected.targetRankTier) : 'Not set'}</dd></div>
               <div className="rounded-xl bg-slate-950 p-3"><dt className="text-xs uppercase tracking-wide text-slate-500">Content source</dt><dd className="mt-1 text-slate-200">{selected.sourceArtifact?.title || 'No keyword-strategy artifact linked'}</dd></div>
             </dl>
+            {selected.duplicateCount > 1 && <p className="mt-3 rounded-xl border border-amber-900/70 bg-amber-950/30 p-3 text-xs text-amber-200">Possible duplicate: {selected.duplicateCount} records use this keyword on the same tracked page. Records are not deleted, merged, or blocked.</p>}
+            <button type="button" disabled={Boolean(statusBusyId)} onClick={() => setActive(selected)} className={BUTTON + ' mt-4'}>{statusBusyId === selected.id ? 'Saving…' : selected.active ? 'Pause tracking' : 'Resume tracking'}</button>
           </div>
 
           <div>
