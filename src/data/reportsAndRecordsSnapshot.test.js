@@ -113,6 +113,8 @@ test('P8 rollback verifier covers ACL, authorization, replay, conflict, root mis
 
 test('P8 concurrency harness is loopback-only and proves same-key serialization', () => {
   assert.match(concurrency, /Only an explicitly configured loopback PostgreSQL template is allowed/)
+  assert.match(concurrency, /host\(inet_server_addr\(\)\) server_address/)
+  assert.doesNotMatch(concurrency, /inet_server_addr\(\)::text server_address/)
   assert.match(concurrency, /Promise\.all\(/)
   assert.match(concurrency, /Promise\.allSettled\(/)
   assert.match(concurrency, /idempotent_replay/)

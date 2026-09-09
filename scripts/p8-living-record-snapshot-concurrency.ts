@@ -56,7 +56,7 @@ async function invoke(client: pg.Client, actorId: string, input: Input) {
 await admin.connect()
 try {
   const guard = await admin.query(
-    'select inet_server_addr()::text server_address, exists(select 1 from pg_database where datname=$1) template_exists',
+    'select host(inet_server_addr()) server_address, exists(select 1 from pg_database where datname=$1) template_exists',
     [template],
   )
   assert.ok(['127.0.0.1', '::1'].includes(guard.rows[0].server_address), 'PostgreSQL server is not loopback')
