@@ -55,6 +55,24 @@ test('P8 server projection labels recent activity as bounded and orders complete
   }
 })
 
+test('P8 browser preview and persisted snapshot share the exact progress contract', () => {
+  const internal = migration.match(/if p_projection_kind = 'internal' then([\s\S]*?)elsif p_projection_kind = 'client' then/)?.[1] || ''
+  const client = migration.match(/elsif p_projection_kind = 'client' then([\s\S]*?)else\s+raise exception 'Projection kind/)?.[1] || ''
+
+  assert.match(internal, /'progress', jsonb_build_object\(/)
+  for (const key of ['workstreams', 'tasks', 'milestones', 'deliverables', 'requests']) {
+    assert.match(internal, new RegExp("'" + key + "', coalesce\\(\\(select jsonb_object_agg"))
+  }
+  assert.match(internal, /coalesce\(nullif\(row\.status::text, ''\), 'unknown'\)/)
+
+  assert.match(client, /'progress', jsonb_build_object\(/)
+  for (const key of ['visible_workstreams', 'completed_milestones', 'released_deliverables', 'open_client_requests']) {
+    assert.match(client, new RegExp("'" + key + "', \\(select count\\(\\*\\)"))
+  }
+  assert.match(client, /portal\.withdrawn_at is null/)
+  assert.match(client, /row\.status not in \('completed', 'declined', 'withdrawn'\)/)
+})
+
 test('P8 rollback verifier covers ACL, authorization, replay, conflict, root mismatch, and forced failure', () => {
   assert.match(verifier, /^begin;/m)
   assert.match(verifier, /rpc_catalog_and_acl/)

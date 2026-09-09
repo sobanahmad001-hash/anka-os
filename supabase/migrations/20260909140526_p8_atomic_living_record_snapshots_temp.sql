@@ -98,6 +98,37 @@ begin
         'description', v_project.description, 'scope_statement', v_project.scope_statement,
         'exclusions', v_project.exclusions, 'client_id', v_project.client_id, 'owner_id', v_project.owner_id
       )),
+      'progress', jsonb_build_object(
+        'workstreams', coalesce((select jsonb_object_agg(bucket.status, bucket.total order by bucket.status)
+          from (select coalesce(nullif(row.status::text, ''), 'unknown') status, count(*) total
+            from public.workstreams row
+            where row.organization_id = p_organization_id and row.project_id = p_project_id
+            group by coalesce(nullif(row.status::text, ''), 'unknown')) bucket), '{}'::jsonb),
+        'tasks', coalesce((select jsonb_object_agg(bucket.status, bucket.total order by bucket.status)
+          from (select coalesce(nullif(row.status::text, ''), 'unknown') status, count(*) total
+            from public.tasks row
+            where row.organization_id = p_organization_id and row.project_id = p_project_id
+              and row.archived_at is null
+            group by coalesce(nullif(row.status::text, ''), 'unknown')) bucket), '{}'::jsonb),
+        'milestones', coalesce((select jsonb_object_agg(bucket.status, bucket.total order by bucket.status)
+          from (select coalesce(nullif(row.status::text, ''), 'unknown') status, count(*) total
+            from public.milestones row
+            where row.organization_id = p_organization_id and row.project_id = p_project_id
+              and row.archived_at is null
+            group by coalesce(nullif(row.status::text, ''), 'unknown')) bucket), '{}'::jsonb),
+        'deliverables', coalesce((select jsonb_object_agg(bucket.status, bucket.total order by bucket.status)
+          from (select coalesce(nullif(row.status::text, ''), 'unknown') status, count(*) total
+            from public.deliverables row
+            where row.organization_id = p_organization_id and row.project_id = p_project_id
+              and row.archived_at is null
+            group by coalesce(nullif(row.status::text, ''), 'unknown')) bucket), '{}'::jsonb),
+        'requests', coalesce((select jsonb_object_agg(bucket.status, bucket.total order by bucket.status)
+          from (select coalesce(nullif(row.status::text, ''), 'unknown') status, count(*) total
+            from public.requests row
+            where row.organization_id = p_organization_id and row.project_id = p_project_id
+              and row.archived_at is null
+            group by coalesce(nullif(row.status::text, ''), 'unknown')) bucket), '{}'::jsonb)
+      ),
       'workstreams', coalesce((select jsonb_agg(jsonb_build_object(
         'id', row.id, 'department_id', row.department_id, 'name', row.name,
         'status', row.status, 'owner_id', row.owner_id
@@ -177,6 +208,32 @@ begin
         'start_date', v_project.start_date, 'due_date', v_project.due_date,
         'summary', v_project.client_summary
       )),
+      'progress', jsonb_build_object(
+        'visible_workstreams', (select count(*) from public.workstreams row
+          where row.organization_id = p_organization_id and row.project_id = p_project_id
+            and row.client_visible = true),
+        'completed_milestones', (select count(*) from public.milestones row
+          where row.organization_id = p_organization_id and row.project_id = p_project_id
+            and row.archived_at is null and row.status = 'completed'
+            and row.visibility in ('client_visible', 'client_restricted')),
+        'released_deliverables', (select count(*) from public.deliverables deliverable
+          where deliverable.organization_id = p_organization_id and deliverable.project_id = p_project_id
+            and deliverable.archived_at is null and exists (
+              select 1 from public.deliverable_versions version
+              join public.client_portal_items portal
+                on portal.organization_id = version.organization_id
+               and portal.project_id = version.project_id
+               and portal.source_type = 'deliverable_version'
+               and portal.source_id = version.id and portal.withdrawn_at is null
+              where version.organization_id = p_organization_id and version.project_id = p_project_id
+                and version.deliverable_id = deliverable.id
+                and version.review_status in ('client_reviewing', 'revision_requested', 'client_approved', 'delivered_published')
+            )),
+        'open_client_requests', (select count(*) from public.requests row
+          where row.organization_id = p_organization_id and row.project_id = p_project_id
+            and row.archived_at is null and row.visibility = 'client_visible'
+            and row.status not in ('completed', 'declined', 'withdrawn'))
+      ),
       'workstreams', coalesce((select jsonb_agg(jsonb_build_object(
         'name', row.name, 'status', row.status
       ) order by row.id) from public.workstreams row

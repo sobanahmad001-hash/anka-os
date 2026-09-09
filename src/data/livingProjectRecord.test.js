@@ -60,6 +60,13 @@ function workspace() {
 test('internal living record preserves operational detail', () => {
   const projection = buildInternalProjectProjection(workspace(), '2026-08-25T12:00:00Z')
   assert.equal(projection.source_version, 7)
+  assert.deepEqual(projection.progress, {
+    workstreams: { active: 2 },
+    tasks: { in_progress: 1 },
+    milestones: { planned: 2 },
+    deliverables: { client_reviewing: 1 },
+    requests: { open: 2 },
+  })
   assert.equal(projection.tasks[0].acceptance_criteria, 'Private test')
   assert.equal(projection.research[0].findings, 'Private findings')
   assert.equal(projection.project.scope_statement, 'Confidential scope.')
@@ -68,6 +75,12 @@ test('internal living record preserves operational detail', () => {
 test('client living record includes released and explicitly visible information only', () => {
   const projection = buildClientProjectProjection(workspace(), '2026-08-25T12:00:00Z')
   assert.equal(projection.project.summary, 'The approved public progress summary.')
+  assert.deepEqual(projection.progress, {
+    visible_workstreams: 1,
+    completed_milestones: 0,
+    released_deliverables: 1,
+    open_client_requests: 1,
+  })
   assert.deepEqual(projection.workstreams.map((item) => item.name), ['Design'])
   assert.deepEqual(projection.milestones.map((item) => item.name), ['Visible launch'])
   assert.deepEqual(projection.deliverables[0].versions.map((item) => item.id), ['version-1'])
