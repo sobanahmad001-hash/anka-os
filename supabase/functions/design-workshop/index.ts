@@ -753,7 +753,11 @@ export async function generateOpenAiImage(credential: string, modelId: string, p
   const result = await apiResponse.json() as Json
   if (!apiResponse.ok) {
     const apiError = result.error && typeof result.error === 'object' ? result.error as Json : {}
-    throw new ConfirmedProviderFailure(text(apiError.message, 1000) || 'OpenAI image generation failed')
+    const message = text(apiError.message, 1000) || `OpenAI image generation returned HTTP ${apiResponse.status}`
+    if (isConfirmedProviderRejection(apiResponse.status, apiError)) {
+      throw new ConfirmedProviderFailure(message)
+    }
+    throw new Error(`Provider outcome is unconfirmed after HTTP ${apiResponse.status}: ${message}`)
   }
   const first = Array.isArray(result.data) ? result.data[0] as Json | undefined : undefined
   const encoded = text(first?.b64_json, 20_000_000)
@@ -769,6 +773,24 @@ export class ConfirmedProviderFailure extends Error {
     super(message)
     this.name = 'ConfirmedProviderFailure'
   }
+}
+
+export function isConfirmedProviderRejection(status: number, providerError: Json) {
+  if (status !== 400 || text(providerError.type, 80) !== 'invalid_request_error') return false
+  return Boolean(text(providerError.code, 200) || text(providerError.param, 200))
+}
+
+export function durableProviderFailureState(error: unknown) {
+  const confirmed = error instanceof ConfirmedProviderFailure
+  return {
+    status: confirmed ? 'failed' : 'outcome_unknown',
+    failure_phase: 'provider',
+    retryable: confirmed,
+  }
+}
+
+export function canRetryImageGenerationJob(job: Json) {
+  return job.status === 'failed' && job.failure_phase === 'provider'
 }
 
 export class DurableImageFailure extends Error {
@@ -897,7 +919,8 @@ async function generateImageForTarget(admin: ScopedClient, input: {
       status: 'failed', storage_path: null, failure_reason: failureReason,
     }).eq('id', asset.id).eq('organization_id', admin.organizationId).select('*').single()
     if (input.durable) {
-      const outcomeUnknown = phase === 'provider' && !(error instanceof ConfirmedProviderFailure)
+      const providerState = durableProviderFailureState(error)
+      const outcomeUnknown = phase === 'provider' && providerState.status === 'outcome_unknown'
       const durableReason = failedError
         ? `${failureReason}; media failure status could not be recorded: ${failedError.message}`
         : failureReason
@@ -1048,7 +1071,7 @@ async function getImageGenerationJob(admin: ScopedClient, body: Json) {
 
 async function retryImageGeneration(admin: ScopedClient, userClient: Client, body: Json, actorId: string) {
   const source = await loadImageGenerationJob(admin, requiredActionId(body.job_id, 'Generation request'))
-  if (source.status !== 'failed' || source.failure_phase !== 'provider') {
+  if (!canRetryImageGenerationJob(source as Json)) {
     throw Object.assign(new Error('Only a confirmed provider failure can be retried'), { status: 409 })
   }
   const job = await reserveImageGenerationJob(admin, {

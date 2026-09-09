@@ -1,5 +1,6 @@
 import { contentRequestMediaStoragePath, createSession, cropResizePng, designEventLink, designWorkshopScope, directionSchema,
-  ConfirmedProviderFailure, directionGenerationPrompt, directionsAreDistinct, generateOpenAiImage, hasWorkshopAuthority,
+  canRetryImageGenerationJob, ConfirmedProviderFailure, directionGenerationPrompt, directionsAreDistinct,
+  durableProviderFailureState, generateOpenAiImage, hasWorkshopAuthority,
   IMAGE_CANCELLATION_UNSUPPORTED_MESSAGE, imageGenerationRequestChecksum, isStoryboardSession, mediaPrompt, mediaStoragePath,
   mediaTargetColumns, outputFamilyForService, pngDimensions, requireActiveDesignService,
   requireReleasedVariantSource, reserveImageGenerationJob, runIndependentVariantJobs, sha256, similarity, variantFormatSpec, variantPrompt,
@@ -359,22 +360,75 @@ Deno.test('OpenAI image adapter uses the registered model and decodes the return
   assert.equal(new TextDecoder().decode(bytes), 'png')
 })
 
-Deno.test('B03A distinguishes confirmed provider rejection from an unknown transport outcome', async () => {
-  let confirmed = false
-  try {
-    await generateOpenAiImage('secret', 'model', 'prompt', async () =>
-      new Response(JSON.stringify({ error: { message: 'rejected' } }), { status: 400 }))
-  } catch (error) { confirmed = error instanceof ConfirmedProviderFailure }
-  assert(confirmed, 'Expected provider HTTP rejection to be confirmed')
+Deno.test('B03A keeps server, proxy, timeout and transport outcomes unknown with no paid retry', async () => {
+  for (const status of [500, 502, 503, 408, 504]) {
+    let providerCalls = 0
+    let failure: unknown
+    try {
+      await generateOpenAiImage('secret', 'model', 'prompt', async () => {
+        providerCalls += 1
+        return new Response(JSON.stringify({
+          error: { type: 'server_error', code: 'upstream_unavailable', message: `ambiguous ${status}` },
+        }), { status })
+      })
+    } catch (error) { failure = error }
+    const state = durableProviderFailureState(failure)
+    const job = { status: state.status, failure_phase: state.failure_phase }
+    assert.equal(failure instanceof ConfirmedProviderFailure, false)
+    assert.equal(state.status, 'outcome_unknown')
+    assert.equal(state.retryable, false)
+    assert.equal(canRetryImageGenerationJob(job), false)
+    if (canRetryImageGenerationJob(job)) providerCalls += 1
+    assert.equal(providerCalls, 1)
+  }
 
-  let uncertain = false
+  let transportFailure: unknown
   try {
     await generateOpenAiImage('secret', 'model', 'prompt', async () => {
       throw new TypeError('connection reset after send')
     })
-  } catch (error) { uncertain = error instanceof TypeError && !(error instanceof ConfirmedProviderFailure) }
-  assert(uncertain, 'Expected transport failure to remain uncertain')
+  } catch (error) { transportFailure = error }
+  assert.equal(durableProviderFailureState(transportFailure).status, 'outcome_unknown')
+  assert.equal(canRetryImageGenerationJob({ status: 'outcome_unknown', failure_phase: 'provider' }), false)
   assert(IMAGE_CANCELLATION_UNSUPPORTED_MESSAGE.includes('Cancellation is not supported'))
+})
+
+Deno.test('B03A allows retry only for a structured definitive invalid-request rejection', async () => {
+  let providerCalls = 0
+  let failure: unknown
+  try {
+    await generateOpenAiImage('secret', 'model', 'invalid prompt', async () => {
+      providerCalls += 1
+      return new Response(JSON.stringify({
+        error: {
+          type: 'invalid_request_error', code: 'invalid_prompt', param: 'prompt',
+          message: 'The prompt is invalid and generation was rejected',
+        },
+      }), { status: 400 })
+    })
+  } catch (error) { failure = error }
+  const state = durableProviderFailureState(failure)
+  const job = { status: state.status, failure_phase: state.failure_phase }
+  assert(failure instanceof ConfirmedProviderFailure)
+  assert.equal(state.status, 'failed')
+  assert.equal(state.retryable, true)
+  assert.equal(canRetryImageGenerationJob(job), true)
+
+  if (canRetryImageGenerationJob(job)) {
+    await generateOpenAiImage('secret', 'model', 'corrected prompt', async () => {
+      providerCalls += 1
+      return new Response(JSON.stringify({ data: [{ b64_json: btoa('png') }] }), { status: 200 })
+    })
+  }
+  assert.equal(providerCalls, 2)
+
+  let unstructured400: unknown
+  try {
+    await generateOpenAiImage('secret', 'model', 'prompt', async () =>
+      new Response(JSON.stringify({ error: { message: 'generic gateway rejection' } }), { status: 400 }))
+  } catch (error) { unstructured400 = error }
+  assert.equal(unstructured400 instanceof ConfirmedProviderFailure, false)
+  assert.equal(durableProviderFailureState(unstructured400).status, 'outcome_unknown')
 })
 
 Deno.test('variant formats use verified platform targets and supported provider canvases', () => {
