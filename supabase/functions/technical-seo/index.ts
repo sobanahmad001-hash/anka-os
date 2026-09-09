@@ -243,7 +243,11 @@ async function saveKeyword(userClient: Client, admin: Client, actorId: string, b
 }
 
 export async function setKeywordActive(userClient: Client, admin: Client, actorId: string, body: Json) {
+  const organizationId = id(body.organizationId, 'Organization')
   const keyword = await readableKeyword(userClient, id(body.keywordId, 'Tracked keyword'))
+  if (keyword.organization_id !== organizationId) {
+    throw Object.assign(new Error('Tracked keyword is unavailable in the selected organization'), { status: 403 })
+  }
   await requireWriter(admin, keyword.organization_id, actorId)
   if (typeof body.active !== 'boolean') throw new Error('Keyword active state must be true or false')
   if (keyword.active === body.active) return keyword

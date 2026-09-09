@@ -797,7 +797,7 @@ function SeoKeywordHistory({ organizationId, scopeRevision, signal, onAccessErro
     const request = { organizationId, brandId: brand.id, revision: scopeRevision, signal }
     setStatusBusyId(item.id); setStatusMessage(''); setStatusError('')
     try {
-      const updated = await technicalSeo.setKeywordActive(item.id, !item.active)
+      const updated = await technicalSeo.setKeywordActive(organizationId, item.id, !item.active)
       if (!shouldApplyKeywordResearchResponse(request, current.current, requestGeneration, generation.current)) return
       setResearch(existing => existing && Object.freeze({
         ...existing,

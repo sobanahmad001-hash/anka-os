@@ -18,6 +18,14 @@ export function shouldApplyKeywordResearchResponse(request, current, generation,
     generation === currentGeneration
 }
 
+export function shouldApplyTechnicalSeoMutationResponse(request, current, generation, currentGeneration) {
+  return request.organizationId === current.organizationId &&
+    request.brandId === current.brandId &&
+    request.pageId === current.pageId &&
+    request.revision === current.revision &&
+    generation === currentGeneration
+}
+
 export function keywordDuplicateCounts(keywords = []) {
   const counts = new Map()
   for (const row of keywords) {

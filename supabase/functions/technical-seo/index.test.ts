@@ -9,14 +9,14 @@ function query(result: unknown, calls: Array<unknown[]>) {
   return builder
 }
 
-function keywordClients({ active = true, allowed = true } = {}) {
+function keywordClients({ active = true, departmentId = 'marketing', role = 'member' } = {}) {
   const calls: Array<unknown[]> = []
   const tables: string[] = []
   const keyword = { id: 'keyword-1', organization_id: 'org-a', brand_id: 'brand-a', tracked_page_id: 'page-a', active }
   const userClient = { from(table: string) { tables.push(`user:${table}`); return query({ data: keyword, error: null }, calls) } }
   const admin = { from(table: string) {
     tables.push(`admin:${table}`)
-    if (table === 'organization_memberships') return query({ data: allowed ? { status: 'active', member_kind: 'team', department_id: 'marketing', role: 'member' } : { status: 'active', member_kind: 'team', department_id: 'content', role: 'member' }, error: null }, calls)
+    if (table === 'organization_memberships') return query({ data: { status: 'active', member_kind: 'team', department_id: departmentId, role }, error: null }, calls)
     return query({ data: { ...keyword, active: !active }, error: null }, calls)
   } }
   return { userClient: userClient as never, admin: admin as never, calls, tables }
@@ -68,7 +68,7 @@ Deno.test('keyword ranks use the existing read-only Search Analytics endpoint an
 Deno.test('keyword pause uses canonical tenant scope and never touches rank history', async () => {
   const { userClient, admin, calls, tables } = keywordClients()
   const result = await setKeywordActive(userClient, admin, 'user-a', {
-    keywordId: 'keyword-1', active: false, organizationId: 'stale-org', brandId: 'stale-brand',
+    organizationId: 'org-a', keywordId: 'keyword-1', active: false, brandId: 'stale-brand', pageId: 'stale-page',
   })
   assertEquals(result.active, false)
   assertEquals(calls.filter(call => call[0] === 'eq').slice(-4), [
@@ -78,12 +78,33 @@ Deno.test('keyword pause uses canonical tenant scope and never touches rank hist
 })
 
 Deno.test('keyword status rejects denied writers and repeat requests are idempotent', async () => {
-  const denied = keywordClients({ allowed: false })
-  await assertRejects(() => setKeywordActive(denied.userClient, denied.admin, 'user-a', { keywordId: 'keyword-1', active: false }), Error, 'Marketing department')
+  const denied = keywordClients({ departmentId: 'content' })
+  await assertRejects(() => setKeywordActive(denied.userClient, denied.admin, 'user-a', { organizationId: 'org-a', keywordId: 'keyword-1', active: false }), Error, 'Marketing department')
   assertEquals(denied.calls.some(call => call[0] === 'update'), false)
 
   const repeat = keywordClients({ active: false })
-  const result = await setKeywordActive(repeat.userClient, repeat.admin, 'user-a', { keywordId: 'keyword-1', active: false })
+  const result = await setKeywordActive(repeat.userClient, repeat.admin, 'user-a', { organizationId: 'org-a', keywordId: 'keyword-1', active: false })
   assertEquals(result.active, false)
   assertEquals(repeat.calls.some(call => call[0] === 'update'), false)
+})
+
+Deno.test('keyword status rejects a stale selected organization before writer or admin access', async () => {
+  const stale = keywordClients()
+  await assertRejects(() => setKeywordActive(stale.userClient, stale.admin, 'user-a', {
+    organizationId: 'org-b', keywordId: 'keyword-1', active: false,
+  }), Error, 'selected organization')
+  assertEquals(stale.tables.filter(table => table.startsWith('admin:')), [])
+  assertEquals(stale.calls.some(call => call[0] === 'update'), false)
+})
+
+Deno.test('organization leadership can change keyword status with exactly one scoped update', async () => {
+  const leader = keywordClients({ departmentId: 'content', role: 'operations_admin' })
+  const result = await setKeywordActive(leader.userClient, leader.admin, 'leader-a', {
+    organizationId: 'org-a', keywordId: 'keyword-1', active: false,
+  })
+  assertEquals(result.active, false)
+  assertEquals(leader.calls.filter(call => call[0] === 'update').length, 1)
+  assertEquals(leader.calls.filter(call => call[0] === 'eq').slice(-4), [
+    ['eq', 'id', 'keyword-1'], ['eq', 'organization_id', 'org-a'], ['eq', 'brand_id', 'brand-a'], ['eq', 'tracked_page_id', 'page-a'],
+  ])
 })

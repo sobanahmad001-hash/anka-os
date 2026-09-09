@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { buildMarketingKeywordResearch, keywordDuplicateCounts, shouldApplyKeywordResearchResponse } from './marketingKeywordResearch.js'
+import { buildMarketingKeywordResearch, keywordDuplicateCounts, shouldApplyKeywordResearchResponse, shouldApplyTechnicalSeoMutationResponse } from './marketingKeywordResearch.js'
 import { collectKeywordResearchPages } from './marketingKeywordResearchRepository.js'
 
 const orgA = 'org-a'
@@ -88,6 +88,18 @@ test('stale, switched-brand, switched-organization, and aborted responses are re
   assert.equal(shouldApplyKeywordResearchResponse(request, { organizationId: orgA, brandId: 'brand-a', revision: 5 }, 2, 2), false)
   assert.equal(shouldApplyKeywordResearchResponse(request, { organizationId: orgA, brandId: 'brand-a', revision: 4 }, 1, 2), false)
   assert.equal(shouldApplyKeywordResearchResponse({ ...request, signal: { aborted: true } }, { organizationId: orgA, brandId: 'brand-a', revision: 4 }, 2, 2), false)
+})
+
+test('Technical SEO mutation responses require the exact current organization, brand, page, revision, and generation', () => {
+  const request = { organizationId: orgA, brandId: 'brand-a', pageId: 'page-1', revision: 4 }
+  assert.equal(shouldApplyTechnicalSeoMutationResponse(request, request, 3, 3), true)
+  for (const current of [
+    { ...request, organizationId: 'org-b' },
+    { ...request, brandId: 'brand-b' },
+    { ...request, pageId: 'page-2' },
+    { ...request, revision: 5 },
+  ]) assert.equal(shouldApplyTechnicalSeoMutationResponse(request, current, 3, 3), false)
+  assert.equal(shouldApplyTechnicalSeoMutationResponse(request, request, 2, 3), false)
 })
 
 test('pagination walks inclusive ranges until the short page', async () => {

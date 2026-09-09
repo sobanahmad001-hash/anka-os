@@ -30,6 +30,6 @@ export const technicalSeo = Object.freeze({
   listKeywordSources: brandId => dataOrThrow(supabase.from('artifacts').select('id, title, artifact_type, brand_id')
     .eq('brand_id', brandId).eq('artifact_type', 'keyword_strategy').order('created_at', { ascending: false })),
   saveKeyword: input => invoke('save_keyword', input),
-  setKeywordActive: (keywordId, active) => invoke('set_keyword_active', { keywordId, active }),
+  setKeywordActive: (organizationId, keywordId, active) => invoke('set_keyword_active', { organizationId, keywordId, active }),
   fetchKeywordRanks: pageId => invoke('fetch_keyword_ranks', { pageId }),
 })
