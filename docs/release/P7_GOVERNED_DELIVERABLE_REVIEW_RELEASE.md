@@ -3,7 +3,7 @@
 ## Review identity
 
 - Branch: `feat/p7-governed-deliverable-release`
-- Reconciled foundation: P5 `97e606620a2a290da5fd7d5ecbfec68ff0f84856` (original production base `f0494186dc5c05c942f36bacd7c81e3122fdf0f6`).
+- Reconciled foundation: corrected P5 `26faa4c12c80b4f9cbe89e7ff9953ffe4672491a` (original production base `f0494186dc5c05c942f36bacd7c81e3122fdf0f6`).
 - Publication, live database work, merge, and deployment are excluded from this local package.
 - Coordinator-reserved migration timestamp: `20260904130000`, immediately after P5 `20260904120000`.
 
@@ -19,6 +19,8 @@
 - Every action requires `state_version` and a request ID. Exact retries replay; changed payloads conflict.
 - `client_approval_required` defaults false and becomes immutable on first release. Release may precede approval; closure requires exact-version approval only when both the flag and organization feature are enabled.
 - Delivered and published are independent append-only facts. A legacy `delivered_published` row receives delivered plus a legacy marker and never an invented published event.
+- Either closure fact may be recorded first. Recording published first retains the capability to record delivered later, while exact event-existence checks prevent duplicates.
+- Every new tenant and actor foreign-key delete path has a nonredundant leading index; unused surrogate `(id, organization_id)` uniqueness was removed.
 - Browser consumers render actions from server capability flags; they do not infer authority from profile roles.
 
 ## Integration correction found by PostgreSQL verification
@@ -35,7 +37,7 @@ P7-owned:
 - `src/data/deliverableGovernance.test.js`
 - this review gate
 
-Shared P4 delivery consumers, frozen pending P5 overlap reconciliation:
+Shared P4 delivery consumers, reconciled once after corrected P5:
 
 - `src/apps/MyWork.jsx`
 - `src/apps/AnkaSpherePortal.jsx`
@@ -48,18 +50,18 @@ No Edge Function, routing, authentication, organization-provider, P5 planning, o
 
 ## Verification evidence
 
-- Node: 715/715 passed.
-- Deno: 285/285 passed with cached dependencies.
-- Deno type-check: all 25 Edge Function entrypoints passed.
+- Node: 722/722 passed.
+- Deno: 264/264 passed across the exact 21 CI-listed test paths.
+- Deno type-check: all 42 CI-listed implementation and test inputs passed.
 - ESLint: 0 errors; 453 pre-existing warnings.
 - Production build: passed.
-- PostgreSQL 17: migration compiled and committed in a dedicated disposable database.
-- Rollback verifier: 28/28 named checks passed; final `ROLLBACK` preserved no fixtures.
+- PostgreSQL 17: the P5 then P7 migration chain compiled and committed in a fresh dedicated disposable database.
+- Rollback verifier: 33/33 named checks passed; final `ROLLBACK` preserved no fixtures.
 - No shared or live database was contacted.
 
-The verifier covers RLS, ACLs, fixed function search paths, composite foreign keys, one-current-reviewer uniqueness, append-only evidence, graph derivation, exact replay, changed-payload conflict, self-review denial, department eligibility, reviewer revalidation after assignment, no open claim, department-manager release denial, Project Owner release, optional post-release client approval, approval-gated closure, independent delivered/published facts, tenant isolation, and content-free replay records.
+The verifier covers RLS, ACLs, fixed function search paths, composite foreign keys, exact nonredundant leading-index catalog shape, absence of unused tenant uniqueness, one-current-reviewer uniqueness, append-only evidence, graph derivation, exact replay, changed-payload conflict, self-review denial, department eligibility, reviewer revalidation after assignment, no open claim, department-manager release denial, Project Owner release, optional post-release client approval, approval-gated closure, delivered-then-published and published-then-delivered facts and capabilities, tenant isolation, and content-free replay records.
 
 ## Remaining release gates
 
-1. Commit the reconciled shared-consumer integration.
-2. Publish only after Admin authorizes the final reviewed commit.
+1. Independent Testing reviews the exact final local head and scope.
+2. Publish only through the authorized Admin release sequence.
