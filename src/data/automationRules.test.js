@@ -10,6 +10,7 @@ const panel = readFileSync(new URL('../components/AutomationRulesPanel.jsx', imp
 const workPanel = readFileSync(new URL('../components/WorkItemsPanel.jsx', import.meta.url), 'utf8')
 const repository = readFileSync(new URL('./workItemsRepository.js', import.meta.url), 'utf8')
 const edgeFunction = readFileSync(new URL('../../supabase/functions/work-items/index.ts', import.meta.url), 'utf8')
+const p5Migration = readFileSync(new URL('../../supabase/migrations/20260904120000_p5_unified_planning.sql', import.meta.url), 'utf8')
 
 test('W5 exposes exactly the four triggers and two actions in the closed library', () => {
   assert.deepEqual(AUTOMATION_TRIGGER_TYPES, [
@@ -48,7 +49,8 @@ test('notify-assignee uses only work-item flags with both approved clear paths',
   assert.match(migration, /automation_flagged_by_rule_id uuid/)
   assert.match(migration, /new\.status is distinct from old\.status[\s\S]*new\.automation_flagged_at := null/)
   assert.match(migration, /item\.assignee_id = p_actor_id[\s\S]*automation_flagged_at is not null/)
-  assert.match(edgeFunction, /acknowledge_automation_flag[\s\S]*acknowledge_work_item_automation_flag/)
+  assert.match(edgeFunction, /acknowledge_automation_flag[\s\S]*acknowledge_p5_work_item_flag/)
+  assert.match(p5Migration, /acknowledge_p5_work_item_flag[\s\S]*acknowledge_work_item_automation_flag/)
   assert.match(workPanel, /automation_flagged_at[\s\S]*acknowledgeAutomationFlag/)
 })
 

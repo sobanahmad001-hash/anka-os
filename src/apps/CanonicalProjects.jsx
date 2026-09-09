@@ -311,7 +311,8 @@ export default function CanonicalProjects() {
   async function transitionTask(taskId, status) {
     setSaving(true)
     try {
-      await delivery.transitionTask(taskId, status)
+      const task = workspace?.tasks?.find(candidate => candidate.id === taskId)
+      await delivery.transitionTask(taskId, status, task?.completion_evidence || '', task?.row_version, workspace?.project?.organization_id)
       await refreshWorkspace()
     } catch (saveError) {
       setError(saveError.message)

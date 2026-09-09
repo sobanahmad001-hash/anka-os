@@ -49,21 +49,22 @@ test('P5 timezone hierarchy is dynamic and internal projects never inherit clien
 })
 
 function clientWith(result) {
-  return { rpc: async (name, params) => ({ ...result, name, params }) }
+  return { functions: { invoke: async (name, params) => ({ ...result, name, params }) } }
 }
 
 test('P5 mutations always carry organization and expected row version', async () => {
   const calls = []
-  const repository = createPlanningRepository({ rpc: async (name, params) => { calls.push({ name, params }); return { data: { id: params.p_task_id || params.p_work_item_id }, error: null } } })
+  const repository = createPlanningRepository({ functions: { invoke: async (name, params) => { calls.push({ name, params }); return { data: { data: { id: params.body.taskId || params.body.workItemId } }, error: null } } } })
   await repository.updateProjectTask('org', { id: 'task', row_version: 7, status: 'ready', assigned_to: null, due_date: null }, { status: 'in_progress' })
   await repository.updateWorkItem('org', { id: 'item', row_version: 9, assignee_id: null, department_id: 'design' }, { dueDate: '2026-09-09' })
   await repository.moveWorkItem('org', { id: 'item', row_version: 10 }, 'done')
-  assert.deepEqual(calls.map(call => call.params.p_expected_row_version), [7, 9, 10])
-  assert.ok(calls.every(call => call.params.p_organization_id === 'org'))
+  assert.deepEqual(calls.map(call => call.params.body.expectedRowVersion), [7, 9, 10])
+  assert.ok(calls.every(call => call.params.body.organizationId === 'org'))
+  assert.ok(calls.every(call => call.name === 'work-items'))
 })
 
 test('P5 maps serialization failures to a typed 409 conflict', async () => {
-  const repository = createPlanningRepository(clientWith({ data: null, error: { code: '40001', message: 'changed' } }))
+  const repository = createPlanningRepository(clientWith({ data: { error: { code: 'stale_write', recordKind: 'engagement_work_item', recordId: 'item', expectedRowVersion: 1, currentRowVersion: 2 } }, error: null }))
   await assert.rejects(
     repository.moveWorkItem('org', { id: 'item', row_version: 1 }, 'done'),
     error => error.status === 409 && error.stale === true
@@ -78,14 +79,18 @@ test('P5 migration and verifier enforce the approved database boundary', () => {
   assert.match(migration, /tasks add column row_version bigint not null default 1/)
   assert.match(migration, /work_items add column row_version bigint not null default 1/)
   assert.match(migration, /pg_catalog\.pg_timezone_names/)
-  assert.match(migration, /array\['system_owner', 'operations_admin'\]/)
-  assert.match(migration, /row_version <> p_expected_row_version[\s\S]*errcode = '40001'/)
-  assert.match(migration, /order by item\.id for update/)
+  assert.match(migration, /membership\.role in \('system_owner', 'operations_admin'\)/)
+  assert.match(migration, /'code', 'stale_write'[\s\S]*'expectedRowVersion'[\s\S]*'currentRowVersion'/)
+  assert.match(migration, /order by item\.id\s+for update/)
+  assert.match(migration, /projects_client_organization_fkey/)
+  assert.match(migration, /tasks_project_organization_fkey/)
+  assert.match(migration, /on delete set null \(client_id\)/)
   assert.match(migration, /security invoker/g)
   assert.doesNotMatch(migration, /security definer|create policy|alter table .* disable row level security/i)
   assert.match(verifier, /invalid_timezone_sqlstate/)
-  assert.match(verifier, /stale_task_typed_conflict/)
-  assert.match(verifier, /stale_work_item_typed_conflict/)
+  assert.match(verifier, /stale_task_exact_typed_payload/)
+  assert.match(verifier, /stale_work_item_exact_typed_payload/)
+  assert.match(verifier, /atomic_move_returns_all_changed_rows/)
   assert.match(verifier, /rollback;\s*$/)
 })
 
@@ -93,13 +98,25 @@ test('P5 is wired into Project Workspace without cross-type drag or browser date
   const workspaceSource = readFileSync(new URL('../apps/ProjectEngagementWorkspace.jsx', import.meta.url), 'utf8')
   const planningSource = readFileSync(new URL('../components/ProjectPlanningPanel.jsx', import.meta.url), 'utf8')
   const repositorySource = readFileSync(new URL('./projectEngagementWorkspaceRepository.js', import.meta.url), 'utf8')
+  const workItemsSource = readFileSync(new URL('../components/WorkItemsPanel.jsx', import.meta.url), 'utf8')
+  const myWorkSource = readFileSync(new URL('../apps/MyWork.jsx', import.meta.url), 'utf8')
+  const deliverySource = readFileSync(new URL('./deliveryRepository.js', import.meta.url), 'utf8')
 
   assert.match(workspaceSource, /\['planning', 'Planning'\]/)
   assert.match(workspaceSource, /<ProjectPlanningPanel[\s\S]*organizationId=\{activeOrganizationId\}[\s\S]*membership=\{activeMembership\}/)
   assert.match(planningSource, /Project Tasks are not draggable/)
   assert.match(planningSource, /WORK_ITEM_STATUSES\.map\(status/)
+  assert.match(planningSource, /title="Timeline"/)
   assert.doesNotMatch(planningSource, /new Date\(|Date\.parse|toLocaleDateString/)
   assert.match(planningSource, /if \(cause\.status === 409\) await onRefresh\(\)/)
   assert.match(repositorySource, /from\('task_dependencies'\)[\s\S]*\.eq\('organization_id', organizationId\)[\s\S]*\.eq\('project_id', projectId\)/)
   assert.match(repositorySource, /from\('work_item_dependencies'\)[\s\S]*\.eq\('organization_id', organizationId\)[\s\S]*\.in\('work_item_id', workItemIds\)/)
+  assert.doesNotMatch(workItemsSource, /planWorkItemBoardMove/)
+  assert.match(workItemsSource, /workItems\.remove\(workspace\.engagement\.organization_id, editor\.id, editor\.row_version\)/)
+  assert.match(workItemsSource, /workItems\.addDependency\(workspace\.engagement\.organization_id, editor\.id, dependencyCandidate, editor\.row_version\)/)
+  assert.match(workItemsSource, /workItems\.removeDependency\(workspace\.engagement\.organization_id, workItemId, dependsOnWorkItemId, source\?\.row_version\)/)
+  assert.match(workItemsSource, /workItems\.acknowledgeAutomationFlag\(workspace\.engagement\.organization_id, item\.id, item\.row_version\)/)
+  assert.match(workItemsSource, /workItems\.move\(workspace\.engagement\.organization_id, item\.id, item\.row_version, targetStatus, beforeWorkItemId\)/)
+  assert.match(myWorkSource, /transitionTask\(task\.id, status, task\.completion_evidence \|\| '', task\.row_version, activeOrganizationId\)/)
+  assert.match(deliverySource, /action: 'transition_task'[\s\S]*expectedRowVersion: Number\(expectedRowVersion\)/)
 })

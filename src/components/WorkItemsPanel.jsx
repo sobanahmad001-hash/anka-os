@@ -8,7 +8,6 @@ import {
   EMPTY_WORK_ITEM,
   filterAndSortWorkItems,
   groupWorkItemsForBoard,
-  planWorkItemBoardMove,
   workItemSaveInput,
   WORK_ITEM_BOARD_COLUMNS,
   WORK_ITEM_PRIORITIES,
@@ -114,7 +113,7 @@ export default function WorkItemsPanel({ workspace, owners, onRefresh }) {
     setEditor({ ...item })
     if (!item.automation_flagged_at) return
     try {
-      const acknowledged = await workItems.acknowledgeAutomationFlag(item.id)
+      const acknowledged = await workItems.acknowledgeAutomationFlag(workspace.engagement.organization_id, item.id, item.row_version)
       if (!acknowledged?.id) return
       setItems(current => current.map(candidate => candidate.id === acknowledged.id ? acknowledged : candidate))
       setEditor(current => current?.id === acknowledged.id ? { ...acknowledged } : current)
@@ -125,7 +124,7 @@ export default function WorkItemsPanel({ workspace, owners, onRefresh }) {
     event.preventDefault()
     setSaving(true); setError('')
     try {
-      await workItems.save(workItemSaveInput(editor, workspace.engagement.id))
+      await workItems.save(workItemSaveInput(editor, workspace.engagement.id, { organizationId: workspace.engagement.organization_id }))
       setEditor(null)
       await Promise.all([loadItems(), onRefresh?.()])
     } catch (saveError) { setError(saveError.message) }
@@ -136,7 +135,7 @@ export default function WorkItemsPanel({ workspace, owners, onRefresh }) {
     if (!editor?.id) return
     setSaving(true); setError('')
     try {
-      await workItems.remove(editor.id)
+      await workItems.remove(workspace.engagement.organization_id, editor.id, editor.row_version)
       setEditor(null)
       await Promise.all([loadItems(), onRefresh?.()])
     } catch (removeError) { setError(removeError.message) }
@@ -147,7 +146,8 @@ export default function WorkItemsPanel({ workspace, owners, onRefresh }) {
     if (!editor?.id || !dependencyCandidate) return
     setSaving(true); setError('')
     try {
-      await workItems.addDependency(editor.id, dependencyCandidate)
+      const result = await workItems.addDependency(workspace.engagement.organization_id, editor.id, dependencyCandidate, editor.row_version)
+      if (result?.workItem) setEditor(current => current?.id === result.workItem.id ? { ...current, ...result.workItem } : current)
       setDependencyCandidate('')
       await loadItems()
     } catch (dependencyError) { setError(dependencyError.message) }
@@ -157,22 +157,24 @@ export default function WorkItemsPanel({ workspace, owners, onRefresh }) {
   async function removeDependency(workItemId, dependsOnWorkItemId) {
     setSaving(true); setError('')
     try {
-      await workItems.removeDependency(workItemId, dependsOnWorkItemId)
+      const source = items.find(item => item.id === workItemId)
+      await workItems.removeDependency(workspace.engagement.organization_id, workItemId, dependsOnWorkItemId, source?.row_version)
       await loadItems()
     } catch (dependencyError) { setError(dependencyError.message) }
     finally { setSaving(false) }
   }
 
   async function moveWorkItem(workItemId, targetStatus, beforeWorkItemId = null) {
-    const changes = planWorkItemBoardMove(visibleItems, workItemId, targetStatus, beforeWorkItemId)
-    if (!changes.length) return
+    const item = items.find(candidate => candidate.id === workItemId)
+    if (!item) return
     setMoving(true); setError('')
     try {
-      for (const item of changes) {
-        await workItems.save(workItemSaveInput(item, workspace.engagement.id))
-      }
+      await workItems.move(workspace.engagement.organization_id, item.id, item.row_version, targetStatus, beforeWorkItemId)
       await Promise.all([loadItems(), onRefresh?.()])
-    } catch (moveError) { setError(moveError.message) }
+    } catch (moveError) {
+      if (moveError.status === 409) await loadItems()
+      setError(moveError.status === 409 ? `${moveError.message} Intended move: ${labelize(targetStatus)}${beforeWorkItemId ? ' before the selected card' : ' at the end'}.` : moveError.message)
+    }
     finally { setMoving(false); setDraggedItemId('') }
   }
 

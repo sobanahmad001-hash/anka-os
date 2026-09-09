@@ -283,6 +283,53 @@ test('unsupported task statuses are rejected before a database call', async () =
   assert.equal(client.calls.length, 0)
 })
 
+test('task transitions use the governed selected-organization version boundary', async () => {
+  const calls = []
+  const client = createFakeClient()
+  client.functions = {
+    invoke: async (name, input) => {
+      calls.push({ name, input })
+      return { data: { data: { id: 'task-1', row_version: 8 } }, error: null }
+    },
+  }
+  const result = await createDeliveryRepository(client).transitionTask(
+    'task-1', 'in_progress', 'evidence', 7, 'org-a',
+  )
+  assert.equal(result.row_version, 8)
+  assert.deepEqual(calls, [{
+    name: 'work-items',
+    input: { body: {
+      action: 'transition_task',
+      organizationId: 'org-a',
+      taskId: 'task-1',
+      status: 'in_progress',
+      completionEvidence: 'evidence',
+      expectedRowVersion: 7,
+    } },
+  }])
+})
+
+test('task transition maps the exact stale payload to typed 409', async () => {
+  const client = createFakeClient()
+  client.functions = {
+    invoke: async () => ({
+      data: { error: {
+        code: 'stale_write', recordKind: 'project_task', recordId: 'task-1',
+        expectedRowVersion: 7, currentRowVersion: 8,
+      } },
+      error: null,
+    }),
+  }
+  await assert.rejects(
+    createDeliveryRepository(client).transitionTask('task-1', 'in_progress', '', 7, 'org-a'),
+    error => error.status === 409
+      && error.recordKind === 'project_task'
+      && error.recordId === 'task-1'
+      && error.expectedRowVersion === 7
+      && error.currentRowVersion === 8,
+  )
+})
+
 test('client revision payload is exact-version and client-visible', async () => {
   const client = createFakeClient({
     requests: { data: { id: 'request-1' }, error: null },

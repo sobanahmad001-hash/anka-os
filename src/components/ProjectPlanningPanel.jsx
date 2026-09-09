@@ -4,7 +4,7 @@ import { planningRepository } from '../data/planningRepository.js'
 
 const label = value => String(value || '').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
 const dateLabel = value => value || 'No date'
-const tabs = { list: 'List', board: 'Board', calendar: 'Calendar', workload: 'Workload' }
+const tabs = { list: 'List', board: 'Board', calendar: 'Calendar', timeline: 'Timeline', workload: 'Workload' }
 const INPUT = 'rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 text-xs text-white outline-none focus:border-violet-400'
 
 export default function ProjectPlanningPanel({ workspace, organizationId, membership, onRefresh }) {
@@ -34,6 +34,7 @@ export default function ProjectPlanningPanel({ workspace, organizationId, member
     {view === 'list' && <ListView plan={plan} workspace={workspace} saving={saving} mutate={mutate} organizationId={organizationId} />}
     {view === 'board' && <BoardView plan={plan} saving={saving} mutate={mutate} organizationId={organizationId} />}
     {view === 'calendar' && <CalendarView plan={plan} />}
+    {view === 'timeline' && <TimelineView plan={plan} />}
     {view === 'workload' && <WorkloadView plan={plan} workspace={workspace} />}
 
     <TimezoneSettings workspace={workspace} plan={plan} canManage={canManageTimezones} saving={saving} mutate={mutate} organizationId={organizationId} />
@@ -83,6 +84,10 @@ function BoardView({ plan, saving, mutate, organizationId }) {
 
 function CalendarView({ plan }) {
   return <Section title="Due-date calendar" note={`Date-only values are shown exactly as stored; no browser-timezone shift is applied. Effective timezone: ${plan.timezone}.`}><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{plan.calendar.map(([day, rows]) => <div key={day} className="rounded-xl border border-white/[0.06] bg-black/10 p-3"><p className="text-xs font-semibold text-violet-300">{day === 'undated' ? 'Unscheduled' : day}</p><Rows rows={rows} compact /></div>)}</div></Section>
+}
+
+function TimelineView({ plan }) {
+  return <Section title="Timeline" note="Native date ranges share one view while record identity and lifecycle remain separate."><div className="space-y-2">{plan.timeline.map(record => <div key={record.key} className="grid gap-2 rounded-xl border border-white/[0.06] bg-black/10 p-3 md:grid-cols-[180px_1fr_auto]"><p className="text-xs text-violet-300">{record.startDate || record.dueDate} → {record.dueDate || record.startDate}</p><div><p className="text-sm font-medium">{record.title}</p><p className="text-[11px] text-slate-500">{record.recordKind === 'project_task' ? 'Project Task' : 'Engagement Work Item'}</p></div><span className="text-xs text-slate-400">{label(record.status)}</span></div>)}{!plan.timeline.length && <p className="text-sm text-slate-500">No scheduled records.</p>}</div></Section>
 }
 
 function WorkloadView({ plan, workspace }) {

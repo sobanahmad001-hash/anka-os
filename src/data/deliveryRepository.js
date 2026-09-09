@@ -666,18 +666,32 @@ export function createDeliveryRepository(client) {
       )
     },
 
-    async transitionTask(taskId, status, completionEvidence = '') {
+    async transitionTask(taskId, status, completionEvidence = '', expectedRowVersion, organizationId) {
       assertIdentifier(taskId, 'taskId')
       assertTaskStatus(status)
-
-      return dataOrThrow(
-        client
-          .from('tasks')
-          .update({ status, completion_evidence: completionEvidence.trim() })
-          .eq('id', taskId)
-          .select()
-          .single()
-      )
+      assertIdentifier(organizationId, 'organizationId')
+      if (!Number.isSafeInteger(Number(expectedRowVersion)) || Number(expectedRowVersion) < 1) throw new TypeError('A positive expected row version is required')
+      if (!client.functions?.invoke) throw new TypeError('Supabase Functions are required for task transitions')
+      const { data, error } = await client.functions.invoke('work-items', { body: {
+        action: 'transition_task', organizationId, taskId, status,
+        completionEvidence: completionEvidence.trim(), expectedRowVersion: Number(expectedRowVersion),
+      } })
+      if (error) {
+        let payload = null
+        try { payload = await error.context?.json?.() } catch { /* preserve transport error */ }
+        const stale = payload?.error?.code === 'stale_write' ? payload.error : null
+        if (stale) throw Object.assign(new Error('This Project Task changed elsewhere. Reload it before deliberately reapplying your transition.'), stale, { status: 409, stale: true })
+        throw new Error(error.message || 'Project Task transition failed')
+      }
+      if (data?.error) {
+        const stale = data.error?.code === 'stale_write' ? data.error : null
+        throw Object.assign(
+          new Error(stale ? 'This Project Task changed elsewhere. Reload it before deliberately reapplying your transition.' : data.error.message || data.error),
+          data.error,
+          stale ? { status: 409, stale: true } : {},
+        )
+      }
+      return data?.data
     },
 
     async createResearchRecord(input, actorId) {

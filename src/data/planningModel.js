@@ -1,6 +1,6 @@
 export const PROJECT_TASK_STATUSES = Object.freeze(['backlog', 'ready', 'in_progress', 'blocked', 'ready_for_review', 'changes_required', 'done', 'cancelled'])
 export const WORK_ITEM_STATUSES = Object.freeze(['not_started', 'in_progress', 'blocked', 'done'])
-export const PLANNING_VIEWS = Object.freeze(['list', 'board', 'calendar', 'workload'])
+export const PLANNING_VIEWS = Object.freeze(['list', 'board', 'calendar', 'timeline', 'workload'])
 
 const closed = new Set(['done', 'cancelled'])
 const dateOnly = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : ''
@@ -79,6 +79,10 @@ export function buildPlanningWorkspace(workspace) {
     records,
     board,
     calendar: [...calendar.entries()].sort(([a], [b]) => a === 'undated' ? 1 : b === 'undated' ? -1 : a.localeCompare(b)),
+    timeline: records.filter(row => row.startDate || row.dueDate).sort((a, b) =>
+      String(a.startDate || a.dueDate).localeCompare(String(b.startDate || b.dueDate))
+        || String(a.dueDate || a.startDate).localeCompare(String(b.dueDate || b.startDate))
+        || a.key.localeCompare(b.key)),
     workload: [...workload.values()].sort((a, b) => (b.projectTasks + b.engagementWorkItems) - (a.projectTasks + a.engagementWorkItems) || a.assigneeId.localeCompare(b.assigneeId)),
   })
 }
