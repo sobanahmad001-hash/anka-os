@@ -101,3 +101,31 @@ test('existing Work list and Board infrastructure filters and labels tracked pag
   assert.match(workPanel, /Tracked content page/)
   assert.match(studio, /Open Work board/)
 })
+
+test('B03a tracking keeps a renamed page attached by stable key and supports legacy tasks', () => {
+  const current = workspace({ tasks: [
+    { id: 'home', linked_page_key: 'page:home', linked_page_path: 'home', status: 'in_progress' },
+  ] })
+  current.versions[0].content.pages = [
+    { page_key: 'page:home', slug: 'welcome', title: 'Welcome', parent_page_key: null, position: 1000, page_type: 'hub', purpose: 'Orient visitors' },
+  ]
+  const renamed = buildContentPageTracking(current)
+  assert.equal(renamed.hasMismatch, false)
+  assert.equal(renamed.rows[0].pagePath, 'welcome')
+  assert.equal(renamed.rows[0].task.id, 'home')
+
+  current.versions.push({ id: 'content-v1', artifact_id: 'content', version_number: 1, content: { pages: [
+    { page_path: 'home' },
+  ] } })
+  const staleContentPath = buildContentPageTracking(current)
+  assert.equal(staleContentPath.source, 'content')
+  assert.equal(staleContentPath.hasMismatch, false)
+  assert.equal(staleContentPath.rows[0].pagePath, 'welcome')
+  assert.equal(staleContentPath.rows[0].task.id, 'home')
+
+  const legacy = buildContentPageTracking(workspace({ tasks: [
+    { id: 'legacy-home', linked_page_path: 'home', status: 'done' },
+  ] }))
+  assert.equal(legacy.rows[0].task.id, 'legacy-home')
+  assert.equal(legacy.rows[1].task, null)
+})

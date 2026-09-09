@@ -33,11 +33,11 @@ export const CONTENT_ARTIFACT_FORMS = Object.freeze({
     ]),
   }),
   website_architecture: Object.freeze({
-    label: 'Website architecture', description: 'Structured sitemap with page hierarchy, type, and purpose.',
+    label: 'Website architecture', description: 'Structured sitemap with stable page identity, hierarchy, order, and purpose.',
     fields: Object.freeze([
-      { key: 'pages', label: 'Page inventory', kind: 'records', addLabel: 'Add page', recordFields: [
-        ['slug', 'Page slug', 'text'], ['title', 'Page title', 'text'],
-        ['parent_slug', 'Parent page', 'parent_slug'],
+      { key: 'pages', label: 'Page inventory', kind: 'records', recordType: 'website_page', addLabel: 'Add page', recordFields: [
+        ['page_key', 'Stable page key', 'readonly'], ['slug', 'Proposed path', 'text'], ['title', 'Page title', 'text'],
+        ['parent_page_key', 'Parent page', 'parent_page_key'],
         ['page_type', 'Page type', 'select', ['hub', 'service', 'supporting']],
         ['purpose', 'Page purpose', 'textarea'],
       ] },
@@ -158,13 +158,56 @@ export function blankContentArtifact(type) {
   ]))
 }
 
+export function normalizeWebsitePath(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .trim()
+    .replaceAll('\\', '/')
+    .replace(/\/+/g, '/')
+    .replace(/^\/+|\/+$/g, '')
+    .split('/')
+    .map(segment => segment.trim().toLowerCase().replace(/\s+/g, '-'))
+    .filter(Boolean)
+    .join('/')
+}
+
+export function legacyWebsitePageKey(path) {
+  const normalized = normalizeWebsitePath(path)
+  return normalized ? `legacy:${normalized}` : ''
+}
+
+export function websitePageKey(page) {
+  return String(page?.page_key || '').trim() || legacyWebsitePageKey(page?.slug)
+}
+
+function websiteArchitectureEditorPages(pages = [], { sort = true } = {}) {
+  const normalized = pages.map((page, index) => ({
+    ...page,
+    page_key: websitePageKey(page),
+    slug: String(page?.slug || ''),
+    position: Number.isSafeInteger(Number(page?.position)) && Number(page.position) > 0
+      ? Number(page.position) : (index + 1) * 1000,
+  }))
+  const keyByPath = new Map(normalized.map(page => [normalizeWebsitePath(page.slug), page.page_key]))
+  const ordered = sort ? normalized.sort((left, right) => left.position - right.position) : normalized
+  return ordered
+    .map(page => ({
+      ...page,
+      parent_page_key: String(page.parent_page_key || '').trim()
+        || keyByPath.get(normalizeWebsitePath(page.parent_slug)) || '',
+    }))
+}
+
 export function contentArtifactEditor(type, content = null) {
   const source = content || blankContentArtifact(type)
   const definition = CONTENT_ARTIFACT_FORMS[type]
   const editor = Object.fromEntries(definition.fields.map(field => {
     const value = source[field.key]
     if (field.kind === 'list') return [field.key, Array.isArray(value) ? value.join('\n') : '']
-    if (field.kind === 'records') return [field.key, Array.isArray(value) ? value.map(record => ({ ...record })) : []]
+    if (field.kind === 'records') {
+      const records = Array.isArray(value) ? value.map(record => ({ ...record })) : []
+      return [field.key, type === 'website_architecture' ? websiteArchitectureEditorPages(records) : records]
+    }
     return [field.key, value || '']
   }))
   if (CONTENT_FOUNDATION_TYPES.includes(type)) {
@@ -176,6 +219,20 @@ export function contentArtifactEditor(type, content = null) {
 
 export function serializeContentArtifact(type, editor) {
   const definition = CONTENT_ARTIFACT_FORMS[type]
+  if (type === 'website_architecture') {
+    const pages = websiteArchitectureEditorPages(editor.pages || [], { sort: false })
+    const pathByKey = new Map(pages.map(page => [page.page_key, normalizeWebsitePath(page.slug)]))
+    return { pages: pages.map((page, index) => ({
+      page_key: page.page_key,
+      slug: normalizeWebsitePath(page.slug),
+      title: String(page.title || '').trim(),
+      parent_page_key: String(page.parent_page_key || '').trim() || null,
+      parent_slug: pathByKey.get(String(page.parent_page_key || '').trim()) || null,
+      position: (index + 1) * 1000,
+      page_type: String(page.page_type || '').trim(),
+      purpose: String(page.purpose || '').trim(),
+    })) }
+  }
   const content = Object.fromEntries(definition.fields.map(field => {
     const value = editor[field.key]
     if (field.kind === 'list') return [field.key, lines(value)]
@@ -198,7 +255,9 @@ export function serializeContentArtifact(type, editor) {
 }
 
 export function newContentRecord(field) {
-  return Object.fromEntries(field.recordFields.map(([key]) => [key, '']))
+  const record = Object.fromEntries(field.recordFields.map(([key]) => [key, '']))
+  if (field.recordType === 'website_page') record.page_key = `page:${globalThis.crypto.randomUUID()}`
+  return record
 }
 
 export function lines(value) {
@@ -217,12 +276,12 @@ export function approvalForVersion(approvals = [], versionId) {
   return approvals.find(item => item.artifact_version_id === versionId) || null
 }
 
-function contentPageKey(page) {
-  return String(page?.page_path || '').trim()
+function contentPagePath(page) {
+  return normalizeWebsitePath(page?.page_path)
 }
 
-function architecturePageSlug(page) {
-  return String(page?.slug || '').trim()
+function architecturePagePath(page) {
+  return normalizeWebsitePath(page?.slug)
 }
 
 function approvedVersionForArtifact(workspace, artifact) {
@@ -245,20 +304,37 @@ export function buildContentPageTracking(workspace) {
   const architecturePages = Array.isArray(approvedArchitecture?.content?.pages) ? approvedArchitecture.content.pages : []
   const sourcePages = contentPages.length ? contentPages : architecturePages
   const source = contentPages.length ? 'content' : 'website_architecture'
-  const taskByPath = new Map(tasks.map(task => [String(task.linked_page_path || '').trim(), task]))
-  const pageKey = source === 'content' ? contentPageKey : architecturePageSlug
-  const sourcePaths = new Set(sourcePages.map(pageKey).filter(Boolean))
+  const architectureByPath = new Map(architecturePages.map(page => [architecturePagePath(page), page]))
+  const architectureByKey = new Map(architecturePages.map(page => [websitePageKey(page), page]))
+  const taskKeyByPath = new Map(tasks.map(task => [
+    normalizeWebsitePath(task?.linked_page_path), String(task?.linked_page_key || '').trim(),
+  ]).filter(([, key]) => key))
+  const sourceIdentity = page => {
+    if (source === 'website_architecture') return websitePageKey(page)
+    return String(page?.page_key || '').trim()
+      || taskKeyByPath.get(contentPagePath(page))
+      || websitePageKey(architectureByPath.get(contentPagePath(page)))
+      || legacyWebsitePageKey(contentPagePath(page))
+  }
+  const taskIdentity = task => String(task?.linked_page_key || '').trim()
+    || legacyWebsitePageKey(task?.linked_page_path)
+  const taskByKey = new Map(tasks.map(task => [taskIdentity(task), task]))
+  const sourceKeys = new Set(sourcePages.map(sourceIdentity).filter(Boolean))
   const rows = sourcePages.map(page => {
-    const path = pageKey(page)
-    const architecturePage = architecturePages.find(candidate => architecturePageSlug(candidate) === path)
+    const pageKey = sourceIdentity(page)
+    const architecturePage = source === 'content'
+      ? architectureByKey.get(pageKey) || architectureByPath.get(contentPagePath(page))
+      : page
+    const path = architecturePage ? architecturePagePath(architecturePage) : contentPagePath(page)
     return {
+      pageKey,
       pagePath: path,
       pageTitle: architecturePage?.title || path,
-      task: taskByPath.get(path) || null,
-      mismatch: !taskByPath.has(path),
+      task: taskByKey.get(pageKey) || null,
+      mismatch: !taskByKey.has(pageKey),
     }
   })
-  const staleTasks = tasks.filter(task => !sourcePaths.has(String(task.linked_page_path || '').trim()))
+  const staleTasks = tasks.filter(task => !sourceKeys.has(taskIdentity(task)))
   return {
     source,
     rows,
