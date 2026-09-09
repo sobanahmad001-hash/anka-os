@@ -29,11 +29,11 @@ test('daily queue reads assignments, handoffs, deliverables, and reviews', () =>
 
 test('deliverable quality flow records an immutable human approval before release', () => {
   assert.match(repository, /async createDeliverableVersion/)
-  assert.match(repository, /approval_type: 'internal_quality'/)
-  assert.match(repository, /decided_by: actorId/)
+  assert.match(repository, /governance\.create/)
+  assert.match(repository, /governance\.review/)
   assert.match(repository, /async releaseDeliverableVersion/)
-  assert.match(repository, /from\('client_portal_items'\)\.upsert/)
-  assert.match(repository, /review_status: 'client_reviewing'/)
+  assert.match(repository, /governance\.release/)
+  assert.doesNotMatch(repository, /from\('client_portal_items'\)\.upsert/)
 })
 
 test('deliverable files use the private canonical bucket', () => {

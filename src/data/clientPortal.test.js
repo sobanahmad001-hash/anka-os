@@ -24,13 +24,15 @@ test('portal revision stays linked to the exact released version', () => {
   assert.match(repository, /visibility: 'client_visible'/)
 })
 
-test('formal client approval is available behind the feature flag', () => {
-  assert.match(portal, /featureFlags\.clientApprovals/)
+test('formal client approval is available only through the server capability', () => {
+  assert.doesNotMatch(portal, /featureFlags\.clientApprovals/)
+  assert.match(portal, /item\.capabilities\?\.can_client_decide/)
   assert.match(portal, /Approve version/)
   assert.match(portal, /delivery\.recordClientApproval/)
-  assert.match(portal, /deliverableId: approvalTarget\.payload\?\.deliverable_id/)
+  assert.match(portal, /organizationId: approvalTarget\.organization_id/)
+  assert.match(portal, /expectedStateVersion: approvalTarget\.capabilities\?\.state_version/)
   assert.match(portal, /deliverableVersionId: approvalTarget\.source_id/)
-  assert.match(approvals, /approval_type: 'client_approval'/)
+  assert.match(approvals, /decide_governed_deliverable_version/)
   assert.match(deliveryEntry, /recordClientApproval/)
 })
 

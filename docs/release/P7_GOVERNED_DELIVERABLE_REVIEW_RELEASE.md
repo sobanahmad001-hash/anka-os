@@ -3,7 +3,7 @@
 ## Review identity
 
 - Branch: `feat/p7-governed-deliverable-release`
-- Required base: `f0494186dc5c05c942f36bacd7c81e3122fdf0f6`
+- Reconciled foundation: P5 `97e606620a2a290da5fd7d5ecbfec68ff0f84856` (original production base `f0494186dc5c05c942f36bacd7c81e3122fdf0f6`).
 - Publication, live database work, merge, and deployment are excluded from this local package.
 - Coordinator-reserved migration timestamp: `20260904130000`, immediately after P5 `20260904120000`.
 
@@ -48,10 +48,10 @@ No Edge Function, routing, authentication, organization-provider, P5 planning, o
 
 ## Verification evidence
 
-- Node: 706/706 passed.
-- Deno: 283/283 passed with cached dependencies.
+- Node: 715/715 passed.
+- Deno: 285/285 passed with cached dependencies.
 - Deno type-check: all 25 Edge Function entrypoints passed.
-- ESLint: 0 errors; 441 pre-existing warnings.
+- ESLint: 0 errors; 453 pre-existing warnings.
 - Production build: passed.
 - PostgreSQL 17: migration compiled and committed in a dedicated disposable database.
 - Rollback verifier: 28/28 named checks passed; final `ROLLBACK` preserved no fixtures.
@@ -61,8 +61,5 @@ The verifier covers RLS, ACLs, fixed function search paths, composite foreign ke
 
 ## Remaining release gates
 
-1. Reconcile P5's selected implementation and confirm exact shared-file overlap.
-2. Rebase P7 onto the resulting current `origin/main`.
-3. Assign the coordinator-ordered migration timestamp and update migration/verifier references once.
-4. Repeat the complete local and disposable-PostgreSQL gate on the rebased exact head.
-5. Publish only after Admin authorizes the final reviewed commit.
+1. Commit the reconciled shared-consumer integration.
+2. Publish only after Admin authorizes the final reviewed commit.

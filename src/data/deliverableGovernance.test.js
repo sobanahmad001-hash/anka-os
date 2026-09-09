@@ -4,6 +4,9 @@ import test from 'node:test'
 import { createDeliverableGovernance } from './deliverableGovernance.js'
 
 const migration = readFileSync(new URL('../../supabase/migrations/20260904130000_p7_governed_deliverable_release.sql', import.meta.url), 'utf8')
+const repository = readFileSync(new URL('./deliveryRepository.js', import.meta.url), 'utf8')
+const myWork = readFileSync(new URL('../apps/MyWork.jsx', import.meta.url), 'utf8')
+const portal = readFileSync(new URL('../apps/AnkaSpherePortal.jsx', import.meta.url), 'utf8')
 
 function fakeClient() {
   const calls = []
@@ -78,4 +81,21 @@ test('P7 uses separate atomic actions and independent delivered/published facts'
   assert.doesNotMatch(migration, /cross join\(values\([^\n]*'published'::text/)
   assert.match(migration, /client_approval_required boolean not null default false/)
   assert.match(migration, /Client approval requirement is immutable after first release/)
+})
+
+test('P7 consumers use server capabilities and never compose governed writes', () => {
+  assert.match(repository, /createDeliverableGovernance/)
+  assert.match(repository, /governance\.create/)
+  assert.match(repository, /governance\.submit/)
+  assert.match(repository, /governance\.review/)
+  assert.match(repository, /governance\.release/)
+  assert.doesNotMatch(repository, /from\('approvals'\)\.insert/)
+  assert.doesNotMatch(repository, /from\('client_portal_items'\)\.upsert/)
+  assert.doesNotMatch(repository, /from\('deliverable_versions'\)\.update\(\{ review_status/)
+  assert.doesNotMatch(myWork, /profile\?\.role.*can_release/)
+  assert.match(myWork, /version\.capabilities\?\.can_review/)
+  assert.match(myWork, /version\.capabilities\?\.can_release/)
+  assert.match(myWork, /requestIdFor\('submit'/)
+  assert.match(portal, /item\.capabilities\?\.can_client_decide/)
+  assert.doesNotMatch(portal, /featureFlags\.clientApprovals/)
 })

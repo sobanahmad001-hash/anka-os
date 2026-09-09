@@ -59,9 +59,23 @@ export default function MyWork() {
   const [saving, setSaving] = useState('')
   const [error, setError] = useState('')
   const [versionTarget, setVersionTarget] = useState(null)
-  const [versionForm, setVersionForm] = useState({ title: '', changeSummary: '', previewUrl: '', file: null })
+  const [versionForm, setVersionForm] = useState({ title: '', changeSummary: '', previewUrl: '', file: null, clientApprovalRequired: false })
   const [reviewTarget, setReviewTarget] = useState(null)
   const [reviewForm, setReviewForm] = useState({ decision: 'approved', rationale: '', quality: true, brief: true, technical: true })
+  const [submissionTarget, setSubmissionTarget] = useState(null)
+  const [reviewerCandidates, setReviewerCandidates] = useState([])
+  const [reviewerId, setReviewerId] = useState('')
+  const actionRequests = useRef(new Map())
+
+  function requestIdFor(action, targetId) {
+    const key = `${action}:${targetId}`
+    if (!actionRequests.current.has(key)) actionRequests.current.set(key, crypto.randomUUID())
+    return actionRequests.current.get(key)
+  }
+
+  function clearRequestId(action, targetId) {
+    actionRequests.current.delete(`${action}:${targetId}`)
+  }
 
   const loadWorkspace = useCallback(async () => {
     if (!user?.id || organizationLoading || selectionRequired || !activeOrganizationId) return
@@ -83,8 +97,10 @@ export default function MyWork() {
 
   useEffect(() => {
     setWorkspace(null); setActiveTab('overview'); setLoading(true); setSaving(''); setError('')
-    setVersionTarget(null); setVersionForm({ title: '', changeSummary: '', previewUrl: '', file: null })
+    setVersionTarget(null); setVersionForm({ title: '', changeSummary: '', previewUrl: '', file: null, clientApprovalRequired: false })
     setReviewTarget(null); setReviewForm({ decision: 'approved', rationale: '', quality: true, brief: true, technical: true })
+    setSubmissionTarget(null); setReviewerCandidates([]); setReviewerId('')
+    actionRequests.current.clear()
     if (user?.id && !organizationLoading && !selectionRequired && activeOrganizationId) loadWorkspace()
   }, [activeOrganizationId, loadWorkspace, organizationLoading, scopeRevision, selectionRequired, user?.id])
 
@@ -109,13 +125,50 @@ export default function MyWork() {
     event.preventDefault()
     if (!versionTarget) return
     mutate(`version-${versionTarget.id}`, async () => {
+      const targetId = versionTarget.id
       await delivery.createDeliverableVersion({
+        organizationId: activeOrganizationId,
         projectId: versionTarget.project_id,
         deliverableId: versionTarget.id,
+        requestId: requestIdFor('create', targetId),
         ...versionForm,
       }, user.id)
+      clearRequestId('create', targetId)
       setVersionTarget(null)
-      setVersionForm({ title: '', changeSummary: '', previewUrl: '', file: null })
+      setVersionForm({ title: '', changeSummary: '', previewUrl: '', file: null, clientApprovalRequired: false })
+    })
+  }
+
+  async function openSubmission(version) {
+    setSaving(`candidates-${version.id}`)
+    setError('')
+    try {
+      const candidates = await delivery.listDeliverableReviewerCandidates(activeOrganizationId, version.id)
+      setReviewerCandidates(candidates || [])
+      setReviewerId(candidates?.[0]?.user_id || '')
+      setSubmissionTarget(version)
+    } catch (candidateError) {
+      handleOrganizationAccessError(candidateError, { membershipMismatch: candidateError.membershipMismatch })
+      setError(candidateError.message)
+    } finally {
+      setSaving('')
+    }
+  }
+
+  function submitForReview(event) {
+    event.preventDefault()
+    if (!submissionTarget || !reviewerId) return
+    mutate(`submit-${submissionTarget.id}`, async () => {
+      const targetId = submissionTarget.id
+      await delivery.submitDeliverableVersion({
+        organizationId: activeOrganizationId,
+        deliverableVersionId: submissionTarget.id,
+        expectedStateVersion: submissionTarget.capabilities?.state_version,
+        reviewerId,
+        requestId: requestIdFor('submit', targetId),
+      })
+      clearRequestId('submit', targetId)
+      setSubmissionTarget(null); setReviewerCandidates([]); setReviewerId('')
     })
   }
 
@@ -123,10 +176,11 @@ export default function MyWork() {
     event.preventDefault()
     if (!reviewTarget) return
     mutate(`review-${reviewTarget.id}`, async () => {
+      const targetId = reviewTarget.id
       await delivery.recordInternalQualityDecision({
-        projectId: reviewTarget.project_id,
-        deliverableId: reviewTarget.deliverable_id,
+        organizationId: activeOrganizationId,
         deliverableVersionId: reviewTarget.id,
+        expectedStateVersion: reviewTarget.capabilities?.state_version,
         decision: reviewForm.decision,
         rationale: reviewForm.rationale,
         checklistResult: {
@@ -134,7 +188,9 @@ export default function MyWork() {
           matches_brief: reviewForm.brief,
           technically_ready: reviewForm.technical,
         },
+        requestId: requestIdFor('review', targetId),
       }, user.id)
+      clearRequestId('review', targetId)
       setReviewTarget(null)
       setReviewForm({ decision: 'approved', rationale: '', quality: true, brief: true, technical: true })
     })
@@ -169,12 +225,14 @@ export default function MyWork() {
         {activeTab === 'tasks' && <TaskQueue tasks={workspace?.tasks || []} saving={saving} onTransition={(task, status) => mutate(`task-${task.id}`, () => delivery.transitionTask(task.id, status, task.completion_evidence || '', task.row_version, activeOrganizationId), `Project Task status ${labelize(status)}`)} />}
         {activeTab === 'engagement-work' && <WorkItemQueue items={workspace?.workItems || []} />}
         {activeTab === 'handoffs' && <RequestQueue requests={workspace?.requests || []} />}
-        {activeTab === 'deliverables' && <DeliverableQueue deliverables={workspace?.deliverables || []} saving={saving} onCreateVersion={item => { setVersionTarget(item); setVersionForm({ title: item.title, changeSummary: '', previewUrl: '', file: null }) }} onSubmitReview={version => mutate(`submit-${version.id}`, () => delivery.transitionDeliverableVersion(version.id, 'ready_for_internal_review'))} />}
+        {activeTab === 'deliverables' && <DeliverableQueue deliverables={workspace?.deliverables || []} saving={saving} onCreateVersion={item => { setVersionTarget(item); setVersionForm({ title: item.title, changeSummary: '', previewUrl: '', file: null, clientApprovalRequired: false }) }} onSubmitReview={openSubmission} />}
         {activeTab === 'review' && <ReviewQueue versions={workspace?.reviewVersions || []} onReview={setReviewTarget} />}
-        {activeTab === 'release' && <ReleaseQueue versions={workspace?.releaseVersions || []} saving={saving} onRelease={version => mutate(`release-${version.id}`, () => delivery.releaseDeliverableVersion({ projectId: version.project_id, deliverableId: version.deliverable_id, deliverableVersionId: version.id }, user.id))} />}
+        {activeTab === 'release' && <ReleaseQueue versions={workspace?.releaseVersions || []} saving={saving} onRelease={version => mutate(`release-${version.id}`, async () => { await delivery.releaseDeliverableVersion({ organizationId: activeOrganizationId, deliverableVersionId: version.id, expectedStateVersion: version.capabilities?.state_version, clientApprovalRequired: version.client_approval_required, requestId: requestIdFor('release', version.id) }, user.id); clearRequestId('release', version.id) })} />}
       </main>
 
-      {versionTarget && <Modal title={`Create a new version · ${versionTarget.title}`} onClose={() => setVersionTarget(null)}><form onSubmit={createVersion} className="space-y-4"><Field label="Version title"><input required className={INPUT} value={versionForm.title} onChange={event => setVersionForm({ ...versionForm, title: event.target.value })} /></Field><Field label="Change summary"><textarea className={INPUT} rows="3" value={versionForm.changeSummary} onChange={event => setVersionForm({ ...versionForm, changeSummary: event.target.value })} /></Field><Field label="Preview URL (optional)"><input type="url" className={INPUT} value={versionForm.previewUrl} onChange={event => setVersionForm({ ...versionForm, previewUrl: event.target.value })} /></Field><Field label="File (optional)"><input type="file" className={INPUT} onChange={event => setVersionForm({ ...versionForm, file: event.target.files?.[0] || null })} /></Field><button disabled={Boolean(saving)} className="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold disabled:opacity-50">Save immutable version</button></form></Modal>}
+      {versionTarget && <Modal title={`Create a new version · ${versionTarget.title}`} onClose={() => setVersionTarget(null)}><form onSubmit={createVersion} className="space-y-4"><Field label="Version title"><input required className={INPUT} value={versionForm.title} onChange={event => setVersionForm({ ...versionForm, title: event.target.value })} /></Field><Field label="Change summary"><textarea className={INPUT} rows="3" value={versionForm.changeSummary} onChange={event => setVersionForm({ ...versionForm, changeSummary: event.target.value })} /></Field><Field label="Preview URL (optional)"><input type="url" className={INPUT} value={versionForm.previewUrl} onChange={event => setVersionForm({ ...versionForm, previewUrl: event.target.value })} /></Field><Field label="File (optional)"><input type="file" className={INPUT} onChange={event => setVersionForm({ ...versionForm, file: event.target.files?.[0] || null })} /></Field><label className="flex items-start gap-3 rounded-xl border border-slate-800 p-3 text-sm"><input type="checkbox" className="mt-1" checked={versionForm.clientApprovalRequired} onChange={event => setVersionForm({ ...versionForm, clientApprovalRequired: event.target.checked })} /><span><span className="block font-medium">Require formal client approval before closure</span><span className="mt-1 block text-xs text-slate-500">Release may still happen first. This choice becomes immutable at first release.</span></span></label><button disabled={Boolean(saving)} className="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold disabled:opacity-50">Save immutable version</button></form></Modal>}
+
+      {submissionTarget && <Modal title={`Assign reviewer · version ${submissionTarget.version_number}`} onClose={() => setSubmissionTarget(null)}><form onSubmit={submitForReview} className="space-y-4"><p className="text-sm text-slate-400">Submission requires one eligible named reviewer. The version cannot be claimed from an open queue.</p><Field label="Internal reviewer"><select required className={INPUT} value={reviewerId} onChange={event => setReviewerId(event.target.value)}><option value="">Select a reviewer</option>{reviewerCandidates.map(candidate => <option key={candidate.user_id} value={candidate.user_id}>{candidate.full_name} · {labelize(candidate.role)}</option>)}</select></Field>{!reviewerCandidates.length && <p className="rounded-xl border border-amber-900 bg-amber-950/40 p-3 text-sm text-amber-200">No eligible non-self reviewer is currently available.</p>}<button disabled={Boolean(saving) || !reviewerId} className="w-full rounded-xl bg-amber-700 px-4 py-2.5 text-sm font-semibold disabled:opacity-50">Assign and submit</button></form></Modal>}
 
       {reviewTarget && <Modal title={`Internal quality review · ${reviewTarget.title}`} onClose={() => setReviewTarget(null)}><form onSubmit={decideReview} className="space-y-4"><div className="space-y-2">{[['quality', 'Meets Anka Sphere quality standard'], ['brief', 'Matches the approved brief'], ['technical', 'Technically ready to share']].map(([key, label]) => <label key={key} className="flex items-center gap-3 rounded-xl border border-slate-800 p-3 text-sm"><input type="checkbox" checked={reviewForm[key]} onChange={event => setReviewForm({ ...reviewForm, [key]: event.target.checked })} />{label}</label>)}</div><Field label="Decision"><select className={INPUT} value={reviewForm.decision} onChange={event => setReviewForm({ ...reviewForm, decision: event.target.value })}><option value="approved">Approve for client-ready stage</option><option value="changes_required">Changes required</option></select></Field><Field label="Review rationale"><textarea required className={INPUT} rows="4" value={reviewForm.rationale} onChange={event => setReviewForm({ ...reviewForm, rationale: event.target.value })} /></Field><button disabled={Boolean(saving) || (reviewForm.decision === 'approved' && (!reviewForm.quality || !reviewForm.brief || !reviewForm.technical))} className="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold disabled:opacity-50">Record human decision</button></form></Modal>}
     </div>
@@ -206,15 +264,15 @@ function RequestQueue({ requests }) {
 }
 
 function DeliverableQueue({ deliverables, saving, onCreateVersion, onSubmitReview }) {
-  return <Section title="My deliverables" description="Create immutable versions, then deliberately submit the exact version for internal review.">{deliverables.length ? deliverables.map(item => <Card key={item.id} title={item.title} context={`${item.projects?.name || 'Project'} · ${item.workstreams?.name || 'Workstream'}`} status={item.status} meta={`Due ${dateLabel(item.due_date)}`}><div className="mt-3 space-y-2">{(item.deliverable_versions || []).sort((a, b) => b.version_number - a.version_number).map(version => <div key={version.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-950 px-3 py-2 text-xs"><span>Version {version.version_number} · {labelize(version.review_status)}</span>{version.review_status === 'in_production' && <button disabled={saving === `submit-${version.id}`} onClick={() => onSubmitReview(version)} className="rounded-lg bg-amber-700 px-3 py-1.5 font-semibold text-white disabled:opacity-50">Submit for internal review</button>}</div>)}</div><button onClick={() => onCreateVersion(item)} className="mt-3 rounded-lg border border-purple-700 px-3 py-1.5 text-xs text-purple-300 hover:bg-purple-950">+ New version</button></Card>) : <Empty text="No deliverables assigned to you." />}</Section>
+  return <Section title="My deliverables" description="Create immutable versions, then assign one eligible reviewer before submission.">{deliverables.length ? deliverables.map(item => <Card key={item.id} title={item.title} context={`${item.projects?.name || 'Project'} · ${item.workstreams?.name || 'Workstream'}`} status={item.status} meta={`Due ${dateLabel(item.due_date)}`}><div className="mt-3 space-y-2">{(item.deliverable_versions || []).sort((a, b) => b.version_number - a.version_number).map(version => <div key={version.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-950 px-3 py-2 text-xs"><span>Version {version.version_number} · {labelize(version.review_status)}</span>{version.capabilities?.can_submit && <button disabled={saving === `submit-${version.id}` || saving === `candidates-${version.id}`} onClick={() => onSubmitReview(version)} className="rounded-lg bg-amber-700 px-3 py-1.5 font-semibold text-white disabled:opacity-50">Choose reviewer and submit</button>}</div>)}</div><button onClick={() => onCreateVersion(item)} className="mt-3 rounded-lg border border-purple-700 px-3 py-1.5 text-xs text-purple-300 hover:bg-purple-950">+ New version</button></Card>) : <Empty text="No deliverables assigned to you." />}</Section>
 }
 
 function ReviewQueue({ versions, onReview }) {
-  return <Section title="Internal quality review" description="A human reviewer must evaluate the exact immutable version before client release.">{versions.length ? versions.map(version => <Card key={version.id} title={version.title} context={`${version.projects?.name || 'Project'} · ${version.deliverables?.title || 'Deliverable'}`} status={version.review_status} meta={`Version ${version.version_number}`}><p className="mt-3 text-sm text-slate-400">{version.change_summary || 'No change summary provided.'}</p><button onClick={() => onReview(version)} className="mt-3 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold">Open review</button></Card>) : <Empty text="Nothing is waiting for internal review." />}</Section>
+  return <Section title="Internal quality review" description="Only the explicitly assigned, eligible reviewer can decide this exact immutable version.">{versions.length ? versions.map(version => <Card key={version.id} title={version.title} context={`${version.projects?.name || 'Project'} · ${version.deliverables?.title || 'Deliverable'}`} status={version.review_status} meta={`Version ${version.version_number}`}><p className="mt-3 text-sm text-slate-400">{version.change_summary || 'No change summary provided.'}</p>{version.capabilities?.can_review ? <button onClick={() => onReview(version)} className="mt-3 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold">Open assigned review</button> : <p className="mt-3 text-xs text-slate-500">Assigned to another eligible reviewer.</p>}</Card>) : <Empty text="Nothing is waiting for internal review." />}</Section>
 }
 
 function ReleaseQueue({ versions, saving, onRelease }) {
-  return <Section title="Approved client-ready versions" description="Release creates a sanitized portal item and moves only this exact version into client review.">{versions.length ? versions.map(version => <Card key={version.id} title={version.title} context={`${version.projects?.name || 'Project'} · ${version.deliverables?.title || 'Deliverable'}`} status={version.review_status} meta={`Version ${version.version_number}`}><button disabled={saving === `release-${version.id}` || !version.projects?.client_id} onClick={() => onRelease(version)} className="mt-3 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold disabled:opacity-40">{version.projects?.client_id ? 'Release to client portal' : 'Internal project — cannot release'}</button></Card>) : <Empty text="No approved versions are waiting for client release." />}</Section>
+  return <Section title="Approved client-ready versions" description="Server capabilities—not browser role guesses—govern exact-version release.">{versions.length ? versions.map(version => <Card key={version.id} title={version.title} context={`${version.projects?.name || 'Project'} · ${version.deliverables?.title || 'Deliverable'}`} status={version.review_status} meta={`Version ${version.version_number}`}>{version.capabilities?.can_release ? <button disabled={saving === `release-${version.id}`} onClick={() => onRelease(version)} className="mt-3 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold disabled:opacity-40">Release to client portal</button> : <p className="mt-3 text-xs text-slate-500">Release requires Project Owner or leadership authority.</p>}</Card>) : <Empty text="No approved versions are waiting for client release." />}</Section>
 }
 
 function Section({ title, description, children }) { return <section className="mx-auto max-w-5xl"><div className="mb-4"><h2 className="text-lg font-semibold">{title}</h2><p className="mt-1 text-sm text-slate-500">{description}</p></div><div className="space-y-3">{children}</div></section> }
