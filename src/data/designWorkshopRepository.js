@@ -99,16 +99,18 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
         ])
       : [[], []]
     const visibleDirectionVersionIds = [...directionVersions, ...experimentalDirectionVersions].map(item => item.id)
-    const [mediaAssets, pageDesigns, variants] = visibleDirectionVersionIds.length
+    const [mediaAssets, imageGenerationJobs, pageDesigns, variants] = visibleDirectionVersionIds.length
       ? await Promise.all([
           dataOrThrow(scopedFrom('design_media_assets').select('*')
             .in('design_direction_version_id', visibleDirectionVersionIds).order('created_at', { ascending: false })),
+          dataOrThrow(scopedFrom('design_image_generation_jobs').select('*')
+            .in('direction_version_id', visibleDirectionVersionIds).order('created_at', { ascending: false })),
           dataOrThrow(scopedFrom('website_page_designs').select('*')
             .in('design_direction_version_id', visibleDirectionVersionIds).order('created_at', { ascending: false })),
           dataOrThrow(scopedFrom('design_direction_variants').select('*')
             .in('source_direction_version_id', visibleDirectionVersionIds).order('created_at', { ascending: false })),
         ])
-      : [[], [], []]
+      : [[], [], [], []]
     const wordpressExportJobs = pageDesigns.length
       ? await dataOrThrow(scopedFrom('wordpress_export_jobs').select('*')
         .in('website_page_design_id', pageDesigns.map(item => item.id))
@@ -149,6 +151,7 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
         engagementId: navigationRecord.engagement_id,
       } : null,
       mediaAssets: mediaAssets.map(item => ({ ...item, signed_url: signedMedia?.signed_urls?.[item.id] || null })),
+      imageGenerationJobs,
       variants,
       handoffPackages,
       mediaUrlExpiresIn: signedMedia?.expires_in || 300,
@@ -178,8 +181,13 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
     session_id: sessionId, direction_version_id: directionVersionId, notes,
   }),
   releaseDirection: (sessionId, releaseNotes = '') => invoke('release_direction', { session_id: sessionId, release_notes: releaseNotes }),
-  generateImage: (directionVersionId, modelRegistryId, prompt) => invoke('generate_image', {
+  generateImage: (directionVersionId, modelRegistryId, prompt, operationKey) => invoke('generate_image', {
     direction_version_id: directionVersionId, model_registry_id: modelRegistryId, prompt,
+    operation_key: operationKey,
+  }),
+  getImageGenerationJob: jobId => invoke('get_image_generation_job', { job_id: jobId }),
+  retryImageGeneration: (jobId, operationKey) => invoke('retry_image_generation', {
+    job_id: jobId, operation_key: operationKey,
   }),
   generateVariants: (sourceDirectionVersionId, modelRegistryId, variantFormats) => invoke('generate_variants', {
     source_direction_version_id: sourceDirectionVersionId,

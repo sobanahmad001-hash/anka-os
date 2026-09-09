@@ -18,6 +18,8 @@ type Json = Record<string, unknown>
 const MEDIA_BUCKET = 'design-generated-media'
 const OPENAI_IMAGES_URL = 'https://api.openai.com/v1/images/generations'
 export const VIDEO_UNAVAILABLE_MESSAGE = 'Video generation is not yet configured. An API key and provider need to be added before this works.'
+export const IMAGE_CANCELLATION_UNSUPPORTED_MESSAGE =
+  'Cancellation is not supported after an image request is submitted. Reopen the request to see its authoritative status.'
 const ARTIFACT_TYPES = new Set(['discovery', 'vision', 'audience'])
 const SERVICE_OUTPUT_FAMILIES = new Map([
   ['brand_visual_identity', 'brand_identity'],
@@ -101,6 +103,17 @@ async function callerVersionRoot(userClient: Client, versionId: string): Promise
   const root = await callerDirectionRoot(userClient, version.direction_id)
   if (root.organizationId !== version.organization_id) {
     throw Object.assign(new Error('Design direction version has an invalid organization chain'), { status: 409 })
+  }
+  return root
+}
+
+async function callerImageGenerationJobRoot(userClient: Client, jobId: string): Promise<CallerRoot> {
+  const { data: job, error } = await userClient.from('design_image_generation_jobs')
+    .select('id, organization_id, direction_version_id').eq('id', requiredActionId(jobId, 'Generation request')).maybeSingle()
+  if (error || !job) throw Object.assign(new Error('Image generation request not found'), { status: 404 })
+  const root = await callerVersionRoot(userClient, job.direction_version_id)
+  if (root.organizationId !== job.organization_id) {
+    throw Object.assign(new Error('Image generation request has an invalid organization chain'), { status: 409 })
   }
   return root
 }
@@ -206,6 +219,10 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
   if (action === 'promote_direction_experiment' || action === 'generate_image'
     || action === 'create_video_placeholder') {
     const root = await callerVersionRoot(userClient, requiredActionId(body.direction_version_id, 'Direction version'))
+    return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
+  }
+  if (action === 'get_image_generation_job' || action === 'retry_image_generation') {
+    const root = await callerImageGenerationJobRoot(userClient, requiredActionId(body.job_id, 'Generation request'))
     return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
   }
   if (action === 'generate_variants') {
@@ -736,7 +753,7 @@ export async function generateOpenAiImage(credential: string, modelId: string, p
   const result = await apiResponse.json() as Json
   if (!apiResponse.ok) {
     const apiError = result.error && typeof result.error === 'object' ? result.error as Json : {}
-    throw new Error(text(apiError.message, 1000) || 'OpenAI image generation failed')
+    throw new ConfirmedProviderFailure(text(apiError.message, 1000) || 'OpenAI image generation failed')
   }
   const first = Array.isArray(result.data) ? result.data[0] as Json | undefined : undefined
   const encoded = text(first?.b64_json, 20_000_000)
@@ -745,6 +762,28 @@ export async function generateOpenAiImage(credential: string, modelId: string, p
   const bytes = Uint8Array.from(binary, character => character.charCodeAt(0))
   if (bytes.byteLength > 10 * 1024 * 1024) throw new Error('Generated image exceeds the 10 MB storage limit')
   return bytes
+}
+
+export class ConfirmedProviderFailure extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ConfirmedProviderFailure'
+  }
+}
+
+export class DurableImageFailure extends Error {
+  phase: 'provider' | 'storage' | 'registration'
+  outcomeUnknown: boolean
+  asset: Json | null
+
+  constructor(message: string, phase: 'provider' | 'storage' | 'registration',
+    outcomeUnknown: boolean, asset: Json | null) {
+    super(message)
+    this.name = 'DurableImageFailure'
+    this.phase = phase
+    this.outcomeUnknown = outcomeUnknown
+    this.asset = asset
+  }
 }
 
 export function pngDimensions(bytes: Uint8Array) {
@@ -808,6 +847,7 @@ async function generateImageForTarget(admin: ScopedClient, input: {
   providerSize?: string
   targetWidth?: number
   targetHeight?: number
+  durable?: boolean
 }) {
   const { data: model, error: modelError } = await admin.from('design_model_registry').select('*')
     .eq('id', input.modelRegistryId).eq('organization_id', admin.organizationId).eq('is_active', true).maybeSingle()
@@ -826,10 +866,12 @@ async function generateImageForTarget(admin: ScopedClient, input: {
     ? mediaStoragePath(admin.organizationId, input.directionVersionId, asset.id)
     : contentRequestMediaStoragePath(admin.organizationId, input.contentRequestId!, asset.id)
   let uploaded = false
+  let phase: 'provider' | 'storage' | 'registration' = 'provider'
   try {
     let bytes = input.providerSize
       ? await generateOpenAiImage(credential, model.model_id, input.prompt, input.providerSize)
       : await generateOpenAiImage(credential, model.model_id, input.prompt)
+    phase = 'storage'
     const hasTargetDimensions = input.targetWidth !== undefined || input.targetHeight !== undefined
     if (hasTargetDimensions) {
       if (input.targetWidth === undefined || input.targetHeight === undefined) {
@@ -842,6 +884,7 @@ async function generateImageForTarget(admin: ScopedClient, input: {
     })
     if (uploadError) throw uploadError
     uploaded = true
+    phase = 'registration'
     const { data: ready, error: readyError } = await admin.from('design_media_assets').update({
       status: 'ready', storage_path: storagePath, failure_reason: '',
     }).eq('id', asset.id).eq('organization_id', admin.organizationId).select('*').single()
@@ -853,24 +896,172 @@ async function generateImageForTarget(admin: ScopedClient, input: {
     const { data: failed, error: failedError } = await admin.from('design_media_assets').update({
       status: 'failed', storage_path: null, failure_reason: failureReason,
     }).eq('id', asset.id).eq('organization_id', admin.organizationId).select('*').single()
+    if (input.durable) {
+      const outcomeUnknown = phase === 'provider' && !(error instanceof ConfirmedProviderFailure)
+      const durableReason = failedError
+        ? `${failureReason}; media failure status could not be recorded: ${failedError.message}`
+        : failureReason
+      throw new DurableImageFailure(durableReason.slice(0, 2000), phase, outcomeUnknown,
+        (failed || { ...asset, status: 'failed', failure_reason: failureReason }) as Json)
+    }
     if (failedError) throw new Error(`Image generation failed and its asset status could not be recorded: ${failedError.message}`)
     return failed || { ...asset, status: 'failed', failure_reason: failureReason }
   }
 }
 
+export function imageGenerationRequestChecksum(directionVersionId: string, modelRegistryId: string, prompt: string) {
+  return stableJson({ direction_version_id: directionVersionId, model_registry_id: modelRegistryId, prompt })
+}
+
+function operationKey(value: unknown) {
+  const key = text(value, 200)
+  if (key.length < 8) throw new Error('A stable operation_key of at least 8 characters is required')
+  return key
+}
+
+export async function reserveImageGenerationJob(admin: ScopedClient, input: {
+  directionVersionId: string
+  modelRegistryId: string
+  actorId: string
+  operationKey: string
+  requestChecksum: string
+  prompt: string
+  retryOfJobId?: string | null
+}) {
+  const record = {
+    organization_id: admin.organizationId,
+    direction_version_id: input.directionVersionId,
+    model_registry_id: input.modelRegistryId,
+    requested_by: input.actorId,
+    operation_key: input.operationKey,
+    request_checksum: input.requestChecksum,
+    prompt: input.prompt,
+    retry_of_job_id: input.retryOfJobId || null,
+  }
+  const { data: inserted, error } = await admin.from('design_image_generation_jobs').insert(record).select('*').single()
+  if (!error && inserted) return inserted
+  if (error?.code !== '23505') throw error
+
+  const { data: existing, error: existingError } = await admin.from('design_image_generation_jobs').select('*')
+    .eq('organization_id', admin.organizationId).eq('requested_by', input.actorId)
+    .eq('operation_key', input.operationKey).maybeSingle()
+  if (existingError) throw existingError
+  if (!existing) throw error
+  if (existing.direction_version_id !== input.directionVersionId
+    || existing.model_registry_id !== input.modelRegistryId
+    || existing.request_checksum !== input.requestChecksum
+    || existing.prompt !== input.prompt
+    || (existing.retry_of_job_id || null) !== (input.retryOfJobId || null)) {
+    throw Object.assign(new Error('operation_key was already used for a different image request'), { status: 409 })
+  }
+  return existing
+}
+
+export async function claimImageGenerationJob(admin: ScopedClient, jobId: string) {
+  const { data, error } = await admin.from('design_image_generation_jobs').update({
+    status: 'running', started_at: new Date().toISOString(),
+  }).eq('id', jobId).eq('organization_id', admin.organizationId).eq('status', 'queued').select('*').maybeSingle()
+  if (error) throw error
+  return data
+}
+
+async function loadImageGenerationJob(admin: ScopedClient, jobId: string) {
+  const { data, error } = await admin.from('design_image_generation_jobs').select('*')
+    .eq('id', jobId).eq('organization_id', admin.organizationId).maybeSingle()
+  if (error) throw error
+  if (!data) throw Object.assign(new Error('Image generation request not found'), { status: 404 })
+  return data
+}
+
+async function finishImageGenerationJob(admin: ScopedClient, jobId: string, values: Json) {
+  const { data, error } = await admin.from('design_image_generation_jobs').update({
+    ...values, completed_at: new Date().toISOString(),
+  }).eq('id', jobId).eq('organization_id', admin.organizationId).eq('status', 'running').select('*').single()
+  if (error) throw error
+  return data
+}
+
+async function executeImageGenerationJob(admin: ScopedClient, userClient: Client, job: Json, actorId: string) {
+  const claimed = await claimImageGenerationJob(admin, String(job.id))
+  if (!claimed) return loadImageGenerationJob(admin, String(job.id))
+
+  try {
+    const { version, session } = await loadPermittedDirectionVersion(
+      userClient, admin.organizationId, String(claimed.direction_version_id))
+    const asset = await generateImageForTarget(admin, {
+      directionVersionId: version.id,
+      contentRequestId: null,
+      engagementId: session.engagement_id,
+      modelRegistryId: String(claimed.model_registry_id),
+      prompt: String(claimed.prompt),
+      actorId,
+      durable: true,
+    })
+    try {
+      return await finishImageGenerationJob(admin, String(claimed.id), {
+        status: 'succeeded', media_asset_id: asset.id,
+      })
+    } catch (error) {
+      throw new DurableImageFailure(
+        `Generated media is ready but request completion could not be recorded: ${error instanceof Error ? error.message : 'unknown registration failure'}`,
+        'registration', false, asset as Json)
+    }
+  } catch (error) {
+    if (error instanceof DurableImageFailure) {
+      return finishImageGenerationJob(admin, String(claimed.id), {
+        status: error.outcomeUnknown ? 'outcome_unknown' : 'failed',
+        failure_phase: error.phase,
+        failure_reason: error.message.slice(0, 2000),
+        media_asset_id: error.asset?.id || null,
+      })
+    }
+    return finishImageGenerationJob(admin, String(claimed.id), {
+      status: 'failed',
+      failure_phase: 'configuration',
+      failure_reason: error instanceof Error ? error.message.slice(0, 2000) : 'Image request configuration failed',
+    })
+  }
+}
+
 async function generateImage(admin: ScopedClient, userClient: Client, body: Json, actorId: string) {
   const directionVersionId = text(body.direction_version_id, 80)
-  const { version, session } = await loadPermittedDirectionVersion(userClient, admin.organizationId, directionVersionId)
+  const modelRegistryId = text(body.model_registry_id, 80)
+  const { version } = await loadPermittedDirectionVersion(userClient, admin.organizationId, directionVersionId)
   const prompt = mediaPrompt((version.content as Json) || {}, body.prompt)
   if (!prompt) throw new Error('Add an image prompt or complete the direction imagery and creative thesis')
-  return generateImageForTarget(admin, {
+  const checksum = await sha256(imageGenerationRequestChecksum(version.id, modelRegistryId, prompt))
+  const job = await reserveImageGenerationJob(admin, {
     directionVersionId: version.id,
-    contentRequestId: null,
-    engagementId: session.engagement_id,
-    modelRegistryId: text(body.model_registry_id, 80),
-    prompt,
+    modelRegistryId,
     actorId,
+    operationKey: operationKey(body.operation_key),
+    requestChecksum: checksum,
+    prompt,
   })
+  if (job.status !== 'queued') return job
+  return executeImageGenerationJob(admin, userClient, job, actorId)
+}
+
+async function getImageGenerationJob(admin: ScopedClient, body: Json) {
+  return loadImageGenerationJob(admin, requiredActionId(body.job_id, 'Generation request'))
+}
+
+async function retryImageGeneration(admin: ScopedClient, userClient: Client, body: Json, actorId: string) {
+  const source = await loadImageGenerationJob(admin, requiredActionId(body.job_id, 'Generation request'))
+  if (source.status !== 'failed' || source.failure_phase !== 'provider') {
+    throw Object.assign(new Error('Only a confirmed provider failure can be retried'), { status: 409 })
+  }
+  const job = await reserveImageGenerationJob(admin, {
+    directionVersionId: String(source.direction_version_id),
+    modelRegistryId: String(source.model_registry_id),
+    actorId,
+    operationKey: operationKey(body.operation_key),
+    requestChecksum: String(source.request_checksum),
+    prompt: String(source.prompt),
+    retryOfJobId: String(source.id),
+  })
+  if (job.status !== 'queued') return job
+  return executeImageGenerationJob(admin, userClient, job, actorId)
 }
 
 async function loadPermittedContentRequest(userClient: Client, organizationId: string, contentRequestId: string) {
@@ -1179,6 +1370,8 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       select_direction: () => selectDirection(admin, body, user.id),
       release_direction: () => releaseDirection(admin, body, user.id),
       generate_image: () => generateImage(admin, userClient, body, user.id),
+      get_image_generation_job: () => getImageGenerationJob(admin, body),
+      retry_image_generation: () => retryImageGeneration(admin, userClient, body, user.id),
       generate_variants: () => generateVariants(admin, userClient, body, user.id),
       create_video_placeholder: () => createVideoPlaceholder(admin, userClient, body, user.id),
       generate_content_request_image: () => generateContentRequestImage(admin, userClient, body, user.id),
