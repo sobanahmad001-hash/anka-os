@@ -8,6 +8,8 @@ import {
   CONTENT_ARTIFACT_TYPES,
   DEFAULT_DISCOVERY_TEMPLATE,
   bestContentStage,
+  contentArtifactEditor,
+  normalizeWebsitePath,
   resolveContentLanguage,
   serializeContentArtifact,
 } from './contentStudio.js'
@@ -83,7 +85,8 @@ test('RP2 sitemap and keyword-to-page content serialize as structured records', 
     pages: [{ slug: 'home', title: 'Homepage', parent_slug: '', page_type: 'hub', purpose: 'Orient' }],
   })
   assert.deepEqual(architecture.pages[0], {
-    slug: 'home', title: 'Homepage', parent_slug: null, page_type: 'hub', purpose: 'Orient',
+    page_key: 'legacy:home', slug: 'home', title: 'Homepage', parent_page_key: null,
+    parent_slug: null, position: 1000, page_type: 'hub', purpose: 'Orient',
   })
   const keywords = serializeContentArtifact('keyword_strategy', {
     keywords: [{ term: 'strategy agency', category: 'industry', search_volume: '1200', target_page_slug: 'home', notes: '' }],
@@ -91,6 +94,26 @@ test('RP2 sitemap and keyword-to-page content serialize as structured records', 
   assert.deepEqual(keywords.keywords[0], {
     term: 'strategy agency', category: 'industry', search_volume: 1200, target_page_slug: 'home', notes: '',
   })
+})
+
+test('B03a preserves legacy identity through rename and emits deterministic order', () => {
+  assert.equal(normalizeWebsitePath(' /Services//Web Design/ '), 'services/web-design')
+  const editor = contentArtifactEditor('website_architecture', { pages: [
+    { slug: 'home', title: 'Homepage', parent_slug: null, page_type: 'hub', purpose: 'Orient' },
+    { slug: 'services', title: 'Services', parent_slug: 'home', page_type: 'service', purpose: 'Explain', position: 2000 },
+  ] })
+  assert.equal(editor.pages[0].page_key, 'legacy:home')
+  assert.equal(editor.pages[1].parent_page_key, 'legacy:home')
+
+  editor.pages[0].slug = 'Welcome'
+  editor.pages.reverse()
+  const architecture = serializeContentArtifact('website_architecture', editor)
+  assert.deepEqual(architecture.pages.map(page => [page.page_key, page.slug, page.position]), [
+    ['legacy:services', 'services', 1000],
+    ['legacy:home', 'welcome', 2000],
+  ])
+  assert.equal(architecture.pages[0].parent_page_key, 'legacy:home')
+  assert.equal(architecture.pages[0].parent_slug, 'welcome')
 })
 
 test('stage selection remains within the Content department', () => {

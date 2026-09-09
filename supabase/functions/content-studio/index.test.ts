@@ -2,7 +2,7 @@ import { assertEquals, assertThrows } from 'jsr:@std/assert@1.0.14'
 import { brandBriefInput, compiledBrandStatement, contentStudioScope, customFieldDefinitionInput, handleRequest, hasContentAuthority, requireBrandBriefMutationToken,
   figmaHandoffUrl, validateContentRequestInput, validateQueueEntryInput } from './index.ts'
 
-import { CHAT_CONTENT_ARTIFACT_TYPE_SET, CONTENT_ARTIFACT_TYPES, contentArtifactResponseFormat, validateContentArtifact, withGeneratedSourceMetadata } from '../_shared/contentArtifacts.ts'
+import { assertWebsitePageIdentityTransition, CHAT_CONTENT_ARTIFACT_TYPE_SET, CONTENT_ARTIFACT_TYPES, contentArtifactResponseFormat, validateContentArtifact, withGeneratedSourceMetadata } from '../_shared/contentArtifacts.ts'
 
 Deno.test('B02 foundation contract preserves language and exact per-field source state', () => {
   const discovery = validateContentArtifact('discovery', {
@@ -216,6 +216,50 @@ Deno.test('RP2 rejects malformed sitemap hierarchy and keyword categories server
   assertThrows(() => validateContentArtifact('keyword_strategy', {
     keywords: [{ term: 'agency', category: 'transactional', search_volume: 12, target_page_slug: 'home', notes: '' }],
   }), Error, 'category')
+})
+
+Deno.test('B03a normalizes paths, sorts deterministically and derives legacy keys', () => {
+  const architecture = validateContentArtifact('website_architecture', { pages: [
+    { page_key: 'page:child', slug: ' /Services//Web Design/ ', title: 'Web', parent_page_key: 'page:root', position: 2000, page_type: 'service', purpose: 'Explain' },
+    { page_key: 'page:root', slug: 'Home', title: 'Home', parent_page_key: null, position: 1000, page_type: 'hub', purpose: 'Orient' },
+  ] })
+  const pages = architecture.pages as Array<Record<string, unknown>>
+  assertEquals(pages.map(page => [page.page_key, page.slug, page.position]), [
+    ['page:root', 'home', 1000],
+    ['page:child', 'services/web-design', 2000],
+  ])
+  const legacy = validateContentArtifact('website_architecture', { pages: [
+    { slug: 'About', title: 'About', parent_slug: null, page_type: 'supporting', purpose: 'Explain' },
+  ] })
+  assertEquals((legacy.pages as Array<Record<string, unknown>>)[0].page_key, 'legacy:about')
+})
+
+Deno.test('B03a rejects normalized duplicate paths, duplicate order and all ancestor cycles', () => {
+  const page = (page_key: string, slug: string, parent_page_key: string | null, position: number) => ({
+    page_key, slug, title: slug, parent_page_key, position, page_type: 'supporting', purpose: 'Explain',
+  })
+  assertThrows(() => validateContentArtifact('website_architecture', { pages: [
+    page('page:a', '/About//Team/', null, 1000), page('page:b', 'about/team', null, 2000),
+  ] }), Error, 'unique after normalization')
+  assertThrows(() => validateContentArtifact('website_architecture', { pages: [
+    page('page:a', 'a', null, 1000), page('page:b', 'b', null, 1000),
+  ] }), Error, 'positions must be unique')
+  assertThrows(() => validateContentArtifact('website_architecture', { pages: [
+    page('page:a', 'a', 'page:b', 1000), page('page:b', 'b', 'page:c', 2000), page('page:c', 'c', 'page:a', 3000),
+  ] }), Error, 'ancestor cycle')
+  assertThrows(() => validateContentArtifact('website_architecture', { pages: [
+    page('page:a', 'a', 'page:a', 1000),
+  ] }), Error, 'ancestor cycle')
+})
+
+Deno.test('B03a retains page identity across rename and rejects same-path key replacement', () => {
+  const previous = { pages: [{ slug: 'home', title: 'Home', parent_slug: null, page_type: 'hub', purpose: 'Orient' }] }
+  assertWebsitePageIdentityTransition(previous, [{
+    page_key: 'legacy:home', slug: 'welcome', title: 'Welcome', parent_page_key: null, position: 1000, page_type: 'hub', purpose: 'Orient',
+  }])
+  assertThrows(() => assertWebsitePageIdentityTransition(previous, [{
+    page_key: 'page:replacement', slug: 'home', title: 'Home', parent_page_key: null, position: 1000, page_type: 'hub', purpose: 'Orient',
+  }]), Error, 'cannot be changed')
 })
 
 Deno.test('RP1 normalizes a mutable brief and compiles exact source context', () => {

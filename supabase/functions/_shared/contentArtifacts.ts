@@ -117,6 +117,27 @@ function requiredNullableText(input: Json, key: string, max = 240) {
   return value
 }
 
+export function normalizeWebsitePath(value: unknown) {
+  const normalized = text(value, 1200)
+    .normalize('NFKC')
+    .replaceAll('\\', '/')
+    .replace(/\/+/g, '/')
+    .replace(/^\/+|\/+$/g, '')
+    .split('/')
+    .map(segment => segment.trim().toLowerCase().replace(/\s+/g, '-'))
+    .filter(Boolean)
+    .join('/')
+  if (!normalized) throw new Error('Website page path is required')
+  if (normalized.length > 1200 || normalized.split('/').some(segment => segment === '.' || segment === '..' || /[?#\u0000-\u001f]/u.test(segment))) {
+    throw new Error('Website page path contains unsupported characters')
+  }
+  return normalized
+}
+
+export function legacyWebsitePageKey(value: unknown) {
+  return `legacy:${normalizeWebsitePath(value)}`
+}
+
 function websitePages(value: unknown) {
   if (!Array.isArray(value) || !value.length) throw new Error('At least one website page is required')
   const pages = value.slice(0, 200).map((item, index) => {
@@ -128,24 +149,81 @@ function websitePages(value: unknown) {
     if (!['hub', 'service', 'supporting'].includes(pageType)) {
       throw new Error(`page type in website page ${index + 1} must be hub, service, or supporting`)
     }
+    const slug = normalizeWebsitePath(page.slug)
+    const pageKey = text(page.page_key, 1208) || legacyWebsitePageKey(slug)
+    if (!/^[\p{L}\p{N}][\p{L}\p{N}:._~\/-]{0,1207}$/u.test(pageKey)) {
+      throw new Error(`page key in website page ${index + 1} is invalid`)
+    }
+    const position = Object.hasOwn(page, 'position') ? Number(page.position) : (index + 1) * 1000
+    if (!Number.isSafeInteger(position) || position < 1) {
+      throw new Error(`position in website page ${index + 1} must be a positive integer`)
+    }
     return {
-      slug: requiredText(page, 'slug', 240),
+      page_key: pageKey,
+      slug,
       title: requiredText(page, 'title', 240),
-      parent_slug: requiredNullableText(page, 'parent_slug', 240),
+      raw_parent_page_key: text(page.parent_page_key, 1208) || null,
+      raw_parent_slug: Object.hasOwn(page, 'parent_slug') ? requiredNullableText(page, 'parent_slug', 1200) : null,
+      position,
       page_type: pageType,
       purpose: requiredText(page, 'purpose', 1200),
     }
   })
-  const slugs = pages.map(page => page.slug)
-  if (new Set(slugs).size !== slugs.length) throw new Error('Website page slugs must be unique')
-  const knownSlugs = new Set(slugs)
-  for (const page of pages) {
-    if (page.parent_slug === page.slug) throw new Error(`parent slug for ${page.slug} must reference another page`)
-    if (page.parent_slug && !knownSlugs.has(page.parent_slug)) {
-      throw new Error(`parent slug ${page.parent_slug} does not reference a page in this website architecture`)
+  const pageKeys = pages.map(page => page.page_key)
+  const paths = pages.map(page => page.slug)
+  const positions = pages.map(page => page.position)
+  if (new Set(pageKeys).size !== pageKeys.length) throw new Error('Website page keys must be unique')
+  if (new Set(paths).size !== paths.length) throw new Error('Website page paths must be unique after normalization')
+  if (new Set(positions).size !== positions.length) throw new Error('Website page positions must be unique')
+  const pageByKey = new Map(pages.map(page => [page.page_key, page]))
+  const keyByPath = new Map(pages.map(page => [page.slug, page.page_key]))
+  const normalized = pages.map(page => {
+    const parentFromSlug = page.raw_parent_slug ? keyByPath.get(normalizeWebsitePath(page.raw_parent_slug)) : null
+    if (page.raw_parent_slug && !parentFromSlug) {
+      throw new Error(`parent slug ${page.raw_parent_slug} does not reference a page in this website architecture`)
+    }
+    if (page.raw_parent_page_key && parentFromSlug && page.raw_parent_page_key !== parentFromSlug) {
+      throw new Error(`parent page key and legacy parent path disagree for ${page.slug}`)
+    }
+    const parentPageKey = page.raw_parent_page_key || parentFromSlug || null
+    if (parentPageKey && !pageByKey.has(parentPageKey)) {
+      throw new Error(`parent page key ${parentPageKey} does not reference a page in this website architecture`)
+    }
+    return {
+      page_key: page.page_key,
+      slug: page.slug,
+      title: page.title,
+      parent_page_key: parentPageKey,
+      parent_slug: parentPageKey ? pageByKey.get(parentPageKey)?.slug || null : null,
+      position: page.position,
+      page_type: page.page_type,
+      purpose: page.purpose,
+    }
+  }).sort((left, right) => left.position - right.position)
+  const parentByKey = new Map(normalized.map(page => [page.page_key, page.parent_page_key]))
+  for (const page of normalized) {
+    const visited = new Set<string>()
+    let current: string | null = page.page_key
+    while (current) {
+      if (visited.has(current)) throw new Error(`Website page hierarchy contains an ancestor cycle involving ${page.slug}`)
+      visited.add(current)
+      current = parentByKey.get(current) || null
     }
   }
-  return pages
+  return normalized
+}
+
+export function assertWebsitePageIdentityTransition(previous: unknown, next: unknown) {
+  if (!previous || typeof previous !== 'object' || Array.isArray(previous)) return
+  const previousPages = websitePages((previous as Json).pages)
+  const nextPages = websitePages(next)
+  const previousByPath = new Map(previousPages.map(page => [page.slug, page.page_key]))
+  for (const page of nextPages) {
+    const previousKey = previousByPath.get(page.slug)
+    if (previousKey && previousKey !== page.page_key) {
+      throw new Error(`Stable page key for ${page.slug} cannot be changed; remove and add must be deliberate separate page operations`)
+    }
+  }
 }
 
 function keywordRecords(value: unknown) {
@@ -390,9 +468,12 @@ export async function createContentArtifactVersion(admin: AdminClient, input: {
     createdArtifact = true
   }
   const { data: latest, error: latestError } = await admin.from('artifact_versions')
-    .select('id, version_number').eq('artifact_id', artifactId)
+    .select('id, version_number, content').eq('artifact_id', artifactId)
     .order('version_number', { ascending: false }).limit(1).maybeSingle()
   if (latestError) throw latestError
+  if (input.artifactType === 'website_architecture' && latest?.content) {
+    assertWebsitePageIdentityTransition(latest.content, content.pages)
+  }
   const { data: version, error: versionError } = await admin.from('artifact_versions').insert({
     organization_id: input.organizationId, artifact_id: artifactId,
     version_number: (latest?.version_number || 0) + 1, parent_version_id: latest?.id || null,
