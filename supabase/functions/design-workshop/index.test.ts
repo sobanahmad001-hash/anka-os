@@ -1,7 +1,9 @@
 import { contentRequestMediaStoragePath, createSession, cropResizePng, designEventLink, designWorkshopScope, directionSchema,
-  directionGenerationPrompt, directionsAreDistinct, generateOpenAiImage, hasWorkshopAuthority, isStoryboardSession, mediaPrompt, mediaStoragePath,
+  canRetryImageGenerationJob, ConfirmedProviderFailure, directionGenerationPrompt, directionsAreDistinct,
+  durableProviderFailureState, generateOpenAiImage, hasWorkshopAuthority,
+  IMAGE_CANCELLATION_UNSUPPORTED_MESSAGE, imageGenerationRequestChecksum, isStoryboardSession, mediaPrompt, mediaStoragePath,
   mediaTargetColumns, outputFamilyForService, pngDimensions, requireActiveDesignService,
-  requireReleasedVariantSource, runIndependentVariantJobs, sha256, similarity, variantFormatSpec, variantPrompt,
+  requireReleasedVariantSource, reserveImageGenerationJob, runIndependentVariantJobs, sha256, similarity, variantFormatSpec, variantPrompt,
   VIDEO_UNAVAILABLE_MESSAGE, handler } from './index.ts'
 import { compileApprovedArtifactContext } from '../_shared/approvedArtifactContext.ts'
 import { normalizeCreativeBrief, saveCreativeBrief, validateCreativeBrief } from './creativeBriefs.ts'
@@ -228,6 +230,56 @@ Deno.test('context and output checksums are stable', async () => {
   assert((await sha256('approved-context')).match(/^[a-f0-9]{64}$/))
 })
 
+Deno.test('B03A request checksums bind the exact immutable version, model and prompt', async () => {
+  const first = await sha256(imageGenerationRequestChecksum('version-1', 'model-1', 'A precise prompt'))
+  const duplicate = await sha256(imageGenerationRequestChecksum('version-1', 'model-1', 'A precise prompt'))
+  const changedVersion = await sha256(imageGenerationRequestChecksum('version-2', 'model-1', 'A precise prompt'))
+  assert.equal(first, duplicate)
+  assert(first !== changedVersion)
+})
+
+Deno.test('B03A atomically reopens concurrent duplicate reserves and rejects key reuse with another payload', async () => {
+  const rows: Array<Record<string, unknown>> = []
+  class JobQuery {
+    private inserted: Record<string, unknown> | null = null
+    private equals: Array<[string, unknown]> = []
+    insert(value: Record<string, unknown>) { this.inserted = value; return this }
+    select() { return this }
+    eq(column: string, value: unknown) { this.equals.push([column, value]); return this }
+    async single() {
+      await Promise.resolve()
+      const existing = rows.find(row => row.organization_id === this.inserted?.organization_id
+        && row.requested_by === this.inserted?.requested_by && row.operation_key === this.inserted?.operation_key)
+      if (existing) return { data: null, error: { code: '23505', message: 'duplicate' } }
+      const row = { id: 'job-1', status: 'queued', ...this.inserted }
+      rows.push(row)
+      return { data: row, error: null }
+    }
+    async maybeSingle() {
+      const row = rows.find(candidate => this.equals.every(([column, value]) => candidate[column] === value))
+      return { data: row || null, error: null }
+    }
+  }
+  const admin = { organizationId: 'org-1', from: () => new JobQuery() }
+  const input = {
+    directionVersionId: 'version-1', modelRegistryId: 'model-1', actorId: 'actor-1',
+    operationKey: 'operation-1', requestChecksum: 'a'.repeat(64), prompt: 'Exact prompt',
+  }
+  const [left, right] = await Promise.all([
+    reserveImageGenerationJob(admin as never, input),
+    reserveImageGenerationJob(admin as never, input),
+  ])
+  assert.equal(left.id, right.id)
+  assert.equal(rows.length, 1)
+  let conflict = false
+  try {
+    await reserveImageGenerationJob(admin as never, { ...input, prompt: 'Changed prompt' })
+  } catch (error) {
+    conflict = error instanceof Error && error.message.includes('different image request')
+  }
+  assert(conflict, 'Expected reused operation key with changed payload to fail')
+})
+
 Deno.test('shared compiler selects the latest approved exact version for every requested type', async () => {
   const fixtures: Record<string, Array<Record<string, unknown>>> = {
     artifacts: [
@@ -306,6 +358,77 @@ Deno.test('OpenAI image adapter uses the registered model and decodes the return
   assert.equal(requestBody.prompt, 'Create a key visual')
   assert.equal('size' in requestBody, false)
   assert.equal(new TextDecoder().decode(bytes), 'png')
+})
+
+Deno.test('B03A keeps server, proxy, timeout and transport outcomes unknown with no paid retry', async () => {
+  for (const status of [500, 502, 503, 408, 504]) {
+    let providerCalls = 0
+    let failure: unknown
+    try {
+      await generateOpenAiImage('secret', 'model', 'prompt', async () => {
+        providerCalls += 1
+        return new Response(JSON.stringify({
+          error: { type: 'server_error', code: 'upstream_unavailable', message: `ambiguous ${status}` },
+        }), { status })
+      })
+    } catch (error) { failure = error }
+    const state = durableProviderFailureState(failure)
+    const job = { status: state.status, failure_phase: state.failure_phase }
+    assert.equal(failure instanceof ConfirmedProviderFailure, false)
+    assert.equal(state.status, 'outcome_unknown')
+    assert.equal(state.retryable, false)
+    assert.equal(canRetryImageGenerationJob(job), false)
+    if (canRetryImageGenerationJob(job)) providerCalls += 1
+    assert.equal(providerCalls, 1)
+  }
+
+  let transportFailure: unknown
+  try {
+    await generateOpenAiImage('secret', 'model', 'prompt', async () => {
+      throw new TypeError('connection reset after send')
+    })
+  } catch (error) { transportFailure = error }
+  assert.equal(durableProviderFailureState(transportFailure).status, 'outcome_unknown')
+  assert.equal(canRetryImageGenerationJob({ status: 'outcome_unknown', failure_phase: 'provider' }), false)
+  assert(IMAGE_CANCELLATION_UNSUPPORTED_MESSAGE.includes('Cancellation is not supported'))
+})
+
+Deno.test('B03A allows retry only for a structured definitive invalid-request rejection', async () => {
+  let providerCalls = 0
+  let failure: unknown
+  try {
+    await generateOpenAiImage('secret', 'model', 'invalid prompt', async () => {
+      providerCalls += 1
+      return new Response(JSON.stringify({
+        error: {
+          type: 'invalid_request_error', code: 'invalid_prompt', param: 'prompt',
+          message: 'The prompt is invalid and generation was rejected',
+        },
+      }), { status: 400 })
+    })
+  } catch (error) { failure = error }
+  const state = durableProviderFailureState(failure)
+  const job = { status: state.status, failure_phase: state.failure_phase }
+  assert(failure instanceof ConfirmedProviderFailure)
+  assert.equal(state.status, 'failed')
+  assert.equal(state.retryable, true)
+  assert.equal(canRetryImageGenerationJob(job), true)
+
+  if (canRetryImageGenerationJob(job)) {
+    await generateOpenAiImage('secret', 'model', 'corrected prompt', async () => {
+      providerCalls += 1
+      return new Response(JSON.stringify({ data: [{ b64_json: btoa('png') }] }), { status: 200 })
+    })
+  }
+  assert.equal(providerCalls, 2)
+
+  let unstructured400: unknown
+  try {
+    await generateOpenAiImage('secret', 'model', 'prompt', async () =>
+      new Response(JSON.stringify({ error: { message: 'generic gateway rejection' } }), { status: 400 }))
+  } catch (error) { unstructured400 = error }
+  assert.equal(unstructured400 instanceof ConfirmedProviderFailure, false)
+  assert.equal(durableProviderFailureState(unstructured400).status, 'outcome_unknown')
 })
 
 Deno.test('variant formats use verified platform targets and supported provider canvases', () => {
@@ -452,6 +575,10 @@ function scopeFixtures() {
       { id: 'asset-1', organization_id: 'org-1', design_direction_version_id: 'version-1', content_request_id: null, storage_path: 'org-1/version-1/asset-1.png' },
       { id: 'asset-2', organization_id: 'org-2', design_direction_version_id: 'version-2', content_request_id: null, storage_path: 'org-2/version-2/asset-2.png' },
     ],
+    design_image_generation_jobs: [
+      { id: 'job-1', organization_id: 'org-1', direction_version_id: 'version-1' },
+      { id: 'job-2', organization_id: 'org-2', direction_version_id: 'version-2' },
+    ],
   }
 }
 
@@ -469,6 +596,8 @@ Deno.test('Design Workshop maps every action family to a closed caller-readable 
     [{ action: 'create_direction_revision', direction_id: 'direction-1' }, 'engagement', 'engagement-1'],
     [{ action: 'promote_direction_experiment', direction_version_id: 'version-1' }, 'engagement', 'engagement-1'],
     [{ action: 'generate_image', direction_version_id: 'version-1' }, 'engagement', 'engagement-1'],
+    [{ action: 'get_image_generation_job', job_id: 'job-1' }, 'engagement', 'engagement-1'],
+    [{ action: 'retry_image_generation', job_id: 'job-1' }, 'engagement', 'engagement-1'],
     [{ action: 'create_video_placeholder', direction_version_id: 'version-1' }, 'engagement', 'engagement-1'],
     [{ action: 'generate_variants', source_direction_version_id: 'version-1' }, 'engagement', 'engagement-1'],
     [{ action: 'generate_content_request_image', content_request_id: 'request-1' }, 'content_request', 'request-1'],
