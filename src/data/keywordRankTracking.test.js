@@ -48,7 +48,7 @@ test('MK6a UI supports manual page-scoped tracking and distinguishes no rank fro
   assert.match(ui, /No Keyword Strategy source/)
   assert.match(ui, /Rank unknown — Google Search Console returned no row/)
   assert.match(ui, /Rank appears after the first fetch/)
-  assert.match(ui, /shouldApplyTechnicalSeoMutationResponse/)
+  assert.match(ui, /runTechnicalSeoMutation/)
   assert.match(ui, /technicalSeo\.setKeywordActive\(activeOrganizationId, keyword\.id/)
 })
 

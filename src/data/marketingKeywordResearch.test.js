@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { buildMarketingKeywordResearch, keywordDuplicateCounts, shouldApplyKeywordResearchResponse, shouldApplyTechnicalSeoMutationResponse } from './marketingKeywordResearch.js'
+import { buildMarketingKeywordResearch, keywordDuplicateCounts, runTechnicalSeoMutation, shouldApplyKeywordResearchResponse, shouldApplyTechnicalSeoMutationResponse } from './marketingKeywordResearch.js'
 import { collectKeywordResearchPages } from './marketingKeywordResearchRepository.js'
 
 const orgA = 'org-a'
@@ -100,6 +100,57 @@ test('Technical SEO mutation responses require the exact current organization, b
     { ...request, revision: 5 },
   ]) assert.equal(shouldApplyTechnicalSeoMutationResponse(request, current, 3, 3), false)
   assert.equal(shouldApplyTechnicalSeoMutationResponse(request, request, 2, 3), false)
+})
+
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((nextResolve, nextReject) => { resolve = nextResolve; reject = nextReject })
+  return { promise, resolve, reject }
+}
+
+test('Technical SEO delayed success and failure cannot alter a newer scope while current responses apply', async () => {
+  const scopeA = { organizationId: orgA, brandId: 'brand-a', pageId: 'page-1', revision: 4 }
+  const scopeB = { organizationId: 'org-b', brandId: 'brand-b', pageId: 'page-2', revision: 5 }
+
+  for (const outcome of ['success', 'failure']) {
+    let current = scopeA
+    let currentGeneration = 1
+    const pending = deferred()
+    const state = { busy: 'keyword-a', message: '', error: '', reloads: [] }
+    const operation = runTechnicalSeoMutation({
+      request: scopeA,
+      generation: 1,
+      currentScope: () => current,
+      currentGeneration: () => currentGeneration,
+      mutate: () => pending.promise,
+      reload: async pageId => { state.reloads.push(pageId) },
+      onSuccess: () => { state.message = 'A success' },
+      onError: error => { state.error = error.message },
+      onFinish: () => { state.busy = '' },
+    })
+    current = scopeB
+    currentGeneration = 2
+    state.busy = 'keyword-b'
+    if (outcome === 'success') pending.resolve({ active: false })
+    else pending.reject(new Error('A failure'))
+    assert.equal(await operation, false)
+    assert.deepEqual(state, { busy: 'keyword-b', message: '', error: '', reloads: [] })
+  }
+
+  const state = { busy: 'keyword-a', message: '', error: '', reloads: [] }
+  assert.equal(await runTechnicalSeoMutation({
+    request: scopeA,
+    generation: 3,
+    currentScope: () => scopeA,
+    currentGeneration: () => 3,
+    mutate: async () => ({ active: false }),
+    reload: async pageId => { state.reloads.push(pageId) },
+    onSuccess: () => { state.message = 'A success' },
+    onError: error => { state.error = error.message },
+    onFinish: () => { state.busy = '' },
+  }), true)
+  assert.deepEqual(state, { busy: '', message: 'A success', error: '', reloads: ['page-1'] })
 })
 
 test('pagination walks inclusive ranges until the short page', async () => {

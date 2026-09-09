@@ -26,6 +26,35 @@ export function shouldApplyTechnicalSeoMutationResponse(request, current, genera
     generation === currentGeneration
 }
 
+export async function runTechnicalSeoMutation({
+  request,
+  generation,
+  currentScope,
+  currentGeneration,
+  mutate,
+  reload,
+  onSuccess,
+  onError,
+  onFinish,
+}) {
+  const isCurrent = () => shouldApplyTechnicalSeoMutationResponse(
+    request, currentScope(), generation, currentGeneration(),
+  )
+  try {
+    const updated = await mutate()
+    if (!isCurrent()) return false
+    await reload(request.pageId)
+    if (!isCurrent()) return false
+    onSuccess(updated)
+    return true
+  } catch (error) {
+    if (isCurrent()) onError(error)
+    return false
+  } finally {
+    if (isCurrent()) onFinish()
+  }
+}
+
 export function keywordDuplicateCounts(keywords = []) {
   const counts = new Map()
   for (const row of keywords) {

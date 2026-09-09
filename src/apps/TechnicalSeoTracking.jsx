@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { useOrganization } from '../context/OrganizationContext.jsx'
-import { keywordDuplicateCounts, shouldApplyTechnicalSeoMutationResponse } from '../data/marketingKeywordResearch.js'
+import { keywordDuplicateCounts, runTechnicalSeoMutation } from '../data/marketingKeywordResearch.js'
 import { INDEX_STATUSES, TRACKED_PAGE_TYPES, auditTrend, filterHealth, healthSummary, labelize, pageDepth } from '../data/technicalSeo.js'
 import { technicalSeo } from '../data/technicalSeoRepository.js'
 
@@ -127,19 +127,18 @@ export default function TechnicalSeoTracking() {
   async function setKeywordActive(keyword) {
     const generation = ++keywordMutationGeneration.current
     const request = { organizationId: activeOrganizationId, brandId, pageId, revision: scopeRevision }
-    const isCurrent = () => shouldApplyTechnicalSeoMutationResponse(request, currentScope.current, generation, keywordMutationGeneration.current)
     setKeywordBusyId(keyword.id); setError(''); setMessage('')
-    try {
-      const updated = await technicalSeo.setKeywordActive(activeOrganizationId, keyword.id, !keyword.active)
-      if (!isCurrent()) return
-      await loadKeywords(request.pageId)
-      if (!isCurrent()) return
-      setMessage(`${keyword.keyword} ${updated.active === false ? 'paused' : 'resumed'}. Existing rank history was retained.`)
-    } catch (e) {
-      if (isCurrent()) setError(e.message)
-    } finally {
-      if (isCurrent()) setKeywordBusyId('')
-    }
+    await runTechnicalSeoMutation({
+      request,
+      generation,
+      currentScope: () => currentScope.current,
+      currentGeneration: () => keywordMutationGeneration.current,
+      mutate: () => technicalSeo.setKeywordActive(activeOrganizationId, keyword.id, !keyword.active),
+      reload: loadKeywords,
+      onSuccess: updated => setMessage(`${keyword.keyword} ${updated.active === false ? 'paused' : 'resumed'}. Existing rank history was retained.`),
+      onError: mutationError => setError(mutationError.message),
+      onFinish: () => setKeywordBusyId(''),
+    })
   }
 
   return <div className="h-full overflow-y-auto bg-slate-950 text-white">
