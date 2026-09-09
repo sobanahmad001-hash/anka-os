@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-const migration = readFileSync(new URL('../../supabase/migrations/20260909140526_p8_atomic_living_record_snapshots_temp.sql', import.meta.url), 'utf8')
+const migration = readFileSync(new URL('../../supabase/migrations/20260904140000_p8_atomic_living_record_snapshots.sql', import.meta.url), 'utf8')
 const canonicalDelivery = readFileSync(new URL('../../supabase/migrations/20260825040000_canonical_delivery_core.sql', import.meta.url), 'utf8')
-const verifier = readFileSync(new URL('../../supabase/verify_20260909140526_p8_atomic_living_record_snapshots_temp.sql', import.meta.url), 'utf8')
+const verifier = readFileSync(new URL('../../supabase/verify_20260904140000_p8_atomic_living_record_snapshots.sql', import.meta.url), 'utf8')
 const concurrency = readFileSync(new URL('../../scripts/p8-living-record-snapshot-concurrency.ts', import.meta.url), 'utf8')
 
 test('P8 migration fails closed and enforces the exact tenant project document chain', () => {
