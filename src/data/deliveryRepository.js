@@ -1,3 +1,5 @@
+import { createDeliverableGovernance } from './deliverableGovernance.js'
+
 const requireOrganizationId = (organizationId) => {
   if (typeof organizationId !== 'string' || !organizationId.trim()) throw new TypeError('organizationId is required')
   return organizationId
@@ -98,6 +100,7 @@ export function createDeliveryRepository(client) {
   if (!client?.from) {
     throw new TypeError('A Supabase-compatible client is required')
   }
+  const governance = createDeliverableGovernance(client)
 
   return Object.freeze({
     async listClients() {
@@ -462,7 +465,7 @@ export function createDeliveryRepository(client) {
         ),
         load(
           client.from('deliverables')
-            .select('*, projects(id, name), workstreams(id, name, department_id), deliverable_versions(id, version_number, review_status, created_at)')
+            .select('*, projects(id, name), workstreams(id, name, department_id), deliverable_versions(id, organization_id, version_number, review_status, state_version, client_approval_required, created_at)')
             .eq('organization_id', organizationId)
             .eq('owner_id', userId)
             .is('archived_at', null)
@@ -485,13 +488,26 @@ export function createDeliveryRepository(client) {
       ])
       assertOrganizationRecords(organizationId, tasks, workItems, requests, deliverables, reviewVersions, releaseVersions)
 
+      const decorate = async (version) => ({
+        ...version,
+        capabilities: typeof client.rpc === 'function'
+          ? await governance.capabilities(organizationId, version.id)
+          : {},
+      })
+      const governedReviewVersions = await Promise.all((reviewVersions || []).map(decorate))
+      const governedReleaseVersions = await Promise.all((releaseVersions || []).map(decorate))
+      const governedDeliverables = await Promise.all((deliverables || []).map(async (deliverable) => ({
+        ...deliverable,
+        deliverable_versions: await Promise.all((deliverable.deliverable_versions || []).map(decorate)),
+      })))
+
       return {
         tasks: tasks || [],
         workItems: workItems || [],
         requests: requests || [],
-        deliverables: deliverables || [],
-        reviewVersions: reviewVersions || [],
-        releaseVersions: releaseVersions || [],
+        deliverables: governedDeliverables,
+        reviewVersions: governedReviewVersions,
+        releaseVersions: governedReleaseVersions,
       }
     },
 
@@ -771,19 +787,12 @@ export function createDeliveryRepository(client) {
     },
 
     async createDeliverableVersion(input, actorId) {
+      const organizationId = requireOrganizationId(input?.organizationId)
       assertIdentifier(input?.projectId, 'projectId')
       assertIdentifier(input?.deliverableId, 'deliverableId')
       assertIdentifier(input?.title, 'version title')
       assertIdentifier(actorId, 'actorId')
 
-      const existing = await dataOrThrow(
-        client.from('deliverable_versions')
-          .select('version_number')
-          .eq('deliverable_id', input.deliverableId)
-          .order('version_number', { ascending: false })
-          .limit(1)
-      )
-      const versionNumber = (existing?.[0]?.version_number || 0) + 1
       let fileId = null
 
       if (input.file) {
@@ -798,6 +807,7 @@ export function createDeliveryRepository(client) {
 
         const file = await dataOrThrow(
           client.from('files').insert({
+            organization_id: organizationId,
             project_id: input.projectId,
             storage_bucket: 'sphere-deliverables',
             storage_path: storagePath,
@@ -810,130 +820,45 @@ export function createDeliveryRepository(client) {
         )
         fileId = file.id
       }
-
-      const version = await dataOrThrow(
-        client.from('deliverable_versions').insert({
-          project_id: input.projectId,
-          deliverable_id: input.deliverableId,
-          version_number: versionNumber,
-          title: input.title.trim(),
-          change_summary: input.changeSummary?.trim() || '',
-          file_id: fileId,
-          preview_metadata: input.previewUrl ? { preview_url: input.previewUrl.trim() } : {},
-          review_status: 'in_production',
-          created_by: actorId,
-        }).select().single()
-      )
-
-      await dataOrThrow(
-        client.from('deliverables').update({ current_version_id: version.id, status: 'in_production' })
-          .eq('id', input.deliverableId)
-      )
-      return version
+      return governance.create({ ...input, organizationId, fileId })
     },
 
-    async transitionDeliverableVersion(versionId, reviewStatus) {
-      assertIdentifier(versionId, 'versionId')
-      if (!DELIVERABLE_VERSION_STATUSES.includes(reviewStatus)) {
-        throw new TypeError(`Unsupported deliverable version status: ${reviewStatus}`)
-      }
+    async listDeliverableReviewerCandidates(organizationId, versionId) {
+      return governance.reviewerCandidates(requireOrganizationId(organizationId), versionId)
+    },
 
-      return dataOrThrow(
-        client.from('deliverable_versions').update({ review_status: reviewStatus })
-          .eq('id', versionId).select().single()
-      )
+    async submitDeliverableVersion(input) {
+      return governance.submit(input)
+    },
+
+    async assignDeliverableReviewer(input) {
+      return governance.assignReviewer(input)
     },
 
     async recordInternalQualityDecision(input, actorId) {
-      assertIdentifier(input?.projectId, 'projectId')
-      assertIdentifier(input?.deliverableId, 'deliverableId')
+      requireOrganizationId(input?.organizationId)
       assertIdentifier(input?.deliverableVersionId, 'deliverableVersionId')
       assertIdentifier(actorId, 'actorId')
       if (!['approved', 'changes_required'].includes(input.decision)) {
         throw new TypeError('Internal quality decision must be approved or changes_required')
       }
 
-      const approval = await dataOrThrow(
-        client.from('approvals').insert({
-          project_id: input.projectId,
-          deliverable_id: input.deliverableId,
-          deliverable_version_id: input.deliverableVersionId,
-          approval_type: 'internal_quality',
-          decision: input.decision,
-          rationale: input.rationale?.trim() || '',
-          checklist_result: input.checklistResult || {},
-          decided_by: actorId,
-        }).select().single()
-      )
-
-      const nextStatus = input.decision === 'approved' ? 'ready_for_client_review' : 'changes_required'
-      await dataOrThrow(
-        client.from('deliverable_versions').update({ review_status: nextStatus })
-          .eq('id', input.deliverableVersionId)
-      )
-      return approval
+      return governance.review(input)
     },
 
     async releaseDeliverableVersion(input, actorId) {
-      assertIdentifier(input?.projectId, 'projectId')
-      assertIdentifier(input?.deliverableId, 'deliverableId')
+      requireOrganizationId(input?.organizationId)
       assertIdentifier(input?.deliverableVersionId, 'deliverableVersionId')
       assertIdentifier(actorId, 'actorId')
+      return governance.release(input)
+    },
 
-      const [project, version] = await Promise.all([
-        dataOrThrow(client.from('projects').select('*').eq('id', input.projectId).single()),
-        dataOrThrow(client.from('deliverable_versions').select('*').eq('id', input.deliverableVersionId).single()),
-      ])
-      if (!project.client_id) throw new TypeError('Internal projects cannot be released to a client portal')
-      if (version.review_status !== 'ready_for_client_review') {
-        throw new TypeError('Only internally approved versions can be released')
-      }
+    async markDeliverableDelivered(input) {
+      return governance.delivered(input)
+    },
 
-      await dataOrThrow(
-        client.from('client_project_projections').upsert({
-          project_id: project.id,
-          client_id: project.client_id,
-          project_name: project.name,
-          engagement_type: project.engagement_type,
-          summary: project.description || '',
-          health: project.health || 'unknown',
-          status: project.status,
-          start_date: project.start_date,
-          due_date: project.due_date,
-          next_action: input.nextAction?.trim() || 'Review the newly released deliverable.',
-          withdrawn_at: null,
-        }, { onConflict: 'project_id' })
-      )
-      await dataOrThrow(
-        client.from('client_portal_items').upsert({
-          project_id: project.id,
-          source_type: 'deliverable_version',
-          source_id: version.id,
-          item_type: 'deliverable',
-          title: version.title,
-          summary: version.change_summary || '',
-          status: 'ready_for_review',
-          payload: {
-            deliverable_id: input.deliverableId,
-            version_number: version.version_number,
-            file_id: version.file_id,
-            preview_url: version.preview_metadata?.preview_url || null,
-          },
-          released_by: actorId,
-          withdrawn_at: null,
-        }, { onConflict: 'project_id,source_type,source_id' })
-      )
-      await dataOrThrow(
-        client.from('deliverables').update({
-          client_released_version_id: version.id,
-          status: 'client_reviewing',
-          visibility: 'client_visible',
-        }).eq('id', input.deliverableId)
-      )
-      return dataOrThrow(
-        client.from('deliverable_versions').update({ review_status: 'client_reviewing' })
-          .eq('id', version.id).select().single()
-      )
+    async markDeliverablePublished(input) {
+      return governance.published(input)
     },
 
     async createInternalRequest(input, actorId) {
@@ -1004,7 +929,12 @@ export function createDeliveryRepository(client) {
         dataOrThrow(client.from('comments').select('*').eq('project_id', projectId).eq('visibility', 'client_shared').order('created_at')),
       ])
 
-      return { project, items, requests, comments }
+      const governedItems = await Promise.all((items || []).map(async (item) => (
+        item.source_type === 'deliverable_version'
+          ? { ...item, capabilities: typeof client.rpc === 'function' ? await governance.capabilities(item.organization_id, item.source_id) : {} }
+          : item
+      )))
+      return { project, items: governedItems, requests, comments }
     },
 
     async listClientPortalProjects() {

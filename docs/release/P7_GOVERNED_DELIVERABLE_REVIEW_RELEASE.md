@@ -1,0 +1,67 @@
+# P7 — Governed deliverable review and release
+
+## Review identity
+
+- Branch: `feat/p7-governed-deliverable-release`
+- Reconciled foundation: corrected P5 `26faa4c12c80b4f9cbe89e7ff9953ffe4672491a` (original production base `f0494186dc5c05c942f36bacd7c81e3122fdf0f6`).
+- Publication, live database work, merge, and deployment are excluded from this local package.
+- Coordinator-reserved migration timestamp: `20260904130000`, immediately after P5 `20260904120000`.
+
+## Delivered contract
+
+- The server derives organization, project, deliverable, workstream, and client from the exact immutable deliverable version.
+- New assignment, lifecycle, and replay tables use composite tenant foreign keys, explicit grants, RLS, and append-only evidence.
+- Submission names one eligible reviewer. There is no open claim path, creator/owner self-review, or browser override.
+- Only the current named reviewer decides. Department managers may review their department but cannot release.
+- System owners, operations admins, executives, and the exact Project Owner may release and record closure evidence.
+- Formal client decisions require an active `client_admin` or `client_approver` membership plus matching active client contact and exact-project access.
+- Create, submit, assign/reassign, review, release, client decision, delivered, and published are separate atomic RPCs.
+- Every action requires `state_version` and a request ID. Exact retries replay; changed payloads conflict.
+- `client_approval_required` defaults false and becomes immutable on first release. Release may precede approval; closure requires exact-version approval only when both the flag and organization feature are enabled.
+- Delivered and published are independent append-only facts. A legacy `delivered_published` row receives delivered plus a legacy marker and never an invented published event.
+- Either closure fact may be recorded first. Recording published first retains the capability to record delivered later, while exact event-existence checks prevent duplicates.
+- Every new tenant and actor foreign-key delete path has a nonredundant leading index; unused surrogate `(id, organization_id)` uniqueness was removed.
+- Browser consumers render actions from server capability flags; they do not infer authority from profile roles.
+
+## Integration correction found by PostgreSQL verification
+
+The existing delivery activity trigger authorized team actors against one seeded organization literal. That made a valid governed action fail for every other organization. P7 preserves the trigger's existing activity and notification behavior but derives membership authorization from the exact project's organization. The rollback verifier proves a non-seeded organization completes the lifecycle and that an actor from another organization cannot read capability data.
+
+## Exact file scope
+
+P7-owned:
+
+- `supabase/migrations/20260904130000_p7_governed_deliverable_release.sql`
+- `supabase/verify_20260904130000_p7_governed_deliverable_release.sql`
+- `src/data/deliverableGovernance.js`
+- `src/data/deliverableGovernance.test.js`
+- this review gate
+
+Shared P4 delivery consumers, reconciled once after corrected P5:
+
+- `src/apps/MyWork.jsx`
+- `src/apps/AnkaSpherePortal.jsx`
+- `src/data/deliveryRepository.js`
+- `src/data/clientApprovals.js`
+- `src/data/myWorkRoutes.test.js`
+- `src/data/clientPortal.test.js`
+
+No Edge Function, routing, authentication, organization-provider, P5 planning, or deployment file is changed.
+
+## Verification evidence
+
+- Node: 722/722 passed.
+- Deno: 264/264 passed across the exact 21 CI-listed test paths.
+- Deno type-check: all 42 CI-listed implementation and test inputs passed.
+- ESLint: 0 errors; 453 pre-existing warnings.
+- Production build: passed.
+- PostgreSQL 17: the P5 then P7 migration chain compiled and committed in a fresh dedicated disposable database.
+- Rollback verifier: 33/33 named checks passed; final `ROLLBACK` preserved no fixtures.
+- No shared or live database was contacted.
+
+The verifier covers RLS, ACLs, fixed function search paths, composite foreign keys, exact nonredundant leading-index catalog shape, absence of unused tenant uniqueness, one-current-reviewer uniqueness, append-only evidence, graph derivation, exact replay, changed-payload conflict, self-review denial, department eligibility, reviewer revalidation after assignment, no open claim, department-manager release denial, Project Owner release, optional post-release client approval, approval-gated closure, delivered-then-published and published-then-delivered facts and capabilities, tenant isolation, and content-free replay records.
+
+## Remaining release gates
+
+1. Independent Testing reviews the exact final local head and scope.
+2. Publish only through the authorized Admin release sequence.

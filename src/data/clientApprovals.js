@@ -5,28 +5,26 @@ function assertIdentifier(value, label) {
 }
 
 export async function recordClientApproval(client, input, userId) {
-  assertIdentifier(input?.projectId, 'projectId')
-  assertIdentifier(input?.deliverableId, 'deliverableId')
+  assertIdentifier(input?.organizationId, 'organizationId')
   assertIdentifier(input?.deliverableVersionId, 'deliverableVersionId')
   assertIdentifier(userId, 'userId')
   if (!['approved', 'changes_required'].includes(input.decision)) {
     throw new TypeError('Client approval decision must be approved or changes_required')
   }
 
-  const { data, error } = await client.from('approvals').insert({
-    project_id: input.projectId,
-    deliverable_id: input.deliverableId,
-    deliverable_version_id: input.deliverableVersionId,
-    approval_type: 'client_approval',
-    decision: input.decision,
-    rationale: input.rationale?.trim() || '',
-    checklist_result: input.checklistResult || {},
-    decided_by: userId,
-  }).select().single()
+  const { data, error, status } = await client.rpc('decide_governed_deliverable_version', {
+    p_organization_id: input.organizationId,
+    p_deliverable_version_id: input.deliverableVersionId,
+    p_expected_state_version: input.expectedStateVersion,
+    p_decision: input.decision,
+    p_rationale: input.rationale?.trim() || '',
+    p_request_id: input.requestId || crypto.randomUUID(),
+  })
 
   if (error) {
     const failure = new Error(error.message || 'Supabase delivery query failed')
     failure.cause = error
+    failure.status = status ?? error.status ?? error.statusCode
     throw failure
   }
 
