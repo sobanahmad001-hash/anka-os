@@ -131,7 +131,8 @@ test('P3 SQL contract is invoker-only, exact-replay atomic, tenant-scoped, and c
     migration.indexOf('create function public.create_internal_project_setup'),
     migration.indexOf('revoke all on function public.create_internal_project_setup'),
   )
-  assert.equal(migrationNames.at(-1), '20260904090001_p3_internal_project_setup.sql')
+  assert.ok(migrationNames.includes('20260904090001_p3_internal_project_setup.sql'))
+  assert.ok(migrationNames.indexOf('20260904090001_p3_internal_project_setup.sql') < migrationNames.indexOf('20260904120000_p5_unified_planning.sql'))
   assert.match(migration, /language plpgsql[\s\S]*security invoker[\s\S]*set search_path = ''/)
   assert.match(migration, /pg_advisory_xact_lock[\s\S]*normalized_payload_sha256[\s\S]*idempotent_replay/)
   assert.match(migration, /member_kind = 'team'[\s\S]*membership\.status = 'active'/)
