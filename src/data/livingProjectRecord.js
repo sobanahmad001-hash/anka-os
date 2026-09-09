@@ -19,6 +19,10 @@ function compact(value) {
   return value
 }
 
+function activitySummary(item) {
+  return String(item?.action || 'activity').replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
 function countBy(items, key) {
   return (items || []).reduce((counts, item) => {
     const value = item[key] || 'unknown'
@@ -129,12 +133,14 @@ export function buildInternalProjectProjection(workspace, generatedAt = new Date
       required_by: item.required_by,
       owner_id: item.owner_id,
     })),
+    recent_activity_is_complete: false,
     recent_activity: workspace.activities.slice(0, 50).map((item) => compact({
       id: item.id,
-      event_type: item.event_type,
-      entity_type: item.entity_type,
-      entity_id: item.entity_id,
-      summary: item.summary,
+      action: item.action,
+      target_type: item.target_type,
+      target_id: item.target_id,
+      metadata: item.metadata,
+      summary: activitySummary(item),
       actor_id: item.actor_id,
       occurred_at: item.occurred_at,
     })),
@@ -208,12 +214,13 @@ export function buildClientProjectProjection(workspace, generatedAt = new Date()
         required_by: item.required_by,
         resolution_summary: item.resolution_summary,
       })),
+    recent_activity_is_complete: false,
     recent_activity: workspace.activities
       .filter((item) => item.visibility === 'client_visible')
       .slice(0, 25)
       .map((item) => compact({
-        event_type: item.event_type,
-        summary: item.summary,
+        action: item.action,
+        summary: activitySummary(item),
         occurred_at: item.occurred_at,
       })),
   })

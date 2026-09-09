@@ -19,3 +19,15 @@ test('reports and records consumes the active organization and isolates stale pr
   assert.match(screen, /setWorkspace\(null\)/)
   assert.doesNotMatch(screen, /delivery\.listProjects\(\)/)
 })
+
+
+test('snapshot operations are cancelled and invalidated with the active scope', () => {
+  const screen = fs.readFileSync(new URL('../apps/ReportsAndRecords.jsx', import.meta.url), 'utf8')
+  assert.match(screen, /snapshotOperation\.current\.controller\?\.abort\(\)/)
+  assert.match(screen, /snapshotOperation\.current\.id === operationId/)
+  assert.match(screen, /runReportsSnapshotOperation/)
+  assert.match(screen, /createLivingRecordSnapshot\([\s\S]*\}, \{ signal \}\)/)
+  assert.match(screen, /getProjectWorkspace\([\s\S]*\{ signal \}/)
+  assert.match(screen, /onRefreshed: setWorkspace/)
+  assert.match(screen, /Recent activity is a bounded feed, not a complete event record/)
+})

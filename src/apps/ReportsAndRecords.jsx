@@ -8,6 +8,7 @@ import {
   projectProjectionToMarkdown,
 } from '../data/livingProjectRecord.js'
 import { createReportsAndRecordsRepository } from '../data/reportsAndRecordsRepository.js'
+import { runReportsSnapshotOperation } from '../data/reportsAndRecordsOperation.js'
 import { supabase } from '../lib/supabase.js'
 
 const reportsAndRecords = createReportsAndRecordsRepository(supabase)
@@ -75,7 +76,18 @@ export default function ReportsAndRecords() {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const currentScope = useRef({ organizationId: activeOrganizationId, revision: scopeRevision, projectId })
+  const snapshotOperation = useRef({ id: 0, controller: null })
   currentScope.current = { organizationId: activeOrganizationId, revision: scopeRevision, projectId }
+
+  useEffect(() => {
+    snapshotOperation.current.controller?.abort()
+    snapshotOperation.current = { id: snapshotOperation.current.id + 1, controller: null }
+    setSaving(false)
+    return () => {
+      snapshotOperation.current.controller?.abort()
+      snapshotOperation.current = { id: snapshotOperation.current.id + 1, controller: null }
+    }
+  }, [activeOrganizationId, projectId, scopeRevision])
 
   useEffect(() => {
     if (!activeOrganizationId) return undefined
@@ -134,34 +146,54 @@ export default function ReportsAndRecords() {
 
   async function createSnapshot() {
     if (!workspace?.livingRecord?.id || !projection || !user?.id || !activeOrganizationId) return
+    snapshotOperation.current.controller?.abort()
+    const controller = new AbortController()
+    const operationId = snapshotOperation.current.id + 1
+    snapshotOperation.current = { id: operationId, controller }
     const requestedScope = { organizationId: activeOrganizationId, revision: scopeRevision, projectId: workspace.project.id }
+    const isCurrent = () => {
+      const current = currentScope.current
+      return !controller.signal.aborted
+        && snapshotOperation.current.id === operationId
+        && current.organizationId === requestedScope.organizationId
+        && current.revision === requestedScope.revision
+        && current.projectId === requestedScope.projectId
+    }
     setSaving(true)
     setMessage('')
     setError('')
-    try {
-      const snapshot = await reportsAndRecords.createLivingRecordSnapshot({
-        organizationId: activeOrganizationId,
-        projectId: workspace.project.id,
+    await runReportsSnapshotOperation({
+      signal: controller.signal,
+      isCurrent,
+      preserve: (signal) => reportsAndRecords.createLivingRecordSnapshot({
+        organizationId: requestedScope.organizationId,
+        projectId: requestedScope.projectId,
         livingRecordId: workspace.livingRecord.id,
         projectionKind,
         sourceVersion: workspace.livingRecord.source_version || 1,
-        snapshot: projection,
+        requestId: crypto.randomUUID(),
         reason: `${labelize(projectionKind)} reporting checkpoint`,
-      }, user.id)
-      const current = currentScope.current
-      if (current.organizationId !== requestedScope.organizationId || current.revision !== requestedScope.revision || current.projectId !== requestedScope.projectId) return
-      setMessage(`${labelize(snapshot.projection_kind)} snapshot v${snapshot.source_version} is preserved.`)
-      const nextWorkspace = await reportsAndRecords.getProjectWorkspace(workspace.project.id, activeOrganizationId)
-      const refreshed = currentScope.current
-      if (refreshed.organizationId === requestedScope.organizationId && refreshed.revision === requestedScope.revision && refreshed.projectId === requestedScope.projectId) setWorkspace(nextWorkspace)
-    } catch (saveError) {
-      const current = currentScope.current
-      if (current.organizationId === requestedScope.organizationId && current.revision === requestedScope.revision && current.projectId === requestedScope.projectId) {
-        if (!handleOrganizationAccessError(saveError, { membershipMismatch: saveError.membershipMismatch })) setError(saveError.message)
-      }
-    } finally {
-      setSaving(false)
-    }
+      }, { signal }),
+      refresh: (signal) => reportsAndRecords.getProjectWorkspace(
+        requestedScope.projectId,
+        requestedScope.organizationId,
+        { signal },
+      ),
+      onPreserved: (snapshot) => setMessage(
+        `${labelize(snapshot.projection_kind)} snapshot v${snapshot.source_version} is preserved.`,
+      ),
+      onRefreshed: setWorkspace,
+      onError: (saveError) => {
+        if (!handleOrganizationAccessError(saveError, { membershipMismatch: saveError.membershipMismatch })) {
+          setError(saveError.message)
+        }
+      },
+      onFinished: () => {
+        snapshotOperation.current = { id: operationId, controller: null }
+        setSaving(false)
+      },
+    })
+
   }
 
   function exportProjection(format) {
@@ -185,7 +217,7 @@ export default function ReportsAndRecords() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-purple-400">Delivery intelligence</p>
             <h1 className="mt-1 text-2xl font-semibold tracking-tight">Reports & Living Records</h1>
-            <p className="mt-2 max-w-3xl text-sm text-slate-400">Versioned project truth generated from canonical work. Client records contain released information only.</p>
+            <p className="mt-2 max-w-3xl text-sm text-slate-400">Versioned project truth generated from canonical work. Client records contain released information only. Recent activity is a bounded feed, not a complete event record.</p>
           </div>
           <label className="min-w-64 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
             Project
