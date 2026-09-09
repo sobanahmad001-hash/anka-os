@@ -233,51 +233,6 @@ export function createDeliveryRepository(client) {
       }
     },
 
-    async createLivingRecordSnapshot(input, actorId) {
-      assertIdentifier(input?.projectId, 'projectId')
-      assertIdentifier(input?.livingRecordId, 'livingRecordId')
-      assertIdentifier(actorId, 'actorId')
-      if (!['internal', 'client'].includes(input.projectionKind)) {
-        throw new TypeError('Projection kind must be internal or client')
-      }
-      if (!Number.isInteger(input.sourceVersion) || input.sourceVersion < 1) {
-        throw new TypeError('A positive source version is required')
-      }
-
-      const existing = await dataOrThrow(
-        client.from('living_project_document_snapshots')
-          .select('*')
-          .eq('living_project_document_id', input.livingRecordId)
-          .eq('projection_kind', input.projectionKind)
-          .eq('source_version', input.sourceVersion)
-          .limit(1)
-      )
-      if (existing?.[0]) return existing[0]
-
-      const projectionColumn = input.projectionKind === 'client'
-        ? 'client_projection'
-        : 'internal_projection'
-      await dataOrThrow(
-        client.from('living_project_documents').update({
-          [projectionColumn]: input.snapshot,
-          generated_at: new Date().toISOString(),
-        }).eq('id', input.livingRecordId)
-      )
-
-      return dataOrThrow(
-        client.from('living_project_document_snapshots').insert({
-          organization_id: input.organizationId,
-          living_project_document_id: input.livingRecordId,
-          project_id: input.projectId,
-          projection_kind: input.projectionKind,
-          source_version: input.sourceVersion,
-          snapshot: input.snapshot,
-          reason: input.reason?.trim() || 'Manual reporting checkpoint',
-          generated_by: actorId,
-        }).select().single()
-      )
-    },
-
     async getDepartmentWorkspace(departmentId, activeOrganizationId, { signal } = {}) {
       assertDepartment(departmentId)
       const organizationId = requireOrganizationId(activeOrganizationId)

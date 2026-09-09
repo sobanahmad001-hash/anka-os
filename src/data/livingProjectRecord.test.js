@@ -46,12 +46,12 @@ function workspace() {
       ],
     }],
     requests: [
-      { id: 'request-1', title: 'Client revision', status: 'open', visibility: 'client_visible', requested_output: 'Change hero' },
+      { id: 'request-1', title: 'Client revision', status: 'open', visibility: 'client_visible', requested_output: 'Change hero', resolution: 'Canonical resolution detail' },
       { id: 'request-2', title: 'Internal request', status: 'open', visibility: 'internal_only', requested_output: 'Private' },
     ],
     activities: [
-      { id: 'activity-1', event_type: 'release', summary: 'Homepage released', visibility: 'client_visible', occurred_at: '2026-08-25T10:00:00Z' },
-      { id: 'activity-2', event_type: 'note', summary: 'Private note', visibility: 'internal_only', occurred_at: '2026-08-25T09:00:00Z' },
+      { id: 'activity-1', action: 'deliverable.released', target_type: 'deliverable_version', metadata: { internal_note: 'not projected' }, visibility: 'client_visible', occurred_at: '2026-08-25T10:00:00Z' },
+      { id: 'activity-2', action: 'private_note', target_type: 'comment', metadata: { note: 'Private note' }, visibility: 'internal_only', occurred_at: '2026-08-25T09:00:00Z' },
     ],
     portalItems: [{ source_type: 'deliverable_version', source_id: 'version-1', released_at: '2026-08-25T10:00:00Z' }],
   }
@@ -60,6 +60,13 @@ function workspace() {
 test('internal living record preserves operational detail', () => {
   const projection = buildInternalProjectProjection(workspace(), '2026-08-25T12:00:00Z')
   assert.equal(projection.source_version, 7)
+  assert.deepEqual(projection.progress, {
+    workstreams: { active: 2 },
+    tasks: { in_progress: 1 },
+    milestones: { planned: 2 },
+    deliverables: { client_reviewing: 1 },
+    requests: { open: 2 },
+  })
   assert.equal(projection.tasks[0].acceptance_criteria, 'Private test')
   assert.equal(projection.research[0].findings, 'Private findings')
   assert.equal(projection.project.scope_statement, 'Confidential scope.')
@@ -68,11 +75,22 @@ test('internal living record preserves operational detail', () => {
 test('client living record includes released and explicitly visible information only', () => {
   const projection = buildClientProjectProjection(workspace(), '2026-08-25T12:00:00Z')
   assert.equal(projection.project.summary, 'The approved public progress summary.')
+  assert.deepEqual(projection.progress, {
+    visible_workstreams: 1,
+    completed_milestones: 0,
+    released_deliverables: 1,
+    open_client_requests: 1,
+  })
   assert.deepEqual(projection.workstreams.map((item) => item.name), ['Design'])
   assert.deepEqual(projection.milestones.map((item) => item.name), ['Visible launch'])
   assert.deepEqual(projection.deliverables[0].versions.map((item) => item.id), ['version-1'])
   assert.deepEqual(projection.requests.map((item) => item.id), ['request-1'])
-  assert.deepEqual(projection.recent_activity.map((item) => item.summary), ['Homepage released'])
+  assert.equal(projection.requests[0].resolution_summary, 'Canonical resolution detail')
+  assert.deepEqual(projection.recent_activity[0], {
+    action: 'deliverable.released',
+    summary: 'Deliverable Released',
+    occurred_at: '2026-08-25T10:00:00Z',
+  })
 })
 
 test('client projection recursively excludes sensitive operational keys and values', () => {

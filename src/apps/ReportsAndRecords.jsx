@@ -1,12 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useAuth } from '../context/AuthContext.jsx'
-import { delivery } from '../data/delivery.js'
+import { useOrganization } from '../context/OrganizationContext.jsx'
 import {
   buildClientProjectProjection,
   buildInternalProjectProjection,
   projectProjectionToMarkdown,
 } from '../data/livingProjectRecord.js'
+import { createReportsAndRecordsRepository } from '../data/reportsAndRecordsRepository.js'
+import { canPreserveReportsSnapshot, runReportsSnapshotOperation } from '../data/reportsAndRecordsOperation.js'
+import { supabase } from '../lib/supabase.js'
+
+const reportsAndRecords = createReportsAndRecordsRepository(supabase)
 
 const BUTTON = 'rounded-xl border border-slate-700 px-3.5 py-2 text-sm font-medium text-slate-200 transition hover:border-purple-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50'
 
@@ -61,6 +66,7 @@ function StatusRows({ items, empty, titleKey = 'title' }) {
 
 export default function ReportsAndRecords() {
   const { user } = useAuth()
+  const { activeOrganizationId, activeMembership, scopeRevision, handleOrganizationAccessError } = useOrganization()
   const [projects, setProjects] = useState([])
   const [projectId, setProjectId] = useState('')
   const [workspace, setWorkspace] = useState(null)
@@ -69,34 +75,64 @@ export default function ReportsAndRecords() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const currentScope = useRef({ organizationId: activeOrganizationId, revision: scopeRevision, projectId })
+  const snapshotOperation = useRef({ id: 0, controller: null })
+  currentScope.current = { organizationId: activeOrganizationId, revision: scopeRevision, projectId }
 
   useEffect(() => {
+    snapshotOperation.current.controller?.abort()
+    snapshotOperation.current = { id: snapshotOperation.current.id + 1, controller: null }
+    setSaving(false)
+    return () => {
+      snapshotOperation.current.controller?.abort()
+      snapshotOperation.current = { id: snapshotOperation.current.id + 1, controller: null }
+    }
+  }, [activeOrganizationId, projectId, scopeRevision])
+
+  useEffect(() => {
+    if (!activeOrganizationId) return undefined
     let active = true
-    delivery.listProjects()
+    const controller = new AbortController()
+    setProjects([])
+    setProjectId('')
+    setWorkspace(null)
+    setMessage('')
+    setError('')
+    setLoading(true)
+    reportsAndRecords.listProjects(activeOrganizationId, { signal: controller.signal })
       .then((rows) => {
-        if (!active) return
+        if (!active || controller.signal.aborted) return
         setProjects(rows || [])
         setProjectId(rows?.[0]?.id || '')
       })
-      .catch((loadError) => active && setError(loadError.message))
-      .finally(() => active && setLoading(false))
-    return () => { active = false }
-  }, [])
+      .catch((loadError) => {
+        if (!active || controller.signal.aborted) return
+        if (!handleOrganizationAccessError(loadError, { membershipMismatch: loadError.membershipMismatch })) setError(loadError.message)
+      })
+      .finally(() => active && !controller.signal.aborted && setLoading(false))
+    return () => { active = false; controller.abort() }
+  }, [activeOrganizationId, handleOrganizationAccessError, scopeRevision])
 
   useEffect(() => {
-    if (!projectId) {
+    if (!projectId || !activeOrganizationId) {
       setWorkspace(null)
-      return
+      return undefined
     }
     let active = true
+    const controller = new AbortController()
     setLoading(true)
+    setWorkspace(null)
+    setMessage('')
     setError('')
-    delivery.getProjectWorkspace(projectId)
-      .then((data) => active && setWorkspace(data))
-      .catch((loadError) => active && setError(loadError.message))
-      .finally(() => active && setLoading(false))
-    return () => { active = false }
-  }, [projectId])
+    reportsAndRecords.getProjectWorkspace(projectId, activeOrganizationId, { signal: controller.signal })
+      .then((data) => active && !controller.signal.aborted && setWorkspace(data))
+      .catch((loadError) => {
+        if (!active || controller.signal.aborted) return
+        if (!handleOrganizationAccessError(loadError, { membershipMismatch: loadError.membershipMismatch })) setError(loadError.message)
+      })
+      .finally(() => active && !controller.signal.aborted && setLoading(false))
+    return () => { active = false; controller.abort() }
+  }, [activeOrganizationId, handleOrganizationAccessError, projectId, scopeRevision])
 
   const projections = useMemo(() => {
     if (!workspace) return null
@@ -107,29 +143,62 @@ export default function ReportsAndRecords() {
     }
   }, [workspace])
   const projection = projections?.[projectionKind]
+  const canPreserveSnapshot = canPreserveReportsSnapshot({
+    membership: activeMembership,
+    userId: user?.id,
+    projectOwnerId: workspace?.project?.owner_id,
+  })
 
   async function createSnapshot() {
-    if (!workspace?.livingRecord?.id || !projection || !user?.id) return
+    if (!canPreserveSnapshot || !workspace?.livingRecord?.id || !projection || !user?.id || !activeOrganizationId) return
+    snapshotOperation.current.controller?.abort()
+    const controller = new AbortController()
+    const operationId = snapshotOperation.current.id + 1
+    snapshotOperation.current = { id: operationId, controller }
+    const requestedScope = { organizationId: activeOrganizationId, revision: scopeRevision, projectId: workspace.project.id }
+    const isCurrent = () => {
+      const current = currentScope.current
+      return !controller.signal.aborted
+        && snapshotOperation.current.id === operationId
+        && current.organizationId === requestedScope.organizationId
+        && current.revision === requestedScope.revision
+        && current.projectId === requestedScope.projectId
+    }
     setSaving(true)
     setMessage('')
     setError('')
-    try {
-      const snapshot = await delivery.createLivingRecordSnapshot({
-        organizationId: workspace.project.organization_id,
-        projectId: workspace.project.id,
+    await runReportsSnapshotOperation({
+      signal: controller.signal,
+      isCurrent,
+      preserve: (signal) => reportsAndRecords.createLivingRecordSnapshot({
+        organizationId: requestedScope.organizationId,
+        projectId: requestedScope.projectId,
         livingRecordId: workspace.livingRecord.id,
         projectionKind,
         sourceVersion: workspace.livingRecord.source_version || 1,
-        snapshot: projection,
+        requestId: crypto.randomUUID(),
         reason: `${labelize(projectionKind)} reporting checkpoint`,
-      }, user.id)
-      setMessage(`${labelize(snapshot.projection_kind)} snapshot v${snapshot.source_version} is preserved.`)
-      setWorkspace(await delivery.getProjectWorkspace(workspace.project.id))
-    } catch (saveError) {
-      setError(saveError.message)
-    } finally {
-      setSaving(false)
-    }
+      }, { signal }),
+      refresh: (signal) => reportsAndRecords.getProjectWorkspace(
+        requestedScope.projectId,
+        requestedScope.organizationId,
+        { signal },
+      ),
+      onPreserved: (snapshot) => setMessage(
+        `${labelize(snapshot.projection_kind)} snapshot v${snapshot.source_version} is preserved.`,
+      ),
+      onRefreshed: setWorkspace,
+      onError: (saveError) => {
+        if (!handleOrganizationAccessError(saveError, { membershipMismatch: saveError.membershipMismatch })) {
+          setError(saveError.message)
+        }
+      },
+      onFinished: () => {
+        snapshotOperation.current = { id: operationId, controller: null }
+        setSaving(false)
+      },
+    })
+
   }
 
   function exportProjection(format) {
@@ -153,7 +222,7 @@ export default function ReportsAndRecords() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-purple-400">Delivery intelligence</p>
             <h1 className="mt-1 text-2xl font-semibold tracking-tight">Reports & Living Records</h1>
-            <p className="mt-2 max-w-3xl text-sm text-slate-400">Versioned project truth generated from canonical work. Client records contain released information only.</p>
+            <p className="mt-2 max-w-3xl text-sm text-slate-400">Versioned project truth generated from canonical work. Client records contain released information only. Recent activity is a bounded feed, not a complete event record.</p>
           </div>
           <label className="min-w-64 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
             Project
@@ -180,7 +249,7 @@ export default function ReportsAndRecords() {
                 ))}
               </div>
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={createSnapshot} disabled={saving} className={BUTTON}>{saving ? 'Preserving…' : 'Preserve snapshot'}</button>
+                <button type="button" onClick={createSnapshot} disabled={saving || !canPreserveSnapshot} title={canPreserveSnapshot ? undefined : 'Snapshot preservation requires organization authority or assignment as project owner.'} className={BUTTON}>{saving ? 'Preserving…' : 'Preserve snapshot'}</button>
                 <button type="button" onClick={() => exportProjection('markdown')} className={BUTTON}>Export Markdown</button>
                 <button type="button" onClick={() => exportProjection('json')} className={BUTTON}>Export JSON</button>
                 <button type="button" onClick={() => window.print()} className={BUTTON}>Print / Save PDF</button>
