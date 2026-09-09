@@ -195,14 +195,17 @@ export default function DepartmentWorkshop({ departmentId }) {
     workstream.project_id === projectId && workstream.id !== selectedWorkstreamId
   ))
 
-  async function runMutation(action) {
+  async function runMutation(action, staleIntent = '') {
     setSaving(true)
     setError('')
     try {
       await action()
       await loadWorkspace()
     } catch (mutationError) {
-      setError(mutationError.message)
+      if (mutationError?.status === 409 && staleIntent) {
+        await loadWorkspace()
+        setError(`${mutationError.message} Intended ${staleIntent} was not applied; review the refreshed task before retrying.`)
+      } else setError(mutationError.message)
     } finally {
       setSaving(false)
     }
@@ -383,7 +386,7 @@ export default function DepartmentWorkshop({ departmentId }) {
             </div>
 
             <div className="mt-6 grid gap-5 xl:grid-cols-[1fr_350px]">
-              <WorkspaceList activeTab={activeTab} data={visibleData} workspace={workspace} selectedWorkstreamId={selectedWorkstreamId} onTransition={(taskId, status) => runMutation(() => delivery.transitionTask(taskId, status))} saving={saving} />
+              <WorkspaceList activeTab={activeTab} data={visibleData} workspace={workspace} selectedWorkstreamId={selectedWorkstreamId} onTransition={(task, status) => runMutation(() => delivery.transitionTask(task.id, status, task.completion_evidence || '', task.row_version, activeOrganizationId), `Project Task status ${labelize(status)}`)} saving={saving} />
               <ActionPanel activeTab={activeTab} saving={saving} taskForm={taskForm} setTaskForm={setTaskForm} researchForm={researchForm} setResearchForm={setResearchForm} deliverableForm={deliverableForm} setDeliverableForm={setDeliverableForm} requestForm={requestForm} setRequestForm={setRequestForm} receivingWorkstreams={receivingWorkstreams} onCreateTask={createTask} onCreateResearch={createResearch} onCreateDeliverable={createDeliverable} onCreateRequest={createRequest} />
             </div>
           </>
@@ -399,7 +402,7 @@ function WorkspaceList({ activeTab, data, workspace, selectedWorkstreamId, onTra
   const workstreamNames = new Map(workspace.relatedWorkstreams.map((workstream) => [workstream.id, workstream.name]))
 
   if (activeTab === 'tasks') {
-    return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><Header title="Project Tasks" description="Canonical project-level tasks owned by this department workstream." />{data.tasks.length === 0 ? <Empty title="No Project Tasks in this workstream" description="Add the first task using the action panel." /> : <div className="space-y-3">{data.tasks.map((task) => <div key={task.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium text-white">{task.title}</p><p className="mt-1 text-xs text-slate-500">{projectNames.get(task.project_id)} · Due {dateLabel(task.due_date)}</p></div><Badge tone={task.status === 'blocked' ? 'red' : task.status === 'done' ? 'emerald' : 'blue'}>{labelize(task.status)}</Badge></div>{task.acceptance_criteria && <p className="mt-3 text-sm leading-6 text-slate-400">Acceptance: {task.acceptance_criteria}</p>}<div className="mt-4 flex flex-wrap gap-2">{(TASK_TRANSITIONS[task.status] || []).map((status) => <button disabled={saving} type="button" key={status} onClick={() => onTransition(task.id, status)} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:border-purple-600 hover:text-white disabled:opacity-50">Move to {labelize(status)}</button>)}</div></div>)}</div>}</section>
+      return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><Header title="Project Tasks" description="Canonical project-level tasks owned by this department workstream." />{data.tasks.length === 0 ? <Empty title="No Project Tasks in this workstream" description="Add the first task using the action panel." /> : <div className="space-y-3">{data.tasks.map((task) => <div key={task.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium text-white">{task.title}</p><p className="mt-1 text-xs text-slate-500">{projectNames.get(task.project_id)} · Due {dateLabel(task.due_date)}</p></div><Badge tone={task.status === 'blocked' ? 'red' : task.status === 'done' ? 'emerald' : 'blue'}>{labelize(task.status)}</Badge></div>{task.acceptance_criteria && <p className="mt-3 text-sm leading-6 text-slate-400">Acceptance: {task.acceptance_criteria}</p>}<div className="mt-4 flex flex-wrap gap-2">{(TASK_TRANSITIONS[task.status] || []).map((status) => <button disabled={saving} type="button" key={status} onClick={() => onTransition(task, status)} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:border-purple-600 hover:text-white disabled:opacity-50">Move to {labelize(status)}</button>)}</div></div>)}</div>}</section>
   }
 
   if (activeTab === 'engagement-work') return <ListSection title="Engagement Work Items" description="Engagement-level commitments remain separate from Project Tasks and are managed in their owning engagement." emptyTitle="No Engagement Work Items">{data.workItems.map((item) => <Record key={item.id} title={item.title} meta={`${item.engagements?.name || 'Engagement'} · Due ${dateLabel(item.due_date)}`} badge={item.status}><p>{item.description || 'No description provided.'}</p></Record>)}</ListSection>

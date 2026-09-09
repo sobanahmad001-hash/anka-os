@@ -37,6 +37,7 @@ export const EMPTY_WORK_ITEM = Object.freeze({
   start_date: '',
   due_date: '',
   position: 0,
+  row_version: null,
 })
 
 export function artifactRoute(artifactType) {
@@ -129,6 +130,13 @@ export function workItemSaveInput(item, engagementId, overrides = {}) {
     startDate: next.start_date || null,
     dueDate: next.due_date || null,
     position: Math.max(0, Number(next.position || 0)),
+    ...(next.organization_id || overrides.organizationId
+      ? { organizationId: next.organization_id || overrides.organizationId }
+      : {}),
+    ...(next.created_via ? { created_via: next.created_via } : {}),
+    ...(next.id && Number.isSafeInteger(Number(next.row_version)) && Number(next.row_version) > 0
+      ? { expectedRowVersion: Number(next.row_version) }
+      : {}),
   }
 }
 

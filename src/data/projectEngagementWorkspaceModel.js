@@ -37,6 +37,7 @@ export function buildProjectEngagementWorkspace(snapshot, options = {}) {
   const workstreams = snapshot.workstreams.filter((item) => sameProject(item, project)).map((item) => ({ ...item, owner: owner(item.owner_id) }))
   const workstreamIds = new Set(workstreams.map((item) => item.id))
   const tasks = snapshot.tasks.filter((item) => sameProject(item, project) && !item.archived_at).map((item) => ({ ...item, owner: owner(item.assigned_to), workstreamName: workstreams.find((row) => row.id === item.workstream_id)?.name || 'Shared project work', overdue: !CLOSED_PROJECT_TASK.has(item.status) && !onTime(item.due_date, today) }))
+  const taskIds = new Set(tasks.map(item => item.id))
   const milestones = snapshot.milestones.filter((item) => sameProject(item, project) && !item.archived_at).map((item) => ({ ...item, owner: owner(item.owner_id), overdue: !CLOSED_MILESTONE.has(item.status) && !onTime(item.target_date, today) }))
   const deliverables = snapshot.deliverables.filter((item) => sameProject(item, project) && !item.archived_at && workstreamIds.has(item.workstream_id))
   const deliverableIds = new Set(deliverables.map((item) => item.id))
@@ -66,6 +67,7 @@ export function buildProjectEngagementWorkspace(snapshot, options = {}) {
   const journey = stages.map((stage) => ({ ...stage, blockers: (dependenciesByStage.get(stage.id) || []).map((item) => stageById.get(item.depends_on_stage_instance_id)?.name).filter(Boolean) }))
   const prerequisites = engagement ? snapshot.prerequisites.filter((item) => sameOrg(item, project) && item.engagement_id === engagement.id && stageIds.has(item.target_stage_instance_id)) : []
   const workItems = engagement ? snapshot.workItems.filter((item) => sameProject(item, project) && item.engagement_id === engagement.id && !item.deleted_at).map((item) => ({ ...item, owner: owner(item.assignee_id), overdue: !CLOSED_WORK_ITEM.has(item.status) && !onTime(item.due_date, today) })) : []
+  const workItemIds = new Set(workItems.map(item => item.id))
 
   const artifacts = engagement ? snapshot.artifacts.filter((item) => sameProject(item, project) && item.engagement_id === engagement.id) : []
   const artifactIds = new Set(artifacts.map((item) => item.id))
@@ -167,6 +169,9 @@ export function buildProjectEngagementWorkspace(snapshot, options = {}) {
     milestones,
     projectTasks: tasks,
     engagementWorkItems: workItems,
+    taskDependencies: (snapshot.taskDependencies || []).filter(item => sameProject(item, project) && taskIds.has(item.task_id) && taskIds.has(item.depends_on_task_id)),
+    workItemDependencies: (snapshot.workItemDependencies || []).filter(item => sameOrg(item, project) && workItemIds.has(item.work_item_id) && workItemIds.has(item.depends_on_work_item_id)),
+    teamMembers: [...membershipKeys].map(id => ({ id, name: owner(id).name })),
     services,
     activeServices,
     existingAssets,

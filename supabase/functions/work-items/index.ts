@@ -5,12 +5,13 @@ type Json = Record<string, unknown>
 
 const ACTIONS = new Set([
   'save', 'delete', 'add_dependency', 'remove_dependency',
-  'acknowledge_automation_flag', 'generate_content_tasks',
+  'acknowledge_automation_flag', 'generate_content_tasks', 'move',
+  'update_project_task', 'transition_task', 'set_timezone',
 ])
 const WORK_ITEM_TYPES = new Set(['task', 'bug', 'request'])
 const PRIORITIES = new Set(['low', 'medium', 'high', 'urgent'])
 const STATUSES = new Set(['not_started', 'in_progress', 'blocked', 'done'])
-const CREATED_VIA = new Set(['manual', 'ai_chat_proposal', 'automation_rule'])
+const CREATED_VIA = new Set(['manual', 'ai_chat_proposal', 'automation_rule', 'recurring_plan', 'quick_task_promotion'])
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -32,9 +33,55 @@ function optionalId(value: unknown) {
   return text(value, 80) || null
 }
 
+export function selectedOrganizationId(input: Json) {
+  const camelCase = optionalId(input.organizationId)
+  const snakeCase = optionalId(input.organization_id)
+  if (camelCase && snakeCase && camelCase !== snakeCase) throw new Error('Organization fields must match')
+  return camelCase || snakeCase
+}
+
+type EngagementScopeQuery = {
+  select: (columns: string) => EngagementScopeQuery
+  eq: (column: string, value: string) => EngagementScopeQuery
+  maybeSingle: () => Promise<{ data: { id: string, organization_id: string } | null, error: { message?: string, status?: number } | null }>
+}
+type EngagementScopeClient = { from: (table: string) => EngagementScopeQuery }
+
+export async function requireGenerateContentScope(client: EngagementScopeClient, organizationId: string, engagementId: string) {
+  const { data, error } = await client.from('engagements')
+    .select('id, organization_id')
+    .eq('id', engagementId)
+    .eq('organization_id', organizationId)
+    .maybeSingle()
+  if (error) throw Object.assign(new Error(error.message || 'Unable to verify engagement organization'), { status: error.status || 400 })
+  if (!data || data.organization_id !== organizationId) {
+    throw Object.assign(new Error('Engagement is unavailable in the active organization'), { status: 403 })
+  }
+  return data
+}
+
 function optionalDate(value: unknown) {
   const normalized = text(value, 10)
   return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : null
+}
+
+function expectedVersion(value: unknown, required = true) {
+  if (value == null && !required) return null
+  const version = Number(value)
+  if (!Number.isSafeInteger(version) || version < 1) throw new Error('Expected row version is required')
+  return version
+}
+
+export function staleWrite(error: unknown) {
+  if (!error || typeof error !== 'object' || !('message' in error)) return null
+  const message = String(error.message)
+  const start = message.indexOf('{')
+  const end = message.lastIndexOf('}')
+  if (start < 0 || end < start) return null
+  try {
+    const parsed = JSON.parse(message.slice(start, end + 1)) as Json
+    return parsed.code === 'stale_write' ? parsed : null
+  } catch { return null }
 }
 
 export function normalizeWorkItemInput(input: Json) {
@@ -54,6 +101,7 @@ export function normalizeWorkItemInput(input: Json) {
   if (startDate && dueDate && dueDate < startDate) throw new Error('Due date cannot be before start date')
   if (!CREATED_VIA.has(createdVia)) throw new Error('Unsupported created_via value')
   return {
+    p_organization_id: optionalId(input.organizationId),
     p_work_item_id: optionalId(input.workItemId),
     p_engagement_id: engagementId,
     p_title: title,
@@ -70,6 +118,7 @@ export function normalizeWorkItemInput(input: Json) {
     p_due_date: dueDate,
     p_position: Math.max(0, Number.isInteger(input.position) ? Number(input.position) : 0),
     p_parent_work_item_id: optionalId(input.parentWorkItemId),
+    p_expected_row_version: expectedVersion(input.expectedRowVersion, Boolean(optionalId(input.workItemId))),
     p_created_via: createdVia,
   }
 }
@@ -91,7 +140,7 @@ async function requireContext(request: Request) {
   })
   const { data: { user }, error } = await userClient.auth.getUser()
   if (error || !user) throw Object.assign(new Error('Authentication required'), { status: 401 })
-  return { admin, user }
+  return { admin, user, userClient }
 }
 
 export async function handleRequest(request: Request) {
@@ -101,10 +150,62 @@ export async function handleRequest(request: Request) {
     const body = await request.json() as Json
     const action = text(body.action, 40)
     if (!ACTIONS.has(action)) return response({ error: 'Unsupported action' }, 400)
-    const { admin, user } = await requireContext(request)
+    const { admin, user, userClient } = await requireContext(request)
+    const organizationId = selectedOrganizationId(body)
+    if (!organizationId) return response({ error: 'Active organization is required' }, 400)
+    if (action === 'update_project_task') {
+      const taskId = optionalId(body.taskId)
+      if (!taskId) return response({ error: 'Project Task is required' }, 400)
+      const status = text(body.status, 40)
+      if (!['backlog', 'ready', 'in_progress', 'blocked', 'ready_for_review', 'changes_required', 'done', 'cancelled'].includes(status)) return response({ error: 'Unsupported Project Task status' }, 400)
+      const { data, error } = await admin.rpc('update_p5_project_task', {
+        p_organization_id: organizationId, p_task_id: taskId,
+        p_expected_row_version: expectedVersion(body.expectedRowVersion), p_status: status,
+        p_assigned_to: optionalId(body.assignedTo), p_due_date: optionalDate(body.dueDate),
+        p_completion_evidence: text(body.completionEvidence), p_actor_id: user.id,
+      })
+      if (error) throw error
+      return response({ data })
+    }
+    if (action === 'transition_task') {
+      const taskId = optionalId(body.taskId)
+      if (!taskId) return response({ error: 'Project Task is required' }, 400)
+      const status = text(body.status, 40)
+      if (!['backlog', 'ready', 'in_progress', 'blocked', 'ready_for_review', 'changes_required', 'done', 'cancelled'].includes(status)) return response({ error: 'Unsupported Project Task status' }, 400)
+      const { data, error } = await admin.rpc('transition_p5_project_task', {
+        p_organization_id: organizationId, p_task_id: taskId,
+        p_expected_row_version: expectedVersion(body.expectedRowVersion), p_status: status,
+        p_completion_evidence: text(body.completionEvidence), p_actor_id: user.id,
+      })
+      if (error) throw error
+      return response({ data })
+    }
+    if (action === 'move') {
+      const workItemId = optionalId(body.workItemId)
+      if (!workItemId) return response({ error: 'Work item is required' }, 400)
+      const { data, error } = await admin.rpc('move_p5_work_item', {
+        p_organization_id: organizationId, p_work_item_id: workItemId,
+        p_expected_row_version: expectedVersion(body.expectedRowVersion),
+        p_target_status: text(body.targetStatus, 40), p_before_work_item_id: optionalId(body.beforeWorkItemId),
+        p_actor_id: user.id,
+      })
+      if (error) throw error
+      return response({ data })
+    }
+    if (action === 'set_timezone') {
+      const recordId = optionalId(body.recordId)
+      if (!recordId) return response({ error: 'Timezone target is required' }, 400)
+      const { data, error } = await admin.rpc('set_p5_planning_timezone', {
+        p_organization_id: organizationId, p_record_kind: text(body.recordKind, 20),
+        p_record_id: recordId, p_timezone: text(body.timezone, 120) || null, p_actor_id: user.id,
+      })
+      if (error) throw error
+      return response({ data })
+    }
     if (action === 'generate_content_tasks') {
       const engagementId = optionalId(body.engagementId)
       if (!engagementId) return response({ error: 'Engagement is required' }, 400)
+      await requireGenerateContentScope(userClient as unknown as EngagementScopeClient, organizationId, engagementId)
       const { data, error } = await admin.rpc('generate_content_page_work_items', {
         p_engagement_id: engagementId,
         p_actor_id: user.id,
@@ -115,8 +216,10 @@ export async function handleRequest(request: Request) {
     if (action === 'acknowledge_automation_flag') {
       const workItemId = optionalId(body.workItemId)
       if (!workItemId) return response({ error: 'Work item is required' }, 400)
-      const { data, error } = await admin.rpc('acknowledge_work_item_automation_flag', {
+      const { data, error } = await admin.rpc('acknowledge_p5_work_item_flag', {
+        p_organization_id: organizationId,
         p_work_item_id: workItemId,
+        p_expected_row_version: expectedVersion(body.expectedRowVersion),
         p_actor_id: user.id,
       })
       if (error) throw error
@@ -126,10 +229,12 @@ export async function handleRequest(request: Request) {
       const workItemId = optionalId(body.workItemId)
       const dependsOnWorkItemId = optionalId(body.dependsOnWorkItemId)
       if (!workItemId || !dependsOnWorkItemId) return response({ error: 'Both work items are required' }, 400)
-      const functionName = action === 'add_dependency' ? 'save_work_item_dependency' : 'remove_work_item_dependency'
-      const { data, error } = await admin.rpc(functionName, {
+      const { data, error } = await admin.rpc('mutate_p5_work_item_dependency', {
+        p_organization_id: organizationId,
+        p_action: action === 'add_dependency' ? 'add' : 'remove',
         p_work_item_id: workItemId,
         p_depends_on_work_item_id: dependsOnWorkItemId,
+        p_expected_row_version: expectedVersion(body.expectedRowVersion),
         p_actor_id: user.id,
       })
       if (error) throw error
@@ -138,15 +243,17 @@ export async function handleRequest(request: Request) {
     if (action === 'delete') {
       const workItemId = optionalId(body.workItemId)
       if (!workItemId) return response({ error: 'Work item is required' }, 400)
-      const { data, error } = await admin.rpc('soft_delete_work_item', {
+      const { data, error } = await admin.rpc('delete_p5_work_item', {
+        p_organization_id: organizationId,
         p_work_item_id: workItemId,
+        p_expected_row_version: expectedVersion(body.expectedRowVersion),
         p_actor_id: user.id,
       })
       if (error) throw error
       return response({ data })
     }
     const input = normalizeWorkItemInput(body)
-    const { data, error } = await admin.rpc('save_work_item', {
+    const { data, error } = await admin.rpc('save_p5_work_item', {
       ...input,
       p_actor_id: user.id,
     })
@@ -154,6 +261,8 @@ export async function handleRequest(request: Request) {
     return response({ data })
   } catch (error) {
     console.error('Work Items failure', error)
+    const stale = staleWrite(error)
+    if (stale) return response({ error: stale }, 409)
     const status = typeof error === 'object' && error && 'status' in error ? Number(error.status) : 400
     return response(
       { error: error instanceof Error ? error.message : 'Unexpected Work Items error' },

@@ -88,7 +88,7 @@ export default function MyWork() {
     if (user?.id && !organizationLoading && !selectionRequired && activeOrganizationId) loadWorkspace()
   }, [activeOrganizationId, loadWorkspace, organizationLoading, scopeRevision, selectionRequired, user?.id])
 
-  async function mutate(key, action) {
+  async function mutate(key, action, staleIntent = '') {
     setSaving(key)
     setError('')
     try {
@@ -96,7 +96,10 @@ export default function MyWork() {
       await loadWorkspace()
     } catch (mutationError) {
       handleOrganizationAccessError(mutationError, { membershipMismatch: mutationError.membershipMismatch })
-      setError(mutationError.message)
+      if (mutationError?.status === 409 && staleIntent) {
+        await loadWorkspace()
+        setError(`${mutationError.message} Intended ${staleIntent} was not applied; review the refreshed task before retrying.`)
+      } else setError(mutationError.message)
     } finally {
       setSaving('')
     }
@@ -163,7 +166,7 @@ export default function MyWork() {
 
       <main className="p-6">
         {activeTab === 'overview' && <ReadinessOverview readiness={readiness} plan={plan} />}
-        {activeTab === 'tasks' && <TaskQueue tasks={workspace?.tasks || []} saving={saving} onTransition={(task, status) => mutate(`task-${task.id}`, () => delivery.transitionTask(task.id, status))} />}
+        {activeTab === 'tasks' && <TaskQueue tasks={workspace?.tasks || []} saving={saving} onTransition={(task, status) => mutate(`task-${task.id}`, () => delivery.transitionTask(task.id, status, task.completion_evidence || '', task.row_version, activeOrganizationId), `Project Task status ${labelize(status)}`)} />}
         {activeTab === 'engagement-work' && <WorkItemQueue items={workspace?.workItems || []} />}
         {activeTab === 'handoffs' && <RequestQueue requests={workspace?.requests || []} />}
         {activeTab === 'deliverables' && <DeliverableQueue deliverables={workspace?.deliverables || []} saving={saving} onCreateVersion={item => { setVersionTarget(item); setVersionForm({ title: item.title, changeSummary: '', previewUrl: '', file: null }) }} onSubmitReview={version => mutate(`submit-${version.id}`, () => delivery.transitionDeliverableVersion(version.id, 'ready_for_internal_review'))} />}

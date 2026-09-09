@@ -1,4 +1,4 @@
-import { normalizeWorkItemInput } from './index.ts'
+import { normalizeWorkItemInput, requireGenerateContentScope, selectedOrganizationId, staleWrite } from './index.ts'
 
 function equal(actual: unknown, expected: unknown) {
   if (actual !== expected) throw new Error(`Expected ${String(expected)}, received ${String(actual)}`)
@@ -29,6 +29,12 @@ Deno.test('normalizes the fixed W1 work item fields', () => {
   equal(input.p_assignee_id, null)
   equal(input.p_position, 0)
   equal(input.p_parent_work_item_id, 'parent-1')
+  equal(input.p_expected_row_version, null)
+})
+
+Deno.test('requires a positive expected row version for existing work items', () => {
+  equal(normalizeWorkItemInput({ organizationId: 'org', engagementId: 'e', workItemId: 'w', title: 'Task', expectedRowVersion: 7 }).p_expected_row_version, 7)
+  throws(() => normalizeWorkItemInput({ organizationId: 'org', engagementId: 'e', workItemId: 'w', title: 'Task' }), /Expected row version/)
 })
 
 Deno.test('rejects unsupported vocabulary and impossible date ranges', () => {
@@ -53,5 +59,50 @@ Deno.test('supports work item created_via provenance normalization and validatio
   })
   equal(inputWithDefault.p_created_via, 'manual')
   equal(inputWithAi.p_created_via, 'ai_chat_proposal')
+  equal(normalizeWorkItemInput({ engagementId: 'e', title: 'Recurring', created_via: 'recurring_plan' }).p_created_via, 'recurring_plan')
+  equal(normalizeWorkItemInput({ engagementId: 'e', title: 'Promoted', created_via: 'quick_task_promotion' }).p_created_via, 'quick_task_promotion')
   throws(invalidInput, /Unsupported created_via/)
+})
+
+Deno.test('maps only exact database stale-write payloads', () => {
+  const payload = staleWrite({ message: 'ERROR: {\"code\":\"stale_write\",\"recordKind\":\"project_task\",\"recordId\":\"task-1\",\"expectedRowVersion\":2,\"currentRowVersion\":3}' })
+  equal(payload?.code, 'stale_write')
+  equal(payload?.recordKind, 'project_task')
+  equal(payload?.expectedRowVersion, 2)
+  equal(staleWrite({ message: 'ordinary failure' }), null)
+})
+
+Deno.test('accepts Content Studio snake-case organization compatibility and rejects ambiguity', () => {
+  equal(selectedOrganizationId({ organization_id: 'org-a' }), 'org-a')
+  equal(selectedOrganizationId({ organizationId: 'org-a' }), 'org-a')
+  equal(selectedOrganizationId({ organizationId: 'org-a', organization_id: 'org-a' }), 'org-a')
+  throws(() => selectedOrganizationId({ organizationId: 'org-a', organization_id: 'org-b' }), /must match/)
+})
+
+Deno.test('content generation scopes the engagement to the selected organization', async () => {
+  const filters: Array<[string, string]> = []
+  const client = { from(table: string) {
+    equal(table, 'engagements')
+    const query = {
+      select() { return query },
+      eq(column: string, value: string) { filters.push([column, value]); return query },
+      maybeSingle: async () => ({ data: { id: 'engagement-a', organization_id: 'org-a' }, error: null }),
+    }
+    return query
+  } }
+  await requireGenerateContentScope(client, 'org-a', 'engagement-a')
+  equal(JSON.stringify(filters), JSON.stringify([['id', 'engagement-a'], ['organization_id', 'org-a']]))
+})
+
+Deno.test('content generation rejects an engagement outside the selected organization', async () => {
+  const client = { from() {
+    const query = { select() { return query }, eq() { return query }, maybeSingle: async () => ({ data: null, error: null }) }
+    return query
+  } }
+  let rejected = false
+  try { await requireGenerateContentScope(client, 'org-b', 'engagement-a') } catch (error) {
+    rejected = true
+    equal((error as { status?: number }).status, 403)
+  }
+  equal(rejected, true)
 })

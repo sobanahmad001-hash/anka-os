@@ -3,6 +3,7 @@ import { useOrganization } from '../context/OrganizationContext.jsx'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { projectEngagementWorkspace } from '../data/projectEngagementWorkspace'
 import RetainerPlanningPanel from '../components/RetainerPlanningPanel'
+import ProjectPlanningPanel from '../components/ProjectPlanningPanel.jsx'
 import { appendWorkshopNavigation, parseWorkshopNavigation } from '../data/workshopNavigation.js'
 
 const TABS = [
@@ -10,6 +11,7 @@ const TABS = [
   ['journey', 'Journey'],
   ['project-tasks', 'Project Tasks'],
   ['engagement-work', 'Engagement Work Items'],
+  ['planning', 'Planning'],
   ['outputs', 'Deliverables & Reviews'],
   ['activity', 'Activity'],
 ]
@@ -27,14 +29,14 @@ export default function ProjectEngagementWorkspace() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const requestedTab = searchParams.get('tab')
-  const tab = TABS.some(([id]) => id === requestedTab) ? requestedTab : 'overview'
+  const tab = [...TABS, ['retainer-planning']].some(([id]) => id === requestedTab) ? requestedTab : 'overview'
   const focusedRecord = parseWorkshopNavigation(searchParams).workRecord
   const selectTab = (id) => {
     const next = new URLSearchParams(searchParams)
     next.set('tab', id)
     setSearchParams(next, { replace: true })
   }
-  const { activeOrganizationId, selectionRequired, loading: organizationLoading, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
+  const { activeOrganizationId, activeMembership, selectionRequired, loading: organizationLoading, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
   const currentRequest = useRef(null)
   currentRequest.current = { organizationId: activeOrganizationId, revision: scopeRevision, recordId: projectId }
   const requestGeneration = useRef(0)
@@ -107,7 +109,7 @@ export default function ProjectEngagementWorkspace() {
   const showRetainerPlanning = identity.hasEngagement
     && (project.engagement_type === 'retainer' || workspace.engagement?.engagement_type === 'retainer')
   const tabs = showRetainerPlanning
-    ? [...TABS.slice(0, 4), ['retainer-planning', 'Retainer Planning'], ...TABS.slice(4)]
+    ? [...TABS.slice(0, 5), ['retainer-planning', 'Retainer Planning'], ...TABS.slice(5)]
     : TABS
   const onTabKeyDown = (event, index) => {
     const keys = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: tabs.length - 1 }
@@ -152,6 +154,7 @@ export default function ProjectEngagementWorkspace() {
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
           {tab === 'project-tasks' && <ProjectTasks rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
           {tab === 'engagement-work' && <EngagementWork rows={workspace.engagementWorkItems} hasEngagement={identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
+          {tab === 'planning' && <ProjectPlanningPanel workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} onRefresh={load} />}
           {tab === 'retainer-planning' && showRetainerPlanning && <RetainerPlanningPanel project={project} engagement={workspace.engagement} services={workspace.services} />}
           {tab === 'outputs' && <Outputs workspace={workspace} />}
           {tab === 'activity' && <Activity rows={workspace.activity} />}

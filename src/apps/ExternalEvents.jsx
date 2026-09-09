@@ -79,6 +79,7 @@ export default function ExternalEvents() {
       if (linkDraft.createWorkItem) {
         if (!linkDraft.engagementId || !linkDraft.workItemTitle.trim()) throw new Error('Engagement and work item title are required')
         const item = await workItems.save({
+          organizationId: selectedEvent.organization_id,
           engagementId: linkDraft.engagementId, title: linkDraft.workItemTitle,
           description: `Created from the ${selectedEvent.event_name} external event plan.`,
           workItemType: 'task', priority: 'medium', status: 'not_started', departmentId: null,
