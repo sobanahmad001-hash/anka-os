@@ -84,7 +84,7 @@ try {
     [organizationId, actorId],
   )
   await setup.query(
-    "insert into public.projects(id,organization_id,name,owner_id,created_by,engagement_type) values($1,$2,'P8 concurrency project',$3,$3,'project')",
+    "insert into public.projects(id,organization_id,name,owner_id,engagement_type) values($1,$2,'P8 concurrency project',$3,'project')",
     [projectId, organizationId, actorId],
   )
   const document = await setup.query(

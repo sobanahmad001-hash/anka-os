@@ -8,7 +8,7 @@ import {
   projectProjectionToMarkdown,
 } from '../data/livingProjectRecord.js'
 import { createReportsAndRecordsRepository } from '../data/reportsAndRecordsRepository.js'
-import { runReportsSnapshotOperation } from '../data/reportsAndRecordsOperation.js'
+import { canPreserveReportsSnapshot, runReportsSnapshotOperation } from '../data/reportsAndRecordsOperation.js'
 import { supabase } from '../lib/supabase.js'
 
 const reportsAndRecords = createReportsAndRecordsRepository(supabase)
@@ -66,7 +66,7 @@ function StatusRows({ items, empty, titleKey = 'title' }) {
 
 export default function ReportsAndRecords() {
   const { user } = useAuth()
-  const { activeOrganizationId, scopeRevision, handleOrganizationAccessError } = useOrganization()
+  const { activeOrganizationId, activeMembership, scopeRevision, handleOrganizationAccessError } = useOrganization()
   const [projects, setProjects] = useState([])
   const [projectId, setProjectId] = useState('')
   const [workspace, setWorkspace] = useState(null)
@@ -143,9 +143,14 @@ export default function ReportsAndRecords() {
     }
   }, [workspace])
   const projection = projections?.[projectionKind]
+  const canPreserveSnapshot = canPreserveReportsSnapshot({
+    membership: activeMembership,
+    userId: user?.id,
+    projectOwnerId: workspace?.project?.owner_id,
+  })
 
   async function createSnapshot() {
-    if (!workspace?.livingRecord?.id || !projection || !user?.id || !activeOrganizationId) return
+    if (!canPreserveSnapshot || !workspace?.livingRecord?.id || !projection || !user?.id || !activeOrganizationId) return
     snapshotOperation.current.controller?.abort()
     const controller = new AbortController()
     const operationId = snapshotOperation.current.id + 1
@@ -244,7 +249,7 @@ export default function ReportsAndRecords() {
                 ))}
               </div>
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={createSnapshot} disabled={saving} className={BUTTON}>{saving ? 'Preserving…' : 'Preserve snapshot'}</button>
+                <button type="button" onClick={createSnapshot} disabled={saving || !canPreserveSnapshot} title={canPreserveSnapshot ? undefined : 'Snapshot preservation requires organization authority or assignment as project owner.'} className={BUTTON}>{saving ? 'Preserving…' : 'Preserve snapshot'}</button>
                 <button type="button" onClick={() => exportProjection('markdown')} className={BUTTON}>Export Markdown</button>
                 <button type="button" onClick={() => exportProjection('json')} className={BUTTON}>Export JSON</button>
                 <button type="button" onClick={() => window.print()} className={BUTTON}>Print / Save PDF</button>

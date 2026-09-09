@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { runReportsSnapshotOperation } from './reportsAndRecordsOperation.js'
+import { canPreserveReportsSnapshot, runReportsSnapshotOperation } from './reportsAndRecordsOperation.js'
 
 function deferred() {
   let resolve
@@ -66,4 +66,17 @@ test('current operation applies snapshot, refresh, and completion in order', asy
     onFinished: () => effects.push('finished'),
   })
   assert.deepEqual(effects, ['preserved', 'refreshed', 'finished'])
+})
+
+test('snapshot preservation role predicate exactly matches the database authority set', () => {
+  for (const role of ['system_owner', 'operations_admin', 'executive']) {
+    assert.equal(canPreserveReportsSnapshot({ membership: { role }, userId: 'actor', projectOwnerId: 'other' }), true)
+  }
+  assert.equal(canPreserveReportsSnapshot({
+    membership: { role: 'project_owner' }, userId: 'actor', projectOwnerId: 'actor',
+  }), true)
+  for (const role of ['project_owner', 'department_manager', 'contributor', 'client_admin', 'client_viewer']) {
+    assert.equal(canPreserveReportsSnapshot({ membership: { role }, userId: 'actor', projectOwnerId: 'other' }), false)
+  }
+  assert.equal(canPreserveReportsSnapshot({ membership: null, userId: 'actor', projectOwnerId: 'actor' }), false)
 })

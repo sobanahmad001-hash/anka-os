@@ -12,7 +12,7 @@ function compact(value) {
   if (value && typeof value === 'object') {
     return Object.fromEntries(
       Object.entries(value)
-        .filter(([, item]) => item !== null && item !== undefined && item !== '')
+        .filter(([, item]) => item !== null && item !== undefined)
         .map(([key, item]) => [key, compact(item)])
     )
   }
@@ -20,7 +20,7 @@ function compact(value) {
 }
 
 function activitySummary(item) {
-  return String(item?.action || 'activity').replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+  return String(item?.action || 'activity').replace(/[_.]/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
 function countBy(items, key) {
@@ -212,7 +212,7 @@ export function buildClientProjectProjection(workspace, generatedAt = new Date()
         status: item.status,
         priority: item.priority,
         required_by: item.required_by,
-        resolution_summary: item.resolution_summary,
+        resolution_summary: item.resolution,
       })),
     recent_activity_is_complete: false,
     recent_activity: workspace.activities

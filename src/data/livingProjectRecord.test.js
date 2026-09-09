@@ -46,11 +46,11 @@ function workspace() {
       ],
     }],
     requests: [
-      { id: 'request-1', title: 'Client revision', status: 'open', visibility: 'client_visible', requested_output: 'Change hero' },
+      { id: 'request-1', title: 'Client revision', status: 'open', visibility: 'client_visible', requested_output: 'Change hero', resolution: 'Canonical resolution detail' },
       { id: 'request-2', title: 'Internal request', status: 'open', visibility: 'internal_only', requested_output: 'Private' },
     ],
     activities: [
-      { id: 'activity-1', action: 'deliverable_released', target_type: 'deliverable_version', metadata: { internal_note: 'not projected' }, visibility: 'client_visible', occurred_at: '2026-08-25T10:00:00Z' },
+      { id: 'activity-1', action: 'deliverable.released', target_type: 'deliverable_version', metadata: { internal_note: 'not projected' }, visibility: 'client_visible', occurred_at: '2026-08-25T10:00:00Z' },
       { id: 'activity-2', action: 'private_note', target_type: 'comment', metadata: { note: 'Private note' }, visibility: 'internal_only', occurred_at: '2026-08-25T09:00:00Z' },
     ],
     portalItems: [{ source_type: 'deliverable_version', source_id: 'version-1', released_at: '2026-08-25T10:00:00Z' }],
@@ -85,7 +85,12 @@ test('client living record includes released and explicitly visible information 
   assert.deepEqual(projection.milestones.map((item) => item.name), ['Visible launch'])
   assert.deepEqual(projection.deliverables[0].versions.map((item) => item.id), ['version-1'])
   assert.deepEqual(projection.requests.map((item) => item.id), ['request-1'])
-  assert.deepEqual(projection.recent_activity.map((item) => item.summary), ['Deliverable Released'])
+  assert.equal(projection.requests[0].resolution_summary, 'Canonical resolution detail')
+  assert.deepEqual(projection.recent_activity[0], {
+    action: 'deliverable.released',
+    summary: 'Deliverable Released',
+    occurred_at: '2026-08-25T10:00:00Z',
+  })
 })
 
 test('client projection recursively excludes sensitive operational keys and values', () => {

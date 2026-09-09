@@ -31,3 +31,11 @@ test('snapshot operations are cancelled and invalidated with the active scope', 
   assert.match(screen, /onRefreshed: setWorkspace/)
   assert.match(screen, /Recent activity is a bounded feed, not a complete event record/)
 })
+
+test('snapshot preservation affordance matches the server-authorized active-membership roles', () => {
+  const screen = fs.readFileSync(new URL('../apps/ReportsAndRecords.jsx', import.meta.url), 'utf8')
+  assert.match(screen, /activeMembership/)
+  assert.match(screen, /canPreserveReportsSnapshot/)
+  assert.match(screen, /disabled=\{saving \|\| !canPreserveSnapshot\}/)
+  assert.match(screen, /if \(!canPreserveSnapshot \|\|/)
+})

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const migration = readFileSync(new URL('../../supabase/migrations/20260909140526_p8_atomic_living_record_snapshots_temp.sql', import.meta.url), 'utf8')
+const canonicalDelivery = readFileSync(new URL('../../supabase/migrations/20260825040000_canonical_delivery_core.sql', import.meta.url), 'utf8')
 const verifier = readFileSync(new URL('../../supabase/verify_20260909140526_p8_atomic_living_record_snapshots_temp.sql', import.meta.url), 'utf8')
 const concurrency = readFileSync(new URL('../../scripts/p8-living-record-snapshot-concurrency.ts', import.meta.url), 'utf8')
 
@@ -70,14 +71,38 @@ test('P8 browser preview and persisted snapshot share the exact progress contrac
     assert.match(client, new RegExp("'" + key + "', \\(select count\\(\\*\\)"))
   }
   assert.match(client, /portal\.withdrawn_at is null/)
+
+  const requestsSchema = canonicalDelivery.match(/create table if not exists public\.requests \(([\s\S]*?)\n\);/)?.[1] || ''
+  assert.match(requestsSchema, /\n  resolution text not null default ''/)
+  assert.doesNotMatch(requestsSchema, /resolution_summary/)
+  assert.match(client, /'resolution_summary', row\.resolution/)
+  assert.doesNotMatch(client, /row\.resolution_summary/)
   assert.match(client, /row\.status not in \('completed', 'declined', 'withdrawn'\)/)
+  assert.match(internal, /jsonb_strip_nulls\(jsonb_build_object\([\s\S]*?'owner_id', row\.owner_id/)
+  assert.match(internal, /jsonb_strip_nulls\(to_jsonb\(row\)\)/)
+  assert.match(internal, /'summary', initcap\(replace\(replace\(row\.action, '_', ' '\), '\.', ' '\)\)/)
+  assert.doesNotMatch(client, /'action', row\.action, 'target_type'/)
+  assert.match(client, /'action', row\.action,[\s\S]*?'summary', initcap\(replace\(replace\(row\.action, '_', ' '\), '\.', ' '\)\)/)
+  for (const order of [
+    /order by row\.created_at, row\.id/,
+    /order by row\.position::text, row\.id/,
+    /order by row\.updated_at desc nulls last, row\.id/,
+    /order by deliverable\.updated_at desc nulls last, deliverable\.id/,
+    /order by version\.version_number::text, version\.id/,
+  ]) assert.match(migration, order)
 })
 
 test('P8 rollback verifier covers ACL, authorization, replay, conflict, root mismatch, and forced failure', () => {
   assert.match(verifier, /^begin;/m)
+  assert.match(verifier, /insert into auth\.users/)
+  assert.match(verifier, /insert into public\.organizations/)
+  assert.match(verifier, /insert into public\.projects/)
+  assert.match(verifier, /insert into public\.requests/)
+  assert.doesNotMatch(verifier, /create temporary table p8_fixture as\s+select/)
   assert.match(verifier, /rpc_catalog_and_acl/)
-  assert.match(verifier, /unauthorized_role_zero_writes/)
-  assert.match(verifier, /runtime_exact_replay_single_snapshot/)
+  assert.match(verifier, /unauthorized_contributor_zero_writes/)
+  assert.match(verifier, /runtime_exact_replay_and_projection_contract/)
+  assert.match(verifier, /projection = expected_projection/)
   assert.match(verifier, /Conflicting retry was accepted/)
   assert.match(verifier, /mismatched_root_zero_writes/)
   assert.match(verifier, /P8 forced snapshot failure/)
@@ -94,4 +119,6 @@ test('P8 concurrency harness is loopback-only and proves same-key serialization'
   assert.match(concurrency, /Request id was already used with different inputs/)
   assert.match(concurrency, /snapshot_count/)
   assert.match(concurrency, /request_count/)
+  assert.match(concurrency, /insert into public\.projects\(id,organization_id,name,owner_id,engagement_type\)/)
+  assert.doesNotMatch(concurrency, /public\.projects\([^)]*created_by/)
 })

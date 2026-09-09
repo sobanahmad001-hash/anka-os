@@ -129,20 +129,20 @@ begin
               and row.archived_at is null
             group by coalesce(nullif(row.status::text, ''), 'unknown')) bucket), '{}'::jsonb)
       ),
-      'workstreams', coalesce((select jsonb_agg(jsonb_build_object(
+      'workstreams', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
         'id', row.id, 'department_id', row.department_id, 'name', row.name,
         'status', row.status, 'owner_id', row.owner_id
-      ) order by row.id) from public.workstreams row
+      )) order by row.created_at, row.id) from public.workstreams row
         where row.organization_id = p_organization_id and row.project_id = p_project_id), '[]'::jsonb),
       'tasks', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
         'id', row.id, 'workstream_id', row.workstream_id, 'title', row.title,
         'description', row.description, 'status', row.status, 'priority', row.priority,
         'due_date', row.due_date, 'assigned_to', row.assigned_to,
         'acceptance_criteria', row.acceptance_criteria, 'completion_evidence', row.completion_evidence
-      )) order by row.id) from public.tasks row
+      )) order by row.created_at, row.id) from public.tasks row
         where row.organization_id = p_organization_id and row.project_id = p_project_id
           and row.archived_at is null), '[]'::jsonb),
-      'dependencies', coalesce((select jsonb_agg(to_jsonb(row) order by row.id)
+      'dependencies', coalesce((select jsonb_agg(jsonb_strip_nulls(to_jsonb(row)) order by row.created_at, row.id)
         from public.task_dependencies row
         join public.tasks task on task.id = row.task_id
           and task.organization_id = row.organization_id and task.project_id = p_project_id
@@ -152,7 +152,7 @@ begin
       'milestones', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
         'id', row.id, 'name', row.name, 'description', row.description, 'status', row.status,
         'target_date', row.target_date, 'completed_at', row.completed_at
-      )) order by row.id) from public.milestones row
+      )) order by row.position::text, row.id) from public.milestones row
         where row.organization_id = p_organization_id and row.project_id = p_project_id
           and row.archived_at is null), '[]'::jsonb),
       'research', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
@@ -160,7 +160,7 @@ begin
         'title', row.title, 'question', row.question, 'findings', row.findings,
         'recommendation', row.recommendation, 'sources', row.sources,
         'confidence', row.confidence, 'status', row.status
-      )) order by row.id) from public.research_records row
+      )) order by row.updated_at desc nulls last, row.id) from public.research_records row
         where row.organization_id = p_organization_id and row.project_id = p_project_id
           and row.archived_at is null), '[]'::jsonb),
       'deliverables', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
@@ -171,25 +171,26 @@ begin
             'id', version.id, 'version_number', version.version_number, 'title', version.title,
             'change_summary', version.change_summary, 'review_status', version.review_status,
             'created_at', version.created_at
-          )) order by version.id)
+          )) order by version.version_number::text, version.id)
           from public.deliverable_versions version
           where version.organization_id = p_organization_id
             and version.project_id = p_project_id and version.deliverable_id = deliverable.id
         ), '[]'::jsonb)
-      )) order by deliverable.id) from public.deliverables deliverable
+      )) order by deliverable.updated_at desc nulls last, deliverable.id) from public.deliverables deliverable
         where deliverable.organization_id = p_organization_id and deliverable.project_id = p_project_id
           and deliverable.archived_at is null), '[]'::jsonb),
       'requests', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
         'id', row.id, 'request_type', row.request_type, 'request_origin', row.request_origin,
         'title', row.title, 'requested_output', row.requested_output, 'status', row.status,
         'priority', row.priority, 'required_by', row.required_by, 'owner_id', row.owner_id
-      )) order by row.id) from public.requests row
+      )) order by row.updated_at desc nulls last, row.id) from public.requests row
         where row.organization_id = p_organization_id and row.project_id = p_project_id
           and row.archived_at is null), '[]'::jsonb),
       'recent_activity', coalesce((select jsonb_agg(event.payload order by event.occurred_at desc, event.id desc)
         from (select row.id, row.occurred_at, jsonb_strip_nulls(jsonb_build_object(
           'id', row.id, 'action', row.action, 'target_type', row.target_type,
           'target_id', row.target_id, 'metadata', row.metadata,
+          'summary', initcap(replace(replace(row.action, '_', ' '), '.', ' ')),
           'actor_id', row.actor_id, 'occurred_at', row.occurred_at
         )) payload from public.activity_events row
         where row.organization_id = p_organization_id and row.project_id = p_project_id
@@ -236,27 +237,27 @@ begin
       ),
       'workstreams', coalesce((select jsonb_agg(jsonb_build_object(
         'name', row.name, 'status', row.status
-      ) order by row.id) from public.workstreams row
+      ) order by row.created_at, row.id) from public.workstreams row
         where row.organization_id = p_organization_id and row.project_id = p_project_id
           and row.client_visible = true), '[]'::jsonb),
       'milestones', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
         'name', row.name, 'description', row.description, 'status', row.status,
         'target_date', row.target_date, 'completed_at', row.completed_at
-      )) order by row.id) from public.milestones row
+      )) order by row.position::text, row.id) from public.milestones row
         where row.organization_id = p_organization_id and row.project_id = p_project_id
           and row.archived_at is null and row.visibility in ('client_visible', 'client_restricted')), '[]'::jsonb),
       'deliverables', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
         'id', deliverable.id, 'title', deliverable.title, 'deliverable_type', deliverable.deliverable_type,
         'status', deliverable.status, 'due_date', deliverable.due_date,
         'versions', versions.items
-      )) order by deliverable.id)
+      )) order by deliverable.updated_at desc nulls last, deliverable.id)
         from public.deliverables deliverable
         cross join lateral (
           select jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
             'id', version.id, 'version_number', version.version_number, 'title', version.title,
             'change_summary', version.change_summary, 'review_status', version.review_status,
             'released_at', portal.released_at
-          )) order by version.id) items
+          )) order by version.version_number::text, version.id) items
           from public.deliverable_versions version
           join public.client_portal_items portal
             on portal.organization_id = version.organization_id
@@ -271,14 +272,14 @@ begin
           and deliverable.archived_at is null and versions.items is not null), '[]'::jsonb),
       'requests', coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
         'id', row.id, 'request_type', row.request_type, 'title', row.title, 'status', row.status,
-        'priority', row.priority, 'required_by', row.required_by, 'resolution_summary', row.resolution_summary
-      )) order by row.id) from public.requests row
+        'priority', row.priority, 'required_by', row.required_by, 'resolution_summary', row.resolution
+      )) order by row.updated_at desc nulls last, row.id) from public.requests row
         where row.organization_id = p_organization_id and row.project_id = p_project_id
           and row.archived_at is null and row.visibility = 'client_visible'), '[]'::jsonb),
       'recent_activity', coalesce((select jsonb_agg(event.payload order by event.occurred_at desc, event.id desc)
         from (select row.id, row.occurred_at, jsonb_strip_nulls(jsonb_build_object(
-          'action', row.action, 'target_type', row.target_type,
-          'summary', initcap(replace(row.action, '_', ' ')), 'occurred_at', row.occurred_at
+          'action', row.action,
+          'summary', initcap(replace(replace(row.action, '_', ' '), '.', ' ')), 'occurred_at', row.occurred_at
         )) payload from public.activity_events row
         where row.organization_id = p_organization_id and row.project_id = p_project_id
           and row.visibility = 'client_visible'
