@@ -195,14 +195,17 @@ export default function DepartmentWorkshop({ departmentId }) {
     workstream.project_id === projectId && workstream.id !== selectedWorkstreamId
   ))
 
-  async function runMutation(action) {
+  async function runMutation(action, staleIntent = '') {
     setSaving(true)
     setError('')
     try {
       await action()
       await loadWorkspace()
     } catch (mutationError) {
-      setError(mutationError.message)
+      if (mutationError?.status === 409 && staleIntent) {
+        await loadWorkspace()
+        setError(`${mutationError.message} Intended ${staleIntent} was not applied; review the refreshed task before retrying.`)
+      } else setError(mutationError.message)
     } finally {
       setSaving(false)
     }
@@ -383,7 +386,7 @@ export default function DepartmentWorkshop({ departmentId }) {
             </div>
 
             <div className="mt-6 grid gap-5 xl:grid-cols-[1fr_350px]">
-              <WorkspaceList activeTab={activeTab} data={visibleData} workspace={workspace} selectedWorkstreamId={selectedWorkstreamId} onTransition={(task, status) => runMutation(() => delivery.transitionTask(task.id, status, task.completion_evidence || '', task.row_version, activeOrganizationId))} saving={saving} />
+              <WorkspaceList activeTab={activeTab} data={visibleData} workspace={workspace} selectedWorkstreamId={selectedWorkstreamId} onTransition={(task, status) => runMutation(() => delivery.transitionTask(task.id, status, task.completion_evidence || '', task.row_version, activeOrganizationId), `Project Task status ${labelize(status)}`)} saving={saving} />
               <ActionPanel activeTab={activeTab} saving={saving} taskForm={taskForm} setTaskForm={setTaskForm} researchForm={researchForm} setResearchForm={setResearchForm} deliverableForm={deliverableForm} setDeliverableForm={setDeliverableForm} requestForm={requestForm} setRequestForm={setRequestForm} receivingWorkstreams={receivingWorkstreams} onCreateTask={createTask} onCreateResearch={createResearch} onCreateDeliverable={createDeliverable} onCreateRequest={createRequest} />
             </div>
           </>

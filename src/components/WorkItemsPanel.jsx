@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { OPERATING_DEPARTMENTS } from '../data/operatingSpineRepository.js'
 import {
@@ -16,7 +16,7 @@ import {
   UNASSIGNED_WORK_ITEM_FILTER,
 } from '../data/workItems.js'
 import { artifactRelations } from '../data/artifactRelationsRepository.js'
-import { workItems } from '../data/workItemsRepository.js'
+import { isCurrentWorkItemsRequest, workItems } from '../data/workItemsRepository.js'
 import AutomationRulesPanel from './AutomationRulesPanel.jsx'
 import WorkItemConnections from './WorkItemConnections.jsx'
 import { WorkCalendarView, WorkTimelineView } from './WorkCalendarTimeline.jsx'
@@ -34,7 +34,7 @@ function sortIndicator(sort, key) {
   return sort.key === key ? (sort.direction === 'asc' ? ' ↑' : ' ↓') : ''
 }
 
-export default function WorkItemsPanel({ workspace, owners, onRefresh }) {
+export default function WorkItemsPanel({ workspace, owners, organizationId, signal, onRefresh }) {
   const [items, setItems] = useState([])
   const [dependencies, setDependencies] = useState([])
   const [view, setView] = useState('list')
@@ -50,20 +50,48 @@ export default function WorkItemsPanel({ workspace, owners, onRefresh }) {
   const [artifactRelationsLoading, setArtifactRelationsLoading] = useState(false)
   const [artifactRelationsError, setArtifactRelationsError] = useState('')
   const [error, setError] = useState('')
+  const loadGeneration = useRef(0)
 
-  const loadItems = useCallback(async () => {
+  const loadItems = useCallback(async ({ preserveEditor = false } = {}) => {
+    const generation = ++loadGeneration.current
+    const request = { organizationId, generation, signal }
+    if (!organizationId || signal?.aborted) {
+      setItems([]); setDependencies([]); setLoading(false)
+      return
+    }
     setLoading(true); setError('')
     try {
-      const loadedItems = await workItems.list(workspace.engagement.id) || []
-      const loadedDependencies = await workItems.listDependencies(loadedItems.map(item => item.id)) || []
+      const options = { signal }
+      const loadedItems = await workItems.list(organizationId, workspace.engagement.id, options) || []
+      if (!isCurrentWorkItemsRequest(request, { organizationId, generation: loadGeneration.current })) return
+      const loadedDependencies = await workItems.listDependencies(organizationId, loadedItems.map(item => item.id), options) || []
+      if (!isCurrentWorkItemsRequest(request, { organizationId, generation: loadGeneration.current })) return
       setItems(loadedItems)
       setDependencies(loadedDependencies)
+      if (preserveEditor) setEditor(current => {
+        if (!current?.id) return current
+        const refreshed = loadedItems.find(item => item.id === current.id)
+        return refreshed ? { ...refreshed, ...current, row_version: refreshed.row_version } : current
+      })
     }
-    catch (loadError) { setError(loadError.message) }
-    finally { setLoading(false) }
-  }, [workspace.engagement.id])
+    catch (loadError) {
+      if (loadError?.name !== 'AbortError' && isCurrentWorkItemsRequest(request, { organizationId, generation: loadGeneration.current })) setError(loadError.message)
+    }
+    finally { if (isCurrentWorkItemsRequest(request, { organizationId, generation: loadGeneration.current })) setLoading(false) }
+  }, [organizationId, signal, workspace.engagement.id])
 
-  useEffect(() => { loadItems() }, [loadItems])
+  useEffect(() => {
+    setItems([]); setDependencies([]); setEditor(null); setDependencyCandidate('')
+    loadItems()
+    return () => { loadGeneration.current += 1 }
+  }, [loadItems])
+
+  const recoverStaleWrite = useCallback(async (mutationError, intent) => {
+    if (mutationError?.status !== 409) return false
+    await loadItems({ preserveEditor: true })
+    setError(`${mutationError.message} Your intended ${intent} was not applied and remains available to deliberately retry.`)
+    return true
+  }, [loadItems])
 
   useEffect(() => {
     let active = true
@@ -113,21 +141,25 @@ export default function WorkItemsPanel({ workspace, owners, onRefresh }) {
     setEditor({ ...item })
     if (!item.automation_flagged_at) return
     try {
-      const acknowledged = await workItems.acknowledgeAutomationFlag(workspace.engagement.organization_id, item.id, item.row_version)
+      const acknowledged = await workItems.acknowledgeAutomationFlag(organizationId, item.id, item.row_version)
       if (!acknowledged?.id) return
       setItems(current => current.map(candidate => candidate.id === acknowledged.id ? acknowledged : candidate))
       setEditor(current => current?.id === acknowledged.id ? { ...acknowledged } : current)
-    } catch (acknowledgeError) { setError(acknowledgeError.message) }
+    } catch (acknowledgeError) {
+      if (!await recoverStaleWrite(acknowledgeError, 'automation acknowledgement')) setError(acknowledgeError.message)
+    }
   }
 
   async function save(event) {
     event.preventDefault()
     setSaving(true); setError('')
     try {
-      await workItems.save(workItemSaveInput(editor, workspace.engagement.id, { organizationId: workspace.engagement.organization_id }))
+      await workItems.save(workItemSaveInput(editor, workspace.engagement.id, { organizationId }))
       setEditor(null)
       await Promise.all([loadItems(), onRefresh?.()])
-    } catch (saveError) { setError(saveError.message) }
+    } catch (saveError) {
+      if (!await recoverStaleWrite(saveError, 'work-item edits')) setError(saveError.message)
+    }
     finally { setSaving(false) }
   }
 
@@ -135,10 +167,12 @@ export default function WorkItemsPanel({ workspace, owners, onRefresh }) {
     if (!editor?.id) return
     setSaving(true); setError('')
     try {
-      await workItems.remove(workspace.engagement.organization_id, editor.id, editor.row_version)
+      await workItems.remove(organizationId, editor.id, editor.row_version)
       setEditor(null)
       await Promise.all([loadItems(), onRefresh?.()])
-    } catch (removeError) { setError(removeError.message) }
+    } catch (removeError) {
+      if (!await recoverStaleWrite(removeError, 'deletion')) setError(removeError.message)
+    }
     finally { setSaving(false) }
   }
 
@@ -146,11 +180,13 @@ export default function WorkItemsPanel({ workspace, owners, onRefresh }) {
     if (!editor?.id || !dependencyCandidate) return
     setSaving(true); setError('')
     try {
-      const result = await workItems.addDependency(workspace.engagement.organization_id, editor.id, dependencyCandidate, editor.row_version)
+      const result = await workItems.addDependency(organizationId, editor.id, dependencyCandidate, editor.row_version)
       if (result?.workItem) setEditor(current => current?.id === result.workItem.id ? { ...current, ...result.workItem } : current)
       setDependencyCandidate('')
       await loadItems()
-    } catch (dependencyError) { setError(dependencyError.message) }
+    } catch (dependencyError) {
+      if (!await recoverStaleWrite(dependencyError, 'dependency addition')) setError(dependencyError.message)
+    }
     finally { setSaving(false) }
   }
 
@@ -158,9 +194,11 @@ export default function WorkItemsPanel({ workspace, owners, onRefresh }) {
     setSaving(true); setError('')
     try {
       const source = items.find(item => item.id === workItemId)
-      await workItems.removeDependency(workspace.engagement.organization_id, workItemId, dependsOnWorkItemId, source?.row_version)
+      await workItems.removeDependency(organizationId, workItemId, dependsOnWorkItemId, source?.row_version)
       await loadItems()
-    } catch (dependencyError) { setError(dependencyError.message) }
+    } catch (dependencyError) {
+      if (!await recoverStaleWrite(dependencyError, 'dependency removal')) setError(dependencyError.message)
+    }
     finally { setSaving(false) }
   }
 
@@ -169,7 +207,7 @@ export default function WorkItemsPanel({ workspace, owners, onRefresh }) {
     if (!item) return
     setMoving(true); setError('')
     try {
-      await workItems.move(workspace.engagement.organization_id, item.id, item.row_version, targetStatus, beforeWorkItemId)
+      await workItems.move(organizationId, item.id, item.row_version, targetStatus, beforeWorkItemId)
       await Promise.all([loadItems(), onRefresh?.()])
     } catch (moveError) {
       if (moveError.status === 409) await loadItems()

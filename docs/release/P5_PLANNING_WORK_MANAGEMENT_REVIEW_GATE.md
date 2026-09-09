@@ -41,6 +41,7 @@ All reads remain scoped to the selected organization. Mutation RPCs are service-
 - `src/apps/DepartmentWorkshop.jsx`
 - `src/apps/ExternalEvents.jsx`
 - `src/apps/MyWork.jsx`
+- `src/apps/OperatingSpine.jsx`
 - `src/components/ProjectPlanningPanel.jsx`
 - `src/components/WorkItemsPanel.jsx`
 - `src/data/automationRules.test.js`
@@ -49,12 +50,14 @@ All reads remain scoped to the selected organization. Mutation RPCs are service-
 - `src/data/internalProjectSetup.test.js`
 - `src/data/planningModel.js`
 - `src/data/planningModel.test.js`
+- `src/data/p5WorkItemsScope.test.js`
 - `src/data/planningRepository.js`
 - `src/data/planningRepositoryFactory.js`
 - `src/data/projectEngagementWorkspaceModel.js`
 - `src/data/projectEngagementWorkspaceRepository.js`
 - `src/data/workItems.js`
 - `src/data/workItemsRepository.js`
+- `src/data/workItemsScope.js`
 - `scripts/p5-planning-concurrency.ts`
 - `supabase/functions/work-items/index.ts`
 - `supabase/functions/work-items/index.test.ts`
@@ -69,13 +72,14 @@ No P6 retainer behavior, P7 review/deliverable lifecycle behavior, P8 records/co
 
 ## Verification
 
-- Focused shared-consumer tests: 29/29 passed.
-- Full Node suite: 709/709 passed.
-- Frozen Deno suite: 285/285 passed.
-- Frozen Deno checks: all 36 Edge source entrypoints plus every P5-changed test/script passed.
+- Focused P5 correction and planning-contract tests: 33/33 passed.
+- Full configured Node suite: 716/716 passed.
+- Exact configured CI Deno suite (21 listed test files): 264/264 passed.
+- Exact configured CI Deno check command passed for its 42 listed source/test paths; the changed `work-items` source and test are included. No claim is made about unconfigured or untouched entrypoints.
 - Lint: 0 errors; 453 pre-existing warning-only findings.
-- Production build: passed (419 modules).
+- Production build: passed (420 modules).
 - PostgreSQL 17: the ordered migration applied cleanly to a disposable exact-schema clone.
 - Rollback verifier: all 55 named checks returned true and the transaction ended in `ROLLBACK`.
 - Two-session PostgreSQL 17 proof: the competing Project Task mutation waited then received the exact typed stale payload; concurrent Work Item moves serialized and produced one unique final order. Its random clone was dropped.
+- The migration, rollback verifier, and two-session concurrency script are unchanged from that PostgreSQL-verified candidate, so the database evidence applies exactly to this UI/Edge/repository correction.
 - Signed-in browser walkthrough: pending final testing.

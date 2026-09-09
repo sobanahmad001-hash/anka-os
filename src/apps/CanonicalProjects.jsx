@@ -315,7 +315,10 @@ export default function CanonicalProjects() {
       await delivery.transitionTask(taskId, status, task?.completion_evidence || '', task?.row_version, workspace?.project?.organization_id)
       await refreshWorkspace()
     } catch (saveError) {
-      setError(saveError.message)
+      if (saveError?.status === 409) {
+        await refreshWorkspace()
+        setError(`${saveError.message} Intended Project Task status: ${labelize(status)}. It was not applied; review the refreshed task before retrying.`)
+      } else setError(saveError.message)
     } finally {
       setSaving(false)
     }

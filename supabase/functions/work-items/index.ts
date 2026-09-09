@@ -33,6 +33,33 @@ function optionalId(value: unknown) {
   return text(value, 80) || null
 }
 
+export function selectedOrganizationId(input: Json) {
+  const camelCase = optionalId(input.organizationId)
+  const snakeCase = optionalId(input.organization_id)
+  if (camelCase && snakeCase && camelCase !== snakeCase) throw new Error('Organization fields must match')
+  return camelCase || snakeCase
+}
+
+type EngagementScopeQuery = {
+  select: (columns: string) => EngagementScopeQuery
+  eq: (column: string, value: string) => EngagementScopeQuery
+  maybeSingle: () => Promise<{ data: { id: string, organization_id: string } | null, error: { message?: string, status?: number } | null }>
+}
+type EngagementScopeClient = { from: (table: string) => EngagementScopeQuery }
+
+export async function requireGenerateContentScope(client: EngagementScopeClient, organizationId: string, engagementId: string) {
+  const { data, error } = await client.from('engagements')
+    .select('id, organization_id')
+    .eq('id', engagementId)
+    .eq('organization_id', organizationId)
+    .maybeSingle()
+  if (error) throw Object.assign(new Error(error.message || 'Unable to verify engagement organization'), { status: error.status || 400 })
+  if (!data || data.organization_id !== organizationId) {
+    throw Object.assign(new Error('Engagement is unavailable in the active organization'), { status: 403 })
+  }
+  return data
+}
+
 function optionalDate(value: unknown) {
   const normalized = text(value, 10)
   return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : null
@@ -113,7 +140,7 @@ async function requireContext(request: Request) {
   })
   const { data: { user }, error } = await userClient.auth.getUser()
   if (error || !user) throw Object.assign(new Error('Authentication required'), { status: 401 })
-  return { admin, user }
+  return { admin, user, userClient }
 }
 
 export async function handleRequest(request: Request) {
@@ -123,8 +150,8 @@ export async function handleRequest(request: Request) {
     const body = await request.json() as Json
     const action = text(body.action, 40)
     if (!ACTIONS.has(action)) return response({ error: 'Unsupported action' }, 400)
-    const { admin, user } = await requireContext(request)
-    const organizationId = optionalId(body.organizationId)
+    const { admin, user, userClient } = await requireContext(request)
+    const organizationId = selectedOrganizationId(body)
     if (!organizationId) return response({ error: 'Active organization is required' }, 400)
     if (action === 'update_project_task') {
       const taskId = optionalId(body.taskId)
@@ -178,6 +205,7 @@ export async function handleRequest(request: Request) {
     if (action === 'generate_content_tasks') {
       const engagementId = optionalId(body.engagementId)
       if (!engagementId) return response({ error: 'Engagement is required' }, 400)
+      await requireGenerateContentScope(userClient as unknown as EngagementScopeClient, organizationId, engagementId)
       const { data, error } = await admin.rpc('generate_content_page_work_items', {
         p_engagement_id: engagementId,
         p_actor_id: user.id,

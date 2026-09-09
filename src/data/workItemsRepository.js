@@ -1,4 +1,6 @@
 import { supabase } from '../lib/supabase.js'
+import { readOrganizationRows } from './workItemsScope.js'
+export { isCurrentWorkItemsRequest } from './workItemsScope.js'
 
 async function dataOrThrow(query) {
   const { data, error } = await query
@@ -6,8 +8,8 @@ async function dataOrThrow(query) {
   return data
 }
 
-async function invoke(action, input) {
-  const { data, error } = await supabase.functions.invoke('work-items', {
+async function invoke(client, action, input) {
+  const { data, error } = await client.functions.invoke('work-items', {
     body: { action, ...input },
   })
   if (error) {
@@ -24,40 +26,42 @@ async function invoke(action, input) {
   return data?.data
 }
 
-export const workItems = Object.freeze({
-  list: engagementId => dataOrThrow(
-    supabase.from('work_items')
+export function createWorkItemsRepository(client) {
+  return Object.freeze({
+  list: (organizationId, engagementId, { signal } = {}) => {
+    if (!organizationId || !engagementId) return Promise.resolve([])
+    return readOrganizationRows(organizationId, () => client.from('work_items')
       .select('*')
+      .eq('organization_id', organizationId)
       .eq('engagement_id', engagementId)
       .is('deleted_at', null)
       .order('position')
-      .order('created_at')
-  ),
-  listDependencies: workItemIds => workItemIds.length ? dataOrThrow(
-    supabase.from('work_item_dependencies')
+      .order('created_at'), { signal, label: 'Work Items' })
+  },
+  listDependencies: (organizationId, workItemIds, { signal } = {}) => organizationId && workItemIds.length ? readOrganizationRows(organizationId, () => client.from('work_item_dependencies')
       .select('*')
+      .eq('organization_id', organizationId)
       .in('work_item_id', workItemIds)
-      .order('created_at')
-  ) : Promise.resolve([]),
-  save: input => invoke('save', input),
-  remove: (organizationId, workItemId, expectedRowVersion) => invoke('delete', { organizationId, workItemId, expectedRowVersion }),
-  addDependency: (organizationId, workItemId, dependsOnWorkItemId, expectedRowVersion) => invoke('add_dependency', { organizationId, workItemId, dependsOnWorkItemId, expectedRowVersion }),
-  removeDependency: (organizationId, workItemId, dependsOnWorkItemId, expectedRowVersion) => invoke('remove_dependency', { organizationId, workItemId, dependsOnWorkItemId, expectedRowVersion }),
-  acknowledgeAutomationFlag: (organizationId, workItemId, expectedRowVersion) => invoke('acknowledge_automation_flag', { organizationId, workItemId, expectedRowVersion }),
-  move: (organizationId, workItemId, expectedRowVersion, targetStatus, beforeWorkItemId = null) => invoke('move', { organizationId, workItemId, expectedRowVersion, targetStatus, beforeWorkItemId }),
-  generateContentTasks: (organizationId, engagementId) => invoke('generate_content_tasks', { organizationId, engagementId }),
+      .order('created_at'), { signal, label: 'Work Item dependencies' }) : Promise.resolve([]),
+  save: input => invoke(client, 'save', input),
+  remove: (organizationId, workItemId, expectedRowVersion) => invoke(client, 'delete', { organizationId, workItemId, expectedRowVersion }),
+  addDependency: (organizationId, workItemId, dependsOnWorkItemId, expectedRowVersion) => invoke(client, 'add_dependency', { organizationId, workItemId, dependsOnWorkItemId, expectedRowVersion }),
+  removeDependency: (organizationId, workItemId, dependsOnWorkItemId, expectedRowVersion) => invoke(client, 'remove_dependency', { organizationId, workItemId, dependsOnWorkItemId, expectedRowVersion }),
+  acknowledgeAutomationFlag: (organizationId, workItemId, expectedRowVersion) => invoke(client, 'acknowledge_automation_flag', { organizationId, workItemId, expectedRowVersion }),
+  move: (organizationId, workItemId, expectedRowVersion, targetStatus, beforeWorkItemId = null) => invoke(client, 'move', { organizationId, workItemId, expectedRowVersion, targetStatus, beforeWorkItemId }),
+  generateContentTasks: (organizationId, engagementId) => invoke(client, 'generate_content_tasks', { organizationId, engagementId }),
   listAutomationRules: organizationId => dataOrThrow(
-    supabase.from('automation_rules')
+    client.from('automation_rules')
       .select('*')
       .eq('organization_id', organizationId)
       .order('created_at')
       .order('id')
   ),
   async createAutomationRule(input) {
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    const { data: { user }, error: userError } = await client.auth.getUser()
     if (userError || !user) throw new Error('Authentication required')
     return dataOrThrow(
-      supabase.from('automation_rules').insert({
+      client.from('automation_rules').insert({
         organization_id: input.organizationId,
         name: input.name.trim(),
         trigger_type: input.triggerType,
@@ -70,6 +74,9 @@ export const workItems = Object.freeze({
     )
   },
   toggleAutomationRule: (ruleId, enabled) => dataOrThrow(
-    supabase.from('automation_rules').update({ enabled }).eq('id', ruleId).select().single()
+    client.from('automation_rules').update({ enabled }).eq('id', ruleId).select().single()
   ),
-})
+  })
+}
+
+export const workItems = createWorkItemsRepository(supabase)
