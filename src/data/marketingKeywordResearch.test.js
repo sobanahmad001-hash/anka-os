@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { buildMarketingKeywordResearch, shouldApplyKeywordResearchResponse } from './marketingKeywordResearch.js'
+import { buildMarketingKeywordResearch, keywordDuplicateCounts, runTechnicalSeoMutation, shouldApplyKeywordResearchResponse, shouldApplyTechnicalSeoMutationResponse } from './marketingKeywordResearch.js'
 import { collectKeywordResearchPages } from './marketingKeywordResearchRepository.js'
 
 const orgA = 'org-a'
@@ -48,6 +48,16 @@ test('SEO keyword identity keeps duplicate-looking records distinct and retains 
   assert.equal(model.trackedKeywords[1].active, false)
 })
 
+test('duplicate warnings are presentation-only, page-specific, and case-insensitive', () => {
+  const rows = [
+    { id: 'a', tracked_page_id: 'page-1', keyword: 'Growth  Strategy' },
+    { id: 'b', tracked_page_id: 'page-1', keyword: ' growth strategy ' },
+    { id: 'c', tracked_page_id: 'page-2', keyword: 'growth strategy' },
+  ]
+  assert.deepEqual([...keywordDuplicateCounts(rows)], [['a', 2], ['b', 2], ['c', 1]])
+  assert.equal(rows.length, 3)
+})
+
 test('rank history is dated, chronological, and preserves unknown rank explicitly', () => {
   const model = buildMarketingKeywordResearch(fixture())
   const active = model.trackedKeywords.find(item => item.id === 'keyword-1')
@@ -80,6 +90,69 @@ test('stale, switched-brand, switched-organization, and aborted responses are re
   assert.equal(shouldApplyKeywordResearchResponse({ ...request, signal: { aborted: true } }, { organizationId: orgA, brandId: 'brand-a', revision: 4 }, 2, 2), false)
 })
 
+test('Technical SEO mutation responses require the exact current organization, brand, page, revision, and generation', () => {
+  const request = { organizationId: orgA, brandId: 'brand-a', pageId: 'page-1', revision: 4 }
+  assert.equal(shouldApplyTechnicalSeoMutationResponse(request, request, 3, 3), true)
+  for (const current of [
+    { ...request, organizationId: 'org-b' },
+    { ...request, brandId: 'brand-b' },
+    { ...request, pageId: 'page-2' },
+    { ...request, revision: 5 },
+  ]) assert.equal(shouldApplyTechnicalSeoMutationResponse(request, current, 3, 3), false)
+  assert.equal(shouldApplyTechnicalSeoMutationResponse(request, request, 2, 3), false)
+})
+
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((nextResolve, nextReject) => { resolve = nextResolve; reject = nextReject })
+  return { promise, resolve, reject }
+}
+
+test('Technical SEO delayed success and failure cannot alter a newer scope while current responses apply', async () => {
+  const scopeA = { organizationId: orgA, brandId: 'brand-a', pageId: 'page-1', revision: 4 }
+  const scopeB = { organizationId: 'org-b', brandId: 'brand-b', pageId: 'page-2', revision: 5 }
+
+  for (const outcome of ['success', 'failure']) {
+    let current = scopeA
+    let currentGeneration = 1
+    const pending = deferred()
+    const state = { busy: 'keyword-a', message: '', error: '', reloads: [] }
+    const operation = runTechnicalSeoMutation({
+      request: scopeA,
+      generation: 1,
+      currentScope: () => current,
+      currentGeneration: () => currentGeneration,
+      mutate: () => pending.promise,
+      reload: async pageId => { state.reloads.push(pageId) },
+      onSuccess: () => { state.message = 'A success' },
+      onError: error => { state.error = error.message },
+      onFinish: () => { state.busy = '' },
+    })
+    current = scopeB
+    currentGeneration = 2
+    state.busy = 'keyword-b'
+    if (outcome === 'success') pending.resolve({ active: false })
+    else pending.reject(new Error('A failure'))
+    assert.equal(await operation, false)
+    assert.deepEqual(state, { busy: 'keyword-b', message: '', error: '', reloads: [] })
+  }
+
+  const state = { busy: 'keyword-a', message: '', error: '', reloads: [] }
+  assert.equal(await runTechnicalSeoMutation({
+    request: scopeA,
+    generation: 3,
+    currentScope: () => scopeA,
+    currentGeneration: () => 3,
+    mutate: async () => ({ active: false }),
+    reload: async pageId => { state.reloads.push(pageId) },
+    onSuccess: () => { state.message = 'A success' },
+    onError: error => { state.error = error.message },
+    onFinish: () => { state.busy = '' },
+  }), true)
+  assert.deepEqual(state, { busy: '', message: 'A success', error: '', reloads: ['page-1'] })
+})
+
 test('pagination walks inclusive ranges until the short page', async () => {
   const ranges = []
   const rows = await collectKeywordResearchPages(async (from, to) => {
@@ -103,4 +176,7 @@ test('production path is read-only, cancellable, paginated, and explicitly scope
   assert.match(studio, /Tracked SEO keywords[\s\S]*separate from Google Ads planning keywords/)
   assert.match(studio, /This view does not generate or save interpretations/)
   assert.match(studio, /shouldApplyKeywordResearchResponse/)
+  assert.match(studio, /Market, language, and device detail is not stored/)
+  assert.match(studio, /Pause tracking/)
+  assert.doesNotMatch(studio, /deleteKeyword|mergeKeyword/)
 })

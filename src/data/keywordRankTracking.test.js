@@ -42,11 +42,22 @@ test('MK6a UI supports manual page-scoped tracking and distinguishes no rank fro
   assert.match(repository, /listRankSnapshots/)
   assert.match(repository, /listKeywordSources/)
   assert.match(repository, /save_keyword/)
+  assert.match(repository, /setKeywordActive: \(organizationId, keywordId, active\)/)
   assert.match(repository, /fetch_keyword_ranks/)
   assert.match(ui, /Keyword rank tracking/)
   assert.match(ui, /No Keyword Strategy source/)
-  assert.match(ui, /Not yet ranking — no Search Console impressions yet/)
+  assert.match(ui, /Rank unknown — Google Search Console returned no row/)
   assert.match(ui, /Rank appears after the first fetch/)
+  assert.match(ui, /runTechnicalSeoMutation/)
+  assert.match(ui, /technicalSeo\.setKeywordActive\(activeOrganizationId, keyword\.id/)
+})
+
+test('MB03A status mutation enforces selected organization and established leadership authority', () => {
+  assert.match(edge, /keyword\.organization_id !== organizationId/)
+  assert.match(edge, /Tracked keyword is unavailable in the selected organization/)
+  assert.match(edge, /LEADER_ROLES\.has\(membership\.role\)/)
+  assert.match(edgeTest, /stale selected organization before writer or admin access/)
+  assert.match(edgeTest, /organization leadership can change keyword status with exactly one scoped update/)
 })
 
 test('MK6a keeps the daily record immutable by reading an existing snapshot before inserting', () => {

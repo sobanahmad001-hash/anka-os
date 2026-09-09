@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 
+import { useOrganization } from '../context/OrganizationContext.jsx'
+import { keywordDuplicateCounts, runTechnicalSeoMutation } from '../data/marketingKeywordResearch.js'
 import { INDEX_STATUSES, TRACKED_PAGE_TYPES, auditTrend, filterHealth, healthSummary, labelize, pageDepth } from '../data/technicalSeo.js'
 import { technicalSeo } from '../data/technicalSeoRepository.js'
 
@@ -19,6 +21,8 @@ function Metric({ label, value }) {
 }
 
 export default function TechnicalSeoTracking() {
+  const { activeOrganizationId, scopeRevision } = useOrganization()
+  const [searchParams] = useSearchParams()
   const [brands, setBrands] = useState([]); const [brandId, setBrandId] = useState('')
   const [pages, setPages] = useState([]); const [pageId, setPageId] = useState(''); const [audits, setAudits] = useState([])
   const [keywords, setKeywords] = useState([]); const [keywordSources, setKeywordSources] = useState([])
@@ -26,28 +30,69 @@ export default function TechnicalSeoTracking() {
   const [filters, setFilters] = useState({ pageType: '', indexStatus: '', attention: '', recency: '' })
   const [pageDraft, setPageDraft] = useState(EMPTY_PAGE); const [auditDraft, setAuditDraft] = useState(EMPTY_AUDIT)
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [message, setMessage] = useState('')
+  const [keywordBusyId, setKeywordBusyId] = useState('')
+  const keywordMutationGeneration = useRef(0)
+  const currentScope = useRef({ organizationId: activeOrganizationId, brandId, pageId, revision: scopeRevision })
+  currentScope.current = { organizationId: activeOrganizationId, brandId, pageId, revision: scopeRevision }
 
-  useEffect(() => { technicalSeo.listBrands().then(rows => { setBrands(rows || []); setBrandId(rows?.[0]?.id || '') }).catch(e => setError(e.message)) }, [])
+  useEffect(() => {
+    keywordMutationGeneration.current += 1
+    setKeywordBusyId(''); setError(''); setMessage('')
+  }, [activeOrganizationId, brandId, pageId, scopeRevision])
+
+  useEffect(() => {
+    let current = true
+    setBrands([]); setBrandId(''); setPages([]); setPageId(''); setAudits([]); setKeywords([]); setKeywordSources([])
+    if (!activeOrganizationId) return () => { current = false }
+    technicalSeo.listBrands(activeOrganizationId).then(rows => {
+      if (!current) return
+      const scoped = rows || []
+      const requestedBrand = searchParams.get('brand')
+      setBrands(scoped)
+      setBrandId(scoped.some(brand => brand.id === requestedBrand) ? requestedBrand : scoped[0]?.id || '')
+    }).catch(e => { if (current) setError(e.message) })
+    return () => { current = false }
+  }, [activeOrganizationId, scopeRevision, searchParams])
 
   async function loadBrand(id, preferredPage = '') {
     if (!id) return
-    const rows = await technicalSeo.listHealth(id); setPages(rows || [])
+    const request = { organizationId: activeOrganizationId, brandId: id, revision: scopeRevision }
+    const rows = await technicalSeo.listHealth(id)
+    if (request.organizationId !== currentScope.current.organizationId || request.brandId !== currentScope.current.brandId || request.revision !== currentScope.current.revision) return
+    setPages(rows || [])
     setPageId(preferredPage || rows?.[0]?.tracked_page_id || '')
   }
   async function loadKeywords(id) {
     if (!id) return setKeywords([])
+    const request = { organizationId: activeOrganizationId, brandId, pageId: id, revision: scopeRevision }
     const rows = await technicalSeo.listKeywords(id)
     const histories = await Promise.all(rows.map(keyword => technicalSeo.listRankSnapshots(keyword.id)))
+    if (request.organizationId !== currentScope.current.organizationId || request.brandId !== currentScope.current.brandId || request.pageId !== currentScope.current.pageId || request.revision !== currentScope.current.revision) return
     setKeywords(rows.map((keyword, index) => ({ ...keyword, latestSnapshot: histories[index][0] || null })))
   }
-  useEffect(() => { loadBrand(brandId).catch(e => setError(e.message)) }, [brandId])
-  useEffect(() => { if (!pageId) { setAudits([]); setKeywords([]); return }; Promise.all([technicalSeo.listAudits(pageId), loadKeywords(pageId)]).then(([nextAudits]) => setAudits(nextAudits)).catch(e => setError(e.message)) }, [pageId])
-  useEffect(() => { if (!brandId) return setKeywordSources([]); technicalSeo.listKeywordSources(brandId).then(setKeywordSources).catch(e => setError(e.message)) }, [brandId])
+  useEffect(() => { loadBrand(brandId).catch(e => setError(e.message)) }, [activeOrganizationId, brandId, scopeRevision])
+  useEffect(() => {
+    if (!pageId) { setAudits([]); setKeywords([]); return undefined }
+    const request = { organizationId: activeOrganizationId, brandId, pageId, revision: scopeRevision }
+    Promise.all([technicalSeo.listAudits(pageId), loadKeywords(pageId)]).then(([nextAudits]) => {
+      if (request.organizationId === currentScope.current.organizationId && request.brandId === currentScope.current.brandId && request.pageId === currentScope.current.pageId && request.revision === currentScope.current.revision) setAudits(nextAudits)
+    }).catch(e => setError(e.message))
+    return undefined
+  }, [activeOrganizationId, brandId, pageId, scopeRevision])
+  useEffect(() => {
+    if (!brandId) { setKeywordSources([]); return undefined }
+    const request = { organizationId: activeOrganizationId, brandId, revision: scopeRevision }
+    technicalSeo.listKeywordSources(brandId).then(rows => {
+      if (request.organizationId === currentScope.current.organizationId && request.brandId === currentScope.current.brandId && request.revision === currentScope.current.revision) setKeywordSources(rows)
+    }).catch(e => setError(e.message))
+    return undefined
+  }, [activeOrganizationId, brandId, scopeRevision])
 
   const selected = pages.find(page => page.tracked_page_id === pageId)
   const visible = useMemo(() => filterHealth(pages, filters), [pages, filters])
   const summary = useMemo(() => healthSummary(pages), [pages])
   const trend = useMemo(() => auditTrend(audits), [audits])
+  const duplicateCounts = useMemo(() => keywordDuplicateCounts(keywords), [keywords])
 
   async function perform(action, success) {
     setBusy(true); setError(''); setMessage('')
@@ -79,6 +124,23 @@ export default function TechnicalSeoTracking() {
     if (result) await loadKeywords(pageId)
   }
 
+  async function setKeywordActive(keyword) {
+    const generation = ++keywordMutationGeneration.current
+    const request = { organizationId: activeOrganizationId, brandId, pageId, revision: scopeRevision }
+    setKeywordBusyId(keyword.id); setError(''); setMessage('')
+    await runTechnicalSeoMutation({
+      request,
+      generation,
+      currentScope: () => currentScope.current,
+      currentGeneration: () => keywordMutationGeneration.current,
+      mutate: () => technicalSeo.setKeywordActive(activeOrganizationId, keyword.id, !keyword.active),
+      reload: loadKeywords,
+      onSuccess: updated => setMessage(`${keyword.keyword} ${updated.active === false ? 'paused' : 'resumed'}. Existing rank history was retained.`),
+      onError: mutationError => setError(mutationError.message),
+      onFinish: () => setKeywordBusyId(''),
+    })
+  }
+
   return <div className="h-full overflow-y-auto bg-slate-950 text-white">
     <header className="border-b border-slate-800 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.12),transparent_36%)] px-6 py-6"><div className="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-400">Marketing Studio</p><h1 className="mt-1 text-3xl font-semibold">Technical SEO health</h1><p className="mt-2 text-sm text-slate-400">Track page hierarchy, immutable audits, indexation, and issue trends over time.</p></div><div className="flex gap-2"><Link to="/sphere/marketing/studio" className={BUTTON}>Marketing Studio</Link><select className={`${INPUT} min-w-56`} value={brandId} onChange={e => setBrandId(e.target.value)}>{brands.map(brand => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select></div></div></header>
     <main className="mx-auto max-w-7xl space-y-5 p-6">
@@ -89,7 +151,7 @@ export default function TechnicalSeoTracking() {
         <Panel title="Add tracked page" description="URLs are unique within the selected brand."><form className="grid gap-3" onSubmit={savePage}><input type="url" required className={INPUT} placeholder="https://example.com/service" value={pageDraft.pageUrl} onChange={e => setPageDraft({ ...pageDraft, pageUrl: e.target.value })}/><select className={INPUT} value={pageDraft.pageType} onChange={e => setPageDraft({ ...pageDraft, pageType: e.target.value })}>{TRACKED_PAGE_TYPES.map(value => <option key={value} value={value}>{labelize(value)}</option>)}</select><select className={INPUT} value={pageDraft.parentPageId} onChange={e => setPageDraft({ ...pageDraft, parentPageId: e.target.value })}><option value="">No parent page</option>{pages.map(page => <option key={page.tracked_page_id} value={page.tracked_page_id}>{page.page_url}</option>)}</select><button disabled={busy || !brandId} className={PRIMARY}>Add page</button></form></Panel>
       </div>
       {selected && <div className="grid gap-5 xl:grid-cols-[1fr_1fr]"><Panel title="Audit history" description={selected.page_url}><div className="mb-4 flex flex-wrap gap-2"><button disabled={busy} onClick={() => perform(() => technicalSeo.inspectPage(pageId), 'Search Console inspection saved as today’s snapshot.')} className={PRIMARY}>Inspect with Search Console</button><span className="self-center text-xs text-slate-500">Read-only URL Inspection API; manual Core Web Vitals remain separate.</span></div><div className="mb-4"><p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Audit trend over time</p><div className="flex gap-2 overflow-x-auto pb-2">{trend.map(point => <div key={point.id} className="min-w-36 rounded-xl border border-slate-800 bg-slate-950/70 p-3"><p className="text-xs font-medium text-slate-300">{point.date}</p><p className="mt-1 text-[11px] text-emerald-300">{labelize(point.indexStatus)}</p><p className="mt-2 text-[11px] text-slate-500">{point.issueCount} issues · M {point.mobile ?? '—'} · D {point.desktop ?? '—'}</p><p className="mt-1 text-[10px] text-slate-600">{labelize(point.sourceType)}</p></div>)}{!trend.length && <p className="text-sm text-slate-500">Trend appears after the first dated audit.</p>}</div></div><div className="space-y-2">{audits.map(audit => <div key={audit.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-3"><div className="flex justify-between gap-3"><p className="text-sm font-medium">{audit.audit_date} · {labelize(audit.index_status || 'unknown')}</p><span className="text-xs text-slate-500">{labelize(audit.source_type)}</span></div><p className="mt-2 text-xs text-slate-400">Mobile {audit.core_web_vitals_mobile ?? '—'} · Desktop {audit.core_web_vitals_desktop ?? '—'} · Schema {audit.schema_valid === null ? 'unknown' : audit.schema_valid ? 'valid' : 'invalid'}</p><p className="mt-1 text-xs text-amber-300">{(audit.issues || []).join(' · ') || 'No manual issues recorded'}</p>{audit.notes && <p className="mt-2 text-xs leading-5 text-slate-500">{audit.notes}</p>}</div>)}{!audits.length && <p className="text-sm text-slate-500">No audits recorded.</p>}</div></Panel>
-        <Panel title="Keyword rank tracking" description="Manual keywords against this page with read-only Search Console snapshots."><div className="mb-4 flex flex-wrap gap-2"><button disabled={busy || !keywords.length} onClick={fetchKeywordRanks} className={PRIMARY}>Fetch Search Console ranks</button><span className="self-center text-xs text-slate-500">Search Console data is read-only and recorded once per keyword per day.</span></div><div className="space-y-2">{keywords.map(keyword => { const snapshot = keyword.latestSnapshot; const rank = !snapshot ? 'Rank appears after the first fetch' : snapshot.position === null ? 'Not yet ranking — no Search Console impressions yet' : `Position ${Number(snapshot.position).toFixed(1)} · ${snapshot.search_console_clicks ?? 0} clicks · ${snapshot.search_console_impressions ?? 0} impressions`; return <div key={keyword.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-3"><div className="flex justify-between gap-3"><p className="text-sm font-medium">{keyword.keyword}</p><span className="text-xs text-slate-500">{keyword.target_rank_tier ? labelize(keyword.target_rank_tier) : 'No target'}</span></div><p className="mt-1 text-xs text-slate-500">{keyword.active ? 'Active' : 'Paused'} · {rank}</p></div> })}{!keywords.length && <p className="text-sm text-slate-500">No keywords are tracked for this page yet.</p>}</div><form className="mt-5 grid gap-3 border-t border-slate-800 pt-5" onSubmit={saveKeyword}><input required maxLength="200" className={INPUT} placeholder="Keyword to track" value={keywordDraft.keyword} onChange={e => setKeywordDraft({ ...keywordDraft, keyword: e.target.value })}/><div className="grid gap-3 md:grid-cols-2"><select className={INPUT} value={keywordDraft.targetRankTier} onChange={e => setKeywordDraft({ ...keywordDraft, targetRankTier: e.target.value })}><option value="">No target rank tier</option><option value="top_3">Top 3</option><option value="top_10">Top 10</option><option value="top_20">Top 20</option></select><select className={INPUT} value={keywordDraft.sourceArtifactId} onChange={e => setKeywordDraft({ ...keywordDraft, sourceArtifactId: e.target.value })}><option value="">No Keyword Strategy source</option>{keywordSources.map(source => <option key={source.id} value={source.id}>{source.title}</option>)}</select></div><button disabled={busy} className={PRIMARY}>Add tracked keyword</button></form></Panel>
+        <Panel title="Keyword rank tracking" description="Manual keywords against this page with read-only Google Search Console snapshots."><div className="mb-4 space-y-2"><div className="flex flex-wrap gap-2"><button disabled={busy || Boolean(keywordBusyId) || !keywords.some(keyword => keyword.active)} onClick={fetchKeywordRanks} className={PRIMARY}>Fetch Search Console ranks</button><span className="self-center text-xs text-slate-500">Active keywords only; paused keyword history remains unchanged.</span></div><p className="text-xs leading-5 text-sky-200">Source: Google Search Console final data. Each fetch covers the previous 28 days through yesterday and filters to this exact page and query. Market, language, and device detail is not stored; values are provider aggregates.</p></div><div className="space-y-2">{keywords.map(keyword => { const snapshot = keyword.latestSnapshot; const rank = !snapshot ? 'Rank appears after the first fetch' : snapshot.position === null ? 'Rank unknown — Google Search Console returned no row' : `Position ${Number(snapshot.position).toFixed(1)} · ${snapshot.search_console_clicks ?? 0} clicks · ${snapshot.search_console_impressions ?? 0} impressions`; const duplicateCount = duplicateCounts.get(keyword.id) || 1; return <div key={keyword.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-3"><div className="flex flex-wrap justify-between gap-3"><p className="text-sm font-medium">{keyword.keyword}</p><div className="flex items-center gap-2"><span className="text-xs text-slate-500">{keyword.target_rank_tier ? labelize(keyword.target_rank_tier) : 'No target'}</span><button type="button" disabled={busy || Boolean(keywordBusyId)} onClick={() => setKeywordActive(keyword)} className={BUTTON}>{keywordBusyId === keyword.id ? 'Saving…' : keyword.active ? 'Pause' : 'Resume'}</button></div></div><p className="mt-1 text-xs text-slate-500">{keyword.active ? 'Active' : 'Paused'} · {rank}</p>{duplicateCount > 1 && <p className="mt-2 text-xs text-amber-300">Possible duplicate: {duplicateCount} separate records use this keyword on this page. They are retained and remain independently controllable.</p>}</div> })}{!keywords.length && <p className="text-sm text-slate-500">No keywords are tracked for this page yet.</p>}</div><form className="mt-5 grid gap-3 border-t border-slate-800 pt-5" onSubmit={saveKeyword}><input required maxLength="200" className={INPUT} placeholder="Keyword to track" value={keywordDraft.keyword} onChange={e => setKeywordDraft({ ...keywordDraft, keyword: e.target.value })}/><div className="grid gap-3 md:grid-cols-2"><select className={INPUT} value={keywordDraft.targetRankTier} onChange={e => setKeywordDraft({ ...keywordDraft, targetRankTier: e.target.value })}><option value="">No target rank tier</option><option value="top_3">Top 3</option><option value="top_10">Top 10</option><option value="top_20">Top 20</option></select><select className={INPUT} value={keywordDraft.sourceArtifactId} onChange={e => setKeywordDraft({ ...keywordDraft, sourceArtifactId: e.target.value })}><option value="">No Keyword Strategy source</option>{keywordSources.map(source => <option key={source.id} value={source.id}>{source.title}</option>)}</select></div><button disabled={busy || Boolean(keywordBusyId)} className={PRIMARY}>Add tracked keyword</button></form></Panel>
         <Panel title="Add manual audit" description="One append-only snapshot per page and date."><form className="grid gap-3" onSubmit={saveAudit}><input type="date" required className={INPUT} value={auditDraft.auditDate} onChange={e => setAuditDraft({ ...auditDraft, auditDate: e.target.value })}/><div className="grid grid-cols-2 gap-3"><select className={INPUT} value={auditDraft.indexed} onChange={e => { const indexed = e.target.value; setAuditDraft({ ...auditDraft, indexed, indexStatus: indexed === 'true' ? 'indexed' : auditDraft.indexStatus === 'indexed' ? '' : auditDraft.indexStatus }) }}><option value="">Indexed unknown</option><option value="true">Indexed</option><option value="false">Not indexed</option></select><select className={INPUT} value={auditDraft.indexStatus} onChange={e => setAuditDraft({ ...auditDraft, indexStatus: e.target.value, indexed: e.target.value === 'indexed' ? 'true' : auditDraft.indexed })}><option value="">Index status unknown</option>{INDEX_STATUSES.map(value => <option key={value} value={value}>{labelize(value)}</option>)}</select></div><div className="grid grid-cols-2 gap-3"><input type="number" min="0" max="100" step="0.01" className={INPUT} placeholder="Mobile score" value={auditDraft.mobileScore} onChange={e => setAuditDraft({ ...auditDraft, mobileScore: e.target.value })}/><input type="number" min="0" max="100" step="0.01" className={INPUT} placeholder="Desktop score" value={auditDraft.desktopScore} onChange={e => setAuditDraft({ ...auditDraft, desktopScore: e.target.value })}/></div><select className={INPUT} value={auditDraft.schemaValid} onChange={e => setAuditDraft({ ...auditDraft, schemaValid: e.target.value })}><option value="">Schema unknown</option><option value="true">Schema valid</option><option value="false">Schema invalid</option></select><textarea className={`${INPUT} min-h-24`} placeholder="Issues, one per line" value={auditDraft.issuesText} onChange={e => setAuditDraft({ ...auditDraft, issuesText: e.target.value })}/><textarea className={`${INPUT} min-h-24`} placeholder="Audit notes" value={auditDraft.notes} onChange={e => setAuditDraft({ ...auditDraft, notes: e.target.value })}/><button disabled={busy} className={PRIMARY}>Add audit snapshot</button></form></Panel></div>}
     </main>
   </div>

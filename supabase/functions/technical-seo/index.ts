@@ -4,7 +4,7 @@ import { googleAccessToken, namedKey } from '../_shared/googleOAuthTokens.ts'
 type Client = ReturnType<typeof createClient<any>>
 type Json = Record<string, unknown>
 
-const ACTIONS = new Set(['save_page', 'save_audit', 'inspect_page', 'save_keyword', 'fetch_keyword_ranks'])
+const ACTIONS = new Set(['save_page', 'save_audit', 'inspect_page', 'save_keyword', 'set_keyword_active', 'fetch_keyword_ranks'])
 const PAGE_TYPES = new Set(['homepage', 'service', 'location', 'event', 'blog', 'other'])
 const INDEX_STATUSES = new Set(['indexed', 'discovered_not_indexed', 'requested', 'excluded'])
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
@@ -122,6 +122,12 @@ async function readablePage(userClient: Client, pageId: string) {
   return data
 }
 
+async function readableKeyword(userClient: Client, keywordId: string) {
+  const { data, error } = await userClient.from('tracked_keywords').select('*').eq('id', keywordId).maybeSingle()
+  if (error || !data) throw Object.assign(new Error('Tracked keyword is unavailable'), { status: 404 })
+  return data
+}
+
 async function savePage(userClient: Client, admin: Client, actorId: string, body: Json) {
   const pageId = optionalId(body.pageId)
   const existing = pageId ? await readablePage(userClient, pageId) : null
@@ -236,6 +242,22 @@ async function saveKeyword(userClient: Client, admin: Client, actorId: string, b
   return data
 }
 
+export async function setKeywordActive(userClient: Client, admin: Client, actorId: string, body: Json) {
+  const organizationId = id(body.organizationId, 'Organization')
+  const keyword = await readableKeyword(userClient, id(body.keywordId, 'Tracked keyword'))
+  if (keyword.organization_id !== organizationId) {
+    throw Object.assign(new Error('Tracked keyword is unavailable in the selected organization'), { status: 403 })
+  }
+  await requireWriter(admin, keyword.organization_id, actorId)
+  if (typeof body.active !== 'boolean') throw new Error('Keyword active state must be true or false')
+  if (keyword.active === body.active) return keyword
+  const { data, error } = await admin.from('tracked_keywords').update({ active: body.active })
+    .eq('id', keyword.id).eq('organization_id', keyword.organization_id).eq('brand_id', keyword.brand_id)
+    .eq('tracked_page_id', keyword.tracked_page_id).select('*').single()
+  if (error) throw error
+  return data
+}
+
 async function fetchKeywordRanks(userClient: Client, admin: Client, actorId: string, body: Json) {
   const page = await readablePage(userClient, id(body.pageId, 'Tracked page'))
   await requireWriter(admin, page.organization_id, actorId)
@@ -306,6 +328,7 @@ export async function handleRequest(request: Request) {
     if (action === 'save_audit') return response({ data: await saveAudit(userClient, admin, user.id, body) })
     if (action === 'inspect_page') return response({ data: await inspectPage(userClient, admin, user.id, body) })
     if (action === 'save_keyword') return response({ data: await saveKeyword(userClient, admin, user.id, body) })
+    if (action === 'set_keyword_active') return response({ data: await setKeywordActive(userClient, admin, user.id, body) })
     return response({ data: await fetchKeywordRanks(userClient, admin, user.id, body) })
   } catch (error) {
     const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : 400

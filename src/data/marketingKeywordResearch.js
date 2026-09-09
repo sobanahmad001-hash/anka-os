@@ -18,6 +18,59 @@ export function shouldApplyKeywordResearchResponse(request, current, generation,
     generation === currentGeneration
 }
 
+export function shouldApplyTechnicalSeoMutationResponse(request, current, generation, currentGeneration) {
+  return request.organizationId === current.organizationId &&
+    request.brandId === current.brandId &&
+    request.pageId === current.pageId &&
+    request.revision === current.revision &&
+    generation === currentGeneration
+}
+
+export async function runTechnicalSeoMutation({
+  request,
+  generation,
+  currentScope,
+  currentGeneration,
+  mutate,
+  reload,
+  onSuccess,
+  onError,
+  onFinish,
+}) {
+  const isCurrent = () => shouldApplyTechnicalSeoMutationResponse(
+    request, currentScope(), generation, currentGeneration(),
+  )
+  try {
+    const updated = await mutate()
+    if (!isCurrent()) return false
+    await reload(request.pageId)
+    if (!isCurrent()) return false
+    onSuccess(updated)
+    return true
+  } catch (error) {
+    if (isCurrent()) onError(error)
+    return false
+  } finally {
+    if (isCurrent()) onFinish()
+  }
+}
+
+export function keywordDuplicateCounts(keywords = []) {
+  const counts = new Map()
+  for (const row of keywords) {
+    const normalized = text(row?.keyword).trim().replace(/\s+/g, ' ').toLocaleLowerCase()
+    const pageId = row?.tracked_page_id || row?.pageTarget?.id || ''
+    if (!normalized || !pageId) continue
+    const key = `${pageId}\u0000${normalized}`
+    counts.set(key, (counts.get(key) || 0) + 1)
+  }
+  return new Map(keywords.map(row => {
+    const normalized = text(row?.keyword).trim().replace(/\s+/g, ' ').toLocaleLowerCase()
+    const pageId = row?.tracked_page_id || row?.pageTarget?.id || ''
+    return [row?.id, normalized && pageId ? counts.get(`${pageId}\u0000${normalized}`) || 1 : 1]
+  }))
+}
+
 export function buildMarketingKeywordResearch({
   organizationId,
   brand,
@@ -62,6 +115,7 @@ export function buildMarketingKeywordResearch({
       histories.set(row.tracked_keyword_id, history)
     })
 
+  const duplicateCounts = keywordDuplicateCounts(visibleKeywords)
   const trackedKeywords = visibleKeywords.map(row => {
     const page = pageById.get(row.tracked_page_id)
     const artifact = artifactById.get(row.source_artifact_id)
@@ -73,6 +127,7 @@ export function buildMarketingKeywordResearch({
       active: row.active !== false,
       targetRankTier: row.target_rank_tier || null,
       createdAt: row.created_at,
+      duplicateCount: duplicateCounts.get(row.id) || 1,
       pageTarget: page ? Object.freeze({ id: page.id, url: page.page_url, pageType: page.page_type }) : null,
       sourceArtifact: artifact ? Object.freeze({
         id: artifact.id,
