@@ -83,15 +83,27 @@ test('RET5 historical and transition months select applicable approvals, excludi
 })
 test('RET5 distinguishes generated from ungenerated and inactive commitments without generation eligibility', () => {
   const snapshot = fixture()
-  let result = buildRetainerReview(snapshot, scope, now).cards[0].upcoming[0]
+  let card = buildRetainerReview(snapshot, scope, now).cards[0]
+  assert.deepEqual(card.commitments.map(row => row.id), ['template'])
+  assert.deepEqual(card.generatedWork.map(row => row.id), ['done-now'])
+  assert.equal(card.projections.length, 0)
+  assert.deepEqual(card.generatedStarts.map(row => row.period_start), ['2026-09-01'])
+  let result = card.upcoming[0]
   assert.equal(result.occurrence.id, 'sep')
   assert.equal(result.templates.length, 0)
   snapshot.occurrences = []
   snapshot.plans[0].status = 'paused'
-  result = buildRetainerReview(snapshot, scope, now).cards[0].upcoming[0]
+  card = buildRetainerReview(snapshot, scope, now).cards[0]
+  result = card.upcoming[0]
   assert.equal(result.occurrence, null)
   assert.equal(result.active, false)
   assert.equal(result.templates[0].title, 'Monthly work')
+  assert.deepEqual(card.projections.map(row => row.period_start), ['2026-09-01'])
+  assert.equal(card.generatedStarts.length, 0)
+  assert.deepEqual(buildRetainerReview(snapshot, scope, now).summary, {
+    commitments: 1, projections: 1, generatedWork: 0, completed: 0,
+    carryover: 0, blockers: 0, upcoming: 1,
+  })
   snapshot.approvals = []
   assert.equal(buildRetainerReview(snapshot, scope, now).summary.upcoming, 0)
 })
@@ -212,6 +224,10 @@ test('RET5 mounts within RET ownership and uses only read paths with explicit cu
   assert.doesNotMatch(repository, /\.(insert|update|delete|upsert|rpc|invoke)\(/)
   assert.match(panel, /Currently completed/)
   assert.match(panel, /Earlier-period work still open now/)
+  assert.match(panel, /Approved commitments/)
+  assert.match(panel, /Projected period starts/)
+  assert.match(panel, /Generated period work/)
+  assert.match(panel, /A projection is not a canonical work record/)
   assert.match(panel, /handleOrganizationAccessError/)
   assert.match(panel, /projectId === project.id/)
   assert.match(panel, /id=\{recordId\(item.id\)\}/)
