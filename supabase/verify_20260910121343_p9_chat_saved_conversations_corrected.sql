@@ -64,15 +64,58 @@ begin
     'authenticated',
     'public.save_department_chat_conversation_proposal(uuid,uuid,uuid,uuid,uuid,text,uuid,text,text,uuid,uuid,jsonb,jsonb,jsonb,uuid[],text,uuid,text,uuid,text,text,integer,integer,integer,bigint)',
     'execute'
+  ) or has_function_privilege(
+    'authenticated',
+    'public.mark_department_chat_turn_dispatched(uuid,uuid,uuid,uuid,uuid,text,uuid)',
+    'execute'
+  ) or has_function_privilege(
+    'authenticated',
+    'public.mark_department_chat_turn_unknown(uuid,uuid,uuid,uuid,uuid,text,uuid)',
+    'execute'
   ) then raise exception 'conversation_rpc_browser_execute_not_revoked'; end if;
 
   select pg_get_functiondef(
     'public.begin_department_chat_turn(uuid,uuid,uuid,uuid,text,uuid,uuid,text)'::regprocedure
   ) into v_definition;
-  if v_definition not like '%FOR UPDATE%'
-     or v_definition not like '%client_request_id = p_client_request_id%'
-     or v_definition not like '%next_sequence = next_sequence + 1%' then
+  if lower(v_definition) not like '%for update%'
+     or lower(v_definition) not like '%client_request_id = p_client_request_id%'
+     or lower(v_definition) not like '%v_message.body <> btrim(p_prompt)%'
+     or lower(v_definition) not like '%errcode = ''23505''%'
+     or lower(v_definition) not like '%next_sequence = next_sequence + 1%' then
     raise exception 'turn_concurrency_contract_missing';
+  end if;
+
+  select pg_get_constraintdef(oid) into v_definition
+  from pg_constraint
+  where conrelid = 'public.ai_runs'::regclass
+    and conname = 'ai_runs_department_chat_conversation_fkey';
+  if lower(v_definition) not like '%foreign key (department_chat_conversation_id, organization_id, project_id, engagement_id, user_id)%'
+     or lower(v_definition) not like '%department_chat_conversations(id, organization_id, project_id, engagement_id, owner_id)%' then
+    raise exception 'ai_run_conversation_full_context_fkey_missing';
+  end if;
+
+  select pg_get_constraintdef(oid) into v_definition
+  from pg_constraint
+  where conrelid = 'public.department_chat_proposals'::regclass
+    and conname = 'department_chat_proposals_conversation_scope_fkey';
+  if lower(v_definition) not like '%foreign key (conversation_id, organization_id, project_id, engagement_id, department_id, proposer_id)%'
+     or lower(v_definition) not like '%department_chat_conversations(id, organization_id, project_id, engagement_id, department_id, owner_id)%' then
+    raise exception 'proposal_conversation_full_context_fkey_missing';
+  end if;
+
+  if not exists (
+    select 1 from pg_trigger
+    where tgrelid = 'public.ai_runs'::regclass
+      and tgname = 'trg_ai_runs_department_chat_conversation' and not tgisinternal
+  ) then raise exception 'ai_run_conversation_immutability_missing'; end if;
+
+  select pg_get_functiondef(
+    'public.mark_department_chat_turn_unknown(uuid,uuid,uuid,uuid,uuid,text,uuid)'::regprocedure
+  ) into v_definition;
+  if lower(v_definition) not like '%provider_dispatched_at is null%'
+     or lower(v_definition) not like '%status = ''unknown''%'
+     or lower(v_definition) not like '%error_code = ''outcome_unknown''%' then
+    raise exception 'unknown_outcome_transition_missing';
   end if;
 
   select pg_get_functiondef(

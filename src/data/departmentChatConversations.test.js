@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const read = path => readFileSync(root + path, 'utf8')
-const migration = read('supabase/migrations/20260909184738_p9_chat_saved_conversations.sql')
-const verifier = read('supabase/verify_20260909184738_p9_chat_saved_conversations.sql')
+const migration = read('supabase/migrations/20260910121343_p9_chat_saved_conversations_corrected.sql')
+const verifier = read('supabase/verify_20260910121343_p9_chat_saved_conversations_corrected.sql')
 const edge = read('supabase/functions/department-chat/index.ts')
 const chat = read('src/components/DepartmentChat.jsx')
 const transport = read('src/data/departmentChatTransport.js')
@@ -48,9 +48,11 @@ test('P9 turn allocation and proposal linkage are deterministic, atomic, and app
   const save = section(migration, 'create function public.save_department_chat_conversation_proposal', 'create function private.protect_department_chat_message')
   assert.ok(begin.includes('for update'))
   assert.ok(begin.includes('client_request_id = p_client_request_id'))
+  assert.ok(begin.includes("v_message.body <> btrim(p_prompt)"))
+  assert.ok(begin.includes("errcode = '23505'"))
   assert.ok(begin.includes('next_sequence = next_sequence + 1'))
   assert.ok(migration.includes('create function public.expire_department_chat_pending_turns'))
-  assert.ok(migration.includes("error_code = 'interrupted'"))
+  assert.ok(migration.includes("then 'interrupted' else 'outcome_unknown'"))
   assert.ok(edge.includes("rpc('expire_department_chat_pending_turns'"))
   assert.ok(save.includes('public.save_department_chat_proposal('))
   assert.ok(save.includes('set department_chat_conversation_id = p_conversation_id'))
@@ -60,6 +62,28 @@ test('P9 turn allocation and proposal linkage are deterministic, atomic, and app
   for (const forbidden of ['insert into public.artifacts', 'insert into public.work_items', 'insert into public.tasks']) {
     assert.ok(!save.includes(forbidden), forbidden)
   }
+})
+
+test('P9 records dispatch and preserves ambiguous provider outcomes without advertising safe retry', () => {
+  for (const required of [
+    "status in ('pending', 'completed', 'failed', 'unsupported', 'unknown')",
+    'provider_dispatched_at timestamptz',
+    'create function public.mark_department_chat_turn_dispatched',
+    'create function public.mark_department_chat_turn_unknown',
+    "error_code = 'outcome_unknown'",
+  ]) assert.ok(migration.includes(required), required)
+  assert.ok(edge.includes("rpc('mark_department_chat_turn_dispatched'"))
+  assert.ok(edge.includes("rpc('mark_department_chat_turn_unknown'"))
+  assert.ok(edge.includes("outcome: 'outcome_unknown'"))
+  assert.ok(chat.includes('Do not retry this request; a retry could duplicate work or cost.'))
+})
+
+test('P9 linked runs and proposals enforce full existing owner and work context', () => {
+  assert.ok(migration.includes('foreign key (department_chat_conversation_id, organization_id, project_id, engagement_id, user_id)'))
+  assert.ok(migration.includes('references public.department_chat_conversations(id, organization_id, project_id, engagement_id, owner_id)'))
+  assert.ok(migration.includes('foreign key (conversation_id, organization_id, project_id, engagement_id, department_id, proposer_id)'))
+  assert.ok(migration.includes('create trigger trg_ai_runs_department_chat_conversation'))
+  assert.ok(migration.includes('AI run Department Chat conversation is immutable.'))
 })
 
 test('P9 endpoint and reusable shell expose saved lifecycle and truthful capability boundaries', () => {
@@ -79,6 +103,16 @@ test('P9 endpoint and reusable shell expose saved lifecycle and truthful capabil
     'listConversations', 'createConversation', 'getConversation',
     'renameConversation', 'setConversationState', 'getCapabilities',
   ]) assert.ok(transport.includes(method), method)
+})
+
+test('P9 conversation metadata actions share the same latest-completion controller', () => {
+  assert.ok(chat.includes('runCurrentChatOperation'))
+  for (const action of ['renameConversation', 'setConversationState', 'toggleArchived']) {
+    const body = section(chat, `async function ${action}`, '\n  async function')
+    assert.ok(body.includes('runCurrentChatOperation(completion.current'), action)
+  }
+  assert.ok(chat.includes('loadConversationList(targetConversationId, checked, isCurrent)'))
+  assert.ok(chat.includes("loadConversation(selected?.id || '', isCurrent)"))
 })
 
 test('P9 preserves proposal-only Development and official confirmation boundaries', () => {

@@ -13,3 +13,19 @@ export function handleCurrentChatFailure(isCurrent, reason, handleOrganizationAc
   handleOrganizationAccessError(reason)
   if (isCurrent()) showError(reason)
 }
+
+export async function runCurrentChatOperation(guard, handlers) {
+  const isCurrent = guard.begin()
+  if (!isCurrent()) return undefined
+  handlers.start?.()
+  try {
+    const value = await handlers.operation(isCurrent)
+    if (isCurrent()) await handlers.success?.(value, isCurrent)
+    return isCurrent() ? value : undefined
+  } catch (reason) {
+    if (isCurrent()) await handlers.failure?.(reason, isCurrent)
+    return undefined
+  } finally {
+    if (isCurrent()) await handlers.settle?.()
+  }
+}

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createChatCompletionGuard } from './departmentChatIdentity.js'
+import { createChatCompletionGuard, runCurrentChatOperation } from './departmentChatIdentity.js'
 
 function deferred() {
   let resolve
@@ -46,3 +46,26 @@ test('organization abort and newer request invalidate in-flight completions', ()
   controller.abort()
   assert.equal(latest(), false)
 })
+
+for (const action of ['rename', 'archive', 'conversation reload', 'show archived']) {
+  test('late ' + action + ' cannot overwrite a newer conversation action', async () => {
+    const guard = createChatCompletionGuard()
+    const first = deferred()
+    const events = []
+    const oldOperation = runCurrentChatOperation(guard, {
+      start: () => events.push('old:start'),
+      operation: () => first.promise,
+      success: value => events.push('old:' + value),
+      failure: () => events.push('old:error'),
+      settle: () => events.push('old:settle'),
+    })
+    await runCurrentChatOperation(guard, {
+      operation: async () => 'new',
+      success: value => events.push(value),
+      settle: () => events.push('new:settle'),
+    })
+    first.resolve('late')
+    await oldOperation
+    assert.deepEqual(events, ['old:start', 'new', 'new:settle'])
+  })
+}

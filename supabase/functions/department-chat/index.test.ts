@@ -47,6 +47,9 @@ function selectedOrganizationFixture() {
   const rpcCalls: Array<{ name: string, args: any }> = []
   let providerCalls = 0
   let beginReplay = false
+  let beginError: any = null
+  let providerFailure = ''
+  const events: string[] = []
   for (const org of ['A', 'B', 'C']) {
     const add = (table: string, value: any) => (rows[table] ||= []).push({ organization_id: org, ...value })
     add('organizations', { id: org, status: 'active', settings: { ai_monthly_budget_microusd: 100 } })
@@ -92,6 +95,8 @@ function selectedOrganizationFixture() {
     },
     async rpc(name: string, args: any) {
       rpcCalls.push({ name, args })
+      events.push('rpc:' + name)
+      if (name === 'begin_department_chat_turn' && beginError) return { data: null, error: beginError }
       return { data: name === 'begin_department_chat_turn' ? {
           message: { id: 'message-B', status: 'pending' }, replayed: beginReplay,
         }
@@ -105,11 +110,24 @@ function selectedOrganizationFixture() {
     method: 'POST', headers: { Authorization: 'Bearer synthetic', 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }), {
     clients: { admin, userClient: { auth: { getUser: async () => ({ data: { user: { id: 'actor' } }, error: null }) } } as any },
-    fetcher: (async () => { providerCalls++; return new Response(JSON.stringify({ output_text: JSON.stringify({ notes: 'Offline', checklist: ['Test'] }) })) }) as typeof fetch,
+    fetcher: (async () => {
+      providerCalls++
+      events.push('provider')
+      if (providerFailure === 'network') throw new TypeError('connection reset after dispatch')
+      if (providerFailure === '504') return new Response(JSON.stringify({ error: { message: 'gateway timeout' } }), { status: 504 })
+      if (providerFailure === '400') return new Response(JSON.stringify({ error: { message: 'rejected' } }), { status: 400 })
+      return new Response(JSON.stringify({ output_text: JSON.stringify({ notes: 'Offline', checklist: ['Test'] }) }))
+    }) as typeof fetch,
     proposal: { estimatedCost: () => 0, resolveSingleOpenAiModel: (client, engagement, department, organization) =>
       resolveSingleOpenAiModel(client, engagement, department, organization, () => 'synthetic-key') },
   })
-  return { rows, queries, rpcCalls, request, providerCalls: () => providerCalls, setBeginReplay: (value: boolean) => { beginReplay = value } }
+  return {
+    rows, queries, rpcCalls, request, events,
+    providerCalls: () => providerCalls,
+    setBeginReplay: (value: boolean) => { beginReplay = value },
+    setBeginError: (value: any) => { beginError = value },
+    setProviderFailure: (value: string) => { providerFailure = value },
+  }
 }
 
 const selectedPreview = { action: 'propose_artifact', organization_id: 'B', engagement_id: 'engagement-B',
@@ -215,6 +233,75 @@ Deno.test('a replayed pending client request never starts a second provider run'
   assertEquals(fixture.providerCalls(), 0)
   assertEquals(fixture.rpcCalls.some(call => call.name === 'save_department_chat_conversation_proposal'), false)
   assertEquals(fixture.rpcCalls.some(call => call.name === 'fail_department_chat_turn'), false)
+})
+
+Deno.test('a conflicting replay payload maps deterministically to 409 before provider dispatch', async () => {
+  const fixture = selectedOrganizationFixture()
+  fixture.rows.organization_memberships.find(row => row.organization_id === 'B').department_id = 'content'
+  fixture.rows.engagement_services.find(row => row.organization_id === 'B').service_catalog.department_id = 'content'
+  fixture.rows.department_chat_conversations.find(row => row.organization_id === 'B').department_id = 'content'
+  const connection = fixture.rows.integration_connections.find(row => row.organization_id === 'B')
+  connection.integration_connection_departments.department_id = 'content'
+  connection.integration_connection_engagements.department_id = 'content'
+  fixture.setBeginError({ code: '23505', message: 'client_request_id conflicts with a different prompt.' })
+  const response = await fixture.request({
+    action: 'propose_work_item', organization_id: 'B', project_id: 'project-B',
+    engagement_id: 'engagement-B', department_id: 'content',
+    conversation_id: 'conversation-B', client_request_id: 'request-B',
+    title: 'Conflict', work_item_type: 'task', priority: 'medium',
+    prompt: 'Different payload', prompt_safe_for_ai: true,
+  })
+  assertEquals(response.status, 409)
+  assertEquals((await response.json()).outcome, 'idempotency_conflict')
+  assertEquals(fixture.providerCalls(), 0)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'fail_department_chat_turn'), false)
+})
+
+for (const failure of ['network', '504']) {
+  Deno.test('post-dispatch ' + failure + ' records outcome unknown and never marks safe failure', async () => {
+    const fixture = selectedOrganizationFixture()
+    fixture.rows.organization_memberships.find(row => row.organization_id === 'B').department_id = 'content'
+    fixture.rows.engagement_services.find(row => row.organization_id === 'B').service_catalog.department_id = 'content'
+    fixture.rows.department_chat_conversations.find(row => row.organization_id === 'B').department_id = 'content'
+    const connection = fixture.rows.integration_connections.find(row => row.organization_id === 'B')
+    connection.integration_connection_departments.department_id = 'content'
+    connection.integration_connection_engagements.department_id = 'content'
+    fixture.setProviderFailure(failure)
+    const response = await fixture.request({
+      action: 'propose_work_item', organization_id: 'B', project_id: 'project-B',
+      engagement_id: 'engagement-B', department_id: 'content',
+      conversation_id: 'conversation-B', client_request_id: 'request-B',
+      title: 'Unknown', work_item_type: 'task', priority: 'medium',
+      prompt: 'Ambiguous request', prompt_safe_for_ai: true,
+    })
+    const payload = await response.json()
+    assertEquals(response.status, 503)
+    assertEquals(payload.outcome, 'outcome_unknown')
+    assertEquals(fixture.events.indexOf('rpc:mark_department_chat_turn_dispatched') < fixture.events.indexOf('provider'), true)
+    assertEquals(fixture.rpcCalls.some(call => call.name === 'mark_department_chat_turn_unknown'), true)
+    assertEquals(fixture.rpcCalls.some(call => call.name === 'fail_department_chat_turn'), false)
+  })
+}
+
+Deno.test('definite provider rejection remains a failed turn, not an unknown outcome', async () => {
+  const fixture = selectedOrganizationFixture()
+  fixture.rows.organization_memberships.find(row => row.organization_id === 'B').department_id = 'content'
+  fixture.rows.engagement_services.find(row => row.organization_id === 'B').service_catalog.department_id = 'content'
+  fixture.rows.department_chat_conversations.find(row => row.organization_id === 'B').department_id = 'content'
+  const connection = fixture.rows.integration_connections.find(row => row.organization_id === 'B')
+  connection.integration_connection_departments.department_id = 'content'
+  connection.integration_connection_engagements.department_id = 'content'
+  fixture.setProviderFailure('400')
+  const response = await fixture.request({
+    action: 'propose_work_item', organization_id: 'B', project_id: 'project-B',
+    engagement_id: 'engagement-B', department_id: 'content',
+    conversation_id: 'conversation-B', client_request_id: 'request-B',
+    title: 'Rejected', work_item_type: 'task', priority: 'medium',
+    prompt: 'Rejected request', prompt_safe_for_ai: true,
+  })
+  assertEquals(response.status, 502)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'fail_department_chat_turn'), true)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'mark_department_chat_turn_unknown'), false)
 })
 
 for (const scenario of ['missing', 'nonmember', 'inactive-organization', 'inactive-membership', 'client-membership']) {

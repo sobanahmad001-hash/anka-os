@@ -27,19 +27,24 @@ create table public.department_chat_conversations (
   constraint department_chat_conversations_archive_check check ((state = 'archived') = (archived_at is not null)),
   constraint department_chat_conversations_sequence_check check (next_sequence >= 1),
   unique (id, organization_id),
+  unique (id, organization_id, project_id, engagement_id, owner_id),
   unique (id, organization_id, project_id, engagement_id, department_id, owner_id)
 );
 
 alter table public.ai_runs
   add column department_chat_conversation_id uuid,
+  add constraint ai_runs_department_chat_conversation_context_check
+    check (department_chat_conversation_id is null or (project_id is not null and engagement_id is not null)),
   add constraint ai_runs_department_chat_conversation_fkey
-    foreign key (department_chat_conversation_id, organization_id)
-    references public.department_chat_conversations(id, organization_id) on delete restrict;
+    foreign key (department_chat_conversation_id, organization_id, project_id, engagement_id, user_id)
+    references public.department_chat_conversations(id, organization_id, project_id, engagement_id, owner_id)
+    on delete restrict;
 alter table public.department_chat_proposals
   add column conversation_id uuid,
   add constraint department_chat_proposals_conversation_scope_fkey
-    foreign key (conversation_id, organization_id)
-    references public.department_chat_conversations(id, organization_id) on delete restrict;
+    foreign key (conversation_id, organization_id, project_id, engagement_id, department_id, proposer_id)
+    references public.department_chat_conversations(id, organization_id, project_id, engagement_id, department_id, owner_id)
+    on delete restrict;
 
 create table public.department_chat_messages (
   id uuid primary key default gen_random_uuid(),
@@ -52,8 +57,9 @@ create table public.department_chat_messages (
   author_id uuid references auth.users(id) on delete restrict,
   role text not null check (role in ('user', 'assistant')),
   body text not null check (char_length(btrim(body)) between 1 and 80000),
-  status text not null check (status in ('pending', 'completed', 'failed', 'unsupported')),
+  status text not null check (status in ('pending', 'completed', 'failed', 'unsupported', 'unknown')),
   error_code text not null default '' check (char_length(error_code) <= 80),
+  provider_dispatched_at timestamptz,
   ai_run_id uuid,
   proposal_id uuid,
   client_request_id uuid not null,
@@ -72,6 +78,8 @@ create table public.department_chat_messages (
     (status = 'pending' and role = 'user' and ai_run_id is null and proposal_id is null and finished_at is null and error_code = '')
     or (status = 'completed' and ai_run_id is not null and proposal_id is not null and finished_at is not null and error_code = '')
     or (status in ('failed', 'unsupported') and role = 'user' and ai_run_id is null and proposal_id is null and finished_at is not null and error_code <> '')
+    or (status = 'unknown' and role = 'user' and ai_run_id is null and proposal_id is null
+      and provider_dispatched_at is not null and finished_at is not null and error_code = 'outcome_unknown')
   ),
   constraint department_chat_messages_author_check check (
     (role = 'user' and author_id is not null)
@@ -315,6 +323,9 @@ begin
   where message.conversation_id = p_conversation_id
     and message.client_request_id = p_client_request_id and message.role = 'user';
   if found then
+    if v_message.body <> btrim(p_prompt) then
+      raise exception 'client_request_id conflicts with a different prompt.' using errcode = '23505';
+    end if;
     return jsonb_build_object('message', to_jsonb(v_message), 'replayed', true);
   end if;
   insert into public.department_chat_messages (
@@ -366,6 +377,73 @@ begin
 end;
 $$;
 
+create function public.mark_department_chat_turn_dispatched(
+  p_message_id uuid, p_conversation_id uuid, p_organization_id uuid,
+  p_project_id uuid, p_engagement_id uuid, p_department_id text,
+  p_actor_id uuid
+)
+returns public.department_chat_messages
+language plpgsql security invoker set search_path = ''
+as $$
+declare v_message public.department_chat_messages;
+begin
+  perform private.require_owned_department_chat_conversation(
+    p_conversation_id, p_organization_id, p_project_id, p_engagement_id,
+    p_department_id, p_actor_id, true
+  );
+  select message.* into v_message
+  from public.department_chat_messages message
+  where message.id = p_message_id and message.conversation_id = p_conversation_id
+    and message.owner_id = p_actor_id and message.author_id = p_actor_id
+    and message.role = 'user'
+  for update;
+  if not found or v_message.status <> 'pending' then
+    raise exception 'Pending Department Chat message not found.' using errcode = '42501';
+  end if;
+  if v_message.provider_dispatched_at is null then
+    update public.department_chat_messages
+    set provider_dispatched_at = clock_timestamp()
+    where id = v_message.id returning * into v_message;
+  end if;
+  return v_message;
+end;
+$$;
+
+create function public.mark_department_chat_turn_unknown(
+  p_message_id uuid, p_conversation_id uuid, p_organization_id uuid,
+  p_project_id uuid, p_engagement_id uuid, p_department_id text,
+  p_actor_id uuid
+)
+returns public.department_chat_messages
+language plpgsql security invoker set search_path = ''
+as $$
+declare v_message public.department_chat_messages;
+begin
+  perform private.require_owned_department_chat_conversation(
+    p_conversation_id, p_organization_id, p_project_id, p_engagement_id,
+    p_department_id, p_actor_id, false
+  );
+  select message.* into v_message
+  from public.department_chat_messages message
+  where message.id = p_message_id and message.conversation_id = p_conversation_id
+    and message.owner_id = p_actor_id and message.author_id = p_actor_id
+    and message.role = 'user'
+  for update;
+  if not found then
+    raise exception 'Department Chat message not found.' using errcode = '42501';
+  end if;
+  if v_message.status = 'pending' then
+    if v_message.provider_dispatched_at is null then
+      raise exception 'A request cannot be unknown before provider dispatch.' using errcode = '23514';
+    end if;
+    update public.department_chat_messages
+    set status = 'unknown', error_code = 'outcome_unknown', finished_at = now()
+    where id = v_message.id returning * into v_message;
+  end if;
+  return v_message;
+end;
+$$;
+
 create function public.expire_department_chat_pending_turns(
   p_conversation_id uuid, p_organization_id uuid, p_project_id uuid,
   p_engagement_id uuid, p_department_id text, p_actor_id uuid
@@ -380,7 +458,9 @@ begin
     p_department_id, p_actor_id, false
   );
   update public.department_chat_messages
-  set status = 'failed', error_code = 'interrupted', finished_at = now()
+  set status = case when provider_dispatched_at is null then 'failed' else 'unknown' end,
+      error_code = case when provider_dispatched_at is null then 'interrupted' else 'outcome_unknown' end,
+      finished_at = now()
   where conversation_id = p_conversation_id
     and organization_id = p_organization_id
     and owner_id = p_actor_id
@@ -488,6 +568,11 @@ begin
   if tg_op = 'DELETE' then
     raise exception 'Department Chat history is append-only.' using errcode = '23514';
   end if;
+  if old.status = 'pending' and new.status = 'pending'
+     and old.provider_dispatched_at is null and new.provider_dispatched_at is not null
+     and (to_jsonb(new) - 'provider_dispatched_at') = (to_jsonb(old) - 'provider_dispatched_at') then
+    return new;
+  end if;
   if new.id is distinct from old.id
      or new.conversation_id is distinct from old.conversation_id
      or new.organization_id is distinct from old.organization_id
@@ -498,6 +583,7 @@ begin
      or new.author_id is distinct from old.author_id
      or new.role is distinct from old.role
      or new.body is distinct from old.body
+     or new.provider_dispatched_at is distinct from old.provider_dispatched_at
      or new.client_request_id is distinct from old.client_request_id
      or new.sequence is distinct from old.sequence
      or new.created_at is distinct from old.created_at then
@@ -506,7 +592,7 @@ begin
   if old.status <> 'pending' and new is distinct from old then
     raise exception 'Terminal Department Chat messages are immutable.' using errcode = '23514';
   end if;
-  if old.status = 'pending' and new.status not in ('completed', 'failed', 'unsupported') then
+  if old.status = 'pending' and new.status not in ('completed', 'failed', 'unsupported', 'unknown') then
     raise exception 'Invalid Department Chat message transition.' using errcode = '23514';
   end if;
   return new;
@@ -529,6 +615,21 @@ $$;
 create trigger trg_department_chat_proposal_conversation
 before update on public.department_chat_proposals
 for each row execute function private.protect_department_chat_proposal_conversation();
+
+create function private.protect_ai_run_department_chat_conversation()
+returns trigger language plpgsql security invoker set search_path = ''
+as $$
+begin
+  if old.department_chat_conversation_id is not null
+     and new.department_chat_conversation_id is distinct from old.department_chat_conversation_id then
+    raise exception 'AI run Department Chat conversation is immutable.' using errcode = '23514';
+  end if;
+  return new;
+end;
+$$;
+create trigger trg_ai_runs_department_chat_conversation
+before update of department_chat_conversation_id on public.ai_runs
+for each row execute function private.protect_ai_run_department_chat_conversation();
 
 create or replace function private.protect_department_chat_proposal()
 returns trigger
@@ -585,10 +686,12 @@ revoke all on function private.require_owned_department_chat_conversation(uuid, 
   from public, anon, authenticated;
 revoke all on function private.protect_department_chat_message() from public, anon, authenticated;
 revoke all on function private.protect_department_chat_proposal_conversation() from public, anon, authenticated;
+revoke all on function private.protect_ai_run_department_chat_conversation() from public, anon, authenticated;
 grant execute on function private.require_owned_department_chat_conversation(uuid, uuid, uuid, uuid, text, uuid, boolean)
   to service_role;
 grant execute on function private.protect_department_chat_message() to service_role;
 grant execute on function private.protect_department_chat_proposal_conversation() to service_role;
+grant execute on function private.protect_ai_run_department_chat_conversation() to service_role;
 
 revoke all on function public.create_department_chat_conversation(uuid, uuid, uuid, text, uuid, text)
   from public, anon, authenticated;
@@ -599,6 +702,10 @@ revoke all on function public.set_department_chat_conversation_state(uuid, uuid,
 revoke all on function public.begin_department_chat_turn(uuid, uuid, uuid, uuid, text, uuid, uuid, text)
   from public, anon, authenticated;
 revoke all on function public.fail_department_chat_turn(uuid, uuid, uuid, uuid, uuid, text, uuid, text)
+  from public, anon, authenticated;
+revoke all on function public.mark_department_chat_turn_dispatched(uuid, uuid, uuid, uuid, uuid, text, uuid)
+  from public, anon, authenticated;
+revoke all on function public.mark_department_chat_turn_unknown(uuid, uuid, uuid, uuid, uuid, text, uuid)
   from public, anon, authenticated;
 revoke all on function public.expire_department_chat_pending_turns(uuid, uuid, uuid, uuid, text, uuid)
   from public, anon, authenticated;
@@ -612,6 +719,8 @@ grant execute on function public.rename_department_chat_conversation(uuid, uuid,
 grant execute on function public.set_department_chat_conversation_state(uuid, uuid, uuid, uuid, text, uuid, text) to service_role;
 grant execute on function public.begin_department_chat_turn(uuid, uuid, uuid, uuid, text, uuid, uuid, text) to service_role;
 grant execute on function public.fail_department_chat_turn(uuid, uuid, uuid, uuid, uuid, text, uuid, text) to service_role;
+grant execute on function public.mark_department_chat_turn_dispatched(uuid, uuid, uuid, uuid, uuid, text, uuid) to service_role;
+grant execute on function public.mark_department_chat_turn_unknown(uuid, uuid, uuid, uuid, uuid, text, uuid) to service_role;
 grant execute on function public.expire_department_chat_pending_turns(uuid, uuid, uuid, uuid, text, uuid) to service_role;
 grant execute on function public.save_department_chat_conversation_proposal(
   uuid, uuid, uuid, uuid, uuid, text, uuid, text, text, uuid, uuid,

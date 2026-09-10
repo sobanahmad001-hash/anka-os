@@ -39,6 +39,61 @@ const response = (body: Json, status = 200) => new Response(JSON.stringify(body)
   status, headers: { ...cors, 'Content-Type': 'application/json' },
 })
 
+export function isProviderOutcomeUnknown(error: unknown) {
+  return Boolean(error && typeof error === 'object' && 'providerOutcomeUnknown' in error
+    && error.providerOutcomeUnknown === true)
+}
+
+function unknownProviderOutcome(cause?: unknown) {
+  return Object.assign(new Error(
+    'The provider outcome is unknown. Do not submit this request again; reload the conversation for its recorded state.',
+  ), { status: 503, outcome: 'outcome_unknown', providerOutcomeUnknown: true, cause })
+}
+
+async function callDepartmentChatProvider(
+  admin: Client,
+  body: Json,
+  actorId: string,
+  fetcher: typeof fetch,
+  init: RequestInit,
+) {
+  const conversationId = text(body.conversation_id, 80)
+  const messageId = text(body.message_id, 80)
+  if (conversationId || messageId) {
+    if (!conversationId || !messageId) throw new Error('Saved turn dispatch identity is incomplete')
+    const { error } = await admin.rpc('mark_department_chat_turn_dispatched', {
+      p_message_id: messageId,
+      p_conversation_id: conversationId,
+      p_organization_id: text(body.organization_id, 80),
+      p_project_id: text(body.project_id, 80),
+      p_engagement_id: text(body.engagement_id, 80),
+      p_department_id: text(body.department_id, 40),
+      p_actor_id: actorId,
+    })
+    if (error) throw error
+  }
+  let providerResponse: Response
+  try {
+    providerResponse = await fetcher(OPENAI_RESPONSES_URL, init)
+  } catch (cause) {
+    throw unknownProviderOutcome(cause)
+  }
+  let result: Json & { error?: { message?: string }, usage?: { input_tokens?: number, output_tokens?: number } }
+  try {
+    result = await providerResponse.json() as typeof result
+  } catch (cause) {
+    if (providerResponse.status === 408 || providerResponse.status >= 500) throw unknownProviderOutcome(cause)
+    throw new SyntaxError('The configured provider returned an invalid response')
+  }
+  if (!providerResponse.ok) {
+    if (providerResponse.status === 408 || providerResponse.status >= 500) throw unknownProviderOutcome()
+    throw Object.assign(new Error('The configured provider rejected the request.'), {
+      status: 502, providerRejected: true,
+    })
+  }
+  return result
+}
+
 function text(value: unknown, max = 8000) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
 }
@@ -658,7 +713,7 @@ export async function proposeArtifact(_userClient: Client, admin: Client, body: 
     'ENGAGEMENT CONTEXT JSON:',
     JSON.stringify(contextFreeze.frozen).slice(0, 70000),
   ].join('\n')
-  const openAiResponse = await fetcher(OPENAI_RESPONSES_URL, {
+  const result = await callDepartmentChatProvider(admin, body, actorId, fetcher, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + provider.credential },
     body: JSON.stringify({
@@ -674,10 +729,6 @@ export async function proposeArtifact(_userClient: Client, admin: Client, body: 
     }),
     signal: AbortSignal.timeout(30_000),
   })
-  const result = await openAiResponse.json() as Json & {
-    error?: { message?: string }, usage?: { input_tokens?: number, output_tokens?: number },
-  }
-  if (!openAiResponse.ok) throw new Error(result.error?.message || 'OpenAI draft request failed')
   const raw = outputText(result)
   if (!raw) throw new Error('The configured model returned an empty draft')
   const parsed = JSON.parse(raw)
@@ -742,7 +793,7 @@ export async function proposeWorkItem(
     'ENGAGEMENT CONTEXT JSON:',
     JSON.stringify(contextFreeze.frozen).slice(0, 70000),
   ].join('\n')
-  const openAiResponse = await fetcher(OPENAI_RESPONSES_URL, {
+  const result = await callDepartmentChatProvider(admin, body, actorId, fetcher, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + provider.credential },
     body: JSON.stringify({
@@ -751,10 +802,6 @@ export async function proposeWorkItem(
     }),
     signal: AbortSignal.timeout(30_000),
   })
-  const result = await openAiResponse.json() as Json & {
-    error?: { message?: string }, usage?: { input_tokens?: number, output_tokens?: number },
-  }
-  if (!openAiResponse.ok) throw new Error(result.error?.message || 'OpenAI work item request failed')
   const description = text(outputText(result), 20000)
   if (!description) throw new Error('The configured model returned an empty work item description')
   return persistDepartmentChatProposal(admin, {
@@ -979,7 +1026,14 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
         p_client_request_id: clientRequestId,
         p_prompt: text(body.prompt, 8000),
       })
-      if (turnError) throw turnError
+      if (turnError) {
+        if (turnError.code === '23505') {
+          throw Object.assign(new Error('client_request_id conflicts with a different request payload.'), {
+            status: 409, outcome: 'idempotency_conflict',
+          })
+        }
+        throw turnError
+      }
       if (turn?.replayed) {
         throw Object.assign(new Error(
           turn?.message?.status === 'pending'
@@ -1004,7 +1058,8 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
   } catch (error) {
     if (turnContext) {
       const reason = safeAttemptReason(error)
-      const { error: turnError } = await turnContext.admin.rpc('fail_department_chat_turn', {
+      const unknown = isProviderOutcomeUnknown(error)
+      const parameters = {
         p_message_id: turnContext.messageId,
         p_conversation_id: turnContext.conversationId,
         p_organization_id: turnContext.organizationId,
@@ -1012,8 +1067,10 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
         p_engagement_id: turnContext.engagementId,
         p_department_id: turnContext.departmentId,
         p_actor_id: turnContext.actorId,
-        p_error_code: reason,
-      })
+      }
+      const { error: turnError } = unknown
+        ? await turnContext.admin.rpc('mark_department_chat_turn_unknown', parameters)
+        : await turnContext.admin.rpc('fail_department_chat_turn', { ...parameters, p_error_code: reason })
       if (turnError) return response({ error: 'Department Chat turn state could not be finalized' }, 503)
     }
     if (previewAttempt && auditContext) {
@@ -1033,6 +1090,10 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
 }
 
 export function safeAttemptReason(error: unknown) {
+  if (isProviderOutcomeUnknown(error)) return 'provider_failed'
+  if (error && typeof error === 'object' && 'providerRejected' in error && error.providerRejected === true) {
+    return 'provider_failed'
+  }
   const message = error instanceof Error ? error.message : ''
   const normalized = message.toLowerCase()
   if (message.includes('credential')) return 'credential_missing'
