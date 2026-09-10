@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useEffect, useMemo, useReducer, useState } from 'react'
 import { buildDesignAssetRows, designAssetAccessState, designAssetLibraryReducer, designAssetSourceFocus, filterDesignAssetRows, initialDesignAssetLibraryState } from '../data/designAssetLibrary.js'
 
 const SELECT = 'rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 focus:border-violet-400 focus:outline-none'
@@ -20,11 +20,10 @@ export default function DesignAssetLibrary({ workspace, contextKey, onClose, onF
   const [state, dispatch] = useReducer(designAssetLibraryReducer, contextKey, initialDesignAssetLibraryState)
   const [clock, setClock] = useState(() => Date.now())
   const rows = useMemo(() => buildDesignAssetRows(workspace), [workspace])
-  const signedUrlKey = rows.map(row => row.id + ':' + row.previewUrl).join('|')
-  const linkWindow = useRef({ key: signedUrlKey, issuedAt: Date.now() })
-  if (linkWindow.current.key !== signedUrlKey) linkWindow.current = { key: signedUrlKey, issuedAt: Date.now() }
-  const issuedAt = linkWindow.current.issuedAt
-  const visible = useMemo(() => filterDesignAssetRows(rows, state.filters, clock), [rows, state.filters, clock])
+  const issuedAt = Number(workspace.mediaUrlsRequestedAt)
+  const effectiveNow = Math.max(clock, Date.now())
+  const accessOptions = { issuedAt, expiresInSeconds: workspace.mediaUrlExpiresIn, trustedOrigin: workspace.mediaUrlOrigin, now: effectiveNow }
+  const visible = useMemo(() => filterDesignAssetRows(rows, state.filters, effectiveNow), [rows, state.filters, effectiveNow])
   const selected = rows.find(row => row.id === state.selectedAssetId) || null
 
   useEffect(() => {
@@ -32,14 +31,16 @@ export default function DesignAssetLibrary({ workspace, contextKey, onClose, onF
   }, [contextKey])
 
   useEffect(() => {
+    setClock(Date.now())
     const seconds = Number(workspace.mediaUrlExpiresIn)
-    if (!Number.isFinite(seconds) || seconds <= 0) return undefined
-    const delay = Math.max(0, (seconds - 5) * 1000)
+    if (!Number.isFinite(issuedAt) || !Number.isFinite(seconds) || seconds <= 5) return undefined
+    const expiresAt = issuedAt + ((seconds - 5) * 1000)
+    const delay = Math.max(0, expiresAt - Date.now())
     const timer = window.setTimeout(() => setClock(Date.now()), delay + 25)
     return () => window.clearTimeout(timer)
   }, [issuedAt, workspace.mediaUrlExpiresIn])
 
-  const access = designAssetAccessState(selected, { issuedAt, expiresInSeconds: workspace.mediaUrlExpiresIn, now: clock })
+  const access = designAssetAccessState(selected, accessOptions)
 
   return <section aria-labelledby="design-asset-library-title" className="rounded-2xl border border-violet-400/20 bg-slate-900/80 p-4 shadow-xl shadow-black/10 sm:p-5">
     <div className="flex flex-wrap items-start justify-between gap-4">
@@ -59,7 +60,7 @@ export default function DesignAssetLibrary({ workspace, contextKey, onClose, onF
     {!rows.length ? <EmptyState title="No generated assets yet" text="Create outputs from an authorized Design direction first. This library does not start generation." />
       : !visible.length ? <EmptyState title="No assets match these filters" text="Clear or change the filters; the underlying authorized results are unchanged." />
         : <div className={'mt-5 ' + (state.view === 'grid' ? 'grid gap-4 sm:grid-cols-2 xl:grid-cols-3' : 'space-y-3')}>{visible.map(row => <button type="button" key={row.id} onClick={() => dispatch({ type: 'select', assetId: row.id })} className={'w-full rounded-2xl border p-3 text-left focus:outline-none focus:ring-2 focus:ring-violet-400/60 ' + (state.selectedAssetId === row.id ? 'border-violet-400 bg-violet-500/10 ' : 'border-white/10 bg-slate-950/50 hover:border-violet-400/40 ') + (state.view === 'list' ? 'grid gap-3 sm:grid-cols-[7rem_1fr_auto] sm:items-center' : '')}>
-          <div className={(state.view === 'list' ? 'h-20' : 'aspect-video') + ' overflow-hidden rounded-xl bg-black/30'}>{designAssetAccessState(row, { issuedAt, expiresInSeconds: workspace.mediaUrlExpiresIn, now: clock }).canOpen ? <img src={row.previewUrl} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center px-3 text-center text-xs text-slate-500">Preview {row.status === 'ready' ? 'link unavailable' : row.status}</div>}</div>
+          <div className={(state.view === 'list' ? 'h-20' : 'aspect-video') + ' overflow-hidden rounded-xl bg-black/30'}>{designAssetAccessState(row, accessOptions).canOpen ? <img src={row.previewUrl} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center px-3 text-center text-xs text-slate-500">Preview {row.status === 'ready' ? 'link unavailable' : row.status}</div>}</div>
           <div className="min-w-0"><p className="truncate font-semibold text-slate-100">{row.directionTitle || 'Untitled generated output'}</p><p className="mt-1 text-xs capitalize text-slate-400">{label(row.sourceType)} · {label(row.status)}</p><p className="mt-2 truncate text-[11px] text-slate-500">Asset {row.id}</p></div>
           <span className="text-xs font-semibold text-violet-300">View detail</span>
         </button>)}</div>}

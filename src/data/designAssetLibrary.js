@@ -9,6 +9,28 @@ export function initialDesignAssetLibraryState(contextKey = '') {
   return { contextKey: clean(contextKey), view: 'grid', filters: { ...DESIGN_ASSET_LIBRARY_INITIAL_FILTERS }, selectedAssetId: '' }
 }
 
+export function designAssetLibraryContextKey(context = {}) {
+  const work = context.workRecord || {}
+  const output = context.output || {}
+  const draft = context.draft || {}
+  return [
+    context.contextKey,
+    context.activeOrganizationId || context.organizationId,
+    context.projectId,
+    context.engagementId,
+    context.brandId,
+    context.activeServiceId,
+    context.stageId,
+    work.kind,
+    work.id,
+    output.kind,
+    output.id,
+    output.versionId,
+    draft.kind,
+    draft.id,
+  ].map(clean).join('|')
+}
+
 export function designAssetLibraryReducer(state, action) {
   if (action.type === 'context_changed') {
     const contextKey = clean(action.contextKey)
@@ -72,20 +94,33 @@ export function filterDesignAssetRows(rows, filters = {}, now = Date.now()) {
   })
 }
 
-export function designAssetAccessState(row, { issuedAt, expiresInSeconds, now = Date.now() } = {}) {
+export function designAssetAccessState(row, { issuedAt, expiresInSeconds, trustedOrigin, now = Date.now() } = {}) {
   if (!row || row.mediaType !== 'image' || row.status !== 'ready') {
     return { status: 'unavailable', canOpen: false, message: 'Only ready images can be opened from the asset library.' }
   }
   if (!row.previewUrl) {
     return { status: 'missing', canOpen: false, message: 'No signed image link is available. Refresh the Workshop to request a new link.' }
   }
+  let signedUrl
+  try {
+    signedUrl = new URL(row.previewUrl)
+  } catch {
+    return { status: 'invalid', canOpen: false, message: 'The signed image link is invalid. Refresh the Workshop to request a new link.' }
+  }
+  const trusted = clean(trustedOrigin)
+  const validSignedUrl = signedUrl.protocol === 'https:' && signedUrl.origin === trusted &&
+    !signedUrl.username && !signedUrl.password && !signedUrl.hash &&
+    signedUrl.pathname.includes('/storage/v1/object/sign/') && Boolean(clean(signedUrl.searchParams.get('token')))
+  if (!validSignedUrl) {
+    return { status: 'invalid', canOpen: false, message: 'The signed image link is invalid. Refresh the Workshop to request a new link.' }
+  }
   const issued = Number(issuedAt)
   const seconds = Number(expiresInSeconds)
   const conservativeSeconds = Number.isFinite(seconds) ? Math.max(0, seconds - 5) : 0
-  if (!Number.isFinite(issued) || conservativeSeconds === 0 || now >= issued + (conservativeSeconds * 1000)) {
+  if (!Number.isFinite(issued) || issued <= 0 || issued > now || conservativeSeconds === 0 || now >= issued + (conservativeSeconds * 1000)) {
     return { status: 'expired', canOpen: false, message: 'This signed image link has expired. Refresh the Workshop to renew it without regenerating.' }
   }
-  return { status: 'ready', canOpen: true, url: row.previewUrl, expiresAt: issued + (conservativeSeconds * 1000), message: 'The signed link is temporary. Your browser may display the image instead of downloading it.' }
+  return { status: 'ready', canOpen: true, url: signedUrl.href, expiresAt: issued + (conservativeSeconds * 1000), message: 'The signed link is temporary. Your browser may display the image instead of downloading it.' }
 }
 
 export function designAssetSourceFocus(row) {

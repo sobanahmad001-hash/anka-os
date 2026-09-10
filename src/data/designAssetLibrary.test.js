@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildDesignAssetRows, designAssetAccessState, designAssetLibraryReducer, designAssetSourceFocus, filterDesignAssetRows, initialDesignAssetLibraryState } from './designAssetLibrary.js'
+import { buildDesignAssetRows, designAssetAccessState, designAssetLibraryContextKey, designAssetLibraryReducer, designAssetSourceFocus, filterDesignAssetRows, initialDesignAssetLibraryState } from './designAssetLibrary.js'
 
 const now = Date.parse('2026-09-11T12:00:00.000Z')
 const workspace = () => ({
@@ -11,7 +11,7 @@ const workspace = () => ({
   variants: [{ id: 'variant-b', source_direction_version_id: 'version-a', design_media_asset_id: 'asset-b', variant_format: 'portrait_4x5' }],
   mediaAssets: [
     { id: 'asset-b', design_direction_version_id: 'version-a', media_type: 'image', status: 'failed', prompt: 'Variant', created_at: '2026-08-01T00:00:00.000Z' },
-    { id: 'asset-a', design_direction_version_id: 'version-a', media_type: 'image', status: 'ready', prompt: 'Hero', signed_url: 'https://signed.invalid/a', created_at: '2026-09-11T11:00:00.000Z' },
+    { id: 'asset-a', design_direction_version_id: 'version-a', media_type: 'image', status: 'ready', prompt: 'Hero', signed_url: 'https://project.supabase.co/storage/v1/object/sign/design/a.png?token=signed', created_at: '2026-09-11T11:00:00.000Z' },
   ],
 })
 
@@ -54,12 +54,26 @@ test('controller resets selected asset, filters and view when the work context c
   assert.deepEqual(state, initialDesignAssetLibraryState('engagement-b'))
 })
 
+test('full context identity changes for same-engagement service, work and output navigation', () => {
+  const base = { contextKey: 'official:org-a:engagement-a:project-a:brand-a:service-a,service-b', activeOrganizationId: 'org-a', projectId: 'project-a', engagementId: 'engagement-a', brandId: 'brand-a', activeServiceId: 'service-a', workRecord: { kind: 'project_task', id: 'task-a' }, output: { kind: 'design_session', id: 'session-a', versionId: 'version-a' } }
+  const original = designAssetLibraryContextKey(base)
+  assert.notEqual(designAssetLibraryContextKey({ ...base, activeServiceId: 'service-b' }), original)
+  assert.notEqual(designAssetLibraryContextKey({ ...base, workRecord: { kind: 'engagement_work_item', id: 'work-a' } }), original)
+  assert.notEqual(designAssetLibraryContextKey({ ...base, output: { kind: 'design_session', id: 'session-b', versionId: 'version-b' } }), original)
+})
+
 test('signed access is limited to ready images and becomes unusable before server expiry', () => {
   const row = buildDesignAssetRows(workspace())[0]
-  assert.equal(designAssetAccessState(row, { issuedAt: now, expiresInSeconds: 300, now: now + 294000 }).canOpen, true)
-  assert.equal(designAssetAccessState(row, { issuedAt: now, expiresInSeconds: 300, now: now + 295000 }).status, 'expired')
-  assert.equal(designAssetAccessState({ ...row, status: 'failed' }, { issuedAt: now, expiresInSeconds: 300, now }).canOpen, false)
-  assert.equal(designAssetAccessState({ ...row, previewUrl: '' }, { issuedAt: now, expiresInSeconds: 300, now }).status, 'missing')
+  const access = { issuedAt: now, expiresInSeconds: 300, trustedOrigin: 'https://project.supabase.co' }
+  assert.equal(designAssetAccessState(row, { ...access, now: now + 294000 }).canOpen, true)
+  assert.equal(designAssetAccessState(row, { ...access, now: now + 295000 }).status, 'expired')
+  assert.equal(designAssetAccessState({ ...row, status: 'failed' }, { ...access, now }).canOpen, false)
+  assert.equal(designAssetAccessState({ ...row, previewUrl: '' }, { ...access, now }).status, 'missing')
+  assert.equal(designAssetAccessState(row, { ...access, issuedAt: undefined, now }).status, 'expired')
+  assert.equal(designAssetAccessState(row, { ...access, issuedAt: now + 1, now }).status, 'expired')
+  for (const previewUrl of ['not-a-valid-url', 'javascript:alert(1)', 'http://project.supabase.co/storage/v1/object/sign/design/a.png?token=signed', 'https://attacker.invalid/storage/v1/object/sign/design/a.png?token=signed', 'https://user:secret@project.supabase.co/storage/v1/object/sign/design/a.png?token=signed', 'https://project.supabase.co/storage/v1/object/sign/design/a.png?token=', 'https://project.supabase.co/storage/v1/object/public/design/a.png']) {
+    assert.equal(designAssetAccessState({ ...row, previewUrl }, { ...access, now }).status, 'invalid')
+  }
 })
 
 test('source focus uses exact existing session, immutable direction version and job identities', () => {
