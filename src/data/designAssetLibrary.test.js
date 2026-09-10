@@ -71,7 +71,7 @@ test('signed access is limited to ready images and becomes unusable before serve
   assert.equal(designAssetAccessState({ ...row, previewUrl: '' }, { ...access, now }).status, 'missing')
   assert.equal(designAssetAccessState(row, { ...access, issuedAt: undefined, now }).status, 'expired')
   assert.equal(designAssetAccessState(row, { ...access, issuedAt: now + 1, now }).status, 'expired')
-  for (const previewUrl of ['not-a-valid-url', 'javascript:alert(1)', 'http://project.supabase.co/storage/v1/object/sign/design/a.png?token=signed', 'https://attacker.invalid/storage/v1/object/sign/design/a.png?token=signed', 'https://user:secret@project.supabase.co/storage/v1/object/sign/design/a.png?token=signed', 'https://project.supabase.co/storage/v1/object/sign/design/a.png?token=', 'https://project.supabase.co/storage/v1/object/public/design/a.png']) {
+  for (const previewUrl of ['not-a-valid-url', 'javascript:alert(1)', 'http://project.supabase.co/storage/v1/object/sign/design/a.png?token=signed', 'https://attacker.invalid/storage/v1/object/sign/design/a.png?token=signed', 'https://user:secret@project.supabase.co/storage/v1/object/sign/design/a.png?token=signed', 'https://project.supabase.co/prefix/storage/v1/object/sign/design/a.png?token=signed', 'https://project.supabase.co/storage/v1/object/sign/design/a.png?token=', 'https://project.supabase.co/storage/v1/object/public/design/a.png']) {
     assert.equal(designAssetAccessState({ ...row, previewUrl }, { ...access, now }).status, 'invalid')
   }
 })

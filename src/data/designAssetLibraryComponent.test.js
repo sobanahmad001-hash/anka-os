@@ -54,9 +54,10 @@ class TestDocument extends TestNode {
 
 function mountedEnvironment() {
   const document = new TestDocument()
-  const window = { document, addEventListener() {}, removeEventListener() {}, getSelection: () => null, setTimeout(callback, delay) { const timer = globalThis.setTimeout(callback, delay); timer.unref(); return timer }, clearTimeout, Event: TestEvent, Node: TestNode, Element: TestElement, HTMLElement: TestElement, HTMLIFrameElement: class extends TestElement {}, SVGElement: TestElement }
+  const timers = new Set()
+  const window = { document, addEventListener() {}, removeEventListener() {}, getSelection: () => null, setTimeout(callback, delay) { const timer = { callback, delay }; timers.add(timer); return timer }, clearTimeout(timer) { timers.delete(timer) }, Event: TestEvent, Node: TestNode, Element: TestElement, HTMLElement: TestElement, HTMLIFrameElement: class extends TestElement {}, SVGElement: TestElement }
   document.defaultView = window
-  return { document, window, container: document.createElement('div') }
+  return { document, window, container: document.createElement('div'), runTimers() { for (const timer of [...timers]) { timers.delete(timer); timer.callback() } } }
 }
 
 function elements(root, tagName) {
@@ -139,9 +140,17 @@ test('mounted library selects, filters, clears, focuses source, resets context a
   assert.equal(elements(environment.container, 'select')[0].value, 'all')
 
   clock += 1001
-  await act(async () => root.render(createElement(DesignAssetLibrary, { ...props, contextKey: 'context-b' })))
+  await act(async () => environment.runTimers())
   assert.equal(elements(environment.container, 'img').length, 0)
   await act(async () => byText(environment.container, 'button', 'View detail').dispatchEvent(new TestEvent('click', { bubbles: true })))
   assert.equal(byText(environment.container, 'a', 'Open or save signed image'), undefined)
   assert.match(environment.container.textContent, /signed image link has expired/)
+
+  const prefixedPathWorkspace = workspace(clock)
+  prefixedPathWorkspace.mediaAssets[0].signed_url = 'https://project.supabase.co/prefix/storage/v1/object/sign/design/a.png?token=signed'
+  await act(async () => root.render(createElement(DesignAssetLibrary, { ...props, workspace: prefixedPathWorkspace, contextKey: 'context-c' })))
+  assert.equal(elements(environment.container, 'img').length, 0)
+  await act(async () => byText(environment.container, 'button', 'View detail').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.equal(byText(environment.container, 'a', 'Open or save signed image'), undefined)
+  assert.match(environment.container.textContent, /signed image link is invalid/)
 })

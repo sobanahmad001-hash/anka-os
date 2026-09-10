@@ -110,7 +110,7 @@ export function designAssetAccessState(row, { issuedAt, expiresInSeconds, truste
   const trusted = clean(trustedOrigin)
   const validSignedUrl = signedUrl.protocol === 'https:' && signedUrl.origin === trusted &&
     !signedUrl.username && !signedUrl.password && !signedUrl.hash &&
-    signedUrl.pathname.includes('/storage/v1/object/sign/') && Boolean(clean(signedUrl.searchParams.get('token')))
+    signedUrl.pathname.startsWith('/storage/v1/object/sign/') && Boolean(clean(signedUrl.searchParams.get('token')))
   if (!validSignedUrl) {
     return { status: 'invalid', canOpen: false, message: 'The signed image link is invalid. Refresh the Workshop to request a new link.' }
   }
