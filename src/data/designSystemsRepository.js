@@ -35,7 +35,7 @@ export const designSystems = Object.freeze({
   async loadLibrary() {
     const [services, artifacts, versions, approvals, stages] = await Promise.all([
       dataOrThrow(supabase.from('engagement_services')
-        .select('id, engagement_id, status, engagements!inner(id, name, brand_id, status, brands(name), agency_clients(name)), service_catalog!inner(id, name, slug, department_id, is_active)')
+        .select('id, engagement_id, status, engagements!inner(id, organization_id, project_id, client_id, name, brand_id, status, brands(name), agency_clients(name)), service_catalog!inner(id, name, slug, department_id, is_active)')
         .eq('status', 'active').eq('service_catalog.slug', 'design_systems')
         .eq('service_catalog.department_id', 'design').eq('service_catalog.is_active', true)
         .order('activated_at')),

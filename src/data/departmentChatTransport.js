@@ -35,5 +35,11 @@ export function createDepartmentChatRepository(client) {
     proposeWorkItem: (departmentId, input, scope) => invoke('propose_work_item', { ...input, department_id: departmentId }, scope),
     confirmProposal: (proposalId, scope) => invoke('confirm_proposal', { proposal_id: proposalId }, scope),
     rejectProposal: (proposalId, scope) => invoke('reject_proposal', { proposal_id: proposalId }, scope),
+    listConversations: (departmentId, input, scope) => invoke('list_conversations', { ...input, department_id: departmentId }, scope),
+    createConversation: (departmentId, input, scope) => invoke('create_conversation', { ...input, department_id: departmentId }, scope),
+    getConversation: (departmentId, input, scope) => invoke('get_conversation', { ...input, department_id: departmentId }, scope),
+    renameConversation: (departmentId, input, scope) => invoke('rename_conversation', { ...input, department_id: departmentId }, scope),
+    setConversationState: (departmentId, input, scope) => invoke('set_conversation_state', { ...input, department_id: departmentId }, scope),
+    getCapabilities: (departmentId, input, scope) => invoke('get_capabilities', { ...input, department_id: departmentId }, scope),
   })
 }

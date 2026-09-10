@@ -26,6 +26,7 @@ type Json = Record<string, unknown>
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses'
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 export const ENABLED_DEPARTMENTS = new Set(['content', 'design', 'marketing', 'development'])
+const SAVED_CONVERSATION_DEPARTMENTS = new Set(['content', 'design', 'marketing'])
 export const CHAT_MARKETING_ARTIFACT_TYPE_SET = new Set(departmentChatProfile('marketing').artifactTypes)
 const WORK_ITEM_TYPES = new Set(departmentChatProfile('content').workItemTypes)
 const WORK_ITEM_PRIORITIES = new Set(['low', 'medium', 'high', 'urgent'])
@@ -37,6 +38,61 @@ const cors = {
 const response = (body: Json, status = 200) => new Response(JSON.stringify(body), {
   status, headers: { ...cors, 'Content-Type': 'application/json' },
 })
+
+export function isProviderOutcomeUnknown(error: unknown) {
+  return Boolean(error && typeof error === 'object' && 'providerOutcomeUnknown' in error
+    && error.providerOutcomeUnknown === true)
+}
+
+function unknownProviderOutcome(cause?: unknown) {
+  return Object.assign(new Error(
+    'The provider outcome is unknown. Do not submit this request again; reload the conversation for its recorded state.',
+  ), { status: 503, outcome: 'outcome_unknown', providerOutcomeUnknown: true, cause })
+}
+
+async function callDepartmentChatProvider(
+  admin: Client,
+  body: Json,
+  actorId: string,
+  fetcher: typeof fetch,
+  init: RequestInit,
+) {
+  const conversationId = text(body.conversation_id, 80)
+  const messageId = text(body.message_id, 80)
+  if (conversationId || messageId) {
+    if (!conversationId || !messageId) throw new Error('Saved turn dispatch identity is incomplete')
+    const { error } = await admin.rpc('mark_department_chat_turn_dispatched', {
+      p_message_id: messageId,
+      p_conversation_id: conversationId,
+      p_organization_id: text(body.organization_id, 80),
+      p_project_id: text(body.project_id, 80),
+      p_engagement_id: text(body.engagement_id, 80),
+      p_department_id: text(body.department_id, 40),
+      p_actor_id: actorId,
+    })
+    if (error) throw error
+  }
+  let providerResponse: Response
+  try {
+    providerResponse = await fetcher(OPENAI_RESPONSES_URL, init)
+  } catch (cause) {
+    throw unknownProviderOutcome(cause)
+  }
+  let result: Json & { error?: { message?: string }, usage?: { input_tokens?: number, output_tokens?: number } }
+  try {
+    result = await providerResponse.json() as typeof result
+  } catch (cause) {
+    if (providerResponse.status === 408 || providerResponse.status >= 500) throw unknownProviderOutcome(cause)
+    throw new SyntaxError('The configured provider returned an invalid response')
+  }
+  if (!providerResponse.ok) {
+    if (providerResponse.status === 408 || providerResponse.status >= 500) throw unknownProviderOutcome()
+    throw Object.assign(new Error('The configured provider rejected the request.'), {
+      status: 502, providerRejected: true,
+    })
+  }
+  return result
+}
 
 function text(value: unknown, max = 8000) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
@@ -382,6 +438,189 @@ async function loadDepartmentChatContext(
   return { engagement, services, commercialContext, context, provider, organizationSettings: (organization?.settings || {}) as Json }
 }
 
+function conversationInput(body: Json) {
+  return {
+    conversationId: text(body.conversation_id, 80),
+    projectId: text(body.project_id, 80),
+    engagementId: text(body.engagement_id, 80),
+    departmentId: text(body.department_id, 40),
+  }
+}
+
+async function requireConversationContext(
+  admin: Client,
+  body: Json,
+  actorId: string,
+  organizationId: string,
+  requireActive = false,
+) {
+  const scope = conversationInput(body)
+  if (!scope.conversationId || !scope.projectId || !scope.engagementId || !scope.departmentId) {
+    throw Object.assign(new Error('Exact conversation context is required'), { status: 400 })
+  }
+  const { data, error } = await admin.from('department_chat_conversations')
+    .select('id, organization_id, project_id, engagement_id, department_id, owner_id, title, state, last_activity_at, archived_at, created_at, updated_at')
+    .eq('id', scope.conversationId)
+    .eq('organization_id', organizationId)
+    .eq('project_id', scope.projectId)
+    .eq('engagement_id', scope.engagementId)
+    .eq('department_id', scope.departmentId)
+    .eq('owner_id', actorId)
+    .maybeSingle()
+  if (error) throw error
+  if (!data) throw Object.assign(new Error('Owned Department Chat conversation not found'), { status: 404 })
+  if (requireActive && data.state !== 'active') {
+    throw Object.assign(new Error('Archived conversations must be reopened before sending'), { status: 409 })
+  }
+  return data
+}
+
+async function validateConversationEngagement(
+  admin: Client,
+  body: Json,
+  organizationId: string,
+  dependencies: ProposalDependencies,
+) {
+  const scope = conversationInput(body)
+  if (!scope.projectId || !scope.engagementId || !scope.departmentId
+    || !SAVED_CONVERSATION_DEPARTMENTS.has(scope.departmentId)) {
+    throw Object.assign(new Error('Saved conversation context is unsupported'), { status: 400 })
+  }
+  const { engagement } = await (dependencies.requireDepartmentEngagement || requireDepartmentEngagement)(
+    admin, scope.engagementId, scope.departmentId, organizationId,
+  )
+  if (engagement.project_id !== scope.projectId) {
+    throw Object.assign(new Error('Conversation project does not match this engagement'), { status: 409 })
+  }
+  return scope
+}
+
+async function listConversations(
+  admin: Client,
+  body: Json,
+  actorId: string,
+  organizationId: string,
+  dependencies: ProposalDependencies,
+) {
+  const scope = await validateConversationEngagement(admin, body, organizationId, dependencies)
+  let query = admin.from('department_chat_conversations')
+    .select('id, organization_id, project_id, engagement_id, department_id, owner_id, title, state, last_activity_at, archived_at, created_at, updated_at')
+    .eq('organization_id', organizationId)
+    .eq('project_id', scope.projectId)
+    .eq('engagement_id', scope.engagementId)
+    .eq('department_id', scope.departmentId)
+    .eq('owner_id', actorId)
+  if (body.include_archived !== true) query = query.eq('state', 'active')
+  const { data, error } = await query.order('last_activity_at', { ascending: false }).order('id')
+  if (error) throw error
+  return data || []
+}
+
+async function createConversation(
+  admin: Client,
+  body: Json,
+  actorId: string,
+  organizationId: string,
+  dependencies: ProposalDependencies,
+) {
+  const scope = await validateConversationEngagement(admin, body, organizationId, dependencies)
+  const { data, error } = await admin.rpc('create_department_chat_conversation', {
+    p_organization_id: organizationId,
+    p_project_id: scope.projectId,
+    p_engagement_id: scope.engagementId,
+    p_department_id: scope.departmentId,
+    p_actor_id: actorId,
+    p_title: text(body.title, 160) || departmentChatProfile(scope.departmentId).label + ' conversation',
+  })
+  if (error) throw error
+  return data
+}
+
+async function updateConversation(
+  admin: Client,
+  body: Json,
+  actorId: string,
+  organizationId: string,
+  action: 'rename' | 'state',
+) {
+  const conversation = await requireConversationContext(admin, body, actorId, organizationId)
+  const parameters = {
+    p_conversation_id: conversation.id,
+    p_organization_id: organizationId,
+    p_project_id: conversation.project_id,
+    p_engagement_id: conversation.engagement_id,
+    p_department_id: conversation.department_id,
+    p_actor_id: actorId,
+  }
+  const { data, error } = action === 'rename'
+    ? await admin.rpc('rename_department_chat_conversation', { ...parameters, p_title: text(body.title, 160) })
+    : await admin.rpc('set_department_chat_conversation_state', { ...parameters, p_state: text(body.state, 20) })
+  if (error) throw error
+  return data
+}
+
+async function getConversation(admin: Client, body: Json, actorId: string, organizationId: string) {
+  const conversation = await requireConversationContext(admin, body, actorId, organizationId)
+  const { error: expiryError } = await admin.rpc('expire_department_chat_pending_turns', {
+    p_conversation_id: conversation.id,
+    p_organization_id: organizationId,
+    p_project_id: conversation.project_id,
+    p_engagement_id: conversation.engagement_id,
+    p_department_id: conversation.department_id,
+    p_actor_id: actorId,
+  })
+  if (expiryError) throw expiryError
+  const { data: messages, error } = await admin.from('department_chat_messages')
+    .select('id, conversation_id, author_id, role, body, status, error_code, ai_run_id, proposal_id, client_request_id, sequence, created_at, finished_at')
+    .eq('organization_id', organizationId)
+    .eq('conversation_id', conversation.id)
+    .eq('owner_id', actorId)
+    .order('sequence')
+  if (error) throw error
+  const proposalIds = (messages || []).map(message => message.proposal_id).filter(Boolean)
+  let proposals: Json[] = []
+  if (proposalIds.length) {
+    const result = await admin.from('department_chat_proposals')
+      .select('id, proposer_id, proposal_kind, target_key, preview_payload, status, expires_at, model_id, connector_connection_id, accepted_artifact_id, accepted_artifact_version_id, accepted_work_item_id')
+      .eq('organization_id', organizationId)
+      .eq('conversation_id', conversation.id)
+      .eq('proposer_id', actorId)
+      .in('id', proposalIds)
+    if (result.error) throw result.error
+    proposals = result.data || []
+  }
+  const byId = new Map(proposals.map(proposal => [proposal.id, proposal]))
+  return {
+    conversation,
+    messages: (messages || []).map(message => ({
+      ...message,
+      proposal: message.proposal_id ? byId.get(message.proposal_id) || null : null,
+    })),
+  }
+}
+
+async function getCapabilities(
+  admin: Client,
+  body: Json,
+  organizationId: string,
+  dependencies: ProposalDependencies,
+) {
+  const scope = await validateConversationEngagement(admin, body, organizationId, dependencies)
+  const provider = await (dependencies.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(
+    admin, scope.engagementId, scope.departmentId, organizationId,
+  )
+  return {
+    provider: 'openai',
+    connector_connection_id: provider.connectorId,
+    model_id: provider.model,
+    approved_models: [provider.model],
+    default_model_id: provider.model,
+    text: { supported: true, max_prompt_characters: 8000 },
+    attachments: { supported: false, reason: 'Private file ingestion is not configured for Department Chat.' },
+    sharing: { supported: false, reason: 'Sharing with replies is planned after the private foundation is frozen.' },
+  }
+}
+
 async function persistDepartmentChatProposal(admin: Client, input: {
   organizationId: string
   actorId: string
@@ -401,8 +640,10 @@ async function persistDepartmentChatProposal(admin: Client, input: {
   startedAt: number
   inputTokens: number | null
   outputTokens: number | null
+  conversationId?: string
+  messageId?: string
 }, dependencies: ProposalDependencies) {
-  const { data, error } = await admin.rpc('save_department_chat_proposal', {
+  const parameters = {
     p_organization_id: input.organizationId,
     p_engagement_id: input.engagementId,
     p_project_id: input.projectId,
@@ -433,7 +674,14 @@ async function persistDepartmentChatProposal(admin: Client, input: {
       input.inputTokens,
       input.outputTokens,
     ),
-  })
+  }
+  const { data, error } = input.conversationId && input.messageId
+    ? await admin.rpc('save_department_chat_conversation_proposal', {
+      ...parameters,
+      p_conversation_id: input.conversationId,
+      p_message_id: input.messageId,
+    })
+    : await admin.rpc('save_department_chat_proposal', parameters)
   if (error) throw error
   return data as Json
 }
@@ -465,7 +713,7 @@ export async function proposeArtifact(_userClient: Client, admin: Client, body: 
     'ENGAGEMENT CONTEXT JSON:',
     JSON.stringify(contextFreeze.frozen).slice(0, 70000),
   ].join('\n')
-  const openAiResponse = await fetcher(OPENAI_RESPONSES_URL, {
+  const result = await callDepartmentChatProvider(admin, body, actorId, fetcher, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + provider.credential },
     body: JSON.stringify({
@@ -481,10 +729,6 @@ export async function proposeArtifact(_userClient: Client, admin: Client, body: 
     }),
     signal: AbortSignal.timeout(30_000),
   })
-  const result = await openAiResponse.json() as Json & {
-    error?: { message?: string }, usage?: { input_tokens?: number, output_tokens?: number },
-  }
-  if (!openAiResponse.ok) throw new Error(result.error?.message || 'OpenAI draft request failed')
   const raw = outputText(result)
   if (!raw) throw new Error('The configured model returned an empty draft')
   const parsed = JSON.parse(raw)
@@ -510,6 +754,8 @@ export async function proposeArtifact(_userClient: Client, admin: Client, body: 
     prompt, raw, provider, contextManifest: contextFreeze.manifest, startedAt,
     inputTokens: result.usage?.input_tokens ?? null,
     outputTokens: result.usage?.output_tokens ?? null,
+    conversationId: text(body.conversation_id, 80) || undefined,
+    messageId: text(body.message_id, 80) || undefined,
   }, dependencies)
 }
 export async function proposeWorkItem(
@@ -547,7 +793,7 @@ export async function proposeWorkItem(
     'ENGAGEMENT CONTEXT JSON:',
     JSON.stringify(contextFreeze.frozen).slice(0, 70000),
   ].join('\n')
-  const openAiResponse = await fetcher(OPENAI_RESPONSES_URL, {
+  const result = await callDepartmentChatProvider(admin, body, actorId, fetcher, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + provider.credential },
     body: JSON.stringify({
@@ -556,10 +802,6 @@ export async function proposeWorkItem(
     }),
     signal: AbortSignal.timeout(30_000),
   })
-  const result = await openAiResponse.json() as Json & {
-    error?: { message?: string }, usage?: { input_tokens?: number, output_tokens?: number },
-  }
-  if (!openAiResponse.ok) throw new Error(result.error?.message || 'OpenAI work item request failed')
   const description = text(outputText(result), 20000)
   if (!description) throw new Error('The configured model returned an empty work item description')
   return persistDepartmentChatProposal(admin, {
@@ -572,6 +814,8 @@ export async function proposeWorkItem(
     prompt, raw: description, provider, contextManifest: contextFreeze.manifest, startedAt,
     inputTokens: result.usage?.input_tokens ?? null,
     outputTokens: result.usage?.output_tokens ?? null,
+    conversationId: text(body.conversation_id, 80) || undefined,
+    messageId: text(body.message_id, 80) || undefined,
   }, dependencies)
 }
 async function proposalForDecision(admin: Client, proposalId: string, organizationId: string) {
@@ -718,6 +962,16 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (request.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
   let auditContext: { admin: Client, actorId: string, organizationId: string } | null = null
+  let turnContext: {
+    admin: Client
+    actorId: string
+    organizationId: string
+    projectId: string
+    engagementId: string
+    departmentId: string
+    conversationId: string
+    messageId: string
+  } | null = null
   let previewAttempt = false
   try {
     const body = await request.json() as Json
@@ -737,10 +991,88 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
     if (!hasDepartmentChatAuthority(membership, departmentId)) {
       throw Object.assign(new Error('Department policy denied'), { status: 403 })
     }
+    if (action === 'list_conversations') {
+      return response({ data: await listConversations(admin, body, user.id, organizationId, dependencies.proposal || {}) })
+    }
+    if (action === 'create_conversation') {
+      return response({ data: await createConversation(admin, body, user.id, organizationId, dependencies.proposal || {}) })
+    }
+    if (action === 'get_conversation') {
+      return response({ data: await getConversation(admin, body, user.id, organizationId) })
+    }
+    if (action === 'rename_conversation') {
+      return response({ data: await updateConversation(admin, body, user.id, organizationId, 'rename') })
+    }
+    if (action === 'set_conversation_state') {
+      return response({ data: await updateConversation(admin, body, user.id, organizationId, 'state') })
+    }
+    if (action === 'get_capabilities') {
+      return response({ data: await getCapabilities(admin, body, organizationId, dependencies.proposal || {}) })
+    }
+    if (previewAttempt && text(body.conversation_id, 80)) {
+      if (!SAVED_CONVERSATION_DEPARTMENTS.has(departmentId)) {
+        throw Object.assign(new Error('Saved conversations are not available for this department'), { status: 409 })
+      }
+      const conversation = await requireConversationContext(admin, body, user.id, organizationId, true)
+      const clientRequestId = text(body.client_request_id, 80)
+      if (!clientRequestId) throw Object.assign(new Error('client_request_id is required'), { status: 400 })
+      const { data: turn, error: turnError } = await admin.rpc('begin_department_chat_turn', {
+        p_conversation_id: conversation.id,
+        p_organization_id: organizationId,
+        p_project_id: conversation.project_id,
+        p_engagement_id: conversation.engagement_id,
+        p_department_id: conversation.department_id,
+        p_actor_id: user.id,
+        p_client_request_id: clientRequestId,
+        p_prompt: text(body.prompt, 8000),
+      })
+      if (turnError) {
+        if (turnError.code === '23505') {
+          throw Object.assign(new Error('client_request_id conflicts with a different request payload.'), {
+            status: 409, outcome: 'idempotency_conflict',
+          })
+        }
+        throw turnError
+      }
+      if (turn?.replayed) {
+        throw Object.assign(new Error(
+          turn?.message?.status === 'pending'
+            ? 'This request is already generating.'
+            : 'This request was already completed. Reload the conversation.',
+        ), { status: 409 })
+      }
+      body.message_id = turn?.message?.id
+      turnContext = {
+        admin, actorId: user.id, organizationId,
+        projectId: conversation.project_id,
+        engagementId: conversation.engagement_id,
+        departmentId: conversation.department_id,
+        conversationId: conversation.id,
+        messageId: text(turn?.message?.id, 80),
+      }
+      if (!turnContext.messageId) throw new Error('Department Chat turn reservation failed')
+    }
     if (action === 'propose_artifact') return response({ data: await proposeArtifact(userClient, admin, body, user.id, organizationId, dependencies.fetcher, dependencies.proposal) })
     if (action === 'propose_work_item') return response({ data: await proposeWorkItem(userClient, admin, body, user.id, organizationId, dependencies.fetcher, dependencies.proposal) })
     return response({ error: 'Unsupported action' }, 400)
   } catch (error) {
+    if (turnContext) {
+      const reason = safeAttemptReason(error)
+      const unknown = isProviderOutcomeUnknown(error)
+      const parameters = {
+        p_message_id: turnContext.messageId,
+        p_conversation_id: turnContext.conversationId,
+        p_organization_id: turnContext.organizationId,
+        p_project_id: turnContext.projectId,
+        p_engagement_id: turnContext.engagementId,
+        p_department_id: turnContext.departmentId,
+        p_actor_id: turnContext.actorId,
+      }
+      const { error: turnError } = unknown
+        ? await turnContext.admin.rpc('mark_department_chat_turn_unknown', parameters)
+        : await turnContext.admin.rpc('fail_department_chat_turn', { ...parameters, p_error_code: reason })
+      if (turnError) return response({ error: 'Department Chat turn state could not be finalized' }, 503)
+    }
     if (previewAttempt && auditContext) {
       const reason = safeAttemptReason(error)
       try {
@@ -758,6 +1090,10 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
 }
 
 export function safeAttemptReason(error: unknown) {
+  if (isProviderOutcomeUnknown(error)) return 'provider_failed'
+  if (error && typeof error === 'object' && 'providerRejected' in error && error.providerRejected === true) {
+    return 'provider_failed'
+  }
   const message = error instanceof Error ? error.message : ''
   const normalized = message.toLowerCase()
   if (message.includes('credential')) return 'credential_missing'
