@@ -4,6 +4,8 @@ begin;
 do $$
 declare
   v_definition text;
+  v_relation regclass;
+  v_function regprocedure;
 begin
   if not exists (
     select 1 from pg_class
@@ -14,15 +16,33 @@ begin
     where oid = 'public.department_chat_messages'::regclass and relrowsecurity
   ) then raise exception 'message_rls_not_enabled'; end if;
 
-  if has_table_privilege('anon', 'public.department_chat_conversations', 'select')
-     or has_table_privilege('anon', 'public.department_chat_messages', 'select')
-     or has_table_privilege('authenticated', 'public.department_chat_conversations', 'insert')
-     or has_table_privilege('authenticated', 'public.department_chat_conversations', 'update')
-     or has_table_privilege('authenticated', 'public.department_chat_conversations', 'delete')
-     or has_table_privilege('authenticated', 'public.department_chat_messages', 'insert')
-     or has_table_privilege('authenticated', 'public.department_chat_messages', 'update')
-     or has_table_privilege('authenticated', 'public.department_chat_messages', 'delete')
-  then raise exception 'browser_acl_not_read_only'; end if;
+  foreach v_relation in array array[
+    'public.department_chat_conversations'::regclass,
+    'public.department_chat_messages'::regclass
+  ] loop
+    if exists (
+      select 1
+      from pg_class relation
+      cross join lateral aclexplode(coalesce(relation.relacl, acldefault('r', relation.relowner))) privilege
+      where relation.oid = v_relation and privilege.grantee = 0
+        and privilege.privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')
+    ) then raise exception 'browser_acl_not_read_only: PUBLIC has table access on %', v_relation; end if;
+    if has_table_privilege('anon', v_relation, 'SELECT')
+       or has_table_privilege('anon', v_relation, 'INSERT')
+       or has_table_privilege('anon', v_relation, 'UPDATE')
+       or has_table_privilege('anon', v_relation, 'DELETE')
+    then raise exception 'browser_acl_not_read_only: anon has table access on %', v_relation; end if;
+    if not has_table_privilege('authenticated', v_relation, 'SELECT')
+       or has_table_privilege('authenticated', v_relation, 'INSERT')
+       or has_table_privilege('authenticated', v_relation, 'UPDATE')
+       or has_table_privilege('authenticated', v_relation, 'DELETE')
+    then raise exception 'browser_acl_not_read_only: authenticated ACL invalid on %', v_relation; end if;
+    if not has_table_privilege('service_role', v_relation, 'SELECT')
+       or not has_table_privilege('service_role', v_relation, 'INSERT')
+       or not has_table_privilege('service_role', v_relation, 'UPDATE')
+       or not has_table_privilege('service_role', v_relation, 'DELETE')
+    then raise exception 'browser_acl_not_read_only: service_role ACL missing on %', v_relation; end if;
+  end loop;
 
   select pg_get_expr(policy.polqual, policy.polrelid)
   into v_definition
@@ -52,27 +72,33 @@ begin
     raise exception 'private_proposal_leadership_exclusion_missing';
   end if;
 
-  if has_function_privilege(
-    'authenticated',
-    'public.create_department_chat_conversation(uuid,uuid,uuid,text,uuid,text)',
-    'execute'
-  ) or has_function_privilege(
-    'authenticated',
-    'public.begin_department_chat_turn(uuid,uuid,uuid,uuid,text,uuid,uuid,text)',
-    'execute'
-  ) or has_function_privilege(
-    'authenticated',
-    'public.save_department_chat_conversation_proposal(uuid,uuid,uuid,uuid,uuid,text,uuid,text,text,uuid,uuid,jsonb,jsonb,jsonb,uuid[],text,uuid,text,uuid,text,text,integer,integer,integer,bigint)',
-    'execute'
-  ) or has_function_privilege(
-    'authenticated',
-    'public.mark_department_chat_turn_dispatched(uuid,uuid,uuid,uuid,uuid,text,uuid)',
-    'execute'
-  ) or has_function_privilege(
-    'authenticated',
-    'public.mark_department_chat_turn_unknown(uuid,uuid,uuid,uuid,uuid,text,uuid)',
-    'execute'
-  ) then raise exception 'conversation_rpc_browser_execute_not_revoked'; end if;
+  for v_function in
+    select function_name::regprocedure
+    from unnest(array[
+      'public.create_department_chat_conversation(uuid,uuid,uuid,text,uuid,text)',
+      'public.rename_department_chat_conversation(uuid,uuid,uuid,uuid,text,uuid,text)',
+      'public.set_department_chat_conversation_state(uuid,uuid,uuid,uuid,text,uuid,text)',
+      'public.begin_department_chat_turn(uuid,uuid,uuid,uuid,text,uuid,uuid,text)',
+      'public.fail_department_chat_turn(uuid,uuid,uuid,uuid,uuid,text,uuid,text)',
+      'public.mark_department_chat_turn_dispatched(uuid,uuid,uuid,uuid,uuid,text,uuid)',
+      'public.mark_department_chat_turn_unknown(uuid,uuid,uuid,uuid,uuid,text,uuid)',
+      'public.expire_department_chat_pending_turns(uuid,uuid,uuid,uuid,text,uuid)',
+      'public.save_department_chat_conversation_proposal(uuid,uuid,uuid,uuid,uuid,text,uuid,text,text,uuid,uuid,jsonb,jsonb,jsonb,uuid[],text,uuid,text,uuid,text,text,integer,integer,integer,bigint)'
+    ]) as rpc(function_name)
+  loop
+    if exists (
+      select 1
+      from pg_proc function_record
+      cross join lateral aclexplode(coalesce(function_record.proacl, acldefault('f', function_record.proowner))) privilege
+      where function_record.oid = v_function and privilege.grantee = 0
+        and privilege.privilege_type = 'EXECUTE'
+    ) or has_function_privilege('anon', v_function, 'EXECUTE')
+       or has_function_privilege('authenticated', v_function, 'EXECUTE')
+       or not has_function_privilege('service_role', v_function, 'EXECUTE')
+    then raise exception 'conversation_rpc_browser_execute_not_revoked: %', v_function; end if;
+    if (select function_record.prosecdef from pg_proc function_record where function_record.oid = v_function)
+    then raise exception 'conversation_rpc_must_be_security_invoker: %', v_function; end if;
+  end loop;
 
   select pg_get_functiondef(
     'public.begin_department_chat_turn(uuid,uuid,uuid,uuid,text,uuid,uuid,text)'::regprocedure

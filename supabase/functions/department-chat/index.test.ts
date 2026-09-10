@@ -114,7 +114,7 @@ function selectedOrganizationFixture() {
       providerCalls++
       events.push('provider')
       if (providerFailure === 'network') throw new TypeError('connection reset after dispatch')
-      if (providerFailure === '504') return new Response(JSON.stringify({ error: { message: 'gateway timeout' } }), { status: 504 })
+      if (providerFailure === '408' || providerFailure === '504') return new Response(JSON.stringify({ error: { message: 'gateway timeout' } }), { status: Number(providerFailure) })
       if (providerFailure === '400') return new Response(JSON.stringify({ error: { message: 'rejected' } }), { status: 400 })
       return new Response(JSON.stringify({ output_text: JSON.stringify({ notes: 'Offline', checklist: ['Test'] }) }))
     }) as typeof fetch,
@@ -257,7 +257,7 @@ Deno.test('a conflicting replay payload maps deterministically to 409 before pro
   assertEquals(fixture.rpcCalls.some(call => call.name === 'fail_department_chat_turn'), false)
 })
 
-for (const failure of ['network', '504']) {
+for (const failure of ['network', '408', '504']) {
   Deno.test('post-dispatch ' + failure + ' records outcome unknown and never marks safe failure', async () => {
     const fixture = selectedOrganizationFixture()
     fixture.rows.organization_memberships.find(row => row.organization_id === 'B').department_id = 'content'
