@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { createChatCompletionGuard, handleCurrentChatFailure } from '../data/departmentChatIdentity.js'
@@ -31,7 +31,10 @@ function ScopedDepartmentChat({
   handleOrganizationAccessError,
 }) {
   const completion = useRef(null)
-  const requestScope = { organizationId, signal: requestSignal }
+  const requestScope = useMemo(
+    () => ({ organizationId, signal: requestSignal }),
+    [organizationId, requestSignal],
+  )
   useLayoutEffect(() => {
     const guard = createChatCompletionGuard(requestSignal)
     completion.current = guard
@@ -51,6 +54,167 @@ function ScopedDepartmentChat({
   const [workItemType, setWorkItemType] = useState('task')
   const [priority, setPriority] = useState('medium')
   const [language, setLanguage] = useState('')
+  const supportsSavedConversations = ['content', 'design', 'marketing'].includes(departmentId)
+  const projectId = engagement.project_id
+  const [conversations, setConversations] = useState([])
+  const [conversationId, setConversationId] = useState('')
+  const [messages, setMessages] = useState([])
+  const [capabilities, setCapabilities] = useState(null)
+  const [includeArchived, setIncludeArchived] = useState(false)
+  const [conversationTitle, setConversationTitle] = useState('')
+  const [historyBusy, setHistoryBusy] = useState(false)
+
+  async function loadConversationList(selectId = conversationId, archived = includeArchived) {
+    if (!supportsSavedConversations || !projectId) return
+    const rows = await departmentChat.listConversations(departmentId, {
+      engagement_id: engagement.id,
+      project_id: projectId,
+      include_archived: archived,
+    }, requestScope)
+    setConversations(rows)
+    const selected = rows.find(item => item.id === selectId) || rows[0] || null
+    setConversationId(selected?.id || '')
+    setConversationTitle(selected?.title || '')
+    return selected
+  }
+
+  async function loadConversation(id = conversationId) {
+    if (!id || !projectId) {
+      setMessages([])
+      return
+    }
+    const data = await departmentChat.getConversation(departmentId, {
+      conversation_id: id,
+      engagement_id: engagement.id,
+      project_id: projectId,
+    }, requestScope)
+    setMessages(data.messages || [])
+    setConversationTitle(data.conversation?.title || '')
+    setConversations(current => current.map(item => item.id === id ? data.conversation : item))
+  }
+
+  useEffect(() => {
+    if (!supportsSavedConversations || !projectId) return
+    const isCurrent = completion.current.begin()
+    setHistoryBusy(true)
+    setError('')
+    Promise.allSettled([
+      departmentChat.listConversations(departmentId, {
+        engagement_id: engagement.id,
+        project_id: projectId,
+        include_archived: false,
+      }, requestScope),
+      departmentChat.getCapabilities(departmentId, {
+        engagement_id: engagement.id,
+        project_id: projectId,
+      }, requestScope),
+    ]).then(async ([conversationResult, capabilityResult]) => {
+      if (!isCurrent()) return
+      if (conversationResult.status === 'rejected') throw conversationResult.reason
+      const rows = conversationResult.value
+      setConversations(rows)
+      setCapabilities(capabilityResult.status === 'fulfilled' ? capabilityResult.value : null)
+      if (capabilityResult.status === 'rejected') setError(capabilityResult.reason?.message || 'Configured AI is unavailable.')
+      const selected = rows[0] || null
+      setConversationId(selected?.id || '')
+      setConversationTitle(selected?.title || '')
+      if (selected) {
+        const data = await departmentChat.getConversation(departmentId, {
+          conversation_id: selected.id,
+          engagement_id: engagement.id,
+          project_id: projectId,
+        }, requestScope)
+        if (isCurrent()) setMessages(data.messages || [])
+      }
+    }).catch(reason => {
+      handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message))
+    }).finally(() => {
+      if (isCurrent()) setHistoryBusy(false)
+    })
+  }, [departmentId, engagement.id, handleOrganizationAccessError, organizationId, projectId, requestScope, supportsSavedConversations])
+
+  async function createConversation() {
+    const isCurrent = completion.current.begin()
+    if (!isCurrent()) return
+    setHistoryBusy(true)
+    setError('')
+    try {
+      const created = await departmentChat.createConversation(departmentId, {
+        engagement_id: engagement.id,
+        project_id: projectId,
+        title: `${resolvedDepartmentLabel} conversation`,
+      }, requestScope)
+      if (!isCurrent()) return
+      setConversations(current => [created, ...current])
+      setConversationId(created.id)
+      setConversationTitle(created.title)
+      setMessages([])
+      setResult(null)
+    } catch (reason) {
+      handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message))
+    } finally {
+      if (isCurrent()) setHistoryBusy(false)
+    }
+  }
+
+  async function selectConversation(id) {
+    const isCurrent = completion.current.begin()
+    if (!isCurrent()) return
+    setConversationId(id)
+    setHistoryBusy(true)
+    setError('')
+    setResult(null)
+    try {
+      const data = await departmentChat.getConversation(departmentId, {
+        conversation_id: id,
+        engagement_id: engagement.id,
+        project_id: projectId,
+      }, requestScope)
+      if (!isCurrent()) return
+      setMessages(data.messages || [])
+      setConversationTitle(data.conversation?.title || '')
+    } catch (reason) {
+      handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message))
+    } finally {
+      if (isCurrent()) setHistoryBusy(false)
+    }
+  }
+
+  async function renameConversation() {
+    if (!conversationId || !conversationTitle.trim()) return
+    const updated = await departmentChat.renameConversation(departmentId, {
+      conversation_id: conversationId,
+      engagement_id: engagement.id,
+      project_id: projectId,
+      title: conversationTitle,
+    }, requestScope)
+    setConversations(current => current.map(item => item.id === updated.id ? updated : item))
+    setConversationTitle(updated.title)
+  }
+
+  async function setConversationState(state) {
+    if (!conversationId) return
+    const updated = await departmentChat.setConversationState(departmentId, {
+      conversation_id: conversationId,
+      engagement_id: engagement.id,
+      project_id: projectId,
+      state,
+    }, requestScope)
+    const selected = await loadConversationList(state === 'active' ? updated.id : '', includeArchived)
+    if (selected) await loadConversation(selected.id)
+    else setMessages([])
+  }
+
+  async function toggleArchived(checked) {
+    setIncludeArchived(checked)
+    setHistoryBusy(true)
+    try {
+      const selected = await loadConversationList(conversationId, checked)
+      await loadConversation(selected?.id || '')
+    } finally {
+      setHistoryBusy(false)
+    }
+  }
 
   async function submit(event) {
     event.preventDefault()
@@ -63,6 +227,9 @@ function ScopedDepartmentChat({
     try {
       const proposed = proposalMode === 'artifact'
         ? await departmentChat.proposeArtifact(departmentId, {
+          conversation_id: supportsSavedConversations ? conversationId : undefined,
+          client_request_id: supportsSavedConversations ? crypto.randomUUID() : undefined,
+          project_id: supportsSavedConversations ? projectId : undefined,
           engagement_id: engagement.id,
           artifact_id: (artifactForType(artifactType) || {}).id || null,
           engagement_stage_instance_id: (stageForType(artifactType) || {}).id || null,
@@ -74,6 +241,9 @@ function ScopedDepartmentChat({
           change_summary: 'Draft proposed via Shared Department Chat',
         }, requestScope)
         : await departmentChat.proposeWorkItem(departmentId, {
+          conversation_id: supportsSavedConversations ? conversationId : undefined,
+          client_request_id: supportsSavedConversations ? crypto.randomUUID() : undefined,
+          project_id: supportsSavedConversations ? projectId : undefined,
           engagement_id: engagement.id,
           title: title || `${artifactDefinitions[artifactType]?.label || 'Work item'} request`,
           work_item_type: workItemType,
@@ -89,30 +259,37 @@ function ScopedDepartmentChat({
       })
       setPrompt('')
       setSafe(false)
+      if (supportsSavedConversations) await loadConversation(conversationId)
     } catch (reason) {
       handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message))
+      if (supportsSavedConversations && isCurrent()) {
+        try { await loadConversation(conversationId) } catch { /* Preserve the original request error. */ }
+      }
     } finally {
       if (isCurrent()) setBusy(false)
     }
   }
 
-  async function decide(action) {
-    if (!result?.proposal_id) return
+  async function decide(action, target = result) {
+    if (!target?.proposal_id) return
     const isCurrent = completion.current.begin()
     if (!isCurrent()) return
     setBusy(true)
     setError('')
     try {
       const decision = action === 'confirm'
-        ? await departmentChat.confirmProposal(result.proposal_id, requestScope)
-        : await departmentChat.rejectProposal(result.proposal_id, requestScope)
+        ? await departmentChat.confirmProposal(target.proposal_id, requestScope)
+        : await departmentChat.rejectProposal(target.proposal_id, requestScope)
       if (!isCurrent()) return
-      setResult(current => ({ ...current, status: decision.outcome, decision }))
+      setResult(current => current?.proposal_id === target.proposal_id
+        ? ({ ...current, status: decision.outcome, decision }) : current)
       if (decision.outcome === 'accepted' && isCurrent()) await onCreated?.(decision)
+      if (supportsSavedConversations && isCurrent()) await loadConversation(conversationId)
     } catch (reason) {
       handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => {
         if (['stale', 'expired', 'rejected'].includes(failure.outcome)) {
-          setResult(current => ({ ...current, status: failure.outcome }))
+          setResult(current => current?.proposal_id === target.proposal_id
+            ? ({ ...current, status: failure.outcome }) : current)
         }
         setError(failure.message)
       })
@@ -123,6 +300,7 @@ function ScopedDepartmentChat({
 
   const isWorkItemMode = proposalMode === 'work_item'
   const requiresContentLanguage = departmentId === 'content' && ['discovery', 'vision', 'audience'].includes(artifactType)
+  const currentConversation = conversations.find(item => item.id === conversationId) || null
 
   async function openOfficial(event) {
     event.preventDefault()
@@ -140,7 +318,21 @@ function ScopedDepartmentChat({
     }
   }
 
-  return <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+  return <div className={`grid gap-6 ${supportsSavedConversations ? 'xl:grid-cols-[260px_minmax(0,1fr)_320px]' : 'xl:grid-cols-[minmax(0,1fr)_360px]'}`}>
+    {supportsSavedConversations && <aside className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Conversations</p><p className="mt-1 text-xs text-emerald-300">Private to you</p></div>
+        <button type="button" disabled={historyBusy || !projectId} onClick={createConversation} className="rounded-lg bg-sky-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">New</button>
+      </div>
+      <label className="mt-4 flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={includeArchived} onChange={event => toggleArchived(event.target.checked).catch(reason => setError(reason.message))} />Show archived</label>
+      <div className="mt-4 space-y-2">
+        {conversations.map(conversation => <button type="button" key={conversation.id} onClick={() => selectConversation(conversation.id)} className={`w-full rounded-xl border px-3 py-3 text-left text-sm ${conversation.id === conversationId ? 'border-sky-600 bg-sky-950/40 text-white' : 'border-slate-800 text-slate-300 hover:border-slate-700'}`}>
+          <span className="block truncate font-medium">{conversation.title}</span>
+          <span className="mt-1 block text-xs capitalize text-slate-500">{conversation.state} · {new Date(conversation.last_activity_at).toLocaleString()}</span>
+        </button>)}
+        {!conversations.length && <p className="rounded-xl border border-dashed border-slate-800 p-4 text-xs leading-5 text-slate-500">No {includeArchived ? '' : 'active '}saved conversations yet.</p>}
+      </div>
+    </aside>}
     <form onSubmit={submit} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-400">Shared Department Chat · {departmentId}</p>
@@ -148,6 +340,18 @@ function ScopedDepartmentChat({
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">The configured model prepares a preview using this engagement and approved AI-safe context. Review and confirm it to create an unapproved artifact version or a work item that has not started.</p>
       </div>
       {error && <div className="mt-5 rounded-xl border border-red-900/60 bg-red-950/40 p-3 text-sm text-red-300">{error}</div>}
+      {supportsSavedConversations && !projectId && <div className="mt-5 rounded-xl border border-amber-900/60 bg-amber-950/30 p-3 text-sm text-amber-200">Saved chat requires a canonical project-owned engagement.</div>}
+      {supportsSavedConversations && currentConversation && <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="min-w-0 flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Conversation title
+            <input maxLength="160" className={`${INPUT} mt-2 normal-case tracking-normal`} value={conversationTitle} onChange={event => setConversationTitle(event.target.value)} />
+          </label>
+          <button type="button" disabled={historyBusy || !conversationTitle.trim()} onClick={() => renameConversation().catch(reason => setError(reason.message))} className="rounded-lg border border-slate-700 px-3 py-2.5 text-xs text-slate-200 disabled:opacity-50">Rename</button>
+          <button type="button" disabled={historyBusy} onClick={() => setConversationState(currentConversation.state === 'active' ? 'archived' : 'active').catch(reason => setError(reason.message))} className="rounded-lg border border-slate-700 px-3 py-2.5 text-xs text-slate-200 disabled:opacity-50">{currentConversation.state === 'active' ? 'Archive' : 'Reopen'}</button>
+        </div>
+        <p className="mt-3 text-xs text-slate-500">History is private and does not become approved engagement context or official work.</p>
+      </div>}
+      {supportsSavedConversations && <ConversationHistory messages={messages} busy={busy} onConfirm={proposal => decide('confirm', proposal)} onReject={proposal => decide('reject', proposal)} />}
       {result && <ProposalPreview result={result} official={official} onOpenOfficial={openOfficial} busy={busy} onConfirm={() => decide('confirm')} onReject={() => decide('reject')} />}
       <div className="mt-6 space-y-5">
         <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Proposal mode
@@ -205,7 +409,7 @@ function ScopedDepartmentChat({
         </label>
 
         <button
-          disabled={busy || !safe || (isWorkItemMode && !title.trim()) || (!isWorkItemMode && !artifactType)}
+          disabled={busy || historyBusy || !safe || (supportsSavedConversations && (!currentConversation || currentConversation.state !== 'active' || !capabilities?.model_id)) || (isWorkItemMode && !title.trim()) || (!isWorkItemMode && !artifactType)}
           className={`${PRIMARY} w-full`}
         >
           {busy ? 'Generating safe preview…' : isWorkItemMode ? 'Preview draft work item' : 'Preview draft artifact'}
@@ -218,12 +422,50 @@ function ScopedDepartmentChat({
         <p className="mt-2 font-semibold text-white">{engagement.brands?.name || engagement.name}</p>
         <p className="mt-1 text-sm text-slate-400">{engagement.agency_clients?.name}</p>
       </div>
+      {supportsSavedConversations && <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-sm leading-6 text-slate-400">
+        <p className="font-semibold text-white">Configured AI</p>
+        {capabilities ? <><p className="mt-2">OpenAI · <span className="text-slate-200">{capabilities.model_id}</span></p><p className="mt-1 text-xs text-slate-500">Administrator-approved default. Model switching is not enabled in this foundation.</p></> : <p className="mt-2">{historyBusy ? 'Checking configuration…' : 'Configuration unavailable.'}</p>}
+        <p className="mt-3 text-xs text-amber-300">Files are not supported yet. No upload or file-reading claim is made.</p>
+      </div>}
       <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-sm leading-6 text-slate-400">
         <p className="font-semibold text-white">Human control remains intact</p>
         <p className="mt-2">The human user is recorded as the timeline actor. The model run is separately traceable. Approval remains available only through the normal exact-version manager action.</p>
       </div>
     </aside>
   </div>
+}
+
+function ConversationHistory({ messages, busy, onConfirm, onReject }) {
+  if (!messages.length) return <div className="mt-5 rounded-xl border border-dashed border-slate-800 p-6 text-center text-sm text-slate-500">This conversation has no messages yet.</div>
+  return <section className="mt-5 space-y-3" aria-label="Saved conversation history">
+    {messages.map(message => {
+      const proposal = message.proposal ? {
+        proposal_id: message.proposal.id,
+        proposal_kind: message.proposal.proposal_kind,
+        target_key: message.proposal.target_key,
+        preview: message.proposal.preview_payload,
+        status: message.proposal.status,
+        expires_at: message.proposal.expires_at,
+        model: message.proposal.model_id,
+        connector_connection_id: message.proposal.connector_connection_id,
+        decision: message.proposal.status === 'accepted' ? {
+          outcome: 'accepted',
+          artifact_id: message.proposal.accepted_artifact_id,
+          artifact_version_id: message.proposal.accepted_artifact_version_id,
+          work_item_id: message.proposal.accepted_work_item_id,
+        } : null,
+      } : null
+      return <article key={message.id} className={`rounded-xl border p-4 ${message.role === 'user' ? 'ml-8 border-sky-900/60 bg-sky-950/20' : 'mr-8 border-slate-800 bg-slate-950/40'}`}>
+        <div className="flex items-center justify-between gap-3 text-xs">
+          <span className="font-semibold uppercase tracking-[0.12em] text-slate-400">{message.role === 'user' ? 'You' : 'Configured assistant'}</span>
+          <span className={message.status === 'failed' ? 'text-red-300' : message.status === 'pending' ? 'text-amber-300' : 'text-slate-500'}>{message.status}</span>
+        </div>
+        {message.role === 'user' && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-200">{message.body}</p>}
+        {message.status === 'failed' && <p className="mt-2 text-xs text-red-300">This request failed safely. Start a new request to retry with the current configured model.</p>}
+        {proposal && <ProposalPreview result={proposal} official={null} busy={busy} onConfirm={() => onConfirm(proposal)} onReject={() => onReject(proposal)} />}
+      </article>
+    })}
+  </section>
 }
 
 function ProposalPreview({ result, official, onOpenOfficial, busy, onConfirm, onReject }) {
@@ -245,7 +487,7 @@ function ProposalPreview({ result, official, onOpenOfficial, busy, onConfirm, on
     {result.preview && <pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950/60 p-3 text-xs leading-5 text-slate-200">{JSON.stringify(result.preview, null, 2)}</pre>}
     {result.decision?.replayed && <p className="mt-3 text-xs text-slate-400">This confirmation was already completed; the existing official record was returned.</p>}
     {accepted && <p className="mt-3 text-xs text-emerald-300">Confirmation is not approval, release, publication, deployment, launch, or stage completion.</p>}
-    {accepted && <a className="mt-3 block underline" aria-disabled={busy} onClick={event => { if (busy) event.preventDefault(); else onOpenOfficial(event) }} href={'#wch-official-' + (result.decision.artifact_version_id || result.decision.work_item_id)}>Open official {result.decision.artifact_version_id ? 'artifact version' : 'work item'} · {result.decision.artifact_version_id || result.decision.work_item_id}</a>}
+    {accepted && onOpenOfficial && result.decision && <a className="mt-3 block underline" aria-disabled={busy} onClick={event => { if (busy) event.preventDefault(); else onOpenOfficial(event) }} href={'#wch-official-' + (result.decision.artifact_version_id || result.decision.work_item_id)}>Open official {result.decision.artifact_version_id ? 'artifact version' : 'work item'} · {result.decision.artifact_version_id || result.decision.work_item_id}</a>}
     {official && <section id={'wch-official-' + official.id} className="mt-4 rounded-lg border border-emerald-700 p-3"><p className="font-semibold">Saved official record · {official.id}</p><pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(official.content || { title: official.title, description: official.description, status: official.status, work_item_type: official.work_item_type }, null, 2)}</pre></section>}
   </div>
 }

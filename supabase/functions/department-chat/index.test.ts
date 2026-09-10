@@ -46,6 +46,7 @@ function selectedOrganizationFixture() {
   const queries: Array<{ table: string, filters: Array<[string, unknown]> }> = []
   const rpcCalls: Array<{ name: string, args: any }> = []
   let providerCalls = 0
+  let beginReplay = false
   for (const org of ['A', 'B', 'C']) {
     const add = (table: string, value: any) => (rows[table] ||= []).push({ organization_id: org, ...value })
     add('organizations', { id: org, status: 'active', settings: { ai_monthly_budget_microusd: 100 } })
@@ -63,6 +64,11 @@ function selectedOrganizationFixture() {
       integration_connection_engagements: { engagement_id: 'engagement-' + org, department_id: 'development' } })
     add('department_chat_proposals', { ...pendingProposal, id: 'proposal-' + org, organization_id: org,
       engagement_id: 'engagement-' + org, project_id: 'project-' + org, proposer_id: 'actor', connector_connection_id: 'connector-' + org })
+    add('department_chat_conversations', {
+      id: 'conversation-' + org, project_id: 'project-' + org, engagement_id: 'engagement-' + org,
+      department_id: 'development', owner_id: 'actor', title: 'Private thread', state: 'active',
+      last_activity_at: '2026-09-10T00:00:00Z',
+    })
   }
   const admin: any = {
     from(table: string) {
@@ -86,7 +92,11 @@ function selectedOrganizationFixture() {
     },
     async rpc(name: string, args: any) {
       rpcCalls.push({ name, args })
-      return { data: name === 'save_department_chat_proposal' ? { status: 'pending', proposal_id: 'saved-B' }
+      return { data: name === 'begin_department_chat_turn' ? {
+          message: { id: 'message-B', status: 'pending' }, replayed: beginReplay,
+        }
+        : name === 'save_department_chat_proposal' || name === 'save_department_chat_conversation_proposal'
+          ? { status: 'pending', proposal_id: 'saved-B', ai_run_id: 'run-B' }
         : name === 'reject_department_chat_proposal' ? { outcome: 'rejected' }
         : { outcome: 'accepted', artifact_version_id: 'version-B' }, error: null }
     },
@@ -99,7 +109,7 @@ function selectedOrganizationFixture() {
     proposal: { estimatedCost: () => 0, resolveSingleOpenAiModel: (client, engagement, department, organization) =>
       resolveSingleOpenAiModel(client, engagement, department, organization, () => 'synthetic-key') },
   })
-  return { rows, queries, rpcCalls, request, providerCalls: () => providerCalls }
+  return { rows, queries, rpcCalls, request, providerCalls: () => providerCalls, setBeginReplay: (value: boolean) => { beginReplay = value } }
 }
 
 const selectedPreview = { action: 'propose_artifact', organization_id: 'B', engagement_id: 'engagement-B',
@@ -122,6 +132,89 @@ Deno.test('selected B succeeds through real request boundaries with every read, 
   assertEquals(save.args.p_engagement_stage_instance_id, 'stage-B')
   assertEquals(fixture.rpcCalls.filter(call => call.name === 'record_department_chat_attempt').every(call =>
     call.args.p_organization_id === 'B' && !JSON.stringify(call.args).includes('Offline fixture')), true)
+})
+
+Deno.test('saved conversations list and open only the current actor exact B work context', async () => {
+  const fixture = selectedOrganizationFixture()
+  fixture.rows.organization_memberships.find(row => row.organization_id === 'B').department_id = 'content'
+  fixture.rows.engagement_services.find(row => row.organization_id === 'B').service_catalog.department_id = 'content'
+  const connection = fixture.rows.integration_connections.find(row => row.organization_id === 'B')
+  connection.integration_connection_departments.department_id = 'content'
+  connection.integration_connection_engagements.department_id = 'content'
+  const conversation = fixture.rows.department_chat_conversations.find(row => row.organization_id === 'B')
+  conversation.department_id = 'content'
+  fixture.rows.department_chat_conversations.push({
+    ...conversation, id: 'conversation-other', owner_id: 'other-user', title: 'Must stay private',
+  })
+  fixture.rows.department_chat_messages = []
+
+  const scope = {
+    organization_id: 'B', project_id: 'project-B', engagement_id: 'engagement-B', department_id: 'content',
+  }
+  const listed = await fixture.request({ action: 'list_conversations', ...scope })
+  assertEquals(listed.status, 200)
+  assertEquals((await listed.json()).data.map((item: any) => item.id), ['conversation-B'])
+
+  const opened = await fixture.request({ action: 'get_conversation', ...scope, conversation_id: 'conversation-B' })
+  assertEquals(opened.status, 200)
+  assertEquals((await opened.json()).data.conversation.owner_id, 'actor')
+  const expiry = fixture.rpcCalls.find(call => call.name === 'expire_department_chat_pending_turns')!
+  assertEquals(expiry.args.p_conversation_id, 'conversation-B')
+  assertEquals(expiry.args.p_organization_id, 'B')
+})
+
+Deno.test('saved work-item turn reserves once and uses the atomic conversation proposal wrapper', async () => {
+  const fixture = selectedOrganizationFixture()
+  fixture.rows.organization_memberships.find(row => row.organization_id === 'B').department_id = 'content'
+  fixture.rows.engagement_services.find(row => row.organization_id === 'B').service_catalog.department_id = 'content'
+  const connection = fixture.rows.integration_connections.find(row => row.organization_id === 'B')
+  connection.integration_connection_departments.department_id = 'content'
+  connection.integration_connection_engagements.department_id = 'content'
+  fixture.rows.department_chat_conversations.find(row => row.organization_id === 'B').department_id = 'content'
+
+  const response = await fixture.request({
+    action: 'propose_work_item',
+    organization_id: 'B',
+    project_id: 'project-B',
+    engagement_id: 'engagement-B',
+    department_id: 'content',
+    conversation_id: 'conversation-B',
+    client_request_id: 'request-B',
+    title: 'Saved request',
+    work_item_type: 'task',
+    priority: 'medium',
+    prompt: 'Keep this creator-private.',
+    prompt_safe_for_ai: true,
+  })
+  assertEquals(response.status, 200)
+  assertEquals(fixture.providerCalls(), 1)
+  const begin = fixture.rpcCalls.find(call => call.name === 'begin_department_chat_turn')!
+  assertEquals(begin.args.p_conversation_id, 'conversation-B')
+  assertEquals(begin.args.p_client_request_id, 'request-B')
+  const save = fixture.rpcCalls.find(call => call.name === 'save_department_chat_conversation_proposal')!
+  assertEquals(save.args.p_conversation_id, 'conversation-B')
+  assertEquals(save.args.p_message_id, 'message-B')
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'save_department_chat_proposal'), false)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'fail_department_chat_turn'), false)
+})
+
+Deno.test('a replayed pending client request never starts a second provider run', async () => {
+  const fixture = selectedOrganizationFixture()
+  fixture.rows.organization_memberships.find(row => row.organization_id === 'B').department_id = 'content'
+  fixture.rows.engagement_services.find(row => row.organization_id === 'B').service_catalog.department_id = 'content'
+  fixture.rows.department_chat_conversations.find(row => row.organization_id === 'B').department_id = 'content'
+  fixture.setBeginReplay(true)
+  const response = await fixture.request({
+    action: 'propose_work_item', organization_id: 'B', project_id: 'project-B',
+    engagement_id: 'engagement-B', department_id: 'content',
+    conversation_id: 'conversation-B', client_request_id: 'request-B',
+    title: 'Duplicate', work_item_type: 'task', priority: 'medium',
+    prompt: 'Duplicate request', prompt_safe_for_ai: true,
+  })
+  assertEquals(response.status, 409)
+  assertEquals(fixture.providerCalls(), 0)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'save_department_chat_conversation_proposal'), false)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'fail_department_chat_turn'), false)
 })
 
 for (const scenario of ['missing', 'nonmember', 'inactive-organization', 'inactive-membership', 'client-membership']) {

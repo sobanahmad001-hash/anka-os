@@ -33,6 +33,36 @@ test('all WCH actions carry the selected organization and exact current abort si
   }
 })
 
+test('saved conversation actions keep exact caller context and cannot override selected organization', async () => {
+  const calls = []
+  const controller = new AbortController()
+  const scope = { organizationId: 'B', signal: controller.signal }
+  const repo = createDepartmentChatRepository({
+    functions: { invoke: async (name, options) => {
+      calls.push({ name, ...options })
+      return { data: { data: [] } }
+    } },
+  })
+  const input = { organization_id: 'A', project_id: 'project-B', engagement_id: 'engagement-B' }
+  await repo.listConversations('content', input, scope)
+  await repo.createConversation('content', { ...input, title: 'Private thread' }, scope)
+  await repo.getConversation('content', { ...input, conversation_id: 'conversation-B' }, scope)
+  await repo.renameConversation('content', { ...input, conversation_id: 'conversation-B', title: 'Renamed' }, scope)
+  await repo.setConversationState('content', { ...input, conversation_id: 'conversation-B', state: 'archived' }, scope)
+  await repo.getCapabilities('content', input, scope)
+  assert.deepEqual(calls.map(call => call.body.action), [
+    'list_conversations', 'create_conversation', 'get_conversation',
+    'rename_conversation', 'set_conversation_state', 'get_capabilities',
+  ])
+  for (const call of calls) {
+    assert.equal(call.body.organization_id, 'B')
+    assert.equal(call.body.department_id, 'content')
+    assert.equal(call.body.project_id, 'project-B')
+    assert.equal(call.body.engagement_id, 'engagement-B')
+    assert.equal(call.signal, controller.signal)
+  }
+})
+
 test('official read narrows to selected organization and forwards cancellation', async () => {
   const filters = []
   const controller = new AbortController()
