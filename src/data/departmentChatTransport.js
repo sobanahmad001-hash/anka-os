@@ -38,6 +38,8 @@ export function createDepartmentChatRepository(client) {
     listConversations: (departmentId, input, scope) => invoke('list_conversations', { ...input, department_id: departmentId }, scope),
     createConversation: (departmentId, input, scope) => invoke('create_conversation', { ...input, department_id: departmentId }, scope),
     getConversation: (departmentId, input, scope) => invoke('get_conversation', { ...input, department_id: departmentId }, scope),
+    listConversationShareCandidates: (departmentId, input, scope) => invoke('list_conversation_share_candidates', { ...input, department_id: departmentId }, scope),
+    setConversationShares: (departmentId, input, scope) => invoke('set_conversation_shares', { ...input, department_id: departmentId }, scope),
     renameConversation: (departmentId, input, scope) => invoke('rename_conversation', { ...input, department_id: departmentId }, scope),
     setConversationState: (departmentId, input, scope) => invoke('set_conversation_state', { ...input, department_id: departmentId }, scope),
     getCapabilities: (departmentId, input, scope) => invoke('get_capabilities', { ...input, department_id: departmentId }, scope),

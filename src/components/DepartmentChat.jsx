@@ -15,7 +15,7 @@ export default function DepartmentChat(props) {
   const identity = JSON.stringify([user?.id, activeOrganizationId, scopeRevision, props.engagement?.id, props.departmentId])
   if (!user?.id || !activeOrganizationId || requestSignal?.aborted
     || props.engagement?.organization_id !== activeOrganizationId) return null
-  return <ScopedDepartmentChat key={identity} {...props} organizationId={activeOrganizationId} requestSignal={requestSignal} handleOrganizationAccessError={handleOrganizationAccessError} />
+  return <ScopedDepartmentChat key={identity} {...props} userId={user.id} organizationId={activeOrganizationId} requestSignal={requestSignal} handleOrganizationAccessError={handleOrganizationAccessError} />
 }
 
 function ScopedDepartmentChat({
@@ -26,6 +26,7 @@ function ScopedDepartmentChat({
   artifactForType = () => null,
   stageForType = () => null,
   onCreated,
+  userId,
   organizationId,
   requestSignal,
   handleOrganizationAccessError,
@@ -63,6 +64,9 @@ function ScopedDepartmentChat({
   const [includeArchived, setIncludeArchived] = useState(false)
   const [conversationTitle, setConversationTitle] = useState('')
   const [historyBusy, setHistoryBusy] = useState(false)
+  const [sharing, setSharing] = useState({ can_manage: false, recipients: [] })
+  const [shareCandidates, setShareCandidates] = useState([])
+  const [recipientIds, setRecipientIds] = useState([])
 
   async function loadConversationList(selectId = conversationId, archived = includeArchived, isCurrent = () => true) {
     if (!supportsSavedConversations || !projectId) return
@@ -91,6 +95,20 @@ function ScopedDepartmentChat({
     }, requestScope)
     if (!isCurrent()) return null
     setMessages(data.messages || [])
+    setSharing(data.sharing || { can_manage: false, recipients: [] })
+    setRecipientIds((data.sharing?.recipients || []).map(item => item.recipient_id))
+    setShareCandidates([])
+    if (data.sharing?.can_manage) {
+      const candidates = await departmentChat.listConversationShareCandidates(departmentId, {
+        conversation_id: id,
+        engagement_id: engagement.id,
+        project_id: projectId,
+      }, requestScope)
+      if (!isCurrent()) return null
+      setShareCandidates(candidates)
+    } else {
+      setShareCandidates([])
+    }
     setConversationTitle(data.conversation?.title || '')
     setConversations(current => current.map(item => item.id === id ? data.conversation : item))
     return data
@@ -128,6 +146,18 @@ function ScopedDepartmentChat({
           project_id: projectId,
         }, requestScope)
         if (isCurrent()) setMessages(data.messages || [])
+        if (isCurrent()) {
+          setSharing(data.sharing || { can_manage: false, recipients: [] })
+          setRecipientIds((data.sharing?.recipients || []).map(item => item.recipient_id))
+        }
+        if (data.sharing?.can_manage) {
+          const candidates = await departmentChat.listConversationShareCandidates(departmentId, {
+            conversation_id: selected.id,
+            engagement_id: engagement.id,
+            project_id: projectId,
+          }, requestScope)
+          if (isCurrent()) setShareCandidates(candidates)
+        }
       }
     }).catch(reason => {
       handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message))
@@ -153,6 +183,18 @@ function ScopedDepartmentChat({
       setConversationTitle(created.title)
       setMessages([])
       setResult(null)
+      setSharing({ can_manage: true, recipients: [] })
+      setRecipientIds([])
+      try {
+        const candidates = await departmentChat.listConversationShareCandidates(departmentId, {
+          conversation_id: created.id,
+          engagement_id: engagement.id,
+          project_id: projectId,
+        }, requestScope)
+        if (isCurrent()) setShareCandidates(candidates)
+      } catch {
+        if (isCurrent()) setError('Conversation created, but eligible recipients could not be loaded.')
+      }
     } catch (reason) {
       handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message))
     } finally {
@@ -167,6 +209,9 @@ function ScopedDepartmentChat({
     setHistoryBusy(true)
     setError('')
     setResult(null)
+    setSharing({ can_manage: false, recipients: [] })
+    setShareCandidates([])
+    setRecipientIds([])
     try {
       const data = await departmentChat.getConversation(departmentId, {
         conversation_id: id,
@@ -176,6 +221,16 @@ function ScopedDepartmentChat({
       if (!isCurrent()) return
       setMessages(data.messages || [])
       setConversationTitle(data.conversation?.title || '')
+      setSharing(data.sharing || { can_manage: false, recipients: [] })
+      setRecipientIds((data.sharing?.recipients || []).map(item => item.recipient_id))
+      if (data.sharing?.can_manage) {
+        const candidates = await departmentChat.listConversationShareCandidates(departmentId, {
+          conversation_id: id,
+          engagement_id: engagement.id,
+          project_id: projectId,
+        }, requestScope)
+        if (isCurrent()) setShareCandidates(candidates)
+      } else setShareCandidates([])
     } catch (reason) {
       handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message))
     } finally {
@@ -236,6 +291,26 @@ function ScopedDepartmentChat({
       start: () => { setIncludeArchived(checked); setHistoryBusy(true); setError('') },
       operation: isCurrent => loadConversationList(targetConversationId, checked, isCurrent),
       success: async (selected, isCurrent) => loadConversation(selected?.id || '', isCurrent),
+      failure: (reason, isCurrent) => handleCurrentChatFailure(
+        isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message),
+      ),
+      settle: () => setHistoryBusy(false),
+    })
+  }
+
+  async function saveSharing() {
+    if (!conversationId || !sharing.can_manage) return
+    const targetConversationId = conversationId
+    const selected = [...recipientIds]
+    return runCurrentChatOperation(completion.current, {
+      start: () => { setHistoryBusy(true); setError('') },
+      operation: () => departmentChat.setConversationShares(departmentId, {
+        conversation_id: targetConversationId,
+        engagement_id: engagement.id,
+        project_id: projectId,
+        recipient_ids: selected,
+      }, requestScope),
+      success: result => setSharing({ can_manage: true, recipients: result.recipients || [] }),
       failure: (reason, isCurrent) => handleCurrentChatFailure(
         isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message),
       ),
@@ -328,6 +403,7 @@ function ScopedDepartmentChat({
   const isWorkItemMode = proposalMode === 'work_item'
   const requiresContentLanguage = departmentId === 'content' && ['discovery', 'vision', 'audience'].includes(artifactType)
   const currentConversation = conversations.find(item => item.id === conversationId) || null
+  const isConversationOwner = currentConversation?.owner_id === userId
 
   async function openOfficial(event) {
     event.preventDefault()
@@ -348,14 +424,14 @@ function ScopedDepartmentChat({
   return <div className={`grid gap-6 ${supportsSavedConversations ? 'xl:grid-cols-[260px_minmax(0,1fr)_320px]' : 'xl:grid-cols-[minmax(0,1fr)_360px]'}`}>
     {supportsSavedConversations && <aside className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
       <div className="flex items-center justify-between gap-3">
-        <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Conversations</p><p className="mt-1 text-xs text-emerald-300">Private to you</p></div>
+        <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Conversations</p><p className="mt-1 text-xs text-emerald-300">Private to you or deliberately shared</p></div>
         <button type="button" disabled={busy || historyBusy || !projectId} onClick={createConversation} className="rounded-lg bg-sky-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">New</button>
       </div>
       <label className="mt-4 flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={includeArchived} disabled={busy || historyBusy} onChange={event => toggleArchived(event.target.checked).catch(reason => setError(reason.message))} />Show archived</label>
       <div className="mt-4 space-y-2">
         {conversations.map(conversation => <button type="button" key={conversation.id} disabled={busy || historyBusy} onClick={() => selectConversation(conversation.id)} className={`w-full rounded-xl border px-3 py-3 text-left text-sm disabled:opacity-50 ${conversation.id === conversationId ? 'border-sky-600 bg-sky-950/40 text-white' : 'border-slate-800 text-slate-300 hover:border-slate-700'}`}>
           <span className="block truncate font-medium">{conversation.title}</span>
-          <span className="mt-1 block text-xs capitalize text-slate-500">{conversation.state} · {new Date(conversation.last_activity_at).toLocaleString()}</span>
+          <span className="mt-1 block text-xs capitalize text-slate-500">{conversation.access_role === 'recipient' ? 'Shared with you' : 'Yours'} · {conversation.state} · {new Date(conversation.last_activity_at).toLocaleString()}</span>
         </button>)}
         {!conversations.length && <p className="rounded-xl border border-dashed border-slate-800 p-4 text-xs leading-5 text-slate-500">No {includeArchived ? '' : 'active '}saved conversations yet.</p>}
       </div>
@@ -371,14 +447,26 @@ function ScopedDepartmentChat({
       {supportsSavedConversations && currentConversation && <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
         <div className="flex flex-wrap items-end gap-3">
           <label className="min-w-0 flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Conversation title
-            <input maxLength="160" disabled={busy || historyBusy} className={`${INPUT} mt-2 normal-case tracking-normal`} value={conversationTitle} onChange={event => setConversationTitle(event.target.value)} />
+            <input maxLength="160" readOnly={!isConversationOwner} disabled={busy || historyBusy} className={`${INPUT} mt-2 normal-case tracking-normal`} value={conversationTitle} onChange={event => setConversationTitle(event.target.value)} />
           </label>
-          <button type="button" disabled={busy || historyBusy || !conversationTitle.trim()} onClick={() => renameConversation().catch(reason => setError(reason.message))} className="rounded-lg border border-slate-700 px-3 py-2.5 text-xs text-slate-200 disabled:opacity-50">Rename</button>
-          <button type="button" disabled={busy || historyBusy} onClick={() => setConversationState(currentConversation.state === 'active' ? 'archived' : 'active').catch(reason => setError(reason.message))} className="rounded-lg border border-slate-700 px-3 py-2.5 text-xs text-slate-200 disabled:opacity-50">{currentConversation.state === 'active' ? 'Archive' : 'Reopen'}</button>
+          {isConversationOwner && <button type="button" disabled={busy || historyBusy || !conversationTitle.trim()} onClick={() => renameConversation().catch(reason => setError(reason.message))} className="rounded-lg border border-slate-700 px-3 py-2.5 text-xs text-slate-200 disabled:opacity-50">Rename</button>}
+          {isConversationOwner && <button type="button" disabled={busy || historyBusy} onClick={() => setConversationState(currentConversation.state === 'active' ? 'archived' : 'active').catch(reason => setError(reason.message))} className="rounded-lg border border-slate-700 px-3 py-2.5 text-xs text-slate-200 disabled:opacity-50">{currentConversation.state === 'active' ? 'Archive' : 'Reopen'}</button>}
         </div>
-        <p className="mt-3 text-xs text-slate-500">History is private and does not become approved engagement context or official work.</p>
+        <p className="mt-3 text-xs text-slate-500">{isConversationOwner ? 'History stays private unless you explicitly share it with eligible internal contributors.' : 'The creator shared read and reply access with you. This adds no approval, tool, release, publishing, or paid-action authority.'}</p>
+        {sharing.can_manage && <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Share conversation and linked previews</p>
+          <div className="mt-3 max-h-40 space-y-2 overflow-auto">
+            {shareCandidates.map(candidate => <label key={candidate.id} className="flex items-start gap-3 text-sm text-slate-300">
+              <input type="checkbox" checked={recipientIds.includes(candidate.id)} disabled={busy || historyBusy} onChange={() => setRecipientIds(current => current.includes(candidate.id) ? current.filter(id => id !== candidate.id) : [...current, candidate.id])} />
+              <span>{candidate.full_name || candidate.email || 'Internal contributor'}<span className="block text-xs text-slate-500">{candidate.role} · {candidate.department_id || 'organization leadership'}</span></span>
+            </label>)}
+            {!shareCandidates.length && <p className="text-xs text-slate-500">No other currently eligible internal contributors.</p>}
+          </div>
+          <button type="button" disabled={busy || historyBusy} onClick={() => saveSharing().catch(reason => setError(reason.message))} className="mt-3 rounded-lg border border-sky-700 px-3 py-2 text-xs font-semibold text-sky-200 disabled:opacity-50">Save sharing</button>
+          <p className="mt-2 text-xs text-slate-500">Removing a person revokes later reads and replies immediately. Sharing never grants approval or execution power.</p>
+        </div>}
       </div>}
-      {supportsSavedConversations && <ConversationHistory messages={messages} busy={busy} onConfirm={proposal => decide('confirm', proposal)} onReject={proposal => decide('reject', proposal)} />}
+      {supportsSavedConversations && <ConversationHistory messages={messages} userId={userId} busy={busy} onConfirm={proposal => decide('confirm', proposal)} onReject={proposal => decide('reject', proposal)} />}
       {result && <ProposalPreview result={result} official={official} onOpenOfficial={openOfficial} busy={busy} onConfirm={() => decide('confirm')} onReject={() => decide('reject')} />}
       <div className="mt-6 space-y-5">
         <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Proposal mode
@@ -462,7 +550,7 @@ function ScopedDepartmentChat({
   </div>
 }
 
-function ConversationHistory({ messages, busy, onConfirm, onReject }) {
+function ConversationHistory({ messages, userId, busy, onConfirm, onReject }) {
   if (!messages.length) return <div className="mt-5 rounded-xl border border-dashed border-slate-800 p-6 text-center text-sm text-slate-500">This conversation has no messages yet.</div>
   return <section className="mt-5 space-y-3" aria-label="Saved conversation history">
     {messages.map(message => {
@@ -475,6 +563,7 @@ function ConversationHistory({ messages, busy, onConfirm, onReject }) {
         expires_at: message.proposal.expires_at,
         model: message.proposal.model_id,
         connector_connection_id: message.proposal.connector_connection_id,
+        proposer_id: message.proposal.proposer_id,
         decision: message.proposal.status === 'accepted' ? {
           outcome: 'accepted',
           artifact_id: message.proposal.accepted_artifact_id,
@@ -484,19 +573,19 @@ function ConversationHistory({ messages, busy, onConfirm, onReject }) {
       } : null
       return <article key={message.id} className={`rounded-xl border p-4 ${message.role === 'user' ? 'ml-8 border-sky-900/60 bg-sky-950/20' : 'mr-8 border-slate-800 bg-slate-950/40'}`}>
         <div className="flex items-center justify-between gap-3 text-xs">
-          <span className="font-semibold uppercase tracking-[0.12em] text-slate-400">{message.role === 'user' ? 'You' : 'Configured assistant'}</span>
+          <span className="font-semibold uppercase tracking-[0.12em] text-slate-400">{message.role === 'user' ? (message.author_id === userId ? 'You' : message.author?.full_name || message.author?.email || 'Internal contributor') : 'Configured assistant'}</span>
           <span className={message.status === 'failed' ? 'text-red-300' : ['pending', 'unknown'].includes(message.status) ? 'text-amber-300' : 'text-slate-500'}>{message.status}</span>
         </div>
         {message.role === 'user' && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-200">{message.body}</p>}
         {message.status === 'failed' && <p className="mt-2 text-xs text-red-300">This request failed safely. Start a new request to retry with the current configured model.</p>}
         {message.status === 'unknown' && <p className="mt-2 text-xs text-amber-300">The provider outcome is unknown. Do not retry this request; a retry could duplicate work or cost.</p>}
-        {proposal && <ProposalPreview result={proposal} official={null} busy={busy} onConfirm={() => onConfirm(proposal)} onReject={() => onReject(proposal)} />}
+        {proposal && <ProposalPreview result={proposal} official={null} busy={busy} canDecide={proposal.proposer_id === userId} onConfirm={() => onConfirm(proposal)} onReject={() => onReject(proposal)} />}
       </article>
     })}
   </section>
 }
 
-function ProposalPreview({ result, official, onOpenOfficial, busy, onConfirm, onReject }) {
+function ProposalPreview({ result, official, onOpenOfficial, busy, canDecide = true, onConfirm, onReject }) {
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
     setNow(Date.now())
@@ -509,9 +598,10 @@ function ProposalPreview({ result, official, onOpenOfficial, busy, onConfirm, on
   return <div className="mt-5 rounded-xl border border-amber-900/60 bg-amber-950/25 p-4 text-sm text-amber-100">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><p className="font-semibold">{accepted ? 'Official unapproved record created' : 'Preview only'}</p><p className="mt-1 text-xs text-amber-300/80">{pending ? 'Expires ' + new Date(result.expires_at).toLocaleString() : 'Status: ' + result.status}</p></div>
-      {pending && <div className="flex gap-2">{!suggestionsOnly && <button type="button" disabled={busy} onClick={onConfirm} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Confirm official draft</button>}<button type="button" disabled={busy} onClick={onReject} className="rounded-lg border border-amber-700 px-3 py-2 text-xs disabled:opacity-50">Reject</button></div>}
+      {pending && canDecide && <div className="flex gap-2">{!suggestionsOnly && <button type="button" disabled={busy} onClick={onConfirm} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Confirm official draft</button>}<button type="button" disabled={busy} onClick={onReject} className="rounded-lg border border-amber-700 px-3 py-2 text-xs disabled:opacity-50">Reject</button></div>}
     </div>
     {pending && suggestionsOnly && <p className="mt-3 text-xs text-amber-200">Campaign brief suggestions can only be applied selectively in the governed campaign brief editor.</p>}
+    {pending && !canDecide && <p className="mt-3 text-xs text-amber-200">Preview shared for review. Only its author can use the existing confirmation or rejection action.</p>}
     {result.preview && <pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950/60 p-3 text-xs leading-5 text-slate-200">{JSON.stringify(result.preview, null, 2)}</pre>}
     {result.decision?.replayed && <p className="mt-3 text-xs text-slate-400">This confirmation was already completed; the existing official record was returned.</p>}
     {accepted && <p className="mt-3 text-xs text-emerald-300">Confirmation is not approval, release, publication, deployment, launch, or stage completion.</p>}
