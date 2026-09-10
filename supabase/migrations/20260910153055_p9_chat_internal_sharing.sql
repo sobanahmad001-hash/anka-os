@@ -398,7 +398,9 @@ as $$
       and (
         (
           conversation.owner_id = p_actor_id
-          and public.is_team_organization_member(p_organization_id)
+          and private.is_current_department_chat_contributor(
+            p_organization_id, p_project_id, p_engagement_id, p_department_id, p_actor_id
+          )
         )
         or (
           private.is_current_department_chat_contributor(

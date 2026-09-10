@@ -54,10 +54,10 @@ function selectedOrganizationFixture() {
     const add = (table: string, value: any) => (rows[table] ||= []).push({ organization_id: org, ...value })
     add('organizations', { id: org, status: 'active', settings: { ai_monthly_budget_microusd: 100 } })
     if (org !== 'C') add('organization_memberships', { user_id: 'actor', status: 'active', member_kind: 'team', role: 'contributor', department_id: 'development' })
-    add('engagements', { id: 'engagement-' + org, client_id: 'agency-' + org, project_id: 'project-' + org, brand_id: 'brand-' + org })
+    add('engagements', { id: 'engagement-' + org, client_id: 'agency-' + org, project_id: 'project-' + org, brand_id: 'brand-' + org, status: 'active' })
     add('agency_clients', { id: 'agency-' + org, canonical_client_id: 'client-' + org })
     add('clients', { id: 'client-' + org })
-    add('projects', { id: 'project-' + org, client_id: 'client-' + org })
+    add('projects', { id: 'project-' + org, client_id: 'client-' + org, archived_at: null })
     add('brands', { id: 'brand-' + org, client_id: 'agency-' + org })
     add('engagement_services', { id: 'service-' + org, engagement_id: 'engagement-' + org, status: 'active', service_catalog: { department_id: 'development' } })
     add('engagement_stage_instances', { id: 'stage-' + org, engagement_id: 'engagement-' + org, accountable_department_id: 'development' })
@@ -102,10 +102,27 @@ function selectedOrganizationFixture() {
           row.id === args.p_conversation_id && row.organization_id === args.p_organization_id
           && row.project_id === args.p_project_id && row.engagement_id === args.p_engagement_id
           && row.department_id === args.p_department_id)
+        const organization = (rows.organizations || []).find(row =>
+          row.id === args.p_organization_id && row.status === 'active')
+        const membership = (rows.organization_memberships || []).find(row =>
+          row.organization_id === args.p_organization_id && row.user_id === args.p_actor_id
+          && row.member_kind === 'team' && row.status === 'active'
+          && (row.department_id === args.p_department_id
+            || ['system_owner', 'operations_admin', 'executive'].includes(row.role)))
+        const engagement = (rows.engagements || []).find(row =>
+          row.id === args.p_engagement_id && row.organization_id === args.p_organization_id
+          && row.project_id === args.p_project_id && row.status !== 'cancelled')
+        const project = (rows.projects || []).find(row =>
+          row.id === args.p_project_id && row.organization_id === args.p_organization_id
+          && row.archived_at === null)
+        const service = (rows.engagement_services || []).find(row =>
+          row.organization_id === args.p_organization_id && row.engagement_id === args.p_engagement_id
+          && row.status === 'active' && row.service_catalog?.department_id === args.p_department_id)
         const shared = (rows.department_chat_conversation_shares || []).some(row =>
           row.conversation_id === args.p_conversation_id && row.organization_id === args.p_organization_id
           && row.recipient_id === args.p_actor_id && row.revoked_at === null)
-        return { data: Boolean(conversation && (conversation.owner_id === args.p_actor_id || shared)), error: null }
+        const currentContributor = Boolean(organization && membership && engagement && project && service)
+        return { data: Boolean(conversation && currentContributor && (conversation.owner_id === args.p_actor_id || shared)), error: null }
       }
       return { data: name === 'begin_department_chat_turn' ? {
           message: { id: 'message-B', status: 'pending' }, replayed: beginReplay,
@@ -132,7 +149,7 @@ function selectedOrganizationFixture() {
       resolveSingleOpenAiModel(client, engagement, department, organization, () => 'synthetic-key') },
   })
   return {
-    rows, queries, rpcCalls, request, events,
+    rows, queries, rpcCalls, request, events, admin,
     providerCalls: () => providerCalls,
     setBeginReplay: (value: boolean) => { beginReplay = value },
     setBeginError: (value: any) => { beginError = value },
@@ -189,6 +206,35 @@ Deno.test('saved conversations list and open only the current actor exact B work
   const expiry = fixture.rpcCalls.find(call => call.name === 'expire_department_chat_pending_turns')!
   assertEquals(expiry.args.p_conversation_id, 'conversation-B')
   assertEquals(expiry.args.p_organization_id, 'B')
+})
+
+Deno.test('a suspended owner cannot open or reply through the service-role access boundary', async () => {
+  const fixture = selectedOrganizationFixture()
+  const membership = fixture.rows.organization_memberships.find(row => row.organization_id === 'B')
+  membership.status = 'suspended'
+  const scope = {
+    organization_id: 'B', project_id: 'project-B', engagement_id: 'engagement-B',
+    department_id: 'development', conversation_id: 'conversation-B',
+  }
+  const access = await fixture.admin.rpc('can_access_department_chat_conversation', {
+    p_conversation_id: 'conversation-B',
+    p_organization_id: 'B',
+    p_project_id: 'project-B',
+    p_engagement_id: 'engagement-B',
+    p_department_id: 'development',
+    p_actor_id: 'actor',
+  })
+  assertEquals(access.data, false)
+  const opened = await fixture.request({ action: 'get_conversation', ...scope })
+  assertEquals(opened.status, 403)
+  const reply = await fixture.request({
+    action: 'propose_work_item', ...scope, client_request_id: 'suspended-owner-request',
+    title: 'Blocked', work_item_type: 'task', priority: 'medium',
+    prompt: 'This must not dispatch.', prompt_safe_for_ai: true,
+  })
+  assertEquals(reply.status, 403)
+  assertEquals(fixture.providerCalls(), 0)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'begin_department_chat_turn'), false)
 })
 
 Deno.test('an active internal recipient can list, open, and reply without becoming the owner', async () => {
