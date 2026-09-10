@@ -13,7 +13,9 @@ import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import ProductionHandoffPanel from '../components/ProductionHandoffPanel.jsx'
 import DesignCreativeBriefWorkspace from '../components/DesignCreativeBriefWorkspace.jsx'
+import DesignAssetLibrary from '../components/DesignAssetLibrary.jsx'
 import { creativeBriefVersionsForDirectionContext, validateCreativeBriefVersionSelection } from '../data/designCreativeBriefs.js'
+import { designAssetSourceFocus } from '../data/designAssetLibrary.js'
 
 const INPUT = 'w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-violet-500/60'
 const BUTTON = 'rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40'
@@ -216,10 +218,25 @@ function ArtifactWorkspace({ workspace }) {
   })}</div></div>
 }
 
-function WorkshopWorkspace({ workspace, focusedSessionId, focusedVersionId, focusedDraftId, canPromoteExperiment, onCreateFlow, onCreate, onGenerate, onGenerateImage, onRefreshImageJob, onRetryImageJob, onGenerateVariants, onGenerateVideo, onGeneratePage, onSubmitPage, onApprovePage, onExportPage, onDownloadExport, onPrepareHandoff, onDownloadHandoff, onRefine, onPromote, onSetWorking, onSelect, onRelease, busy }) {
+function WorkshopWorkspace({ workspace, focusedSessionId, focusedVersionId: navigationFocusedVersionId, focusedDraftId, canPromoteExperiment, onCreateFlow, onCreate, onGenerate, onGenerateImage, onRefreshImageJob, onRetryImageJob, onGenerateVariants, onGenerateVideo, onGeneratePage, onSubmitPage, onApprovePage, onExportPage, onDownloadExport, onPrepareHandoff, onDownloadHandoff, onRefine, onPromote, onSetWorking, onSelect, onRelease, busy }) {
   const approvedTypes = new Set(workspace.approvals.map(approval => workspace.artifacts.find(item => item.id === approval.artifact_id)?.artifact_type).filter(Boolean))
   const ready = ['discovery', 'vision', 'audience'].every(type => approvedTypes.has(type))
-  const [flowSessionId, setFlowSessionId] = useState('')
+  const [flowSessionId, updateFlowSessionId] = useState('')
+  const [focusedVersionId, setFocusedVersionId] = useState(navigationFocusedVersionId)
+  const [assetLibraryOpen, setAssetLibraryOpen] = useState(false)
+  const [assetSourceFocus, setAssetSourceFocus] = useState(null)
+  const contextKey = workspace.engagement?.id || ''
+  function setFlowSessionId(nextSessionId) {
+    updateFlowSessionId(nextSessionId)
+    setAssetSourceFocus(null)
+    setFocusedVersionId('')
+  }
+  useEffect(() => {
+    setAssetLibraryOpen(false)
+    setAssetSourceFocus(null)
+    updateFlowSessionId('')
+    setFocusedVersionId(navigationFocusedVersionId)
+  }, [contextKey, navigationFocusedVersionId])
   const session = workspace.sessions.find(item => item.id === flowSessionId) || workspace.sessions.find(item => item.id === focusedSessionId) || workspace.sessions[0]
   const experimentVersions = [...workspace.experimentalDirectionVersions].sort((left, right) => Number(right.id === focusedDraftId) - Number(left.id === focusedDraftId))
   const directions = session ? workspace.directions.filter(item => item.session_id === session.id).sort((left, right) => left.direction_slot - right.direction_slot) : []
@@ -230,7 +247,18 @@ function WorkshopWorkspace({ workspace, focusedSessionId, focusedVersionId, focu
   const storyboard = serviceCatalog(activeService)?.slug === 'video_concepts_storyboards' || session?.output_family === 'video_motion'
   const variantEligible = ['social_assets', 'advertising_assets'].includes(serviceCatalog(activeService)?.slug)
   const createSessionAction = <div className="mt-4 flex items-center gap-3"><Badge tone={ready ? 'green' : 'amber'}>{approvedTypes.size}/3 approved</Badge><button disabled={!ready} className={BUTTON} onClick={onCreate}>Create Design Workshop session</button></div>
+  function focusAssetSource(row) {
+    const source = designAssetSourceFocus(row)
+    if (!source) return
+    setFlowSessionId(source.sessionId)
+    setFocusedVersionId(source.directionVersionId)
+    setAssetSourceFocus(source)
+    setAssetLibraryOpen(false)
+  }
   return <div className="mt-6 space-y-6">
+    <Panel><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-violet-400">Design S05</p><h2 className="mt-2 text-xl font-semibold">Generated asset library</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Browse the already-authorized outputs in this work context. Uploads, editing, approvals, archive actions, and independent version comparison are not included.</p></div><button type="button" aria-expanded={assetLibraryOpen} onClick={() => setAssetLibraryOpen(value => !value)} className={BUTTON}>{assetLibraryOpen ? 'Hide assets' : 'Browse assets'}</button></div></Panel>
+    {assetLibraryOpen && <DesignAssetLibrary key={contextKey} contextKey={contextKey} workspace={workspace} onClose={() => setAssetLibraryOpen(false)} onFocusSource={focusAssetSource} />}
+    {assetSourceFocus && <div role="status" className="rounded-xl border border-violet-400/30 bg-violet-500/10 p-3 text-sm text-violet-100">Opened immutable direction version <code>{assetSourceFocus.directionVersionId}</code>{assetSourceFocus.jobId ? <> and generation request <code>{assetSourceFocus.jobId}</code></> : null} from the asset library. The existing source is shown below; no generation was started.</div>}
     <Panel><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-violet-400">Multi-page flows</p><h2 className="mt-2 text-xl font-semibold">Website page flow</h2><p className="mt-2 text-sm text-slate-400">Group independent direction sessions by their real sitemap page.</p></div><button className={BUTTON} onClick={onCreateFlow}>Create page flow</button></div>{(workspace.pageFlows || []).length ? <div className="mt-4 grid gap-3 lg:grid-cols-2">{workspace.pageFlows.map(flow => { const members = workspace.sessions.filter(item => item.page_flow_id === flow.id); return <section key={flow.id} className="rounded-xl border border-violet-500/20 bg-violet-500/[0.04] p-3"><p className="font-semibold">{flow.flow_name}</p><div className="mt-2 flex flex-wrap gap-2">{members.length ? members.map(item => <button key={item.id} onClick={() => setFlowSessionId(item.id)} className={`rounded-lg px-2.5 py-1.5 text-xs ${session?.id === item.id ? 'bg-violet-500 text-white' : 'bg-white/5 text-slate-300'}`}>{item.page_slug} · {sessionServiceLabel(item, workspace.designServices)}</button>) : <span className="text-xs text-slate-500">No page sessions yet.</span>}</div></section> })}</div> : null}</Panel>
     {!session ? <Panel><h2 className="text-xl font-semibold">Compile approved context</h2><p className="mt-2 text-sm text-slate-400">The session snapshots exact approved Discovery, Vision and Audience versions, then adds an output brief and designer-safe instructions.</p>{createSessionAction}</Panel>
       : <Panel><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-violet-400">Compiled session</p><h2 className="mt-2 text-xl font-semibold">{sessionServiceLabel(session, workspace.designServices)}</h2><p className="mt-2 text-sm text-slate-400">Context {session.context_checksum.slice(0, 12)}… · {Object.keys(session.context_manifest?.artifacts || {}).length} exact approved inputs</p></div><Badge tone={release ? 'green' : session.status === 'generation_failed' ? 'red' : 'violet'}>{release ? 'Released' : session.status.replaceAll('_', ' ')}</Badge></div><p className="mt-4 rounded-xl bg-white/[0.03] p-4 text-sm leading-6 text-slate-300">{session.designer_instructions}</p>{!directions.length && <button disabled={busy === `generate-${session.id}` || !['ready', 'generation_failed'].includes(session.status)} onClick={() => onGenerate(session)} className={`${BUTTON} mt-4`}>{busy === `generate-${session.id}` ? (storyboard ? 'Generating connected storyboard frames…' : 'Generating three distinct directions…') : (storyboard ? 'Generate storyboard sequence' : 'Generate three directions')}</button>}</Panel>}
