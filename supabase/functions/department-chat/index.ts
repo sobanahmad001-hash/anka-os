@@ -465,14 +465,25 @@ async function requireConversationContext(
     .eq('project_id', scope.projectId)
     .eq('engagement_id', scope.engagementId)
     .eq('department_id', scope.departmentId)
-    .eq('owner_id', actorId)
     .maybeSingle()
   if (error) throw error
-  if (!data) throw Object.assign(new Error('Owned Department Chat conversation not found'), { status: 404 })
+  if (!data) throw Object.assign(new Error('Department Chat conversation not found'), { status: 404 })
+  const { data: accessible, error: accessError } = await admin.rpc('can_access_department_chat_conversation', {
+    p_conversation_id: data.id,
+    p_organization_id: organizationId,
+    p_project_id: data.project_id,
+    p_engagement_id: data.engagement_id,
+    p_department_id: data.department_id,
+    p_actor_id: actorId,
+  })
+  if (accessError) throw accessError
+  if (accessible !== true) {
+    throw Object.assign(new Error('Department Chat conversation not found'), { status: 404 })
+  }
   if (requireActive && data.state !== 'active') {
     throw Object.assign(new Error('Archived conversations must be reopened before sending'), { status: 409 })
   }
-  return data
+  return { ...data, access_role: data.owner_id === actorId ? 'owner' : 'recipient' }
 }
 
 async function validateConversationEngagement(
@@ -503,17 +514,41 @@ async function listConversations(
   dependencies: ProposalDependencies,
 ) {
   const scope = await validateConversationEngagement(admin, body, organizationId, dependencies)
-  let query = admin.from('department_chat_conversations')
+  let ownerQuery = admin.from('department_chat_conversations')
     .select('id, organization_id, project_id, engagement_id, department_id, owner_id, title, state, last_activity_at, archived_at, created_at, updated_at')
     .eq('organization_id', organizationId)
     .eq('project_id', scope.projectId)
     .eq('engagement_id', scope.engagementId)
-    .eq('department_id', scope.departmentId)
-    .eq('owner_id', actorId)
-  if (body.include_archived !== true) query = query.eq('state', 'active')
-  const { data, error } = await query.order('last_activity_at', { ascending: false }).order('id')
-  if (error) throw error
-  return data || []
+    .eq('department_id', scope.departmentId).eq('owner_id', actorId)
+  if (body.include_archived !== true) ownerQuery = ownerQuery.eq('state', 'active')
+  const { data: owned, error: ownerError } = await ownerQuery
+  if (ownerError) throw ownerError
+  const { data: shares, error: shareError } = await admin.from('department_chat_conversation_shares')
+    .select('conversation_id').eq('organization_id', organizationId)
+    .eq('project_id', scope.projectId).eq('engagement_id', scope.engagementId)
+    .eq('department_id', scope.departmentId).eq('recipient_id', actorId).is('revoked_at', null)
+  if (shareError) throw shareError
+  const sharedIds = [...new Set((shares || []).map(item => text(item.conversation_id, 80)).filter(Boolean))]
+  let shared: Json[] = []
+  if (sharedIds.length) {
+    let sharedQuery = admin.from('department_chat_conversations')
+      .select('id, organization_id, project_id, engagement_id, department_id, owner_id, title, state, last_activity_at, archived_at, created_at, updated_at')
+      .eq('organization_id', organizationId).eq('project_id', scope.projectId)
+      .eq('engagement_id', scope.engagementId).eq('department_id', scope.departmentId)
+      .in('id', sharedIds)
+    if (body.include_archived !== true) sharedQuery = sharedQuery.eq('state', 'active')
+    const result = await sharedQuery
+    if (result.error) throw result.error
+    shared = result.data || []
+  }
+  const merged = new Map<string, Json>()
+  for (const conversation of owned || []) merged.set(String(conversation.id), { ...conversation, access_role: 'owner' })
+  for (const conversation of shared) if (!merged.has(String(conversation.id))) {
+    merged.set(String(conversation.id), { ...conversation, access_role: 'recipient' })
+  }
+  return [...merged.values()].sort((left, right) =>
+    String(right.last_activity_at).localeCompare(String(left.last_activity_at))
+      || String(left.id).localeCompare(String(right.id)))
 }
 
 async function createConversation(
@@ -544,6 +579,9 @@ async function updateConversation(
   action: 'rename' | 'state',
 ) {
   const conversation = await requireConversationContext(admin, body, actorId, organizationId)
+  if (conversation.owner_id !== actorId) {
+    throw Object.assign(new Error('Only the conversation creator can change its title or state'), { status: 403 })
+  }
   const parameters = {
     p_conversation_id: conversation.id,
     p_organization_id: organizationId,
@@ -574,7 +612,6 @@ async function getConversation(admin: Client, body: Json, actorId: string, organ
     .select('id, conversation_id, author_id, role, body, status, error_code, ai_run_id, proposal_id, client_request_id, sequence, created_at, finished_at')
     .eq('organization_id', organizationId)
     .eq('conversation_id', conversation.id)
-    .eq('owner_id', actorId)
     .order('sequence')
   if (error) throw error
   const proposalIds = (messages || []).map(message => message.proposal_id).filter(Boolean)
@@ -584,19 +621,96 @@ async function getConversation(admin: Client, body: Json, actorId: string, organ
       .select('id, proposer_id, proposal_kind, target_key, preview_payload, status, expires_at, model_id, connector_connection_id, accepted_artifact_id, accepted_artifact_version_id, accepted_work_item_id')
       .eq('organization_id', organizationId)
       .eq('conversation_id', conversation.id)
-      .eq('proposer_id', actorId)
       .in('id', proposalIds)
     if (result.error) throw result.error
     proposals = result.data || []
   }
   const byId = new Map(proposals.map(proposal => [proposal.id, proposal]))
+  const authorIds = [...new Set((messages || []).map(message => text(message.author_id, 80)).filter(Boolean))]
+  let authors: Json[] = []
+  if (authorIds.length) {
+    const result = await admin.from('profiles').select('id, full_name, email').in('id', authorIds)
+    if (result.error) throw result.error
+    authors = result.data || []
+  }
+  const authorById = new Map(authors.map(author => [author.id, author]))
+  let recipients: Json[] = []
+  if (conversation.owner_id === actorId) {
+    const result = await admin.from('department_chat_conversation_shares')
+      .select('recipient_id, shared_at').eq('organization_id', organizationId)
+      .eq('conversation_id', conversation.id).is('revoked_at', null).order('recipient_id')
+    if (result.error) throw result.error
+    recipients = result.data || []
+  }
   return {
     conversation,
+    sharing: { can_manage: conversation.owner_id === actorId, recipients },
     messages: (messages || []).map(message => ({
       ...message,
+      author: message.author_id ? authorById.get(message.author_id) || null : null,
       proposal: message.proposal_id ? byId.get(message.proposal_id) || null : null,
     })),
   }
+}
+
+async function listConversationShareCandidates(
+  admin: Client,
+  body: Json,
+  actorId: string,
+  organizationId: string,
+  dependencies: ProposalDependencies,
+) {
+  await validateConversationEngagement(admin, body, organizationId, dependencies)
+  const conversation = await requireConversationContext(admin, body, actorId, organizationId)
+  if (conversation.owner_id !== actorId) {
+    throw Object.assign(new Error('Only the conversation creator can manage sharing'), { status: 403 })
+  }
+  const { data: memberships, error } = await admin.from('organization_memberships')
+    .select('user_id, role, department_id').eq('organization_id', organizationId)
+    .eq('member_kind', 'team').eq('status', 'active')
+  if (error) throw error
+  const eligible = (memberships || []).filter(item =>
+    item.user_id !== actorId
+    && (LEADER_ROLES.has(text(item.role, 60)) || text(item.department_id, 60) === conversation.department_id))
+  const ids = [...new Set(eligible.map(item => text(item.user_id, 80)).filter(Boolean))]
+  if (!ids.length) return []
+  const { data: profiles, error: profileError } = await admin.from('profiles')
+    .select('id, full_name, email').in('id', ids)
+  if (profileError) throw profileError
+  const names = new Map((profiles || []).map(profile => [profile.id, profile]))
+  return eligible.map(item => ({
+    id: item.user_id,
+    full_name: names.get(item.user_id)?.full_name || '',
+    email: names.get(item.user_id)?.email || '',
+    role: item.role,
+    department_id: item.department_id,
+  })).sort((left, right) =>
+    String(left.full_name || left.email || left.id).localeCompare(String(right.full_name || right.email || right.id)))
+}
+
+async function setConversationShares(
+  admin: Client,
+  body: Json,
+  actorId: string,
+  organizationId: string,
+) {
+  const conversation = await requireConversationContext(admin, body, actorId, organizationId)
+  if (conversation.owner_id !== actorId) {
+    throw Object.assign(new Error('Only the conversation creator can manage sharing'), { status: 403 })
+  }
+  const recipientIds = Array.isArray(body.recipient_ids)
+    ? body.recipient_ids.map(value => text(value, 80)).filter(Boolean) : []
+  const { data, error } = await admin.rpc('set_department_chat_conversation_shares', {
+    p_conversation_id: conversation.id,
+    p_organization_id: organizationId,
+    p_project_id: conversation.project_id,
+    p_engagement_id: conversation.engagement_id,
+    p_department_id: conversation.department_id,
+    p_actor_id: actorId,
+    p_recipient_ids: recipientIds,
+  })
+  if (error) throw error
+  return data
 }
 
 async function getCapabilities(
@@ -617,7 +731,11 @@ async function getCapabilities(
     default_model_id: provider.model,
     text: { supported: true, max_prompt_characters: 8000 },
     attachments: { supported: false, reason: 'Private file ingestion is not configured for Department Chat.' },
-    sharing: { supported: false, reason: 'Sharing with replies is planned after the private foundation is frozen.' },
+    sharing: {
+      supported: true,
+      recipient_limit: 50,
+      boundary: 'Internal read and reply access only; no approval, tool, release, publishing, or paid-action authority.',
+    },
   }
 }
 
@@ -999,6 +1117,14 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
     }
     if (action === 'get_conversation') {
       return response({ data: await getConversation(admin, body, user.id, organizationId) })
+    }
+    if (action === 'list_conversation_share_candidates') {
+      return response({ data: await listConversationShareCandidates(
+        admin, body, user.id, organizationId, dependencies.proposal || {},
+      ) })
+    }
+    if (action === 'set_conversation_shares') {
+      return response({ data: await setConversationShares(admin, body, user.id, organizationId) })
     }
     if (action === 'rename_conversation') {
       return response({ data: await updateConversation(admin, body, user.id, organizationId, 'rename') })

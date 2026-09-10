@@ -97,6 +97,16 @@ function selectedOrganizationFixture() {
       rpcCalls.push({ name, args })
       events.push('rpc:' + name)
       if (name === 'begin_department_chat_turn' && beginError) return { data: null, error: beginError }
+      if (name === 'can_access_department_chat_conversation') {
+        const conversation = (rows.department_chat_conversations || []).find(row =>
+          row.id === args.p_conversation_id && row.organization_id === args.p_organization_id
+          && row.project_id === args.p_project_id && row.engagement_id === args.p_engagement_id
+          && row.department_id === args.p_department_id)
+        const shared = (rows.department_chat_conversation_shares || []).some(row =>
+          row.conversation_id === args.p_conversation_id && row.organization_id === args.p_organization_id
+          && row.recipient_id === args.p_actor_id && row.revoked_at === null)
+        return { data: Boolean(conversation && (conversation.owner_id === args.p_actor_id || shared)), error: null }
+      }
       return { data: name === 'begin_department_chat_turn' ? {
           message: { id: 'message-B', status: 'pending' }, replayed: beginReplay,
         }
@@ -179,6 +189,69 @@ Deno.test('saved conversations list and open only the current actor exact B work
   const expiry = fixture.rpcCalls.find(call => call.name === 'expire_department_chat_pending_turns')!
   assertEquals(expiry.args.p_conversation_id, 'conversation-B')
   assertEquals(expiry.args.p_organization_id, 'B')
+})
+
+Deno.test('an active internal recipient can list, open, and reply without becoming the owner', async () => {
+  const fixture = selectedOrganizationFixture()
+  fixture.rows.organization_memberships.find(row => row.organization_id === 'B').department_id = 'content'
+  fixture.rows.engagement_services.find(row => row.organization_id === 'B').service_catalog.department_id = 'content'
+  const connection = fixture.rows.integration_connections.find(row => row.organization_id === 'B')
+  connection.integration_connection_departments.department_id = 'content'
+  connection.integration_connection_engagements.department_id = 'content'
+  const conversation = fixture.rows.department_chat_conversations.find(row => row.organization_id === 'B')
+  conversation.department_id = 'content'
+  conversation.owner_id = 'creator'
+  fixture.rows.department_chat_conversation_shares = [{
+    organization_id: 'B', project_id: 'project-B', engagement_id: 'engagement-B',
+    department_id: 'content', conversation_id: 'conversation-B', owner_id: 'creator',
+    recipient_id: 'actor', revoked_at: null,
+  }]
+  fixture.rows.department_chat_messages = []
+  const scope = {
+    organization_id: 'B', project_id: 'project-B', engagement_id: 'engagement-B', department_id: 'content',
+  }
+  const listed = await fixture.request({ action: 'list_conversations', ...scope })
+  assertEquals(listed.status, 200)
+  assertEquals((await listed.json()).data[0].access_role, 'recipient')
+  const opened = await fixture.request({ action: 'get_conversation', ...scope, conversation_id: 'conversation-B' })
+  assertEquals(opened.status, 200)
+  assertEquals((await opened.json()).data.sharing.can_manage, false)
+  const reply = await fixture.request({
+    action: 'propose_work_item', ...scope, conversation_id: 'conversation-B',
+    client_request_id: 'recipient-request', title: 'Collaborative reply',
+    work_item_type: 'task', priority: 'medium', prompt: 'Reply as the actual author.',
+    prompt_safe_for_ai: true,
+  })
+  assertEquals(reply.status, 200)
+  assertEquals(fixture.rpcCalls.find(call => call.name === 'begin_department_chat_turn')!.args.p_actor_id, 'actor')
+})
+
+Deno.test('revocation removes later recipient reads and replies before provider dispatch', async () => {
+  const fixture = selectedOrganizationFixture()
+  fixture.rows.organization_memberships.find(row => row.organization_id === 'B').department_id = 'content'
+  fixture.rows.engagement_services.find(row => row.organization_id === 'B').service_catalog.department_id = 'content'
+  const conversation = fixture.rows.department_chat_conversations.find(row => row.organization_id === 'B')
+  conversation.department_id = 'content'
+  conversation.owner_id = 'creator'
+  fixture.rows.department_chat_conversation_shares = [{
+    organization_id: 'B', project_id: 'project-B', engagement_id: 'engagement-B',
+    department_id: 'content', conversation_id: 'conversation-B', owner_id: 'creator',
+    recipient_id: 'actor', revoked_at: '2026-09-10T01:00:00Z',
+  }]
+  const scope = {
+    organization_id: 'B', project_id: 'project-B', engagement_id: 'engagement-B',
+    department_id: 'content', conversation_id: 'conversation-B',
+  }
+  const opened = await fixture.request({ action: 'get_conversation', ...scope })
+  assertEquals(opened.status, 404)
+  const reply = await fixture.request({
+    action: 'propose_work_item', ...scope, client_request_id: 'revoked-request',
+    title: 'Blocked', work_item_type: 'task', priority: 'medium',
+    prompt: 'This must not dispatch.', prompt_safe_for_ai: true,
+  })
+  assertEquals(reply.status, 404)
+  assertEquals(fixture.providerCalls(), 0)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'begin_department_chat_turn'), false)
 })
 
 Deno.test('saved work-item turn reserves once and uses the atomic conversation proposal wrapper', async () => {
