@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import test from 'node:test'
+
+import { WebsiteArchitecturePathAlert, WebsitePageRecordActions } from '../components/WebsitePageStructureControls.js'
 
 import {
   CONTENT_ARTIFACT_FORMS,
@@ -65,12 +69,21 @@ test('B03b blocks blank and normalized duplicate paths before persistence', () =
   assert.match(errors.get('page:home'), /unique proposed path/)
   assert.match(errors.get('page:collision'), /unique proposed path/)
   assert.match(ui, /disabled=\{saving \|\| pathErrors\.size > 0\}/)
-  assert.match(ui, /role="alert"/)
 })
 
-test('B03b mounts Add child and Duplicate only on website page records', () => {
-  assert.match(ui, />Add child<\/button>/)
-  assert.match(ui, />Duplicate<\/button>/)
+test('B03b renders Add child, Duplicate, move state, and path conflict feedback', () => {
+  const actions = renderToStaticMarkup(createElement(WebsitePageRecordActions, {
+    label: 'Home', buttonClassName: 'button', canMoveEarlier: false, canMoveLater: true,
+    onAddChild() {}, onDuplicate() {}, onMoveEarlier() {}, onMoveLater() {},
+  }))
+  assert.match(actions, />Add child<\/button>/)
+  assert.match(actions, />Duplicate<\/button>/)
+  assert.match(actions, /aria-label="Move Home earlier" disabled=""/)
+  assert.match(actions, /aria-label="Move Home later"/)
+  const alert = renderToStaticMarkup(createElement(WebsiteArchitecturePathAlert, { hasErrors: true }))
+  assert.match(alert, /role="alert"/)
+  assert.match(alert, /Resolve every proposed path before saving/)
+  assert.equal(renderToStaticMarkup(createElement(WebsiteArchitecturePathAlert, { hasErrors: false })), '')
   assert.match(ui, /field\.recordType === 'website_page'/)
   assert.match(ui, /onAddChild=\{\(\) => onChange\(addWebsiteChild/)
   assert.match(ui, /onDuplicate=\{\(\) => onChange\(duplicateWebsitePage/)
