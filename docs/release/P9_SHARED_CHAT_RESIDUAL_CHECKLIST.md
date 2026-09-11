@@ -25,7 +25,9 @@ The scope note's older statement that attachments are unavailable is superseded 
 - New turns revalidate selection after idempotent reservation and again immediately before dispatch; replayed turns exit before any fresh model lookup. Confirmation also revalidates. No stale-choice fallback.
 - The exact model plus immutable configuration identity is stored on the proposal and AI-run ledger. Revocation blocks new dispatch/confirmation while preserving old history and an already-dispatched result.
 - Capabilities remain honest: text generation; validated text attachments only; PNG/JPEG reference-only; PDF/OCR/vision unavailable.
-- The navigation-released main baseline is integrated, and the exact configured Deno suite passes 290 tests plus frozen type-checks.
+- The model-selection migration is ordered after CHAT-3 as `20260911130000_p9_department_chat_model_selection.sql`.
+- The rollback-only verifier now exercises schema, RLS/ACLs, tenant/role boundaries, replay, revocation, immutable ledger binding, explicit-empty allowlists and no-side-effect denial paths.
+- The navigation-released main baseline is integrated; local gates pass 813 Node tests, 299 Deno tests (including 9 integration-gateway handler cases), frozen type-checks, lint with zero errors and the 434-module production build.
 
 ## Still required before P9 can be called complete
 

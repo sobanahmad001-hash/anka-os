@@ -93,6 +93,8 @@ $$;
 create trigger trg_department_chat_model_configurations_protect
 before update on public.department_chat_model_configurations
 for each row execute function private.protect_department_chat_model_configuration();
+revoke all on function private.protect_department_chat_model_configuration()
+  from public, anon, authenticated;
 
 alter table public.ai_runs
   add column department_chat_model_configuration_id uuid,
@@ -299,13 +301,25 @@ begin
   set model_configuration_id = p_configuration_id
   where id = v_proposal_id and organization_id = p_organization_id
     and model_configuration_id is null;
-  if not found then raise exception 'Department Chat proposal model identity could not be frozen.' using errcode = '23514'; end if;
+  if not found and not exists (
+    select 1 from public.department_chat_proposals
+    where id = v_proposal_id and organization_id = p_organization_id
+      and model_configuration_id = p_configuration_id
+  ) then
+    raise exception 'Department Chat proposal model identity could not be frozen.' using errcode = '23514';
+  end if;
   update public.ai_runs
   set department_chat_model_configuration_id = p_configuration_id,
       context_manifest = context_manifest || jsonb_build_object('model_configuration_id', p_configuration_id)
   where id = v_ai_run_id and organization_id = p_organization_id
     and department_chat_model_configuration_id is null;
-  if not found then raise exception 'Department Chat run model identity could not be frozen.' using errcode = '23514'; end if;
+  if not found and not exists (
+    select 1 from public.ai_runs
+    where id = v_ai_run_id and organization_id = p_organization_id
+      and department_chat_model_configuration_id = p_configuration_id
+  ) then
+    raise exception 'Department Chat run model identity could not be frozen.' using errcode = '23514';
+  end if;
   return p_saved || jsonb_build_object('model_configuration_id', p_configuration_id);
 end;
 $$;
@@ -444,6 +458,8 @@ $$;
 create trigger trg_department_chat_proposals_model_binding
 before update on public.department_chat_proposals
 for each row execute function private.protect_department_chat_model_binding();
+revoke all on function private.protect_department_chat_model_binding()
+  from public, anon, authenticated;
 
 create function private.protect_ai_run_model_binding()
 returns trigger language plpgsql security invoker set search_path = '' as $$
@@ -470,6 +486,8 @@ $$;
 create trigger trg_ai_runs_model_binding
 before update of department_chat_model_configuration_id on public.ai_runs
 for each row execute function private.protect_ai_run_model_binding();
+revoke all on function private.protect_ai_run_model_binding()
+  from public, anon, authenticated;
 
 comment on table public.department_chat_model_configurations is
   'Administrator-governed immutable model identities derived only from verified connector configuration facts.';

@@ -7,8 +7,9 @@ import { selectDepartmentChatModelConfiguration } from './departmentChatModelSel
 const read = path => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
 const edge = read('supabase/functions/department-chat/index.ts')
 const gateway = read('supabase/functions/integration-gateway/index.ts')
-const migration = read('supabase/migrations/20260911110000_p9_department_chat_model_selection.sql')
-const verifier = read('supabase/verify_20260911110000_p9_department_chat_model_selection.sql')
+const repository = read('src/data/integrationRepository.js')
+const migration = read('supabase/migrations/20260911130000_p9_department_chat_model_selection.sql')
+const verifier = read('supabase/verify_20260911130000_p9_department_chat_model_selection.sql')
 const component = read('src/components/DepartmentChat.jsx')
 
 test('P9 model UI keeps a valid choice and replaces a stale choice only with an advertised default', () => {
@@ -47,10 +48,15 @@ test('P9 server revalidates selection at dispatch and confirmation with no silen
 
 test('P9 admin allowlist reuses existing leadership and verified connector facts', () => {
   assert.match(gateway, /if \(!isLeader\).*Leadership access required/)
+  assert.match(gateway, /action === 'list_model_allowlist'/)
   assert.match(gateway, /action === 'configure_model_allowlist'/)
+  assert.match(gateway, /selectedOrganizationId/)
+  assert.match(gateway, /\.eq\('organization_id', selectedOrganizationId\)/)
   assert.match(gateway, /connection\.provider !== 'openai' \|\| connection\.status !== 'verified'/)
   assert.match(gateway, /Model allowlist contains an unverified model/)
   assert.match(gateway, /verifiedModelIds\(connection\)/)
+  assert.match(repository, /list_model_allowlist[\s\S]*organization_id: organizationId/)
+  assert.match(repository, /configure_model_allowlist[\s\S]*organization_id: organizationId/)
 })
 
 test('P9 schema preserves immutable historical identity with RLS and closed browser writes', () => {
@@ -63,7 +69,22 @@ test('P9 schema preserves immutable historical identity with RLS and closed brow
   assert.match(migration, /model configuration is immutable/i)
   assert.match(migration, /new\.status = 'accepted'[\s\S]*department_chat_model_configuration_is_current/)
   assert.match(verifier, /always rolls back/i)
-  for (const gate of ['schema_rls_acl', 'seeded_default', 'dispatch_stale', 'tenant_role', 'immutable_history', 'confirmation_stale']) {
+  for (const gate of [
+    'schema_columns_constraints', 'schema_indexes_triggers', 'table_rls_acl',
+    'service_rpc_acl', 'private_function_acl', 'seed_default_runtime',
+    'rls_own_foreign_runtime', 'rls_suspended_runtime',
+    'configure_leadership_runtime', 'configure_unverified_runtime',
+    'configure_unmapped_runtime', 'configure_leader_runtime',
+    'dispatch_current_runtime', 'dispatch_fabricated_runtime',
+    'proposal_run_binding_replay_runtime', 'configuration_immutable_runtime',
+    'dispatch_revoked_runtime', 'confirmation_revoked_no_side_effect_runtime',
+    'explicit_empty_revocation_runtime', 'browser_direct_mutation_denied',
+  ]) {
     assert.match(verifier, new RegExp(gate))
   }
+})
+
+test('P9 unapplied migration is ordered after released CHAT-3', () => {
+  assert.equal('20260911130000' > '20260911121056', true)
+  assert.match(migration, /P9-MODELS-1: governed model selection/)
 })

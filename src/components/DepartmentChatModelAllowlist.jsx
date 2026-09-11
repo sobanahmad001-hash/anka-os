@@ -16,7 +16,7 @@ function initialDraft(connection) {
   return draft
 }
 
-export default function DepartmentChatModelAllowlist({ connections, canManage, onSaved }) {
+export default function DepartmentChatModelAllowlist({ organizationId, connections, canManage, onSaved }) {
   const openAiConnections = connections.filter(connection => connection.provider === 'openai')
   const [drafts, setDrafts] = useState({})
   const [savingId, setSavingId] = useState('')
@@ -32,7 +32,7 @@ export default function DepartmentChatModelAllowlist({ connections, canManage, o
     try {
       const mapped = new Set(connection.department_ids || [])
       const draft = drafts[connection.id] || {}
-      await integrations.configureModelAllowlist(connection.id, Object.fromEntries(
+      await integrations.configureModelAllowlist(organizationId, connection.id, Object.fromEntries(
         CHAT_DEPARTMENTS.filter(departmentId => mapped.has(departmentId))
           .map(departmentId => [departmentId, draft[departmentId] || []]),
       ))
