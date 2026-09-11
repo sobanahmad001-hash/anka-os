@@ -154,6 +154,44 @@ export function validateCampaign(value: unknown) {
   }
 }
 
+export function validateCampaignPlan(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Campaign plan details are required')
+  const input = value as Json
+  const title = text(input.title, 180)
+  const objective = text(input.objective, 4000)
+  const channels = [...new Set(strings(input.channels, 20).map(item => item.slice(0, 120)))]
+  const startsOn = safeDate(input.starts_on)
+  const endsOn = safeDate(input.ends_on)
+  const landingPageUrl = text(input.landing_page_url, 2000)
+  if (!title || !objective || !channels.length) throw new Error('Plan title, objective, and at least one channel are required')
+  if (startsOn && endsOn && startsOn > endsOn) throw new Error('Plan end date cannot precede its start date')
+  if (landingPageUrl) {
+    let parsed: URL
+    try { parsed = new URL(landingPageUrl) } catch { throw new Error('Landing page must use an HTTP or HTTPS URL') }
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Landing page must use an HTTP or HTTPS URL')
+  }
+  const requirements = Array.isArray(input.creative_requirements) ? input.creative_requirements : []
+  if (requirements.length > 100) throw new Error('At most 100 creative requirements are supported')
+  return {
+    title, objective, channels, starts_on: startsOn, ends_on: endsOn,
+    audience: text(input.audience, 4000), landing_page_url: landingPageUrl || null,
+    approved_message_version_id: text(input.approved_message_version_id, 80) || null,
+    measurement_plan_version_id: text(input.measurement_plan_version_id, 80) || null,
+    change_summary: text(input.change_summary, 1000),
+    creative_requirements: requirements.map((raw, index) => {
+      const item = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Json : {}
+      const format = text(item.format, 240)
+      const intendedPlacement = text(item.intended_placement, 500)
+      const dueDate = safeDate(item.due_date)
+      if (!format || !intendedPlacement) throw new Error(`Creative requirement ${index + 1} needs format and intended placement`)
+      return {
+        format, intended_placement: intendedPlacement,
+        message_version_id: text(item.message_version_id, 80) || null, due_date: dueDate,
+      }
+    }),
+  }
+}
+
 function optionalText(value: unknown, max: number) {
   const result = text(value, max)
   return result || null
@@ -655,6 +693,35 @@ async function saveCampaignBrief(context: MarketingRequestContext, body: Json, a
   return data
 }
 
+async function saveCampaignPlan(context: MarketingRequestContext, body: Json, actorId: string) {
+  const engagementId = text(body.engagement_id, 80)
+  const campaignId = text(body.campaign_id, 80)
+  if (!campaignId) throw new Error('Campaign is required')
+  await requireMarketingEngagement(context, engagementId)
+  const plan = validateCampaignPlan(body.plan)
+  const { data, error } = await context.admin.rpc('save_marketing_campaign_plan_draft', {
+    p_organization_id: context.organizationId,
+    p_engagement_id: engagementId,
+    p_campaign_id: campaignId,
+    p_expected_latest_version_id: text(body.expected_latest_version_id, 80) || null,
+    p_title: plan.title,
+    p_objective: plan.objective,
+    p_channels: plan.channels,
+    p_starts_on: plan.starts_on,
+    p_ends_on: plan.ends_on,
+    p_audience: plan.audience,
+    p_landing_page_url: plan.landing_page_url,
+    p_approved_message_version_id: plan.approved_message_version_id,
+    p_measurement_plan_version_id: plan.measurement_plan_version_id,
+    p_creative_requirements: plan.creative_requirements,
+    p_change_summary: plan.change_summary,
+    p_source_plan_version_id: text(body.source_plan_version_id, 80) || null,
+    p_actor_id: actorId,
+  })
+  if (error) throw error
+  return data
+}
+
 async function approveArtifact(context: MarketingRequestContext, body: Json, actorId: string) {
   const { admin, organizationId } = context
   const versionId = text(body.artifact_version_id, 80)
@@ -900,6 +967,7 @@ export async function handleRequest(
     if (action === 'import_ad_campaign_performance') return response({ data: await importAdCampaignPerformance(context, body, user.id) })
     if (action === 'save_artifact') return response({ data: await saveArtifact(context, body, user.id) })
     if (action === 'save_campaign_brief') return response({ data: await saveCampaignBrief(context, body, user.id) })
+    if (action === 'save_campaign_plan') return response({ data: await saveCampaignPlan(context, body, user.id) })
     if (action === 'approve_artifact') return response({ data: await approveArtifact(context, body, user.id) })
     if (action === 'analytics_dashboard') return response({ data: await analyticsDashboard(context, body) })
     return response({ error: 'Unsupported action' }, 400)

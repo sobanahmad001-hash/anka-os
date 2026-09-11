@@ -11,6 +11,7 @@ import {
   validateAdGroup,
   validateAdKeyword,
   validateCampaign,
+  validateCampaignPlan,
   validateMarketingArtifact,
 } from './index.ts'
 
@@ -25,7 +26,7 @@ Deno.test('non-Marketing members cannot execute any MK3 write action', () => {
   const writeActions = [
     'create_ad_campaign', 'update_ad_campaign', 'delete_ad_campaign',
     'save_ad_group', 'delete_ad_group', 'save_ad_keyword', 'delete_ad_keyword',
-    'import_ad_campaign_performance',
+    'import_ad_campaign_performance', 'save_campaign_plan',
   ]
   for (const action of writeActions) {
     assertEquals(hasMarketingAuthority({ role: 'contributor', department_id: 'content' }, action), false)
@@ -40,6 +41,73 @@ Deno.test('campaign planning validates dates, channels, and informational budget
   assertEquals(campaign.planned_budget, 2500)
   assertEquals(campaign.currency_code, 'USD')
   assertThrows(() => validateCampaign({ name: 'Risk', planned_channels: ['paid'], planned_budget: -1 }), Error, 'non-negative')
+})
+
+Deno.test('MB04A campaign-plan drafts are manual, unapproved, exact-source inputs', () => {
+  const plan = validateCampaignPlan({
+    title: 'Autumn launch', objective: 'Qualified demand', channels: ['email', 'search'],
+    starts_on: '2026-09-12', ends_on: '2026-10-12',
+    landing_page_url: 'https://example.com/launch',
+    approved_message_version_id: 'message-version',
+    measurement_plan_version_id: 'measurement-version',
+    creative_requirements: [{ format: 'Static image', intended_placement: 'Homepage hero', message_version_id: 'message-version', due_date: '2026-09-20' }],
+  })
+  assertEquals(plan.channels, ['email', 'search'])
+  assertEquals(plan.creative_requirements[0].due_date, '2026-09-20')
+  assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Date', channels: ['email'], starts_on: '2026-10-01', ends_on: '2026-09-01' }), Error, 'cannot precede')
+  assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'URL', channels: ['email'], landing_page_url: 'ftp://example.com' }), Error, 'HTTP or HTTPS')
+  assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Requirement', channels: ['email'], creative_requirements: [{}] }), Error, 'needs format')
+})
+
+Deno.test('MB04A authenticated save routes exact context and concurrency inputs to the server RPC', async () => {
+  const organizationId = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
+  const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = []
+  let clientCount = 0
+  const userClient = { auth: { getUser: async () => ({ data: { user: { id: 'actor-id' } }, error: null }) } }
+  const admin = {
+    from(table: string) {
+      const filters: Record<string, unknown> = {}
+      const builder: any = {
+        select: () => builder,
+        eq(column: string, value: unknown) { filters[column] = value; return builder },
+        limit: () => Promise.resolve({ data: table === 'engagement_services' ? [{ id: 'service-id' }] : [], error: null }),
+        async maybeSingle() {
+          if (table === 'organization_memberships') return { data: {
+            organization_id: organizationId, role: 'contributor', department_id: 'marketing',
+            status: 'active', member_kind: 'team', organization: { status: 'active' },
+          }, error: null }
+          if (table === 'engagements' && filters.id === 'engagement-id' && filters.organization_id === organizationId) {
+            return { data: { id: 'engagement-id', organization_id: organizationId, brand_id: 'brand-id', name: 'Launch', status: 'active' }, error: null }
+          }
+          return { data: null, error: null }
+        },
+      }
+      return builder
+    },
+    async rpc(name: string, args: Record<string, unknown>) {
+      rpcCalls.push({ name, args })
+      return { data: { id: 'plan-v2', version_number: 2, lifecycle_status: 'draft' }, error: null }
+    },
+  }
+  const response = await handleRequest(new Request('https://functions.example/marketing-studio', {
+    method: 'POST', headers: { Authorization: 'Bearer caller-jwt', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'save_campaign_plan', organization_id: organizationId, engagement_id: 'engagement-id',
+      campaign_id: 'campaign-id', expected_latest_version_id: 'plan-v1',
+      plan: { title: 'Launch', objective: 'Demand', channels: ['email'], creative_requirements: [] },
+    }),
+  }), {
+    createClient: (() => clientCount++ === 0 ? userClient : admin) as never,
+    environment: { supabaseUrl: 'https://project.supabase.co', publishableKey: 'publishable', secretKey: 'secret' },
+  })
+  assertEquals(response.status, 200)
+  assertEquals(rpcCalls.length, 1)
+  assertEquals(rpcCalls[0].name, 'save_marketing_campaign_plan_draft')
+  assertEquals(rpcCalls[0].args.p_organization_id, organizationId)
+  assertEquals(rpcCalls[0].args.p_engagement_id, 'engagement-id')
+  assertEquals(rpcCalls[0].args.p_campaign_id, 'campaign-id')
+  assertEquals(rpcCalls[0].args.p_expected_latest_version_id, 'plan-v1')
+  assertEquals(rpcCalls[0].args.p_actor_id, 'actor-id')
 })
 
 Deno.test('backlink targets preserve unknown metrics and validate URLs, scores, and enums', () => {
