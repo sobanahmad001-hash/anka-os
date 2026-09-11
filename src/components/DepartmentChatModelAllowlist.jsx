@@ -16,7 +16,7 @@ function initialDraft(connection) {
   return draft
 }
 
-export default function DepartmentChatModelAllowlist({ organizationId, connections, canManage, onSaved }) {
+export default function DepartmentChatModelAllowlist({ organizationId, connections, canManage, onSaved, requestSignal }) {
   const openAiConnections = connections.filter(connection => connection.provider === 'openai')
   const [drafts, setDrafts] = useState({})
   const [savingId, setSavingId] = useState('')
@@ -35,11 +35,11 @@ export default function DepartmentChatModelAllowlist({ organizationId, connectio
       await integrations.configureModelAllowlist(organizationId, connection.id, Object.fromEntries(
         CHAT_DEPARTMENTS.filter(departmentId => mapped.has(departmentId))
           .map(departmentId => [departmentId, draft[departmentId] || []]),
-      ))
+      ), { signal: requestSignal })
       setMessage('Department Chat model access saved. New requests use only the active selections.')
       await onSaved?.()
     } catch (error) {
-      setMessage(error.message || 'Model access could not be saved.')
+      if (error?.name !== 'AbortError' && error?.cause?.name !== 'AbortError') setMessage(error.message || 'Model access could not be saved.')
     } finally {
       setSavingId('')
     }

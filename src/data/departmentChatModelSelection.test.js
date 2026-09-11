@@ -2,7 +2,10 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { selectDepartmentChatModelConfiguration } from './departmentChatModelSelection.js'
+import {
+  runCurrentModelAllowlistRequest,
+  selectDepartmentChatModelConfiguration,
+} from './departmentChatModelSelection.js'
 
 const read = path => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
 const edge = read('supabase/functions/department-chat/index.ts')
@@ -11,6 +14,7 @@ const repository = read('src/data/integrationRepository.js')
 const migration = read('supabase/migrations/20260911130000_p9_department_chat_model_selection.sql')
 const verifier = read('supabase/verify_20260911130000_p9_department_chat_model_selection.sql')
 const component = read('src/components/DepartmentChat.jsx')
+const settings = read('src/apps/Settings.jsx')
 
 test('P9 model UI keeps a valid choice and replaces a stale choice only with an advertised default', () => {
   const capabilities = {
@@ -28,6 +32,69 @@ test('P9 model UI keeps a valid choice and replaces a stale choice only with an 
   }, 'revoked'), 'configuration-b')
   assert.equal(selectDepartmentChatModelConfiguration({ approved_models: [] }, 'browser-id'), '')
 })
+
+test('P9 model allowlist drops delayed and failed organization A loads after switching to B', async () => {
+  let resolveA
+  let state = { organizationId: 'org-a', connections: ['initial-a'] }
+  let error = ''
+  let current = { organizationId: 'org-a', revision: 1 }
+  let generation = 1
+  const requestA = { ...current, signal: new AbortController().signal }
+  const pendingA = runCurrentModelAllowlistRequest({
+    request: requestA, generation: 1,
+    currentScope: () => current,
+    currentGeneration: () => generation,
+    load: () => new Promise(resolve => { resolveA = resolve }),
+    onSuccess: result => { state = result },
+    onError: reason => { error = reason.message },
+  })
+
+  current = { organizationId: 'org-b', revision: 2 }
+  generation = 2
+  await runCurrentModelAllowlistRequest({
+    request: { ...current, signal: new AbortController().signal }, generation: 2,
+    currentScope: () => current,
+    currentGeneration: () => generation,
+    load: async () => ({ organizationId: 'org-b', connections: ['current-b'] }),
+    onSuccess: result => { state = result },
+    onError: reason => { error = reason.message },
+  })
+  assert.deepEqual(state, { organizationId: 'org-b', connections: ['current-b'] })
+  assert.equal(error, '')
+
+  resolveA({ organizationId: 'org-a', connections: ['delayed-a'] })
+  await pendingA
+  assert.deepEqual(state, { organizationId: 'org-b', connections: ['current-b'] })
+  assert.equal(error, '')
+
+  await runCurrentModelAllowlistRequest({
+    request: requestA, generation: 1,
+    currentScope: () => current,
+    currentGeneration: () => generation,
+    load: async () => { throw new Error('stale A failure') },
+    onSuccess: result => { state = result },
+    onError: reason => { error = reason.message },
+  })
+  assert.deepEqual(state, { organizationId: 'org-b', connections: ['current-b'] })
+  assert.equal(error, '')
+
+  const aborted = new AbortController()
+  aborted.abort()
+  await runCurrentModelAllowlistRequest({
+    request: { organizationId: 'org-a', revision: 1, signal: aborted.signal }, generation: 1,
+    currentScope: () => current,
+    currentGeneration: () => generation,
+    load: async () => { const reason = new Error('aborted A failure'); reason.name = 'AbortError'; throw reason },
+    onSuccess: result => { state = result },
+    onError: reason => { error = reason.message },
+  })
+  assert.deepEqual(state, { organizationId: 'org-b', connections: ['current-b'] })
+  assert.equal(error, '')
+  assert.match(settings, /runCurrentModelAllowlistRequest/)
+  assert.match(settings, /key=\{`\$\{activeOrganizationId\}:\$\{scopeRevision\}`\}/)
+  assert.match(repository, /listModelAllowlist: \(organizationId, options = \{\}\)/)
+})
+
 
 test('P9 staff sends only an opaque selected configuration and keeps stale completions scoped', () => {
   assert.match(component, /model_configuration_id: modelConfigurationId/)
@@ -75,8 +142,11 @@ test('P9 schema preserves immutable historical identity with RLS and closed brow
     'rls_own_foreign_runtime', 'rls_suspended_runtime',
     'configure_leadership_runtime', 'configure_unverified_runtime',
     'configure_unmapped_runtime', 'configure_leader_runtime',
-    'dispatch_current_runtime', 'dispatch_fabricated_runtime',
-    'proposal_run_binding_replay_runtime', 'configuration_immutable_runtime',
+    'dispatch_current_runtime', 'dispatch_suspended_actor_runtime',
+    'dispatch_revoked_actor_runtime', 'dispatch_fabricated_runtime',
+    'proposal_run_binding_replay_runtime', 'proposal_binding_immutable_runtime',
+    'ai_run_binding_immutable_runtime', 'configuration_immutable_runtime',
+    'dispatch_stale_connector_runtime', 'confirmation_stale_no_side_effect_runtime',
     'dispatch_revoked_runtime', 'confirmation_revoked_no_side_effect_runtime',
     'explicit_empty_revocation_runtime', 'browser_direct_mutation_denied',
   ]) {

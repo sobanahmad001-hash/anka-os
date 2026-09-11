@@ -27,7 +27,7 @@ The scope note's older statement that attachments are unavailable is superseded 
 - Capabilities remain honest: text generation; validated text attachments only; PNG/JPEG reference-only; PDF/OCR/vision unavailable.
 - The model-selection migration is ordered after CHAT-3 as `20260911130000_p9_department_chat_model_selection.sql`.
 - The rollback-only verifier now exercises schema, RLS/ACLs, tenant/role boundaries, replay, revocation, immutable ledger binding, explicit-empty allowlists and no-side-effect denial paths.
-- The navigation-released main baseline is integrated; local gates pass 813 Node tests, 299 Deno tests (including 9 integration-gateway handler cases), frozen type-checks, lint with zero errors and the 434-module production build.
+- The navigation-released main baseline is integrated; local gates pass 814 Node tests, 331 Deno tests (including 9 integration-gateway handler cases), all discovered frozen Edge type-checks, lint with zero errors and the 434-module production build.
 
 ## Still required before P9 can be called complete
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import {
@@ -7,6 +7,7 @@ import {
   DEPARTMENT_LABELS,
   connectorLabel,
 } from '../config/connectorCatalog.js'
+import { runCurrentModelAllowlistRequest } from '../data/departmentChatModelSelection.js'
 import { integrations } from '../data/integrationRepository.js'
 import ContentCustomFieldSettings from '../components/ContentCustomFieldSettings.jsx'
 import DepartmentChatModelAllowlist from '../components/DepartmentChatModelAllowlist.jsx'
@@ -40,7 +41,10 @@ function Status({ value }) {
 }
 
 export default function Settings() {
-  const { activeOrganizationId, scopeRevision } = useOrganization()
+  const { activeOrganizationId, scopeRevision, requestSignal } = useOrganization()
+  const currentModelScope = useRef({ organizationId: activeOrganizationId, revision: scopeRevision })
+  currentModelScope.current = { organizationId: activeOrganizationId, revision: scopeRevision }
+  const modelLoadGeneration = useRef(0)
   const [searchParams, setSearchParams] = useSearchParams()
   const [connections, setConnections] = useState([])
   const [modelConnections, setModelConnections] = useState([])
@@ -74,24 +78,37 @@ export default function Settings() {
   }
 
   async function loadModelConnections() {
-    if (!activeOrganizationId) {
+    const request = { organizationId: activeOrganizationId, revision: scopeRevision, signal: requestSignal }
+    const generation = ++modelLoadGeneration.current
+    if (!request.organizationId || request.signal?.aborted) {
       setModelConnections([])
       setModelCanManage(false)
       return
     }
-    const result = await integrations.listModelAllowlist(activeOrganizationId)
-    if (result.organization_id !== activeOrganizationId) {
-      throw new Error('Model access response does not match the selected organization')
-    }
-    setModelConnections(result.connections || [])
-    setModelCanManage(Boolean(result.can_manage))
+    await runCurrentModelAllowlistRequest({
+      request, generation,
+      currentScope: () => currentModelScope.current,
+      currentGeneration: () => modelLoadGeneration.current,
+      load: currentRequest => integrations.listModelAllowlist(
+        currentRequest.organizationId, { signal: currentRequest.signal },
+      ),
+      onSuccess: result => {
+        if (result.organization_id !== request.organizationId) {
+          throw new Error('Model access response does not match the selected organization')
+        }
+        setModelConnections(result.connections || [])
+        setModelCanManage(Boolean(result.can_manage))
+      },
+      onError: loadError => setError(loadError.message),
+    })
   }
 
   useEffect(() => { loadConnections() }, [])
   useEffect(() => {
     setModelConnections([])
     setModelCanManage(false)
-    loadModelConnections().catch(loadError => setError(loadError.message))
+    loadModelConnections()
+    return () => { modelLoadGeneration.current += 1 }
   }, [activeOrganizationId, scopeRevision])
   useEffect(() => {
     const outcome = searchParams.get('oauth')
@@ -309,6 +326,8 @@ export default function Settings() {
 
         <ContentCustomFieldSettings />
         <DepartmentChatModelAllowlist
+          key={`${activeOrganizationId}:${scopeRevision}`}
+          requestSignal={requestSignal}
           organizationId={activeOrganizationId}
           connections={modelConnections}
           canManage={modelCanManage}

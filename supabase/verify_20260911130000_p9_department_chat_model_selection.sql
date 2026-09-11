@@ -289,9 +289,9 @@ do $runtime$
 declare
   f p9_model_fixture%rowtype;
   active_configuration uuid;
-  saved jsonb; replayed jsonb; operation_key uuid := gen_random_uuid();
+  saved jsonb; replayed jsonb; stale_confirmation jsonb; operation_key uuid := gen_random_uuid();
   denied boolean;
-  before_work_items bigint;
+  before_work_items bigint; before_proposals bigint; before_runs bigint; before_audit bigint;
 begin
   select * into strict f from p9_model_fixture;
 
@@ -346,6 +346,32 @@ begin
   denied := false;
   begin
     perform public.assert_department_chat_model_dispatch(
+      active_configuration,f.organization_id,f.engagement_id,'content',
+      f.connector_id,'gpt-other',f.suspended_id);
+  exception when insufficient_privilege then denied := true;
+  end;
+  insert into p9_model_selection_checks values(
+    'dispatch_suspended_actor_runtime',denied,
+    'A suspended team actor is rejected at the service dispatch RPC boundary.');
+
+  update public.organization_memberships set status='revoked'
+  where organization_id=f.organization_id and user_id=f.contributor_id;
+  denied := false;
+  begin
+    perform public.assert_department_chat_model_dispatch(
+      active_configuration,f.organization_id,f.engagement_id,'content',
+      f.connector_id,'gpt-other',f.contributor_id);
+  exception when insufficient_privilege then denied := true;
+  end;
+  insert into p9_model_selection_checks values(
+    'dispatch_revoked_actor_runtime',denied,
+    'A revoked team actor is rejected at the service dispatch RPC boundary.');
+  update public.organization_memberships set status='active'
+  where organization_id=f.organization_id and user_id=f.contributor_id;
+
+  denied := false;
+  begin
+    perform public.assert_department_chat_model_dispatch(
       gen_random_uuid(),f.organization_id,f.engagement_id,'content',
       f.connector_id,'gpt-other',f.contributor_id);
   exception when check_violation then denied := true;
@@ -384,6 +410,32 @@ begin
 
   denied := false;
   begin
+    update public.department_chat_proposals
+    set model_configuration_id=f.configuration_id
+    where id=(saved->>'proposal_id')::uuid;
+  exception when check_violation then denied := true;
+  end;
+  insert into p9_model_selection_checks values(
+    'proposal_binding_immutable_runtime',
+    denied and (select model_configuration_id=active_configuration
+      from public.department_chat_proposals where id=(saved->>'proposal_id')::uuid),
+    'A bound proposal model configuration cannot be replaced.');
+
+  denied := false;
+  begin
+    update public.ai_runs
+    set department_chat_model_configuration_id=f.configuration_id
+    where id=(saved->>'ai_run_id')::uuid;
+  exception when check_violation then denied := true;
+  end;
+  insert into p9_model_selection_checks values(
+    'ai_run_binding_immutable_runtime',
+    denied and (select department_chat_model_configuration_id=active_configuration
+      from public.ai_runs where id=(saved->>'ai_run_id')::uuid),
+    'A bound AI-run model configuration cannot be replaced.');
+
+  denied := false;
+  begin
     update public.department_chat_model_configurations
     set model_id='mutated'
     where id=active_configuration;
@@ -392,6 +444,57 @@ begin
   insert into p9_model_selection_checks values(
     'configuration_immutable_runtime',denied,
     'Configuration identity fields cannot be mutated.');
+
+  select count(*) into before_work_items from public.work_items;
+  select count(*) into before_proposals from public.department_chat_proposals;
+  select count(*) into before_runs from public.ai_runs;
+  select count(*) into before_audit from public.department_chat_audit_events;
+  update public.integration_connections set status='error' where id=f.connector_id;
+  denied := false;
+  begin
+    perform public.assert_department_chat_model_dispatch(
+      active_configuration,f.organization_id,f.engagement_id,'content',
+      f.connector_id,'gpt-other',f.contributor_id);
+  exception when check_violation then denied := true;
+  end;
+  insert into p9_model_selection_checks values(
+    'dispatch_stale_connector_runtime',
+    denied
+      and (select revoked_at is null from public.department_chat_model_configurations where id=active_configuration)
+      and (select count(*) from public.work_items)=before_work_items
+      and (select count(*) from public.department_chat_proposals)=before_proposals
+      and (select count(*) from public.ai_runs)=before_runs
+      and (select count(*) from public.department_chat_audit_events)=before_audit,
+    'A still-unrevoked configuration made stale by connector status is rejected before every side effect.');
+
+  stale_confirmation := public.confirm_department_chat_proposal(
+    (saved->>'proposal_id')::uuid,f.contributor_id,repeat('a',64),
+    f.connector_id,'gpt-other');
+  insert into p9_model_selection_checks values(
+    'confirmation_stale_no_side_effect_runtime',
+    stale_confirmation->>'outcome'='stale'
+      and (select count(*) from public.work_items)=before_work_items
+      and exists(select 1 from public.department_chat_proposals
+        where id=(saved->>'proposal_id')::uuid and status='stale'
+          and model_configuration_id=active_configuration)
+      and exists(select 1 from public.ai_runs
+        where id=(saved->>'ai_run_id')::uuid
+          and human_decision='rejected'
+          and decision_outcome='context_changed_regenerate'
+          and department_chat_model_configuration_id=active_configuration),
+    'Confirmation rejects stale connector facts with no official write and preserves bound history.');
+
+  update public.integration_connections set status='verified' where id=f.connector_id;
+  operation_key := gen_random_uuid();
+  saved := public.save_department_chat_proposal_with_model(
+    active_configuration,
+    f.organization_id,f.engagement_id,f.project_id,'content',f.contributor_id,
+    'work_item','task',null,null,
+    '{"title":"Verifier revoked item","description":"Verifier only","priority":"medium"}',
+    '{"title":"Verifier revoked item","work_item_type":"task","priority":"medium","status":"not_started"}',
+    '{}'::jsonb,'{}'::uuid[],repeat('a',64),f.connector_id,'gpt-other',
+    operation_key,'Verifier','Verifier revoked output',1,1,1,0
+  );
 
   update public.department_chat_model_configurations
   set revoked_at=clock_timestamp(),revoked_by=f.leader_id
