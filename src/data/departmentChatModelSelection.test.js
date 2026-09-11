@@ -113,6 +113,21 @@ test('P9 server revalidates selection at dispatch and confirmation with no silen
   assert.doesNotMatch(edge, /body\.model_id/)
 })
 
+test('P9 proposal lifecycle accepts connector-verified secondary models without substituting the primary model', () => {
+  const verifiedModelGuards = migration.match(
+    /connection\.public_config -> 'verified_model_ids'[\s\S]{0,80}\? p_model_id/g,
+  ) || []
+
+  assert.ok(verifiedModelGuards.length >= 2)
+  assert.match(migration, /save_department_chat_proposal_with_model[\s\S]*p_model_id/)
+  assert.match(migration, /confirm_department_chat_proposal[\s\S]*p_model_id/)
+  assert.match(migration, /idempotency key was reused with different proposal input/)
+  assert.doesNotMatch(migration, /save_department_chat_proposal_with_model[\s\S]{0,500}'model_id'\s*:\s*'gpt-default'/)
+  assert.match(verifier, /'\{"model_id":"gpt-default","verified_model_ids":\["gpt-default","gpt-other"\]\}'/)
+  assert.match(verifier, /configure_department_chat_model_allowlist\([\s\S]{0,180}'\{"content":\["gpt-other"\]\}'/)
+  assert.match(verifier, /save_department_chat_proposal_with_model\([\s\S]{0,1200}f\.connector_id,'gpt-other'/)
+})
+
 test('P9 admin allowlist reuses existing leadership and verified connector facts', () => {
   assert.match(gateway, /if \(!isLeader\).*Leadership access required/)
   assert.match(gateway, /action === 'list_model_allowlist'/)
