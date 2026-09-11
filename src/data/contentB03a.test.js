@@ -6,6 +6,7 @@ const migration = readFileSync(new URL('../../supabase/migrations/20260909202126
 const verifier = readFileSync(new URL('../../supabase/verify_20260909202126_content_b03a_page_identity.sql', import.meta.url), 'utf8')
 const server = readFileSync(new URL('../../supabase/functions/_shared/contentArtifacts.ts', import.meta.url), 'utf8')
 const ui = readFileSync(new URL('../apps/ContentStudio.jsx', import.meta.url), 'utf8')
+const pageControls = readFileSync(new URL('../components/WebsitePageStructureControls.js', import.meta.url), 'utf8')
 
 test('B03a migration adds stable page identity without rewriting legacy rows', () => {
   assert.match(migration, /add column linked_page_key text/)
@@ -21,8 +22,8 @@ test('B03a migration adds stable page identity without rewriting legacy rows', (
 test('B03a UI keeps identity read-only and exposes deterministic order controls', () => {
   assert.match(ui, /Stable page identity/)
   assert.match(ui, /aria-readonly="true"/)
-  assert.match(ui, /Move .* earlier/)
-  assert.match(ui, /Move .* later/)
+  assert.match(pageControls, /Move .* earlier/)
+  assert.match(pageControls, /Move .* later/)
   assert.match(ui, /stable page key/)
 })
 
