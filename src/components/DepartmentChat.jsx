@@ -67,6 +67,24 @@ function ScopedDepartmentChat({
   const [sharing, setSharing] = useState({ can_manage: false, recipients: [] })
   const [shareCandidates, setShareCandidates] = useState([])
   const [recipientIds, setRecipientIds] = useState([])
+  const [attachments, setAttachments] = useState([])
+  const [selectedAttachmentIds, setSelectedAttachmentIds] = useState([])
+  const [pendingFiles, setPendingFiles] = useState([])
+  const [attachmentClassification, setAttachmentClassification] = useState('internal')
+  const [attachmentAiUse, setAttachmentAiUse] = useState(false)
+  const [attachmentShare, setAttachmentShare] = useState(false)
+  const [attachmentBusy, setAttachmentBusy] = useState(false)
+
+  async function loadAttachments(id = conversationId, isCurrent = () => true) {
+    if (!id || !projectId) { setAttachments([]); setSelectedAttachmentIds([]); return [] }
+    const rows = await departmentChat.listAttachments(departmentId, {
+      conversation_id: id, engagement_id: engagement.id, project_id: projectId,
+    }, requestScope)
+    if (!isCurrent()) return []
+    setAttachments(rows || [])
+    setSelectedAttachmentIds(current => current.filter(value => (rows || []).some(item => item.id === value)))
+    return rows || []
+  }
 
   async function loadConversationList(selectId = conversationId, archived = includeArchived, isCurrent = () => true) {
     if (!supportsSavedConversations || !projectId) return
@@ -95,6 +113,8 @@ function ScopedDepartmentChat({
     }, requestScope)
     if (!isCurrent()) return null
     setMessages(data.messages || [])
+    await loadAttachments(id, isCurrent)
+    if (!isCurrent()) return null
     setSharing(data.sharing || { can_manage: false, recipients: [] })
     setRecipientIds((data.sharing?.recipients || []).map(item => item.recipient_id))
     setShareCandidates([])
@@ -146,6 +166,13 @@ function ScopedDepartmentChat({
           project_id: projectId,
         }, requestScope)
         if (isCurrent()) setMessages(data.messages || [])
+        const attachmentRows = await departmentChat.listAttachments(departmentId, {
+          conversation_id: selected.id, engagement_id: engagement.id, project_id: projectId,
+        }, requestScope)
+        if (isCurrent()) {
+          setAttachments(attachmentRows || [])
+          setSelectedAttachmentIds([])
+        }
         if (isCurrent()) {
           setSharing(data.sharing || { can_manage: false, recipients: [] })
           setRecipientIds((data.sharing?.recipients || []).map(item => item.recipient_id))
@@ -182,6 +209,9 @@ function ScopedDepartmentChat({
       setConversationId(created.id)
       setConversationTitle(created.title)
       setMessages([])
+      setAttachments([])
+      setSelectedAttachmentIds([])
+      setPendingFiles([])
       setResult(null)
       setSharing({ can_manage: true, recipients: [] })
       setRecipientIds([])
@@ -212,6 +242,9 @@ function ScopedDepartmentChat({
     setSharing({ can_manage: false, recipients: [] })
     setShareCandidates([])
     setRecipientIds([])
+    setAttachments([])
+    setSelectedAttachmentIds([])
+    setPendingFiles([])
     try {
       const data = await departmentChat.getConversation(departmentId, {
         conversation_id: id,
@@ -220,6 +253,8 @@ function ScopedDepartmentChat({
       }, requestScope)
       if (!isCurrent()) return
       setMessages(data.messages || [])
+      await loadAttachments(id, isCurrent)
+      if (!isCurrent()) return
       setConversationTitle(data.conversation?.title || '')
       setSharing(data.sharing || { can_manage: false, recipients: [] })
       setRecipientIds((data.sharing?.recipients || []).map(item => item.recipient_id))
@@ -276,7 +311,7 @@ function ScopedDepartmentChat({
         const selected = await loadConversationList(state === 'active' ? updated.id : '', includeArchived, isCurrent)
         if (!isCurrent()) return
         if (selected) await loadConversation(selected.id, isCurrent)
-        else setMessages([])
+        else { setMessages([]); setAttachments([]); setSelectedAttachmentIds([]) }
       },
       failure: (reason, isCurrent) => handleCurrentChatFailure(
         isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message),
@@ -318,6 +353,46 @@ function ScopedDepartmentChat({
     })
   }
 
+  function mimeForFile(file) {
+    if (file.type) return file.type.toLowerCase()
+    const extension = file.name.toLowerCase().split('.').pop()
+    return extension === 'md' ? 'text/markdown' : extension === 'txt' ? 'text/plain' : ''
+  }
+
+  async function uploadPendingAttachments() {
+    if (!conversationId || !pendingFiles.length) return
+    setAttachmentBusy(true)
+    setError('')
+    try {
+      if ((!isConversationOwner || (sharing.recipients || []).length > 0) && !attachmentShare) {
+        throw new Error('This conversation is shared. Explicitly share each uploaded source before using it here.')
+      }
+      const uploaded = []
+      for (const file of pendingFiles.slice(0, 3)) {
+        const claimedMime = mimeForFile(file)
+        if (!claimedMime) throw new Error(`${file.name}: file type could not be verified.`)
+        if (file.size > 5 * 1024 * 1024) throw new Error(`${file.name}: file exceeds 5 MiB.`)
+        const isImage = claimedMime === 'image/png' || claimedMime === 'image/jpeg'
+        if (!isImage && !attachmentAiUse) throw new Error('Approve AI use before uploading text-bearing files.')
+        uploaded.push(await departmentChat.uploadAttachment(departmentId, {
+          file, conversation_id: conversationId, engagement_id: engagement.id, project_id: projectId,
+          claimed_mime: claimedMime, original_name: file.name,
+          data_classification: attachmentClassification,
+          ai_use_allowed: isImage ? false : attachmentAiUse,
+          share_with_recipients: attachmentShare,
+        }, requestScope))
+      }
+      setPendingFiles([])
+      await loadAttachments(conversationId)
+      setSelectedAttachmentIds(uploaded.map(item => item.id))
+    } catch (reason) {
+      handleOrganizationAccessError?.(reason)
+      setError(reason.message || 'Attachment upload failed')
+    } finally {
+      setAttachmentBusy(false)
+    }
+  }
+
   async function submit(event) {
     event.preventDefault()
     const isCurrent = completion.current.begin()
@@ -331,6 +406,7 @@ function ScopedDepartmentChat({
         ? await departmentChat.proposeArtifact(departmentId, {
           conversation_id: supportsSavedConversations ? conversationId : undefined,
           client_request_id: supportsSavedConversations ? crypto.randomUUID() : undefined,
+          attachment_ids: supportsSavedConversations ? selectedAttachmentIds : undefined,
           project_id: supportsSavedConversations ? projectId : undefined,
           engagement_id: engagement.id,
           artifact_id: (artifactForType(artifactType) || {}).id || null,
@@ -345,6 +421,7 @@ function ScopedDepartmentChat({
         : await departmentChat.proposeWorkItem(departmentId, {
           conversation_id: supportsSavedConversations ? conversationId : undefined,
           client_request_id: supportsSavedConversations ? crypto.randomUUID() : undefined,
+          attachment_ids: supportsSavedConversations ? selectedAttachmentIds : undefined,
           project_id: supportsSavedConversations ? projectId : undefined,
           engagement_id: engagement.id,
           title: title || `${artifactDefinitions[artifactType]?.label || 'Work item'} request`,
@@ -361,6 +438,7 @@ function ScopedDepartmentChat({
       })
       setPrompt('')
       setSafe(false)
+      setSelectedAttachmentIds([])
       if (supportsSavedConversations) await loadConversation(conversationId, isCurrent)
     } catch (reason) {
       handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message))
@@ -404,6 +482,7 @@ function ScopedDepartmentChat({
   const requiresContentLanguage = departmentId === 'content' && ['discovery', 'vision', 'audience'].includes(artifactType)
   const currentConversation = conversations.find(item => item.id === conversationId) || null
   const isConversationOwner = currentConversation?.owner_id === userId
+  const conversationHasRecipients = Boolean(currentConversation && (!isConversationOwner || (sharing.recipients || []).length > 0))
 
   async function openOfficial(event) {
     event.preventDefault()
@@ -514,13 +593,54 @@ function ScopedDepartmentChat({
           </>
         )}
 
+        {supportsSavedConversations && capabilities?.attachments?.supported && <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Explicit source files</p>
+          <p className="mt-2 text-xs leading-5 text-slate-500">TXT, Markdown, and DOCX contribute validated text. PNG/JPEG are reference-only and are never sent to the model. PDF and scanned/OCR documents are unavailable.</p>
+          <input
+            type="file" multiple
+            accept=".txt,.md,.docx,.png,.jpg,.jpeg,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg"
+            disabled={busy || historyBusy || attachmentBusy || !currentConversation || currentConversation.state !== 'active'}
+            className="mt-3 block w-full text-xs text-slate-400 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-800 file:px-3 file:py-2 file:text-slate-200"
+            onChange={event => setPendingFiles([...event.target.files].slice(0, 3))}
+          />
+          {pendingFiles.length > 0 && <div className="mt-3 space-y-3">
+            <p className="text-xs text-slate-300">{pendingFiles.map(file => file.name).join(', ')}</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-xs text-slate-400">Classification
+                <select className={`${INPUT} mt-1 normal-case tracking-normal`} value={attachmentClassification} onChange={event => {
+                  setAttachmentClassification(event.target.value)
+                  if (event.target.value === 'restricted') { setAttachmentAiUse(false); setAttachmentShare(false) }
+                }}>
+                  <option value="public">Public</option><option value="internal">Internal</option>
+                  <option value="confidential">Confidential</option><option value="restricted">Restricted</option>
+                </select>
+              </label>
+              <label className="flex items-start gap-2 pt-6 text-xs text-slate-300"><input type="checkbox" checked={attachmentShare} disabled={attachmentClassification === 'restricted'} onChange={event => setAttachmentShare(event.target.checked)} />Share this source with current and future conversation recipients</label>
+            </div>
+            <label className="flex items-start gap-2 text-xs text-amber-200"><input type="checkbox" checked={attachmentAiUse} disabled={attachmentClassification === 'restricted'} onChange={event => setAttachmentAiUse(event.target.checked)} />I approve sending validated text from text-bearing files to the configured AI. Images remain reference-only.</label>
+            <button type="button" disabled={attachmentBusy} onClick={uploadPendingAttachments} className="rounded-lg border border-sky-700 px-3 py-2 text-xs font-semibold text-sky-200 disabled:opacity-50">{attachmentBusy ? 'Validating privately…' : 'Upload and validate'}</button>
+          </div>}
+          {attachments.length > 0 && <div className="mt-4 space-y-2">
+            {attachments.map(item => {
+              const ready = ['extracted', 'reference_only'].includes(item.status) && item.data_classification !== 'restricted'
+                && (!conversationHasRecipients || item.share_with_recipients)
+              const selected = selectedAttachmentIds.includes(item.id)
+              return <label key={item.id} className={`flex items-start gap-3 rounded-lg border p-3 text-xs ${ready ? 'border-slate-800 text-slate-300' : 'border-slate-900 text-slate-500'}`}>
+                <input type="checkbox" disabled={!ready || busy || attachmentBusy} checked={selected} onChange={() => setSelectedAttachmentIds(current => selected ? current.filter(id => id !== item.id) : current.length < 3 ? [...current, item.id] : current)} />
+                <span className="min-w-0"><span className="block truncate font-medium">{item.original_name}</span><span className="mt-1 block capitalize text-slate-500">{item.status.replaceAll('_', ' ')} · {item.data_classification} · {item.share_with_recipients ? 'source shared' : 'uploader only'} · {item.extraction_notice}</span></span>
+              </label>
+            })}
+          </div>}
+          <p className="mt-3 text-xs text-slate-500">Choose up to three files for this turn. Only checked files are linked to the request; rejected limits never truncate content. Revocation blocks later server reads and replies, but cannot recall copies someone already saved.</p>
+        </section>}
+
         <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Draft request
           <textarea required rows="10" className={`${INPUT} mt-2 normal-case tracking-normal`} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="Describe the draft you need, the evidence to prioritize, known constraints, tone, and gaps the team should keep visible." />
         </label>
 
         <label className="flex items-start gap-3 rounded-xl border border-amber-900/50 bg-amber-950/20 p-4 text-sm leading-6 text-amber-200">
           <input required type="checkbox" className="mt-1" checked={safe} onChange={event => setSafe(event.target.checked)} />
-          <span>I confirm this prompt is safe to send to the engagement-mapped {resolvedDepartmentLabel} model. Restricted artifact versions are never included automatically.</span>
+          <span>I confirm this prompt and the validated text from explicitly selected files are safe to send to the engagement-mapped {resolvedDepartmentLabel} model. Restricted sources are never included.</span>
         </label>
 
         <button
@@ -540,7 +660,7 @@ function ScopedDepartmentChat({
       {supportsSavedConversations && <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-sm leading-6 text-slate-400">
         <p className="font-semibold text-white">Configured AI</p>
         {capabilities ? <><p className="mt-2">OpenAI · <span className="text-slate-200">{capabilities.model_id}</span></p><p className="mt-1 text-xs text-slate-500">Administrator-approved default. Model switching is not enabled in this foundation.</p></> : <p className="mt-2">{historyBusy ? 'Checking configuration…' : 'Configuration unavailable.'}</p>}
-        <p className="mt-3 text-xs text-amber-300">Files are not supported yet. No upload or file-reading claim is made.</p>
+        <p className="mt-3 text-xs text-amber-300">Private files: TXT/Markdown/DOCX validated text; PNG/JPEG reference-only. PDF, OCR, and vision input remain unavailable.</p>
       </div>}
       <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-sm leading-6 text-slate-400">
         <p className="font-semibold text-white">Human control remains intact</p>
@@ -577,6 +697,13 @@ function ConversationHistory({ messages, userId, busy, onConfirm, onReject }) {
           <span className={message.status === 'failed' ? 'text-red-300' : ['pending', 'unknown'].includes(message.status) ? 'text-amber-300' : 'text-slate-500'}>{message.status}</span>
         </div>
         {message.role === 'user' && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-200">{message.body}</p>}
+        {message.role === 'user' && message.attachments?.length > 0 && <div className="mt-3 space-y-2">
+          {message.attachments.map(source => <div key={source.attachment_id} className="rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2 text-xs text-slate-400">
+            <span className="font-medium text-slate-200">{source.original_name}</span>
+            <span className="ml-2">{source.extraction_kind === 'reference_only' ? 'reference only · not sent to AI' : source.provider_dispatched_at ? 'validated text · dispatch recorded' : 'validated text · not dispatched'}</span>
+            <span className="mt-1 block">{source.data_classification} · SHA-256 {String(source.attachment_sha256_hex).slice(0, 12)}… · {source.extraction_notice}</span>
+          </div>)}
+        </div>}
         {message.status === 'failed' && <p className="mt-2 text-xs text-red-300">This request failed safely. Start a new request to retry with the current configured model.</p>}
         {message.status === 'unknown' && <p className="mt-2 text-xs text-amber-300">The provider outcome is unknown. Do not retry this request; a retry could duplicate work or cost.</p>}
         {proposal && <ProposalPreview result={proposal} official={null} busy={busy} canDecide={proposal.proposer_id === userId} onConfirm={() => onConfirm(proposal)} onReject={() => onReject(proposal)} />}

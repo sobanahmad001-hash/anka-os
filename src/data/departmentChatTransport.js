@@ -17,7 +17,36 @@ export function createDepartmentChatRepository(client) {
       try { detail = await error?.context?.json() || data } catch { /* Preserve transport status for non-JSON errors. */ }
       throw failure(error, envelope, detail)
     }
-    return data?.data
+    return data instanceof Blob ? data : data?.data
+  }
+  async function uploadAttachment(departmentId, input, scope) {
+    const { file, ...metadata } = input
+    if (!(file instanceof Blob)) throw new Error('Choose a local file to upload')
+    const claimedMime = metadata.claimed_mime || file.type
+    const reserved = await invoke('reserve_attachment', {
+      ...metadata, department_id: departmentId,
+      original_name: metadata.original_name || file.name,
+      claimed_mime: claimedMime,
+    }, scope)
+    const { bucket, path, token } = reserved.upload
+    const uploaded = await client.storage.from(bucket).uploadToSignedUrl(path, token, file, {
+      contentType: claimedMime,
+    })
+    if (uploaded.error) {
+      try {
+        await invoke('discard_attachment', {
+          department_id: departmentId, conversation_id: metadata.conversation_id,
+          engagement_id: metadata.engagement_id, project_id: metadata.project_id,
+          attachment_id: reserved.attachment.id,
+        }, scope)
+      } catch { /* The unreadable staging reservation expires independently. */ }
+      throw failure(uploaded.error, uploaded)
+    }
+    return invoke('finalize_attachment', {
+      department_id: departmentId, conversation_id: metadata.conversation_id,
+      engagement_id: metadata.engagement_id, project_id: metadata.project_id,
+      attachment_id: reserved.attachment.id,
+    }, scope)
   }
   return Object.freeze({
     getOfficialRecord: async (organizationId, decision, { signal } = {}) => {
@@ -43,5 +72,9 @@ export function createDepartmentChatRepository(client) {
     renameConversation: (departmentId, input, scope) => invoke('rename_conversation', { ...input, department_id: departmentId }, scope),
     setConversationState: (departmentId, input, scope) => invoke('set_conversation_state', { ...input, department_id: departmentId }, scope),
     getCapabilities: (departmentId, input, scope) => invoke('get_capabilities', { ...input, department_id: departmentId }, scope),
+    uploadAttachment,
+    discardAttachment: (departmentId, input, scope) => invoke('discard_attachment', { ...input, department_id: departmentId }, scope),
+    listAttachments: (departmentId, input, scope) => invoke('list_attachments', { ...input, department_id: departmentId }, scope),
+    downloadAttachment: (departmentId, input, scope) => invoke('download_attachment', { ...input, department_id: departmentId }, scope),
   })
 }

@@ -83,7 +83,7 @@ test('CHAT-2 endpoint and UI expose sharing without added approval or execution 
     'Only its author can use the existing confirmation or rejection action',
     'no approval, tool, release, publishing, or paid-action authority',
   ]) assert.ok(chat.includes(text), text)
-  assert.ok(edge.includes("attachments: { supported: false"))
+  assert.ok(edge.includes('share_with_recipients'))
   assert.ok(edge.includes('approved_models: [provider.model]'))
 })
 
