@@ -14,6 +14,7 @@ import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import ProductionHandoffPanel from '../components/ProductionHandoffPanel.jsx'
 import DesignCreativeBriefWorkspace from '../components/DesignCreativeBriefWorkspace.jsx'
 import DesignAssetLibrary from '../components/DesignAssetLibrary.jsx'
+import _DesignDeniedState from '../components/DesignDeniedState.jsx'
 import { creativeBriefVersionsForDirectionContext, validateCreativeBriefVersionSelection } from '../data/designCreativeBriefs.js'
 import { designAssetLibraryContextKey, designAssetSourceFocus } from '../data/designAssetLibrary.js'
 
@@ -163,7 +164,7 @@ export default function DesignWorkshop() {
     const rejected = navigationContext.organizationId && navigationContext.organizationId !== activeOrganizationId
       ? validateWorkshopNavigation(navigationContext, { status: 'ready', activeOrganizationId, organizationId: activeOrganizationId })
       : validateWorkshopNavigation(navigationContext, { status: 'denied' })
-    return <Shell><WorkshopContextShell navigation={navigationContext} validation={rejected} returnTarget={workspaceReturnTarget(rejected)}><Empty title="This Design context is unavailable" text="The requested project, engagement, brand, service, or work identity does not match authorized work in the active organization." /></WorkshopContextShell><div className="flex justify-center"><button type="button" onClick={() => setSearchParams({})} className={BUTTON}>Choose permitted work</button></div></Shell>
+    return <_DesignDeniedState navigation={navigationContext} validation={rejected} activeOrganizationId={activeOrganizationId} onChoose={() => setSearchParams({})} />
   }
   if (!engagements.length && !error) return <Shell><Empty title="No Design engagement yet" text="Activate at least one Design service on an engagement before opening the Workshop." /></Shell>
   if (workspaceLoadState === 'loading' && !workspace) return <Shell><Empty title="Loading exact Design context" text="Resolving the selected work record, output, version, and draft." /></Shell>

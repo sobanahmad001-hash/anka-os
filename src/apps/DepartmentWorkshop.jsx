@@ -3,10 +3,12 @@ import { Link, useSearchParams } from 'react-router-dom'
 
 import DepartmentConnectors from '../components/DepartmentConnectors.jsx'
 import WorkshopContextShell from '../components/WorkshopContextShell.jsx'
+import _WorkshopTabs from '../components/WorkshopTabs.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { delivery } from '../data/delivery.js'
 import { TASK_TRANSITIONS } from '../data/deliveryRepository.js'
+import { WORKSHOP_TABS } from '../data/workshopTabs.js'
 import { appendWorkshopNavigation, parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
 
 const ALL_DEPARTMENT_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
@@ -60,18 +62,6 @@ const DEPARTMENT_CONFIG = {
   },
 }
 
-const TABS = [
-  ['tasks', 'Project Tasks'],
-  ['engagement-work', 'Engagement Work Items'],
-  ['services', 'Services & Stages'],
-  ['research', 'Research'],
-  ['deliverables', 'Deliverables'],
-  ['requests', 'Requests'],
-  ['milestones', 'Milestones'],
-  ['specialists', 'Specialist Queues'],
-  ['connectors', 'Connectors'],
-]
-
 const INPUT_CLASS = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20'
 const LABEL_CLASS = 'mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.13em] text-slate-500'
 
@@ -123,7 +113,7 @@ export default function DepartmentWorkshop({ departmentId }) {
   const config = DEPARTMENT_CONFIG[departmentId]
   const departmentAllowed = canViewDepartment(activeMembership, departmentId)
   const [workspace, setWorkspace] = useState(null)
-  const initialTab = TABS.some(([id]) => id === navigationContext.workshopTab) ? navigationContext.workshopTab : 'tasks'
+  const initialTab = WORKSHOP_TABS.some(([id]) => id === navigationContext.workshopTab) ? navigationContext.workshopTab : 'tasks'
   const [activeTab, setActiveTab] = useState(initialTab)
   const [selectedWorkstreamId, setSelectedWorkstreamId] = useState('')
   const [loading, setLoading] = useState(true)
@@ -360,9 +350,7 @@ export default function DepartmentWorkshop({ departmentId }) {
           <Stat label="Incoming requests" value={incoming} note="Cross-department handoffs" />
         </div>
 
-        <nav aria-label="Department workspace sections" role="tablist" className="mt-6 flex gap-1 overflow-x-auto border-b border-slate-800">
-          {TABS.map(([id, label]) => <button key={id} id={`${departmentId}-${id}-tab`} type="button" role="tab" aria-selected={activeTab === id} aria-controls={`${departmentId}-${id}-panel`} onClick={() => setActiveTab(id)} className={`whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium ${activeTab === id ? 'border-purple-500 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>{label}</button>)}
-        </nav>
+        <_WorkshopTabs departmentId={departmentId} activeTab={activeTab} onChange={setActiveTab} />
 
         <div id={`${departmentId}-${activeTab}-panel`} role="tabpanel" aria-labelledby={`${departmentId}-${activeTab}-tab`}>
         {activeTab === 'connectors' ? (

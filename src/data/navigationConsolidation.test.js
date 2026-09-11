@@ -82,6 +82,7 @@ test('desktop and mobile share unchanged department and admin visibility rules',
 test('specialist tools remain routed inside their parent Workshops with safe return links', () => {
   const app = readFileSync(new URL('../App.jsx', import.meta.url), 'utf8')
   const workshop = readFileSync(new URL('../apps/DepartmentWorkshop.jsx', import.meta.url), 'utf8')
+  const workshopTabs = readFileSync(new URL('../components/WorkshopTabs.jsx', import.meta.url), 'utf8')
   const sidebar = readFileSync(new URL('../components/Sidebar.jsx', import.meta.url), 'utf8')
   const mobile = readFileSync(new URL('../components/Header.jsx', import.meta.url), 'utf8')
 
@@ -97,8 +98,9 @@ test('specialist tools remain routed inside their parent Workshops with safe ret
     assert.match(workshop, new RegExp("name: '" + label + "'"))
   }
   assert.match(workshop, /appendWorkshopNavigation\(item\.path/)
-  assert.match(workshop, /role="tablist"/)
-  assert.match(workshop, /aria-selected=/)
+  assert.match(workshopTabs, /role="tablist"/)
+  assert.match(workshopTabs, /aria-selected=/)
+  assert.match(workshopTabs, /tabIndex=/)
   assert.match(sidebar, /visibleEnvironmentItems/)
   assert.match(sidebar, /isNavigationItemActive/)
   assert.match(mobile, /visibleEnvironmentItems/)
