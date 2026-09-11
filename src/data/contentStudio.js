@@ -260,6 +260,44 @@ export function newContentRecord(field) {
   return record
 }
 
+export function addWebsiteChild(records = [], field, parentPageKey) {
+  const parentKey = String(parentPageKey || '').trim()
+  if (!parentKey || !records.some(page => websitePageKey(page) === parentKey)) {
+    throw new Error('A current parent page is required')
+  }
+  return [...records, { ...newContentRecord(field), parent_page_key: parentKey }]
+}
+
+export function duplicateWebsitePage(records = [], field, pageKey) {
+  const sourceKey = String(pageKey || '').trim()
+  const source = records.find(page => websitePageKey(page) === sourceKey)
+  if (!source) throw new Error('A current page is required')
+  const duplicate = Object.fromEntries(field.recordFields.map(([key]) => [key, source[key] ?? '']))
+  duplicate.page_key = newContentRecord(field).page_key
+  duplicate.slug = ''
+  return [...records, duplicate]
+}
+
+export function websiteArchitecturePathErrors(pages = []) {
+  const errors = new Map()
+  const pagesByPath = new Map()
+  pages.forEach((page, index) => {
+    const key = websitePageKey(page) || `index:${index}`
+    const path = normalizeWebsitePath(page?.slug)
+    if (!path) {
+      errors.set(key, 'Enter a new unique proposed path before saving.')
+      return
+    }
+    const matches = pagesByPath.get(path) || []
+    matches.push(key)
+    pagesByPath.set(path, matches)
+  })
+  pagesByPath.forEach(keys => {
+    if (keys.length > 1) keys.forEach(key => errors.set(key, 'Choose a unique proposed path before saving.'))
+  })
+  return errors
+}
+
 export function lines(value) {
   return String(value || '').split('\n').map(item => item.trim()).filter(Boolean)
 }
