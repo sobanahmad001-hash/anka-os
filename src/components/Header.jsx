@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useOrganization } from '../context/OrganizationContext.jsx'
-import { environmentNav } from '../config/environmentNav'
+import { environmentNav, isNavigationItemActive, visibleEnvironmentItems } from '../config/environmentNav'
 import { featureFlags } from '../config/featureFlags'
 import { useNotifications } from '../hooks/useNotifications'
 
@@ -20,10 +20,10 @@ export default function Header() {
     location.pathname.startsWith(e.basePath?.split('/').slice(0, 2).join('/') || '__') ||
     (e.key === 'admin' && (location.pathname.startsWith('/admin') || location.pathname === '/users' || location.pathname === '/settings'))
   )
-  const mobileItems = (activeEnv?.items || []).filter((item) => {
-    if (item.path === '/assistant' && !featureFlags.aiAssistance) return false
-    if (activeEnv?.key === 'admin') return profile?.role === 'admin'
-    return item.dept == null || profile?.role === 'admin' || profile?.department === item.dept
+  const mobileItems = visibleEnvironmentItems(activeEnv, {
+    role: profile?.role,
+    department: profile?.department,
+    aiAssistance: featureFlags.aiAssistance,
   })
 
   // Close dropdown on outside click
@@ -73,6 +73,7 @@ export default function Header() {
         type="button"
         aria-label="Open workspace navigation"
         aria-expanded={showMobileNav}
+        aria-controls="workspace-mobile-navigation"
         onClick={() => setShowMobileNav((current) => !current)}
         className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.06] text-slate-400 md:hidden"
       >
@@ -80,15 +81,15 @@ export default function Header() {
       </button>
 
       {showMobileNav && (
-        <nav className="absolute left-3 right-3 top-[3.75rem] max-h-[calc(100vh-5rem)] overflow-y-auto rounded-2xl border border-white/10 bg-[#141824] p-2 shadow-2xl md:hidden">
+        <nav id="workspace-mobile-navigation" aria-label="Workspace navigation" className="absolute left-3 right-3 top-[3.75rem] max-h-[calc(100vh-5rem)] overflow-y-auto rounded-2xl border border-white/10 bg-[#141824] p-2 shadow-2xl md:hidden">
           <p className="px-3 pb-2 pt-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">{activeEnv?.label}</p>
-          {mobileItems.map((item) => item.isHeader ? (
-            <p key={`header-${item.label}`} className="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">{item.label}</p>
-          ) : (
-            <button type="button" key={item.path} onClick={() => navigate(item.path)} className={`block w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium ${location.pathname === item.path ? 'bg-violet-500/15 text-violet-100' : 'text-slate-400 hover:bg-white/[0.05] hover:text-white'}`}>
+          {mobileItems.map((item) => {
+            if (item.isHeader) return <p key={`header-${item.label}`} className="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">{item.label}</p>
+            const isCurrent = isNavigationItemActive(item, location.pathname)
+            return <button type="button" key={item.path} aria-current={isCurrent ? 'page' : undefined} onClick={() => navigate(item.path)} className={`block w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium ${isCurrent ? 'bg-violet-500/15 text-violet-100' : 'text-slate-400 hover:bg-white/[0.05] hover:text-white'}`}>
               {item.label}
             </button>
-          ))}
+          })}
         </nav>
       )}
 
@@ -100,6 +101,8 @@ export default function Header() {
           return (
             <button
               key={env.key}
+              type="button"
+              aria-current={isActive ? 'page' : undefined}
               onClick={() => navigate(env.basePath)}
               className={`rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
                 isActive

@@ -118,7 +118,7 @@ test('unsaved brief uses the router blocker for every SPA transition and beforeu
   assert.match(studio, /navigationBlocker\.reset\(\)/)
   assert.equal((studio.match(/navigationBlocker\.proceed\(\)/g) || []).length, 2)
   assert.doesNotMatch(studio, /setPendingNavigation|runNavigation/)
-  assert.match(studio, /<Link to="\/sphere\/marketing"/)
+  assert.match(studio, /<Link to=\{parentWorkshopPath\}/)
   assert.match(studio, /<WorkshopContextShell[\s\S]*returnTarget=\{returnTarget\}/)
   assert.match(brief, /beforeunload/)
 })

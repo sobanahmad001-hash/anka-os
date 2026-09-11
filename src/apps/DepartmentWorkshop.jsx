@@ -23,7 +23,8 @@ const isCurrentOrganizationScope = (request, current) => Boolean(
 
 const DEPARTMENT_CONFIG = {
   content: {
-    name: 'Content Department',
+    name: 'Content Workshop',
+    surfaceLabel: 'Workshop overview',
     shortName: 'Content',
     accent: 'amber',
     accentClass: 'text-amber-400',
@@ -31,7 +32,8 @@ const DEPARTMENT_CONFIG = {
     specialists: [{ name: 'Content Studio', description: 'Authoring, requests, and publishing preparation.', path: '/sphere/content/studio' }],
   },
   design: {
-    name: 'Design Department',
+    name: 'Design Workshop',
+    surfaceLabel: 'Workshop overview',
     shortName: 'Design',
     accent: 'pink',
     accentClass: 'text-pink-400',
@@ -39,7 +41,8 @@ const DEPARTMENT_CONFIG = {
     specialists: [{ name: 'Design Workshop', description: 'Direction generation, comparison, proofing, and release.', path: '/sphere/design/workshop' }, { name: 'Design Systems', description: 'Released design-system specifications and reuse.', path: '/sphere/design/systems' }],
   },
   marketing: {
-    name: 'Marketing Department',
+    name: 'Marketing Workshop',
+    surfaceLabel: 'Workshop overview',
     shortName: 'Marketing',
     accent: 'emerald',
     accentClass: 'text-emerald-400',
@@ -47,7 +50,8 @@ const DEPARTMENT_CONFIG = {
     specialists: [{ name: 'Marketing Studio', description: 'Campaign, reporting, planning, and optimization tools.', path: '/sphere/marketing/studio' }, { name: 'Technical SEO', description: 'Page health, inspection, and search tracking.', path: '/sphere/marketing/seo' }],
   },
   development: {
-    name: 'Development Department',
+    name: 'Development',
+    surfaceLabel: 'Delivery capability',
     shortName: 'Development',
     accent: 'blue',
     accentClass: 'text-blue-400',
@@ -337,7 +341,7 @@ export default function DepartmentWorkshop({ departmentId }) {
       <div className="mx-auto max-w-7xl px-6 py-7">
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div>
-            <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${config.accentClass}`}>Department Workspace</p>
+            <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${config.accentClass}`}>{config.surfaceLabel}</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">{config.name}</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">{config.description}</p>
           </div>
@@ -356,10 +360,11 @@ export default function DepartmentWorkshop({ departmentId }) {
           <Stat label="Incoming requests" value={incoming} note="Cross-department handoffs" />
         </div>
 
-        <nav aria-label="Department workspace sections" className="mt-6 flex gap-1 overflow-x-auto border-b border-slate-800">
-          {TABS.map(([id, label]) => <button key={id} type="button" onClick={() => setActiveTab(id)} className={`whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium ${activeTab === id ? 'border-purple-500 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>{label}</button>)}
+        <nav aria-label="Department workspace sections" role="tablist" className="mt-6 flex gap-1 overflow-x-auto border-b border-slate-800">
+          {TABS.map(([id, label]) => <button key={id} id={`${departmentId}-${id}-tab`} type="button" role="tab" aria-selected={activeTab === id} aria-controls={`${departmentId}-${id}-panel`} onClick={() => setActiveTab(id)} className={`whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium ${activeTab === id ? 'border-purple-500 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>{label}</button>)}
         </nav>
 
+        <div id={`${departmentId}-${activeTab}-panel`} role="tabpanel" aria-labelledby={`${departmentId}-${activeTab}-tab`}>
         {activeTab === 'connectors' ? (
           <div className="mt-6"><DepartmentConnectors departmentId={departmentId} departmentName={config.shortName} /></div>
         ) : activeTab === 'specialists' ? (
@@ -391,6 +396,7 @@ export default function DepartmentWorkshop({ departmentId }) {
             </div>
           </>
         )}
+        </div>
         </WorkshopContextShell>
       </div>
     </div>

@@ -39,7 +39,7 @@ import {
   runAuthorizedMarketingAction,
   selectableMarketingEngagements,
 } from '../data/marketingWorkshopContext.js'
-import { parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
+import { appendWorkshopNavigation, parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
 import DepartmentChat from '../components/DepartmentChat.jsx' // eslint-disable-line no-unused-vars
 import MarketingConnectionReadinessPanel from '../components/MarketingConnectionReadinessPanel.jsx'
 import MarketingOverview from '../components/MarketingOverview.jsx'
@@ -147,6 +147,10 @@ export default function MarketingStudio() {
   const sameOrganization = !navigationContext.organizationId || navigationContext.organizationId === activeOrganizationId
   const returnTarget = workspaceReturnTarget(contextValidation.context ? contextValidation : {}, {
     fallbackProjectId: sameOrganization ? context.engagement?.project_id : '',
+  })
+  const parentWorkshopPath = appendWorkshopNavigation('/sphere/marketing', {
+    ...(contextValidation.context || {}),
+    workshopTab: '',
   })
 
   function currentScope(request) {
@@ -258,7 +262,7 @@ export default function MarketingStudio() {
     return <div className="flex h-full items-center justify-center bg-slate-950 p-6 text-sm text-slate-400">{organizationLoading ? 'Loading organization access…' : 'Choose an active organization before opening Marketing Studio.'}</div>
   }
 
-  if (!loading && context.mode === 'choose') return <MarketingEntryShell>
+  if (!loading && context.mode === 'choose') return <MarketingEntryShell parentPath={parentWorkshopPath}>
     <section className="mx-auto max-w-3xl rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Marketing Studio</p>
       <h1 className="mt-2 text-2xl font-semibold">Choose Marketing work</h1>
@@ -269,7 +273,7 @@ export default function MarketingStudio() {
     </section>
   </MarketingEntryShell>
 
-  if (!loading && context.mode === 'private') return <MarketingEntryShell>
+  if (!loading && context.mode === 'private') return <MarketingEntryShell parentPath={parentWorkshopPath}>
     <section className="mx-auto max-w-7xl rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Private experiment</p>
       <h1 className="mt-2 text-2xl font-semibold">Private Marketing workspace</h1>
@@ -283,7 +287,7 @@ export default function MarketingStudio() {
     const rejected = navigationContext.organizationId && navigationContext.organizationId !== activeOrganizationId
       ? validateWorkshopNavigation(navigationContext, { status: 'ready', activeOrganizationId, organizationId: activeOrganizationId })
       : validateWorkshopNavigation(navigationContext, { status: 'denied' })
-    return <MarketingEntryShell><WorkshopContextShell navigation={navigationContext} validation={rejected} returnTarget={workspaceReturnTarget(rejected)}>
+    return <MarketingEntryShell parentPath={parentWorkshopPath}><WorkshopContextShell navigation={navigationContext} validation={rejected} returnTarget={workspaceReturnTarget(rejected)}>
       <div />
     </WorkshopContextShell><div className="mt-5 text-center"><button type="button" onClick={() => setSearchParams({})} className={BUTTON}>Choose permitted work</button></div></MarketingEntryShell>
   }
@@ -308,7 +312,7 @@ export default function MarketingStudio() {
             <h1 className="mt-1 text-3xl font-semibold tracking-tight">Marketing Studio</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Plan campaigns, maintain backlink outreach research, version accountable marketing artifacts, and inspect live read-only performance.</p>
           </div>
-          <Link to="/sphere/marketing" className={BUTTON}>Open Marketing work queue</Link>
+          <Link to={parentWorkshopPath} className={BUTTON}>Back to Marketing Workshop</Link>
         </div>
       </header>
 
@@ -388,8 +392,8 @@ export default function MarketingStudio() {
   )
 }
 
-function MarketingEntryShell({ children }) {
-  return <div className="h-full overflow-y-auto bg-slate-950 px-6 py-12 text-white">{children}</div>
+function MarketingEntryShell({ children, parentPath }) {
+  return <div className="h-full overflow-y-auto bg-slate-950 px-6 py-8 text-white"><div className="mx-auto mb-5 max-w-3xl"><Link to={parentPath} className={BUTTON}>Back to Marketing Workshop</Link></div>{children}</div>
 }
 
 function Campaigns({ studio, workspace, campaignId, setCampaignId, selected, saving, act }) {

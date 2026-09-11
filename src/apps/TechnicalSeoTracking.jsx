@@ -23,6 +23,9 @@ function Metric({ label, value }) {
 export default function TechnicalSeoTracking() {
   const { activeOrganizationId, scopeRevision } = useOrganization()
   const [searchParams] = useSearchParams()
+  const parentSearch = searchParams.toString()
+  const parentWorkshopPath = `/sphere/marketing${parentSearch ? `?${parentSearch}` : ''}`
+  const marketingStudioPath = `/sphere/marketing/studio${parentSearch ? `?${parentSearch}` : ''}`
   const [brands, setBrands] = useState([]); const [brandId, setBrandId] = useState('')
   const [pages, setPages] = useState([]); const [pageId, setPageId] = useState(''); const [audits, setAudits] = useState([])
   const [keywords, setKeywords] = useState([]); const [keywordSources, setKeywordSources] = useState([])
@@ -142,7 +145,7 @@ export default function TechnicalSeoTracking() {
   }
 
   return <div className="h-full overflow-y-auto bg-slate-950 text-white">
-    <header className="border-b border-slate-800 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.12),transparent_36%)] px-6 py-6"><div className="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-400">Marketing Studio</p><h1 className="mt-1 text-3xl font-semibold">Technical SEO health</h1><p className="mt-2 text-sm text-slate-400">Track page hierarchy, immutable audits, indexation, and issue trends over time.</p></div><div className="flex gap-2"><Link to="/sphere/marketing/studio" className={BUTTON}>Marketing Studio</Link><select className={`${INPUT} min-w-56`} value={brandId} onChange={e => setBrandId(e.target.value)}>{brands.map(brand => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select></div></div></header>
+    <header className="border-b border-slate-800 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.12),transparent_36%)] px-6 py-6"><div className="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-400">Marketing Studio</p><h1 className="mt-1 text-3xl font-semibold">Technical SEO health</h1><p className="mt-2 text-sm text-slate-400">Track page hierarchy, immutable audits, indexation, and issue trends over time.</p></div><div className="flex flex-wrap gap-2"><Link to={parentWorkshopPath} className={BUTTON}>Back to Marketing Workshop</Link><Link to={marketingStudioPath} className={BUTTON}>Marketing Studio</Link><select className={`${INPUT} min-w-56`} value={brandId} onChange={e => setBrandId(e.target.value)}>{brands.map(brand => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select></div></div></header>
     <main className="mx-auto max-w-7xl space-y-5 p-6">
       {error && <div className="rounded-xl border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">{error}</div>}{message && <div className="rounded-xl border border-emerald-900 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">{message}</div>}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><Metric label="Tracked pages" value={summary.total}/><Metric label="Needs attention" value={summary.attention}/><Metric label="Discovered, not indexed" value={summary.notIndexed}/><Metric label="Never audited" value={summary.unaudited}/></div>

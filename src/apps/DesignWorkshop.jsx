@@ -4,7 +4,7 @@ import { OUTPUT_FAMILIES, latestByVersion } from '../data/designWorkshop.js'
 import { canRequestDesignExperimentPromotion, designAllowedActions, designCapabilities, designSelectionParams, loadDesignEngagements, privateDesignParams, resolveDesignContext, resolveDesignNavigationScope, selectableDesignEngagements } from '../data/designWorkshopContext.js'
 import { designWorkshop } from '../data/designWorkshopRepository.js'
 import { productionHandoffs } from '../data/productionHandoffsRepository.js'
-import { parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
+import { appendWorkshopNavigation, parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
 import { composePageDesignPreview } from '../data/websitePageDesigns.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
@@ -64,6 +64,10 @@ export default function DesignWorkshop() {
     navigationValidation.context ? navigationValidation : {},
     { fallbackProjectId: sameOrganization ? context.projectId : '' },
   )
+  const parentWorkshopPath = appendWorkshopNavigation('/sphere/design', {
+    ...(navigationValidation.context || {}),
+    workshopTab: '',
+  })
 
   useEffect(() => {
     const generation = ++requestGeneration.current
@@ -153,7 +157,7 @@ export default function DesignWorkshop() {
 
   if (engagementLoadState === 'error') return <Shell><div role="alert" className="mx-auto max-w-xl rounded-2xl border border-red-500/20 bg-red-500/10 p-6 text-center"><h1 className="text-xl font-semibold text-red-100">Design work could not be loaded</h1><p className="mt-2 text-sm text-red-200">The active organization could not be checked. No work has been selected.</p><button type="button" onClick={() => setEngagementRetry(value => value + 1)} className={`${BUTTON} mt-5`}>Retry</button></div></Shell>
   if (busy === 'load' && !engagements.length) return <Shell><Empty title="Loading Design work" text="Checking authorized engagements in the active organization." /></Shell>
-  if (context.mode === 'choose') return <Shell><ChooseWork engagements={selectableEngagements} filter={filter} setFilter={setFilter} onSelect={item => setSearchParams(designSelectionParams(navigationContext, item, activeOrganizationId))} onPrivate={() => setSearchParams(privateDesignParams(navigationContext, activeOrganizationId))} /></Shell>
+  if (context.mode === 'choose') return <Shell parentPath={parentWorkshopPath}><ChooseWork engagements={selectableEngagements} filter={filter} setFilter={setFilter} onSelect={item => setSearchParams(designSelectionParams(navigationContext, item, activeOrganizationId))} onPrivate={() => setSearchParams(privateDesignParams(navigationContext, activeOrganizationId))} /></Shell>
   if (context.mode === 'private') return <Shell><PrivateDesk draft={navigationContext.draft} returnTarget={workspaceReturnTarget(navigationContext)} onChoose={() => setSearchParams({})} /></Shell>
   if (context.mode === 'denied') {
     const rejected = navigationContext.organizationId && navigationContext.organizationId !== activeOrganizationId
@@ -165,9 +169,9 @@ export default function DesignWorkshop() {
   if (workspaceLoadState === 'loading' && !workspace) return <Shell><Empty title="Loading exact Design context" text="Resolving the selected work record, output, version, and draft." /></Shell>
   return <Shell>
     <WorkshopContextShell navigation={navigationContext} validation={navigationValidation} returnTarget={returnTarget} projectName={context.engagement?.name}>
-    <div className="flex flex-col gap-4 border-b border-white/10 pb-5 lg:flex-row lg:items-end lg:justify-between">
+      <div className="flex flex-col gap-4 border-b border-white/10 pb-5 lg:flex-row lg:items-end lg:justify-between">
       <div><p className="text-xs font-semibold uppercase tracking-[.24em] text-violet-400">Designer-controlled environment</p><h1 className="mt-2 text-3xl font-semibold">Design Workshop</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Approved human context becomes traceable design directions or an ordered storyboard sequence. Nothing is approved or released automatically.</p></div>
-      <Field label="Authorized work"><select className={`${INPUT} min-w-72`} value={engagementId} onChange={event => { const item = engagements.find(candidate => candidate.id === event.target.value); requestSelection(item ? designSelectionParams(navigationContext, item, activeOrganizationId) : new URLSearchParams()) }}><option value="">Choose work</option>{engagements.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
+        <div className="flex flex-wrap items-end gap-3"><Link to={parentWorkshopPath} className={BUTTON}>Back to Design Workshop</Link><Field label="Authorized work"><select className={`${INPUT} min-w-72`} value={engagementId} onChange={event => { const item = engagements.find(candidate => candidate.id === event.target.value); requestSelection(item ? designSelectionParams(navigationContext, item, activeOrganizationId) : new URLSearchParams()) }}><option value="">Choose work</option>{engagements.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field></div>
     </div>
     <ContextStrip context={context} navigation={navigationContext} organizationName={activeOrganization?.name} unsaved={Boolean(modal)} capabilities={capabilities} officialReady={officialReady} />
     {error && <div role="alert" className="mt-5 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">{error}</div>}
@@ -455,7 +459,7 @@ function bestStage(stages, type) { const terms = type === 'discovery' ? ['discov
 function serviceCatalog(service) { return Array.isArray(service?.service_catalog) ? service.service_catalog[0] : service?.service_catalog }
 function sessionServiceLabel(session, services) { const service = services.find(item => item.id === session.engagement_service_id); return serviceCatalog(service)?.name || familyLabel(session.output_family) }
 function familyLabel(value) { return OUTPUT_FAMILIES.find(([id]) => id === value)?.[1] || value }
-function Shell({ children }) { return <main className="min-h-full bg-slate-950 px-5 py-6 text-slate-100 lg:px-8">{children}</main> }
+function Shell({ children, parentPath }) { return <main className="min-h-full bg-slate-950 px-5 py-6 text-slate-100 lg:px-8">{parentPath && <div className="mx-auto mb-5 max-w-3xl"><Link to={parentPath} className={BUTTON}>Back to Design Workshop</Link></div>}{children}</main> }
 function Panel({ children }) { return <section className="rounded-2xl border border-white/[0.08] bg-slate-900/60 p-5 shadow-xl shadow-black/10">{children}</section> }
 function Badge({ children, tone = 'slate' }) { const colors = { slate: 'bg-white/5 text-slate-300', green: 'bg-emerald-500/10 text-emerald-300', amber: 'bg-amber-500/10 text-amber-300', violet: 'bg-violet-500/10 text-violet-300', red: 'bg-red-500/10 text-red-300' }; return <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize ${colors[tone]}`}>{children}</span> }
 function Field({ label, children }) { return <label className="block"><span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</span>{children}</label> }

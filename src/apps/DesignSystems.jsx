@@ -23,6 +23,8 @@ function related(value) {
 
 export default function DesignSystems() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const parentSearch = searchParams.toString()
+  const parentWorkshopPath = `/sphere/design${parentSearch ? `?${parentSearch}` : ''}`
   const [workspace, setWorkspace] = useState({ services: [], artifacts: [], versions: [], approvals: [], stages: [] })
   const [chatServiceId, setChatServiceId] = useState('')
   const [selectedId, setSelectedId] = useState(searchParams.get('artifact') || '')
@@ -146,7 +148,7 @@ export default function DesignSystems() {
     <div className="mx-auto max-w-7xl px-5 py-7 lg:px-8">
       <header className="flex flex-wrap items-start justify-between gap-5">
         <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-pink-300">Design Studio · Persistent library</p><h1 className="mt-2 text-3xl font-semibold">Design Systems</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Manual, versioned specifications for tokens, typography, components, and usage rules. Released versions remain browsable and linkable from other artifacts.</p></div>
-        <div className="flex gap-2"><Link to="/sphere/design" className={SECONDARY}>Design workspace</Link><button type="button" onClick={startNew} disabled={!workspace.services.length} className="rounded-xl bg-pink-600 px-4 py-2 text-sm font-semibold hover:bg-pink-500 disabled:opacity-40">New design system</button></div>
+        <div className="flex gap-2"><Link to={parentWorkshopPath} className={SECONDARY}>Back to Design Workshop</Link><button type="button" onClick={startNew} disabled={!workspace.services.length} className="rounded-xl bg-pink-600 px-4 py-2 text-sm font-semibold hover:bg-pink-500 disabled:opacity-40">New design system</button></div>
       </header>
       <div className="mt-5 rounded-xl border border-pink-500/20 bg-pink-950/15 px-4 py-3 text-sm text-pink-100"><span className="font-semibold">Structured specification, not a renderer.</span> DS5 documents standards for repeat use; it does not generate content or preview live components.</div>
       {error && <div className="mt-4 rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">{error}</div>}
