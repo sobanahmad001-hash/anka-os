@@ -17,12 +17,16 @@ test('legacy specialist URLs safely redirect to canonical department surfaces', 
   assert.match(app, /path="sphere\/campaigns" element={<Navigate to="\/sphere\/marketing\/studio"/)
 })
 
-test('navigation exposes only canonical delivery surfaces', () => {
+test('primary navigation exposes canonical Workshop parents while specialist routes remain mounted', () => {
   for (const path of ['/sphere/figma', '/sphere/assets', '/sphere/wp-sites', '/sphere/campaigns']) {
     assert.doesNotMatch(nav, new RegExp(`path: '${path}'`))
   }
-  for (const path of ['/sphere/workspace', '/sphere/internal', '/sphere/my-work', '/sphere/content', '/sphere/content/studio', '/sphere/design', '/sphere/marketing', '/sphere/delivery', '/sphere/clients', '/sphere/portal']) {
+  for (const path of ['/sphere/workspace', '/sphere/internal', '/sphere/my-work', '/sphere/content', '/sphere/design', '/sphere/marketing', '/sphere/delivery', '/sphere/clients', '/sphere/portal']) {
     assert.match(nav, new RegExp(`path: '${path}'`))
+  }
+  for (const path of ['/sphere/content/studio', '/sphere/design/workshop', '/sphere/design/systems', '/sphere/marketing/studio', '/sphere/marketing/seo']) {
+    assert.match(app, new RegExp(`path="${path.slice(1).replaceAll('/', '\\/')}`))
+    assert.doesNotMatch(nav, new RegExp(`path: '${path}'`))
   }
   assert.doesNotMatch(nav, /path: '\/sphere\/engagements'/)
 })

@@ -41,7 +41,7 @@ import { contentQueue } from '../data/contentQueueRepository.js'
 import { contentCustomFields } from '../data/contentCustomFieldsRepository.js'
 import { blogLinksForMonth, relatedRecord } from '../data/contentDesignEventLinking.js'
 import { contentSelectionParams, resolveContentContext, resolveContentNavigationScope, selectableContentEngagements } from '../data/contentWorkshopContext.js'
-import { parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
+import { appendWorkshopNavigation, parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
 
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20'
 const BUTTON = 'rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-amber-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50'
@@ -83,6 +83,10 @@ export default function ContentStudio() {
   const sameOrganization = !navigationContext.organizationId || navigationContext.organizationId === activeOrganizationId
   const returnTarget = workspaceReturnTarget(contextValidation.context ? contextValidation : {}, {
     fallbackProjectId: sameOrganization ? context.engagement?.project_id : '',
+  })
+  const parentWorkshopPath = appendWorkshopNavigation('/sphere/content', {
+    ...(contextValidation.context || {}),
+    workshopTab: '',
   })
 
   function currentScope(request) {
@@ -204,7 +208,7 @@ export default function ContentStudio() {
     }), { replace: true })
   }
 
-  if (organizationReady && !loading && context.mode === 'choose') return <ContentEntryShell>
+  if (organizationReady && !loading && context.mode === 'choose') return <ContentEntryShell parentPath={parentWorkshopPath}>
     <section className="mx-auto max-w-3xl rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Content Studio</p>
       <h1 className="mt-2 text-2xl font-semibold">Choose Content work</h1>
@@ -219,7 +223,7 @@ export default function ContentStudio() {
     const rejected = navigationContext.organizationId && navigationContext.organizationId !== activeOrganizationId
       ? validateWorkshopNavigation(navigationContext, { status: 'ready', activeOrganizationId, organizationId: activeOrganizationId })
       : validateWorkshopNavigation(navigationContext, { status: 'denied' })
-    return <ContentEntryShell><WorkshopContextShell navigation={navigationContext} validation={rejected} returnTarget={workspaceReturnTarget(rejected)}>
+    return <ContentEntryShell parentPath={parentWorkshopPath}><WorkshopContextShell navigation={navigationContext} validation={rejected} returnTarget={workspaceReturnTarget(rejected)}>
       <div />
     </WorkshopContextShell><div className="mt-5 text-center"><button type="button" onClick={() => setSearchParams({})} className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200">Choose permitted work</button></div></ContentEntryShell>
   }
@@ -228,7 +232,7 @@ export default function ContentStudio() {
     <header className="border-b border-slate-800 bg-[radial-gradient(circle_at_top_left,rgba(245,158,11,0.12),transparent_36%)] px-6 py-6">
       <div className="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-5">
         <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-400">Content department</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">Content Studio</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Build the approved context and structured content system that Design, Development, and Marketing consume.</p></div>
-        <div className="flex flex-wrap gap-3"><button type="button" onClick={() => selectTab('general')} className={PRIMARY}>Make a post / reel</button><Link to="/sphere/content" className={BUTTON}>Open Content work queue</Link></div>
+        <div className="flex flex-wrap gap-3"><button type="button" onClick={() => selectTab('general')} className={PRIMARY}>Make a post / reel</button><Link to={parentWorkshopPath} className={BUTTON}>Back to Content Workshop</Link></div>
       </div>
     </header>
     <main className="mx-auto max-w-7xl space-y-6 px-6 py-6">
@@ -260,8 +264,8 @@ export default function ContentStudio() {
   </div>
 }
 
-function ContentEntryShell({ children }) {
-  return <div className="h-full overflow-y-auto bg-slate-950 px-6 py-12 text-white">{children}</div>
+function ContentEntryShell({ children, parentPath }) {
+  return <div className="h-full overflow-y-auto bg-slate-950 px-6 py-8 text-white"><div className="mx-auto mb-5 max-w-3xl"><Link to={parentPath} className={BUTTON}>Back to Content Workshop</Link></div>{children}</div>
 }
 
 function BrandBriefWorkspace({ studio, workspace, saving, act, onRefresh }) {

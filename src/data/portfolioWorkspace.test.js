@@ -64,7 +64,7 @@ test('workspace routes and terminology expose portfolio alongside dedicated WKS4
   assert.match(app, /path="sphere\/portfolio" element={<PortfolioWorkspace \/>}/)
   assert.match(app, /path="sphere\/internal" element={<InternalWorkspace \/>}/)
   assert.match(app, /path="sphere\/engagements" element={<OperatingSpine initialView="engagements" \/>}/)
-  for (const term of ['Coordination', 'Home', 'Portfolio', 'Client Work', 'Internal Work']) assert.match(nav, new RegExp(term))
+  for (const term of ['Workspace', 'Home', 'Portfolio', 'Client Work', 'Internal Work']) assert.match(nav, new RegExp(term))
   assert.match(view, /Project Tasks/)
   assert.match(view, /Engagement Work Items/)
 })

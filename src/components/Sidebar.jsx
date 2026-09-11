@@ -1,6 +1,6 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { environmentNav, getEnvironmentFromPath } from '../config/environmentNav'
+import { environmentNav, getEnvironmentFromPath, isNavigationItemActive, visibleEnvironmentItems } from '../config/environmentNav'
 import { featureFlags } from '../config/featureFlags'
 
 export default function Sidebar() {
@@ -11,17 +11,11 @@ export default function Sidebar() {
     || environmentNav.find((environment) => environment.key === 'sphere')
   const userDept = profile?.department
 
-  function shouldShow(item) {
-    if (item.path === '/assistant' && !featureFlags.aiAssistance) return false
-    if (activeEnv.key === 'admin') return profile?.role === 'admin'
-    if (activeEnv.key === 'sphere') {
-      if (item.dept == null) return true
-      return profile?.role === 'admin' || userDept === item.dept
-    }
-    return false
-  }
-
-  const visibleItems = activeEnv.items.filter(shouldShow)
+  const visibleItems = visibleEnvironmentItems(activeEnv, {
+    role: profile?.role,
+    department: userDept,
+    aiAssistance: featureFlags.aiAssistance,
+  })
   const departmentBadgeColors = {
     content: 'bg-amber-900/50 text-amber-300',
     design: 'bg-pink-900/50 text-pink-300',
@@ -73,21 +67,21 @@ export default function Sidebar() {
               )
             }
 
+            const isCurrent = isNavigationItemActive(item, location.pathname)
             return (
-              <NavLink
+              <Link
                 key={item.path}
                 to={item.path}
-                className={({ isActive }) =>
-                  `group flex items-center gap-3 rounded-xl border px-3 py-2.5 text-[13px] font-medium transition-all ${
-                    isActive
+                aria-current={isCurrent ? 'page' : undefined}
+                className={`group flex items-center gap-3 rounded-xl border px-3 py-2.5 text-[13px] font-medium transition-all ${
+                    isCurrent
                       ? 'border-violet-500/20 bg-violet-500/10 text-violet-100 shadow-[inset_3px_0_0_#8b5cf6]'
                       : 'border-transparent text-slate-400 hover:border-white/[0.06] hover:bg-white/[0.035] hover:text-white'
-                  }`
-                }
+                  }`}
               >
                 <NavIcon path={item.path} />
                 <span className="truncate">{item.label}</span>
-              </NavLink>
+              </Link>
             )
           })}
         </div>
