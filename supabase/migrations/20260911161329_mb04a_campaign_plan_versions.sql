@@ -80,7 +80,7 @@ alter table public.marketing_campaign_plan_versions enable row level security;
 alter table public.marketing_campaign_plan_creative_requirements enable row level security;
 create policy "Team can read campaign plan versions" on public.marketing_campaign_plan_versions for select to authenticated using (public.is_team_organization_member(organization_id));
 create policy "Team can read campaign plan requirements" on public.marketing_campaign_plan_creative_requirements for select to authenticated using (public.is_team_organization_member(organization_id));
-revoke all on public.marketing_campaign_plan_versions, public.marketing_campaign_plan_creative_requirements from anon, authenticated;
+revoke all on public.marketing_campaign_plan_versions, public.marketing_campaign_plan_creative_requirements from anon, authenticated, service_role;
 grant select on public.marketing_campaign_plan_versions, public.marketing_campaign_plan_creative_requirements to authenticated;
 grant select, insert on public.marketing_campaign_plan_versions, public.marketing_campaign_plan_creative_requirements to service_role;
 

@@ -103,7 +103,7 @@ test('schema is append-only, organization-scoped, server-written and planning-on
   assert.match(migration, /trg_marketing_campaign_plan_requirements_immutable[\s\S]*before update or delete/)
   assert.match(migration, /enable row level security/)
   assert.match(migration, /using \(public\.is_team_organization_member\(organization_id\)\)/)
-  assert.match(migration, /revoke all on public\.marketing_campaign_plan_versions[\s\S]*from anon, authenticated/)
+  assert.match(migration, /revoke all on public\.marketing_campaign_plan_versions[\s\S]*from anon, authenticated, service_role/)
   assert.doesNotMatch(migration, /planned_budget|currency_code|insert into public\.work_items|provider_connection/i)
 })
 

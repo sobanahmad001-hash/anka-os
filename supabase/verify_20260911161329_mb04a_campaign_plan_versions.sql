@@ -28,8 +28,12 @@ insert into mb04a_checks values
 ('service_tables_narrow_write_acl',
   has_table_privilege('service_role','public.marketing_campaign_plan_versions','SELECT,INSERT')
   and has_table_privilege('service_role','public.marketing_campaign_plan_creative_requirements','SELECT,INSERT')
-  and not has_table_privilege('service_role','public.marketing_campaign_plan_versions','UPDATE,DELETE,TRUNCATE')
-  and not has_table_privilege('service_role','public.marketing_campaign_plan_creative_requirements','UPDATE,DELETE,TRUNCATE')
+  and not has_table_privilege('service_role','public.marketing_campaign_plan_versions','UPDATE')
+  and not has_table_privilege('service_role','public.marketing_campaign_plan_versions','DELETE')
+  and not has_table_privilege('service_role','public.marketing_campaign_plan_versions','TRUNCATE')
+  and not has_table_privilege('service_role','public.marketing_campaign_plan_creative_requirements','UPDATE')
+  and not has_table_privilege('service_role','public.marketing_campaign_plan_creative_requirements','DELETE')
+  and not has_table_privilege('service_role','public.marketing_campaign_plan_creative_requirements','TRUNCATE')
 ),
 ('plan_versions_immutable_trigger', exists (
   select 1 from pg_trigger where tgrelid='public.marketing_campaign_plan_versions'::regclass
