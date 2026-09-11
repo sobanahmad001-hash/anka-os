@@ -1,6 +1,7 @@
 import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.14'
 import {
   CHAT_MARKETING_ARTIFACT_TYPE_SET,
+  attachmentContentDisposition,
   ENABLED_DEPARTMENTS,
   confirmProposal,
   departmentChatExternalEndpoint,
@@ -19,6 +20,14 @@ import {
   selectSingleOpenAiModel,
   safeAttemptReason,
 } from './index.ts'
+
+Deno.test('CHAT-3 download disposition is ASCII-safe and preserves UTF-8 without header injection', () => {
+  assertEquals(
+    attachmentContentDisposition('quote" slash\\ line\r\n résumé.txt'),
+    'attachment; filename="quote_ slash_ line___ r_sum_.txt"; filename*=UTF-8\'\'quote%22%20slash%5C%20line%0D%0A%20r%C3%A9sum%C3%A9.txt',
+  )
+  assertEquals(attachmentContentDisposition(''), 'attachment; filename="attachment"; filename*=UTF-8\'\'')
+})
 
 Deno.test('B02 Content proposal language follows explicit, approved-brand, organization, then require-selection precedence', () => {
   const context = [{ artifact_type: 'vision', content: { language: 'Arabic' } }]

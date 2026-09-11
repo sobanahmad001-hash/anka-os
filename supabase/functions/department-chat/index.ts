@@ -130,6 +130,14 @@ function publicAttachment(row: Json) {
   }
 }
 
+export function attachmentContentDisposition(value: unknown) {
+  const originalName = String(value ?? '')
+  const safeName = originalName.replace(/[^\x20-\x7e]|["\\]/g, '_') || 'attachment'
+  const encodedName = encodeURIComponent(originalName).replace(/['()*]/g, character =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`)
+  return `attachment; filename="${safeName}"; filename*=UTF-8''${encodedName}`
+}
+
 function optionalDate(value: unknown) {
   const normalized = text(value, 10)
   return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : null
@@ -944,13 +952,9 @@ async function downloadAttachment(admin: Client, body: Json, actorId: string, or
   }
   const downloaded = await admin.storage.from(ATTACHMENT_BUCKET).download(attachment.final_path)
   if (downloaded.error || !downloaded.data) throw downloaded.error || new Error('Attachment bytes are unavailable')
-  const originalName = String(attachment.original_name)
-  const safeName = originalName.replace(/[^\x20-\x7e]|["\\]/g, '_') || 'attachment'
-  const encodedName = encodeURIComponent(originalName).replace(/['()*]/g, character =>
-    `%${character.charCodeAt(0).toString(16).toUpperCase()}`)
   return new Response(downloaded.data, { headers: {
     ...cors, 'Content-Type': attachment.verified_mime,
-    'Content-Disposition': `attachment; filename="${safeName}"; filename*=UTF-8''${encodedName}`,
+    'Content-Disposition': attachmentContentDisposition(attachment.original_name),
     'Cache-Control': 'private, no-store, max-age=0', Pragma: 'no-cache',
     'X-Content-Type-Options': 'nosniff',
   } })
