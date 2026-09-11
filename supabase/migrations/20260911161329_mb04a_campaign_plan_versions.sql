@@ -54,7 +54,14 @@ create table public.marketing_campaign_plan_creative_requirements (
 );
 
 create index idx_marketing_campaign_plan_versions_campaign on public.marketing_campaign_plan_versions(organization_id, campaign_id, version_number desc);
+create index idx_marketing_campaign_plan_versions_engagement on public.marketing_campaign_plan_versions(organization_id, engagement_id);
+create index idx_marketing_campaign_plan_versions_brand on public.marketing_campaign_plan_versions(organization_id, brand_id);
+create index idx_marketing_campaign_plan_versions_parent on public.marketing_campaign_plan_versions(organization_id, parent_version_id) where parent_version_id is not null;
+create index idx_marketing_campaign_plan_versions_source on public.marketing_campaign_plan_versions(organization_id, source_plan_version_id) where source_plan_version_id is not null;
+create index idx_marketing_campaign_plan_versions_message on public.marketing_campaign_plan_versions(organization_id, approved_message_version_id) where approved_message_version_id is not null;
+create index idx_marketing_campaign_plan_versions_measurement on public.marketing_campaign_plan_versions(organization_id, measurement_plan_version_id) where measurement_plan_version_id is not null;
 create index idx_marketing_campaign_plan_requirements_version on public.marketing_campaign_plan_creative_requirements(organization_id, plan_version_id, position);
+create index idx_marketing_campaign_plan_requirements_message on public.marketing_campaign_plan_creative_requirements(organization_id, message_version_id) where message_version_id is not null;
 create trigger trg_marketing_campaign_plan_versions_immutable before update or delete on public.marketing_campaign_plan_versions for each row execute function private.reject_immutable_artifact_history_change();
 create trigger trg_marketing_campaign_plan_requirements_immutable before update or delete on public.marketing_campaign_plan_creative_requirements for each row execute function private.reject_immutable_artifact_history_change();
 alter table public.marketing_campaign_plan_versions enable row level security;
@@ -63,7 +70,7 @@ create policy "Team can read campaign plan versions" on public.marketing_campaig
 create policy "Team can read campaign plan requirements" on public.marketing_campaign_plan_creative_requirements for select to authenticated using (public.is_team_organization_member(organization_id));
 revoke all on public.marketing_campaign_plan_versions, public.marketing_campaign_plan_creative_requirements from anon, authenticated;
 grant select on public.marketing_campaign_plan_versions, public.marketing_campaign_plan_creative_requirements to authenticated;
-grant all on public.marketing_campaign_plan_versions, public.marketing_campaign_plan_creative_requirements to service_role;
+grant select, insert on public.marketing_campaign_plan_versions, public.marketing_campaign_plan_creative_requirements to service_role;
 
 create or replace function public.save_marketing_campaign_plan_draft(
   p_organization_id uuid, p_engagement_id uuid, p_campaign_id uuid, p_expected_latest_version_id uuid,

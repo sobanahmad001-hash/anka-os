@@ -1,5 +1,38 @@
 const clean = (value, max) => String(value || '').trim().slice(0, max)
 const isoDate = /^\d{4}-\d{2}-\d{2}$/
+const leadershipRoles = new Set(['system_owner', 'operations_admin', 'executive'])
+
+export function canEditCampaignPlan(membership = {}) {
+  if (membership.member_kind !== 'team' || membership.status !== 'active') return false
+  return leadershipRoles.has(membership.role) || membership.department_id === 'marketing'
+}
+
+function campaignPlanAccessError(message) {
+  return Object.assign(new Error(message), { status: 403, membershipMismatch: true })
+}
+
+export function validateCampaignPlanSnapshot(snapshot, { organizationId, engagementId, campaignId }) {
+  const versions = snapshot.versions || []
+  const versionIds = new Set(versions.map(item => item.id))
+  if (versions.some(item => item.organization_id !== organizationId || item.engagement_id !== engagementId || item.campaign_id !== campaignId)) {
+    throw campaignPlanAccessError('Campaign plan version context mismatch')
+  }
+  if ((snapshot.requirements || []).some(item => item.organization_id !== organizationId || !versionIds.has(item.plan_version_id))) {
+    throw campaignPlanAccessError('Campaign plan requirement context mismatch')
+  }
+  const artifactIds = new Set((snapshot.artifacts || []).map(item => item.id))
+  if ((snapshot.artifacts || []).some(item => item.organization_id !== organizationId || item.engagement_id !== engagementId)) {
+    throw campaignPlanAccessError('Campaign plan source context mismatch')
+  }
+  const sourceVersionIds = new Set((snapshot.sourceVersions || []).map(item => item.id))
+  if ((snapshot.sourceVersions || []).some(item => item.organization_id !== organizationId || !artifactIds.has(item.artifact_id))) {
+    throw campaignPlanAccessError('Campaign plan source version mismatch')
+  }
+  if ((snapshot.approvals || []).some(item => !sourceVersionIds.has(item.artifact_version_id))) {
+    throw campaignPlanAccessError('Campaign plan source approval mismatch')
+  }
+  return snapshot
+}
 
 export function latestCampaignPlanVersion(rows = [], campaignId = '') {
   return rows.filter(row => row.campaign_id === campaignId)

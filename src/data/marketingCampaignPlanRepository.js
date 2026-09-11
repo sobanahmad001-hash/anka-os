@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase.js'
+import { validateCampaignPlanSnapshot } from './marketingCampaignPlan.js'
 
 async function dataOrThrow(query, signal) {
   if (signal && typeof query.abortSignal === 'function') query = query.abortSignal(signal)
@@ -24,7 +25,10 @@ export function createMarketingCampaignPlanRepository(organizationId, { client =
         .eq('organization_id', organizationId).in('artifact_id', artifactIds).order('version_number', { ascending: false }), signal) : []
       const approvals = sourceVersions.length ? await dataOrThrow(client.from('artifact_approvals').select('artifact_version_id')
         .eq('organization_id', organizationId).in('artifact_version_id', sourceVersions.map(item => item.id)), signal) : []
-      return { versions, requirements, artifacts, sourceVersions, approvals }
+      return validateCampaignPlanSnapshot(
+        { versions, requirements, artifacts, sourceVersions, approvals },
+        { organizationId, engagementId, campaignId },
+      )
     },
     async saveDraft(input) {
       const { data, error } = await client.functions.invoke('marketing-studio', {
