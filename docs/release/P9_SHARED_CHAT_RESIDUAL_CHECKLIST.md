@@ -1,7 +1,8 @@
 # P9 Shared Workshop Chat — actual-code residual checklist
 
 Original implementation base: `dd3d10425d6c46eaae130b045fae68f75ad97775`.
-Navigation-integrated main baseline: `af5df30f592a39228e8ecbca28bec22f5cc6122c`.
+Navigation integration base: `af5df30f592a39228e8ecbca28bec22f5cc6122c`.
+Freshness-reconciled current main baseline: `64548bcb2b06119795e9951274804ad363173137`.
 Scope authority: workspace `P9_SHARED_CHAT_SCOPE.md`.
 Candidate: `P9-MODELS-1` (local only).
 
