@@ -24,6 +24,8 @@ import {
   filterBacklinkTargets,
 } from '../data/backlinkOutreach.js'
 import { marketingStudio } from '../data/marketingStudioRepository.js'
+import { canEditCampaignPlan } from '../data/marketingCampaignPlan.js'
+import { createMarketingCampaignPlanRepository } from '../data/marketingCampaignPlanRepository.js'
 import { shouldApplyDashboardResponse } from '../data/performanceDashboard.js'
 import { loadPerformanceDashboard } from '../data/performanceDashboardRepository.js'
 import { shouldApplyKeywordResearchResponse } from '../data/marketingKeywordResearch.js'
@@ -44,6 +46,7 @@ import DepartmentChat from '../components/DepartmentChat.jsx' // eslint-disable-
 import MarketingConnectionReadinessPanel from '../components/MarketingConnectionReadinessPanel.jsx'
 import MarketingOverview from '../components/MarketingOverview.jsx'
 import MarketingCampaignBrief from '../components/MarketingCampaignBrief.jsx'
+import MarketingCampaignPlan from '../components/MarketingCampaignPlan.jsx'
 import QuickTasks from './QuickTasks.jsx'
 import WorkshopContextShell from '../components/WorkshopContextShell.jsx'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
@@ -128,6 +131,9 @@ export default function MarketingStudio() {
   const organizationReady = Boolean(activeOrganizationId) && !organizationLoading && !selectionRequired
   const studio = useMemo(() => organizationReady
     ? marketingStudio.forOrganization(activeOrganizationId, { signal: requestSignal })
+    : null, [activeOrganizationId, organizationReady, requestSignal])
+  const campaignPlans = useMemo(() => organizationReady
+    ? createMarketingCampaignPlanRepository(activeOrganizationId, { signal: requestSignal })
     : null, [activeOrganizationId, organizationReady, requestSignal])
   const workspaceGeneration = useRef(0)
   const context = useMemo(
@@ -363,7 +369,18 @@ export default function MarketingStudio() {
             brand={{ id: workspace.engagement.brand_id, name: workspace.engagement.brands?.name || 'Brand', organization_id: workspace.engagement.organization_id }}
           />
         ) : tab === 'campaigns' ? (
-          <Campaigns studio={studio} workspace={workspace} campaignId={campaignId} setCampaignId={setCampaignId} selected={selectedCampaign} saving={saving} act={act} />
+          <Campaigns
+            studio={studio}
+            campaignPlans={campaignPlans}
+            workspace={workspace}
+            campaignId={campaignId}
+            setCampaignId={setCampaignId}
+            selected={selectedCampaign}
+            saving={saving}
+            act={act}
+            canEditPlan={contextValidation.status === 'ready' && canEditCampaignPlan(activeMembership)}
+            onAccessError={handleOrganizationAccessError}
+          />
         ) : tab === 'brief' ? (
           <MarketingCampaignBrief studio={studio} workspace={workspace} campaign={selectedCampaign} saving={saving} act={act} onRefresh={() => loadWorkspace(engagementId, campaignId)} onDirtyChange={setBriefDirty} saveHandleRef={briefSaveRef} />
         ) : tab === 'ad-tracking' ? (
@@ -396,7 +413,7 @@ function MarketingEntryShell({ children, parentPath }) {
   return <div className="h-full overflow-y-auto bg-slate-950 px-6 py-8 text-white"><div className="mx-auto mb-5 max-w-3xl"><Link to={parentPath} className={BUTTON}>Back to Marketing Workshop</Link></div>{children}</div>
 }
 
-function Campaigns({ studio, workspace, campaignId, setCampaignId, selected, saving, act }) {
+function Campaigns({ studio, campaignPlans, workspace, campaignId, setCampaignId, selected, saving, act, canEditPlan, onAccessError }) {
   const [creating, setCreating] = useState(!selected)
   const [form, setForm] = useState(campaignEditor(selected))
   useEffect(() => { setCreating(!selected); setForm(campaignEditor(selected)) }, [selected])
@@ -411,7 +428,7 @@ function Campaigns({ studio, workspace, campaignId, setCampaignId, selected, sav
     if (result) { setCampaignId(result.id); setCreating(false) }
   }
 
-  return <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
+  return <div className="space-y-6"><div className="grid gap-6 lg:grid-cols-[340px_1fr]">
     <section className="space-y-3">
       <button onClick={() => { setCreating(true); setForm(blankCampaign()) }} className={`${PRIMARY} w-full`}>New campaign</button>
       {workspace.campaigns.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500">No campaigns yet.</div> : workspace.campaigns.map(campaign => (
@@ -437,6 +454,17 @@ function Campaigns({ studio, workspace, campaignId, setCampaignId, selected, sav
       </div>
       <div className="mt-6 flex items-center justify-between gap-4 border-t border-slate-800 pt-5"><p className="text-xs leading-5 text-slate-500">This record coordinates work only. No field or action can alter Google Ads spend.</p><button disabled={saving} className={PRIMARY}>{saving ? 'Saving…' : creating ? 'Create campaign' : 'Save changes'}</button></div>
     </form>
+  </div>
+    {selected && !creating && campaignPlans ? <MarketingCampaignPlan
+      organizationId={workspace.engagement.organization_id}
+      engagement={workspace.engagement}
+      campaign={selected}
+      repository={campaignPlans}
+      canEdit={canEditPlan}
+      onAccessError={onAccessError}
+    /> : <section className="rounded-2xl border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500">
+      Save or select a campaign to author its immutable plan versions.
+    </section>}
   </div>
 }
 
