@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { createChatCompletionGuard, handleCurrentChatFailure, runCurrentChatOperation } from '../data/departmentChatIdentity.js'
+import { selectPendingDepartmentChatAttachments, validateDepartmentChatAttachmentFile } from '../data/departmentChatAttachmentSelection.js'
 
 import { departmentChatProfile } from '../data/departmentChatProfiles.js'
 import { departmentChat } from '../data/departmentChatRepository.js'
@@ -353,12 +354,6 @@ function ScopedDepartmentChat({
     })
   }
 
-  function mimeForFile(file) {
-    if (file.type) return file.type.toLowerCase()
-    const extension = file.name.toLowerCase().split('.').pop()
-    return extension === 'md' ? 'text/markdown' : extension === 'txt' ? 'text/plain' : ''
-  }
-
   async function uploadPendingAttachments() {
     if (!conversationId || !pendingFiles.length) return
     setAttachmentBusy(true)
@@ -368,10 +363,9 @@ function ScopedDepartmentChat({
         throw new Error('This conversation is shared. Explicitly share each uploaded source before using it here.')
       }
       const uploaded = []
-      for (const file of pendingFiles.slice(0, 3)) {
-        const claimedMime = mimeForFile(file)
-        if (!claimedMime) throw new Error(`${file.name}: file type could not be verified.`)
-        if (file.size > 5 * 1024 * 1024) throw new Error(`${file.name}: file exceeds 5 MiB.`)
+      if (pendingFiles.length > 3) throw new Error('Choose no more than three files. No files were uploaded.')
+      for (const file of pendingFiles) {
+        const claimedMime = validateDepartmentChatAttachmentFile(file)
         const isImage = claimedMime === 'image/png' || claimedMime === 'image/jpeg'
         if (!isImage && !attachmentAiUse) throw new Error('Approve AI use before uploading text-bearing files.')
         uploaded.push(await departmentChat.uploadAttachment(departmentId, {
@@ -595,13 +589,18 @@ function ScopedDepartmentChat({
 
         {supportsSavedConversations && capabilities?.attachments?.supported && <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Explicit source files</p>
-          <p className="mt-2 text-xs leading-5 text-slate-500">TXT, Markdown, and DOCX contribute validated text. PNG/JPEG are reference-only and are never sent to the model. PDF and scanned/OCR documents are unavailable.</p>
+          <p className="mt-2 text-xs leading-5 text-slate-500">TXT, Markdown, and DOCX contribute validated text. PNG/JPEG are reference-only and are never sent to the model. PDF and scanned/OCR documents are unavailable. Choose up to 3 files: 5 MiB per file; DOCX 4 MiB. Extracted text is limited to 16,000 characters per file and 24,000 per turn; rejected limits never truncate content.</p>
           <input
             type="file" multiple
             accept=".txt,.md,.docx,.png,.jpg,.jpeg,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg"
             disabled={busy || historyBusy || attachmentBusy || !currentConversation || currentConversation.state !== 'active'}
             className="mt-3 block w-full text-xs text-slate-400 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-800 file:px-3 file:py-2 file:text-slate-200"
-            onChange={event => setPendingFiles([...event.target.files].slice(0, 3))}
+            onChange={event => {
+              const selection = selectPendingDepartmentChatAttachments(event.target.files)
+              setPendingFiles(selection.files)
+              setError(selection.error)
+              if (selection.error) event.target.value = ''
+            }}
           />
           {pendingFiles.length > 0 && <div className="mt-3 space-y-3">
             <p className="text-xs text-slate-300">{pendingFiles.map(file => file.name).join(', ')}</p>

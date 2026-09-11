@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { createDepartmentChatRepository } from './departmentChatTransport.js'
+import { selectPendingDepartmentChatAttachments, validateDepartmentChatAttachmentFile } from './departmentChatAttachmentSelection.js'
 
 const read = path => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
 const migration = read('supabase/migrations/20260911121056_p9_chat_private_attachments.sql')
@@ -97,10 +98,26 @@ test('CHAT-3 transport uploads only to the reserved path and finalizes the same 
 
 test('CHAT-3 UI is explicit about selection, AI use, source sharing, and unavailable formats', () => {
   for (const phrase of ['Explicit source files', 'Only checked files are linked to the request',
-    'Share this source with current and future conversation recipients', 'PDF and scanned/OCR documents are unavailable']) {
+    'Share this source with current and future conversation recipients', 'PDF and scanned/OCR documents are unavailable',
+    '5 MiB per file; DOCX 4 MiB', '16,000 characters per file and 24,000 per turn']) {
     assert.ok(chat.includes(phrase), phrase)
   }
+  assert.doesNotMatch(chat, /pendingFiles\.slice\(0, 3\)|target\.files\]\.slice\(0, 3\)/)
   assert.ok(chat.includes('attachment_ids: supportsSavedConversations ? selectedAttachmentIds : undefined'))
+})
+
+test('CHAT-3 file selection rejects whole over-limit selections and enforces DOCX 4 MiB', () => {
+  const files = Array.from({ length: 4 }, (_, index) => ({ name: `source-${index}.txt`, type: 'text/plain', size: 10 }))
+  assert.deepEqual(selectPendingDepartmentChatAttachments(files), {
+    files: [], error: 'Choose no more than three files. No files were selected.',
+  })
+  const oversizedDocx = { name: 'large.docx', type: '', size: 4 * 1024 * 1024 + 1 }
+  assert.throws(() => validateDepartmentChatAttachmentFile(oversizedDocx), /4 MiB DOCX/)
+  assert.deepEqual(selectPendingDepartmentChatAttachments([oversizedDocx]), {
+    files: [], error: 'large.docx: file exceeds the 4 MiB DOCX limit.',
+  })
+  const accepted = { name: 'safe.docx', type: '', size: 4 * 1024 * 1024 }
+  assert.deepEqual(selectPendingDepartmentChatAttachments([accepted]), { files: [accepted], error: '' })
 })
 
 test('CHAT-3 verifier is rollback-only and names storage, ACL, manifest, and revocation gates', () => {
