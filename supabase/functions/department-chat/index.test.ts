@@ -1,6 +1,8 @@
 import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.14'
 import {
   CHAT_MARKETING_ARTIFACT_TYPE_SET,
+  attachmentContentDisposition,
+  sha256AttachmentBytes,
   ENABLED_DEPARTMENTS,
   confirmProposal,
   departmentChatExternalEndpoint,
@@ -19,6 +21,21 @@ import {
   selectSingleOpenAiModel,
   safeAttemptReason,
 } from './index.ts'
+
+Deno.test('CHAT-3 download disposition is ASCII-safe and preserves UTF-8 without header injection', () => {
+  assertEquals(
+    attachmentContentDisposition('quote" slash\\ line\r\n résumé.txt'),
+    'attachment; filename="quote_ slash_ line__ r_sum_.txt"; filename*=UTF-8\'\'quote%22%20slash%5C%20line%0D%0A%20r%C3%A9sum%C3%A9.txt',
+  )
+  assertEquals(attachmentContentDisposition(''), 'attachment; filename="attachment"; filename*=UTF-8\'\'')
+})
+
+Deno.test('CHAT-3 attachment hashing copies into an ArrayBuffer-backed WebCrypto input', async () => {
+  assertEquals(
+    await sha256AttachmentBytes(new TextEncoder().encode('abc')),
+    'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+  )
+})
 
 Deno.test('B02 Content proposal language follows explicit, approved-brand, organization, then require-selection precedence', () => {
   const context = [{ artifact_type: 'vision', content: { language: 'Arabic' } }]
@@ -96,7 +113,7 @@ function selectedOrganizationFixture() {
     async rpc(name: string, args: any) {
       rpcCalls.push({ name, args })
       events.push('rpc:' + name)
-      if (name === 'begin_department_chat_turn' && beginError) return { data: null, error: beginError }
+      if (name === 'begin_department_chat_turn_with_attachments' && beginError) return { data: null, error: beginError }
       if (name === 'can_access_department_chat_conversation') {
         const conversation = (rows.department_chat_conversations || []).find(row =>
           row.id === args.p_conversation_id && row.organization_id === args.p_organization_id
@@ -124,7 +141,7 @@ function selectedOrganizationFixture() {
         const currentContributor = Boolean(organization && membership && engagement && project && service)
         return { data: Boolean(conversation && currentContributor && (conversation.owner_id === args.p_actor_id || shared)), error: null }
       }
-      return { data: name === 'begin_department_chat_turn' ? {
+      return { data: name === 'begin_department_chat_turn_with_attachments' ? {
           message: { id: 'message-B', status: 'pending' }, replayed: beginReplay,
         }
         : name === 'save_department_chat_proposal' || name === 'save_department_chat_conversation_proposal'
@@ -234,7 +251,7 @@ Deno.test('a suspended owner cannot open or reply through the service-role acces
   })
   assertEquals(reply.status, 403)
   assertEquals(fixture.providerCalls(), 0)
-  assertEquals(fixture.rpcCalls.some(call => call.name === 'begin_department_chat_turn'), false)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'begin_department_chat_turn_with_attachments'), false)
 })
 
 Deno.test('an active internal recipient can list, open, and reply without becoming the owner', async () => {
@@ -269,7 +286,7 @@ Deno.test('an active internal recipient can list, open, and reply without becomi
     prompt_safe_for_ai: true,
   })
   assertEquals(reply.status, 200)
-  assertEquals(fixture.rpcCalls.find(call => call.name === 'begin_department_chat_turn')!.args.p_actor_id, 'actor')
+  assertEquals(fixture.rpcCalls.find(call => call.name === 'begin_department_chat_turn_with_attachments')!.args.p_actor_id, 'actor')
 })
 
 Deno.test('revocation removes later recipient reads and replies before provider dispatch', async () => {
@@ -297,7 +314,7 @@ Deno.test('revocation removes later recipient reads and replies before provider 
   })
   assertEquals(reply.status, 404)
   assertEquals(fixture.providerCalls(), 0)
-  assertEquals(fixture.rpcCalls.some(call => call.name === 'begin_department_chat_turn'), false)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'begin_department_chat_turn_with_attachments'), false)
 })
 
 Deno.test('saved work-item turn reserves once and uses the atomic conversation proposal wrapper', async () => {
@@ -325,9 +342,10 @@ Deno.test('saved work-item turn reserves once and uses the atomic conversation p
   })
   assertEquals(response.status, 200)
   assertEquals(fixture.providerCalls(), 1)
-  const begin = fixture.rpcCalls.find(call => call.name === 'begin_department_chat_turn')!
+  const begin = fixture.rpcCalls.find(call => call.name === 'begin_department_chat_turn_with_attachments')!
   assertEquals(begin.args.p_conversation_id, 'conversation-B')
   assertEquals(begin.args.p_client_request_id, 'request-B')
+  assertEquals(begin.args.p_attachment_ids, [])
   const save = fixture.rpcCalls.find(call => call.name === 'save_department_chat_conversation_proposal')!
   assertEquals(save.args.p_conversation_id, 'conversation-B')
   assertEquals(save.args.p_message_id, 'message-B')
