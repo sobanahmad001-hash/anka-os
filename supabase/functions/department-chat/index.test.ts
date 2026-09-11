@@ -406,10 +406,11 @@ Deno.test('saved work-item turn reserves once and uses the atomic conversation p
   assertEquals(begin.args.p_conversation_id, 'conversation-B')
   assertEquals(begin.args.p_client_request_id, 'request-B')
   assertEquals(begin.args.p_attachment_ids, [])
-  const save = fixture.rpcCalls.find(call => call.name === 'save_department_chat_conversation_proposal')!
+  const save = fixture.rpcCalls.find(call => call.name === 'save_department_chat_conversation_proposal_with_model')!
   assertEquals(save.args.p_conversation_id, 'conversation-B')
   assertEquals(save.args.p_message_id, 'message-B')
-  assertEquals(fixture.rpcCalls.some(call => call.name === 'save_department_chat_proposal'), false)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'save_department_chat_proposal'
+    || call.name === 'save_department_chat_proposal_with_model'), false)
   assertEquals(fixture.rpcCalls.some(call => call.name === 'fail_department_chat_turn'), false)
 })
 
@@ -428,6 +429,7 @@ Deno.test('a replayed pending client request never starts a second provider run'
   })
   assertEquals(response.status, 409)
   assertEquals(fixture.providerCalls(), 0)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'assert_department_chat_model_dispatch'), false)
   assertEquals(fixture.rpcCalls.some(call => call.name === 'save_department_chat_conversation_proposal'), false)
   assertEquals(fixture.rpcCalls.some(call => call.name === 'fail_department_chat_turn'), false)
 })
@@ -602,19 +604,20 @@ for (const department of ['content','design','marketing','development']) {
         prompt: 'Fixture', prompt_safe_for_ai: true,
         organization_id: 'injected', project_id: 'injected', actor_id: 'injected', approval: true,
       }, 'member-1', ORGANIZATION_ID, async () => new Response(JSON.stringify({ output_text: JSON.stringify(fixture) })), contextDependencies)
-      assertEquals(rpcCalls.length, 1)
-      assertEquals(rpcCalls[0].name, 'save_department_chat_proposal')
-      assertEquals(rpcCalls[0].args.p_actor_id, 'member-1')
-      assertEquals(rpcCalls[0].args.p_project_id, 'project-1')
-      assertEquals(rpcCalls[0].args.p_organization_id, ORGANIZATION_ID)
-      assertEquals(rpcCalls[0].args.p_target_key, target)
+      const save = rpcCalls.find(call => call.name === (department === 'development'
+        ? 'save_department_chat_proposal' : 'save_department_chat_proposal_with_model'))!
+      assertEquals(Boolean(save), true)
+      assertEquals(save.args.p_actor_id, 'member-1')
+      assertEquals(save.args.p_project_id, 'project-1')
+      assertEquals(save.args.p_organization_id, ORGANIZATION_ID)
+      assertEquals(save.args.p_target_key, target)
       const invalid = proposalAdmin()
       await assertRejects(() => proposeArtifact({} as any, invalid.admin as any, {
         department_id: department, engagement_id: 'engagement-1', artifact_type: target,
         language: department === 'content' && ['discovery', 'vision', 'audience'].includes(target) ? 'Urdu' : undefined,
         prompt: 'Fixture', prompt_safe_for_ai: true,
       }, 'member-1', ORGANIZATION_ID, async () => new Response(JSON.stringify({ output_text: '{}' })), contextDependencies))
-      assertEquals(invalid.rpcCalls.length, 0)
+      assertEquals(invalid.rpcCalls.some(call => call.name.startsWith('save_department_chat_')), false)
     })
   }
   for (const target of ['task','bug','request']) {
@@ -624,15 +627,17 @@ for (const department of ['content','design','marketing','development']) {
         department_id: department, engagement_id: 'engagement-1', work_item_type: target,
         title: 'Fixture', prompt: 'Fixture', prompt_safe_for_ai: true, status: 'done', assignee_id: 'injected',
       }, 'member-1', ORGANIZATION_ID, async () => new Response(JSON.stringify({output_text:'Fixture'})), contextDependencies)
-      assertEquals(rpcCalls.length, 1)
-      assertEquals((rpcCalls[0].args.p_preview_payload as any).status, 'not_started')
-      assertEquals((rpcCalls[0].args.p_validated_payload as any).assignee_id, undefined)
+      const save = rpcCalls.find(call => call.name === (department === 'development'
+        ? 'save_department_chat_proposal' : 'save_department_chat_proposal_with_model'))!
+      assertEquals(Boolean(save), true)
+      assertEquals((save.args.p_preview_payload as any).status, 'not_started')
+      assertEquals((save.args.p_validated_payload as any).assignee_id, undefined)
       const invalid = proposalAdmin()
       await assertRejects(() => proposeWorkItem({} as any, invalid.admin as any, {
         department_id: department, engagement_id: 'engagement-1', work_item_type: target,
         title: 'Fixture', prompt: 'Fixture', prompt_safe_for_ai: true,
       }, 'member-1', ORGANIZATION_ID, async () => new Response(JSON.stringify({ output_text: '' })), contextDependencies))
-      assertEquals(invalid.rpcCalls.length, 0)
+      assertEquals(invalid.rpcCalls.some(call => call.name.startsWith('save_department_chat_')), false)
     })
   }
 }
@@ -788,8 +793,16 @@ const contextDependencies = {
   })) as any,
   safeStage: (async () => null) as any,
   approvedSafeContext: (async () => []) as any,
-  resolveSingleOpenAiModel: (async () => ({
+  resolveSingleOpenAiModel: (async (_admin: unknown, _engagementId: string, departmentId: string) => ({
     connectorId: 'connector-1', credential: 'test-key', model: 'gpt-test',
+    ...(departmentId === 'development' ? {} : {
+      configurationId: 'configuration-1',
+      displayName: 'GPT test',
+      approvedModels: [{
+        configuration_id: 'configuration-1', model_id: 'gpt-test',
+        display_name: 'GPT test', is_default: true,
+      }],
+    }),
   })) as any,
   estimatedCost: () => 12,
 }

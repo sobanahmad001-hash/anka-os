@@ -1585,11 +1585,6 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
         throw Object.assign(new Error('Saved conversations are not available for this department'), { status: 409 })
       }
       const conversation = await requireConversationContext(admin, body, user.id, organizationId, true)
-      const reservationProvider = await (dependencies.proposal?.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(
-        admin, conversation.engagement_id, conversation.department_id, organizationId, undefined,
-        text(body.model_configuration_id, 80),
-      )
-      await assertModelDispatch(admin, body, user.id, reservationProvider)
       const clientRequestId = text(body.client_request_id, 80)
       if (!clientRequestId) throw Object.assign(new Error('client_request_id is required'), { status: 400 })
       const attachmentIds = Array.isArray(body.attachment_ids)
@@ -1630,6 +1625,11 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
         messageId: text(turn?.message?.id, 80),
       }
       if (!turnContext.messageId) throw new Error('Department Chat turn reservation failed')
+      const reservationProvider = await (dependencies.proposal?.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(
+        admin, conversation.engagement_id, conversation.department_id, organizationId, undefined,
+        text(body.model_configuration_id, 80),
+      )
+      await assertModelDispatch(admin, body, user.id, reservationProvider)
     }
     if (action === 'propose_artifact') return response({ data: await proposeArtifact(userClient, admin, body, user.id, organizationId, dependencies.fetcher, dependencies.proposal) })
     if (action === 'propose_work_item') return response({ data: await proposeWorkItem(userClient, admin, body, user.id, organizationId, dependencies.fetcher, dependencies.proposal) })
