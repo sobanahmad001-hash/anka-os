@@ -49,8 +49,7 @@ create table public.marketing_campaign_plan_creative_requirements (
   created_at timestamptz not null default now(),
   foreign key (plan_version_id, organization_id) references public.marketing_campaign_plan_versions(id, organization_id) on delete cascade,
   foreign key (message_version_id, organization_id) references public.artifact_versions(id, organization_id) on delete restrict,
-  unique (plan_version_id, position),
-  unique (id, organization_id)
+  unique (plan_version_id, position)
 );
 
 create index idx_marketing_campaign_plan_versions_campaign on public.marketing_campaign_plan_versions(organization_id, campaign_id, version_number desc);
@@ -62,6 +61,19 @@ create index idx_marketing_campaign_plan_versions_message on public.marketing_ca
 create index idx_marketing_campaign_plan_versions_measurement on public.marketing_campaign_plan_versions(organization_id, measurement_plan_version_id) where measurement_plan_version_id is not null;
 create index idx_marketing_campaign_plan_requirements_version on public.marketing_campaign_plan_creative_requirements(organization_id, plan_version_id, position);
 create index idx_marketing_campaign_plan_requirements_message on public.marketing_campaign_plan_creative_requirements(organization_id, message_version_id) where message_version_id is not null;
+
+alter table public.engagement_events drop constraint engagement_events_event_type_check;
+alter table public.engagement_events add constraint engagement_events_event_type_check
+check (event_type in (
+  'engagement_created', 'service_activated', 'blueprint_instantiated',
+  'artifact_version_created', 'artifact_approved', 'design_direction_released',
+  'campaign_created', 'campaign_updated', 'artifact_draft_proposed_via_chat',
+  'stage_status_changed', 'work_item_created', 'work_item_status_changed', 'work_item_assigned',
+  'recurring_plan_created', 'recurring_plan_version_created',
+  'recurring_plan_version_approved', 'recurring_plan_status_changed',
+  'recurring_period_generated', 'marketing_campaign_plan_version_created'
+));
+
 create trigger trg_marketing_campaign_plan_versions_immutable before update or delete on public.marketing_campaign_plan_versions for each row execute function private.reject_immutable_artifact_history_change();
 create trigger trg_marketing_campaign_plan_requirements_immutable before update or delete on public.marketing_campaign_plan_creative_requirements for each row execute function private.reject_immutable_artifact_history_change();
 alter table public.marketing_campaign_plan_versions enable row level security;
@@ -115,7 +127,7 @@ begin
 
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_organization_id::text || ':' || p_campaign_id::text || ':campaign_plan', 0));
   select * into v_latest from public.marketing_campaign_plan_versions
-  where organization_id = p_organization_id and campaign_id = p_campaign_id order by version_number desc limit 1 for update;
+  where organization_id = p_organization_id and campaign_id = p_campaign_id order by version_number desc limit 1;
   if v_latest.id is distinct from p_expected_latest_version_id then raise exception 'Campaign plan changed since it was loaded; refresh before saving' using errcode = '40001'; end if;
   if p_source_plan_version_id is not null and not exists (
     select 1 from public.marketing_campaign_plan_versions where id = p_source_plan_version_id and organization_id = p_organization_id and campaign_id = p_campaign_id

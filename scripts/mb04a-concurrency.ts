@@ -95,7 +95,11 @@ try {
   }
 
   const firstVersion = await race(null, 1)
-  await race(firstVersion, 2)
+  await beginService(first)
+  const replay = await save(first, firstVersion, 'Contender 1')
+  await first.query('commit')
+  assert.equal(replay.rows[0].result.version_number, 2)
+  assert.equal(replay.rows[0].result.parent_version_id, firstVersion)
   const final = await setup.query(
     'select version_number,parent_version_id from public.marketing_campaign_plan_versions where campaign_id=$1 order by version_number',
     [ids.campaign],
@@ -104,7 +108,7 @@ try {
     { version_number: 1, parent_version_id: null },
     { version_number: 2, parent_version_id: firstVersion },
   ])
-  console.log('loopback_clone=true; first_save_serialized=true; revision_save_serialized=true; stale_sqlstate_40001=true; immutable_lineage_exact=true')
+  console.log('loopback_clone=true; one_winner=true; stale_loser_sqlstate_40001=true; exact_stale_retry=true; immutable_lineage_exact=true')
 } finally {
   for (const client of clients) {
     await client.query('rollback').catch(() => {})

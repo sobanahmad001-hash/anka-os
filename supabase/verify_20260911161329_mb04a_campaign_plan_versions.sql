@@ -43,6 +43,14 @@ insert into mb04a_checks values
   select 1 from pg_constraint where conrelid='public.marketing_campaign_plan_versions'::regclass
   and contype='u' and pg_get_constraintdef(oid)='UNIQUE (campaign_id, version_number)'
 )),
+('requirements_redundant_composite_unique_absent', not exists (
+  select 1 from pg_constraint where conrelid='public.marketing_campaign_plan_creative_requirements'::regclass
+  and contype='u' and pg_get_constraintdef(oid)='UNIQUE (id, organization_id)'
+)),
+('engagement_event_type_registered', exists (
+  select 1 from pg_constraint where conrelid='public.engagement_events'::regclass
+  and conname='engagement_events_event_type_check' and position('marketing_campaign_plan_version_created' in pg_get_constraintdef(oid))>0
+)),
 ('draft_only_lifecycle', exists (
   select 1 from pg_constraint where conrelid='public.marketing_campaign_plan_versions'::regclass
   and contype='c' and pg_get_constraintdef(oid) like '%lifecycle_status%draft%'
@@ -73,6 +81,7 @@ insert into mb04a_checks values
 ('save_rpc_active_team_check', position('member_kind = ''team'' and status = ''active''' in pg_get_functiondef('public.save_marketing_campaign_plan_draft(uuid,uuid,uuid,uuid,text,text,text[],date,date,text,text,uuid,uuid,jsonb,text,uuid,uuid)'::regprocedure))>0),
 ('save_rpc_active_marketing_service_check', position('sc.department_id = ''marketing'' and sc.is_active' in pg_get_functiondef('public.save_marketing_campaign_plan_draft(uuid,uuid,uuid,uuid,text,text,text[],date,date,text,text,uuid,uuid,jsonb,text,uuid,uuid)'::regprocedure))>0),
 ('save_rpc_optimistic_concurrency', position('v_latest.id is distinct from p_expected_latest_version_id' in pg_get_functiondef('public.save_marketing_campaign_plan_draft(uuid,uuid,uuid,uuid,text,text,text[],date,date,text,text,uuid,uuid,jsonb,text,uuid,uuid)'::regprocedure))>0),
+('save_rpc_no_update_acl_dependency', position('limit 1 for update' in pg_get_functiondef('public.save_marketing_campaign_plan_draft(uuid,uuid,uuid,uuid,text,text,text[],date,date,text,text,uuid,uuid,jsonb,text,uuid,uuid)'::regprocedure))=0),
 ('concurrent_save_guard_present', position('pg_advisory_xact_lock' in pg_get_functiondef('public.save_marketing_campaign_plan_draft(uuid,uuid,uuid,uuid,text,text,text[],date,date,text,text,uuid,uuid,jsonb,text,uuid,uuid)'::regprocedure))>0),
 ('save_rpc_exact_source_checks', position('join public.artifact_approvals approval' in pg_get_functiondef('public.save_marketing_campaign_plan_draft(uuid,uuid,uuid,uuid,text,text,text[],date,date,text,text,uuid,uuid,jsonb,text,uuid,uuid)'::regprocedure))>0
   and position('campaign_messaging' in pg_get_functiondef('public.save_marketing_campaign_plan_draft(uuid,uuid,uuid,uuid,text,text,text[],date,date,text,text,uuid,uuid,jsonb,text,uuid,uuid)'::regprocedure))>0

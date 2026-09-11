@@ -97,6 +97,8 @@ test('repository scopes every read and save to the selected organization and exa
 
 test('schema is append-only, organization-scoped, server-written and planning-only', () => {
   assert.match(migration, /unique \(campaign_id, version_number\)/)
+  assert.doesNotMatch(migration, /marketing_campaign_plan_creative_requirements[\s\S]*unique \(id, organization_id\)/)
+  assert.match(migration, /engagement_events_event_type_check[\s\S]*marketing_campaign_plan_version_created/)
   assert.match(migration, /trg_marketing_campaign_plan_versions_immutable[\s\S]*before update or delete/)
   assert.match(migration, /trg_marketing_campaign_plan_requirements_immutable[\s\S]*before update or delete/)
   assert.match(migration, /enable row level security/)
@@ -109,6 +111,7 @@ test('atomic save enforces context, authority, approved-message sources and opti
   assert.match(migration, /member_kind = 'team' and status = 'active'/)
   assert.match(migration, /sc\.department_id = 'marketing' and sc\.is_active/)
   assert.match(migration, /pg_advisory_xact_lock/)
+  assert.doesNotMatch(migration, /limit 1 for update/)
   assert.match(migration, /v_latest\.id is distinct from p_expected_latest_version_id/)
   assert.match(migration, /artifact_type in \('campaign_messaging', 'scripts'\)/)
   assert.match(migration, /join public\.artifact_approvals approval/)
@@ -146,8 +149,11 @@ test('rollback verifier checks the exact schema, ACL, RLS, immutable and server-
     'save_rpc_exact_signature', 'save_rpc_security_invoker', 'save_rpc_empty_search_path',
     'save_rpc_not_client_callable', 'save_rpc_service_role_execute', 'save_rpc_active_team_check',
     'save_rpc_active_marketing_service_check', 'save_rpc_optimistic_concurrency',
+    'save_rpc_no_update_acl_dependency',
     'save_rpc_exact_source_checks', 'save_rpc_scope_boundary', 'service_tables_narrow_write_acl',
-    'foreign_key_indexes_present', 'owner_save_succeeds', 'marketing_member_save_succeeds',
+    'foreign_key_indexes_present', 'requirements_redundant_composite_unique_absent',
+    'engagement_event_type_registered',
+    'owner_save_succeeds', 'marketing_member_save_succeeds',
     'other_department_rejected', 'other_organization_rejected', 'suspended_member_rejected',
     'disabled_marketing_service_rejected', 'unapproved_message_source_rejected',
     'wrong_measurement_type_rejected', 'foreign_engagement_source_rejected',
@@ -161,6 +167,7 @@ test('rollback verifier checks the exact schema, ACL, RLS, immutable and server-
   assert.match(concurrency, /MB04A_LOCAL_TEMPLATE_URL/)
   assert.match(concurrency, /concurrent save did not wait on the campaign advisory lock/)
   assert.match(concurrency, /assert\.equal\(stale\?\.code, '40001'\)/)
+  assert.match(concurrency, /exact_stale_retry=true/)
   assert.match(concurrency, /version_number: 2, parent_version_id: firstVersion/)
   assert.match(verifier, /raise exception 'MB04A verification failed:/)
   assert.match(verifier, /select 'PASS' as mb04a_final_result/)
