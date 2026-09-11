@@ -21,17 +21,17 @@ The scope note's older statement that attachments are unavailable is superseded 
 - Existing verified connector `model_id` is seeded as the sole initial approved/default choice.
 - Existing organization leadership manages the allowlist; no new role, provider, account, spend, release, or publishing authority.
 - Browser-supplied raw model IDs are ignored. Server selection is the intersection of immutable allowlist identity, verified connector facts, department mapping, engagement mapping, active service, organization and current role.
-- Selection is revalidated before saved-turn reservation, immediately before dispatch, and before proposal confirmation. No stale-choice fallback.
+- New turns revalidate selection after idempotent reservation and again immediately before dispatch; replayed turns exit before any fresh model lookup. Confirmation also revalidates. No stale-choice fallback.
 - The exact model plus immutable configuration identity is stored on the proposal and AI-run ledger. Revocation blocks new dispatch/confirmation while preserving old history and an already-dispatched result.
 - Capabilities remain honest: text generation; validated text attachments only; PNG/JPEG reference-only; PDF/OCR/vision unavailable.
+- The navigation-released main baseline is integrated, and the exact configured Deno suite passes 290 tests plus frozen type-checks.
 
 ## Still required before P9 can be called complete
 
 - Product slice: ordinary conversational answers are not implemented; current actions are only `propose_artifact` and `propose_work_item`.
 - Product slice: streaming/cancel presentation from the scope is not implemented.
-- Integration: reconcile the separately owned Workshop navigation/denied-state candidate without editing its owned files in this branch.
-- Verification: run the Deno Edge suite and the rollback-only Postgres verifier in an environment with Deno plus disposable Supabase/Postgres; this workstation currently exposes neither runtime.
-- Review: independent Testing/security review, signed-in three-Workshop acceptance, accessibility/error-state pass, and exact-head integration checks.
+- Verification: run the rollback-only Postgres verifier in an environment with disposable Supabase/Postgres; no reusable local PostgreSQL runtime was discoverable.
+- Review: independent Testing/security review, signed-in three-Workshop acceptance, and accessibility/error-state pass.
 - Release: migration application, Edge deployment, push/PR/merge and production verification remain separately authorized actions and were not performed here.
 
 Excluded throughout: attachments beyond the released formats, model/provider calls for discovery, arbitrary model IDs, new providers/accounts, paid tests/actions, releases, publishing, and deployment.
