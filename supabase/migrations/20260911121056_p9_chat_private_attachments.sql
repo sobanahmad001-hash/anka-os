@@ -435,6 +435,12 @@ grant execute on function public.finish_department_chat_attachment(uuid, uuid, t
 grant execute on function public.fail_department_chat_attachment(uuid, uuid, text, text, text) to service_role;
 grant execute on function public.begin_department_chat_turn_with_attachments(uuid, uuid, uuid, uuid, text, uuid, uuid, text, uuid[]) to service_role;
 
+revoke all on function private.block_unsafe_department_chat_share() from public, anon, authenticated;
+revoke all on function private.guard_department_chat_attachment_dispatch() from public, anon, authenticated;
+revoke all on function private.mark_department_chat_attachment_dispatch() from public, anon, authenticated;
+revoke all on function private.protect_department_chat_attachment_records() from public, anon, authenticated;
+revoke all on function private.protect_department_chat_attachment_manifest() from public, anon, authenticated;
+
 comment on table public.department_chat_attachments is
   'Server-only private CHAT-3 source records. Final objects are immutable and separate from signed-upload staging paths.';
 comment on table public.department_chat_message_attachments is

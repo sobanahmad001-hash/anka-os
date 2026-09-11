@@ -17,6 +17,11 @@ test('CHAT-3 private storage and tables are exact-scope, RLS-enabled, and browse
     assert.ok(migration.includes(`alter table public.${table} enable row level security`))
   }
   assert.match(migration, /revoke all on table public\.department_chat_attachments, public\.department_chat_message_attachments\s+from public, anon, authenticated/)
+  for (const helper of ['block_unsafe_department_chat_share', 'guard_department_chat_attachment_dispatch',
+    'mark_department_chat_attachment_dispatch', 'protect_department_chat_attachment_records',
+    'protect_department_chat_attachment_manifest']) {
+    assert.ok(migration.includes(`revoke all on function private.${helper}() from public, anon, authenticated`), helper)
+  }
   assert.match(migration, /staging_path = organization_id::text \|\| '\/' \|\| conversation_id::text \|\| '\/staging\/' \|\| id::text/)
   assert.match(migration, /final_path = organization_id::text \|\| '\/' \|\| conversation_id::text \|\| '\/final\/' \|\| id::text/)
 })
@@ -43,11 +48,14 @@ test('CHAT-3 finalization separates expiring signed staging from immutable serve
 
 test('CHAT-3 parsers enforce bounded preflight and fail-closed extraction', () => {
   for (const boundary of ['zipEntries: 256', 'zipExpandedBytes: 16 * 1024 * 1024', 'docxXmlBytes: 8 * 1024 * 1024',
-    'zipExpansionRatio: 30', 'textCharacters: 16_000', 'turnCharacters: 24_000', 'imageDimension: 4096']) {
+    'zipExpansionRatio: 30', 'textCharacters: 16_000', 'turnCharacters: 24_000', 'imageDimension: 4096',
+    'imageDecodedBytes: 32 * 1024 * 1024']) {
     assert.ok(parser.includes(boundary), boundary)
   }
   for (const guard of ['crc32(result) !== entry.crc', 'duplicate or path-ambiguous', '<!DOCTYPE|<!ENTITY',
     'Only baseline JPEG frame encoding is supported.', 'PNG checksum is invalid.',
+    'PNG image data could not be decoded safely.', 'JPEG entropy data contains an invalid Huffman code.',
+    'DOCX text outside the main document body is unsupported.', 'DOCX text contains an invalid XML character entity.',
     'File signature conflicts with the reserved text type.']) {
     assert.ok(parser.includes(guard), guard)
   }
@@ -99,6 +107,7 @@ test('CHAT-3 verifier is rollback-only and names storage, ACL, manifest, and rev
   assert.match(verifier, /^-- P9 CHAT-3 rollback-only/)
   assert.ok(verifier.includes('begin;'))
   assert.ok(verifier.includes('rollback;'))
+  assert.ok(verifier.includes("privilege.grantee in (0, 'anon'::regrole, 'authenticated'::regrole)"))
   for (const gate of ['attachment_private_bucket_contract', 'attachment_server_only_acl',
     'attachment_exact_manifest_and_hash', 'attachment_share_and_dispatch_revocation',
     'attachment_finalization_reauthorization']) assert.ok(verifier.includes(gate), gate)

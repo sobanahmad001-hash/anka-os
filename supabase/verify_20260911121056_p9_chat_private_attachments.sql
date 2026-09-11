@@ -60,6 +60,24 @@ begin
     then raise exception 'attachment_rpc_must_be_security_invoker: %', v_function; end if;
   end loop;
 
+  foreach v_function in array array[
+    'private.block_unsafe_department_chat_share()'::regprocedure,
+    'private.guard_department_chat_attachment_dispatch()'::regprocedure,
+    'private.mark_department_chat_attachment_dispatch()'::regprocedure,
+    'private.protect_department_chat_attachment_records()'::regprocedure,
+    'private.protect_department_chat_attachment_manifest()'::regprocedure
+  ] loop
+    if exists (
+      select 1
+      from pg_proc procedure
+      cross join lateral aclexplode(coalesce(procedure.proacl, acldefault('f', procedure.proowner))) privilege
+      where procedure.oid = v_function
+        and privilege.privilege_type = 'EXECUTE'
+        and privilege.grantee in (0, 'anon'::regrole, 'authenticated'::regrole)
+    )
+    then raise exception 'attachment_private_helper_execute_not_revoked: %', v_function; end if;
+  end loop;
+
   select pg_get_functiondef('public.finish_department_chat_attachment(uuid,uuid,text,bigint,text,text,text,text)'::regprocedure)
   into v_definition;
   if lower(v_definition) not like '%for update%'
