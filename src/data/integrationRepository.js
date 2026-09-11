@@ -31,6 +31,11 @@ export const integrations = Object.freeze({
   save: (connection) => invoke({ action: 'save', ...connection }),
   test: (connectionId) => invoke({ action: 'test', connection_id: connectionId }),
   disable: (connectionId) => invoke({ action: 'disable', connection_id: connectionId }),
+  configureModelAllowlist: (connectionId, departmentModelIds) => invoke({
+    action: 'configure_model_allowlist',
+    connection_id: connectionId,
+    department_model_ids: departmentModelIds,
+  }),
   startGoogleOAuth: (connection) => invokeGoogle({ action: 'start', ...connection }),
   configureGoogleReporting: (connectionId, publicConfig) => invokeGoogle({
     action: 'configure_reporting', connection_id: connectionId, public_config: publicConfig,

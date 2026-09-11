@@ -52,6 +52,49 @@ function safeDepartmentIds(value: unknown) {
   return departmentIds
 }
 
+function verifiedModelIds(connection: Record<string, unknown>) {
+  const config = connection.public_config && typeof connection.public_config === 'object'
+    ? connection.public_config as Record<string, unknown> : {}
+  return [...new Set([
+    text(config.model_id, 120),
+    ...(Array.isArray(config.verified_model_ids)
+      ? config.verified_model_ids.map(model => text(model, 120)) : []),
+  ].filter(Boolean))]
+}
+
+async function syncInitialDepartmentChatModel(
+  adminClient: ReturnType<typeof createClient<any>>,
+  connection: Record<string, unknown>,
+  actorId: string,
+) {
+  if (connection.provider !== 'openai') return
+  const modelId = verifiedModelIds(connection)[0]
+  if (!modelId) return
+  const [{ data: mappings, error: mappingError }, { data: history, error: historyError }] = await Promise.all([
+    adminClient.from('integration_connection_departments').select('department_id')
+      .eq('connection_id', connection.id).eq('organization_id', ORGANIZATION_ID),
+    adminClient.from('department_chat_model_configurations').select('model_id, revoked_at')
+      .eq('connector_connection_id', connection.id).eq('organization_id', ORGANIZATION_ID),
+  ])
+  if (mappingError) throw mappingError
+  if (historyError) throw historyError
+  const active = (history || []).filter(configuration => !configuration.revoked_at)
+  const shouldInitialize = !(history || []).length
+  const verifiedModelChanged = active.some(configuration => configuration.model_id !== modelId)
+  if (!shouldInitialize && !verifiedModelChanged) return
+  const departmentModelIds = Object.fromEntries((mappings || [])
+    .map(mapping => mapping.department_id)
+    .filter(departmentId => ['content', 'design', 'marketing'].includes(departmentId))
+    .map(departmentId => [departmentId, [modelId]]))
+  const { error } = await adminClient.rpc('configure_department_chat_model_allowlist', {
+    p_organization_id: ORGANIZATION_ID,
+    p_connector_connection_id: connection.id,
+    p_actor_id: actorId,
+    p_department_model_ids: departmentModelIds,
+  })
+  if (error) throw error
+}
+
 function validateSecretName(provider: string, value: unknown) {
   const secretName = text(value, 120)
   if (!secretName) return null
@@ -179,6 +222,11 @@ serve(async (req) => {
         .select('*, integration_connection_departments(department_id)')
         .is('archived_at', null).order('provider').order('display_name')
       if (error) throw error
+      const { data: modelConfigurations, error: modelConfigurationError } = await userClient
+        .from('department_chat_model_configurations')
+        .select('id, department_id, connector_connection_id, model_id, display_name, is_default, revoked_at, verified_at')
+        .order('created_at', { ascending: true })
+      if (modelConfigurationError) throw modelConfigurationError
       const visibleConnections = (data || []).map((connection) => {
         const mappings = Array.isArray(connection.integration_connection_departments)
           ? connection.integration_connection_departments as Array<{ department_id: string }>
@@ -188,6 +236,9 @@ serve(async (req) => {
           ...publicConnection,
           department_ids: mappings.map((mapping) => mapping.department_id),
           secret_configured: Boolean(connection.secret_name && Deno.env.get(connection.secret_name)),
+          verified_model_ids: connection.status === 'verified' ? verifiedModelIds(connection) : [],
+          model_configurations: (modelConfigurations || []).filter(configuration =>
+            configuration.connector_connection_id === connection.id && !configuration.revoked_at),
         }
       }).filter((connection) => !departmentId || connection.department_ids.includes(departmentId))
       return json({
@@ -273,6 +324,51 @@ serve(async (req) => {
       return json({ success: true })
     }
 
+    if (action === 'configure_model_allowlist') {
+      if (connection.provider !== 'openai' || connection.status !== 'verified') {
+        return json({ error: 'A verified OpenAI connector is required' }, 409)
+      }
+      const requested = body.department_model_ids && typeof body.department_model_ids === 'object'
+        ? body.department_model_ids as Record<string, unknown> : {}
+      const { data: mappings, error: mappingError } = await adminClient
+        .from('integration_connection_departments').select('department_id')
+        .eq('connection_id', connection.id).eq('organization_id', ORGANIZATION_ID)
+      if (mappingError) throw mappingError
+      const mappedDepartments = new Set((mappings || []).map(mapping => mapping.department_id)
+        .filter(departmentId => ['content', 'design', 'marketing'].includes(departmentId)))
+      const verified = new Set(verifiedModelIds(connection))
+      const selected: Array<{ department_id: string; model_id: string }> = []
+      for (const [departmentId, values] of Object.entries(requested)) {
+        if (!mappedDepartments.has(departmentId) || !Array.isArray(values)) {
+          return json({ error: 'Model allowlist contains an unmapped department' }, 400)
+        }
+        for (const value of values) {
+          const modelId = text(value, 120)
+          if (!modelId || !verified.has(modelId)) {
+            return json({ error: 'Model allowlist contains an unverified model' }, 400)
+          }
+          selected.push({ department_id: departmentId, model_id: modelId })
+        }
+      }
+      const departmentModelIds = Object.fromEntries([...mappedDepartments].map(departmentId => [
+        departmentId,
+        selected.filter(entry => entry.department_id === departmentId).map(entry => entry.model_id),
+      ]))
+      const { error: configureError } = await adminClient.rpc('configure_department_chat_model_allowlist', {
+        p_organization_id: ORGANIZATION_ID,
+        p_connector_connection_id: connection.id,
+        p_actor_id: user.id,
+        p_department_model_ids: departmentModelIds,
+      })
+      if (configureError) throw configureError
+      await adminClient.from('integration_events').insert({
+        organization_id: ORGANIZATION_ID, connection_id: connection.id, actor_id: user.id,
+        operation: 'updated', outcome: 'succeeded', provider: 'openai',
+        metadata: { change: 'department_chat_model_allowlist', departments: [...mappedDepartments] },
+      })
+      return json({ success: true })
+    }
+
     if (action === 'test') {
       const providerSecret = connection.secret_name ? Deno.env.get(connection.secret_name) : null
       if (!providerSecret) {
@@ -287,6 +383,7 @@ serve(async (req) => {
         await adminClient.from('integration_connections').update({
           status: 'verified', last_checked_at: new Date().toISOString(), last_check_status: 'passed',
         }).eq('id', connection.id)
+        await syncInitialDepartmentChatModel(adminClient, connection, user.id)
         await adminClient.from('integration_events').insert({
           organization_id: ORGANIZATION_ID,
           connection_id: connection.id,

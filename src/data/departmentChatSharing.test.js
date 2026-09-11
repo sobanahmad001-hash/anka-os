@@ -84,7 +84,7 @@ test('CHAT-2 endpoint and UI expose sharing without added approval or execution 
     'no approval, tool, release, publishing, or paid-action authority',
   ]) assert.ok(chat.includes(text), text)
   assert.ok(edge.includes('share_with_recipients'))
-  assert.ok(edge.includes('approved_models: [provider.model]'))
+  assert.ok(edge.includes('approved_models: provider.approvedModels'))
 })
 
 test('CHAT-2 ships named rollback-safe catalog gates', () => {

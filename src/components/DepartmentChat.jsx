@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { createChatCompletionGuard, handleCurrentChatFailure, runCurrentChatOperation } from '../data/departmentChatIdentity.js'
 import { selectPendingDepartmentChatAttachments, validateDepartmentChatAttachmentFile } from '../data/departmentChatAttachmentSelection.js'
+import { selectDepartmentChatModelConfiguration } from '../data/departmentChatModelSelection.js'
 
 import { departmentChatProfile } from '../data/departmentChatProfiles.js'
 import { departmentChat } from '../data/departmentChatRepository.js'
@@ -62,6 +63,7 @@ function ScopedDepartmentChat({
   const [conversationId, setConversationId] = useState('')
   const [messages, setMessages] = useState([])
   const [capabilities, setCapabilities] = useState(null)
+  const [modelConfigurationId, setModelConfigurationId] = useState('')
   const [includeArchived, setIncludeArchived] = useState(false)
   const [conversationTitle, setConversationTitle] = useState('')
   const [historyBusy, setHistoryBusy] = useState(false)
@@ -75,6 +77,10 @@ function ScopedDepartmentChat({
   const [attachmentAiUse, setAttachmentAiUse] = useState(false)
   const [attachmentShare, setAttachmentShare] = useState(false)
   const [attachmentBusy, setAttachmentBusy] = useState(false)
+
+  useEffect(() => {
+    setModelConfigurationId(current => selectDepartmentChatModelConfiguration(capabilities, current))
+  }, [capabilities])
 
   async function loadAttachments(id = conversationId, isCurrent = () => true) {
     if (!id || !projectId) { setAttachments([]); setSelectedAttachmentIds([]); return [] }
@@ -403,6 +409,7 @@ function ScopedDepartmentChat({
           attachment_ids: supportsSavedConversations ? selectedAttachmentIds : undefined,
           project_id: supportsSavedConversations ? projectId : undefined,
           engagement_id: engagement.id,
+          model_configuration_id: modelConfigurationId,
           artifact_id: (artifactForType(artifactType) || {}).id || null,
           engagement_stage_instance_id: (stageForType(artifactType) || {}).id || null,
           artifact_type: artifactType,
@@ -418,6 +425,7 @@ function ScopedDepartmentChat({
           attachment_ids: supportsSavedConversations ? selectedAttachmentIds : undefined,
           project_id: supportsSavedConversations ? projectId : undefined,
           engagement_id: engagement.id,
+          model_configuration_id: modelConfigurationId,
           title: title || `${artifactDefinitions[artifactType]?.label || 'Work item'} request`,
           work_item_type: workItemType,
           priority,
@@ -542,6 +550,21 @@ function ScopedDepartmentChat({
       {supportsSavedConversations && <ConversationHistory messages={messages} userId={userId} busy={busy} onConfirm={proposal => decide('confirm', proposal)} onReject={proposal => decide('reject', proposal)} />}
       {result && <ProposalPreview result={result} official={official} onOpenOfficial={openOfficial} busy={busy} onConfirm={() => decide('confirm')} onReject={() => decide('reject')} />}
       <div className="mt-6 space-y-5">
+        {supportsSavedConversations && capabilities && <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Approved model
+          <select
+            className={`${INPUT} mt-2 normal-case tracking-normal`}
+            value={modelConfigurationId}
+            disabled={busy || historyBusy || !(capabilities.approved_models || []).length}
+            onChange={event => {
+              setModelConfigurationId(event.target.value)
+              setResult(null)
+              setOfficial(null)
+            }}
+          >
+            {(capabilities.approved_models || []).map(model => <option key={model.configuration_id} value={model.configuration_id}>{model.display_name || model.model_id}{model.is_default ? ' · default' : ''}</option>)}
+          </select>
+          <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-slate-500">Only administrator-approved models verified through this engagement's connector are available. A revoked or stale choice is rejected before dispatch without fallback.</span>
+        </label>}
         <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Proposal mode
           <select className={`${INPUT} mt-2 normal-case tracking-normal`} value={proposalMode} onChange={event => setProposalMode(event.target.value)}>
             <option value="artifact">Artifact draft</option>
@@ -643,7 +666,7 @@ function ScopedDepartmentChat({
         </label>
 
         <button
-          disabled={busy || historyBusy || !safe || (supportsSavedConversations && (!currentConversation || currentConversation.state !== 'active' || !capabilities?.model_id)) || (isWorkItemMode && !title.trim()) || (!isWorkItemMode && !artifactType)}
+          disabled={busy || historyBusy || !safe || (supportsSavedConversations && (!currentConversation || currentConversation.state !== 'active' || !modelConfigurationId)) || (isWorkItemMode && !title.trim()) || (!isWorkItemMode && !artifactType)}
           className={`${PRIMARY} w-full`}
         >
           {busy ? 'Generating safe preview…' : isWorkItemMode ? 'Preview draft work item' : 'Preview draft artifact'}
@@ -658,7 +681,7 @@ function ScopedDepartmentChat({
       </div>
       {supportsSavedConversations && <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-sm leading-6 text-slate-400">
         <p className="font-semibold text-white">Configured AI</p>
-        {capabilities ? <><p className="mt-2">OpenAI · <span className="text-slate-200">{capabilities.model_id}</span></p><p className="mt-1 text-xs text-slate-500">Administrator-approved default. Model switching is not enabled in this foundation.</p></> : <p className="mt-2">{historyBusy ? 'Checking configuration…' : 'Configuration unavailable.'}</p>}
+        {capabilities ? <><p className="mt-2">OpenAI · <span className="text-slate-200">{(capabilities.approved_models || []).find(model => model.configuration_id === modelConfigurationId)?.model_id || capabilities.model_id}</span></p><p className="mt-1 text-xs text-slate-500">Selection is limited to verified, administrator-approved configurations for this engagement.</p></> : <p className="mt-2">{historyBusy ? 'Checking configuration…' : 'Configuration unavailable.'}</p>}
         <p className="mt-3 text-xs text-amber-300">Private files: TXT/Markdown/DOCX validated text; PNG/JPEG reference-only. PDF, OCR, and vision input remain unavailable.</p>
       </div>}
       <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-sm leading-6 text-slate-400">
