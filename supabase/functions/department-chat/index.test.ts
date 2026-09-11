@@ -2,6 +2,7 @@ import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.1
 import {
   CHAT_MARKETING_ARTIFACT_TYPE_SET,
   attachmentContentDisposition,
+  sha256AttachmentBytes,
   ENABLED_DEPARTMENTS,
   confirmProposal,
   departmentChatExternalEndpoint,
@@ -27,6 +28,13 @@ Deno.test('CHAT-3 download disposition is ASCII-safe and preserves UTF-8 without
     'attachment; filename="quote_ slash_ line___ r_sum_.txt"; filename*=UTF-8\'\'quote%22%20slash%5C%20line%0D%0A%20r%C3%A9sum%C3%A9.txt',
   )
   assertEquals(attachmentContentDisposition(''), 'attachment; filename="attachment"; filename*=UTF-8\'\'')
+})
+
+Deno.test('CHAT-3 attachment hashing copies into an ArrayBuffer-backed WebCrypto input', async () => {
+  assertEquals(
+    await sha256AttachmentBytes(new TextEncoder().encode('abc')),
+    'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+  )
 })
 
 Deno.test('B02 Content proposal language follows explicit, approved-brand, organization, then require-selection precedence', () => {

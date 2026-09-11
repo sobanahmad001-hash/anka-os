@@ -113,8 +113,10 @@ function attachmentName(value: unknown) {
   return name
 }
 
-async function sha256Bytes(bytes: Uint8Array) {
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+export async function sha256AttachmentBytes(bytes: Uint8Array) {
+  const arrayBufferBacked = new Uint8Array(bytes.length)
+  arrayBufferBacked.set(bytes)
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', arrayBufferBacked.buffer))
   return [...digest].map(value => value.toString(16).padStart(2, '0')).join('')
 }
 
@@ -852,7 +854,7 @@ async function finalizeAttachment(admin: Client, body: Json, actorId: string, or
       throw Object.assign(new Error('Stored Content-Type does not match the reserved file type.'), { status: 422 })
     }
     const inspected = inspectDepartmentChatAttachment(bytes, claimedMime)
-    const digest = await sha256Bytes(bytes)
+    const digest = await sha256AttachmentBytes(bytes)
     const stored = await admin.storage.from(ATTACHMENT_BUCKET).upload(finalPath, bytes, {
       contentType: inspected.verifiedMime, cacheControl: '0', upsert: false,
     })
