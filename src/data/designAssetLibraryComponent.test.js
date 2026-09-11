@@ -85,10 +85,30 @@ function workspace(requestedAt) {
   }
 }
 
+function comparisonWorkspace(requestedAt) {
+  const data = workspace(requestedAt)
+  data.sessions.push({ id: 'session-b', output_goal: 'Campaign assets' }, { id: 'session-c', output_goal: 'Editorial assets' })
+  data.directions.push({ id: 'direction-b', session_id: 'session-b' }, { id: 'direction-c', session_id: 'session-c' })
+  data.directionVersions.push(
+    { id: 'version-b', direction_id: 'direction-b', version_number: 4, content: { title: 'Campaign output' } },
+    { id: 'version-c', direction_id: 'direction-c', version_number: 1, content: { title: 'Editorial output' } },
+  )
+  data.imageGenerationJobs.push(
+    { id: 'job-b', media_asset_id: 'asset-b', model_registry_id: 'model-a', status: 'succeeded' },
+    { id: 'job-c', media_asset_id: 'asset-c', model_registry_id: 'model-a', status: 'succeeded' },
+  )
+  Object.assign(data.mediaAssets[1], { design_direction_version_id: 'version-b', status: 'ready', signed_url: 'https://project.supabase.co/storage/v1/object/sign/design/b.png?token=signed-b' })
+  Object.assign(data.mediaAssets[0], { provider: 'openai', generated_by: 'user-a' })
+  Object.assign(data.mediaAssets[1], { provider: 'openai', generated_by: 'user-b' })
+  data.mediaAssets.push({ id: 'asset-c', design_direction_version_id: 'version-c', media_type: 'image', status: 'ready', signed_url: 'https://project.supabase.co/storage/v1/object/sign/design/c.png?token=signed-c', created_at: '2026-09-11T09:00:00.000Z' })
+  return data
+}
+
 test('asset library renders its read-only empty state, filters and keyboard controls', async t => {
   const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
   t.after(() => server.close())
   const { default: DesignAssetLibrary } = await server.ssrLoadModule('/src/components/DesignAssetLibrary.jsx')
+  const { default: DesignAssetComparison } = await server.ssrLoadModule('/src/components/DesignAssetComparison.jsx')
   const markup = renderToStaticMarkup(createElement(DesignAssetLibrary, {
     contextKey: 'engagement-a',
     workspace: { engagement: { id: 'engagement-a' }, mediaAssets: [], imageGenerationJobs: [], directionVersions: [], experimentalDirectionVersions: [], directions: [], sessions: [], models: [], variants: [], mediaUrlExpiresIn: 300 },
@@ -100,6 +120,9 @@ test('asset library renders its read-only empty state, filters and keyboard cont
   assert.match(markup, /All sources/)
   assert.match(markup, /Any date/)
   assert.match(markup, /aria-pressed="true"/)
+  const comparisonMarkup = renderToStaticMarkup(createElement(DesignAssetComparison, { rows: [], contextKey: 'engagement-a', accessOptions: {}, onClose: () => {}, onFocusSource: () => {} }))
+  assert.match(comparisonMarkup, /Two outputs are required/)
+  assert.match(comparisonMarkup, /does not establish asset version lineage/)
   assert.doesNotMatch(markup, /Upload asset|Approve asset|Archive asset|Generate image/)
 })
 
@@ -123,6 +146,9 @@ test('mounted library selects, filters, clears, focuses source, resets context a
 
   await act(async () => root.render(createElement(DesignAssetLibrary, props)))
   assert.equal(elements(environment.container, 'img').length, 1)
+  await act(async () => byText(environment.container, 'button', 'Compare two outputs').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.ok(byText(environment.container, 'h3', 'Compare two outputs'))
+  await act(async () => byText(environment.container, 'button', 'Close comparison').dispatchEvent(new TestEvent('click', { bubbles: true })))
   await act(async () => byText(environment.container, 'button', 'View detail').dispatchEvent(new TestEvent('click', { bubbles: true })))
   assert.ok(byText(environment.container, 'a', 'Open or save signed image'))
   await act(async () => byText(environment.container, 'button', 'Open source in Design desk').dispatchEvent(new TestEvent('click', { bubbles: true })))
@@ -153,4 +179,73 @@ test('mounted library selects, filters, clears, focuses source, resets context a
   await act(async () => byText(environment.container, 'button', 'View detail').dispatchEvent(new TestEvent('click', { bubbles: true })))
   assert.equal(byText(environment.container, 'a', 'Open or save signed image'), undefined)
   assert.match(environment.container.textContent, /signed image link is invalid/)
+})
+
+test('mounted library comparison selects, changes, clears, focuses, resets context and expires both outputs', async t => {
+  const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  t.after(() => server.close())
+  const { default: DesignAssetLibrary } = await server.ssrLoadModule('/src/components/DesignAssetLibrary.jsx')
+  const environment = mountedEnvironment()
+  const previous = { document: globalThis.document, window: globalThis.window, Event: globalThis.Event, Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT }
+  Object.assign(globalThis, { document: environment.document, window: environment.window, Event: TestEvent, Node: TestNode, HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true })
+  t.after(() => Object.assign(globalThis, { document: previous.document, window: previous.window, Event: previous.Event, Node: previous.Node, HTMLElement: previous.HTMLElement, IS_REACT_ACT_ENVIRONMENT: previous.act }))
+  const requestedAt = Date.parse('2026-09-11T12:00:00.000Z')
+  let clock = requestedAt + 294000
+  const originalNow = Date.now
+  Date.now = () => clock
+  t.after(() => { Date.now = originalNow })
+  const focused = []
+  const props = { workspace: comparisonWorkspace(requestedAt), contextKey: 'context-a', onClose: () => {}, onFocusSource: row => focused.push(row.id) }
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+
+  await act(async () => root.render(createElement(DesignAssetLibrary, props)))
+  await act(async () => byText(environment.container, 'button', 'Compare two outputs').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.match(environment.container.textContent, /Choose output A and output B/)
+  const outputSelect = label => elements(environment.container, 'select').find(select => select.getAttribute('aria-label') === label)
+  outputSelect('Output A').value = 'asset-a'
+  await act(async () => outputSelect('Output A').dispatchEvent(new TestEvent('change', { bubbles: true })))
+  outputSelect('Output B').value = 'asset-b'
+  await act(async () => outputSelect('Output B').dispatchEvent(new TestEvent('change', { bubbles: true })))
+  assert.equal(elements(environment.container, 'article').length, 2)
+  assert.equal(elements(environment.container, 'img').length, 5)
+  assert.match(environment.container.textContent, /v1 · version-a/)
+  assert.match(environment.container.textContent, /v4 · version-b/)
+  assert.match(environment.container.textContent, /Generated byuser-a/)
+  assert.match(environment.container.textContent, /Generated byuser-b/)
+  assert.match(environment.container.textContent, /Independent asset versionunknownUnavailable \/ not recordedUnavailable \/ not recorded/)
+  assert.match(environment.container.textContent, /does not establish asset version lineage/)
+  await act(async () => elements(environment.container, 'button').find(button => button.textContent === 'Open recorded source').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.deepEqual(focused, ['asset-a'])
+
+  outputSelect('Output A').value = 'asset-c'
+  await act(async () => outputSelect('Output A').dispatchEvent(new TestEvent('change', { bubbles: true })))
+  assert.match(environment.container.textContent, /Editorial output/)
+  const clearButtons = elements(environment.container, 'button').filter(button => button.textContent === 'Clear')
+  await act(async () => clearButtons[0].dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.match(environment.container.textContent, /Choose output A and output B/)
+
+  outputSelect('Output A').value = 'asset-a'
+  await act(async () => outputSelect('Output A').dispatchEvent(new TestEvent('change', { bubbles: true })))
+  await act(async () => byText(environment.container, 'button', 'Clear both outputs').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.equal(elements(environment.container, 'article').length, 0)
+  outputSelect('Output A').value = 'asset-a'
+  await act(async () => outputSelect('Output A').dispatchEvent(new TestEvent('change', { bubbles: true })))
+  outputSelect('Output B').value = 'asset-b'
+  await act(async () => outputSelect('Output B').dispatchEvent(new TestEvent('change', { bubbles: true })))
+  await act(async () => root.render(createElement(DesignAssetLibrary, { ...props, contextKey: 'context-b' })))
+  assert.match(environment.container.textContent, /Choose output A and output B/)
+  assert.equal(elements(environment.container, 'article').length, 0)
+  assert.equal(elements(environment.container, 'img').length, 3)
+
+  outputSelect('Output A').value = 'asset-a'
+  await act(async () => outputSelect('Output A').dispatchEvent(new TestEvent('change', { bubbles: true })))
+  outputSelect('Output B').value = 'asset-b'
+  await act(async () => outputSelect('Output B').dispatchEvent(new TestEvent('change', { bubbles: true })))
+  clock += 1001
+  await act(async () => environment.runTimers())
+  assert.equal(elements(environment.container, 'article').length, 2)
+  assert.equal(elements(environment.container, 'img').length, 0)
+  assert.equal(elements(environment.container, 'a').filter(link => link.textContent === 'Open or save signed image').length, 0)
+  assert.equal((environment.container.textContent.match(/signed image link has expired/g) || []).length, 2)
 })

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useReducer, useState } from 'react'
 import { buildDesignAssetRows, designAssetAccessState, designAssetLibraryReducer, designAssetSourceFocus, filterDesignAssetRows, initialDesignAssetLibraryState } from '../data/designAssetLibrary.js'
+import DesignAssetComparison from './DesignAssetComparison.jsx'
 
 const SELECT = 'rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 focus:border-violet-400 focus:outline-none'
 const SECONDARY = 'rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-200 hover:border-violet-400/50 focus:outline-none focus:ring-2 focus:ring-violet-400/50'
@@ -19,6 +20,7 @@ function exactId(value) {
 export default function DesignAssetLibrary({ workspace, contextKey, onClose, onFocusSource }) {
   const [state, dispatch] = useReducer(designAssetLibraryReducer, contextKey, initialDesignAssetLibraryState)
   const [clock, setClock] = useState(() => Date.now())
+  const [comparisonOpen, setComparisonOpen] = useState(false)
   const rows = useMemo(() => buildDesignAssetRows(workspace), [workspace])
   const issuedAt = Number(workspace.mediaUrlsRequestedAt)
   const effectiveNow = Math.max(clock, Date.now())
@@ -55,7 +57,9 @@ export default function DesignAssetLibrary({ workspace, contextKey, onClose, onF
       <div className="flex items-end gap-2"><button type="button" aria-pressed={state.view === 'grid'} onClick={() => dispatch({ type: 'set_view', view: 'grid' })} className={SECONDARY + (state.view === 'grid' ? ' bg-white text-slate-950' : '')}>Grid</button><button type="button" aria-pressed={state.view === 'list'} onClick={() => dispatch({ type: 'set_view', view: 'list' })} className={SECONDARY + (state.view === 'list' ? ' bg-white text-slate-950' : '')}>List</button></div>
     </div>
 
-    <div aria-live="polite" className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400"><span>{visible.length} of {rows.length} authorized asset{rows.length === 1 ? '' : 's'}</span>{visible.length !== rows.length && <button type="button" onClick={() => dispatch({ type: 'reset_filters' })} className="font-semibold text-violet-300">Clear filters</button>}</div>
+    <div aria-live="polite" className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400"><span>{visible.length} of {rows.length} authorized asset{rows.length === 1 ? '' : 's'}</span><span className="flex items-center gap-3">{visible.length !== rows.length && <button type="button" onClick={() => dispatch({ type: 'reset_filters' })} className="font-semibold text-violet-300">Clear filters</button>}<button type="button" aria-expanded={comparisonOpen} onClick={() => setComparisonOpen(value => !value)} className="font-semibold text-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-300/50">{comparisonOpen ? 'Hide output comparison' : 'Compare two outputs'}</button></span></div>
+
+    {comparisonOpen && <DesignAssetComparison rows={rows} contextKey={contextKey} accessOptions={accessOptions} onClose={() => setComparisonOpen(false)} onFocusSource={onFocusSource} />}
 
     {!rows.length ? <EmptyState title="No generated assets yet" text="Create outputs from an authorized Design direction first. This library does not start generation." />
       : !visible.length ? <EmptyState title="No assets match these filters" text="Clear or change the filters; the underlying authorized results are unchanged." />

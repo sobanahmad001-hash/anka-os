@@ -66,6 +66,7 @@ export function buildDesignAssetRows(workspace = {}) {
     return {
       id: clean(asset.id), mediaType: clean(asset.media_type) || 'unknown', status: clean(asset.status) || 'unknown',
       createdAt: clean(asset.created_at), prompt: clean(asset.prompt), previewUrl: clean(asset.signed_url),
+      provider: clean(asset.provider), generatedBy: clean(asset.generated_by),
       sourceType: variant ? 'variant' : job ? 'generated' : 'recorded', recordedVariantFormat: clean(variant?.variant_format),
       jobId: clean(job?.id), jobStatus: clean(job?.status), modelId, modelName: clean(model?.display_name),
       directionVersionId: clean(version?.id || asset.design_direction_version_id),

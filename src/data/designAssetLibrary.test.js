@@ -11,7 +11,7 @@ const workspace = () => ({
   variants: [{ id: 'variant-b', source_direction_version_id: 'version-a', design_media_asset_id: 'asset-b', variant_format: 'portrait_4x5' }],
   mediaAssets: [
     { id: 'asset-b', design_direction_version_id: 'version-a', media_type: 'image', status: 'failed', prompt: 'Variant', created_at: '2026-08-01T00:00:00.000Z' },
-    { id: 'asset-a', design_direction_version_id: 'version-a', media_type: 'image', status: 'ready', prompt: 'Hero', signed_url: 'https://project.supabase.co/storage/v1/object/sign/design/a.png?token=signed', created_at: '2026-09-11T11:00:00.000Z' },
+    { id: 'asset-a', design_direction_version_id: 'version-a', media_type: 'image', status: 'ready', prompt: 'Hero', provider: 'openai', generated_by: 'user-a', signed_url: 'https://project.supabase.co/storage/v1/object/sign/design/a.png?token=signed', created_at: '2026-09-11T11:00:00.000Z' },
   ],
 })
 
@@ -22,6 +22,8 @@ test('builds deterministic provenance only from already-loaded authorized worksp
   assert.equal(rows[0].modelName, 'Approved image model')
   assert.equal(rows[0].directionVersionId, 'version-a')
   assert.equal(rows[0].sessionId, 'session-a')
+  assert.equal(rows[0].provider, 'openai')
+  assert.equal(rows[0].generatedBy, 'user-a')
   assert.deepEqual(rows[0].recorded, { dimensions: null, mimeType: null, name: null, reviewState: null, independentVersion: null })
   assert.equal(rows[1].sourceType, 'variant')
   assert.equal(rows[1].recordedVariantFormat, 'portrait_4x5')
