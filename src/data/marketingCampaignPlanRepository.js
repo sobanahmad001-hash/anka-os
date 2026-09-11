@@ -3,9 +3,21 @@ import { validateCampaignPlanSnapshot } from './marketingCampaignPlan.js'
 
 async function dataOrThrow(query, signal) {
   if (signal && typeof query.abortSignal === 'function') query = query.abortSignal(signal)
-  const { data, error } = await query
-  if (error) throw new Error(error.message || 'Campaign plan query failed')
-  return data || []
+  const response = await query
+  if (response.error || Number(response.status) >= 400) throw campaignPlanError(response, 'Campaign plan query failed')
+  return response.data || []
+}
+
+function campaignPlanError(response, fallback) {
+  const error = response?.error
+  const status = response?.status ?? error?.status ?? error?.statusCode ?? error?.context?.status
+  const detail = response?.data?.error
+  return Object.assign(new Error(typeof detail === 'string' ? detail : error?.message || fallback), {
+    status: status == null ? undefined : Number(status),
+    cause: error,
+    code: error?.code,
+    response,
+  })
 }
 
 export function createMarketingCampaignPlanRepository(organizationId, { client = supabase, signal } = {}) {
@@ -31,12 +43,11 @@ export function createMarketingCampaignPlanRepository(organizationId, { client =
       )
     },
     async saveDraft(input) {
-      const { data, error } = await client.functions.invoke('marketing-studio', {
+      const response = await client.functions.invoke('marketing-studio', {
         body: { ...input, action: 'save_campaign_plan', organization_id: organizationId }, signal,
       })
-      if (error) throw new Error(error.message || 'Campaign plan save failed')
-      if (data?.error) throw new Error(data.error)
-      return data?.data
+      if (response.error || response.data?.error || Number(response.status) >= 400) throw campaignPlanError(response, 'Campaign plan save failed')
+      return response.data?.data
     },
   })
 }

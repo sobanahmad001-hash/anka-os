@@ -65,6 +65,12 @@ function elements(root, tagName) {
 const byText = (root, tagName, text) => elements(root, tagName).find(node => node.textContent.includes(text))
 const byLabel = (root, label) => ['input', 'textarea', 'select'].flatMap(tag => elements(root, tag)).find(node => node.getAttribute('aria-label') === label)
 const deferred = () => { let resolve; let reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
+function queryEnvelope(envelope) {
+  const query = {}
+  for (const method of ['select', 'eq', 'in', 'order', 'abortSignal']) query[method] = () => query
+  query.then = (resolve, reject) => Promise.resolve(envelope).then(resolve, reject)
+  return query
+}
 const emptySnapshot = () => ({
   versions: [], requirements: [],
   artifacts: [
@@ -79,9 +85,21 @@ const emptySnapshot = () => ({
 })
 
 async function mountedComponent(t) {
-  const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  const server = await createServer({
+    server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent',
+    define: {
+      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify('https://example.supabase.co'),
+      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify('test-anon-key'),
+    },
+  })
   t.after(() => server.close())
-  const { default: MarketingCampaignPlan } = await server.ssrLoadModule('/src/components/MarketingCampaignPlan.jsx')
+  const [
+    { default: MarketingCampaignPlan },
+    { createMarketingCampaignPlanRepository },
+  ] = await Promise.all([
+    server.ssrLoadModule('/src/components/MarketingCampaignPlan.jsx'),
+    server.ssrLoadModule('/src/data/marketingCampaignPlanRepository.js'),
+  ])
   const environment = mountedEnvironment()
   const previous = { document: globalThis.document, window: globalThis.window, Event: globalThis.Event, Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT }
   Object.assign(globalThis, { document: environment.document, window: environment.window, Event: TestEvent, Node: TestNode, HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true })
@@ -89,7 +107,7 @@ async function mountedComponent(t) {
   const { createRoot } = await import('react-dom/client')
   const root = createRoot(environment.container)
   t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
-  return { MarketingCampaignPlan, environment, root }
+  return { MarketingCampaignPlan, createMarketingCampaignPlanRepository, environment, root }
 }
 
 async function setValue(node, value) {
@@ -101,6 +119,61 @@ async function setValue(node, value) {
     node.dispatchEvent(new TestEvent('change', { bubbles: true }))
   })
 }
+
+test('envelope-only root-read 403 reaches access recovery with the original Supabase response', async t => {
+  const { MarketingCampaignPlan, createMarketingCampaignPlanRepository, environment, root } = await mountedComponent(t)
+  const originalError = { message: 'Plan read denied', code: '42501' }
+  const envelope = { data: null, error: originalError, status: 403 }
+  const repository = createMarketingCampaignPlanRepository('org-a', {
+    client: {
+      from: () => queryEnvelope(envelope),
+      functions: { invoke: async () => ({ data: null, error: null, status: 200 }) },
+    },
+  })
+  const accessErrors = []
+  await act(async () => root.render(createElement(MarketingCampaignPlan, {
+    organizationId: 'org-a',
+    engagement: { id: 'eng-a', name: 'Engagement A' },
+    campaign: { id: 'campaign-a', name: 'Campaign A', objective: 'Objective', planned_channels: ['Email'] },
+    repository,
+    canEdit: true,
+    onAccessError: error => accessErrors.push(error),
+  })))
+  assert.equal(accessErrors.length, 1)
+  assert.equal(accessErrors[0].status, 403)
+  assert.equal(accessErrors[0].cause, originalError)
+  assert.equal(accessErrors[0].code, '42501')
+  assert.equal(accessErrors[0].response, envelope)
+  assert.match(environment.container.textContent, /Plan read denied/)
+})
+
+test('envelope-only save 403 reaches access recovery with the original Supabase response', async t => {
+  const { MarketingCampaignPlan, createMarketingCampaignPlanRepository, environment, root } = await mountedComponent(t)
+  const originalError = { message: 'Plan save denied', code: '42501' }
+  const envelope = { data: null, error: originalError, status: 403 }
+  const repository = createMarketingCampaignPlanRepository('org-a', {
+    client: {
+      from: () => queryEnvelope({ data: [], error: null, status: 200 }),
+      functions: { invoke: async () => envelope },
+    },
+  })
+  const accessErrors = []
+  await act(async () => root.render(createElement(MarketingCampaignPlan, {
+    organizationId: 'org-a',
+    engagement: { id: 'eng-a', name: 'Engagement A' },
+    campaign: { id: 'campaign-a', name: 'Campaign A', objective: 'Objective', planned_channels: ['Email'] },
+    repository,
+    canEdit: true,
+    onAccessError: error => accessErrors.push(error),
+  })))
+  await act(async () => elements(environment.container, 'form')[0].dispatchEvent(new TestEvent('submit', { bubbles: true })))
+  assert.equal(accessErrors.length, 1)
+  assert.equal(accessErrors[0].status, 403)
+  assert.equal(accessErrors[0].cause, originalError)
+  assert.equal(accessErrors[0].code, '42501')
+  assert.equal(accessErrors[0].response, envelope)
+  assert.match(environment.container.textContent, /Plan save denied/)
+})
 
 test('mounted plan loads, selects exact sources, saves, reloads, and appends revision history', async t => {
   const { MarketingCampaignPlan, environment, root } = await mountedComponent(t)
@@ -189,10 +262,44 @@ test('mounted plan reports save errors and rejects stale completions after conte
   await act(async () => elements(environment.container, 'form')[0].dispatchEvent(new TestEvent('submit', { bubbles: true })))
   await act(async () => root.render(createElement(MarketingCampaignPlan, props('b'))))
   assert.match(environment.container.textContent, /Campaign b/i)
-  await act(async () => lateSave.resolve({ id: 'late-v1', version_number: 1 }))
+  await act(async () => lateSave.reject(Object.assign(new Error('Late plan denied'), { status: 403 })))
+  assert.deepEqual(accessErrors, ['Plan permission revoked'])
   assert.doesNotMatch(environment.container.textContent, /Saved unapproved plan version/)
   assert.match(environment.container.textContent, /Campaign b/i)
 })
+test('cancelled and late prior-context loads cannot recover access or overwrite the current campaign', async t => {
+  const { MarketingCampaignPlan, environment, root } = await mountedComponent(t)
+  const lateLoad = deferred()
+  const accessErrors = []
+  const repository = {
+    load: engagementId => {
+      if (engagementId === 'eng-a') return lateLoad.promise
+      if (engagementId === 'eng-c') return Promise.reject(Object.assign(new Error('Request cancelled'), { name: 'AbortError' }))
+      return Promise.resolve({ ...emptySnapshot(), artifacts: emptySnapshot().artifacts.map(item => ({ ...item, engagement_id: engagementId })) })
+    },
+    saveDraft: async () => null,
+  }
+  const props = campaign => ({
+    organizationId: 'org-a',
+    engagement: { id: `eng-${campaign}`, name: `Engagement ${campaign}` },
+    campaign: { id: `campaign-${campaign}`, name: `Campaign ${campaign}`, objective: 'Objective', planned_channels: ['Email'] },
+    repository,
+    canEdit: true,
+    onAccessError: error => accessErrors.push(error),
+  })
+  await act(async () => root.render(createElement(MarketingCampaignPlan, props('a'))))
+  await act(async () => root.render(createElement(MarketingCampaignPlan, props('b'))))
+  await act(async () => lateLoad.reject(Object.assign(new Error('Late access denied'), { status: 403 })))
+  assert.equal(accessErrors.length, 0)
+  assert.match(environment.container.textContent, /Campaign b/i)
+  assert.doesNotMatch(environment.container.textContent, /Late access denied/)
+
+  await act(async () => root.render(createElement(MarketingCampaignPlan, props('c'))))
+  assert.equal(accessErrors.length, 0)
+  assert.match(environment.container.textContent, /Campaign c/i)
+  assert.doesNotMatch(environment.container.textContent, /Request cancelled/)
+})
+
 
 test('mounted plan keeps read-only and stale-source states non-saveable', async t => {
   const { MarketingCampaignPlan, environment, root } = await mountedComponent(t)
