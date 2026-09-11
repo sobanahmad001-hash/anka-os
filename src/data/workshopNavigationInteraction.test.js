@@ -4,7 +4,7 @@ import { act, createElement, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { createServer } from 'vite'
-import DesignDeniedNavigation from '../components/DesignDeniedNavigation.js'
+import DesignDeniedState from '../components/DesignDeniedState.js'
 
 class TestEvent {
   constructor(type, options = {}) {
@@ -74,6 +74,19 @@ function elements(root, tagName) {
 
 function byText(root, tagName, text) {
   return elements(root, tagName).find(node => node.textContent.includes(text))
+}
+
+function surfaceEvidence(root) {
+  const evidence = []
+  function visit(node) {
+    if (node.nodeType === 3) evidence.push(node.data)
+    if (node.attributes) {
+      for (const [name, value] of node.attributes) evidence.push(`${name}=${value}`)
+    }
+    for (const child of node.childNodes || []) visit(child)
+  }
+  visit(root)
+  return evidence.join(' ')
 }
 
 function installEnvironment(t) {
@@ -150,23 +163,72 @@ test('mounted Workshop tabs use roving focus for keyboard, mouse, Tab, and navig
   assert.equal(tabs().filter(node => node.tabIndex === 0).length, 1)
 })
 
-test('mounted Design denial routes back with only the validated active organization', async t => {
+test('mounted Design denial hides every rejected context value and keeps both safe exits', async t => {
   const environment = installEnvironment(t)
-  const router = createMemoryRouter([{
-    path: '*',
-    element: createElement(DesignDeniedNavigation, { activeOrganizationId: 'org-allowed' }),
-  }], { initialEntries: ['/sphere/design/workshop?ctxOrg=org-rejected&ctxProject=project-secret&ctxEngagement=engagement-secret'] })
   const root = createRoot(environment.container)
   t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
 
-  await act(async () => root.render(createElement(RouterProvider, { router })))
+  const rejectedSentinels = [
+    'rejected-org-sentinel', 'rejected-client-sentinel', 'rejected-project-sentinel',
+    'rejected-engagement-sentinel', 'rejected-brand-sentinel', 'rejected-service-sentinel',
+    'rejected-stage-sentinel', 'rejected-origin-sentinel', 'rejected-origin-tab-sentinel',
+    'rejected-work-sentinel', 'rejected-output-sentinel', 'rejected-version-sentinel',
+    'rejected-draft-sentinel', 'rejected-tab-sentinel', 'rejected-reason-sentinel',
+  ]
+  const rejectedNavigation = {
+    status: 'parsed', reason: 'rejected-reason-sentinel',
+    organizationId: rejectedSentinels[0], clientId: rejectedSentinels[1], projectId: rejectedSentinels[2],
+    engagementId: rejectedSentinels[3], brandId: rejectedSentinels[4], activeServiceId: rejectedSentinels[5],
+    stageId: rejectedSentinels[6], origin: `/sphere/workspace/projects/${rejectedSentinels[7]}`,
+    originTab: rejectedSentinels[8], workRecord: { kind: 'project_task', id: rejectedSentinels[9] },
+    output: { kind: 'design_session', id: rejectedSentinels[10], versionId: rejectedSentinels[11] },
+    draft: { kind: 'private_experiment', id: rejectedSentinels[12] }, workshopTab: rejectedSentinels[13],
+  }
+  const validationCases = [
+    { status: 'denied', reason: 'access_denied', context: null },
+    { status: 'stale', reason: 'work_record_unavailable', context: null, rejected: true },
+    { status: 'error', reason: 'load_failed', context: null, error: new Error(rejectedSentinels[14]) },
+  ]
+
+  for (const [index, validation] of validationCases.entries()) {
+    const caseRouter = createMemoryRouter([{
+      path: '*',
+      element: createElement(DesignDeniedState, {
+        activeOrganizationId: 'active-org-sentinel', onChoose: () => {},
+        navigation: rejectedNavigation, validation,
+      }),
+    }], { initialEntries: [`/sphere/design/workshop?case=${index}`] })
+    await act(async () => root.render(createElement(RouterProvider, { router: caseRouter, key: index })))
+    const evidence = surfaceEvidence(environment.container)
+    for (const sentinel of rejectedSentinels) assert.ok(!evidence.includes(sentinel), `${sentinel} leaked for ${validation.status}`)
+    assert.ok(evidence.includes('active-org-sentinel'))
+    assert.match(environment.container.textContent, /No work has been opened/)
+  }
+
+  let chooseCount = 0
+  let router
+  router = createMemoryRouter([{
+    path: '*',
+    element: createElement(DesignDeniedState, {
+      activeOrganizationId: 'active-org-sentinel',
+      onChoose: () => { chooseCount += 1; router.navigate('/sphere/design/workshop') },
+      navigation: rejectedNavigation,
+      validation: validationCases[0],
+    }),
+  }], { initialEntries: ['/sphere/design/workshop?ctxOrg=rejected-org-sentinel&ctxProject=rejected-project-sentinel'] })
+
+  await act(async () => root.render(createElement(RouterProvider, { router, key: 'interactive' })))
   const back = byText(environment.container, 'a', 'Back to Design Workshop')
   assert.ok(back)
-  assert.equal(back.getAttribute('href'), '/sphere/design?ctxOrg=org-allowed')
+  assert.equal(back.getAttribute('href'), '/sphere/design?ctxOrg=active-org-sentinel')
   await act(async () => back.dispatchEvent(new TestEvent('click', { bubbles: true, button: 0 })))
   assert.equal(router.state.location.pathname, '/sphere/design')
-  assert.equal(router.state.location.search, '?ctxOrg=org-allowed')
-  assert.ok(!router.state.location.search.includes('project-secret'))
-  assert.ok(!router.state.location.search.includes('engagement-secret'))
-  assert.ok(!router.state.location.search.includes('org-rejected'))
+  assert.equal(router.state.location.search, '?ctxOrg=active-org-sentinel')
+
+  await act(async () => byText(environment.container, 'button', 'Choose permitted work').dispatchEvent(new TestEvent('click', { bubbles: true, button: 0 })))
+  assert.equal(chooseCount, 1)
+  assert.equal(router.state.location.pathname, '/sphere/design/workshop')
+  assert.equal(router.state.location.search, '')
+  const finalEvidence = surfaceEvidence(environment.container)
+  for (const sentinel of rejectedSentinels) assert.ok(!finalEvidence.includes(sentinel))
 })

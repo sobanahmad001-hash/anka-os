@@ -14,7 +14,7 @@ import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import ProductionHandoffPanel from '../components/ProductionHandoffPanel.jsx'
 import DesignCreativeBriefWorkspace from '../components/DesignCreativeBriefWorkspace.jsx'
 import DesignAssetLibrary from '../components/DesignAssetLibrary.jsx'
-import _DesignDeniedState from '../components/DesignDeniedState.jsx'
+import _DesignDeniedState from '../components/DesignDeniedState.js'
 import { creativeBriefVersionsForDirectionContext, validateCreativeBriefVersionSelection } from '../data/designCreativeBriefs.js'
 import { designAssetLibraryContextKey, designAssetSourceFocus } from '../data/designAssetLibrary.js'
 
@@ -161,10 +161,7 @@ export default function DesignWorkshop() {
   if (context.mode === 'choose') return <Shell parentPath={parentWorkshopPath}><ChooseWork engagements={selectableEngagements} filter={filter} setFilter={setFilter} onSelect={item => setSearchParams(designSelectionParams(navigationContext, item, activeOrganizationId))} onPrivate={() => setSearchParams(privateDesignParams(navigationContext, activeOrganizationId))} /></Shell>
   if (context.mode === 'private') return <Shell><PrivateDesk draft={navigationContext.draft} returnTarget={workspaceReturnTarget(navigationContext)} onChoose={() => setSearchParams({})} /></Shell>
   if (context.mode === 'denied') {
-    const rejected = navigationContext.organizationId && navigationContext.organizationId !== activeOrganizationId
-      ? validateWorkshopNavigation(navigationContext, { status: 'ready', activeOrganizationId, organizationId: activeOrganizationId })
-      : validateWorkshopNavigation(navigationContext, { status: 'denied' })
-    return <_DesignDeniedState navigation={navigationContext} validation={rejected} activeOrganizationId={activeOrganizationId} onChoose={() => setSearchParams({})} />
+    return <_DesignDeniedState activeOrganizationId={activeOrganizationId} onChoose={() => setSearchParams({})} />
   }
   if (!engagements.length && !error) return <Shell><Empty title="No Design engagement yet" text="Activate at least one Design service on an engagement before opening the Workshop." /></Shell>
   if (workspaceLoadState === 'loading' && !workspace) return <Shell><Empty title="Loading exact Design context" text="Resolving the selected work record, output, version, and draft." /></Shell>
