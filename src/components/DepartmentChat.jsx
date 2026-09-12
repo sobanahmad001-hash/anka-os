@@ -4,6 +4,7 @@ import { useOrganization } from '../context/OrganizationContext.jsx'
 import { createChatCompletionGuard, handleCurrentChatFailure, runCurrentChatOperation } from '../data/departmentChatIdentity.js'
 import { selectPendingDepartmentChatAttachments, validateDepartmentChatAttachmentFile } from '../data/departmentChatAttachmentSelection.js'
 import { selectDepartmentChatModelConfiguration } from '../data/departmentChatModelSelection.js'
+import { createAnswerObservationController, reduceAnswerStreamState } from '../data/departmentChatAnswerController.js'
 
 import { departmentChatProfile } from '../data/departmentChatProfiles.js'
 import { departmentChat } from '../data/departmentChatRepository.js'
@@ -20,7 +21,7 @@ export default function DepartmentChat(props) {
   return <ScopedDepartmentChat key={identity} {...props} userId={user.id} organizationId={activeOrganizationId} requestSignal={requestSignal} handleOrganizationAccessError={handleOrganizationAccessError} />
 }
 
-function ScopedDepartmentChat({
+export function ScopedDepartmentChat({
   departmentId,
   departmentLabel,
   engagement,
@@ -34,6 +35,7 @@ function ScopedDepartmentChat({
   handleOrganizationAccessError,
 }) {
   const completion = useRef(null)
+  const answerObservation = useRef(null)
   const requestScope = useMemo(
     () => ({ organizationId, signal: requestSignal }),
     [organizationId, requestSignal],
@@ -41,18 +43,24 @@ function ScopedDepartmentChat({
   useLayoutEffect(() => {
     const guard = createChatCompletionGuard(requestSignal)
     completion.current = guard
-    return () => guard.dispose()
+    return () => {
+      answerObservation.current?.dispose()
+      answerObservation.current = null
+      guard.dispose()
+    }
   }, [requestSignal])
   const profile = departmentChatProfile(departmentId)
   const resolvedDepartmentLabel = departmentLabel || profile.label
   const [artifactType, setArtifactType] = useState(profile.artifactTypes[0] || '')
-  const [proposalMode, setProposalMode] = useState('artifact')
+  const [proposalMode, setProposalMode] = useState(['content', 'design', 'marketing'].includes(departmentId) ? 'answer' : 'artifact')
   const [prompt, setPrompt] = useState('')
   const [safe, setSafe] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
   const [official, setOfficial] = useState(null)
+  const [answerState, setAnswerState] = useState({ status: 'idle', text: '', durable: false })
+  const [observationNotice, setObservationNotice] = useState('')
   const [title, setTitle] = useState('')
   const [workItemType, setWorkItemType] = useState('task')
   const [priority, setPriority] = useState('medium')
@@ -220,6 +228,8 @@ function ScopedDepartmentChat({
       setSelectedAttachmentIds([])
       setPendingFiles([])
       setResult(null)
+      setAnswerState({ status: 'idle', text: '', durable: false })
+      setObservationNotice('')
       setSharing({ can_manage: true, recipients: [] })
       setRecipientIds([])
       try {
@@ -246,6 +256,8 @@ function ScopedDepartmentChat({
     setHistoryBusy(true)
     setError('')
     setResult(null)
+    setAnswerState({ status: 'idle', text: '', durable: false })
+    setObservationNotice('')
     setSharing({ can_manage: false, recipients: [] })
     setShareCandidates([])
     setRecipientIds([])
@@ -397,61 +409,83 @@ function ScopedDepartmentChat({
     event.preventDefault()
     const isCurrent = completion.current.begin()
     if (!isCurrent()) return
+    const targetConversationId = conversationId
+    const clientRequestId = supportsSavedConversations ? crypto.randomUUID() : undefined
+    const common = {
+      conversation_id: supportsSavedConversations ? targetConversationId : undefined,
+      client_request_id: clientRequestId,
+      attachment_ids: supportsSavedConversations ? selectedAttachmentIds : undefined,
+      project_id: supportsSavedConversations ? projectId : undefined,
+      engagement_id: engagement.id,
+      model_configuration_id: modelConfigurationId,
+      prompt,
+      prompt_safe_for_ai: safe,
+    }
     setBusy(true)
     setError('')
+    setObservationNotice('')
     setResult(null)
     setOfficial(null)
+    setAnswerState({ status: 'idle', text: '', durable: false })
+    let observation = null
     try {
-      const proposed = proposalMode === 'artifact'
-        ? await departmentChat.proposeArtifact(departmentId, {
-          conversation_id: supportsSavedConversations ? conversationId : undefined,
-          client_request_id: supportsSavedConversations ? crypto.randomUUID() : undefined,
-          attachment_ids: supportsSavedConversations ? selectedAttachmentIds : undefined,
-          project_id: supportsSavedConversations ? projectId : undefined,
-          engagement_id: engagement.id,
-          model_configuration_id: modelConfigurationId,
-          artifact_id: (artifactForType(artifactType) || {}).id || null,
-          engagement_stage_instance_id: (stageForType(artifactType) || {}).id || null,
-          artifact_type: artifactType,
-          language,
-          title: (artifactForType(artifactType)?.title) || `${artifactDefinitions[artifactType]?.label || resolvedDepartmentLabel} artifact`,
-          prompt,
-          prompt_safe_for_ai: safe,
-          change_summary: 'Draft proposed via Shared Department Chat',
-        }, requestScope)
-        : await departmentChat.proposeWorkItem(departmentId, {
-          conversation_id: supportsSavedConversations ? conversationId : undefined,
-          client_request_id: supportsSavedConversations ? crypto.randomUUID() : undefined,
-          attachment_ids: supportsSavedConversations ? selectedAttachmentIds : undefined,
-          project_id: supportsSavedConversations ? projectId : undefined,
-          engagement_id: engagement.id,
-          model_configuration_id: modelConfigurationId,
-          title: title || `${artifactDefinitions[artifactType]?.label || 'Work item'} request`,
-          work_item_type: workItemType,
-          priority,
-          prompt,
-          prompt_safe_for_ai: safe,
-        }, requestScope)
+      if (proposalMode === 'answer') {
+        observation = createAnswerObservationController(requestSignal)
+        answerObservation.current = observation
+        await departmentChat.answer(departmentId, common, {
+          organizationId, signal: observation.signal,
+        }, {
+          onEvent: event => {
+            if (isCurrent()) setAnswerState(current => reduceAnswerStreamState(current, event))
+          },
+        })
+      } else {
+        const proposed = proposalMode === 'artifact'
+          ? await departmentChat.proposeArtifact(departmentId, {
+            ...common,
+            artifact_id: (artifactForType(artifactType) || {}).id || null,
+            engagement_stage_instance_id: (stageForType(artifactType) || {}).id || null,
+            artifact_type: artifactType,
+            language,
+            title: (artifactForType(artifactType)?.title) || `${artifactDefinitions[artifactType]?.label || resolvedDepartmentLabel} artifact`,
+            change_summary: 'Draft proposed via Shared Department Chat',
+          }, requestScope)
+          : await departmentChat.proposeWorkItem(departmentId, {
+            ...common,
+            title: title || `${artifactDefinitions[artifactType]?.label || 'Work item'} request`,
+            work_item_type: workItemType,
+            priority,
+          }, requestScope)
+        if (!isCurrent()) return
+        setResult({
+          ...proposed,
+          proposal_kind: proposalMode === 'artifact' ? 'artifact_version' : 'work_item',
+          target_key: proposalMode === 'artifact' ? artifactType : workItemType,
+        })
+      }
       if (!isCurrent()) return
-      setResult({
-        ...proposed,
-        proposal_kind: proposalMode === 'artifact' ? 'artifact_version' : 'work_item',
-        target_key: proposalMode === 'artifact' ? artifactType : workItemType,
-      })
       setPrompt('')
       setSafe(false)
       setSelectedAttachmentIds([])
-      if (supportsSavedConversations) await loadConversation(conversationId, isCurrent)
+      if (supportsSavedConversations) await loadConversation(targetConversationId, isCurrent)
     } catch (reason) {
-      handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message))
-      if (supportsSavedConversations && isCurrent()) {
-        try { await loadConversation(conversationId, isCurrent) } catch { /* Preserve the original request error. */ }
+      if (observation?.stoppedLocally()) {
+        if (isCurrent()) {
+          setObservationNotice('Stopped watching locally. The provider may still be running or incur cost; reload this conversation for its durable status. Do not submit the same request again.')
+          try { await loadConversation(targetConversationId, isCurrent) } catch { /* Keep the truthful local-stop notice. */ }
+        }
+      } else {
+        handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message))
+        if (supportsSavedConversations && isCurrent()) {
+          try { await loadConversation(targetConversationId, isCurrent) } catch { /* Preserve the original request error. */ }
+        }
       }
     } finally {
+      observation?.dispose()
+      if (answerObservation.current === observation) answerObservation.current = null
       if (isCurrent()) setBusy(false)
     }
   }
-
   async function decide(action, target = result) {
     if (!target?.proposal_id) return
     const isCurrent = completion.current.begin()
@@ -480,6 +514,7 @@ function ScopedDepartmentChat({
     }
   }
 
+  const isAnswerMode = proposalMode === 'answer'
   const isWorkItemMode = proposalMode === 'work_item'
   const requiresContentLanguage = departmentId === 'content' && ['discovery', 'vision', 'audience'].includes(artifactType)
   const currentConversation = conversations.find(item => item.id === conversationId) || null
@@ -520,10 +555,12 @@ function ScopedDepartmentChat({
     <form onSubmit={submit} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-400">Shared Department Chat · {departmentId}</p>
-        <h2 className="mt-2 text-2xl font-semibold text-white">Propose a structured artifact or work item</h2>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">The configured model prepares a preview using this engagement and approved AI-safe context. Review and confirm it to create an unapproved artifact version or a work item that has not started.</p>
+        <h2 className="mt-2 text-2xl font-semibold text-white">Ask, explore, or prepare a governed proposal</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Ordinary answers stay conversational and create no official record. Artifact and work-item modes remain explicit governed proposals requiring separate confirmation.</p>
       </div>
       {error && <div className="mt-5 rounded-xl border border-red-900/60 bg-red-950/40 p-3 text-sm text-red-300">{error}</div>}
+      {observationNotice && <div className="mt-5 rounded-xl border border-amber-900/60 bg-amber-950/30 p-3 text-sm text-amber-200">{observationNotice}</div>}
+      {answerState.text && <div className="mt-5 rounded-xl border border-sky-900/60 bg-sky-950/20 p-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-sky-300">{answerState.durable ? 'Saved answer' : 'Live partial · not yet durable'}</p><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-200">{answerState.text}</p></div>}
       {supportsSavedConversations && !projectId && <div className="mt-5 rounded-xl border border-amber-900/60 bg-amber-950/30 p-3 text-sm text-amber-200">Saved chat requires a canonical project-owned engagement.</div>}
       {supportsSavedConversations && currentConversation && <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
         <div className="flex flex-wrap items-end gap-3">
@@ -559,20 +596,23 @@ function ScopedDepartmentChat({
               setModelConfigurationId(event.target.value)
               setResult(null)
               setOfficial(null)
+              setAnswerState({ status: 'idle', text: '', durable: false })
+              setObservationNotice('')
             }}
           >
             {(capabilities.approved_models || []).map(model => <option key={model.configuration_id} value={model.configuration_id}>{model.display_name || model.model_id}{model.is_default ? ' · default' : ''}</option>)}
           </select>
           <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-slate-500">Only administrator-approved models verified through this engagement's connector are available. A revoked or stale choice is rejected before dispatch without fallback.</span>
         </label>}
-        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Proposal mode
-          <select className={`${INPUT} mt-2 normal-case tracking-normal`} value={proposalMode} onChange={event => setProposalMode(event.target.value)}>
+        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Task mode
+          <select disabled={busy || historyBusy} className={`${INPUT} mt-2 normal-case tracking-normal`} value={proposalMode} onChange={event => setProposalMode(event.target.value)}>
+            {supportsSavedConversations && <option value="answer">Conversational answer</option>}
             <option value="artifact">Artifact draft</option>
             <option value="work_item">Work item draft</option>
           </select>
         </label>
 
-        {isWorkItemMode ? (
+        {isAnswerMode ? null : isWorkItemMode ? (
           <>
             <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Work item title
               <input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={title} onChange={event => setTitle(event.target.value)} placeholder="Short title for the proposed work item" />
@@ -656,21 +696,22 @@ function ScopedDepartmentChat({
           <p className="mt-3 text-xs text-slate-500">Choose up to three files for this turn. Only checked files are linked to the request; rejected limits never truncate content. Revocation blocks later server reads and replies, but cannot recall copies someone already saved.</p>
         </section>}
 
-        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Draft request
-          <textarea required rows="10" className={`${INPUT} mt-2 normal-case tracking-normal`} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="Describe the draft you need, the evidence to prioritize, known constraints, tone, and gaps the team should keep visible." />
+        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{isAnswerMode ? 'Message' : 'Draft request'}
+          <textarea required rows="10" className={`${INPUT} mt-2 normal-case tracking-normal`} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={isAnswerMode ? 'Ask a question or explore the work context. This will not create an official output.' : 'Describe the draft you need, the evidence to prioritize, known constraints, tone, and gaps the team should keep visible.'} />
         </label>
 
         <label className="flex items-start gap-3 rounded-xl border border-amber-900/50 bg-amber-950/20 p-4 text-sm leading-6 text-amber-200">
           <input required type="checkbox" className="mt-1" checked={safe} onChange={event => setSafe(event.target.checked)} />
-          <span>I confirm this prompt and the validated text from explicitly selected files are safe to send to the engagement-mapped {resolvedDepartmentLabel} model. Restricted sources are never included.</span>
+          <span>I confirm this message and the validated text from explicitly selected files are safe to send to the engagement-mapped {resolvedDepartmentLabel} model. Restricted sources are never included.</span>
         </label>
 
         <button
-          disabled={busy || historyBusy || !safe || (supportsSavedConversations && (!currentConversation || currentConversation.state !== 'active' || !modelConfigurationId)) || (isWorkItemMode && !title.trim()) || (!isWorkItemMode && !artifactType)}
+          disabled={busy || historyBusy || !safe || (supportsSavedConversations && (!currentConversation || currentConversation.state !== 'active' || !modelConfigurationId)) || (isWorkItemMode && !title.trim()) || (!isAnswerMode && !isWorkItemMode && !artifactType)}
           className={`${PRIMARY} w-full`}
         >
-          {busy ? 'Generating safe preview…' : isWorkItemMode ? 'Preview draft work item' : 'Preview draft artifact'}
+          {busy ? (isAnswerMode ? 'Receiving genuine response…' : 'Generating safe preview…') : isAnswerMode ? 'Ask configured AI' : isWorkItemMode ? 'Preview draft work item' : 'Preview draft artifact'}
         </button>
+        {busy && isAnswerMode && <button type="button" onClick={() => answerObservation.current?.stop()} className="w-full rounded-xl border border-amber-700 px-4 py-2.5 text-sm font-semibold text-amber-200">Stop watching locally</button>}
       </div>
     </form>
     <aside className="space-y-4">
@@ -682,7 +723,7 @@ function ScopedDepartmentChat({
       {supportsSavedConversations && <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-sm leading-6 text-slate-400">
         <p className="font-semibold text-white">Configured AI</p>
         {capabilities ? <><p className="mt-2">OpenAI · <span className="text-slate-200">{(capabilities.approved_models || []).find(model => model.configuration_id === modelConfigurationId)?.model_id || capabilities.model_id}</span></p><p className="mt-1 text-xs text-slate-500">Selection is limited to verified, administrator-approved configurations for this engagement.</p></> : <p className="mt-2">{historyBusy ? 'Checking configuration…' : 'Configuration unavailable.'}</p>}
-        <p className="mt-3 text-xs text-amber-300">Private files: TXT/Markdown/DOCX validated text; PNG/JPEG reference-only. PDF, OCR, and vision input remain unavailable.</p>
+        <p className="mt-3 text-xs text-amber-300">Private files: TXT/Markdown/DOCX validated text; PNG/JPEG reference-only. PDF, OCR, and vision input remain unavailable.</p><p className="mt-2 text-xs text-slate-500">Answers use genuine provider SSE. “Stop watching” closes only this view; upstream cancellation and cost stopping are not verified.</p>
       </div>}
       <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-sm leading-6 text-slate-400">
         <p className="font-semibold text-white">Human control remains intact</p>
@@ -719,6 +760,7 @@ function ConversationHistory({ messages, userId, busy, onConfirm, onReject }) {
           <span className={message.status === 'failed' ? 'text-red-300' : ['pending', 'unknown'].includes(message.status) ? 'text-amber-300' : 'text-slate-500'}>{message.status}</span>
         </div>
         {message.role === 'user' && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-200">{message.body}</p>}
+        {message.role === 'assistant' && !proposal && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-200">{message.body}</p>}
         {message.role === 'user' && message.attachments?.length > 0 && <div className="mt-3 space-y-2">
           {message.attachments.map(source => <div key={source.attachment_id} className="rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2 text-xs text-slate-400">
             <span className="font-medium text-slate-200">{source.original_name}</span>

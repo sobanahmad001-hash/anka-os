@@ -158,3 +158,24 @@ test('recovery abort suppresses remaining state completion', () => {
   handleCurrentChatFailure(current, { status: 403 }, () => controller.abort(), () => { shown = true })
   assert.equal(shown, false)
 })
+test('ordinary answer transport carries exact context and consumes genuine SSE events', async () => {
+  const calls = []
+  const events = []
+  const stream = new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('data: {"type":"delta","delta":"Hi"}\n\n'))
+      controller.enqueue(new TextEncoder().encode('data: {"type":"completed","answer":"Hi","ai_run_id":"run"}\n\n'))
+      controller.close()
+    },
+  }), { headers: { 'Content-Type': 'text/event-stream' } })
+  const repo = createDepartmentChatRepository({
+    functions: { invoke: async (name, options) => { calls.push({ name, ...options }); return { data: stream, status: 200 } } },
+  })
+  const terminal = await repo.answer('content', {
+    organization_id: 'A', conversation_id: 'conversation-B', project_id: 'project-B', engagement_id: 'engagement-B',
+  }, { organizationId: 'B' }, { onEvent: event => events.push(event.type) })
+  assert.equal(calls[0].body.action, 'answer')
+  assert.equal(calls[0].body.organization_id, 'B')
+  assert.deepEqual(events, ['delta', 'completed'])
+  assert.equal(terminal.ai_run_id, 'run')
+})

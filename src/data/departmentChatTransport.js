@@ -1,3 +1,5 @@
+import { readDepartmentChatAnswerStream } from './departmentChatStreaming.js'
+
 function failure(error, envelope, detail) {
   const status = [error?.context?.status, envelope?.status, error?.status, error?.statusCode, detail?.status, detail?.statusCode]
     .map(Number).find(value => Number.isInteger(value) && value >= 400 && value <= 599)
@@ -17,7 +19,7 @@ export function createDepartmentChatRepository(client) {
       try { detail = await error?.context?.json() || data } catch { /* Preserve transport status for non-JSON errors. */ }
       throw failure(error, envelope, detail)
     }
-    return data instanceof Blob ? data : data?.data
+    return data instanceof Blob || data instanceof Response ? data : data?.data
   }
   async function uploadAttachment(departmentId, input, scope) {
     const { file, ...metadata } = input
@@ -59,6 +61,10 @@ export function createDepartmentChatRepository(client) {
       const envelope = await query.single()
       if (envelope.error || envelope.status >= 400) throw failure(envelope.error, envelope)
       return envelope.data
+    },
+    answer: async (departmentId, input, scope, observer = {}) => {
+      const stream = await invoke('answer', { ...input, department_id: departmentId }, scope)
+      return readDepartmentChatAnswerStream(stream, observer)
     },
     proposeArtifact: (departmentId, input, scope) => invoke('propose_artifact', { ...input, department_id: departmentId }, scope),
     proposeWorkItem: (departmentId, input, scope) => invoke('propose_work_item', { ...input, department_id: departmentId }, scope),
