@@ -157,6 +157,51 @@ function selectedOrganizationFixture() {
         const currentContributor = Boolean(organization && membership && engagement && project && service)
         return { data: Boolean(conversation && currentContributor && (conversation.owner_id === args.p_actor_id || shared)), error: null }
       }
+      if (name === 'search_department_chat_conversations') {
+        const organization = (rows.organizations || []).find(row => row.id === args.p_organization_id && row.status === 'active')
+        const membership = (rows.organization_memberships || []).find(row =>
+          row.organization_id === args.p_organization_id && row.user_id === args.p_actor_id
+          && row.member_kind === 'team' && row.status === 'active'
+          && (row.department_id === args.p_department_id
+            || ['system_owner', 'operations_admin', 'executive'].includes(row.role)))
+        const engagement = (rows.engagements || []).find(row =>
+          row.id === args.p_engagement_id && row.organization_id === args.p_organization_id
+          && row.project_id === args.p_project_id && row.status !== 'cancelled')
+        const project = (rows.projects || []).find(row =>
+          row.id === args.p_project_id && row.organization_id === args.p_organization_id && row.archived_at === null)
+        const service = (rows.engagement_services || []).find(row =>
+          row.organization_id === args.p_organization_id && row.engagement_id === args.p_engagement_id
+          && row.status === 'active' && row.service_catalog?.department_id === args.p_department_id)
+        if (!organization || !membership || !engagement || !project || !service) return { data: [], error: null }
+        const query = String(args.p_query || '').toLowerCase()
+        const result = (rows.department_chat_conversations || []).filter(conversation => {
+          if (conversation.organization_id !== args.p_organization_id || conversation.project_id !== args.p_project_id
+            || conversation.engagement_id !== args.p_engagement_id || conversation.department_id !== args.p_department_id) return false
+          if (!args.p_include_archived && conversation.state !== 'active') return false
+          const shared = (rows.department_chat_conversation_shares || []).some(row =>
+            row.conversation_id === conversation.id && row.organization_id === conversation.organization_id
+            && row.project_id === conversation.project_id && row.engagement_id === conversation.engagement_id
+            && row.department_id === conversation.department_id && row.owner_id === conversation.owner_id
+            && row.recipient_id === args.p_actor_id && row.revoked_at === null)
+          if (conversation.owner_id !== args.p_actor_id && !shared) return false
+          if (args.p_before_last_activity_at && !(conversation.last_activity_at < args.p_before_last_activity_at
+            || (conversation.last_activity_at === args.p_before_last_activity_at && conversation.id > args.p_before_id))) return false
+          if (!query) return true
+          return String(conversation.title).toLowerCase().includes(query)
+            || (rows.department_chat_messages || []).some(message =>
+              message.conversation_id === conversation.id && message.organization_id === conversation.organization_id
+              && String(message.body).toLowerCase().includes(query))
+        }).sort((left, right) => String(right.last_activity_at).localeCompare(String(left.last_activity_at))
+          || String(left.id).localeCompare(String(right.id))).slice(0, args.p_limit).map(conversation => ({
+            ...conversation,
+            access_role: conversation.owner_id === args.p_actor_id ? 'owner' : 'recipient',
+            has_pending_run: (rows.department_chat_messages || []).some(message =>
+              message.conversation_id === conversation.id && message.status === 'pending'),
+            has_failed_run: (rows.department_chat_messages || []).some(message =>
+              message.conversation_id === conversation.id && ['failed', 'unknown'].includes(message.status)),
+          }))
+        return { data: result, error: null }
+      }
       return { data: name === 'begin_department_chat_turn_with_attachments' ? {
           message: { id: 'message-B', status: 'pending' }, replayed: beginReplay,
         }
@@ -311,6 +356,117 @@ Deno.test('saved conversations list and open only the current actor exact B work
   const expiry = fixture.rpcCalls.find(call => call.name === 'expire_department_chat_pending_turns')!
   assertEquals(expiry.args.p_conversation_id, 'conversation-B')
   assertEquals(expiry.args.p_organization_id, 'B')
+})
+
+Deno.test('conversation search returns only current permitted matches with bounded stable cursors and no text leak', async () => {
+  const fixture = selectedOrganizationFixture()
+  fixture.rows.organization_memberships.find(row => row.organization_id === 'B').department_id = 'content'
+  fixture.rows.engagement_services.find(row => row.organization_id === 'B').service_catalog.department_id = 'content'
+  const base = fixture.rows.department_chat_conversations.find(row => row.organization_id === 'B')
+  Object.assign(base, { id: 'conversation-a', department_id: 'content', title: 'Owner planning', last_activity_at: '2026-09-12T03:00:00Z' })
+  fixture.rows.department_chat_conversations.push(
+    { ...base, id: 'conversation-b', owner_id: 'creator', title: 'Shared planning', last_activity_at: '2026-09-12T02:00:00Z' },
+    { ...base, id: 'conversation-c', owner_id: 'other', title: 'Private planning', last_activity_at: '2026-09-12T01:00:00Z' },
+    { ...base, id: 'conversation-d', owner_id: 'revoker', title: 'Revoked planning', last_activity_at: '2026-09-12T00:00:00Z' },
+  )
+  fixture.rows.department_chat_conversation_shares = [
+    { organization_id: 'B', project_id: 'project-B', engagement_id: 'engagement-B', department_id: 'content', conversation_id: 'conversation-b', owner_id: 'creator', recipient_id: 'actor', revoked_at: null },
+    { organization_id: 'B', project_id: 'project-B', engagement_id: 'engagement-B', department_id: 'content', conversation_id: 'conversation-d', owner_id: 'revoker', recipient_id: 'actor', revoked_at: '2026-09-12T04:00:00Z' },
+  ]
+  fixture.rows.department_chat_messages = [
+    { organization_id: 'B', conversation_id: 'conversation-a', body: 'needle owner body', status: 'pending' },
+    { organization_id: 'B', conversation_id: 'conversation-b', body: 'needle shared body', status: 'failed' },
+    { organization_id: 'B', conversation_id: 'conversation-c', body: 'needle private body', status: 'completed' },
+    { organization_id: 'B', conversation_id: 'conversation-d', body: 'needle revoked body', status: 'completed' },
+  ]
+  const scope = { organization_id: 'B', project_id: 'project-B', engagement_id: 'engagement-B', department_id: 'content' }
+  const first = await fixture.request({ action: 'search_conversations', ...scope, query: 'needle', limit: 1 })
+  assertEquals(first.status, 200)
+  const firstBody = await first.json()
+  assertEquals(firstBody.data.items.map((item: any) => item.id), ['conversation-a'])
+  assertEquals(firstBody.data.items[0].has_pending_run, true)
+  assertEquals(firstBody.data.next_cursor, { last_activity_at: '2026-09-12T03:00:00Z', id: 'conversation-a' })
+  assertEquals(JSON.stringify(firstBody).includes('needle owner body'), false)
+  assertEquals(JSON.stringify(firstBody).includes('conversation-c'), false)
+  assertEquals(JSON.stringify(firstBody).includes('conversation-d'), false)
+
+  const second = await fixture.request({
+    action: 'search_conversations', ...scope, query: 'needle', limit: 1,
+    before_last_activity_at: firstBody.data.next_cursor.last_activity_at,
+    before_id: firstBody.data.next_cursor.id,
+  })
+  const secondBody = await second.json()
+  assertEquals(secondBody.data.items.map((item: any) => item.id), ['conversation-b'])
+  assertEquals(secondBody.data.items[0].has_failed_run, true)
+  assertEquals(secondBody.data.next_cursor, null)
+  const rpc = fixture.rpcCalls.find(call => call.name === 'search_department_chat_conversations')!
+  assertEquals(rpc.args.p_limit, 2)
+  assertEquals(rpc.args.p_actor_id, 'actor')
+})
+
+Deno.test('conversation search reveals no matches after current contributor access is removed', async () => {
+  const fixture = selectedOrganizationFixture()
+  const membership = fixture.rows.organization_memberships.find(row => row.organization_id === 'B')
+  membership.department_id = 'content'
+  membership.status = 'suspended'
+  fixture.rows.engagement_services.find(row => row.organization_id === 'B').service_catalog.department_id = 'content'
+  Object.assign(fixture.rows.department_chat_conversations.find(row => row.organization_id === 'B'), {
+    department_id: 'content', title: 'Secret needle',
+  })
+  const response = await fixture.request({
+    action: 'search_conversations', organization_id: 'B', project_id: 'project-B',
+    engagement_id: 'engagement-B', department_id: 'content', query: 'needle',
+  })
+  assertEquals(response.status, 403)
+  assertEquals(JSON.stringify(await response.json()).includes('Secret needle'), false)
+})
+
+Deno.test('conversation search rejects unbounded text, pages, and incomplete cursors before its RPC', async () => {
+  for (const invalid of [
+    { query: 'x'.repeat(161) },
+    { query: 'planning', limit: 26 },
+    { query: 'planning', before_id: 'conversation-a' },
+    { query: 'planning', before_last_activity_at: 'not-a-time', before_id: 'conversation-a' },
+  ]) {
+    const fixture = selectedOrganizationFixture()
+    fixture.rows.organization_memberships.find(row => row.organization_id === 'B').department_id = 'content'
+    fixture.rows.engagement_services.find(row => row.organization_id === 'B').service_catalog.department_id = 'content'
+    Object.assign(fixture.rows.department_chat_conversations.find(row => row.organization_id === 'B'), { department_id: 'content' })
+    const response = await fixture.request({
+      action: 'search_conversations', organization_id: 'B', project_id: 'project-B',
+      engagement_id: 'engagement-B', department_id: 'content', ...invalid,
+    })
+    assertEquals(response.status, 400)
+    assertEquals(fixture.rpcCalls.some(call => call.name === 'search_department_chat_conversations'), false)
+    assertEquals(fixture.providerCalls(), 0)
+  }
+})
+
+Deno.test('conversation transcript returns only persisted timestamp and authorized run metadata', async () => {
+  const fixture = selectedOrganizationFixture()
+  fixture.rows.organization_memberships.find(row => row.organization_id === 'B').department_id = 'content'
+  fixture.rows.engagement_services.find(row => row.organization_id === 'B').service_catalog.department_id = 'content'
+  Object.assign(fixture.rows.department_chat_conversations.find(row => row.organization_id === 'B'), { department_id: 'content' })
+  fixture.rows.department_chat_messages = [{
+    id: 'message-B', organization_id: 'B', conversation_id: 'conversation-B', author_id: 'actor',
+    role: 'user', body: 'Recorded request', status: 'completed', error_code: '', ai_run_id: 'run-B',
+    proposal_id: null, client_request_id: 'request-B', sequence: 1,
+    created_at: '2026-09-12T01:02:03Z', finished_at: '2026-09-12T01:02:04Z',
+  }]
+  fixture.rows.ai_runs = [{
+    id: 'run-B', organization_id: 'B', provider: 'openai', model: 'recorded-model',
+    capability: 'department_chat_answer', status: 'completed',
+    department_chat_model_configuration_id: 'configuration-B', created_at: '2026-09-12T01:02:03Z',
+  }]
+  const response = await fixture.request({
+    action: 'get_conversation', organization_id: 'B', project_id: 'project-B',
+    engagement_id: 'engagement-B', department_id: 'content', conversation_id: 'conversation-B',
+  })
+  assertEquals(response.status, 200)
+  const message = (await response.json()).data.messages[0]
+  assertEquals(message.created_at, '2026-09-12T01:02:03Z')
+  assertEquals(message.run, fixture.rows.ai_runs[0])
+  assertEquals(JSON.stringify(message).includes('fabricated'), false)
 })
 
 Deno.test('a suspended owner cannot open or reply through the service-role access boundary', async () => {

@@ -45,13 +45,14 @@ test('saved conversation actions keep exact caller context and cannot override s
   })
   const input = { organization_id: 'A', project_id: 'project-B', engagement_id: 'engagement-B' }
   await repo.listConversations('content', input, scope)
+  await repo.searchConversations('content', { ...input, query: 'planning', limit: 25 }, scope)
   await repo.createConversation('content', { ...input, title: 'Private thread' }, scope)
   await repo.getConversation('content', { ...input, conversation_id: 'conversation-B' }, scope)
   await repo.renameConversation('content', { ...input, conversation_id: 'conversation-B', title: 'Renamed' }, scope)
   await repo.setConversationState('content', { ...input, conversation_id: 'conversation-B', state: 'archived' }, scope)
   await repo.getCapabilities('content', input, scope)
   assert.deepEqual(calls.map(call => call.body.action), [
-    'list_conversations', 'create_conversation', 'get_conversation',
+    'list_conversations', 'search_conversations', 'create_conversation', 'get_conversation',
     'rename_conversation', 'set_conversation_state', 'get_capabilities',
   ])
   for (const call of calls) {
@@ -61,6 +62,8 @@ test('saved conversation actions keep exact caller context and cannot override s
     assert.equal(call.body.engagement_id, 'engagement-B')
     assert.equal(call.signal, controller.signal)
   }
+  assert.equal(calls[1].body.query, 'planning')
+  assert.equal(calls[1].body.limit, 25)
 })
 
 test('official read narrows to selected organization and forwards cancellation', async () => {

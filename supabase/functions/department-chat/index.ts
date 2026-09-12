@@ -706,6 +706,54 @@ async function listConversations(
       || String(left.id).localeCompare(String(right.id)))
 }
 
+async function searchConversations(
+  admin: Client,
+  body: Json,
+  actorId: string,
+  organizationId: string,
+  dependencies: ProposalDependencies,
+) {
+  const scope = await validateConversationEngagement(admin, body, organizationId, dependencies)
+  const rawQuery = typeof body.query === 'string' ? body.query.trim() : ''
+  if (rawQuery.length > 160) {
+    throw Object.assign(new Error('Conversation search text is too long'), { status: 400 })
+  }
+  const pageSize = body.limit === undefined ? 25 : Number(body.limit)
+  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 25) {
+    throw Object.assign(new Error('Conversation search page size must be between 1 and 25'), { status: 400 })
+  }
+  const beforeLastActivityAt = text(body.before_last_activity_at, 80) || null
+  const beforeId = text(body.before_id, 80) || null
+  if (Boolean(beforeLastActivityAt) !== Boolean(beforeId)) {
+    throw Object.assign(new Error('Conversation search cursor is incomplete'), { status: 400 })
+  }
+  if (beforeLastActivityAt && Number.isNaN(Date.parse(beforeLastActivityAt))) {
+    throw Object.assign(new Error('Conversation search cursor is invalid'), { status: 400 })
+  }
+  const { data, error } = await admin.rpc('search_department_chat_conversations', {
+    p_organization_id: organizationId,
+    p_project_id: scope.projectId,
+    p_engagement_id: scope.engagementId,
+    p_department_id: scope.departmentId,
+    p_actor_id: actorId,
+    p_query: rawQuery || null,
+    p_include_archived: body.include_archived === true,
+    p_limit: pageSize + 1,
+    p_before_last_activity_at: beforeLastActivityAt,
+    p_before_id: beforeId,
+  })
+  if (error) throw error
+  const rows = data || []
+  const items = rows.slice(0, pageSize)
+  const last = items.at(-1)
+  return {
+    items,
+    next_cursor: rows.length > pageSize && last
+      ? { last_activity_at: last.last_activity_at, id: last.id }
+      : null,
+  }
+}
+
 async function createConversation(
   admin: Client,
   body: Json,
@@ -782,6 +830,16 @@ async function getConversation(admin: Client, body: Json, actorId: string, organ
     proposals = result.data || []
   }
   const byId = new Map(proposals.map(proposal => [proposal.id, proposal]))
+  const aiRunIds = [...new Set((messages || []).map(message => text(message.ai_run_id, 80)).filter(Boolean))]
+  let aiRuns: Json[] = []
+  if (aiRunIds.length) {
+    const result = await admin.from('ai_runs')
+      .select('id, provider, model, capability, status, department_chat_model_configuration_id, created_at')
+      .eq('organization_id', organizationId).in('id', aiRunIds)
+    if (result.error) throw result.error
+    aiRuns = result.data || []
+  }
+  const aiRunById = new Map(aiRuns.map(run => [run.id, run]))
   const authorIds = [...new Set((messages || []).map(message => text(message.author_id, 80)).filter(Boolean))]
   let authors: Json[] = []
   if (authorIds.length) {
@@ -820,6 +878,7 @@ async function getConversation(admin: Client, body: Json, actorId: string, organ
       ...message,
       author: message.author_id ? authorById.get(message.author_id) || null : null,
       proposal: message.proposal_id ? byId.get(message.proposal_id) || null : null,
+      run: message.ai_run_id ? aiRunById.get(message.ai_run_id) || null : null,
       attachments: attachmentsByMessage.get(String(message.id)) || [],
     })),
   }
@@ -1695,6 +1754,9 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
     }
     if (action === 'list_conversations') {
       return response({ data: await listConversations(admin, body, user.id, organizationId, dependencies.proposal || {}) })
+    }
+    if (action === 'search_conversations') {
+      return response({ data: await searchConversations(admin, body, user.id, organizationId, dependencies.proposal || {}) })
     }
     if (action === 'create_conversation') {
       return response({ data: await createConversation(admin, body, user.id, organizationId, dependencies.proposal || {}) })

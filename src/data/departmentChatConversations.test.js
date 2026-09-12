@@ -88,7 +88,7 @@ test('P9 linked runs and proposals enforce full existing owner and work context'
 
 test('P9 endpoint and reusable shell expose saved lifecycle and truthful capability boundaries', () => {
   for (const action of [
-    'list_conversations', 'create_conversation', 'get_conversation',
+    'list_conversations', 'search_conversations', 'create_conversation', 'get_conversation',
     'rename_conversation', 'set_conversation_state', 'get_capabilities',
   ]) {
     assert.ok(edge.includes(action), action)
@@ -102,7 +102,7 @@ test('P9 endpoint and reusable shell expose saved lifecycle and truthful capabil
     assert.ok(chat.includes(label), label)
   }
   for (const method of [
-    'listConversations', 'createConversation', 'getConversation',
+    'listConversations', 'searchConversations', 'createConversation', 'getConversation',
     'renameConversation', 'setConversationState', 'getCapabilities', 'uploadAttachment', 'listAttachments',
   ]) assert.ok(transport.includes(method), method)
 })
