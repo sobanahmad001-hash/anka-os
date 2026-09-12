@@ -73,6 +73,9 @@ export function ScopedDepartmentChat({
   const [capabilities, setCapabilities] = useState(null)
   const [modelConfigurationId, setModelConfigurationId] = useState('')
   const [includeArchived, setIncludeArchived] = useState(false)
+  const [conversationSearchDraft, setConversationSearchDraft] = useState('')
+  const [conversationSearchQuery, setConversationSearchQuery] = useState('')
+  const [nextConversationCursor, setNextConversationCursor] = useState(null)
   const [conversationTitle, setConversationTitle] = useState('')
   const [historyBusy, setHistoryBusy] = useState(false)
   const [sharing, setSharing] = useState({ can_manage: false, recipients: [] })
@@ -101,16 +104,33 @@ export function ScopedDepartmentChat({
     return rows || []
   }
 
-  async function loadConversationList(selectId = conversationId, archived = includeArchived, isCurrent = () => true) {
+  async function loadConversationList(selectId = conversationId, archived = includeArchived, isCurrent = () => true, query = conversationSearchQuery) {
     if (!supportsSavedConversations || !projectId) return
-    const rows = await departmentChat.listConversations(departmentId, {
+    const page = await departmentChat.searchConversations(departmentId, {
       engagement_id: engagement.id,
       project_id: projectId,
       include_archived: archived,
+      query,
+      limit: 25,
     }, requestScope)
     if (!isCurrent()) return null
+    const rows = page.items || []
     setConversations(rows)
+    setNextConversationCursor(page.next_cursor || null)
     const selected = rows.find(item => item.id === selectId) || rows[0] || null
+    if ((selected?.id || '') !== conversationId) {
+      setResult(null)
+      setOfficial(null)
+      setAnswerState({ status: 'idle', text: '', durable: false })
+      setObservationNotice('')
+      setMessages([])
+      setAttachments([])
+      setSelectedAttachmentIds([])
+      setSharing({ can_manage: false, recipients: [] })
+      setShareCandidates([])
+      setRecipientIds([])
+      setPendingFiles([])
+    }
     setConversationId(selected?.id || '')
     setConversationTitle(selected?.title || '')
     return selected
@@ -119,6 +139,12 @@ export function ScopedDepartmentChat({
   async function loadConversation(id = conversationId, isCurrent = () => true) {
     if (!id || !projectId) {
       setMessages([])
+      setAttachments([])
+      setSelectedAttachmentIds([])
+      setSharing({ can_manage: false, recipients: [] })
+      setShareCandidates([])
+      setRecipientIds([])
+      setConversationTitle('')
       return
     }
     const data = await departmentChat.getConversation(departmentId, {
@@ -155,10 +181,12 @@ export function ScopedDepartmentChat({
     setHistoryBusy(true)
     setError('')
     Promise.allSettled([
-      departmentChat.listConversations(departmentId, {
+      departmentChat.searchConversations(departmentId, {
         engagement_id: engagement.id,
         project_id: projectId,
         include_archived: false,
+        query: '',
+        limit: 25,
       }, requestScope),
       departmentChat.getCapabilities(departmentId, {
         engagement_id: engagement.id,
@@ -167,8 +195,9 @@ export function ScopedDepartmentChat({
     ]).then(async ([conversationResult, capabilityResult]) => {
       if (!isCurrent()) return
       if (conversationResult.status === 'rejected') throw conversationResult.reason
-      const rows = conversationResult.value
+      const rows = conversationResult.value.items || []
       setConversations(rows)
+      setNextConversationCursor(conversationResult.value.next_cursor || null)
       setCapabilities(capabilityResult.status === 'fulfilled' ? capabilityResult.value : null)
       if (capabilityResult.status === 'rejected') setError(capabilityResult.reason?.message || 'Configured AI is unavailable.')
       const selected = rows[0] || null
@@ -221,6 +250,9 @@ export function ScopedDepartmentChat({
       }, requestScope)
       if (!isCurrent()) return
       setConversations(current => [created, ...current])
+      setConversationSearchDraft('')
+      setConversationSearchQuery('')
+      setNextConversationCursor(null)
       setConversationId(created.id)
       setConversationTitle(created.title)
       setMessages([])
@@ -232,6 +264,18 @@ export function ScopedDepartmentChat({
       setObservationNotice('')
       setSharing({ can_manage: true, recipients: [] })
       setRecipientIds([])
+      try {
+        const page = await departmentChat.searchConversations(departmentId, {
+          engagement_id: engagement.id, project_id: projectId,
+          include_archived: includeArchived, query: '', limit: 25,
+        }, requestScope)
+        if (isCurrent()) {
+          setConversations(page.items || [created])
+          setNextConversationCursor(page.next_cursor || null)
+        }
+      } catch {
+        if (isCurrent()) setError('Conversation created, but the conversation list could not be refreshed.')
+      }
       try {
         const candidates = await departmentChat.listConversationShareCandidates(departmentId, {
           conversation_id: created.id,
@@ -253,11 +297,14 @@ export function ScopedDepartmentChat({
     const isCurrent = completion.current.begin()
     if (!isCurrent()) return
     setConversationId(id)
+    setConversationTitle(conversations.find(item => item.id === id)?.title || '')
     setHistoryBusy(true)
     setError('')
     setResult(null)
+    setOfficial(null)
     setAnswerState({ status: 'idle', text: '', durable: false })
     setObservationNotice('')
+    setMessages([])
     setSharing({ can_manage: false, recipients: [] })
     setShareCandidates([])
     setRecipientIds([])
@@ -345,6 +392,62 @@ export function ScopedDepartmentChat({
       start: () => { setIncludeArchived(checked); setHistoryBusy(true); setError('') },
       operation: isCurrent => loadConversationList(targetConversationId, checked, isCurrent),
       success: async (selected, isCurrent) => loadConversation(selected?.id || '', isCurrent),
+      failure: (reason, isCurrent) => handleCurrentChatFailure(
+        isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message),
+      ),
+      settle: () => setHistoryBusy(false),
+    })
+  }
+
+  async function searchSavedConversations(event) {
+    event.preventDefault()
+    const query = conversationSearchDraft.trim()
+    return runCurrentChatOperation(completion.current, {
+      start: () => { setHistoryBusy(true); setError('') },
+      operation: isCurrent => loadConversationList(conversationId, includeArchived, isCurrent, query),
+      success: async (selected, isCurrent) => { setConversationSearchQuery(query); await loadConversation(selected?.id || '', isCurrent) },
+      failure: (reason, isCurrent) => handleCurrentChatFailure(
+        isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message),
+      ),
+      settle: () => setHistoryBusy(false),
+    })
+  }
+
+  async function clearConversationSearch() {
+    setConversationSearchDraft('')
+    return runCurrentChatOperation(completion.current, {
+      start: () => { setHistoryBusy(true); setError('') },
+      operation: isCurrent => loadConversationList(conversationId, includeArchived, isCurrent, ''),
+      success: async (selected, isCurrent) => { setConversationSearchQuery(''); await loadConversation(selected?.id || '', isCurrent) },
+      failure: (reason, isCurrent) => handleCurrentChatFailure(
+        isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message),
+      ),
+      settle: () => setHistoryBusy(false),
+    })
+  }
+
+  async function loadMoreConversations() {
+    if (!nextConversationCursor) return
+    const cursor = nextConversationCursor
+    return runCurrentChatOperation(completion.current, {
+      start: () => { setHistoryBusy(true); setError('') },
+      operation: () => departmentChat.searchConversations(departmentId, {
+        engagement_id: engagement.id,
+        project_id: projectId,
+        include_archived: includeArchived,
+        query: conversationSearchQuery,
+        limit: 25,
+        before_last_activity_at: cursor.last_activity_at,
+        before_id: cursor.id,
+      }, requestScope),
+      success: page => {
+        setConversations(current => {
+          const merged = new Map(current.map(item => [item.id, item]))
+          for (const item of page.items || []) merged.set(item.id, item)
+          return [...merged.values()]
+        })
+        setNextConversationCursor(page.next_cursor || null)
+      },
       failure: (reason, isCurrent) => handleCurrentChatFailure(
         isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message),
       ),
@@ -543,13 +646,27 @@ export function ScopedDepartmentChat({
         <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Conversations</p><p className="mt-1 text-xs text-emerald-300">Private to you or deliberately shared</p></div>
         <button type="button" disabled={busy || historyBusy || !projectId} onClick={createConversation} className="rounded-lg bg-sky-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">New</button>
       </div>
+      <form className="mt-4 space-y-2" role="search" onSubmit={searchSavedConversations}>
+        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Search permitted conversations
+          <input type="search" maxLength="160" value={conversationSearchDraft} disabled={busy || historyBusy} onInput={event => setConversationSearchDraft(event.currentTarget.value)} placeholder="Titles and messages" className={`${INPUT} mt-2 normal-case tracking-normal`} />
+        </label>
+        <div className="flex gap-2">
+          <button type="submit" disabled={busy || historyBusy} className="rounded-lg border border-sky-800 px-3 py-2 text-xs font-semibold text-sky-200 disabled:opacity-50">Search</button>
+          {conversationSearchQuery && <button type="button" disabled={busy || historyBusy} onClick={() => clearConversationSearch().catch(reason => setError(reason.message))} className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 disabled:opacity-50">Clear</button>}
+        </div>
+      </form>
       <label className="mt-4 flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={includeArchived} disabled={busy || historyBusy} onChange={event => toggleArchived(event.target.checked).catch(reason => setError(reason.message))} />Show archived</label>
       <div className="mt-4 space-y-2">
         {conversations.map(conversation => <button type="button" key={conversation.id} disabled={busy || historyBusy} onClick={() => selectConversation(conversation.id)} className={`w-full rounded-xl border px-3 py-3 text-left text-sm disabled:opacity-50 ${conversation.id === conversationId ? 'border-sky-600 bg-sky-950/40 text-white' : 'border-slate-800 text-slate-300 hover:border-slate-700'}`}>
           <span className="block truncate font-medium">{conversation.title}</span>
           <span className="mt-1 block text-xs capitalize text-slate-500">{conversation.access_role === 'recipient' ? 'Shared with you' : 'Yours'} · {conversation.state} · {new Date(conversation.last_activity_at).toLocaleString()}</span>
+          {(conversation.has_pending_run || conversation.has_failed_run) && <span className="mt-2 flex flex-wrap gap-1 text-[11px]">
+            {conversation.has_pending_run && <span className="rounded-full bg-amber-950 px-2 py-0.5 text-amber-300">Run pending</span>}
+            {conversation.has_failed_run && <span className="rounded-full bg-red-950 px-2 py-0.5 text-red-300">Run needs attention</span>}
+          </span>}
         </button>)}
-        {!conversations.length && <p className="rounded-xl border border-dashed border-slate-800 p-4 text-xs leading-5 text-slate-500">No {includeArchived ? '' : 'active '}saved conversations yet.</p>}
+        {!conversations.length && <p className="rounded-xl border border-dashed border-slate-800 p-4 text-xs leading-5 text-slate-500">{conversationSearchQuery ? 'No permitted conversations match this search.' : `No ${includeArchived ? '' : 'active '}saved conversations yet.`}</p>}
+        {nextConversationCursor && <button type="button" disabled={busy || historyBusy} onClick={() => loadMoreConversations().catch(reason => setError(reason.message))} className="w-full rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 disabled:opacity-50">Load more</button>}
       </div>
     </aside>}
     <form onSubmit={submit} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
@@ -757,8 +874,9 @@ function ConversationHistory({ messages, userId, busy, onConfirm, onReject }) {
       return <article key={message.id} className={`rounded-xl border p-4 ${message.role === 'user' ? 'ml-8 border-sky-900/60 bg-sky-950/20' : 'mr-8 border-slate-800 bg-slate-950/40'}`}>
         <div className="flex items-center justify-between gap-3 text-xs">
           <span className="font-semibold uppercase tracking-[0.12em] text-slate-400">{message.role === 'user' ? (message.author_id === userId ? 'You' : message.author?.full_name || message.author?.email || 'Internal contributor') : 'Configured assistant'}</span>
-          <span className={message.status === 'failed' ? 'text-red-300' : ['pending', 'unknown'].includes(message.status) ? 'text-amber-300' : 'text-slate-500'}>{message.status}</span>
+          <span className="text-right text-slate-500"><time dateTime={message.created_at}>{new Date(message.created_at).toLocaleString()}</time><span className={`ml-2 ${message.status === 'failed' ? 'text-red-300' : ['pending', 'unknown'].includes(message.status) ? 'text-amber-300' : 'text-slate-500'}`}>{message.status}</span></span>
         </div>
+        {message.run && <p className="mt-2 break-words text-xs text-slate-500">Run {message.run.id} · {message.run.provider || 'Provider not recorded'} · {message.run.model || 'Model not recorded'} · {message.run.capability || 'Mode not recorded'} · {message.run.status}{message.run.department_chat_model_configuration_id ? ` · configuration ${message.run.department_chat_model_configuration_id}` : ''}</p>}
         {message.role === 'user' && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-200">{message.body}</p>}
         {message.role === 'assistant' && !proposal && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-200">{message.body}</p>}
         {message.role === 'user' && message.attachments?.length > 0 && <div className="mt-3 space-y-2">

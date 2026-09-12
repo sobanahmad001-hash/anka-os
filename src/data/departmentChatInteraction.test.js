@@ -25,11 +25,11 @@ class N {
   set textContent(value) { if (this.nodeType === 3) this.data = String(value); else { this.childNodes = []; if (value !== '') this.appendChild(this.ownerDocument.createTextNode(String(value))) } }
 }
 class El extends N {
-  constructor(tag, document, namespaceURI = 'http://www.w3.org/1999/xhtml') { super(1, tag.toUpperCase(), document); this.tagName = this.nodeName; this.namespaceURI = namespaceURI; this.attributes = new Map(); this.style = { setProperty(name, value) { this[name] = value }, removeProperty(name) { delete this[name] } }; this._value = ''; this.checked = false; this.selected = false; this.disabled = false }
+  constructor(tag, document, namespaceURI = 'http://www.w3.org/1999/xhtml') { super(1, tag.toUpperCase(), document); this.tagName = this.nodeName; this.namespaceURI = namespaceURI; this.attributes = new Map(); this.style = { setProperty(name, value) { this[name] = value }, removeProperty(name) { delete this[name] } }; this._value = ''; this.type = ''; this.checked = false; this.selected = false; this.disabled = false }
   get options() { return this.tagName === 'SELECT' ? this.childNodes.filter(node => node.tagName === 'OPTION') : undefined }
   get value() { return this.tagName === 'SELECT' ? this.options.find(option => option.selected)?.value ?? this._value : this._value }
   set value(value) { this._value = String(value); if (this.tagName === 'SELECT') for (const option of this.options) option.selected = option.value === this._value }
-  setAttribute(name, value) { this.attributes.set(name, String(value)); if (name === 'value') this.value = value; if (name === 'disabled') this.disabled = true }
+  setAttribute(name, value) { this.attributes.set(name, String(value)); if (name === 'value') this.value = value; if (name === 'type') this.type = String(value); if (name === 'disabled') this.disabled = true }
   getAttribute(name) { return this.attributes.get(name) ?? null }
   removeAttribute(name) { this.attributes.delete(name); if (name === 'disabled') this.disabled = false }
   hasAttribute(name) { return this.attributes.has(name) }
@@ -50,9 +50,13 @@ const flush = () => act(async () => { await Promise.resolve(); await new Promise
 async function value(node, next) { const prior = node.value; node.value = next; node._valueTracker?.setValue(prior); await act(async () => { node.dispatchEvent(new E('input')); node.dispatchEvent(new E('change')) }) }
 async function authorize(root) { const box = nodes(root, 'input').find(node => node.parentNode?.textContent.includes('I confirm this message')); assert.ok(box); box.checked = true; await act(async () => { box.dispatchEvent(new E('click')); box.dispatchEvent(new E('change')) }) }
 const conversation = id => ({ id, owner_id: 'user-1', title: id, state: 'active', access_role: 'owner', last_activity_at: '2026-09-12T00:00:00Z' })
-function repository(streams, savedBody = '') {
+function repository(streams, savedBody = '', searches = []) {
   return {
     listConversations: async (_d, input) => [conversation('conversation-' + input.engagement_id)],
+    searchConversations: async (_d, input) => {
+      searches.push(input)
+      return { items: input.query === 'no match' ? [] : [conversation(input.query ? 'matching-conversation' : 'conversation-' + input.engagement_id)], next_cursor: null }
+    },
     getCapabilities: async () => ({ model_id: 'gpt-test', approved_models: [{ configuration_id: 'configuration-1', model_id: 'gpt-test', display_name: 'Test', is_default: true }], attachments: { supported: false } }),
     getConversation: async (_d, input) => ({ conversation: conversation(input.conversation_id), messages: savedBody ? [{ id: 'assistant-1', role: 'assistant', status: 'completed', body: savedBody, proposal: null }] : [], sharing: { can_manage: false, recipients: [] } }),
     listAttachments: async () => [],
@@ -65,7 +69,7 @@ function repository(streams, savedBody = '') {
   }
 }
 function props(id, signal) { return { departmentId: 'content', departmentLabel: 'Content', engagement: { id, project_id: 'project-' + id, organization_id: 'organization-1', name: 'Engagement', agency_clients: { name: 'Client' } }, userId: 'user-1', organizationId: 'organization-1', requestSignal: signal, handleOrganizationAccessError() {} } }
-async function start(root) { await value(nodes(root, 'textarea')[0], 'Explain'); await authorize(root); await act(async () => nodes(root, 'form')[0].dispatchEvent(new E('submit'))); await flush() }
+async function start(root) { await value(nodes(root, 'textarea')[0], 'Explain'); await authorize(root); const form = nodes(root, 'form').find(item => nodes(item, 'textarea').length); assert.ok(form); await act(async () => form.dispatchEvent(new E('submit'))); await flush() }
 async function setup(t) {
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', define: { 'import.meta.env.VITE_SUPABASE_URL': JSON.stringify('http://127.0.0.1:54321'), 'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify('local-test-anon-key') }, plugins: [{ name: 'department-chat-test-repository', enforce: 'pre', resolveId(source) { if (source.endsWith('departmentChatRepository.js')) return '\0department-chat-test-repository' }, load(id) { if (id === '\0department-chat-test-repository') return `export const departmentChat = new Proxy({}, { get(_target, key) { return (...args) => globalThis.__departmentChatTestRepository[key](...args) } })` } }] }); t.after(() => vite.close())
   const { ScopedDepartmentChat } = await vite.ssrLoadModule('/src/components/DepartmentChat.jsx')
@@ -99,4 +103,180 @@ test('mounted chat wires local stop and suppresses late events after context rep
   assert.equal(count(container, 'LATE_CONTEXT_SENTINEL'), 0)
   await start(container); const unmounted = streams[2]; await act(async () => root.unmount()); assert.equal(unmounted.signal.aborted, true)
   unmounted.onEvent({ type: 'completed', answer: 'LATE_UNMOUNT_SENTINEL' }); await Promise.resolve(); assert.equal(container.textContent, '')
+})
+
+test('mounted chat sends title/message search to the server and renders only returned conversations', async t => {
+  const { container, ScopedDepartmentChat } = await setup(t); const streams = []; const searches = []; globalThis.__departmentChatTestRepository = repository(streams, '', searches); const root = createRoot(container); t.after(() => { try { root.unmount() } catch {} })
+  await act(async () => root.render(createElement(ScopedDepartmentChat, props('a', new AbortController().signal)))); await flush()
+  const input = nodes(container, 'input').find(node => node.type === 'search'); assert.ok(input)
+  await value(input, 'quarterly planning')
+  await flush()
+  const form = nodes(container, 'form').find(item => nodes(item, 'input').includes(input)); assert.ok(form)
+  await act(async () => form.dispatchEvent(new E('submit'))); await flush()
+  assert.equal(searches.length, 2)
+  assert.equal(searches.at(-1).query, 'quarterly planning')
+  assert.match(container.textContent, /matching-conversation/)
+  await value(input, 'no match'); await flush()
+  await act(async () => form.dispatchEvent(new E('submit'))); await flush()
+  assert.equal(searches.at(-1).query, 'no match')
+  assert.equal(count(container, 'matching-conversation'), 0)
+  assert.match(container.textContent, /No permitted conversations match this search/)
+})
+
+test('mounted search clears the prior transcript on denied and failed result loads', async t => {
+  const { document, ScopedDepartmentChat } = await setup(t)
+  for (const scenario of [
+    { query: 'denied result', message: 'Conversation access revoked' },
+    { query: 'network failure', message: 'Conversation load failed' },
+  ]) {
+    const container = document.createElement('div')
+    const repo = repository([], 'OLD_CONVERSATION_BODY')
+    const originalGetConversation = repo.getConversation
+    repo.getConversation = async (departmentId, input) => {
+      if (input.conversation_id === 'matching-conversation') throw new Error(scenario.message)
+      return originalGetConversation(departmentId, input)
+    }
+    globalThis.__departmentChatTestRepository = repo
+    const root = createRoot(container)
+
+    await act(async () => root.render(createElement(
+      ScopedDepartmentChat,
+      props('a', new AbortController().signal),
+    )))
+    await flush()
+    assert.equal(count(container, 'OLD_CONVERSATION_BODY'), 1)
+
+    const input = nodes(container, 'input').find(node => node.type === 'search')
+    assert.ok(input)
+    await value(input, scenario.query)
+    const form = nodes(container, 'form').find(item => nodes(item, 'input').includes(input))
+    assert.ok(form)
+    await act(async () => form.dispatchEvent(new E('submit')))
+    await flush()
+
+    assert.match(container.textContent, new RegExp(scenario.message))
+    assert.match(container.textContent, /matching-conversation/)
+    assert.equal(
+      count(container, 'OLD_CONVERSATION_BODY'),
+      0,
+      'A prior transcript must not remain under a different selected conversation.',
+    )
+    await act(async () => root.unmount())
+  }
+})
+
+test('mounted conversation changes clear transient answer and proposal state', async t => {
+  const { document, ScopedDepartmentChat } = await setup(t)
+
+  async function search(container, query) {
+    const input = nodes(container, 'input').find(node => node.type === 'search')
+    assert.ok(input)
+    await value(input, query)
+    const form = nodes(container, 'form').find(item => nodes(item, 'input').includes(input))
+    assert.ok(form)
+    await act(async () => form.dispatchEvent(new E('submit')))
+    await flush()
+  }
+
+  {
+    const container = document.createElement('div')
+    const streams = []
+    const repo = repository(streams)
+    const originalGetConversation = repo.getConversation
+    repo.getConversation = async (departmentId, input) => {
+      if (input.conversation_id === 'matching-conversation') throw new Error('Conversation load failed')
+      return originalGetConversation(departmentId, input)
+    }
+    globalThis.__departmentChatTestRepository = repo
+    const root = createRoot(container)
+
+    await act(async () => root.render(createElement(
+      ScopedDepartmentChat,
+      props('a', new AbortController().signal),
+    )))
+    await flush()
+    await start(container)
+    assert.match(container.textContent, /Live partial · not yet durablePARTIAL_SENTINEL/)
+    await act(async () => byText(container, 'button', 'Stop watching locally').dispatchEvent(new E('click')))
+    await flush()
+    assert.match(container.textContent, /Stopped watching locally/)
+
+    await search(container, 'network failure')
+    assert.equal(count(container, 'PARTIAL_SENTINEL'), 0)
+    assert.equal(count(container, 'Stopped watching locally'), 0)
+    await act(async () => root.unmount())
+  }
+
+  {
+    const container = document.createElement('div')
+    const repo = repository([])
+    const originalGetConversation = repo.getConversation
+    repo.getConversation = async (departmentId, input) => {
+      if (input.conversation_id === 'matching-conversation') throw new Error('Conversation access revoked')
+      return originalGetConversation(departmentId, input)
+    }
+    repo.proposeArtifact = async () => ({
+      proposal_id: 'proposal-a',
+      preview: { title: 'A_PROPOSAL_PREVIEW' },
+      status: 'pending',
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      model: 'gpt-test',
+      connector_connection_id: 'connection-1',
+    })
+    globalThis.__departmentChatTestRepository = repo
+    const root = createRoot(container)
+
+    await act(async () => root.render(createElement(
+      ScopedDepartmentChat,
+      props('a', new AbortController().signal),
+    )))
+    await flush()
+    const mode = nodes(container, 'select').find(select => select.options?.some(option => option.textContent === 'Artifact draft'))
+    assert.ok(mode)
+    await value(mode, 'artifact')
+    await start(container)
+    assert.match(container.textContent, /A_PROPOSAL_PREVIEW/)
+    assert.ok(byText(container, 'button', 'Confirm official draft'))
+    assert.ok(byText(container, 'button', 'Reject'))
+
+    await search(container, 'denied proposal')
+    assert.equal(count(container, 'A_PROPOSAL_PREVIEW'), 0)
+    assert.equal(count(container, 'Confirm official draft'), 0)
+    assert.equal(count(container, 'Reject'), 0)
+    await act(async () => root.unmount())
+  }
+})
+
+test('direct selection aligns the editable title before a failed conversation load', async t => {
+  const { container, ScopedDepartmentChat } = await setup(t)
+  const repo = repository([])
+  repo.searchConversations = async () => ({
+    items: [conversation('conversation-a'), conversation('conversation-b')],
+    next_cursor: null,
+  })
+  const originalGetConversation = repo.getConversation
+  repo.getConversation = async (departmentId, input) => {
+    if (input.conversation_id === 'conversation-b') throw new Error('Conversation load failed')
+    return originalGetConversation(departmentId, input)
+  }
+  globalThis.__departmentChatTestRepository = repo
+  const root = createRoot(container)
+  t.after(() => { try { root.unmount() } catch {} })
+
+  await act(async () => root.render(createElement(
+    ScopedDepartmentChat,
+    props('a', new AbortController().signal),
+  )))
+  await flush()
+  const titleInput = nodes(container, 'input').find(node => node.parentNode?.textContent.includes('Conversation title'))
+  assert.ok(titleInput)
+  assert.equal(titleInput.value, 'conversation-a')
+
+  const next = byText(container, 'button', 'conversation-b')
+  assert.ok(next)
+  await act(async () => next.dispatchEvent(new E('click')))
+  await flush()
+
+  assert.match(container.textContent, /Conversation load failed/)
+  assert.equal(titleInput.value, 'conversation-b')
 })
