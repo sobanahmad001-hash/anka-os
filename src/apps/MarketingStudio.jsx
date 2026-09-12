@@ -26,6 +26,7 @@ import {
 import { marketingStudio } from '../data/marketingStudioRepository.js'
 import { canEditCampaignPlan } from '../data/marketingCampaignPlan.js'
 import { createMarketingCampaignPlanRepository } from '../data/marketingCampaignPlanRepository.js'
+import { createMarketingCalendarRepository } from '../data/marketingCalendarRepository.js'
 import { shouldApplyDashboardResponse } from '../data/performanceDashboard.js'
 import { loadPerformanceDashboard } from '../data/performanceDashboardRepository.js'
 import { shouldApplyKeywordResearchResponse } from '../data/marketingKeywordResearch.js'
@@ -47,6 +48,7 @@ import MarketingConnectionReadinessPanel from '../components/MarketingConnection
 import MarketingOverview from '../components/MarketingOverview.jsx'
 import MarketingCampaignBrief from '../components/MarketingCampaignBrief.jsx'
 import MarketingCampaignPlan from '../components/MarketingCampaignPlan.jsx'
+import MarketingCalendar from '../components/MarketingCalendar.jsx'
 import QuickTasks from './QuickTasks.jsx'
 import WorkshopContextShell from '../components/WorkshopContextShell.jsx'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
@@ -60,6 +62,7 @@ const MARKETING_TABS = Object.freeze([
   ['overview', 'Overview'],
   ['brief', 'Campaign brief'],
   ['campaigns', 'Campaigns'],
+  ['calendar', 'Calendar'],
   ['ad-tracking', 'Ad campaign tracking'],
   ['seo-keywords', 'SEO keyword history'],
   ['backlinks', 'Backlink outreach'],
@@ -134,6 +137,9 @@ export default function MarketingStudio() {
     : null, [activeOrganizationId, organizationReady, requestSignal])
   const campaignPlans = useMemo(() => organizationReady
     ? createMarketingCampaignPlanRepository(activeOrganizationId, { signal: requestSignal })
+    : null, [activeOrganizationId, organizationReady, requestSignal])
+  const calendar = useMemo(() => organizationReady
+    ? createMarketingCalendarRepository(activeOrganizationId, { signal: requestSignal })
     : null, [activeOrganizationId, organizationReady, requestSignal])
   const workspaceGeneration = useRef(0)
   const context = useMemo(
@@ -379,6 +385,16 @@ export default function MarketingStudio() {
             saving={saving}
             act={act}
             canEditPlan={contextValidation.status === 'ready' && canEditCampaignPlan(activeMembership)}
+            onAccessError={handleOrganizationAccessError}
+          />
+        ) : tab === 'calendar' ? (
+          <MarketingCalendar
+            key={`${activeOrganizationId}:${scopeRevision}:${engagementId}`}
+            organizationId={activeOrganizationId}
+            scopeRevision={scopeRevision}
+            signal={requestSignal}
+            engagement={workspace.engagement}
+            repository={calendar}
             onAccessError={handleOrganizationAccessError}
           />
         ) : tab === 'brief' ? (
