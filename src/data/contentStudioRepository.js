@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase.js'
 import { CONTENT_ARTIFACT_TYPES } from './contentStudio.js'
 import { BRAND_STATEMENT_SOURCE_TYPES, BRAND_STATEMENT_TYPE } from './brandBrief.js'
+import { recordedSourceVersionIds } from './contentLibrary.js'
 
 const CONTENT_WORKSPACE_TYPES = [...CONTENT_ARTIFACT_TYPES, BRAND_STATEMENT_TYPE]
 
@@ -91,6 +92,41 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
       } : null,
       brandBrief, brandSourceArtifacts, brandSourceApprovals, blogEventLinks, contentRequests,
       organizationSettings: organization?.settings || {} }
+  },
+
+  async loadLibrary() {
+    const artifacts = await dataOrThrow(supabase.from('artifacts')
+      .select('id, organization_id, brand_id, engagement_id, engagement_stage_instance_id, artifact_type, title, created_by, created_at, engagements!inner(id, name, project_id, organization_id, projects(id, name))')
+      .eq('organization_id', organizationId).in('artifact_type', CONTENT_WORKSPACE_TYPES)
+      .order('created_at', { ascending: false }), options)
+    if (!artifacts.length) return {
+      artifacts: [], versions: [], approvals: [], approvalRequests: [], comments: [], profiles: [], sourceVersions: [],
+    }
+    const artifactIds = artifacts.map(item => item.id)
+    const [versions, approvals] = await Promise.all([
+      dataOrThrow(supabase.from('artifact_versions').select('*').eq('organization_id', organizationId)
+        .in('artifact_id', artifactIds).order('version_number', { ascending: false }), options),
+      dataOrThrow(supabase.from('artifact_approvals').select('*').eq('organization_id', organizationId)
+        .in('artifact_id', artifactIds).order('approved_at', { ascending: false }), options),
+    ])
+    const versionIds = versions.map(item => item.id)
+    const [approvalRequests, comments] = versionIds.length ? await Promise.all([
+      dataOrThrow(supabase.from('artifact_approval_requests').select('*').eq('organization_id', organizationId)
+        .in('artifact_version_id', versionIds).order('created_at', { ascending: false }), options),
+      dataOrThrow(supabase.from('artifact_version_comments').select('*').eq('organization_id', organizationId)
+        .in('artifact_version_id', versionIds).order('created_at'), options),
+    ]) : [[], []]
+    const userIds = [...new Set([
+      ...artifacts.map(item => item.created_by), ...versions.map(item => item.created_by),
+      ...approvals.flatMap(item => [item.approved_by]), ...comments.flatMap(item => [item.author_id, item.resolved_by]),
+    ].filter(Boolean))]
+    const profiles = userIds.length ? await dataOrThrow(supabase.from('profiles')
+      .select('id, full_name, email').in('id', userIds), options) : []
+    const sourceVersionIds = recordedSourceVersionIds(versions).filter(id => !versionIds.includes(id))
+    const sourceVersions = sourceVersionIds.length ? await dataOrThrow(supabase.from('artifact_versions')
+      .select('id, organization_id, artifact_id, version_number, created_at, artifacts!inner(id, title, artifact_type, engagement_id)')
+      .eq('organization_id', organizationId).in('id', sourceVersionIds), options) : []
+    return { artifacts, versions, approvals, approvalRequests, comments, profiles, sourceVersions }
   },
 
   saveArtifact: input => invoke(organizationId, 'content-studio', 'save_artifact', input, options),

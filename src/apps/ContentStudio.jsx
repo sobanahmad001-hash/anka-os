@@ -7,6 +7,7 @@ import ContentRequestPanel from '../components/ContentRequestPanel.jsx'
 import GeneralContentRequestsPanel from '../components/GeneralContentRequestsPanel.jsx'
 import ContentQueuePanel from '../components/ContentQueuePanel.jsx'
 import ContentWriterEditor from '../components/ContentWriterEditor.jsx'
+import ContentLibraryPanel from '../components/ContentLibraryPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'
 import ContentCustomFieldsPanel from '../components/ContentCustomFieldsPanel.jsx'
@@ -70,7 +71,7 @@ export default function ContentStudio() {
   const [workspace, setWorkspace] = useState(null)
   const [type, setType] = useState('discovery')
   const requestedTab = navigationContext.workshopTab || ''
-  const [tab, setTab] = useState(['general', 'queue', 'calendar', 'writer'].includes(requestedTab) ? requestedTab : 'artifacts')
+  const [tab, setTab] = useState(['general', 'queue', 'calendar', 'writer', 'library'].includes(requestedTab) ? requestedTab : 'artifacts')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -162,7 +163,7 @@ export default function ContentStudio() {
   }, [engagementId, navigationContext, studio])
 
   useEffect(() => {
-    setTab(['general', 'queue', 'calendar', 'writer'].includes(requestedTab) ? requestedTab : 'artifacts')
+    setTab(['general', 'queue', 'calendar', 'writer', 'library'].includes(requestedTab) ? requestedTab : 'artifacts')
   }, [requestedTab])
 
   async function act(callback, success) {
@@ -251,7 +252,7 @@ export default function ContentStudio() {
     <main className="mx-auto max-w-7xl space-y-6 px-6 py-6">
       <WorkshopContextShell navigation={navigationContext} validation={contextValidation} returnTarget={returnTarget} projectName={context.engagement?.name}>
       {(error || message) && <div className={`rounded-xl border px-4 py-3 text-sm ${error ? 'border-red-900/60 bg-red-950/40 text-red-300' : 'border-emerald-900/60 bg-emerald-950/30 text-emerald-300'}`}>{error || message}</div>}
-      {!['general', 'queue'].includes(tab) && <section className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+      {!['general', 'queue', 'library'].includes(tab) && <section className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
         <label className="min-w-72 flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Content engagement
           <select value={engagementId} onChange={event => { const item = engagements.find(candidate => candidate.id === event.target.value); setSearchParams(item ? contentSelectionParams(navigationContext, item, activeOrganizationId) : {}) }} className={`${INPUT} mt-2 normal-case tracking-normal`}>
             <option value="">Choose work</option>
@@ -261,9 +262,9 @@ export default function ContentStudio() {
         {workspace?.engagement && <div className="rounded-xl bg-slate-950 px-4 py-3 text-sm text-slate-400"><span className="font-semibold text-white">{workspace.engagement.brands?.name}</span><span className="mx-2 text-slate-700">/</span>{workspace.engagement.agency_clients?.name}</div>}
       </section>}
       <nav className="flex gap-2 overflow-x-auto border-b border-slate-800">
-        {[['general', 'General requests'], ['queue', 'Content queue'], ['writer', 'Production writer'], ['artifacts', 'Artifact workspace'], ['requests', 'Content requests'], ['calendar', 'Blog calendar'], ['brand', 'Brief & brand statement'], ['chat', 'Shared Department Chat']].map(([id, label]) => <button type="button" key={id} onClick={() => selectTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-amber-400 text-amber-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>)}
+        {[['general', 'General requests'], ['queue', 'Content queue'], ['writer', 'Production writer'], ['library', 'Content library'], ['artifacts', 'Artifact workspace'], ['requests', 'Content requests'], ['calendar', 'Blog calendar'], ['brand', 'Brief & brand statement'], ['chat', 'Shared Department Chat']].map(([id, label]) => <button type="button" key={id} onClick={() => selectTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-amber-400 text-amber-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>)}
       </nav>
-      {!repositories ? <div className="py-20 text-center text-sm text-slate-500">Select an active organization to open Content Studio.</div> : tab === 'general' ? <GeneralContentRequestsPanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.requests} /> : loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Content Studio…</div> : tab === 'queue' ? <ContentQueuePanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.queue} /> : !workspace ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Activate a Content service on an engagement to begin, or use General requests without an engagement.</div> : tab === 'writer' ? (
+      {!repositories ? <div className="py-20 text-center text-sm text-slate-500">Select an active organization to open Content Studio.</div> : tab === 'general' ? <GeneralContentRequestsPanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.requests} /> : tab === 'library' ? <ContentLibraryPanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.studio} /> : loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Content Studio…</div> : tab === 'queue' ? <ContentQueuePanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.queue} /> : !workspace ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Activate a Content service on an engagement to begin, or use General requests without an engagement.</div> : tab === 'writer' ? (
         <ContentWriterEditor key={`${activeOrganizationId}:${scopeRevision}:${workspace.engagement.id}`} workspace={workspace} studio={studio} saving={saving} act={act} stageId={bestContentStage(workspace.stages, 'content')?.id || null} defaultLanguage={resolveContentLanguage({ approvedBrandLanguage: approvedVisionLanguage(workspace), organizationDefaultLanguage: workspace.organizationSettings?.content_language || workspace.organizationSettings?.default_language }).language} />
       ) : tab === 'artifacts' ? (
         <ArtifactWorkspace key={`${activeOrganizationId}:${scopeRevision}:${workspace.engagement.id}`} studio={studio} customFields={repositories.customFields} workspace={workspace} type={type} setType={setType} saving={saving} act={act} onRefresh={() => loadWorkspace(engagementId)} originLinkId={originLinkId} />
