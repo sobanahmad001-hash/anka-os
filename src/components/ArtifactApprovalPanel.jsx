@@ -35,7 +35,8 @@ export default function ArtifactApprovalPanel({
   const [changeComment, setChangeComment] = useState('')
   const [loadingTarget, setLoadingTarget] = useState(targetId)
   const [busyTarget, setBusyTarget] = useState('')
-  const [errorState, setErrorState] = useState({ targetId: '', message: '' })
+  const [loadErrorState, setLoadErrorState] = useState({ targetId: '', message: '' })
+  const [actionErrorState, setActionErrorState] = useState({ targetId: '', message: '' })
 
   const load = useCallback(async () => {
     const requestedTarget = version?.id || ''
@@ -47,7 +48,7 @@ export default function ArtifactApprovalPanel({
     }
     setState({ targetId: '', ...EMPTY_STATE })
     setLoadingTarget(requestedTarget)
-    setErrorState({ targetId: requestedTarget, message: '' })
+    setLoadErrorState({ targetId: requestedTarget, message: '' })
     try {
       const next = await artifactApprovals.load(requestedTarget)
       if (targetRef.current === requestedTarget && loadSequence.current === sequence) {
@@ -56,7 +57,7 @@ export default function ArtifactApprovalPanel({
     } catch (reason) {
       if (targetRef.current === requestedTarget && loadSequence.current === sequence) {
         setState({ targetId: requestedTarget, ...EMPTY_STATE })
-        setErrorState({ targetId: requestedTarget, message: reason.message })
+        setLoadErrorState({ targetId: requestedTarget, message: reason.message })
       }
     } finally {
       if (targetRef.current === requestedTarget && loadSequence.current === sequence) setLoadingTarget('')
@@ -67,6 +68,7 @@ export default function ArtifactApprovalPanel({
     setPolicy('sequential')
     setSelected([])
     setChangeComment('')
+    setActionErrorState({ targetId: '', message: '' })
     changeIntent.current = null
     load()
     return () => { loadSequence.current += 1 }
@@ -75,7 +77,8 @@ export default function ArtifactApprovalPanel({
   const activeState = state.targetId === targetId ? state : EMPTY_STATE
   const loading = Boolean(targetId) && (loadingTarget === targetId || state.targetId !== targetId)
   const busy = busyTarget === targetId
-  const error = errorState.targetId === targetId ? errorState.message : ''
+  const loadError = loadErrorState.targetId === targetId ? loadErrorState.message : ''
+  const actionError = actionErrorState.targetId === targetId ? actionErrorState.message : ''
 
   const eligibleApprovers = useMemo(() => approverFilter ? activeState.approvers.filter(approverFilter) : activeState.approvers, [approverFilter, activeState.approvers])
   const approverById = useMemo(() => new Map(
@@ -94,14 +97,14 @@ export default function ArtifactApprovalPanel({
     const actionTarget = targetId
     if (!actionTarget) return
     setBusyTarget(actionTarget)
-    setErrorState({ targetId: actionTarget, message: '' })
+    setActionErrorState({ targetId: actionTarget, message: '' })
     try {
       await callback(actionTarget)
       if (targetRef.current !== actionTarget) return
       await load()
       if (targetRef.current === actionTarget) await onChanged?.()
     } catch (reason) {
-      if (targetRef.current === actionTarget) setErrorState({ targetId: actionTarget, message: reason.message })
+      if (targetRef.current === actionTarget) setActionErrorState({ targetId: actionTarget, message: reason.message })
     } finally {
       if (targetRef.current === actionTarget) setBusyTarget('')
     }
@@ -133,8 +136,9 @@ export default function ArtifactApprovalPanel({
 
   return <section className={`mt-4 rounded-2xl border ${colors.border} bg-slate-900/70 p-5`}>
     <div><p className={`text-xs font-semibold uppercase tracking-[0.14em] ${colors.accent}`}>Version approval</p><h3 className="mt-1 font-semibold text-white">Version {version.version_number}</h3></div>
-    {error && <p className="mt-3 rounded-xl border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm text-red-300">{error}</p>}
-    {loading ? <p className="mt-4 text-sm text-slate-500">Loading approval policy…</p> : error ? <p className="mt-4 text-sm text-slate-500">Review controls are unavailable for this exact version until its approval state can be loaded.</p> : activeState.request ? <div className="mt-4 space-y-4">
+    {loadError && <p className="mt-3 rounded-xl border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm text-red-300">{loadError}</p>}
+    {actionError && <p className="mt-3 rounded-xl border border-amber-900/60 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">{actionError} You can safely retry the same action.</p>}
+    {loading ? <p className="mt-4 text-sm text-slate-500">Loading approval policy…</p> : loadError ? <p className="mt-4 text-sm text-slate-500">Review controls are unavailable for this exact version until its approval state can be loaded.</p> : activeState.request ? <div className="mt-4 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-slate-300"><span className="font-semibold capitalize text-white">{activeState.request.approval_policy}</span> policy · <span className="capitalize">{activeState.request.status}</span></p><span className="text-xs text-slate-500">{activeState.signoffs.filter(item => item.signed_off_at).length}/{activeState.signoffs.length} signed</span></div>
       <ol className="space-y-2">{orderedSignoffs.map(signoff => <li key={signoff.id} className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2.5"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-800 text-[10px] font-semibold text-slate-300">{activeState.request.approval_policy === 'sequential' ? signoff.sequence_position : '•'}</span><span className="min-w-0 flex-1 text-sm text-slate-300">{label(approverById.get(signoff.required_approver_id))}{signoff.required_approver_id === user?.id ? ' (you)' : ''}</span><span className={`text-xs font-semibold ${signoff.signed_off_at ? 'text-emerald-300' : 'text-amber-300'}`}>{signoff.signed_off_at ? 'Signed' : 'Pending'}</span></li>)}</ol>
       {activeState.request.status === 'pending' && ownSignoff && !ownSignoff.signed_off_at && <button type="button" disabled={busy || earlierPending} onClick={() => run(() => artifactApprovals.signOff(activeState.request.id))} className={`rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${colors.button}`}>{busy ? 'Signing…' : earlierPending ? 'Waiting for earlier approvers' : 'Sign off this exact version'}</button>}

@@ -423,3 +423,79 @@ test('shared approval panel ignores a prior-version mutation completion and reta
   assert.match(environment.container.textContent, /Reviewer v1/)
   assert.doesNotMatch(environment.container.textContent, /Reviewer v2/)
 })
+test('approval mutation lost response keeps the same intent retryable on the exact target', async t => {
+  const vite = await createServer({
+    server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [b06PanelStubs()],
+  })
+  t.after(() => vite.close())
+  const { default: ArtifactApprovalPanel } = await vite.ssrLoadModule('/src/components/ArtifactApprovalPanel.jsx')
+  const environment = mountedEnvironment()
+  const previous = {
+    document: globalThis.document, window: globalThis.window, Event: globalThis.Event,
+    Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT,
+    approval: globalThis.__b06ApprovalTest, proofing: globalThis.__b06ProofingTest,
+  }
+  Object.assign(globalThis, {
+    document: environment.document, window: environment.window, Event: TestEvent, Node: TestNode,
+    HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true,
+  })
+  t.after(() => Object.assign(globalThis, {
+    document: previous.document, window: previous.window, Event: previous.Event, Node: previous.Node,
+    HTMLElement: previous.HTMLElement, IS_REACT_ACT_ENVIRONMENT: previous.act,
+    __b06ApprovalTest: previous.approval, __b06ProofingTest: previous.proofing,
+  }))
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+  const mutations = []
+  globalThis.__b06ApprovalTest = {
+    load: async id => ({
+      request: { id: `request-${id}`, status: 'pending', approval_policy: 'parallel' },
+      signoffs: [{ id: `signoff-${id}`, required_approver_id: 'actor', signed_off_at: null }],
+      approvers: [{ user_id: 'actor', full_name: `Reviewer ${id}` }],
+    }),
+    requestChanges: async (...args) => {
+      mutations.push(args)
+      if (mutations.length === 1) throw new Error('Response lost after commit')
+    },
+    signOff: async () => {}, createRequest: async () => {},
+  }
+  globalThis.__b06ProofingTest = { list: async () => [], add: async () => {}, resolve: async () => {} }
+  const props = { version: { id: 'v2', version_number: 2 }, approval: null }
+  await act(async () => root.render(createElement(ArtifactApprovalPanel, props)))
+  await flushMounted()
+
+  const changeText = async value => {
+    const textarea = elements(environment.container, 'textarea')[0]
+    assert.ok(textarea)
+    const propsKey = Object.keys(textarea).find(key => key.startsWith('__reactProps'))
+    assert.ok(propsKey)
+    await act(async () => textarea[propsKey].onChange({ target: { value } }))
+    await flushMounted()
+  }
+  const submit = async () => {
+    const form = elements(environment.container, 'form')[0]
+    assert.ok(form)
+    await act(async () => form.dispatchEvent(new TestEvent('submit', { bubbles: true })))
+    await flushMounted()
+  }
+
+  await changeText('Fix the committed response')
+  await submit()
+  assert.match(environment.container.textContent, /Response lost after commit/)
+  assert.equal(elements(environment.container, 'form').length, 1)
+  assert.equal(mutations.length, 1)
+
+  await act(async () => root.render(createElement(ArtifactApprovalPanel, props)))
+  await flushMounted()
+  assert.equal(elements(environment.container, 'form').length, 1)
+  await submit()
+  assert.equal(mutations.length, 2)
+  assert.equal(mutations[1][0], mutations[0][0])
+  assert.equal(mutations[1][1], mutations[0][1])
+  assert.equal(mutations[1][2], mutations[0][2])
+
+  await changeText('A deliberate new feedback item')
+  await submit()
+  assert.equal(mutations.length, 3)
+  assert.notEqual(mutations[2][2], mutations[0][2])
+})
