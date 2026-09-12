@@ -48,6 +48,7 @@ Deno.test('B02 Content proposal language follows explicit, approved-brand, organ
 })
 import { contentArtifactResponseFormat } from '../_shared/contentArtifacts.ts'
 import { departmentChatProfile } from '../_shared/departmentChatProfiles.ts'
+import { createDurableDepartmentChatAnswerStream } from '../_shared/departmentChatResponseStream.ts'
 import { developmentChatArtifactResponseFormat } from '../_shared/developmentChatArtifacts.ts'
 import {
   CHAT_DESIGN_ARTIFACT_TYPE_SET,
@@ -64,6 +65,8 @@ function selectedOrganizationFixture() {
   const queries: Array<{ table: string, filters: Array<[string, unknown]> }> = []
   const rpcCalls: Array<{ name: string, args: any }> = []
   let providerCalls = 0
+  const providerRequests: RequestInit[] = []
+  const backgroundTasks: Promise<void>[] = []
   let beginReplay = false
   let beginError: any = null
   let providerFailure = ''
@@ -161,6 +164,11 @@ function selectedOrganizationFixture() {
           || name === 'save_department_chat_proposal_with_model'
           || name === 'save_department_chat_conversation_proposal_with_model'
           ? { status: 'pending', proposal_id: 'saved-B', ai_run_id: 'run-B' }
+        : name === 'complete_department_chat_answer' ? {
+          conversation_id: args.p_conversation_id, user_message_id: args.p_message_id,
+          assistant_message_id: 'assistant-B', ai_run_id: 'run-answer-B',
+          model_configuration_id: args.p_model_configuration_id, replayed: false,
+        }
         : name === 'reject_department_chat_proposal' ? { outcome: 'rejected' }
         : { outcome: 'accepted', artifact_version_id: 'version-B' }, error: null }
     },
@@ -169,19 +177,39 @@ function selectedOrganizationFixture() {
     method: 'POST', headers: { Authorization: 'Bearer synthetic', 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }), {
     clients: { admin, userClient: { auth: { getUser: async () => ({ data: { user: { id: 'actor' } }, error: null }) } } as any },
-    fetcher: (async () => {
+    fetcher: (async (_url, init) => {
       providerCalls++
+      providerRequests.push(init || {})
       events.push('provider')
       if (providerFailure === 'network') throw new TypeError('connection reset after dispatch')
       if (providerFailure === '408' || providerFailure === '504') return new Response(JSON.stringify({ error: { message: 'gateway timeout' } }), { status: Number(providerFailure) })
       if (providerFailure === '400') return new Response(JSON.stringify({ error: { message: 'rejected' } }), { status: 400 })
+      const requestBody = JSON.parse(String(init?.body || '{}'))
+      if (requestBody.stream === true) {
+        const events = providerFailure === 'stream-drop'
+          ? ['data: {"type":"response.output_text.delta","delta":"Partial"}\n\n']
+          : providerFailure === 'stream-failed'
+          ? ['data: {"type":"response.failed","response":{"status":"failed"}}\n\n']
+          : [
+            'data: {"type":"response.output_text.delta","delta":"Offline "}\n\n',
+            'data: {"type":"response.output_text.delta","delta":"answer"}\n\n',
+            'data: {"type":"response.completed","response":{"output_text":"Offline answer","usage":{"input_tokens":7,"output_tokens":2}}}\n\n',
+          ]
+        return new Response(new ReadableStream({
+          start(controller) {
+            for (const event of events) controller.enqueue(new TextEncoder().encode(event))
+            controller.close()
+          },
+        }), { headers: { 'Content-Type': 'text/event-stream' } })
+      }
       return new Response(JSON.stringify({ output_text: JSON.stringify({ notes: 'Offline', checklist: ['Test'] }) }))
     }) as typeof fetch,
+    waitUntil: promise => { backgroundTasks.push(promise) },
     proposal: { estimatedCost: () => 0, resolveSingleOpenAiModel: (client, engagement, department, organization, _credential, selected) =>
       resolveSingleOpenAiModel(client, engagement, department, organization, () => 'synthetic-key', selected) },
   })
   return {
-    rows, queries, rpcCalls, request, events, admin,
+    rows, queries, rpcCalls, request, events, admin, providerRequests, backgroundTasks,
     providerCalls: () => providerCalls,
     setBeginReplay: (value: boolean) => { beginReplay = value },
     setBeginError: (value: any) => { beginError = value },
@@ -976,4 +1004,139 @@ Deno.test('Shared Department Chat exposes only the OpenAI Responses endpoint', (
   assertEquals(endpoint, 'https://api.openai.com/v1/responses')
   assertEquals(/connector|mutate|publish|send|upload|deploy|ads/i.test(endpoint), false)
   assertEquals(outputText({ output_text: '{"summary":"draft"}' }), '{"summary":"draft"}')
+})
+function enableSavedAnswerFixture(fixture: ReturnType<typeof selectedOrganizationFixture>, ownerId = 'actor') {
+  Object.assign(fixture.rows.organization_memberships.find((row: any) => row.organization_id === 'B'), {
+    department_id: 'content', role: 'contributor',
+  })
+  fixture.rows.engagement_services.find((row: any) => row.organization_id === 'B').service_catalog.department_id = 'content'
+  const connection = fixture.rows.integration_connections.find((row: any) => row.organization_id === 'B')
+  connection.integration_connection_departments.department_id = 'content'
+  connection.integration_connection_engagements.department_id = 'content'
+  Object.assign(fixture.rows.department_chat_conversations.find((row: any) => row.organization_id === 'B'), {
+    department_id: 'content', owner_id: ownerId,
+  })
+}
+
+const answerRequest = {
+  action: 'answer', organization_id: 'B', project_id: 'project-B',
+  engagement_id: 'engagement-B', department_id: 'content', conversation_id: 'conversation-B',
+  client_request_id: '10000000-0000-4000-8000-000000000001',
+  prompt: 'Explain the current evidence without creating work.', prompt_safe_for_ai: true,
+  model_configuration_id: 'model-configuration-B-content', attachment_ids: [],
+}
+
+Deno.test('P9 ordinary answer streams genuine deltas then atomically saves a no-proposal durable result', async () => {
+  const fixture = selectedOrganizationFixture()
+  enableSavedAnswerFixture(fixture)
+  fixture.rows.department_chat_messages = [
+    { organization_id: 'B', conversation_id: 'conversation-B', role: 'user', body: 'Earlier question', status: 'completed', sequence: 1 },
+    { organization_id: 'B', conversation_id: 'conversation-B', role: 'assistant', body: 'Earlier answer', status: 'completed', sequence: 2 },
+  ]
+  const response = await fixture.request(answerRequest)
+  assertEquals(response.status, 200)
+  assertEquals(response.headers.get('content-type')?.startsWith('text/event-stream'), true)
+  const streamText = await response.text()
+  await Promise.all(fixture.backgroundTasks)
+  assertEquals(streamText.includes('"type":"delta"'), true)
+  assertEquals(streamText.includes('"type":"completed"'), true)
+  const completed = fixture.rpcCalls.find(call => call.name === 'complete_department_chat_answer')!
+  assertEquals(completed.args.p_model_configuration_id, 'model-configuration-B-content')
+  assertEquals(completed.args.p_output_text, 'Offline answer')
+  assertEquals(completed.args.p_context_manifest.model_configuration_id, 'model-configuration-B-content')
+  assertEquals(fixture.rpcCalls.some(call => call.name.startsWith('save_department_chat_')), false)
+  const providerBody = JSON.parse(String(fixture.providerRequests[0].body))
+  assertEquals(providerBody.stream, true)
+  assertEquals(providerBody.store, false)
+  assertEquals(providerBody.tools, undefined)
+  assertEquals(providerBody.input.map((item: any) => item.content), [
+    'Earlier question', 'Earlier answer', answerRequest.prompt,
+  ])
+  assertEquals(fixture.events.indexOf('rpc:mark_department_chat_turn_dispatched') < fixture.events.indexOf('provider'), true)
+})
+
+Deno.test('P9 ordinary answer exact replay exits before fresh model validation or provider dispatch', async () => {
+  const fixture = selectedOrganizationFixture()
+  enableSavedAnswerFixture(fixture)
+  fixture.setBeginReplay(true)
+  const response = await fixture.request(answerRequest)
+  assertEquals(response.status, 409)
+  assertEquals(fixture.providerCalls(), 0)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'assert_department_chat_model_dispatch'), false)
+})
+
+Deno.test('P9 ordinary answer rejects stale selected configuration before provider dispatch', async () => {
+  const fixture = selectedOrganizationFixture()
+  enableSavedAnswerFixture(fixture)
+  fixture.setModelDispatchError({ code: '23514', message: 'revoked' })
+  const response = await fixture.request(answerRequest)
+  assertEquals(response.status, 409)
+  assertEquals(fixture.providerCalls(), 0)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'fail_department_chat_turn'), true)
+})
+
+Deno.test('P9 streamed disconnect becomes unknown while a definite provider failure becomes failed', async () => {
+  for (const [failure, terminalRpc, terminalEvent] of [
+    ['stream-drop', 'mark_department_chat_turn_unknown', '"type":"unknown"'],
+    ['stream-failed', 'fail_department_chat_turn', '"type":"failed"'],
+  ]) {
+    const fixture = selectedOrganizationFixture()
+    enableSavedAnswerFixture(fixture)
+    fixture.setProviderFailure(failure)
+    const response = await fixture.request({ ...answerRequest, client_request_id: crypto.randomUUID() })
+    const streamText = await response.text()
+    await Promise.all(fixture.backgroundTasks)
+    assertEquals(streamText.includes(terminalEvent), true)
+    assertEquals(fixture.rpcCalls.some(call => call.name === terminalRpc), true)
+    assertEquals(fixture.rpcCalls.some(call => call.name === 'complete_department_chat_answer'), false)
+  }
+})
+
+Deno.test('P9 deliberately shared contributor answer retains actual author and no added action authority', async () => {
+  const fixture = selectedOrganizationFixture()
+  enableSavedAnswerFixture(fixture, 'owner')
+  fixture.rows.department_chat_conversation_shares = [{
+    organization_id: 'B', conversation_id: 'conversation-B', recipient_id: 'actor', revoked_at: null,
+  }]
+  const response = await fixture.request({ ...answerRequest, client_request_id: crypto.randomUUID() })
+  await response.text()
+  await Promise.all(fixture.backgroundTasks)
+  const begin = fixture.rpcCalls.find(call => call.name === 'begin_department_chat_turn_with_attachments')!
+  const complete = fixture.rpcCalls.find(call => call.name === 'complete_department_chat_answer')!
+  assertEquals(begin.args.p_actor_id, 'actor')
+  assertEquals(complete.args.p_actor_id, 'actor')
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'confirm_department_chat_proposal'), false)
+})
+Deno.test('P9 stopping local observation does not cancel upstream durable finalization', async () => {
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  let pulled = false
+  const upstream = new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":"Still working"}\n\n'))
+    },
+    async pull(controller) {
+      if (pulled) return
+      pulled = true
+      await gate
+      controller.enqueue(new TextEncoder().encode('data: {"type":"response.completed","response":{"output_text":"Still working","usage":{}}}\n\n'))
+      controller.close()
+    },
+  }))
+  const background: Promise<void>[] = []
+  let completed = false
+  let unknown = false
+  const response = createDurableDepartmentChatAnswerStream(upstream, {
+    complete: async () => { completed = true; return { ai_run_id: 'run' } },
+    fail: async () => {},
+    unknown: async () => { unknown = true },
+    waitUntil: promise => background.push(promise),
+  })
+  const reader = response.body!.getReader()
+  await reader.read()
+  await reader.cancel('local stop')
+  release()
+  await Promise.all(background)
+  assertEquals(completed, true)
+  assertEquals(unknown, false)
 })
