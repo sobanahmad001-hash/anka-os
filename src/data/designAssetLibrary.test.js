@@ -38,6 +38,27 @@ test('does not call an output generated when no durable job or variant provenanc
   assert.equal(row.jobId, '')
 })
 
+test('canonical asset versions replace matching legacy rows without inventing cross-output lineage', () => {
+  const data = workspace()
+  data.designAssets = [{ id: 'design-asset-a', name: 'Hero master', placement: 'Homepage', rights_notes: '', created_at: '2026-09-11T11:00:00.000Z' }]
+  data.designAssetVersions = [
+    { id: 'asset-version-2', asset_id: 'design-asset-a', version_number: 2, parent_version_id: 'asset-version-1', source_kind: 'upload', source_direction_version_id: 'version-a', lifecycle_status: 'draft', mime_type: 'image/png', width: 1600, height: 900, original_filename: 'hero-v2.png', signed_url: 'https://project.supabase.co/storage/v1/object/sign/design/v2.png?token=v2', created_by: 'user-a', created_at: '2026-09-11T11:00:00.000Z' },
+    { id: 'asset-version-1', asset_id: 'design-asset-a', version_number: 1, parent_version_id: null, source_kind: 'generated', source_media_asset_id: 'asset-a', source_direction_version_id: 'version-a', lifecycle_status: 'draft', mime_type: 'image/png', signed_url: 'https://project.supabase.co/storage/v1/object/sign/design/v1.png?token=v1', created_by: 'user-a', created_at: '2026-09-10T11:00:00.000Z' },
+  ]
+  const rows = buildDesignAssetRows(data)
+  const canonical = rows.find(row => row.id === 'design-asset-a')
+  assert.equal(rows.some(row => row.id === 'asset-a'), false)
+  assert.equal(canonical.assetVersionId, 'asset-version-2')
+  assert.equal(canonical.assetVersions.length, 2)
+  assert.equal(canonical.sourceType, 'upload')
+  assert.deepEqual(canonical.recorded, {
+    dimensions: '1600×900', mimeType: 'image/png', name: 'Hero master',
+    reviewState: 'draft', independentVersion: 'v2 · asset-version-2',
+  })
+  assert.equal(canonical.assetVersions[0].parent_version_id, 'asset-version-1')
+  assert.equal(rows.find(row => row.id === 'asset-b').sourceType, 'variant')
+})
+
 test('filters status, durable source and date without changing or widening the source rows', () => {
   const rows = buildDesignAssetRows(workspace())
   assert.deepEqual(filterDesignAssetRows(rows, { status: 'ready', source: 'all', date: 'all' }, now).map(row => row.id), ['asset-a'])

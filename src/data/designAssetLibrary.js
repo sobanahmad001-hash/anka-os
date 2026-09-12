@@ -54,8 +54,50 @@ export function buildDesignAssetRows(workspace = {}) {
   const modelById = new Map(array(workspace.models).map(item => [item.id, item]))
   const jobByAssetId = new Map(array(workspace.imageGenerationJobs).filter(item => item.media_asset_id).map(item => [item.media_asset_id, item]))
   const variantByAssetId = new Map(array(workspace.variants).filter(item => item.design_media_asset_id).map(item => [item.design_media_asset_id, item]))
+  const mediaById = new Map(array(workspace.mediaAssets).map(item => [item.id, item]))
+  const assetVersions = array(workspace.designAssetVersions)
+  const versionsByAssetId = new Map()
+  for (const version of assetVersions) {
+    const versions = versionsByAssetId.get(version.asset_id) || []
+    versions.push(version)
+    versionsByAssetId.set(version.asset_id, versions)
+  }
+  const canonicalMediaIds = new Set(assetVersions.map(item => item.source_media_asset_id).filter(Boolean))
 
-  return array(workspace.mediaAssets).map(asset => {
+  const canonicalRows = array(workspace.designAssets).flatMap(asset => {
+    const versions = (versionsByAssetId.get(asset.id) || []).sort((left, right) => right.version_number - left.version_number)
+    const latest = versions[0]
+    if (!latest) return []
+    const media = mediaById.get(latest.source_media_asset_id) || null
+    const directionVersion = versionById.get(latest.source_direction_version_id) || null
+    const direction = directionVersion ? directionById.get(directionVersion.direction_id) || null : null
+    const session = direction ? sessionById.get(direction.session_id) || null : null
+    const job = media ? jobByAssetId.get(media.id) || null : null
+    const modelId = clean(job?.model_registry_id || media?.model_registry_id)
+    const model = modelById.get(modelId) || null
+    return [{
+      id: clean(asset.id), mediaType: 'image', status: 'ready', createdAt: clean(latest.created_at),
+      prompt: clean(media?.prompt), previewUrl: clean(latest.signed_url), provider: clean(media?.provider),
+      generatedBy: clean(media?.generated_by || latest.created_by),
+      sourceType: latest.source_kind === 'upload' ? 'upload' : latest.source_kind === 'recorded_variant' ? 'variant' : 'generated',
+      recordedVariantFormat: clean(variantByAssetId.get(media?.id)?.variant_format),
+      jobId: clean(job?.id), jobStatus: clean(job?.status), modelId, modelName: clean(model?.display_name),
+      directionVersionId: clean(directionVersion?.id || latest.source_direction_version_id),
+      directionVersionNumber: Number.isInteger(directionVersion?.version_number) ? directionVersion.version_number : null,
+      directionId: clean(direction?.id), directionTitle: clean(asset.name), sessionId: clean(session?.id),
+      sessionLabel: clean(session?.output_goal || session?.page_slug || session?.output_family),
+      isExperimental: directionVersion?.is_experimental === true,
+      assetId: clean(asset.id), assetVersionId: clean(latest.id), assetVersionNumber: latest.version_number,
+      assetVersions: versions,
+      recorded: Object.freeze({
+        dimensions: latest.width && latest.height ? `${latest.width}×${latest.height}` : null,
+        mimeType: clean(latest.mime_type), name: clean(asset.name),
+        reviewState: clean(latest.lifecycle_status), independentVersion: `v${latest.version_number} · ${latest.id}`,
+      }),
+    }]
+  })
+
+  const legacyRows = array(workspace.mediaAssets).filter(asset => !canonicalMediaIds.has(asset.id)).map(asset => {
     const version = versionById.get(asset.design_direction_version_id) || null
     const direction = version ? directionById.get(version.direction_id) || null : null
     const session = direction ? sessionById.get(direction.session_id) || null : null
@@ -75,7 +117,13 @@ export function buildDesignAssetRows(workspace = {}) {
       sessionLabel: clean(session?.output_goal || session?.page_slug || session?.output_family), isExperimental: version?.is_experimental === true,
       recorded: Object.freeze({ dimensions: null, mimeType: null, name: null, reviewState: null, independentVersion: null }),
     }
-  }).sort((left, right) => Date.parse(right.createdAt || 0) - Date.parse(left.createdAt || 0) || left.id.localeCompare(right.id))
+  })
+  return [...canonicalRows, ...legacyRows]
+    .sort((left, right) => Date.parse(right.createdAt || 0) - Date.parse(left.createdAt || 0) || left.id.localeCompare(right.id))
+}
+
+export function latestDesignAssetVersion(versions = []) {
+  return [...array(versions)].sort((left, right) => right.version_number - left.version_number)[0] || null
 }
 
 export function filterDesignAssetRows(rows, filters = {}, now = Date.now()) {

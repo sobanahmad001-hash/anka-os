@@ -1,0 +1,70 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import test from 'node:test'
+
+const migration = readFileSync(new URL('../../supabase/migrations/20260912071458_design_b04c_asset_upload_versions.sql', import.meta.url), 'utf8')
+const verifier = readFileSync(new URL('../../supabase/verify_20260912071458_design_b04c_asset_upload_versions.sql', import.meta.url), 'utf8')
+const server = readFileSync(new URL('../../supabase/functions/design-workshop/assetVersions.ts', import.meta.url), 'utf8')
+const index = readFileSync(new URL('../../supabase/functions/design-workshop/index.ts', import.meta.url), 'utf8')
+const repository = readFileSync(new URL('./designWorkshopRepository.js', import.meta.url), 'utf8')
+
+test('B04c adds one official asset identity with immutable draft file versions', () => {
+  assert.match(migration, /create table public\.design_assets/)
+  assert.match(migration, /create table public\.design_asset_versions/)
+  assert.match(migration, /lifecycle_status text not null default 'draft' check \(lifecycle_status = 'draft'\)/)
+  assert.match(migration, /trg_design_asset_versions_immutable/)
+  assert.match(migration, /parent_version_id/)
+  assert.match(migration, /source_kind in \('upload', 'generated', 'recorded_variant'\)/)
+  assert.match(migration, /Every ready generated output becomes its own independent v1 asset/)
+  assert.match(migration, /trg_register_ready_design_media_asset/)
+  assert.match(migration, /source_media_asset_id = new\.id/)
+  assert.doesNotMatch(migration, /update public\.(artifact_approvals|design_direction_releases)|insert into public\.(work_items|production_handoff)/i)
+})
+
+test('B04c keeps browser writes closed and registration server-only, tenant-safe, and stale-safe', () => {
+  assert.match(migration, /alter table public\.design_assets enable row level security/)
+  assert.match(migration, /alter table public\.design_asset_versions enable row level security/)
+  assert.match(migration, /is_team_organization_member/)
+  assert.match(migration, /revoke all on public\.design_assets, public\.design_asset_versions from anon, authenticated, service_role/)
+  assert.match(migration, /security invoker set search_path = ''/)
+  assert.match(migration, /grant execute on function public\.register_design_asset_upload[\s\S]*to service_role/)
+  assert.match(migration, /member_kind = 'team' and status = 'active'/)
+  assert.match(migration, /sc\.department_id = 'design' and sc\.is_active/)
+  assert.match(migration, /v_latest\.id is distinct from p_expected_latest_version_id/)
+  assert.match(migration, /pg_advisory_xact_lock/)
+  assert.match(migration, /Operation key was already used for a different upload/)
+})
+
+test('B04c validates real PNG bytes before an immutable non-upsert Storage write', () => {
+  assert.match(server, /DESIGN_ASSET_MIME = 'image\/png'/)
+  assert.match(server, /DESIGN_ASSET_MAX_BYTES = 10 \* 1024 \* 1024/)
+  assert.match(server, /signature = \[137, 80, 78, 71, 13, 10, 26, 10\]/)
+  assert.match(server, /PNG\.sync\.read\(Buffer\.from\(bytes\), \{ checkCRC: true \}\)/)
+  assert.match(server, /contentChecksum: await sha256Bytes\(bytes\)/)
+  assert.match(server, /upsert: false/)
+  assert.match(server, /register_design_asset_upload/)
+  assert.match(server, /download\(storagePath\)/)
+  assert.match(server, /remove\(\[storagePath\]\)/)
+  assert.doesNotMatch(server, /OPENAI_IMAGES_URL|generateOpenAiImage|fetch\(/)
+})
+
+test('B04c reads and signs exact versions through the existing Design authority path', () => {
+  assert.match(index, /callerAssetVersionRoot/)
+  assert.match(index, /action === 'upload_asset_version'/)
+  assert.match(index, /action === 'sign_asset_versions'/)
+  assert.match(index, /createSignedUrls/)
+  assert.match(repository, /design_asset_versions/)
+  assert.match(repository, /sign_asset_versions/)
+  assert.match(repository, /uploadAssetVersion/)
+})
+
+test('B04c verifier names database behavior separately from Storage transport', () => {
+  assert.match(verifier, /browser_tables_read_only/)
+  assert.match(verifier, /same_request_idempotent/)
+  assert.match(verifier, /replacement_is_child/)
+  assert.match(verifier, /stale_replacement_rejected/)
+  assert.match(verifier, /other_department_rejected/)
+  assert.match(verifier, /immutable_update_rejected/)
+  assert.match(verifier, /select 'PASS' as b04c_final_result/)
+  assert.match(verifier, /rollback;/)
+})

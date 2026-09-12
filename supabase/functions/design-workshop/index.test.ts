@@ -7,6 +7,7 @@ import { contentRequestMediaStoragePath, createSession, cropResizePng, designEve
   VIDEO_UNAVAILABLE_MESSAGE, handler } from './index.ts'
 import { compileApprovedArtifactContext } from '../_shared/approvedArtifactContext.ts'
 import { normalizeCreativeBrief, saveCreativeBrief, validateCreativeBrief } from './creativeBriefs.ts'
+import { designAssetStoragePath, parseDesignAssetPng } from './assetVersions.ts'
 
 function assert(value: unknown, message = 'Expected value to be truthy') {
   if (!value) throw new Error(message)
@@ -28,6 +29,27 @@ Deno.test('client memberships cannot cross the original team-only Workshop bound
 Deno.test('Content members cannot call Design Workshop actions after authoring relocation', () => {
   assert.equal(hasWorkshopAuthority({ member_kind: 'team', role: 'member', department_id: 'content' }, 'create_session'), false)
   assert.equal(hasWorkshopAuthority({ member_kind: 'team', role: 'department_manager', department_id: 'content' }, 'generate_directions'), false)
+})
+
+Deno.test('B04c validates actual PNG bytes and keeps upload authority inside Design', async () => {
+  const encoded = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWP4z8DwHwAFAAH/e+m+7wAAAABJRU5ErkJggg=='
+  const parsed = await parseDesignAssetPng({ mime_type: 'image/png', original_filename: 'hero.png', file_base64: encoded })
+  assert.equal(parsed.width, 1)
+  assert.equal(parsed.height, 1)
+  assert.equal(parsed.mimeType, 'image/png')
+  assert.equal(parsed.contentChecksum.length, 64)
+  assert.equal(designAssetStoragePath('org-1', 'asset-1', 'version-1'), 'org-1/assets/asset-1/version-1/file.png')
+  assert.equal(hasWorkshopAuthority({ member_kind: 'team', role: 'member', department_id: 'design' }, 'upload_asset_version'), true)
+  assert.equal(hasWorkshopAuthority({ member_kind: 'team', role: 'member', department_id: 'content' }, 'upload_asset_version'), false)
+  for (const invalid of [
+    { mime_type: 'image/jpeg', original_filename: 'hero.png', file_base64: encoded },
+    { mime_type: 'image/png', original_filename: 'hero.jpg', file_base64: encoded },
+    { mime_type: 'image/png', original_filename: 'hero.png', file_base64: btoa('not a png') },
+  ]) {
+    let rejected = false
+    try { await parseDesignAssetPng(invalid) } catch { rejected = true }
+    assert(rejected, 'Expected invalid upload bytes or metadata to fail closed')
+  }
 })
 
 Deno.test('B02 saves title-only drafts but computes output-specific validation without a provider', () => {
@@ -579,6 +601,14 @@ function scopeFixtures() {
       { id: 'job-1', organization_id: 'org-1', direction_version_id: 'version-1' },
       { id: 'job-2', organization_id: 'org-2', direction_version_id: 'version-2' },
     ],
+    design_assets: [
+      { id: 'design-asset-1', organization_id: 'org-1', engagement_id: 'engagement-1', brand_id: 'brand-1' },
+      { id: 'design-asset-2', organization_id: 'org-2', engagement_id: 'engagement-2', brand_id: 'brand-2' },
+    ],
+    design_asset_versions: [
+      { id: 'asset-version-1', organization_id: 'org-1', asset_id: 'design-asset-1', storage_path: 'org-1/assets/design-asset-1/asset-version-1/file.png' },
+      { id: 'asset-version-2', organization_id: 'org-2', asset_id: 'design-asset-2', storage_path: 'org-2/assets/design-asset-2/asset-version-2/file.png' },
+    ],
   }
 }
 
@@ -603,6 +633,9 @@ Deno.test('Design Workshop maps every action family to a closed caller-readable 
     [{ action: 'generate_content_request_image', content_request_id: 'request-1' }, 'content_request', 'request-1'],
     [{ action: 'create_content_request_video_placeholder', content_request_id: 'request-1' }, 'content_request', 'request-1'],
     [{ action: 'sign_media_assets', asset_ids: ['asset-1'] }, 'engagement', 'engagement-1'],
+    [{ action: 'upload_asset_version', engagement_id: 'engagement-1' }, 'engagement', 'engagement-1'],
+    [{ action: 'upload_asset_version', asset_id: 'design-asset-1' }, 'engagement', 'engagement-1'],
+    [{ action: 'sign_asset_versions', version_ids: ['asset-version-1'] }, 'engagement', 'engagement-1'],
     [{ action: 'list_experiment_reviewers', organization_id: 'org-1' }, null, null],
   ]
   for (const [body, kind, id] of cases) {
@@ -618,6 +651,8 @@ Deno.test('only explicit team operations may use a selected-organization rootles
   assert.equal(reviewers.root, null)
   const emptySigning = await designWorkshopScope(client, { action: 'sign_media_assets', asset_ids: [], organization_id: 'org-1' })
   assert.equal(emptySigning.root, null)
+  const emptyVersionSigning = await designWorkshopScope(client, { action: 'sign_asset_versions', version_ids: [], organization_id: 'org-1' })
+  assert.equal(emptyVersionSigning.root, null)
   let missingRootRejected = false
   try { await designWorkshopScope(client, { action: 'create_session', organization_id: 'org-1' }) } catch (error) {
     missingRootRejected = error instanceof Error && error.message.includes('Engagement is required')
@@ -668,6 +703,18 @@ Deno.test('same-shaped cross-organization media graphs are rejected before signi
     rejected = error instanceof Error && error.message.includes('one organization')
   }
   assert(rejected, 'Expected cross-organization media graph rejection')
+})
+
+Deno.test('same-shaped cross-organization asset version graphs are rejected before signing', async () => {
+  let rejected = false
+  try {
+    await designWorkshopScope(scopeClient(scopeFixtures()) as never, {
+      action: 'sign_asset_versions', organization_id: 'org-1', version_ids: ['asset-version-1', 'asset-version-2'],
+    })
+  } catch (error) {
+    rejected = error instanceof Error && error.message.includes('one engagement')
+  }
+  assert(rejected, 'Expected cross-organization asset version graph rejection')
 })
 
 Deno.test('released variants reject a release/version organization mismatch', async () => {

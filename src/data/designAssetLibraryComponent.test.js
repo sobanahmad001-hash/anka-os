@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { Buffer } from 'node:buffer'
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -114,8 +115,8 @@ test('asset library renders its read-only empty state, filters and keyboard cont
     workspace: { engagement: { id: 'engagement-a' }, mediaAssets: [], imageGenerationJobs: [], directionVersions: [], experimentalDirectionVersions: [], directions: [], sessions: [], models: [], variants: [], mediaUrlExpiresIn: 300 },
     onClose: () => {}, onFocusSource: () => {},
   }))
-  assert.match(markup, /Design S05 · Read-only/)
-  assert.match(markup, /No generated assets yet/)
+  assert.match(markup, /Design S05 · Versioned assets/)
+  assert.match(markup, /No assets yet/)
   assert.match(markup, /All statuses/)
   assert.match(markup, /All sources/)
   assert.match(markup, /Any date/)
@@ -123,7 +124,46 @@ test('asset library renders its read-only empty state, filters and keyboard cont
   const comparisonMarkup = renderToStaticMarkup(createElement(DesignAssetComparison, { rows: [], contextKey: 'engagement-a', accessOptions: {}, onClose: () => {}, onFocusSource: () => {} }))
   assert.match(comparisonMarkup, /Two outputs are required/)
   assert.match(comparisonMarkup, /does not establish asset version lineage/)
-  assert.doesNotMatch(markup, /Upload asset|Approve asset|Archive asset|Generate image/)
+  assert.match(markup, /Upload asset/)
+  assert.doesNotMatch(markup, /Authorized draft upload|Approve asset|Archive asset|Generate image/)
+})
+
+test('mounted library uploads an exact PNG draft payload and clears the form on context change', async t => {
+  const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  t.after(() => server.close())
+  const { default: DesignAssetLibrary } = await server.ssrLoadModule('/src/components/DesignAssetLibrary.jsx')
+  const environment = mountedEnvironment()
+  const previous = { document: globalThis.document, window: globalThis.window, Event: globalThis.Event, Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT }
+  Object.assign(globalThis, { document: environment.document, window: environment.window, Event: TestEvent, Node: TestNode, HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true })
+  t.after(() => Object.assign(globalThis, { document: previous.document, window: previous.window, Event: previous.Event, Node: previous.Node, HTMLElement: previous.HTMLElement, IS_REACT_ACT_ENVIRONMENT: previous.act }))
+  const requestedAt = Date.now()
+  const data = workspace(requestedAt)
+  data.engagement.brand_id = 'brand-a'
+  data.designAssets = []
+  data.designAssetVersions = []
+  const uploads = []
+  const props = { workspace: data, contextKey: 'context-a', canUpload: true, busy: false, onUpload: input => { uploads.push(input); return Promise.resolve({}) }, onClose: () => {}, onFocusSource: () => {} }
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+
+  await act(async () => root.render(createElement(DesignAssetLibrary, props)))
+  await act(async () => byText(environment.container, 'button', 'Upload asset').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.match(environment.container.textContent, /Authorized draft upload/)
+  const fileInput = elements(environment.container, 'input')[0]
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n9sAAAAASUVORK5CYII=', 'base64')
+  fileInput.files = [{ name: 'hero.png', type: 'image/png', size: png.length, arrayBuffer: async () => png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) }]
+  await act(async () => fileInput.dispatchEvent(new TestEvent('change', { bubbles: true })))
+  await act(async () => elements(environment.container, 'form')[0].dispatchEvent(new TestEvent('submit', { bubbles: true })))
+  assert.equal(uploads.length, 1, environment.container.textContent)
+  assert.equal(uploads[0].engagement_id, 'engagement-a')
+  assert.equal(uploads[0].brand_id, 'brand-a')
+  assert.equal(uploads[0].mime_type, 'image/png')
+  assert.equal(uploads[0].original_filename, 'hero.png')
+  assert.ok(uploads[0].file_base64.length > 20)
+  assert.ok(uploads[0].operation_key)
+
+  await act(async () => root.render(createElement(DesignAssetLibrary, { ...props, contextKey: 'context-b' })))
+  assert.doesNotMatch(environment.container.textContent, /Authorized draft upload/)
 })
 
 test('mounted library selects, filters, clears, focuses source, resets context and expires links', async t => {
@@ -248,4 +288,40 @@ test('mounted library comparison selects, changes, clears, focuses, resets conte
   assert.equal(elements(environment.container, 'img').length, 0)
   assert.equal(elements(environment.container, 'a').filter(link => link.textContent === 'Open or save signed image').length, 0)
   assert.equal((environment.container.textContent.match(/signed image link has expired/g) || []).length, 2)
+})
+
+test('mounted asset detail browses and compares two true versions of one asset', async t => {
+  const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  t.after(() => server.close())
+  const { default: DesignAssetLibrary } = await server.ssrLoadModule('/src/components/DesignAssetLibrary.jsx')
+  const environment = mountedEnvironment()
+  const previous = { document: globalThis.document, window: globalThis.window, Event: globalThis.Event, Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT }
+  Object.assign(globalThis, { document: environment.document, window: environment.window, Event: TestEvent, Node: TestNode, HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true })
+  t.after(() => Object.assign(globalThis, { document: previous.document, window: previous.window, Event: previous.Event, Node: previous.Node, HTMLElement: previous.HTMLElement, IS_REACT_ACT_ENVIRONMENT: previous.act }))
+  const requestedAt = Date.now()
+  const data = workspace(requestedAt)
+  data.designAssets = [{ id: 'design-asset-a', name: 'Hero master', placement: 'Homepage', rights_notes: '', created_at: '2026-09-11T10:00:00.000Z' }]
+  data.designAssetVersions = [
+    { id: 'asset-version-2', asset_id: 'design-asset-a', version_number: 2, parent_version_id: 'asset-version-1', source_kind: 'upload', source_direction_version_id: 'version-a', lifecycle_status: 'draft', mime_type: 'image/png', width: 1600, height: 900, original_filename: 'hero-v2.png', change_summary: 'Adjusted crop', signed_url: 'https://project.supabase.co/storage/v1/object/sign/design/v2.png?token=v2', created_by: 'user-a', created_at: '2026-09-11T11:00:00.000Z' },
+    { id: 'asset-version-1', asset_id: 'design-asset-a', version_number: 1, parent_version_id: null, source_kind: 'generated', source_media_asset_id: 'asset-a', source_direction_version_id: 'version-a', lifecycle_status: 'draft', mime_type: 'image/png', original_filename: 'generated.png', signed_url: 'https://project.supabase.co/storage/v1/object/sign/design/v1.png?token=v1', created_by: 'user-a', created_at: '2026-09-11T10:00:00.000Z' },
+  ]
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+  await act(async () => root.render(createElement(DesignAssetLibrary, { workspace: data, contextKey: 'context-a', onClose: () => {}, onFocusSource: () => {} })))
+  await act(async () => byText(environment.container, 'button', 'View detail').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.match(environment.container.textContent, /Immutable file history/)
+  assert.match(environment.container.textContent, /v2 · asset-version-2/)
+  assert.match(environment.container.textContent, /v1 · asset-version-1/)
+  assert.match(environment.container.textContent, /Adjusted crop/)
+  assert.equal(elements(environment.container, 'article').length, 2)
+  const versionB = elements(environment.container, 'select').find(select => select.getAttribute('aria-label') === 'Asset version B')
+  versionB.value = 'asset-version-2'
+  await act(async () => versionB.dispatchEvent(new TestEvent('change', { bubbles: true })))
+  assert.match(environment.container.textContent, /Choose two distinct versions of this asset/)
+  versionB.value = 'asset-version-1'
+  await act(async () => versionB.dispatchEvent(new TestEvent('change', { bubbles: true })))
+  const versionA = elements(environment.container, 'select').find(select => select.getAttribute('aria-label') === 'Asset version A')
+  versionA.value = 'asset-version-2'
+  await act(async () => versionA.dispatchEvent(new TestEvent('change', { bubbles: true })))
+  assert.equal(elements(environment.container, 'a').filter(link => link.textContent.includes('Open or download exact')).length, 2)
 })
