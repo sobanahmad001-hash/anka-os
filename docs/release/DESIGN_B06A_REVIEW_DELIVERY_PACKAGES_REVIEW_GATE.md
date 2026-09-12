@@ -2,7 +2,7 @@
 
 Date: 2026-09-13
 
-Base: `origin/main` at `bfdd77983366c33de06caf32706e835b57b830ca`
+Integrated base: `origin/main` at `df5371c1b2dd6e30549576425d952400fc3d3158`
 
 Branch: `feat/design-b06a-review-packages-20260913`
 
@@ -59,15 +59,17 @@ publication, client delivery, downstream service activation, or automatic ZIP cr
 - Reference-first/archive-second race: waited, then archive rejected — PASS.
 - Race residue: one package, one exact reference, first asset archived, second asset active,
   zero storage deletions — PASS.
-- Full repository data tests: 919/919 PASS.
+- Released Content B06a migration followed by Design B06a migration: PASS.
+- Full post-merge repository data tests: 929/929 PASS.
 - Design Workshop server tests: 49/49 PASS.
+- Integrated Design plus shared approval server tests: 55/55 PASS; both entry points type-check.
 - Exact missing-object server reproductions: 2/2 PASS; save performed one storage check and zero
   database mutations.
 - Exact mounted correction reproductions: 4/4 PASS (retry, pending preview edit, pending save edit,
   and stored-work provenance).
 - Design Workshop server type-check: PASS.
-- Lint: PASS with zero errors (492 pre-existing warnings).
-- Production build: PASS (456 modules).
+- Lint: PASS with zero errors (496 baseline warnings after the shared-review release).
+- Production build: PASS (458 modules).
 - Patch whitespace check: PASS.
 - Shared Content approval/proofing panel diff: empty.
 
