@@ -49,7 +49,7 @@ test('general requests are a flat RLS-filtered organization list sorted newest f
 
 test('general mode is directly usable before an engagement workspace exists', () => {
   assert.match(studio, /Make a post \/ reel/)
-  assert.match(studio, /tab === 'general' \? <GeneralContentRequestsPanel[\s\S]*?repository=\{repositories\.requests\} \/> : loading/)
+  assert.match(studio, /tab === 'general' \? <GeneralContentRequestsPanel[\s\S]*?repository=\{repositories\.requests\} \/> : tab === 'library'[\s\S]*?: loading/)
   assert.match(studio, /\['general', 'General requests'\]/)
   assert.match(panel, /No brand selected/)
   assert.match(panel, /What do you need\?/)
