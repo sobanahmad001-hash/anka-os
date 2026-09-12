@@ -80,6 +80,8 @@ try {
       "version1",
       "asset2",
       "version2",
+      "asset3",
+      "version3",
     ]
       .map((key) => [key, crypto.randomUUID()]),
   );
@@ -117,11 +119,19 @@ try {
     [id.task, id.actor, id.org, id.engagement],
   );
   for (
-    const [asset, version, operation] of [[
-      id.asset1,
-      id.version1,
-      "archive-first-upload",
-    ], [id.asset2, id.version2, "reference-first-upload"]]
+    const [asset, version, operation] of [
+      [
+        id.asset1,
+        id.version1,
+        "archive-first-upload",
+      ],
+      [id.asset2, id.version2, "reference-first-upload"],
+      [
+        id.asset3,
+        id.version3,
+        "membership-race-upload",
+      ],
+    ]
   ) {
     await setup.query(
       "select public.register_design_asset_upload($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,null,null,'Race asset','static_image','','','race.png',$1::text||'/assets/'||$4::text||'/'||$5::text||'/file.png','image/png',68,1,1,repeat('a',64),'',$6::text,repeat('1',64),$7::uuid)",
@@ -133,8 +143,25 @@ try {
   );
   await setup.query(
     "insert into storage.objects(bucket_id,name,owner_id,metadata) select storage_bucket,storage_path,$1::text,'{}'::jsonb from public.design_asset_versions where id=any($2::uuid[])",
-    [id.actor, [id.version1, id.version2]],
+    [id.actor, [id.version1, id.version2, id.version3]],
   );
+  const setupPid =
+    (await setup.query("select pg_backend_pid() pid")).rows[0].pid;
+  const archiverPid =
+    (await archiver.query("select pg_backend_pid() pid")).rows[0].pid;
+  const saverPid =
+    (await saver.query("select pg_backend_pid() pid")).rows[0].pid;
+  async function assertBlocked(pid: number) {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const result = await admin.query(
+        "select cardinality(pg_blocking_pids($1)) > 0 blocked",
+        [pid],
+      );
+      if (result.rows[0].blocked) return;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error(`Expected backend ${pid} to be blocked`);
+  }
   const content = JSON.stringify({
     schema_version: 1,
     destination_type: "website",
@@ -197,7 +224,7 @@ try {
       saveSettled = true;
     }
   })();
-  await new Promise((resolve) => setTimeout(resolve, 150));
+  await assertBlocked(saverPid);
   assert.equal(
     saveSettled,
     false,
@@ -240,7 +267,7 @@ try {
       archiveSettled = true;
     }
   })();
-  await new Promise((resolve) => setTimeout(resolve, 150));
+  await assertBlocked(archiverPid);
   assert.equal(
     archiveSettled,
     false,
@@ -260,8 +287,96 @@ try {
     second_active: true,
   });
   assert.equal(saved.rows[0].result.idempotent_replay, false);
+
+  // Save-first: membership revocation waits for the save/replay authority lock.
+  await archiver.query("begin");
+  await archiver.query(
+    "select id from public.design_assets where id=$1 for update",
+    [id.asset3],
+  );
+  let authoritySaveSettled = false;
+  const authoritySave = (async () => {
+    await beginService(saver);
+    try {
+      const result = await save(
+        saver,
+        id.version3,
+        "membership-save-first",
+        "6".repeat(64),
+        "7".repeat(64),
+      );
+      await saver.query("commit");
+      return result;
+    } finally {
+      authoritySaveSettled = true;
+    }
+  })();
+  await assertBlocked(saverPid);
+  let revocationSettled = false;
+  const blockedRevocation = setup.query(
+    "update public.organization_memberships set status='suspended' where organization_id=$1 and user_id=$2",
+    [id.org, id.actor],
+  ).finally(() => {
+    revocationSettled = true;
+  });
+  await assertBlocked(setupPid);
+  assert.equal(authoritySaveSettled, false);
+  assert.equal(revocationSettled, false);
+  await archiver.query("commit");
+  const authoritySaved = await authoritySave;
+  await blockedRevocation;
+  assert.equal(authoritySaved.rows[0].result.idempotent_replay, false);
+  await setup.query(
+    "update public.organization_memberships set status='active' where organization_id=$1 and user_id=$2",
+    [id.org, id.actor],
+  );
+
+  // Revocation-first: the same lost-response replay waits, then rejects revoked authority.
+  await setup.query("begin");
+  await setup.query(
+    "update public.organization_memberships set status='suspended' where organization_id=$1 and user_id=$2",
+    [id.org, id.actor],
+  );
+  let replaySettled = false;
+  const blockedReplay = (async () => {
+    await beginService(saver);
+    try {
+      await save(
+        saver,
+        id.version3,
+        "membership-save-first",
+        "6".repeat(64),
+        "7".repeat(64),
+      );
+      await saver.query("commit");
+      return null;
+    } catch (error) {
+      await saver.query("rollback");
+      return error as { message?: string };
+    } finally {
+      replaySettled = true;
+    }
+  })();
+  await assertBlocked(saverPid);
+  assert.equal(replaySettled, false);
+  await setup.query("commit");
+  const replayError = await blockedReplay;
+  assert.match(replayError?.message || "", /Design department access required/);
+  await setup.query(
+    "update public.organization_memberships set status='active' where organization_id=$1 and user_id=$2",
+    [id.org, id.actor],
+  );
+  const membershipFinal = await setup.query(
+    "select (select count(*)::int from public.artifacts where organization_id=$1 and artifact_type='design_delivery_package') packages,(select count(*)::int from public.design_delivery_package_version_assets where organization_id=$1) refs,(select status from public.organization_memberships where organization_id=$1 and user_id=$2) membership_status",
+    [id.org, id.actor],
+  );
+  assert.deepEqual(membershipFinal.rows[0], {
+    packages: 2,
+    refs: 2,
+    membership_status: "active",
+  });
   console.log(
-    "loopback_clone=true; archive_first_reference_waited=true; archive_first_save_rejected=true; reference_first_archive_waited=true; reference_first_archive_rejected=true; packages=1; refs=1; first_archived=true; second_active=true; storage_deleted=0",
+    "actual_pg_blocking_pids=true; loopback_clone=true; archive_first_reference_waited=true; archive_first_save_rejected=true; reference_first_archive_waited=true; reference_first_archive_rejected=true; save_first_revocation_waited=true; save_first_committed_before_revocation=true; revocation_first_replay_waited=true; revocation_first_replay_rejected=true; packages=2; refs=2; membership_status=active; storage_deleted=0",
   );
 } finally {
   for (const client of clients) {

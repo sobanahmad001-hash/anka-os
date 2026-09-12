@@ -402,7 +402,8 @@ begin
 
   select role, department_id into v_membership from public.organization_memberships
   where organization_id=p_organization_id and user_id=p_actor_id
-    and member_kind='team' and status='active';
+    and member_kind='team' and status='active'
+  for share;
   if not found or (v_membership.role in ('system_owner','operations_admin','executive')
     or v_membership.department_id='design') is not true then raise exception 'Design department access required.' using errcode='42501'; end if;
 

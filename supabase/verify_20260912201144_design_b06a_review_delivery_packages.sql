@@ -29,6 +29,8 @@ insert into b06a_checks values
   and tgname='trg_design_delivery_package_version_insert' and tgenabled<>'D')
   and exists(select 1 from pg_trigger where tgrelid='public.artifact_versions'::regclass
   and tgname='trg_design_delivery_package_version_complete' and tgenabled<>'D' and tgdeferrable and tginitdeferred)),
+('actor_membership_locked',pg_get_functiondef('public.save_design_delivery_package_version(uuid,uuid,uuid,uuid,uuid,uuid,text,uuid,uuid,uuid,uuid,text,text,text,jsonb,text,uuid[])'::regprocedure)
+  ~* 'organization_memberships[\s\S]*status[[:space:]]*=[[:space:]]*''active''[\s\S]*for share'),
 ('no_storage_delete',pg_get_functiondef('public.save_design_delivery_package_version(uuid,uuid,uuid,uuid,uuid,uuid,text,uuid,uuid,uuid,uuid,text,text,text,jsonb,text,uuid[])'::regprocedure)
   !~* 'delete[[:space:]]+from[[:space:]]+(storage\.)?objects');
 

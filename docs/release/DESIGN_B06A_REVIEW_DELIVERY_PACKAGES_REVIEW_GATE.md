@@ -53,12 +53,15 @@ publication, client delivery, downstream service activation, or automatic ZIP cr
 ## Verification results
 
 - Ordered migration chain on a fresh disposable PostgreSQL database: PASS.
-- Rollback-only B06a database verifier: 30/30 PASS.
+- Rollback-only B06a database verifier: 31/31 PASS.
 - Testing Wave's ten SQL gap/revocation probes: 10/10 rejected as required.
 - Archive-first/reference-second race: waited, then package save rejected — PASS.
 - Reference-first/archive-second race: waited, then archive rejected — PASS.
 - Race residue: one package, one exact reference, first asset archived, second asset active,
   zero storage deletions — PASS.
+- Save-first membership revocation waited for the package authority lock; save committed before
+  revocation — PASS.
+- Revocation-first lost-response replay waited, then rejected the suspended actor — PASS.
 - Released Content B06a migration followed by Design B06a migration: PASS.
 - Full post-merge repository data tests: 929/929 PASS.
 - Design Workshop server tests: 49/49 PASS.
