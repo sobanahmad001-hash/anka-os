@@ -32,6 +32,7 @@ const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses'
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 export const ENABLED_DEPARTMENTS = new Set(['content', 'design', 'marketing', 'development'])
 const SAVED_CONVERSATION_DEPARTMENTS = new Set(['content', 'design', 'marketing'])
+const MODEL_SELECTION_DEPARTMENTS = SAVED_CONVERSATION_DEPARTMENTS
 const ATTACHMENT_BUCKET = 'department-chat-attachments'
 const ATTACHMENT_CLASSIFICATIONS = new Set(['public', 'internal', 'confidential', 'restricted'])
 export const CHAT_MARKETING_ARTIFACT_TYPE_SET = new Set(departmentChatProfile('marketing').artifactTypes)
@@ -265,7 +266,14 @@ export async function requireDepartmentEngagement(admin: Client, engagementId: s
   }
 }
 
-export async function resolveSingleOpenAiModel(admin: Client, engagementId: string, departmentId: string, organizationId: string, credentialFor?: (name: string) => string | undefined) {
+export async function resolveSingleOpenAiModel(
+  admin: Client,
+  engagementId: string,
+  departmentId: string,
+  organizationId: string,
+  credentialFor?: (name: string) => string | undefined,
+  selectedConfigurationId?: string,
+) {
   const { data: connections, error } = await admin.from('integration_connections')
     .select('id, public_config, secret_name, integration_connection_departments!inner(department_id), integration_connection_engagements!inner(engagement_id, department_id)')
     .eq('organization_id', organizationId).eq('provider', 'openai').eq('status', 'verified')
@@ -274,7 +282,33 @@ export async function resolveSingleOpenAiModel(admin: Client, engagementId: stri
     .eq('integration_connection_engagements.department_id', departmentId)
     .order('updated_at', { ascending: false })
   if (error) throw error
-  return selectSingleOpenAiModel(connections || [], departmentId, credentialFor)
+  const connector = selectSingleOpenAiModel(connections || [], departmentId, credentialFor)
+  if (!MODEL_SELECTION_DEPARTMENTS.has(departmentId)) {
+    return { ...connector, configurationId: '', displayName: connector.model, approvedModels: [] }
+  }
+  const { data: configurations, error: configurationError } = await admin
+    .from('department_chat_model_configurations')
+    .select('id, connector_connection_id, model_id, display_name, is_default, verified_at')
+    .eq('organization_id', organizationId)
+    .eq('department_id', departmentId)
+    .eq('connector_connection_id', connector.connectorId)
+    .is('revoked_at', null)
+    .order('is_default', { ascending: false })
+    .order('created_at', { ascending: true })
+  if (configurationError) throw configurationError
+  const publicConfig = connections[0].public_config && typeof connections[0].public_config === 'object'
+    ? connections[0].public_config as Json : {}
+  const selection = selectApprovedModelConfiguration(
+    configurations || [],
+    [connector.model, ...(Array.isArray(publicConfig.verified_model_ids)
+      ? publicConfig.verified_model_ids.map(model => text(model, 120)) : [])],
+    departmentId,
+    selectedConfigurationId,
+  )
+  return {
+    ...connector,
+    ...selection,
+  }
 }
 
 export function selectSingleOpenAiModel(
@@ -297,6 +331,38 @@ export function selectSingleOpenAiModel(
   return {
     connectorId, credential,
     model,
+  }
+}
+
+export function selectApprovedModelConfiguration(
+  configurations: Json[],
+  verifiedModelIds: string[],
+  departmentId: string,
+  selectedConfigurationId?: string,
+) {
+  const verified = new Set(verifiedModelIds.map(model => text(model, 120)).filter(Boolean))
+  const approvedModels = (configurations || []).filter(configuration =>
+    text(configuration.id, 80) && verified.has(text(configuration.model_id, 120)))
+  if (!approvedModels.length) throw new Error(`No administrator-approved model is available for this ${departmentId} connector`)
+  const requestedId = text(selectedConfigurationId, 80)
+  const selected = requestedId
+    ? approvedModels.find(configuration => configuration.id === requestedId)
+    : approvedModels.find(configuration => configuration.is_default) || approvedModels[0]
+  if (!selected) throw Object.assign(new Error('Selected model is stale or no longer approved. Refresh before retrying.'), {
+    status: 409, outcome: 'stale',
+  })
+  return {
+    configurationId: text(selected.id, 80),
+    model: text(selected.model_id, 120),
+    displayName: text(selected.display_name, 120),
+    approvedModels: approvedModels.map(configuration => ({
+      configuration_id: configuration.id,
+      model_id: configuration.model_id,
+      display_name: configuration.display_name,
+      is_default: Boolean(configuration.is_default),
+      supports_text: true,
+      attachment_support: 'validated_text_only',
+    })),
   }
 }
 
@@ -386,7 +452,7 @@ export async function freezeDepartmentChatContext(input: {
   commercialContext: Json
   services: Json[]
   approvedContext: Json[]
-  provider: { connectorId: string, model: string }
+  provider: { connectorId: string, configurationId?: string, model: string }
   stageId?: string | null
   attachmentManifest?: Json[]
 }) {
@@ -408,7 +474,9 @@ export async function freezeDepartmentChatContext(input: {
   if (Object.values(identities).some(value => !value) || !serviceIds.length) {
     throw Object.assign(new Error('Department Chat canonical context envelope is incomplete'), { status: 409 })
   }
-  if (!text(input.provider.connectorId, 80) || !text(input.provider.model, 120)) {
+  if (!text(input.provider.connectorId, 80) || !text(input.provider.model, 120)
+    || (MODEL_SELECTION_DEPARTMENTS.has(input.departmentId)
+      && !text(input.provider.configurationId, 80))) {
     throw Object.assign(new Error('Department Chat connector context is incomplete'), { status: 409 })
   }
   if (approvedArtifacts.some(item => (
@@ -423,6 +491,7 @@ export async function freezeDepartmentChatContext(input: {
     active_service_ids: serviceIds,
     approved_artifacts: approvedArtifacts,
     connector_connection_id: input.provider.connectorId,
+    ...(input.provider.configurationId ? { model_configuration_id: input.provider.configurationId } : {}),
     model_id: input.provider.model,
     engagement_stage_instance_id: input.stageId || null,
   }
@@ -436,6 +505,7 @@ export async function freezeDepartmentChatContext(input: {
       active_service_ids: serviceIds,
       approved_artifact_version_ids: approvedArtifacts.map(item => item.artifact_version_id),
       connector_connection_id: input.provider.connectorId,
+      ...(input.provider.configurationId ? { model_configuration_id: input.provider.configurationId } : {}),
       model_id: input.provider.model,
       engagement_stage_instance_id: input.stageId || null,
       attachment_manifest: input.attachmentManifest || [],
@@ -452,6 +522,7 @@ async function loadDepartmentChatContext(
   engagementId: string,
   departmentId: string,
   dependencies: ProposalDependencies,
+  selectedConfigurationId?: string,
 ) {
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
   const { count: recentRuns, error: rateError } = await admin.from('ai_runs')
@@ -479,7 +550,10 @@ async function loadDepartmentChatContext(
 
   const { engagement, services, commercialContext } = await (dependencies.requireDepartmentEngagement || requireDepartmentEngagement)(admin, engagementId, departmentId, organizationId)
   const context = await (dependencies.approvedSafeContext || approvedSafeContext)(admin, engagement.id, departmentId, organizationId)
-  const provider = await (dependencies.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(admin, engagement.id, departmentId, organizationId)
+  const provider = await (dependencies.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(
+    admin, engagement.id, departmentId, organizationId, undefined,
+    selectedConfigurationId,
+  )
   return { engagement, services, commercialContext, context, provider, organizationSettings: (organization?.settings || {}) as Json }
 }
 
@@ -1024,8 +1098,11 @@ async function getCapabilities(
   return {
     provider: 'openai',
     connector_connection_id: provider.connectorId,
+    model_configuration_id: provider.configurationId,
     model_id: provider.model,
-    approved_models: [provider.model],
+    approved_models: provider.approvedModels,
+    default_model_configuration_id: provider.approvedModels.find(model => model.is_default)?.configuration_id
+      || provider.configurationId,
     default_model_id: provider.model,
     text: { supported: true, max_prompt_characters: 8000 },
     attachments: {
@@ -1058,7 +1135,7 @@ async function persistDepartmentChatProposal(admin: Client, input: {
   preview: Json
   prompt: string
   raw: string
-  provider: { connectorId: string; model: string }
+  provider: { connectorId: string; configurationId?: string; model: string }
   contextManifest: Json
   startedAt: number
   inputTokens: number | null
@@ -1098,16 +1175,43 @@ async function persistDepartmentChatProposal(admin: Client, input: {
       input.outputTokens,
     ),
   }
+  const hasModelConfiguration = Boolean(input.provider.configurationId)
+  const modelParameters = hasModelConfiguration
+    ? { ...parameters, p_model_configuration_id: input.provider.configurationId }
+    : parameters
   const { data, error } = input.conversationId && input.messageId
-    ? await admin.rpc('save_department_chat_conversation_proposal', {
-      ...parameters,
+    ? await admin.rpc(hasModelConfiguration
+      ? 'save_department_chat_conversation_proposal_with_model'
+      : 'save_department_chat_conversation_proposal', {
+      ...modelParameters,
       p_conversation_id: input.conversationId,
       p_message_id: input.messageId,
     })
-    : await admin.rpc('save_department_chat_proposal', parameters)
+    : await admin.rpc(hasModelConfiguration ? 'save_department_chat_proposal_with_model' : 'save_department_chat_proposal', modelParameters)
   if (error) throw error
   return data as Json
 }
+
+async function assertModelDispatch(admin: Client, body: Json, actorId: string, provider: {
+  connectorId: string
+  configurationId?: string
+  model: string
+}) {
+  if (!provider.configurationId) return
+  const { error } = await admin.rpc('assert_department_chat_model_dispatch', {
+    p_configuration_id: provider.configurationId,
+    p_organization_id: text(body.organization_id, 80),
+    p_engagement_id: text(body.engagement_id, 80),
+    p_department_id: text(body.department_id, 40),
+    p_connector_connection_id: provider.connectorId,
+    p_model_id: provider.model,
+    p_actor_id: actorId,
+  })
+  if (error) throw Object.assign(new Error('Selected model is stale or unavailable. Refresh before retrying.'), {
+    status: 409, outcome: 'stale', cause: error,
+  })
+}
+
 export async function proposeArtifact(_userClient: Client, admin: Client, body: Json, actorId: string, organizationId: string, fetcher: typeof fetch = fetch, dependencies: ProposalDependencies = {}) {
   const startedAt = Date.now()
   const engagementId = text(body.engagement_id, 80)
@@ -1118,7 +1222,10 @@ export async function proposeArtifact(_userClient: Client, admin: Client, body: 
   if (!isDepartmentChatArtifactType(departmentId, artifactType)) throw new Error('Unsupported ' + departmentId + ' artifact')
   if (!prompt) throw new Error('A draft prompt is required')
   if (body.prompt_safe_for_ai !== true) throw new Error('Confirm the prompt is safe to send to the configured model')
-  const { engagement, services, commercialContext, context, provider, organizationSettings } = await loadDepartmentChatContext(admin, organizationId, actorId, engagementId, departmentId, dependencies)
+  const { engagement, services, commercialContext, context, provider, organizationSettings } = await loadDepartmentChatContext(
+    admin, organizationId, actorId, engagementId, departmentId, dependencies,
+    text(body.model_configuration_id, 80),
+  )
   const proposalLanguage = departmentId === 'content'
     ? resolveContentProposalLanguage(body, context, organizationSettings, artifactType) : null
   const stageId = await (dependencies.safeStage || safeStage)(admin, engagement.id, body.engagement_stage_instance_id, departmentId, organizationId)
@@ -1138,6 +1245,7 @@ export async function proposeArtifact(_userClient: Client, admin: Client, body: 
     'ENGAGEMENT CONTEXT JSON:',
     JSON.stringify(contextFreeze.frozen).slice(0, 70000),
   ].join('\n')
+  await assertModelDispatch(admin, body, actorId, provider)
   const result = await callDepartmentChatProvider(admin, body, actorId, fetcher, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + provider.credential },
@@ -1205,7 +1313,10 @@ export async function proposeWorkItem(
   if (body.prompt_safe_for_ai !== true) throw new Error('Confirm the prompt is safe to send to the configured model')
   if (!WORK_ITEM_TYPES.has(workItemType)) throw new Error('Unsupported work item type')
   if (!WORK_ITEM_PRIORITIES.has(priority)) throw new Error('Unsupported priority')
-  const { engagement, services, commercialContext, context, provider } = await loadDepartmentChatContext(admin, organizationId, actorId, engagementId, departmentId, dependencies)
+  const { engagement, services, commercialContext, context, provider } = await loadDepartmentChatContext(
+    admin, organizationId, actorId, engagementId, departmentId, dependencies,
+    text(body.model_configuration_id, 80),
+  )
   const attachments = await attachmentContext(admin, body)
   const contextFreeze = await freezeDepartmentChatContext({
     departmentId, commercialContext, services, approvedContext: context, provider,
@@ -1220,6 +1331,7 @@ export async function proposeWorkItem(
     'ENGAGEMENT CONTEXT JSON:',
     JSON.stringify(contextFreeze.frozen).slice(0, 70000),
   ].join('\n')
+  await assertModelDispatch(admin, body, actorId, provider)
   const result = await callDepartmentChatProvider(admin, body, actorId, fetcher, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + provider.credential },
@@ -1248,7 +1360,7 @@ export async function proposeWorkItem(
 async function proposalForDecision(admin: Client, proposalId: string, organizationId: string) {
   if (!proposalId) throw Object.assign(new Error('proposal_id is required'), { status: 400 })
   const { data, error } = await admin.from('department_chat_proposals')
-    .select('id, organization_id, engagement_id, project_id, department_id, proposer_id, proposal_kind, target_key, artifact_id, engagement_stage_instance_id, context_checksum, connector_connection_id, model_id, status, expires_at')
+    .select('id, organization_id, engagement_id, project_id, department_id, proposer_id, proposal_kind, target_key, artifact_id, engagement_stage_instance_id, context_checksum, connector_connection_id, model_configuration_id, model_id, status, expires_at')
     .eq('id', proposalId).eq('organization_id', organizationId).maybeSingle()
   if (error) throw error
   if (!data) throw Object.assign(new Error('Department Chat proposal not found'), { status: 404 })
@@ -1309,6 +1421,8 @@ export async function confirmProposal(
     engagement.id,
     proposal.department_id,
     organizationId,
+    undefined,
+    proposal.model_configuration_id,
   )
   const stageId = await (dependencies.safeStage || safeStage)(
     admin,
@@ -1343,7 +1457,14 @@ export async function confirmProposal(
     p_connector_connection_id: provider.connectorId,
     p_model_id: provider.model,
   })
-  if (error) throw error
+  if (error) {
+    if (error.code === '23514' && String(error.message || '').includes('model')) {
+      throw Object.assign(new Error('Selected model is stale or no longer approved. Regenerate a fresh preview.'), {
+        status: 409, outcome: 'stale', cause: error,
+      })
+    }
+    throw error
+  }
   if (data?.outcome !== 'accepted') {
     const message = data?.outcome === 'stale'
       ? 'Proposal context changed. Regenerate a fresh preview before confirming.'
@@ -1504,6 +1625,11 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
         messageId: text(turn?.message?.id, 80),
       }
       if (!turnContext.messageId) throw new Error('Department Chat turn reservation failed')
+      const reservationProvider = await (dependencies.proposal?.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(
+        admin, conversation.engagement_id, conversation.department_id, organizationId, undefined,
+        text(body.model_configuration_id, 80),
+      )
+      await assertModelDispatch(admin, body, user.id, reservationProvider)
     }
     if (action === 'propose_artifact') return response({ data: await proposeArtifact(userClient, admin, body, user.id, organizationId, dependencies.fetcher, dependencies.proposal) })
     if (action === 'propose_work_item') return response({ data: await proposeWorkItem(userClient, admin, body, user.id, organizationId, dependencies.fetcher, dependencies.proposal) })

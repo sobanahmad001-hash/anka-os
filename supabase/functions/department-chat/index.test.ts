@@ -18,6 +18,7 @@ import {
   rejectProposal,
   requireDepartmentEngagement,
   resolveSingleOpenAiModel,
+  selectApprovedModelConfiguration,
   selectSingleOpenAiModel,
   safeAttemptReason,
 } from './index.ts'
@@ -66,6 +67,7 @@ function selectedOrganizationFixture() {
   let beginReplay = false
   let beginError: any = null
   let providerFailure = ''
+  let modelDispatchError: any = null
   const events: string[] = []
   for (const org of ['A', 'B', 'C']) {
     const add = (table: string, value: any) => (rows[table] ||= []).push({ organization_id: org, ...value })
@@ -82,6 +84,14 @@ function selectedOrganizationFixture() {
       secret_name: 'SYNTHETIC', public_config: { model_id: 'offline' },
       integration_connection_departments: { department_id: 'development' },
       integration_connection_engagements: { engagement_id: 'engagement-' + org, department_id: 'development' } })
+    for (const departmentId of ['content', 'design', 'marketing']) {
+      add('department_chat_model_configurations', {
+        id: `model-configuration-${org}-${departmentId}`,
+        connector_connection_id: 'connector-' + org, department_id: departmentId,
+        model_id: 'offline', display_name: 'Offline fixture', is_default: true,
+        revoked_at: null, verified_at: '2026-09-11T00:00:00Z',
+      })
+    }
     add('department_chat_proposals', { ...pendingProposal, id: 'proposal-' + org, organization_id: org,
       engagement_id: 'engagement-' + org, project_id: 'project-' + org, proposer_id: 'actor', connector_connection_id: 'connector-' + org })
     add('department_chat_conversations', {
@@ -113,6 +123,9 @@ function selectedOrganizationFixture() {
     async rpc(name: string, args: any) {
       rpcCalls.push({ name, args })
       events.push('rpc:' + name)
+      if (name === 'assert_department_chat_model_dispatch' && modelDispatchError) {
+        return { data: null, error: modelDispatchError }
+      }
       if (name === 'begin_department_chat_turn_with_attachments' && beginError) return { data: null, error: beginError }
       if (name === 'can_access_department_chat_conversation') {
         const conversation = (rows.department_chat_conversations || []).find(row =>
@@ -145,6 +158,8 @@ function selectedOrganizationFixture() {
           message: { id: 'message-B', status: 'pending' }, replayed: beginReplay,
         }
         : name === 'save_department_chat_proposal' || name === 'save_department_chat_conversation_proposal'
+          || name === 'save_department_chat_proposal_with_model'
+          || name === 'save_department_chat_conversation_proposal_with_model'
           ? { status: 'pending', proposal_id: 'saved-B', ai_run_id: 'run-B' }
         : name === 'reject_department_chat_proposal' ? { outcome: 'rejected' }
         : { outcome: 'accepted', artifact_version_id: 'version-B' }, error: null }
@@ -162,8 +177,8 @@ function selectedOrganizationFixture() {
       if (providerFailure === '400') return new Response(JSON.stringify({ error: { message: 'rejected' } }), { status: 400 })
       return new Response(JSON.stringify({ output_text: JSON.stringify({ notes: 'Offline', checklist: ['Test'] }) }))
     }) as typeof fetch,
-    proposal: { estimatedCost: () => 0, resolveSingleOpenAiModel: (client, engagement, department, organization) =>
-      resolveSingleOpenAiModel(client, engagement, department, organization, () => 'synthetic-key') },
+    proposal: { estimatedCost: () => 0, resolveSingleOpenAiModel: (client, engagement, department, organization, _credential, selected) =>
+      resolveSingleOpenAiModel(client, engagement, department, organization, () => 'synthetic-key', selected) },
   })
   return {
     rows, queries, rpcCalls, request, events, admin,
@@ -171,8 +186,53 @@ function selectedOrganizationFixture() {
     setBeginReplay: (value: boolean) => { beginReplay = value },
     setBeginError: (value: any) => { beginError = value },
     setProviderFailure: (value: string) => { providerFailure = value },
+    setModelDispatchError: (value: any) => { modelDispatchError = value },
   }
 }
+
+Deno.test('P9 model selection accepts only an approved verified configuration identity', () => {
+  const configurations = [
+    { id: 'configuration-default', model_id: 'verified-default', display_name: 'Default', is_default: true },
+    { id: 'configuration-other', model_id: 'verified-other', display_name: 'Other', is_default: false },
+    { id: 'configuration-fabricated', model_id: 'browser-invented', display_name: 'Invented', is_default: false },
+  ]
+  assertEquals(selectApprovedModelConfiguration(
+    configurations, ['verified-default', 'verified-other'], 'content', 'configuration-other',
+  ).model, 'verified-other')
+  assertEquals(selectApprovedModelConfiguration(
+    configurations, ['verified-default'], 'content',
+  ).configurationId, 'configuration-default')
+  assertThrows(() => selectApprovedModelConfiguration(
+    configurations, ['verified-default', 'verified-other'], 'content', 'configuration-stale',
+  ), Error, 'stale or no longer approved')
+  assertThrows(() => selectApprovedModelConfiguration(
+    [{ id: 'configuration-fabricated', model_id: 'browser-invented' }],
+    ['verified-default'], 'content', 'configuration-fabricated',
+  ), Error, 'No administrator-approved model')
+})
+
+Deno.test('P9 stale model dispatch is rejected before provider call with no fallback', async () => {
+  const fixture = selectedOrganizationFixture()
+  Object.assign(fixture.rows.organization_memberships.find(row => row.organization_id === 'B'), {
+    department_id: 'content', role: 'contributor',
+  })
+  fixture.rows.engagement_services.find(row => row.organization_id === 'B').service_catalog.department_id = 'content'
+  const connection = fixture.rows.integration_connections.find(row => row.organization_id === 'B')
+  connection.integration_connection_departments.department_id = 'content'
+  connection.integration_connection_engagements.department_id = 'content'
+  fixture.setModelDispatchError({ code: '23514', message: 'stale' })
+  const response = await fixture.request({
+    action: 'propose_work_item', organization_id: 'B', project_id: 'project-B',
+    engagement_id: 'engagement-B', department_id: 'content',
+    title: 'No paid retry', work_item_type: 'task', priority: 'medium',
+    prompt: 'Do not dispatch', prompt_safe_for_ai: true,
+    model_configuration_id: 'model-configuration-B-content',
+  })
+  assertEquals(response.status, 409)
+  assertEquals((await response.json()).outcome, 'stale')
+  assertEquals(fixture.providerCalls(), 0)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'mark_department_chat_turn_dispatched'), false)
+})
 
 const selectedPreview = { action: 'propose_artifact', organization_id: 'B', engagement_id: 'engagement-B',
   department_id: 'development', artifact_type: 'technical_brief', engagement_stage_instance_id: 'stage-B',
@@ -346,10 +406,11 @@ Deno.test('saved work-item turn reserves once and uses the atomic conversation p
   assertEquals(begin.args.p_conversation_id, 'conversation-B')
   assertEquals(begin.args.p_client_request_id, 'request-B')
   assertEquals(begin.args.p_attachment_ids, [])
-  const save = fixture.rpcCalls.find(call => call.name === 'save_department_chat_conversation_proposal')!
+  const save = fixture.rpcCalls.find(call => call.name === 'save_department_chat_conversation_proposal_with_model')!
   assertEquals(save.args.p_conversation_id, 'conversation-B')
   assertEquals(save.args.p_message_id, 'message-B')
-  assertEquals(fixture.rpcCalls.some(call => call.name === 'save_department_chat_proposal'), false)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'save_department_chat_proposal'
+    || call.name === 'save_department_chat_proposal_with_model'), false)
   assertEquals(fixture.rpcCalls.some(call => call.name === 'fail_department_chat_turn'), false)
 })
 
@@ -368,6 +429,7 @@ Deno.test('a replayed pending client request never starts a second provider run'
   })
   assertEquals(response.status, 409)
   assertEquals(fixture.providerCalls(), 0)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'assert_department_chat_model_dispatch'), false)
   assertEquals(fixture.rpcCalls.some(call => call.name === 'save_department_chat_conversation_proposal'), false)
   assertEquals(fixture.rpcCalls.some(call => call.name === 'fail_department_chat_turn'), false)
 })
@@ -542,19 +604,20 @@ for (const department of ['content','design','marketing','development']) {
         prompt: 'Fixture', prompt_safe_for_ai: true,
         organization_id: 'injected', project_id: 'injected', actor_id: 'injected', approval: true,
       }, 'member-1', ORGANIZATION_ID, async () => new Response(JSON.stringify({ output_text: JSON.stringify(fixture) })), contextDependencies)
-      assertEquals(rpcCalls.length, 1)
-      assertEquals(rpcCalls[0].name, 'save_department_chat_proposal')
-      assertEquals(rpcCalls[0].args.p_actor_id, 'member-1')
-      assertEquals(rpcCalls[0].args.p_project_id, 'project-1')
-      assertEquals(rpcCalls[0].args.p_organization_id, ORGANIZATION_ID)
-      assertEquals(rpcCalls[0].args.p_target_key, target)
+      const save = rpcCalls.find(call => call.name === (department === 'development'
+        ? 'save_department_chat_proposal' : 'save_department_chat_proposal_with_model'))!
+      assertEquals(Boolean(save), true)
+      assertEquals(save.args.p_actor_id, 'member-1')
+      assertEquals(save.args.p_project_id, 'project-1')
+      assertEquals(save.args.p_organization_id, ORGANIZATION_ID)
+      assertEquals(save.args.p_target_key, target)
       const invalid = proposalAdmin()
       await assertRejects(() => proposeArtifact({} as any, invalid.admin as any, {
         department_id: department, engagement_id: 'engagement-1', artifact_type: target,
         language: department === 'content' && ['discovery', 'vision', 'audience'].includes(target) ? 'Urdu' : undefined,
         prompt: 'Fixture', prompt_safe_for_ai: true,
       }, 'member-1', ORGANIZATION_ID, async () => new Response(JSON.stringify({ output_text: '{}' })), contextDependencies))
-      assertEquals(invalid.rpcCalls.length, 0)
+      assertEquals(invalid.rpcCalls.some(call => call.name.startsWith('save_department_chat_')), false)
     })
   }
   for (const target of ['task','bug','request']) {
@@ -564,15 +627,17 @@ for (const department of ['content','design','marketing','development']) {
         department_id: department, engagement_id: 'engagement-1', work_item_type: target,
         title: 'Fixture', prompt: 'Fixture', prompt_safe_for_ai: true, status: 'done', assignee_id: 'injected',
       }, 'member-1', ORGANIZATION_ID, async () => new Response(JSON.stringify({output_text:'Fixture'})), contextDependencies)
-      assertEquals(rpcCalls.length, 1)
-      assertEquals((rpcCalls[0].args.p_preview_payload as any).status, 'not_started')
-      assertEquals((rpcCalls[0].args.p_validated_payload as any).assignee_id, undefined)
+      const save = rpcCalls.find(call => call.name === (department === 'development'
+        ? 'save_department_chat_proposal' : 'save_department_chat_proposal_with_model'))!
+      assertEquals(Boolean(save), true)
+      assertEquals((save.args.p_preview_payload as any).status, 'not_started')
+      assertEquals((save.args.p_validated_payload as any).assignee_id, undefined)
       const invalid = proposalAdmin()
       await assertRejects(() => proposeWorkItem({} as any, invalid.admin as any, {
         department_id: department, engagement_id: 'engagement-1', work_item_type: target,
         title: 'Fixture', prompt: 'Fixture', prompt_safe_for_ai: true,
       }, 'member-1', ORGANIZATION_ID, async () => new Response(JSON.stringify({ output_text: '' })), contextDependencies))
-      assertEquals(invalid.rpcCalls.length, 0)
+      assertEquals(invalid.rpcCalls.some(call => call.name.startsWith('save_department_chat_')), false)
     })
   }
 }
@@ -728,8 +793,16 @@ const contextDependencies = {
   })) as any,
   safeStage: (async () => null) as any,
   approvedSafeContext: (async () => []) as any,
-  resolveSingleOpenAiModel: (async () => ({
+  resolveSingleOpenAiModel: (async (_admin: unknown, _engagementId: string, departmentId: string) => ({
     connectorId: 'connector-1', credential: 'test-key', model: 'gpt-test',
+    ...(departmentId === 'development' ? {} : {
+      configurationId: 'configuration-1',
+      displayName: 'GPT test',
+      approvedModels: [{
+        configuration_id: 'configuration-1', model_id: 'gpt-test',
+        display_name: 'GPT test', is_default: true,
+      }],
+    }),
   })) as any,
   estimatedCost: () => 12,
 }

@@ -52,6 +52,50 @@ function safeDepartmentIds(value: unknown) {
   return departmentIds
 }
 
+function verifiedModelIds(connection: Record<string, unknown>) {
+  const config = connection.public_config && typeof connection.public_config === 'object'
+    ? connection.public_config as Record<string, unknown> : {}
+  return [...new Set([
+    text(config.model_id, 120),
+    ...(Array.isArray(config.verified_model_ids)
+      ? config.verified_model_ids.map(model => text(model, 120)) : []),
+  ].filter(Boolean))]
+}
+
+export async function syncInitialDepartmentChatModel(
+  adminClient: ReturnType<typeof createClient<any>>,
+  connection: Record<string, unknown>,
+  actorId: string,
+  organizationId = ORGANIZATION_ID,
+) {
+  if (connection.provider !== 'openai') return
+  const modelId = verifiedModelIds(connection)[0]
+  if (!modelId) return
+  const [{ data: mappings, error: mappingError }, { data: history, error: historyError }] = await Promise.all([
+    adminClient.from('integration_connection_departments').select('department_id')
+      .eq('connection_id', connection.id).eq('organization_id', organizationId),
+    adminClient.from('department_chat_model_configurations').select('model_id, revoked_at')
+      .eq('connector_connection_id', connection.id).eq('organization_id', organizationId),
+  ])
+  if (mappingError) throw mappingError
+  if (historyError) throw historyError
+  const active = (history || []).filter(configuration => !configuration.revoked_at)
+  const shouldInitialize = !(history || []).length
+  const verifiedModelChanged = active.some(configuration => configuration.model_id !== modelId)
+  if (!shouldInitialize && !verifiedModelChanged) return
+  const departmentModelIds = Object.fromEntries((mappings || [])
+    .map(mapping => mapping.department_id)
+    .filter(departmentId => ['content', 'design', 'marketing'].includes(departmentId))
+    .map(departmentId => [departmentId, [modelId]]))
+  const { error } = await adminClient.rpc('configure_department_chat_model_allowlist', {
+    p_organization_id: organizationId,
+    p_connector_connection_id: connection.id,
+    p_actor_id: actorId,
+    p_department_model_ids: departmentModelIds,
+  })
+  if (error) throw error
+}
+
 function validateSecretName(provider: string, value: unknown) {
   const secretName = text(value, 120)
   if (!secretName) return null
@@ -76,7 +120,7 @@ function safeHttpsBaseUrl(value: unknown) {
   return url.toString().replace(/\/$/, '')
 }
 
-async function testConnection(connection: Record<string, unknown>, secret: string) {
+async function testConnection(connection: Record<string, unknown>, secret: string, fetcher: typeof fetch = fetch) {
   const provider = String(connection.provider)
   const config = connection.public_config as Record<string, string>
   const startedAt = Date.now()
@@ -85,7 +129,7 @@ async function testConnection(connection: Record<string, unknown>, secret: strin
 
   if (provider === 'github') {
     if (!config.owner || !config.repo) throw new Error('GitHub owner and repository are required')
-    response = await fetch(`https://api.github.com/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}`, {
+    response = await fetcher(`https://api.github.com/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}`, {
       headers: {
         Authorization: `Bearer ${secret}`,
         Accept: 'application/vnd.github+json',
@@ -99,7 +143,7 @@ async function testConnection(connection: Record<string, unknown>, secret: strin
     }
   } else if (provider === 'figma') {
     if (!config.file_key) throw new Error('Figma file key is required')
-    response = await fetch(`https://api.figma.com/v1/files/${encodeURIComponent(config.file_key)}?depth=1`, {
+    response = await fetcher(`https://api.figma.com/v1/files/${encodeURIComponent(config.file_key)}?depth=1`, {
       headers: { 'X-Figma-Token': secret },
       signal: AbortSignal.timeout(8000),
     })
@@ -110,7 +154,7 @@ async function testConnection(connection: Record<string, unknown>, secret: strin
   } else if (provider === 'wordpress') {
     const baseUrl = safeHttpsBaseUrl(connection.base_url)
     if (!baseUrl || !config.username) throw new Error('WordPress URL and username are required')
-    response = await fetch(`${baseUrl}/wp-json/wp/v2/users/me?context=edit`, {
+    response = await fetcher(`${baseUrl}/wp-json/wp/v2/users/me?context=edit`, {
       headers: { Authorization: `Basic ${btoa(`${config.username}:${secret}`)}` },
       signal: AbortSignal.timeout(8000),
     })
@@ -120,7 +164,7 @@ async function testConnection(connection: Record<string, unknown>, secret: strin
     }
   } else {
     if (!config.model_id) throw new Error('OpenAI model ID is required')
-    response = await fetch(`https://api.openai.com/v1/models/${encodeURIComponent(config.model_id)}`, {
+    response = await fetcher(`https://api.openai.com/v1/models/${encodeURIComponent(config.model_id)}`, {
       headers: { Authorization: `Bearer ${secret}` },
       signal: AbortSignal.timeout(8000),
     })
@@ -136,7 +180,11 @@ async function testConnection(connection: Record<string, unknown>, secret: strin
   return { latency_ms: Date.now() - startedAt, summary }
 }
 
-serve(async (req) => {
+export async function handleRequest(req: Request, dependencies: {
+  clients?: { userClient: any; adminClient: any }
+  env?: (name: string) => string | undefined
+  fetcher?: typeof fetch
+} = {}) {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
 
@@ -144,33 +192,71 @@ serve(async (req) => {
     const authorization = req.headers.get('Authorization')
     if (!authorization) return json({ error: 'Authentication required' }, 401)
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
-    const publishableKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
-    const secretKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SERVICE_ROLE_KEY') ?? ''
-    if (!supabaseUrl || !publishableKey || !secretKey) throw new Error('Function environment is incomplete')
-
-    const userClient = createClient(supabaseUrl, publishableKey, {
-      global: { headers: { Authorization: authorization } },
-    })
-    const adminClient = createClient(supabaseUrl, secretKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
+    const environment = dependencies.env || ((name: string) => Deno.env.get(name))
+    let userClient = dependencies.clients?.userClient
+    let adminClient = dependencies.clients?.adminClient
+    if (!userClient || !adminClient) {
+      const supabaseUrl = environment('SUPABASE_URL') ?? ''
+      const publishableKey = environment('SUPABASE_ANON_KEY') ?? ''
+      const secretKey = environment('SUPABASE_SERVICE_ROLE_KEY') ?? environment('SERVICE_ROLE_KEY') ?? ''
+      if (!supabaseUrl || !publishableKey || !secretKey) throw new Error('Function environment is incomplete')
+      userClient = createClient(supabaseUrl, publishableKey, {
+        global: { headers: { Authorization: authorization } },
+      })
+      adminClient = createClient(supabaseUrl, secretKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      })
+    }
     const { data: { user }, error: authError } = await userClient.auth.getUser()
     if (authError || !user) return json({ error: 'Authentication required' }, 401)
 
+    const body = await req.json()
+    const action = text(body.action, 40)
+    const modelScopedAction = action === 'list_model_allowlist' || action === 'configure_model_allowlist'
+    const selectedOrganizationId = modelScopedAction ? text(body.organization_id, 80) : ORGANIZATION_ID
+    if (modelScopedAction && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(selectedOrganizationId)) {
+      return json({ error: 'Selected organization is required' }, 400)
+    }
     const { data: membership, error: membershipError } = await userClient
       .from('organization_memberships')
       .select('role, status, member_kind')
-      .eq('organization_id', ORGANIZATION_ID)
+      .eq('organization_id', selectedOrganizationId)
       .eq('user_id', user.id)
       .single()
     if (membershipError || membership?.status !== 'active' || membership?.member_kind !== 'team') {
       return json({ error: 'Active team membership required' }, 403)
     }
 
-    const body = await req.json()
-    const action = text(body.action, 40)
     const isLeader = LEADER_ROLES.has(membership.role)
+
+    if (action === 'list_model_allowlist') {
+      const { data, error } = await userClient.from('integration_connections')
+        .select('*, integration_connection_departments(department_id)')
+        .eq('organization_id', selectedOrganizationId)
+        .eq('provider', 'openai')
+        .is('archived_at', null).order('display_name')
+      if (error) throw error
+      const { data: modelConfigurations, error: modelConfigurationError } = await userClient
+        .from('department_chat_model_configurations')
+        .select('id, department_id, connector_connection_id, model_id, display_name, is_default, revoked_at, verified_at')
+        .eq('organization_id', selectedOrganizationId)
+        .order('created_at', { ascending: true })
+      if (modelConfigurationError) throw modelConfigurationError
+      const connections = (data || []).map((connection: Record<string, any>) => {
+        const mappings = Array.isArray(connection.integration_connection_departments)
+          ? connection.integration_connection_departments as Array<{ department_id: string }>
+          : []
+        const { integration_connection_departments: _mappings, ...publicConnection } = connection
+        return {
+          ...publicConnection,
+          department_ids: mappings.map(mapping => mapping.department_id),
+          verified_model_ids: connection.status === 'verified' ? verifiedModelIds(connection) : [],
+          model_configurations: (modelConfigurations || []).filter((configuration: Record<string, unknown>) =>
+            configuration.connector_connection_id === connection.id && !configuration.revoked_at),
+        }
+      })
+      return json({ organization_id: selectedOrganizationId, connections, can_manage: isLeader })
+    }
 
     if (action === 'list') {
       const departmentId = text(body.department_id, 40)
@@ -179,7 +265,7 @@ serve(async (req) => {
         .select('*, integration_connection_departments(department_id)')
         .is('archived_at', null).order('provider').order('display_name')
       if (error) throw error
-      const visibleConnections = (data || []).map((connection) => {
+      const visibleConnections = (data || []).map((connection: Record<string, any>) => {
         const mappings = Array.isArray(connection.integration_connection_departments)
           ? connection.integration_connection_departments as Array<{ department_id: string }>
           : []
@@ -189,7 +275,7 @@ serve(async (req) => {
           department_ids: mappings.map((mapping) => mapping.department_id),
           secret_configured: Boolean(connection.secret_name && Deno.env.get(connection.secret_name)),
         }
-      }).filter((connection) => !departmentId || connection.department_ids.includes(departmentId))
+      }).filter((connection: Record<string, any>) => !departmentId || connection.department_ids.includes(departmentId))
       return json({
         connections: visibleConnections,
         can_manage: isLeader,
@@ -248,9 +334,12 @@ serve(async (req) => {
 
     const connectionId = text(body.connection_id, 80)
     if (!connectionId) return json({ error: 'Connection ID is required' }, 400)
+    const connectionOrganizationId = action === 'configure_model_allowlist'
+      ? selectedOrganizationId
+      : ORGANIZATION_ID
     const { data: connection, error: connectionError } = await adminClient
       .from('integration_connections').select('*')
-      .eq('id', connectionId).eq('organization_id', ORGANIZATION_ID).is('archived_at', null).single()
+      .eq('id', connectionId).eq('organization_id', connectionOrganizationId).is('archived_at', null).single()
     if (connectionError || !connection) return json({ error: 'Connection not found' }, 404)
     if (!PROVIDERS.has(String(connection.provider))) {
       return json({ error: 'Use the Google authorization service for this connector' }, 400)
@@ -273,6 +362,51 @@ serve(async (req) => {
       return json({ success: true })
     }
 
+    if (action === 'configure_model_allowlist') {
+      if (connection.provider !== 'openai' || connection.status !== 'verified') {
+        return json({ error: 'A verified OpenAI connector is required' }, 409)
+      }
+      const requested = body.department_model_ids && typeof body.department_model_ids === 'object'
+        ? body.department_model_ids as Record<string, unknown> : {}
+      const { data: mappings, error: mappingError } = await adminClient
+        .from('integration_connection_departments').select('department_id')
+        .eq('connection_id', connection.id).eq('organization_id', selectedOrganizationId)
+      if (mappingError) throw mappingError
+      const mappedDepartments = new Set<string>((mappings || []).map((mapping: { department_id: string }) => mapping.department_id)
+        .filter((departmentId: string) => ['content', 'design', 'marketing'].includes(departmentId)))
+      const verified = new Set(verifiedModelIds(connection))
+      const selected: Array<{ department_id: string; model_id: string }> = []
+      for (const [departmentId, values] of Object.entries(requested)) {
+        if (!mappedDepartments.has(departmentId) || !Array.isArray(values)) {
+          return json({ error: 'Model allowlist contains an unmapped department' }, 400)
+        }
+        for (const value of values) {
+          const modelId = text(value, 120)
+          if (!modelId || !verified.has(modelId)) {
+            return json({ error: 'Model allowlist contains an unverified model' }, 400)
+          }
+          selected.push({ department_id: departmentId, model_id: modelId })
+        }
+      }
+      const departmentModelIds = Object.fromEntries([...mappedDepartments].map(departmentId => [
+        departmentId,
+        selected.filter(entry => entry.department_id === departmentId).map(entry => entry.model_id),
+      ]))
+      const { error: configureError } = await adminClient.rpc('configure_department_chat_model_allowlist', {
+        p_organization_id: selectedOrganizationId,
+        p_connector_connection_id: connection.id,
+        p_actor_id: user.id,
+        p_department_model_ids: departmentModelIds,
+      })
+      if (configureError) throw configureError
+      await adminClient.from('integration_events').insert({
+        organization_id: selectedOrganizationId, connection_id: connection.id, actor_id: user.id,
+        operation: 'updated', outcome: 'succeeded', provider: 'openai',
+        metadata: { change: 'department_chat_model_allowlist', departments: [...mappedDepartments] },
+      })
+      return json({ success: true })
+    }
+
     if (action === 'test') {
       const providerSecret = connection.secret_name ? Deno.env.get(connection.secret_name) : null
       if (!providerSecret) {
@@ -283,10 +417,11 @@ serve(async (req) => {
       }
       const startedAt = Date.now()
       try {
-        const result = await testConnection(connection, providerSecret)
+        const result = await testConnection(connection, providerSecret, dependencies.fetcher)
         await adminClient.from('integration_connections').update({
           status: 'verified', last_checked_at: new Date().toISOString(), last_check_status: 'passed',
         }).eq('id', connection.id)
+        await syncInitialDepartmentChatModel(adminClient, connection, user.id)
         await adminClient.from('integration_events').insert({
           organization_id: ORGANIZATION_ID,
           connection_id: connection.id,
@@ -323,4 +458,6 @@ serve(async (req) => {
     const message = error instanceof Error ? error.message : 'Unexpected integration gateway error'
     return json({ error: message }, 400)
   }
-})
+}
+
+if (import.meta.main) serve(req => handleRequest(req))

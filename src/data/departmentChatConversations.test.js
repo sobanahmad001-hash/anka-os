@@ -96,7 +96,7 @@ test('P9 endpoint and reusable shell expose saved lifecycle and truthful capabil
   assert.ok(edge.includes('attachments: {'))
   assert.ok(edge.includes('reference_only: { mime_types:'))
   assert.ok(edge.includes("unavailable: ['PDF'"))
-  assert.ok(edge.includes('approved_models: [provider.model]'))
+  assert.ok(edge.includes('approved_models: provider.approvedModels'))
   assert.ok(edge.includes("SAVED_CONVERSATION_DEPARTMENTS = new Set(['content', 'design', 'marketing'])"))
   for (const label of ['Conversations', 'Private to you', 'Show archived', 'Explicit source files']) {
     assert.ok(chat.includes(label), label)

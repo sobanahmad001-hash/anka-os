@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabase.js'
 
-async function invoke(body) {
-  const { data, error } = await supabase.functions.invoke('integration-gateway', { body })
+async function invoke(body, { signal } = {}) {
+  const { data, error } = await supabase.functions.invoke('integration-gateway', { body, signal })
   if (error) throw new Error(error.message || 'Integration service failed')
   if (data?.error) throw new Error(data.error)
   return data
@@ -28,9 +28,18 @@ export const integrations = Object.freeze({
     return data || []
   },
   list: (departmentId = null) => invoke({ action: 'list', department_id: departmentId }),
+  listModelAllowlist: (organizationId, options = {}) => invoke({
+    action: 'list_model_allowlist', organization_id: organizationId,
+  }, options),
   save: (connection) => invoke({ action: 'save', ...connection }),
   test: (connectionId) => invoke({ action: 'test', connection_id: connectionId }),
   disable: (connectionId) => invoke({ action: 'disable', connection_id: connectionId }),
+  configureModelAllowlist: (organizationId, connectionId, departmentModelIds, options = {}) => invoke({
+    action: 'configure_model_allowlist',
+    organization_id: organizationId,
+    connection_id: connectionId,
+    department_model_ids: departmentModelIds,
+  }, options),
   startGoogleOAuth: (connection) => invokeGoogle({ action: 'start', ...connection }),
   configureGoogleReporting: (connectionId, publicConfig) => invokeGoogle({
     action: 'configure_reporting', connection_id: connectionId, public_config: publicConfig,

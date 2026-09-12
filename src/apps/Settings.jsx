@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import {
@@ -7,8 +7,11 @@ import {
   DEPARTMENT_LABELS,
   connectorLabel,
 } from '../config/connectorCatalog.js'
+import { runCurrentModelAllowlistRequest } from '../data/departmentChatModelSelection.js'
 import { integrations } from '../data/integrationRepository.js'
 import ContentCustomFieldSettings from '../components/ContentCustomFieldSettings.jsx'
+import DepartmentChatModelAllowlist from '../components/DepartmentChatModelAllowlist.jsx'
+import { useOrganization } from '../context/OrganizationContext.jsx'
 
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20'
 const BUTTON = 'rounded-xl border border-slate-700 px-3.5 py-2 text-sm font-medium text-slate-200 transition hover:border-purple-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50'
@@ -38,8 +41,14 @@ function Status({ value }) {
 }
 
 export default function Settings() {
+  const { activeOrganizationId, scopeRevision, requestSignal } = useOrganization()
+  const currentModelScope = useRef({ organizationId: activeOrganizationId, revision: scopeRevision })
+  currentModelScope.current = { organizationId: activeOrganizationId, revision: scopeRevision }
+  const modelLoadGeneration = useRef(0)
   const [searchParams, setSearchParams] = useSearchParams()
   const [connections, setConnections] = useState([])
+  const [modelConnections, setModelConnections] = useState([])
+  const [modelCanManage, setModelCanManage] = useState(false)
   const [brands, setBrands] = useState([])
   const [canManage, setCanManage] = useState(false)
   const [form, setForm] = useState(initialForm())
@@ -68,7 +77,39 @@ export default function Settings() {
     }
   }
 
+  async function loadModelConnections() {
+    const request = { organizationId: activeOrganizationId, revision: scopeRevision, signal: requestSignal }
+    const generation = ++modelLoadGeneration.current
+    if (!request.organizationId || request.signal?.aborted) {
+      setModelConnections([])
+      setModelCanManage(false)
+      return
+    }
+    await runCurrentModelAllowlistRequest({
+      request, generation,
+      currentScope: () => currentModelScope.current,
+      currentGeneration: () => modelLoadGeneration.current,
+      load: currentRequest => integrations.listModelAllowlist(
+        currentRequest.organizationId, { signal: currentRequest.signal },
+      ),
+      onSuccess: result => {
+        if (result.organization_id !== request.organizationId) {
+          throw new Error('Model access response does not match the selected organization')
+        }
+        setModelConnections(result.connections || [])
+        setModelCanManage(Boolean(result.can_manage))
+      },
+      onError: loadError => setError(loadError.message),
+    })
+  }
+
   useEffect(() => { loadConnections() }, [])
+  useEffect(() => {
+    setModelConnections([])
+    setModelCanManage(false)
+    loadModelConnections()
+    return () => { modelLoadGeneration.current += 1 }
+  }, [activeOrganizationId, scopeRevision])
   useEffect(() => {
     const outcome = searchParams.get('oauth')
     if (!outcome) return
@@ -284,6 +325,14 @@ export default function Settings() {
         {message && <div className="rounded-xl border border-emerald-900/60 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">{message}</div>}
 
         <ContentCustomFieldSettings />
+        <DepartmentChatModelAllowlist
+          key={`${activeOrganizationId}:${scopeRevision}`}
+          requestSignal={requestSignal}
+          organizationId={activeOrganizationId}
+          connections={modelConnections}
+          canManage={modelCanManage}
+          onSaved={loadModelConnections}
+        />
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {Object.entries(CONNECTOR_CATALOG).map(([id, connector]) => {
