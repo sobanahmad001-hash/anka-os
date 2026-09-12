@@ -459,6 +459,78 @@ Deno.test('B04 over-limit save fails before target reads or writes', async () =>
   assertEquals(fixture.writes.length, 0)
 })
 
+function b05WriterContent(outputType = 'website_page_copy') {
+  const website = outputType === 'website_page_copy'
+  return {
+    schema_version: 2, output_type: outputType, working_title: 'Homepage draft',
+    source_architecture_version_id: website ? 'architecture-v2' : null,
+    target_page_key: website ? 'page:home' : null, target_page_path: null,
+    destination: website ? null : 'September launch', objective: 'Explain the service',
+    audience: 'Operations leaders', language: 'English', tone: 'Direct and calm',
+    body: 'A clear manually authored draft.', cta: 'Book a call', exclusions: ['guaranteed'],
+    variant_number: 1,
+  }
+}
+
+function b05VersionInput(fixture: ReturnType<typeof b04SaveFixture>, content: Record<string, unknown>) {
+  return {
+    organizationId: fixture.organizationId,
+    engagement: { id: fixture.engagementId, brand_id: fixture.brandId },
+    artifactId: null, artifactType: 'content', title: 'Homepage draft', content,
+    changeSummary: 'B05 manual writer preview', aiUseAllowed: false, dataClassification: 'internal',
+    actorId: 'actor-a', source: 'manual' as const, visibilityClient: fixture.user,
+  }
+}
+
+Deno.test('B05a validates five strict writer types while preserving the legacy Content schema', () => {
+  for (const outputType of ['website_page_copy', 'blog_article', 'social_copy', 'campaign_copy', 'custom_text']) {
+    const content = validateContentArtifact('content', b05WriterContent(outputType))
+    assertEquals(content.output_type, outputType)
+    assertEquals(content.variant_number, 1)
+  }
+  const legacy = validateContentArtifact('content', {
+    content_strategy: 'Page plan', pages: [{ page_path: 'home', page_brief: 'Orient', draft_copy: 'Copy', meta_title: 'Home', meta_description: 'Description', primary_cta: 'Book' }],
+  })
+  assertEquals(legacy.content_strategy, 'Page plan')
+  assertThrows(() => validateContentArtifact('content', { ...b05WriterContent('blog_article'), variant_number: 2 }), Error, 'exactly one variant')
+  assertThrows(() => validateContentArtifact('content', { ...b05WriterContent('blog_article'), target_page_key: 'page:home' }), Error, 'Only website page copy')
+  assertThrows(() => validateContentArtifact('content', { ...b05WriterContent(), source_architecture_version_id: null }), Error, 'source architecture version id is required')
+  assertThrows(() => validateContentArtifact('content', { ...b05WriterContent(), working_title: 'x'.repeat(161) }), Error, '160 characters or fewer')
+  assertThrows(() => validateContentArtifact('content', { ...b05WriterContent(), approved: true }), Error, 'unsupported field')
+})
+
+Deno.test('B05a save binds exact website version and page before creating one unapproved canonical draft', async () => {
+  const fixture = b04SaveFixture()
+  const result = await createContentArtifactVersion(fixture.admin, b05VersionInput(fixture, b05WriterContent()))
+  const artifact = fixture.writes.find(write => write.table === 'artifacts')?.value
+  const version = fixture.writes.find(write => write.table === 'artifact_versions')?.value as Record<string, unknown>
+  assertEquals(result.artifact_id, artifact?.id)
+  assertEquals(version.version_number, 1)
+  assertEquals(version.parent_version_id, null)
+  assertEquals(version.ai_use_allowed, false)
+  assertEquals((version.content as Record<string, unknown>).target_page_path, 'home')
+  assertEquals(Object.hasOwn(version, 'approval'), false)
+  const relation = fixture.writes.find(write => write.table === 'artifact_relations')?.value
+  assertEquals(relation?.source_artifact_id, artifact?.id)
+  assertEquals(relation?.target_artifact_id, 'architecture-artifact')
+})
+
+Deno.test('B05a rejects stale website targets before output writes and saves isolated text without structure', async () => {
+  for (const content of [
+    { ...b05WriterContent(), source_architecture_version_id: 'missing-version' },
+    { ...b05WriterContent(), target_page_key: 'page:missing' },
+  ]) {
+    const fixture = b04SaveFixture()
+    await assertRejects(() => createContentArtifactVersion(fixture.admin, b05VersionInput(fixture, content)))
+    assertEquals(fixture.writes.length, 0)
+  }
+  const isolated = b04SaveFixture({ sourceVersionId: 'unrelated-version', pages: [] })
+  await createContentArtifactVersion(isolated.admin, b05VersionInput(isolated, b05WriterContent('blog_article')))
+  const version = isolated.writes.find(write => write.table === 'artifact_versions')?.value as Record<string, unknown>
+  assertEquals((version.content as Record<string, unknown>).source_architecture_version_id, null)
+  assertEquals(isolated.writes.some(write => write.table === 'artifact_relations'), false)
+})
+
 Deno.test('B03a normalizes paths, sorts deterministically and derives legacy keys', () => {
   const architecture = validateContentArtifact('website_architecture', { pages: [
     { page_key: 'page:child', slug: ' /Services//Web Design/ ', title: 'Web', parent_page_key: 'page:root', position: 2000, page_type: 'service', purpose: 'Explain' },
