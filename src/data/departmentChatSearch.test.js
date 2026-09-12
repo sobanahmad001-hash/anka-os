@@ -13,7 +13,8 @@ const chat = read('src/components/DepartmentChat.jsx')
 
 test('P9 search is indexed, scope-bound, permission-filtered, and service-only', () => {
   for (const required of [
-    "to_tsvector('simple'", 'using gin (search_vector)',
+    "to_tsvector('simple', coalesce(title, ''))",
+    "to_tsvector('simple', coalesce(body, ''))",
     'private.is_current_department_chat_contributor(',
     'conversation.organization_id = p_organization_id',
     'conversation.project_id = p_project_id',
@@ -58,9 +59,10 @@ test('P9 transcript presents stored timestamps and stored run metadata without i
   assert.ok(!chat.includes("model: 'gpt-"))
 })
 
-test('P9 search verifier covers generated vectors, indexes, access clauses, leakage, pagination, and ACL', () => {
+test('P9 search verifier covers expression indexes, access clauses, leakage, pagination, and ACL', () => {
   for (const required of [
-    'conversation_search_vector_missing', 'message_search_vector_missing',
+    "indexdef ilike '%using gin%to_tsvector%title%'",
+    "indexdef ilike '%using gin%to_tsvector%body%'",
     'conversation_search_index_missing', 'message_search_index_missing',
     'search_current_access_filter_missing', 'search_result_leak_contract_failed',
     'search_keyset_pagination_contract_missing', 'search_function_acl_invalid',

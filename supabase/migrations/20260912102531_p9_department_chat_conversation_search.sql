@@ -3,18 +3,14 @@ begin;
 set local lock_timeout = '5s';
 set local statement_timeout = '60s';
 
-alter table public.department_chat_conversations
-  add column search_vector tsvector
-  generated always as (to_tsvector('simple', coalesce(title, ''))) stored;
-
-alter table public.department_chat_messages
-  add column search_vector tsvector
-  generated always as (to_tsvector('simple', coalesce(body, ''))) stored;
-
 create index idx_department_chat_conversations_search
-  on public.department_chat_conversations using gin (search_vector);
+  on public.department_chat_conversations using gin (
+    to_tsvector('simple', coalesce(title, ''))
+  );
 create index idx_department_chat_messages_search
-  on public.department_chat_messages using gin (search_vector);
+  on public.department_chat_messages using gin (
+    to_tsvector('simple', coalesce(body, ''))
+  );
 create index idx_department_chat_conversations_context_activity
   on public.department_chat_conversations (
     organization_id, project_id, engagement_id, department_id,
@@ -105,7 +101,8 @@ begin
       )
     )
     and (
-      v_query is null or conversation.search_vector @@ v_tsquery
+      v_query is null
+      or to_tsvector('simple', coalesce(conversation.title, '')) @@ v_tsquery
       or exists (
         select 1 from public.department_chat_messages message
         where message.conversation_id = conversation.id
@@ -114,7 +111,7 @@ begin
           and message.engagement_id = conversation.engagement_id
           and message.department_id = conversation.department_id
           and message.owner_id = conversation.owner_id
-          and message.search_vector @@ v_tsquery
+          and to_tsvector('simple', coalesce(message.body, '')) @@ v_tsquery
       )
     )
     and (

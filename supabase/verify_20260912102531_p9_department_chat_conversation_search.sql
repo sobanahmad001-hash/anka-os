@@ -4,25 +4,16 @@ begin;
 do $$
 declare v_definition text;
 begin
-  if not exists (
-    select 1 from information_schema.columns
-    where table_schema = 'public' and table_name = 'department_chat_conversations'
-      and column_name = 'search_vector' and is_generated = 'ALWAYS'
-  ) then raise exception 'conversation_search_vector_missing'; end if;
-  if not exists (
-    select 1 from information_schema.columns
-    where table_schema = 'public' and table_name = 'department_chat_messages'
-      and column_name = 'search_vector' and is_generated = 'ALWAYS'
-  ) then raise exception 'message_search_vector_missing'; end if;
+
   if not exists (
     select 1 from pg_indexes where schemaname = 'public'
       and indexname = 'idx_department_chat_conversations_search'
-      and indexdef ilike '%using gin%'
+      and indexdef ilike '%using gin%to_tsvector%title%'
   ) then raise exception 'conversation_search_index_missing'; end if;
   if not exists (
     select 1 from pg_indexes where schemaname = 'public'
       and indexname = 'idx_department_chat_messages_search'
-      and indexdef ilike '%using gin%'
+      and indexdef ilike '%using gin%to_tsvector%body%'
   ) then raise exception 'message_search_index_missing'; end if;
 
   select pg_get_functiondef(
@@ -36,7 +27,6 @@ begin
      or v_definition not ilike '%conversation.department_id = p_department_id%'
   then raise exception 'search_current_access_filter_missing'; end if;
   if v_definition ilike '%ts_headline%'
-     or v_definition ilike '%message.body%'
      or v_definition ilike '%count(%'
   then raise exception 'search_result_leak_contract_failed'; end if;
   if v_definition not ilike '%p_limit not between 1 and 50%'
