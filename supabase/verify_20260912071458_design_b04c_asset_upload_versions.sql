@@ -11,8 +11,20 @@ insert into b04c_checks values
   and has_table_privilege('authenticated','public.design_asset_versions','SELECT')
   and not has_table_privilege('authenticated','public.design_assets','INSERT,UPDATE,DELETE')
   and not has_table_privilege('authenticated','public.design_asset_versions','INSERT,UPDATE,DELETE')),
+('public_and_anon_denied',
+  not exists (
+    select 1 from pg_class relation
+    cross join lateral aclexplode(coalesce(relation.relacl, acldefault('r',relation.relowner))) privilege
+    where relation.oid in ('public.design_assets'::regclass,'public.design_asset_versions'::regclass)
+      and privilege.grantee=0
+      and privilege.privilege_type in ('SELECT','INSERT','UPDATE','DELETE','TRUNCATE')
+  )
+  and not has_table_privilege('anon','public.design_assets','SELECT,INSERT,UPDATE,DELETE,TRUNCATE')
+  and not has_table_privilege('anon','public.design_asset_versions','SELECT,INSERT,UPDATE,DELETE,TRUNCATE')),
 ('service_version_no_update_delete',
-  has_table_privilege('service_role','public.design_asset_versions','SELECT,INSERT')
+  has_table_privilege('service_role','public.design_assets','SELECT,INSERT')
+  and has_table_privilege('service_role','public.design_asset_versions','SELECT,INSERT')
+  and not has_table_privilege('service_role','public.design_assets','UPDATE,DELETE,TRUNCATE')
   and not has_table_privilege('service_role','public.design_asset_versions','UPDATE,DELETE,TRUNCATE')),
 ('version_immutable_trigger',exists(select 1 from pg_trigger where tgrelid='public.design_asset_versions'::regclass
   and tgname='trg_design_asset_versions_immutable' and tgenabled <> 'D')),
@@ -37,18 +49,25 @@ insert into b04c_checks values
 
 insert into b04c_checks values
 ('first_upload_draft',false),('same_request_idempotent',false),('replacement_is_child',false),
-('stale_replacement_rejected',false),('other_department_rejected',false),('immutable_update_rejected',false);
+('stale_replacement_rejected',false),('other_department_rejected',false),('cross_organization_rejected',false),
+('immutable_update_rejected',false);
 
 do $$
 declare
-  org_id uuid:=gen_random_uuid(); owner_id uuid:=gen_random_uuid(); content_id uuid:=gen_random_uuid();
+  org_id uuid:=gen_random_uuid(); other_org_id uuid:=gen_random_uuid(); owner_id uuid:=gen_random_uuid(); content_id uuid:=gen_random_uuid();
   client_id uuid:=gen_random_uuid(); brand_id uuid:=gen_random_uuid(); engagement_id uuid:=gen_random_uuid(); service_id uuid:=gen_random_uuid();
   asset_id uuid:=gen_random_uuid(); v1_id uuid:=gen_random_uuid(); v2_id uuid:=gen_random_uuid(); v3_id uuid:=gen_random_uuid();
   denied_asset_id uuid:=gen_random_uuid(); denied_version_id uuid:=gen_random_uuid();
+  cross_asset_id uuid:=gen_random_uuid(); cross_version_id uuid:=gen_random_uuid();
   first_result jsonb; replay_result jsonb; second_result jsonb; rejected boolean;
 begin
   insert into auth.users(id) values(owner_id),(content_id);
-  insert into public.organizations(id,name,slug,status) values(org_id,'B04c verifier','b04c-'||replace(org_id::text,'-',''),'active');
+  insert into public.organizations(id,name,slug,status) values
+    (org_id,'B04c verifier','b04c-'||replace(org_id::text,'-',''),'active'),
+    (other_org_id,'B04c other verifier','b04c-other-'||replace(other_org_id::text,'-',''),'active');
+  insert into public.departments(id,name,description,color,icon,organization_id) values
+    ('design','Design','','#e84393','D',org_id),('content','Content','','#d97706','C',org_id)
+    on conflict (id) do nothing;
   insert into public.organization_memberships(organization_id,user_id,member_kind,role,department_id,status) values
     (org_id,owner_id,'team','contributor','design','active'),(org_id,content_id,'team','contributor','content','active');
   insert into public.agency_clients(id,organization_id,name,created_by) values(client_id,org_id,'B04c client',owner_id);
@@ -94,6 +113,14 @@ begin
       'image/png',68,1,1,repeat('d',64),'','operation-denied',repeat('4',64),content_id);
   exception when others then rejected:=true; end;
   update b04c_checks set passed=rejected where check_name='other_department_rejected';
+
+  rejected:=false;
+  begin
+    perform public.register_design_asset_upload(other_org_id,engagement_id,brand_id,cross_asset_id,cross_version_id,null,null,
+      'Cross organization','static_image','','','cross.png',other_org_id::text||'/assets/'||cross_asset_id::text||'/'||cross_version_id::text||'/file.png',
+      'image/png',68,1,1,repeat('e',64),'','operation-cross-org',repeat('5',64),owner_id);
+  exception when others then rejected:=true; end;
+  update b04c_checks set passed=rejected where check_name='cross_organization_rejected';
 
   rejected:=false;
   begin update public.design_asset_versions set change_summary='mutated' where id=v1_id;

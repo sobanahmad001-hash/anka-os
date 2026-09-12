@@ -7,7 +7,7 @@ import { contentRequestMediaStoragePath, createSession, cropResizePng, designEve
   VIDEO_UNAVAILABLE_MESSAGE, handler } from './index.ts'
 import { compileApprovedArtifactContext } from '../_shared/approvedArtifactContext.ts'
 import { normalizeCreativeBrief, saveCreativeBrief, validateCreativeBrief } from './creativeBriefs.ts'
-import { designAssetStoragePath, parseDesignAssetPng } from './assetVersions.ts'
+import { designAssetStoragePath, parseDesignAssetPng, uploadDesignAssetVersion } from './assetVersions.ts'
 
 function assert(value: unknown, message = 'Expected value to be truthy') {
   if (!value) throw new Error(message)
@@ -50,6 +50,58 @@ Deno.test('B04c validates actual PNG bytes and keeps upload authority inside Des
     try { await parseDesignAssetPng(invalid) } catch { rejected = true }
     assert(rejected, 'Expected invalid upload bytes or metadata to fail closed')
   }
+})
+
+Deno.test('B04c concurrent successful replay removes only the losing version object', async () => {
+  const encoded = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWP4z8DwHwAFAAH/e+m+7wAAAABJRU5ErkJggg=='
+  const uploaded: string[] = []
+  const removed: string[] = []
+  let winner: Record<string, unknown> | null = null
+  let winnerPath = ''
+  const emptyQuery = {
+    select() { return this },
+    eq() { return this },
+    async maybeSingle() { return { data: null, error: null } },
+  }
+  const storage = {
+    from() {
+      return {
+        async upload(path: string) { uploaded.push(path); return { error: null } },
+        async remove(paths: string[]) { removed.push(...paths); return { error: null } },
+      }
+    },
+  }
+  const admin = {
+    organizationId: '00000000-0000-4000-8000-000000000001',
+    storage,
+    from() { return emptyQuery },
+    async rpc(_name: string, args: Record<string, unknown>) {
+      if (!winner) {
+        winnerPath = String(args.p_storage_path)
+        winner = { id: args.p_version_id, storage_path: args.p_storage_path }
+        return { data: { asset: { id: args.p_asset_id }, version: winner, idempotent_replay: false }, error: null }
+      }
+      return { data: { asset: { id: args.p_asset_id }, version: winner, idempotent_replay: true }, error: null }
+    },
+  }
+  const body = {
+    engagement_id: '00000000-0000-4000-8000-000000000002',
+    brand_id: '00000000-0000-4000-8000-000000000003',
+    name: 'Race-safe hero',
+    original_filename: 'hero.png',
+    mime_type: 'image/png',
+    file_base64: encoded,
+    operation_key: 'same-operation-key',
+  }
+  const results = await Promise.all([
+    uploadDesignAssetVersion(admin, body, '00000000-0000-4000-8000-000000000004'),
+    uploadDesignAssetVersion(admin, body, '00000000-0000-4000-8000-000000000004'),
+  ])
+  assert.equal(uploaded.length, 2)
+  assert.equal(results.filter(result => result.idempotent_replay === true).length, 1)
+  assert.equal(removed.length, 1)
+  assert(removed[0] !== winnerPath, 'The winning immutable object must not be removed')
+  assert(uploaded.includes(removed[0]), 'Only this race participant\'s uploaded object may be removed')
 })
 
 Deno.test('B02 saves title-only drafts but computes output-specific validation without a provider', () => {

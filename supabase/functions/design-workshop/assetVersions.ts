@@ -70,6 +70,11 @@ async function existingOperation(admin: AssetAdmin, actorId: string, operationKe
   return data
 }
 
+async function removeUploadedObject(admin: AssetAdmin, storagePath: string) {
+  const { error } = await admin.storage.from(DESIGN_ASSET_BUCKET).remove([storagePath])
+  if (error) throw new Error(`The unused upload could not be removed: ${error.message || 'Storage cleanup failed'}`)
+}
+
 export async function uploadDesignAssetVersion(admin: AssetAdmin, body: Json, actorId: string) {
   const engagementId = text(body.engagement_id, 80)
   const brandId = text(body.brand_id, 80)
@@ -143,16 +148,22 @@ export async function uploadDesignAssetVersion(admin: AssetAdmin, body: Json, ac
     p_request_checksum: requestChecksum,
     p_actor_id: actorId,
   })
-  if (!error && data) return data
+  if (!error && data) {
+    const savedVersion = data.version as Json | undefined
+    if (uploadedHere && data.idempotent_replay === true && savedVersion?.storage_path !== storagePath) {
+      await removeUploadedObject(admin, storagePath)
+    }
+    return data
+  }
 
   const replay = await existingOperation(admin, actorId, operationKey)
   if (replay?.request_checksum === requestChecksum) {
-    if (uploadedHere && replay.storage_path !== storagePath) await admin.storage.from(DESIGN_ASSET_BUCKET).remove([storagePath])
+    if (uploadedHere && replay.storage_path !== storagePath) await removeUploadedObject(admin, storagePath)
     const { data: asset, error: assetError } = await admin.from('design_assets').select('*')
       .eq('id', replay.asset_id).eq('organization_id', admin.organizationId).single()
     if (assetError) throw assetError
     return { asset, version: replay, idempotent_replay: true }
   }
-  if (uploadedHere) await admin.storage.from(DESIGN_ASSET_BUCKET).remove([storagePath])
+  if (uploadedHere) await removeUploadedObject(admin, storagePath)
   throw error
 }

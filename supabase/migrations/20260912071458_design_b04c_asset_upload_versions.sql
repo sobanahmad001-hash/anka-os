@@ -77,7 +77,7 @@ create policy "Team can read scoped design asset versions" on public.design_asse
   and exists (select 1 from public.design_assets asset where asset.id = design_asset_versions.asset_id
     and asset.organization_id = design_asset_versions.organization_id)
 );
-revoke all on public.design_assets, public.design_asset_versions from anon, authenticated, service_role;
+revoke all on public.design_assets, public.design_asset_versions from public, anon, authenticated, service_role;
 grant select on public.design_assets, public.design_asset_versions to authenticated;
 grant select, insert on public.design_assets, public.design_asset_versions to service_role;
 
@@ -199,7 +199,12 @@ begin
     id, organization_id, asset_id, version_number, source_kind, source_media_asset_id, source_direction_version_id,
     storage_path, mime_type, original_filename, created_by, created_at
   ) values(
-    new_version_id, new.organization_id, new_asset_id, 1, 'generated', new.id, new.design_direction_version_id,
+    new_version_id, new.organization_id, new_asset_id, 1,
+    case when exists (
+      select 1 from public.design_direction_variants variant
+      where variant.design_media_asset_id = new.id and variant.organization_id = new.organization_id
+    ) then 'recorded_variant' else 'generated' end,
+    new.id, new.design_direction_version_id,
     new.storage_path, 'image/png', new.id::text || '.png', new.generated_by, new.created_at
   );
   return new;
@@ -221,12 +226,14 @@ begin
     select media.id as media_id, media.organization_id, media.design_direction_version_id, media.storage_path,
       media.generated_by, media.created_at, session.engagement_id, session.brand_id,
       coalesce(nullif(trim(version.content->>'title'), ''), 'Generated output ' || left(media.id::text, 8)) as name,
-      case when variant.id is null then 'generated' else 'recorded_variant' end as source_kind
+      case when exists (
+        select 1 from public.design_direction_variants variant
+        where variant.design_media_asset_id = media.id and variant.organization_id = media.organization_id
+      ) then 'recorded_variant' else 'generated' end as source_kind
     from public.design_media_assets media
     join public.design_direction_versions version on version.id = media.design_direction_version_id and version.organization_id = media.organization_id
     join public.design_directions direction on direction.id = version.direction_id and direction.organization_id = version.organization_id
     join public.design_workshop_sessions session on session.id = direction.session_id and session.organization_id = direction.organization_id
-    left join public.design_direction_variants variant on variant.design_media_asset_id = media.id and variant.organization_id = media.organization_id
     where media.media_type = 'image' and media.status = 'ready' and media.storage_path is not null
   loop
     new_asset_id := gen_random_uuid();

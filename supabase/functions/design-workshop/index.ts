@@ -920,6 +920,7 @@ async function generateImageForTarget(admin: ScopedClient, input: {
   targetWidth?: number
   targetHeight?: number
   durable?: boolean
+  onAssetReserved?: (asset: Json) => Promise<void>
 }) {
   const { data: model, error: modelError } = await admin.from('design_model_registry').select('*')
     .eq('id', input.modelRegistryId).eq('organization_id', admin.organizationId).eq('is_active', true).maybeSingle()
@@ -940,6 +941,7 @@ async function generateImageForTarget(admin: ScopedClient, input: {
   let uploaded = false
   let phase: 'provider' | 'storage' | 'registration' = 'provider'
   try {
+    if (input.onAssetReserved) await input.onAssetReserved(asset as Json)
     let bytes = input.providerSize
       ? await generateOpenAiImage(credential, model.model_id, input.prompt, input.providerSize)
       : await generateOpenAiImage(credential, model.model_id, input.prompt)
@@ -1226,10 +1228,16 @@ async function generateVariants(admin: ScopedClient, userClient: Client, body: J
         providerSize: spec.providerSize,
         targetWidth: spec.width,
         targetHeight: spec.height,
+        onAssetReserved: async reserved => {
+          const { error: linkError } = await admin.from('design_direction_variants')
+            .update({ design_media_asset_id: reserved.id }).eq('id', variant.id)
+            .eq('organization_id', admin.organizationId)
+          if (linkError) throw linkError
+        },
       })
       const status = asset?.status === 'ready' ? 'ready' : 'failed'
       const { data: finished, error: finishError } = await admin.from('design_direction_variants').update({
-        status, design_media_asset_id: asset?.id || null,
+        status,
       }).eq('id', variant.id).eq('organization_id', admin.organizationId).select('*').single()
       if (finishError) throw finishError
       return { ...finished, media_asset: asset }
