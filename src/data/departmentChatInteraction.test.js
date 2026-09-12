@@ -164,3 +164,119 @@ test('mounted search clears the prior transcript on denied and failed result loa
     await act(async () => root.unmount())
   }
 })
+
+test('mounted conversation changes clear transient answer and proposal state', async t => {
+  const { document, ScopedDepartmentChat } = await setup(t)
+
+  async function search(container, query) {
+    const input = nodes(container, 'input').find(node => node.type === 'search')
+    assert.ok(input)
+    await value(input, query)
+    const form = nodes(container, 'form').find(item => nodes(item, 'input').includes(input))
+    assert.ok(form)
+    await act(async () => form.dispatchEvent(new E('submit')))
+    await flush()
+  }
+
+  {
+    const container = document.createElement('div')
+    const streams = []
+    const repo = repository(streams)
+    const originalGetConversation = repo.getConversation
+    repo.getConversation = async (departmentId, input) => {
+      if (input.conversation_id === 'matching-conversation') throw new Error('Conversation load failed')
+      return originalGetConversation(departmentId, input)
+    }
+    globalThis.__departmentChatTestRepository = repo
+    const root = createRoot(container)
+
+    await act(async () => root.render(createElement(
+      ScopedDepartmentChat,
+      props('a', new AbortController().signal),
+    )))
+    await flush()
+    await start(container)
+    assert.match(container.textContent, /Live partial · not yet durablePARTIAL_SENTINEL/)
+    await act(async () => byText(container, 'button', 'Stop watching locally').dispatchEvent(new E('click')))
+    await flush()
+    assert.match(container.textContent, /Stopped watching locally/)
+
+    await search(container, 'network failure')
+    assert.equal(count(container, 'PARTIAL_SENTINEL'), 0)
+    assert.equal(count(container, 'Stopped watching locally'), 0)
+    await act(async () => root.unmount())
+  }
+
+  {
+    const container = document.createElement('div')
+    const repo = repository([])
+    const originalGetConversation = repo.getConversation
+    repo.getConversation = async (departmentId, input) => {
+      if (input.conversation_id === 'matching-conversation') throw new Error('Conversation access revoked')
+      return originalGetConversation(departmentId, input)
+    }
+    repo.proposeArtifact = async () => ({
+      proposal_id: 'proposal-a',
+      preview: { title: 'A_PROPOSAL_PREVIEW' },
+      status: 'pending',
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      model: 'gpt-test',
+      connector_connection_id: 'connection-1',
+    })
+    globalThis.__departmentChatTestRepository = repo
+    const root = createRoot(container)
+
+    await act(async () => root.render(createElement(
+      ScopedDepartmentChat,
+      props('a', new AbortController().signal),
+    )))
+    await flush()
+    const mode = nodes(container, 'select').find(select => select.options?.some(option => option.textContent === 'Artifact draft'))
+    assert.ok(mode)
+    await value(mode, 'artifact')
+    await start(container)
+    assert.match(container.textContent, /A_PROPOSAL_PREVIEW/)
+    assert.ok(byText(container, 'button', 'Confirm official draft'))
+    assert.ok(byText(container, 'button', 'Reject'))
+
+    await search(container, 'denied proposal')
+    assert.equal(count(container, 'A_PROPOSAL_PREVIEW'), 0)
+    assert.equal(count(container, 'Confirm official draft'), 0)
+    assert.equal(count(container, 'Reject'), 0)
+    await act(async () => root.unmount())
+  }
+})
+
+test('direct selection aligns the editable title before a failed conversation load', async t => {
+  const { container, ScopedDepartmentChat } = await setup(t)
+  const repo = repository([])
+  repo.searchConversations = async () => ({
+    items: [conversation('conversation-a'), conversation('conversation-b')],
+    next_cursor: null,
+  })
+  const originalGetConversation = repo.getConversation
+  repo.getConversation = async (departmentId, input) => {
+    if (input.conversation_id === 'conversation-b') throw new Error('Conversation load failed')
+    return originalGetConversation(departmentId, input)
+  }
+  globalThis.__departmentChatTestRepository = repo
+  const root = createRoot(container)
+  t.after(() => { try { root.unmount() } catch {} })
+
+  await act(async () => root.render(createElement(
+    ScopedDepartmentChat,
+    props('a', new AbortController().signal),
+  )))
+  await flush()
+  const titleInput = nodes(container, 'input').find(node => node.parentNode?.textContent.includes('Conversation title'))
+  assert.ok(titleInput)
+  assert.equal(titleInput.value, 'conversation-a')
+
+  const next = byText(container, 'button', 'conversation-b')
+  assert.ok(next)
+  await act(async () => next.dispatchEvent(new E('click')))
+  await flush()
+
+  assert.match(container.textContent, /Conversation load failed/)
+  assert.equal(titleInput.value, 'conversation-b')
+})
