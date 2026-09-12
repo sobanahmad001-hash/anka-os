@@ -46,6 +46,35 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value)
 }
 
+const PREVIEW_MAX_AGE_MS = 30 * 60 * 1000
+const PREVIEW_FUTURE_SKEW_MS = 5 * 60 * 1000
+
+function seoPreviewEnvelope(organizationId: string, actorId: string, engagementId: string, research: Json) {
+  return { purpose: 'marketing_seo_research_preview_v1', organization_id: organizationId, actor_id: actorId,
+    engagement_id: engagementId, research }
+}
+
+export async function signSeoResearchPreview(secret: string, organizationId: string, actorId: string, engagementId: string, research: Json) {
+  if (!secret || !actorId) throw new Error('SEO research preview signing context is unavailable')
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const signature = await crypto.subtle.sign('HMAC', key,
+    new TextEncoder().encode(stableJson(seoPreviewEnvelope(organizationId, actorId, engagementId, research))))
+  return [...new Uint8Array(signature)].map(byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+export async function verifySeoResearchPreview(secret: string, organizationId: string, actorId: string,
+  engagementId: string, research: Json, signature: string, now = Date.now()) {
+  if (!/^[a-f0-9]{64}$/.test(signature)) throw Object.assign(new Error('A verified SEO research preview is required'), { status: 409 })
+  const capturedAt = Date.parse(String(research.captured_at || ''))
+  if (!Number.isFinite(capturedAt) || capturedAt > now + PREVIEW_FUTURE_SKEW_MS || now - capturedAt > PREVIEW_MAX_AGE_MS) {
+    throw Object.assign(new Error('SEO research preview expired; run research again'), { status: 409 })
+  }
+  const expected = await signSeoResearchPreview(secret, organizationId, actorId, engagementId, research)
+  let mismatch = expected.length !== signature.length
+  for (let index = 0; index < expected.length; index += 1) mismatch = mismatch || expected.charCodeAt(index) !== signature.charCodeAt(index)
+  if (mismatch) throw Object.assign(new Error('SEO research preview no longer matches the verified source evidence'), { status: 409 })
+}
+
 function safeDate(value: unknown, required = false) {
   const result = text(value, 10)
   if (!result && !required) return null
@@ -203,9 +232,18 @@ export function validateSeoResearchContent(value: unknown) {
     if (!['technical_seo','keyword_history','content_strategy'].includes(source)) throw new Error(`Source availability ${index + 1} is unsupported`)
     const count = item.record_count == null ? null : Number(item.record_count)
     if (count !== null && (!Number.isSafeInteger(count) || count < 0)) throw new Error(`Source availability ${index + 1} has an invalid count`)
-    return { source, available: item.available === true, record_count: count,
-      exact_version: source === 'content_strategy' && item.exact_version && typeof item.exact_version === 'object'
-        ? item.exact_version : null }
+    let exactVersion = null
+    if (source === 'content_strategy' && item.exact_version && typeof item.exact_version === 'object' && !Array.isArray(item.exact_version)) {
+      const version = item.exact_version as Json
+      const id = text(version.id, 80)
+      const artifactId = text(version.artifact_id, 80)
+      const versionNumber = Number(version.version_number)
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(artifactId)
+        || !Number.isSafeInteger(versionNumber) || versionNumber < 1) throw new Error('Content strategy provenance is invalid')
+      exactVersion = { id, version_number: versionNumber, artifact_id: artifactId, title: text(version.title, 240) }
+    }
+    return { source, available: item.available === true, record_count: count, exact_version: exactVersion }
   })
   return {
     input: validateSeoResearchInput(input.input), captured_at: new Date(capturedAt).toISOString(),
@@ -413,7 +451,7 @@ type RequestDependencies = {
   environment?: { supabaseUrl: string; publishableKey: string; secretKey: string }
 }
 
-type MarketingRequestContext = { admin: Client; organizationId: string }
+type MarketingRequestContext = { admin: Client; organizationId: string; actorId: string; previewSigningSecret: string }
 
 async function requireContext(
   request: Request,
@@ -448,9 +486,10 @@ async function requireMarketingEngagement(context: MarketingRequestContext, enga
     .eq('id', engagementId).eq('organization_id', organizationId).maybeSingle()
   if (error || !engagement) throw Object.assign(new Error('Engagement not found'), { status: 404 })
   const { data: services, error: serviceError } = await admin.from('engagement_services')
-    .select('id, service_catalog!inner(department_id)').eq('organization_id', organizationId)
-    .eq('engagement_id', engagementId)
-    .eq('service_catalog.department_id', 'marketing').limit(1)
+    .select('id, service_catalog!inner(department_id, is_active, organization_id)').eq('organization_id', organizationId)
+    .eq('engagement_id', engagementId).eq('status', 'active')
+    .eq('service_catalog.organization_id', organizationId).eq('service_catalog.department_id', 'marketing')
+    .eq('service_catalog.is_active', true).limit(1)
   if (serviceError || !services?.length) {
     throw Object.assign(new Error('This engagement has no active Marketing service'), { status: 409 })
   }
@@ -1086,13 +1125,15 @@ export async function previewSeoResearch(context: MarketingRequestContext, body:
   if (!scopedKeywords.length) limitations.push(selectedSeeds.size ? 'No tracked keyword exactly matched the supplied seed keywords.' : 'No tracked keywords were available for the matched pages.')
   if (scopedKeywords.length && !snapshots?.length) limitations.push('Tracked keywords have no stored rank snapshots.')
   if (facts.length > 200 || interpretations.length > 200) limitations.push('The preview is limited to the first 200 deterministic findings in the selected scope.')
-  return validateSeoResearchContent({
+  const research = validateSeoResearchContent({
     input, captured_at: new Date().toISOString(), source_availability: [
       { source: 'technical_seo', available: pages.some(page => page.latest_audit_id), record_count: pages.filter(page => page.latest_audit_id).length },
       { source: 'keyword_history', available: Boolean(snapshots?.length), record_count: snapshots?.length || 0 },
       { source: 'content_strategy', available: Boolean(strategy), exact_version: strategy },
     ], source_facts: facts.slice(0, 200), interpretations: interpretations.slice(0, 200), limitations,
   })
+  return { ...research, preview_signature: await signSeoResearchPreview(context.previewSigningSecret,
+    context.organizationId, context.actorId, engagement.id, research) }
 }
 
 async function saveSeoResearch(context: MarketingRequestContext, body: Json, actorId: string) {
@@ -1103,7 +1144,16 @@ async function saveSeoResearch(context: MarketingRequestContext, body: Json, act
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) throw new Error('A UUID idempotency key is required')
   const engagement = await requireMarketingEngagement(context, engagementId)
   const research = validateSeoResearchContent(body.research)
-  await requireContentStrategyVersion(context, engagement.brand_id, (research.input as Json).content_strategy_version_id as string | null)
+  const rawResearch = body.research && typeof body.research === 'object' && !Array.isArray(body.research)
+    ? body.research as Json : {}
+  const previewSignature = text(rawResearch.preview_signature, 64)
+  await verifySeoResearchPreview(context.previewSigningSecret, context.organizationId, actorId,
+    engagementId, research, previewSignature)
+  const strategy = await requireContentStrategyVersion(context, engagement.brand_id, (research.input as Json).content_strategy_version_id as string | null)
+  const strategyAvailability = (research.source_availability as Json[]).find(item => item.source === 'content_strategy')
+  if (stableJson(strategyAvailability?.exact_version ?? null) !== stableJson(strategy)) {
+    throw Object.assign(new Error('Content strategy provenance no longer matches the verified version'), { status: 409 })
+  }
   const contentChecksum = await sha256(stableJson(research))
   const payloadChecksum = await sha256(stableJson({ organization_id: context.organizationId, actor_id: actorId,
     engagement_id: engagementId, artifact_id: text(body.artifact_id, 80) || null,
@@ -1162,7 +1212,8 @@ export async function handleRequest(
     const { admin, user, membership, organizationId } = await requireContext(
       request, requestedOrganizationId, dependencies.createClient, dependencies.environment,
     )
-    const context = { admin, organizationId }
+    const context = { admin, organizationId, actorId: user.id, previewSigningSecret: dependencies.environment?.secretKey
+      ?? namedKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY') }
     const action = text(body.action, 60)
     if (action !== 'list_google_ads_connections' && !hasMarketingAuthority(membership, action)) {
       return response({ error: action === 'approve_artifact' ? 'Marketing manager approval required' : 'Marketing department access required' }, 403)

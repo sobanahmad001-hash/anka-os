@@ -14,6 +14,8 @@ import {
   validateCampaignPlan,
   validateMarketingArtifact,
   safeResearchUrl,
+  signSeoResearchPreview,
+  verifySeoResearchPreview,
   validateSeoResearchInput,
   validateSeoResearchContent,
 } from './index.ts'
@@ -281,6 +283,75 @@ Deno.test('MB03B validates explicit source-only scope, safe URLs, and separated 
   assertEquals((content.source_facts as unknown[]).length, 1)
   assertEquals((content.interpretations as unknown[]).length, 1)
   assertThrows(() => validateSeoResearchContent({ ...content, captured_at: '' }), Error, 'capture time')
+})
+
+Deno.test('MB03B signed previews reject altered evidence, foreign scope, and expiry', async () => {
+  const research = validateSeoResearchContent({
+    input: validateSeoResearchInput({ research_type: 'page', target_url: 'https://example.com/page', market: 'Pakistan' }),
+    captured_at: '2026-09-12T00:00:00Z',
+    source_availability: [{ source: 'technical_seo', available: true, record_count: 1 }],
+    source_facts: [{ category: 'index status', observation: 'Stored status is indexed.', source: 'technical_seo_audit',
+      evidence_date: '2026-09-12', affected_url: 'https://example.com/page', source_record_id: '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25' }],
+    interpretations: [], limitations: ['Stored evidence only.'],
+  })
+  const captured = Date.parse(String(research.captured_at))
+  const signature = await signSeoResearchPreview('server-secret', 'org-a', 'actor-a', 'eng-a', research)
+  await verifySeoResearchPreview('server-secret', 'org-a', 'actor-a', 'eng-a', research, signature, captured + 60_000)
+  await assertRejects(() => verifySeoResearchPreview('server-secret', 'org-a', 'actor-a', 'eng-a', {
+    ...research, source_facts: [{ ...(research.source_facts as Record<string, unknown>[])[0], observation: 'Fabricated fact.' }],
+  }, signature, captured + 60_000), Error, 'no longer matches')
+  await assertRejects(() => verifySeoResearchPreview('server-secret', 'org-a', 'foreign-actor', 'eng-a', research,
+    signature, captured + 60_000), Error, 'no longer matches')
+  await assertRejects(() => verifySeoResearchPreview('server-secret', 'org-a', 'actor-a', 'eng-a', research,
+    signature, captured + 31 * 60_000), Error, 'expired')
+})
+
+Deno.test('MB03B authenticated save rejects unsigned evidence and inactive service before RPC', async () => {
+  const organizationId = '11111111-1111-4111-8111-111111111111'
+  const actorId = '22222222-2222-4222-8222-222222222222'
+  async function attempt(serviceActive: boolean) {
+    const rpcCalls: unknown[] = []
+    const rows: Record<string, Record<string, unknown>[]> = {
+      organization_memberships: [{ organization_id: organizationId, user_id: actorId, member_kind: 'team', role: 'contributor', department_id: 'marketing', status: 'active', organization: { status: 'active' } }],
+      engagements: [{ id: 'engagement-a', organization_id: organizationId, brand_id: 'brand-a' }],
+      engagement_services: serviceActive ? [{ id: 'service-a', organization_id: organizationId, engagement_id: 'engagement-a', status: 'active', service_catalog: { organization_id: organizationId, department_id: 'marketing', is_active: true } }] : [],
+    }
+    class Query {
+      filters: Array<[string, unknown]> = []
+      constructor(private table: string) {}
+      select() { return this }
+      eq(key: string, value: unknown) { this.filters.push([key, value]); return this }
+      limit() { return this }
+      result() { return (rows[this.table] || []).filter(row => this.filters.every(([key, value]) =>
+        key.split('.').reduce((current: unknown, part) => (current as Record<string, unknown> | undefined)?.[part], row) === value)) }
+      maybeSingle() { return Promise.resolve({ data: this.result()[0] || null, error: null }) }
+      then(resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) {
+        return Promise.resolve({ data: this.result(), error: null }).then(resolve, reject)
+      }
+    }
+    const admin = { from: (table: string) => new Query(table), rpc: async (...args: unknown[]) => { rpcCalls.push(args); return { data: {}, error: null } } }
+    let clients = 0
+    const research = {
+      input: { research_type: 'page', target_url: 'https://example.test/page', market: 'Test', language: null, device: null, seed_keywords: [], content_strategy_version_id: null },
+      captured_at: new Date().toISOString(), source_availability: [],
+      source_facts: [{ category: 'rank', observation: 'Fabricated rank.', source: 'stored_snapshot', source_record_id: '44444444-4444-4444-8444-444444444444', evidence_date: '2026-09-12', affected_url: 'https://example.test/page' }],
+      interpretations: [], limitations: ['Stored source only.'],
+    }
+    const request = new Request('https://functions.example/marketing-studio', { method: 'POST',
+      headers: { Authorization: 'Bearer caller-jwt', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'save_seo_research', organization_id: organizationId, engagement_id: 'engagement-a',
+        title: 'Tampered research', idempotency_key: '55555555-5555-4555-8555-555555555555', research }) })
+    const response = await handleRequest(request, { createClient: (() => clients++ === 0
+      ? { auth: { getUser: async () => ({ data: { user: { id: actorId } }, error: null }) } } : admin) as never,
+      environment: { supabaseUrl: 'https://project.supabase.co', publishableKey: 'publishable', secretKey: 'server-secret' } })
+    return { response, rpcCalls }
+  }
+  const unsigned = await attempt(true)
+  assertEquals(unsigned.response.status, 409)
+  assertEquals(unsigned.rpcCalls.length, 0)
+  const inactive = await attempt(false)
+  assertEquals(inactive.response.status, 409)
+  assertEquals(inactive.rpcCalls.length, 0)
 })
 
 Deno.test('unified dashboard requests only its fixed GA4 and Search Console providers', () => {

@@ -41,7 +41,12 @@ insert into mb03b_checks values
 insert into mb03b_checks values
 ('first_save_unapproved',false),('same_request_replays',false),('conflicting_reuse_rejected',false),
 ('optimistic_second_version',false),('foreign_strategy_rejected',false),('cross_tenant_rejected',false),
-('immutable_version_preserved',false),('unknown_artifact_type_rejected',false);
+('immutable_version_preserved',false),('unknown_artifact_type_rejected',false),
+('service_role_runtime_save',false),('null_department_rejected',false),
+('suspended_member_replay_rejected',false),('inactive_service_replay_rejected',false),
+('expired_replay_creates_fresh_output',false);
+
+grant select, update on mb03b_checks to service_role;
 
 do $$
 declare
@@ -49,6 +54,7 @@ declare
   v_other_actor uuid:=gen_random_uuid(); v_client uuid:=gen_random_uuid(); v_brand uuid:=gen_random_uuid();
   v_engagement uuid:=gen_random_uuid(); v_service uuid:=gen_random_uuid(); v_strategy uuid:=gen_random_uuid();
   v_strategy_version uuid:=gen_random_uuid(); v_key uuid:=gen_random_uuid(); v_first jsonb; v_replay jsonb; v_second jsonb;
+  v_expiry_key uuid:=gen_random_uuid(); v_expiry_first jsonb; v_expiry_second jsonb;
   v_artifact uuid; v_first_version uuid; v_rejected boolean; v_content jsonb;
 begin
   insert into auth.users(id) values(v_actor),(v_other_actor);
@@ -80,16 +86,48 @@ begin
       'limitations','Stored evidence only.','affected_url','https://example.test/page')),
     'limitations',jsonb_build_array('No remote fetch was performed.')
   );
+  execute 'set local role service_role';
   select public.save_marketing_seo_research(v_org,v_engagement,null,null,'MB03B research',v_content,repeat('a',64),'first',v_key,repeat('1',64),v_actor) into v_first;
   v_artifact:=(v_first->>'artifact_id')::uuid; v_first_version:=(v_first->>'id')::uuid;
   update mb03b_checks set passed=not (v_first->>'replayed')::boolean
     and (select artifact_type='seo_research' from public.artifacts where id=v_artifact)
     and not exists(select 1 from public.artifact_approvals where artifact_version_id=v_first_version)
   where check_name='first_save_unapproved';
+  update mb03b_checks set passed=current_user='service_role' where check_name='service_role_runtime_save';
   select public.save_marketing_seo_research(v_org,v_engagement,null,null,'MB03B research',v_content,repeat('a',64),'first',v_key,repeat('1',64),v_actor) into v_replay;
   update mb03b_checks set passed=(v_replay->>'replayed')::boolean and (v_replay->>'id')::uuid=v_first_version
     and (select count(*)=1 from public.artifact_versions where artifact_id=v_artifact)
   where check_name='same_request_replays';
+  update public.organization_memberships set department_id=null
+    where organization_id=v_org and user_id=v_actor;
+  v_rejected:=false;
+  begin perform public.save_marketing_seo_research(v_org,v_engagement,null,null,'Null department',v_content,repeat('a',64),'',gen_random_uuid(),repeat('6',64),v_actor);
+  exception when insufficient_privilege then v_rejected:=true; end;
+  update mb03b_checks set passed=v_rejected where check_name='null_department_rejected';
+  update public.organization_memberships set department_id='marketing'
+    where organization_id=v_org and user_id=v_actor;
+  update public.organization_memberships set status='suspended'
+    where organization_id=v_org and user_id=v_actor;
+  v_rejected:=false;
+  begin perform public.save_marketing_seo_research(v_org,v_engagement,null,null,'MB03B research',v_content,repeat('a',64),'first',v_key,repeat('1',64),v_actor);
+  exception when insufficient_privilege then v_rejected:=true; end;
+  update mb03b_checks set passed=v_rejected where check_name='suspended_member_replay_rejected';
+  update public.organization_memberships set status='active'
+    where organization_id=v_org and user_id=v_actor;
+  update public.service_catalog set is_active=false where id=v_service;
+  v_rejected:=false;
+  begin perform public.save_marketing_seo_research(v_org,v_engagement,null,null,'MB03B research',v_content,repeat('a',64),'first',v_key,repeat('1',64),v_actor);
+  exception when insufficient_privilege then v_rejected:=true; end;
+  update mb03b_checks set passed=v_rejected where check_name='inactive_service_replay_rejected';
+  update public.service_catalog set is_active=true where id=v_service;
+  select public.save_marketing_seo_research(v_org,v_engagement,null,null,'Expiry first',v_content,repeat('e',64),'',v_expiry_key,repeat('7',64),v_actor) into v_expiry_first;
+  update public.marketing_seo_research_save_requests
+    set created_at=pg_catalog.clock_timestamp()-interval '31 days', expires_at=pg_catalog.clock_timestamp()-interval '1 second'
+    where organization_id=v_org and actor_id=v_actor and idempotency_key=v_expiry_key;
+  select public.save_marketing_seo_research(v_org,v_engagement,null,null,'Expiry first',v_content,repeat('e',64),'',v_expiry_key,repeat('7',64),v_actor) into v_expiry_second;
+  update mb03b_checks set passed=not (v_expiry_second->>'replayed')::boolean
+    and (v_expiry_second->>'id')::uuid<>(v_expiry_first->>'id')::uuid
+  where check_name='expired_replay_creates_fresh_output';
   v_rejected:=false;
   begin perform public.save_marketing_seo_research(v_org,v_engagement,null,null,'Conflict',v_content,repeat('a',64),'',v_key,repeat('2',64),v_actor);
   exception when unique_violation then v_rejected:=true; end;
@@ -115,6 +153,7 @@ begin
     values(v_org,v_brand,v_engagement,'unknown_research','Invalid',v_actor);
   exception when check_violation then v_rejected:=true; end;
   update mb03b_checks set passed=v_rejected where check_name='unknown_artifact_type_rejected';
+  execute 'reset role';
 end;
 $$;
 

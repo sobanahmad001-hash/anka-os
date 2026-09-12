@@ -43,13 +43,14 @@ test('source availability and response identity remain honest and context-bound'
 })
 
 test('production wiring uses server preview, replay-safe save, additive persistence, and a visibly blocked request confirmation', async () => {
-  const [repository, component, studio, edge, migration, verifier, relations, workItems, proofing] = await Promise.all([
+  const [repository, component, studio, edge, migration, verifier, concurrency, relations, workItems, proofing] = await Promise.all([
     readFile(new URL('./marketingSeoResearchRepository.js', import.meta.url), 'utf8'),
     readFile(new URL('../components/MarketingSeoResearch.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../apps/MarketingStudio.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../../supabase/functions/marketing-studio/index.ts', import.meta.url), 'utf8'),
     readFile(new URL('../../supabase/migrations/20260912160000_mb03b_seo_research.sql', import.meta.url), 'utf8'),
     readFile(new URL('../../supabase/verify_20260912160000_mb03b_seo_research.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../../scripts/mb03b-concurrency.ts', import.meta.url), 'utf8'),
     readFile(new URL('./artifactRelations.js', import.meta.url), 'utf8'),
     readFile(new URL('./workItems.js', import.meta.url), 'utf8'),
     readFile(new URL('../../supabase/functions/proofing-layer/index.ts', import.meta.url), 'utf8'),
@@ -67,6 +68,12 @@ test('production wiring uses server preview, replay-safe save, additive persiste
   assert.match(migration, /seo_research/)
   assert.match(verifier, /cross_tenant_rejected/)
   assert.match(verifier, /rollback;/)
+  assert.match(concurrency, /MB03B_LOCAL_TEMPLATE_URL/)
+  assert.match(concurrency, /localhost.*127\.0\.0\.1.*\[::1\]/)
+  assert.match(concurrency, /CREATE DATABASE[\s\S]*TEMPLATE/)
+  assert.match(concurrency, /DROP DATABASE/)
+  assert.match(concurrency, /same_key_race=one_write_one_replay/)
+  assert.match(concurrency, /expired_key_race=one_fresh_write_one_replay/)
   assert.match(relations, /seo_research/)
   assert.match(workItems, /seo_research/)
   assert.match(proofing, /seo_research/)

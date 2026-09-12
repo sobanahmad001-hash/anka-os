@@ -39,8 +39,9 @@ export default function MarketingSeoResearch({ organizationId, scopeRevision, si
   }, [engagement.brand_id, engagement.id, onAccessError, organizationId, repository, scopeRevision, signal])
 
   function change(field, value) {
+    generation.current += 1
     setForm(current => ({ ...current, [field]: value }))
-    setPreview(null); setRequestPreview(null); setMessage(''); saveKey.current = crypto.randomUUID()
+    setPreview(null); setRequestPreview(null); setMessage(''); setBusy(false); saveKey.current = crypto.randomUUID()
   }
 
   async function run(event) {
@@ -88,11 +89,11 @@ export default function MarketingSeoResearch({ organizationId, scopeRevision, si
     <form onSubmit={run} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
       <div className="grid gap-4 md:grid-cols-2">
         <Field label="Research type"><select required className={`${INPUT} mt-2 normal-case tracking-normal`} value={form.research_type} onChange={event => change('research_type', event.target.value)}><option value="">Choose type</option>{SEO_RESEARCH_TYPES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></Field>
-        <Field label="Market"><input required maxLength="240" className={`${INPUT} mt-2 normal-case tracking-normal`} value={form.market} onChange={event => change('market', event.target.value)} placeholder="Enter the actual research market" /></Field>
-        <div className="md:col-span-2"><Field label="Target domain or page URL" hint="Validated again on the server. No remote fetch is performed."><input required type="url" maxLength="2048" className={`${INPUT} mt-2 normal-case tracking-normal`} value={form.target_url} onChange={event => change('target_url', event.target.value)} placeholder="https://example.com/page" /></Field></div>
+        <Field label="Market"><input required maxLength="240" className={`${INPUT} mt-2 normal-case tracking-normal`} value={form.market} onInput={event => change('market', event.target.value)} placeholder="Enter the actual research market" /></Field>
+        <div className="md:col-span-2"><Field label="Target domain or page URL" hint="Validated again on the server. No remote fetch is performed."><input required type="url" maxLength="2048" className={`${INPUT} mt-2 normal-case tracking-normal`} value={form.target_url} onInput={event => change('target_url', event.target.value)} placeholder="https://example.com/page" /></Field></div>
         <Field label="Language"><span className={`${INPUT} mt-2 block normal-case font-normal tracking-normal text-slate-500`}>Unavailable in current stored sources</span></Field>
         <Field label="Device"><span className={`${INPUT} mt-2 block normal-case font-normal tracking-normal text-slate-500`}>Unavailable in current stored sources</span></Field>
-        <div className="md:col-span-2"><Field label="Seed keywords" hint="Optional · one per line"><textarea maxLength="10000" className={`${INPUT} mt-2 min-h-24 normal-case tracking-normal`} value={form.seed_keywords} onChange={event => change('seed_keywords', event.target.value)} /></Field></div>
+        <div className="md:col-span-2"><Field label="Seed keywords" hint="Optional · one per line"><textarea maxLength="10000" className={`${INPUT} mt-2 min-h-24 normal-case tracking-normal`} value={form.seed_keywords} onInput={event => change('seed_keywords', event.target.value)} /></Field></div>
         <div className="md:col-span-2"><Field label="Canonical Content strategy version"><select className={`${INPUT} mt-2 normal-case tracking-normal`} value={form.content_strategy_version_id} onChange={event => change('content_strategy_version_id', event.target.value)}><option value="">No strategy version selected</option>{availability.contentStrategies.map(item => <option key={item.id} value={item.id}>{item.title} · version {item.versionNumber}</option>)}</select></Field></div>
       </div>
       <div className="mt-6 flex justify-end border-t border-slate-800 pt-5"><button disabled={busy} className={PRIMARY}>{busy ? 'Building preview…' : 'Run research'}</button></div>

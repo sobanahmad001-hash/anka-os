@@ -80,6 +80,22 @@ begin
 
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
     p_organization_id::text || ':' || p_actor_id::text || ':save_seo_research:' || p_idempotency_key::text, 0));
+  select role,department_id into v_membership from public.organization_memberships
+  where organization_id=p_organization_id and user_id=p_actor_id and member_kind='team' and status='active'
+    and exists(select 1 from public.organizations o where o.id=p_organization_id and o.status='active');
+  if not found or not coalesce(
+    v_membership.role in ('system_owner','operations_admin','executive') or v_membership.department_id='marketing', false
+  ) then
+    raise exception 'Marketing department access required' using errcode='42501';
+  end if;
+  select id,brand_id into v_engagement from public.engagements
+  where id=p_engagement_id and organization_id=p_organization_id;
+  if not found or not exists (
+    select 1 from public.engagement_services es join public.service_catalog sc on sc.id=es.service_id
+    where es.organization_id=p_organization_id and es.engagement_id=p_engagement_id
+      and es.status='active' and sc.organization_id=p_organization_id and sc.department_id='marketing' and sc.is_active
+  ) then raise exception 'Active Marketing engagement required' using errcode='42501'; end if;
+
   delete from public.marketing_seo_research_save_requests
   where organization_id=p_organization_id and actor_id=p_actor_id and action='save_seo_research'
     and idempotency_key=p_idempotency_key and expires_at <= pg_catalog.clock_timestamp();
@@ -94,19 +110,6 @@ begin
     where id=v_replay.artifact_version_id and organization_id=p_organization_id;
     return to_jsonb(v_version) || jsonb_build_object('artifact_id',v_replay.artifact_id,'replayed',true);
   end if;
-
-  select role,department_id into v_membership from public.organization_memberships
-  where organization_id=p_organization_id and user_id=p_actor_id and member_kind='team' and status='active';
-  if not found or not (v_membership.role in ('system_owner','operations_admin','executive') or v_membership.department_id='marketing') then
-    raise exception 'Marketing department access required' using errcode='42501';
-  end if;
-  select id,brand_id into v_engagement from public.engagements
-  where id=p_engagement_id and organization_id=p_organization_id;
-  if not found or not exists (
-    select 1 from public.engagement_services es join public.service_catalog sc on sc.id=es.service_id
-    where es.organization_id=p_organization_id and es.engagement_id=p_engagement_id
-      and es.status='active' and sc.department_id='marketing' and sc.is_active
-  ) then raise exception 'Active Marketing engagement required' using errcode='42501'; end if;
 
   v_strategy_version_id := nullif(p_content->'input'->>'content_strategy_version_id','')::uuid;
   if v_strategy_version_id is not null and not exists (
