@@ -25,13 +25,20 @@ insert into b06a_checks values
   and tgname='trg_design_delivery_package_review_ready' and tgenabled<>'D')
   and exists(select 1 from pg_trigger where tgrelid='public.artifact_approvals'::regclass
   and tgname='trg_design_delivery_package_approval_ready' and tgenabled<>'D')),
+('version_write_guards',exists(select 1 from pg_trigger where tgrelid='public.artifact_versions'::regclass
+  and tgname='trg_design_delivery_package_version_insert' and tgenabled<>'D')
+  and exists(select 1 from pg_trigger where tgrelid='public.artifact_versions'::regclass
+  and tgname='trg_design_delivery_package_version_complete' and tgenabled<>'D' and tgdeferrable and tginitdeferred)),
 ('no_storage_delete',pg_get_functiondef('public.save_design_delivery_package_version(uuid,uuid,uuid,uuid,uuid,uuid,text,uuid,uuid,uuid,uuid,text,text,text,jsonb,text,uuid[])'::regprocedure)
-  !~* 'delete[[:space:]]+from|storage\.objects');
+  !~* 'delete[[:space:]]+from[[:space:]]+(storage\.)?objects');
 
 insert into b06a_checks values
 ('website_save',false),('same_intent_replay',false),('changed_replay_rejected',false),
 ('exact_reference',false),('typed_work_link',false),('referenced_archive_rejected',false),
 ('missing_object_review_rejected',false),('review_ready_after_object_restore',false),
+('missing_object_save_rejected',false),('plain_package_version_rejected',false),
+('sealed_reference_append_rejected',false),('inactive_source_review_rejected',false),
+('archived_task_review_rejected',false),('suspended_org_review_rejected',false),
 ('other_department_rejected',false),('inactive_destination_rejected',false),
 ('member_rls_read',false),('outsider_rls_denied',false);
 
@@ -95,6 +102,22 @@ begin
   reset role;
   update b06a_checks set passed=(replay->>'idempotent_replay')::boolean
     and replay->'version'->>'id'=package_version_id::text where check_name='same_intent_replay';
+
+  rejected:=false;
+  begin set local role service_role;
+    insert into public.artifact_versions(organization_id,artifact_id,version_number,parent_version_id,
+      content,content_checksum,change_summary,created_by)
+    values(org_id,package_id,2,package_version_id,'{}',repeat('8',64),'Plain package write',owner_id);
+  exception when insufficient_privilege then rejected:=sqlerrm like '%canonical atomic save boundary%'; end; reset role;
+  update b06a_checks set passed=rejected where check_name='plain_package_version_rejected';
+
+  rejected:=false;
+  begin set local role service_role;
+    insert into public.design_delivery_package_version_assets(artifact_version_id,organization_id,artifact_id,
+      design_asset_id,design_asset_version_id,position)
+    values(package_version_id,org_id,package_id,gen_random_uuid(),gen_random_uuid(),2);
+  exception when sqlstate '55000' then rejected:=sqlerrm like '%references are sealed%'; end; reset role;
+  update b06a_checks set passed=rejected where check_name='sealed_reference_append_rejected';
   rejected:=false;
   begin set local role service_role;
     perform public.save_design_delivery_package_version(org_id,owner_id,null,engagement_id,brand_id,design_es_id,
@@ -118,6 +141,40 @@ begin
   insert into public.artifact_approval_requests(organization_id,artifact_version_id,approval_policy,requested_by)
     values(org_id,package_version_id,'parallel',owner_id);
   update b06a_checks set passed=true where check_name='review_ready_after_object_restore';
+
+  rejected:=false;
+  begin
+    update storage.objects set archived_at=now() where id=object_id;
+    set local role service_role;
+    perform public.save_design_delivery_package_version(org_id,owner_id,package_id,engagement_id,brand_id,design_es_id,
+      null,null,task_id,null,package_version_id,'b06a-missing-object-save',repeat('a',64),
+      'Object recheck package',content,repeat('b',64),array[asset_version_id]);
+  exception when check_violation then rejected:=sqlerrm like '%selected Design object is missing%'; end; reset role;
+  update b06a_checks set passed=rejected where check_name='missing_object_save_rejected';
+
+  rejected:=false;
+  begin
+    update public.engagement_services set status='planned' where id=design_es_id;
+    insert into public.artifact_approval_requests(organization_id,artifact_version_id,approval_policy,requested_by)
+      values(org_id,package_version_id,'parallel',owner_id);
+  exception when check_violation then rejected:=sqlerrm like '%no longer active%'; end;
+  update b06a_checks set passed=rejected where check_name='inactive_source_review_rejected';
+
+  rejected:=false;
+  begin
+    update public.tasks set archived_at=now() where id=task_id;
+    insert into public.artifact_approval_requests(organization_id,artifact_version_id,approval_policy,requested_by)
+      values(org_id,package_version_id,'parallel',owner_id);
+  exception when check_violation then rejected:=sqlerrm like '%no longer active%'; end;
+  update b06a_checks set passed=rejected where check_name='archived_task_review_rejected';
+
+  rejected:=false;
+  begin
+    update public.organizations set status='suspended' where id=org_id;
+    insert into public.artifact_approval_requests(organization_id,artifact_version_id,approval_policy,requested_by)
+      values(org_id,package_version_id,'parallel',owner_id);
+  exception when check_violation then rejected:=sqlerrm like '%no longer active%'; end;
+  update b06a_checks set passed=rejected where check_name='suspended_org_review_rejected';
 
   rejected:=false;
   begin set local role service_role;

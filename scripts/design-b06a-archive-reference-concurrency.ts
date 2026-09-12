@@ -128,6 +128,13 @@ try {
       [id.org, id.engagement, id.brand, asset, version, operation, id.actor],
     );
   }
+  await setup.query(
+    "insert into storage.buckets(id,name,public) values('design-generated-media','design-generated-media',false) on conflict(id) do nothing",
+  );
+  await setup.query(
+    "insert into storage.objects(bucket_id,name,owner_id,metadata) select storage_bucket,storage_path,$1::text,'{}'::jsonb from public.design_asset_versions where id=any($2::uuid[])",
+    [id.actor, [id.version1, id.version2]],
+  );
   const content = JSON.stringify({
     schema_version: 1,
     destination_type: "website",

@@ -8,15 +8,29 @@ export function emptyDesignPackageDraft() {
     title: '', destination_type: 'website', placement_label: '', placement_description: '',
     website_page_section: '', social_platform: '', width: '', height: '',
     usage_instructions: '', export_guidance: '', destination_engagement_service_id: '',
-    selected_version_ids: [],
+    selected_version_ids: [], source_work_kind: '', source_work_id: '',
   }
 }
 
+export function designPackageDraftWork(draft, context) {
+  const retainedKind = clean(draft?.source_work_kind, 40)
+  const retainedId = id(draft?.source_work_id)
+  if (retainedId && ['project_task', 'engagement_work_item'].includes(retainedKind)) {
+    return { kind: retainedKind, id: retainedId, retained: true }
+  }
+  const currentKind = clean(context?.workRecord?.kind, 40)
+  const currentId = id(context?.workRecord?.id)
+  return currentId && ['project_task', 'engagement_work_item'].includes(currentKind)
+    ? { kind: currentKind, id: currentId, retained: false }
+    : null
+}
+
 export function designPackageTargetKey(context, draft, latestVersionId = '') {
+  const work = designPackageDraftWork(draft, context)
   return JSON.stringify({
     organizationId: id(context?.organizationId), engagementId: id(context?.engagementId),
     brandId: id(context?.brandId), serviceId: id(context?.activeServiceId),
-    workKind: clean(context?.workRecord?.kind, 40), workId: id(context?.workRecord?.id),
+    workKind: clean(work?.kind, 40), workId: id(work?.id),
     packageId: id(draft?.artifact_id), latestVersionId: id(latestVersionId),
     destination: clean(draft?.destination_type, 30), placement: clean(draft?.placement_label, 240),
     page: clean(draft?.website_page_section, 500), platform: clean(draft?.social_platform, 120),
@@ -42,7 +56,7 @@ export function validateDesignPackageDraft(draft, context) {
     || !Number.isInteger(Number(draft?.height)) || Number(draft.height) <= 0) missing.push('positive pixel dimensions')
   if (!clean(draft?.usage_instructions)) missing.push('usage instructions')
   if (!(draft?.selected_version_ids || []).length) missing.push('at least one exact asset version')
-  if (!context?.workRecord?.id || !['project_task', 'engagement_work_item'].includes(context.workRecord.kind)) {
+  if (!designPackageDraftWork(draft, context)) {
     missing.push('existing typed work destination')
   }
   return { valid: missing.length === 0, missing }

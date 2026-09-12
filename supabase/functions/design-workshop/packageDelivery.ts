@@ -176,7 +176,8 @@ export async function saveDeliveryPackage(admin: Client, userClient: Client, bod
   await validateExistingWork(userClient, organizationId, engagementId, brandId, work)
   const validation = validateDeliveryPackage(body.content, body.asset_version_ids)
   if (!validation.valid) throw new Error(`Package needs ${validation.missing.join(', ')}`)
-  await currentAssetVersions(userClient, organizationId, engagementId, brandId, validation.selected_version_ids)
+  const versions = await currentAssetVersions(userClient, organizationId, engagementId, brandId, validation.selected_version_ids)
+  await temporaryPreviews(admin, versions)
   const destination = await validateDestinationService(admin, organizationId, engagementId, body)
   const request = {
     artifact_id: clean(body.artifact_id, 80) || null,

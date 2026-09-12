@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 
 import {
   activePackageDestinations, designPackageTargetKey, emptyDesignPackageDraft,
-  isCurrentPackageResponse, packageVersionStatus, validateDesignPackageDraft,
+  designPackageDraftWork, isCurrentPackageResponse, packageVersionStatus, validateDesignPackageDraft,
 } from '../data/designDeliveryPackages.js'
 
 const INPUT = 'w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-violet-500/60'
@@ -24,12 +24,13 @@ export default function DesignDeliveryPackagePanel({ workspace, context, canSave
       .sort((left, right) => right.version_number - left.version_number)[0]
     : null
   const targetKey = designPackageTargetKey(context, draft, latestVersion?.id)
+  const draftWork = designPackageDraftWork(draft, context)
   const validation = validateDesignPackageDraft(draft, context)
 
   function change(field, value) {
     requestSequence.current += 1
     setDraft(current => ({ ...current, [field]: value }))
-    setPreview(null); setPreviewKey(''); setOperationKey(''); setError(''); setMessage('')
+    setPreview(null); setPreviewKey(''); setOperationKey(''); setBusy(''); setError(''); setMessage('')
   }
   function toggleVersion(versionId) {
     const selected = draft.selected_version_ids.includes(versionId)
@@ -46,8 +47,8 @@ export default function DesignDeliveryPackagePanel({ workspace, context, canSave
       source_engagement_service_id: context.activeServiceId,
       destination_department_id: selectedDestination?.departmentId || null,
       destination_engagement_service_id: selectedDestination?.id || null,
-      project_task_id: context.workRecord?.kind === 'project_task' ? context.workRecord.id : null,
-      engagement_work_item_id: context.workRecord?.kind === 'engagement_work_item' ? context.workRecord.id : null,
+      project_task_id: draftWork?.kind === 'project_task' ? draftWork.id : null,
+      engagement_work_item_id: draftWork?.kind === 'engagement_work_item' ? draftWork.id : null,
       operation_key: key,
       title: draft.title,
       asset_version_ids: draft.selected_version_ids,
@@ -91,8 +92,17 @@ export default function DesignDeliveryPackagePanel({ workspace, context, canSave
     requestSequence.current += 1
     setDraft({ ...emptyDesignPackageDraft(), ...version.content, title: artifact.title, artifact_id: artifact.id,
       destination_engagement_service_id: packageContext?.destination_engagement_service_id || '',
+      source_work_kind: packageContext?.project_task_id ? 'project_task' : 'engagement_work_item',
+      source_work_id: packageContext?.project_task_id || packageContext?.engagement_work_item_id || '',
       selected_version_ids: references.map(item => item.design_asset_version_id) })
-    setPreview(null); setPreviewKey(''); setOperationKey(''); setError(''); setMessage('Loaded the latest immutable version as a new draft. Preview before saving another version.')
+    setPreview(null); setPreviewKey(''); setOperationKey(''); setBusy(''); setError(''); setMessage('Loaded the latest immutable version as a new draft and retained its stored work provenance. Preview before saving another version.')
+  }
+  function relinkToCurrentWork() {
+    if (!context.workRecord) return
+    requestSequence.current += 1
+    setDraft(current => ({ ...current, source_work_kind: context.workRecord.kind, source_work_id: context.workRecord.id }))
+    setPreview(null); setPreviewKey(''); setOperationKey(''); setBusy(''); setError('')
+    setMessage(`Draft deliberately relinked to ${context.workRecord.kind}:${context.workRecord.id.slice(0, 8)}. Saved history remains unchanged.`)
   }
 
   return <section aria-labelledby="design-delivery-title" className="mt-6 rounded-2xl border border-violet-400/20 bg-slate-900/70 p-5">
@@ -115,6 +125,7 @@ export default function DesignDeliveryPackagePanel({ workspace, context, canSave
     <div className="mt-5 flex flex-wrap gap-3"><button type="button" className="rounded-xl border border-violet-400/30 px-4 py-2.5 text-sm font-semibold text-violet-200 disabled:opacity-40" disabled={busy !== '' || !validation.valid} onClick={runPreview}>{busy === 'preview' ? 'Checking exact versions…' : 'Preview package'}</button><button type="button" className={BUTTON} disabled={busy !== '' || !canSave || previewKey !== targetKey} onClick={save}>{busy === 'save' ? 'Saving exact version…' : 'Save unapproved version'}</button></div>
     {preview && previewKey === targetKey && <div className="mt-5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4"><p className="font-semibold text-emerald-200">Current target preview is valid</p><p className="mt-1 text-xs text-slate-400">{preview.selected_versions.length} exact version(s) · temporary previews expire in {preview.signed_url_expires_in} seconds · downstream: {preview.destination_status.replaceAll('_', ' ')}</p><div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{preview.selected_versions.map(item => <figure key={item.id}><img className="aspect-video w-full rounded-lg object-cover" src={item.preview_url} alt={`Temporary preview of ${item.original_filename}`} /><figcaption className="mt-1 text-xs text-slate-500">v{item.version_number} · {item.width || '?'}×{item.height || '?'}</figcaption></figure>)}</div></div>}
     {!draft.destination_engagement_service_id && <p className="mt-4 text-sm text-amber-200">Content, Marketing, or Development delivery is blocked until an already active permitted service is selected. Saving this independent Design draft remains allowed.</p>}
-    <div className="mt-6 border-t border-white/10 pt-5"><h3 className="font-semibold">Existing package versions</h3><div className="mt-3 space-y-2">{workspace.deliveryPackageArtifacts.map(artifact => { const versions = workspace.deliveryPackageVersions.filter(item => item.artifact_id === artifact.id); const latest = [...versions].sort((a, b) => b.version_number - a.version_number)[0]; const workLabel = context.workRecord ? `${context.workRecord.kind}:${context.workRecord.id.slice(0, 8)}` : 'existing work unavailable'; return <button type="button" key={artifact.id} onClick={() => openPackage(artifact)} className="flex w-full items-center justify-between rounded-xl border border-white/10 p-3 text-left"><span><span className="block text-sm font-semibold">{artifact.title}</span><span className="text-xs text-slate-500">{workLabel} · exact version {latest?.version_number || '?'}</span></span><span className="text-xs font-semibold capitalize text-violet-300">{packageVersionStatus(latest, workspace.approvals, workspace.deliveryPackageContexts)}</span></button>})}{!workspace.deliveryPackageArtifacts.length && <p className="text-sm text-slate-500">No saved package versions for this engagement.</p>}</div><p className="mt-3 text-xs text-slate-500">Submit-for-review remains on the existing shared artifact approval contract. This panel does not duplicate or alter that authority.</p></div>
+    {draftWork?.retained && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-sky-400/20 bg-sky-400/5 p-3 text-sm"><span>New version retains stored work: {draftWork.kind}:{draftWork.id.slice(0, 8)}.</span>{context.workRecord && (context.workRecord.kind !== draftWork.kind || context.workRecord.id !== draftWork.id) && <button type="button" className="rounded-lg border border-sky-300/30 px-3 py-1.5 font-semibold text-sky-200" onClick={relinkToCurrentWork}>Relink draft to current work</button>}</div>}
+    <div className="mt-6 border-t border-white/10 pt-5"><h3 className="font-semibold">Existing package versions</h3><div className="mt-3 space-y-2">{workspace.deliveryPackageArtifacts.map(artifact => { const versions = workspace.deliveryPackageVersions.filter(item => item.artifact_id === artifact.id); const latest = [...versions].sort((a, b) => b.version_number - a.version_number)[0]; const storedContext = workspace.deliveryPackageContexts.find(item => item.artifact_version_id === latest?.id); const workLabel = storedContext?.project_task_id ? `project_task:${storedContext.project_task_id.slice(0, 8)}` : storedContext?.engagement_work_item_id ? `engagement_work_item:${storedContext.engagement_work_item_id.slice(0, 8)}` : 'stored work unavailable'; return <button type="button" key={artifact.id} onClick={() => openPackage(artifact)} className="flex w-full items-center justify-between rounded-xl border border-white/10 p-3 text-left"><span><span className="block text-sm font-semibold">{artifact.title}</span><span className="text-xs text-slate-500">{workLabel} · exact version {latest?.version_number || '?'}</span></span><span className="text-xs font-semibold capitalize text-violet-300">{packageVersionStatus(latest, workspace.approvals, workspace.deliveryPackageContexts)}</span></button>})}{!workspace.deliveryPackageArtifacts.length && <p className="text-sm text-slate-500">No saved package versions for this engagement.</p>}</div><p className="mt-3 text-xs text-slate-500">Submit-for-review remains on the existing shared artifact approval contract. This panel does not duplicate or alter that authority.</p></div>
   </section>
 }

@@ -4,7 +4,7 @@ import test from 'node:test'
 
 import {
   activePackageDestinations, designPackageTargetKey, emptyDesignPackageDraft,
-  isCurrentPackageResponse, packageReadState, validateDesignPackageDraft,
+  designPackageDraftWork, isCurrentPackageResponse, packageReadState, validateDesignPackageDraft,
 } from './designDeliveryPackages.js'
 
 const read = path => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
@@ -47,6 +47,15 @@ test('B06a exact target key invalidates preview on context, placement, asset, an
   assert.equal(isCurrentPackageResponse(3, 3, base, `${base}:changed`), false)
 })
 
+test('B06a reopened drafts retain immutable stored work until explicitly relinked', () => {
+  const retained = { ...complete(), source_work_kind: 'project_task', source_work_id: 'task-original' }
+  assert.deepEqual(designPackageDraftWork(retained, context), {
+    kind: 'project_task', id: 'task-original', retained: true,
+  })
+  assert.notEqual(designPackageTargetKey(context, retained, 'package-v1'),
+    designPackageTargetKey(context, { ...retained, source_work_id: 'task-1' }, 'package-v1'))
+})
+
 test('B06a destination list exposes only current active Content, Marketing, or Development contracts', () => {
   const services = [
     { id: 'content-1', status: 'active', service_catalog: { name: 'Copy', department_id: 'content', is_active: true } },
@@ -72,18 +81,25 @@ test('B06a keeps one artifact version truth and narrow exact-reference/work link
   assert.match(migration, /project_task_id[\s\S]*engagement_work_item_id/)
   assert.match(migration, /for key share of asset/)
   assert.match(migration, /trg_design_assets_package_reference_archive_guard/)
+  assert.match(migration, /trg_design_delivery_package_version_insert/)
+  assert.match(migration, /trg_design_delivery_package_version_complete/)
+  assert.match(migration, /exact-version references are sealed/)
   assert.doesNotMatch(migration, /create table public\.design_delivery_packages\b|create table public\.design_delivery_package_versions\b/)
   assert.doesNotMatch(migration, /delete\s+from\s+(?:storage\.)?objects/i)
 })
 
 test('B06a preview checks private objects and UI remains explicitly unapproved', () => {
   assert.match(edge, /createSignedUrls\(paths, 300\)/)
+  assert.match(edge, /saveDeliveryPackage[\s\S]*await temporaryPreviews\(admin, versions\)/)
   assert.match(edge, /from\('tasks'\)[\s\S]*archived_at/)
   assert.match(edge, /from\('work_items'\)[\s\S]*deleted_at/)
   assert.match(edge, /planning_blocked/)
   assert.match(ui, /Save unapproved version/)
   assert.match(ui, /Preview package/)
   assert.match(ui, /requestSequence/)
+  assert.match(ui, /setOperationKey\(''\); setBusy\(''\)/)
+  assert.match(ui, /storedContext\?\.project_task_id/)
+  assert.match(ui, /Relink draft to current work/)
   assert.match(ui, /No approval, release, publication, or delivery occurred/)
   assert.doesNotMatch(ui, /ArtifactApprovalPanel|VersionProofingPanel/)
 })
