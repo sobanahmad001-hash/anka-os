@@ -177,6 +177,8 @@ test('MB04B is additive, retry-safe, exact-version governed, and does not create
   assert.match(completion, /v_replay.payload_checksum<>v_actual_checksum/)
   assert.match(completion, /v_submission.payload_checksum<>v_actual_checksum/)
   assert.ok((completion.match(/perform private.assert_mb04b_campaign_context/g) || []).length >= 5)
+  assert.match(completion, /lock_mb04b_campaign_context/)
+  assert.match(completion, /campaign_brief_lineage/)
   assert.doesNotMatch(completion, /insert into public\.(work_items|artifact_approvals|provider_connections)|update public\.marketing_campaigns[^]*planned_budget/i)
   for (const check of ['budget_pair_required', 'nonfinite_budget_denied', 'duplicate_replay_same_result',
     'duplicate_key_conflict_denied', 'review_exact_plan_and_brief_version', 'review_pending_not_approved',
@@ -190,6 +192,10 @@ test('MB04B is additive, retry-safe, exact-version governed, and does not create
   assert.match(completionConcurrency, /review contender did not wait on replay lock/)
   assert.match(completionConcurrency, /duplicate_replay_revocation_denied=true/)
   assert.match(completionConcurrency, /review_replay_revocation_denied=true/)
+  assert.match(completionConcurrency, /direct_save_revocation_denied=true/)
+  assert.match(completionConcurrency, /fresh_duplicate_revocation_denied=true/)
+  assert.match(completionConcurrency, /fresh_review_revocation_denied=true/)
+  assert.match(completionConcurrency, /pg_blocking_pids/)
   assert.match(completionConcurrency, /stale submit did not wait on plan lock/)
   assert.match(completionConcurrency, /'40001'/)
 })
