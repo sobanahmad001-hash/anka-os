@@ -1,7 +1,7 @@
-const CLOSED = new Set(['done', 'cancelled', 'completed'])
+const DEPENDENCY_TERMINAL = new Set(['done', 'cancelled', 'completed'])
 const clean = value => typeof value === 'string' ? value.trim() : ''
 const unique = values => [...new Set(values.filter(Boolean))]
-const state = status => CLOSED.has(status) ? 'completed' : 'planned'
+const state = status => status === 'cancelled' ? 'cancelled' : status === 'done' || status === 'completed' ? 'completed' : 'planned'
 const range = entry => ({ start: clean(entry.plannedDate), end: clean(entry.endDate) || clean(entry.plannedDate) })
 
 function scoped(row, organizationId) {
@@ -28,10 +28,10 @@ export function monthInTimezone(now = new Date(), timezone = 'UTC') {
 }
 
 export function buildMarketingCalendar(input) {
-  const { organizationId, engagement, project, client, tasks = [], taskDependencies = [], workItems = [], workItemDependencies = [], memberships = [], profiles = [], campaigns = [], planVersions = [], campaignLinks = [] } = input || {}
+  const { organizationId, engagement, project, client, tasks = [], taskDependencies = [], dependencyTasks = [], workItems = [], workItemDependencies = [], dependencyWorkItems = [], memberships = [], profiles = [], campaigns = [], planVersions = [], campaignLinks = [] } = input || {}
   if (!organizationId || engagement?.organization_id !== organizationId || engagement?.project_id !== project?.id) throw Object.assign(new Error('Marketing Calendar context mismatch'), { status: 403, membershipMismatch: true })
   scoped(project, organizationId); if (client) scoped(client, organizationId)
-  for (const rows of [tasks, taskDependencies, workItems, workItemDependencies, memberships, campaigns, planVersions, campaignLinks]) for (const row of rows) scoped(row, organizationId)
+  for (const rows of [tasks, taskDependencies, dependencyTasks, workItems, workItemDependencies, dependencyWorkItems, memberships, campaigns, planVersions, campaignLinks]) for (const row of rows) scoped(row, organizationId)
   const profilesById = new Map(profiles.map(item => [item.id, item]))
   const active = new Set(memberships.filter(item => item.member_kind === 'team' && item.status === 'active').map(item => item.user_id))
   const campaignsById = new Map(campaigns.filter(item => item.engagement_id === engagement.id).map(item => [item.id, item]))
@@ -41,25 +41,38 @@ export function buildMarketingCalendar(input) {
     const current = latestPlans.get(item.campaign_id)
     if (!current || Number(item.version_number) > Number(current.version_number)) latestPlans.set(item.campaign_id, item)
   }
-  const statuses = new Map([...tasks.map(item => [`task:${item.id}`, item.status]), ...workItems.map(item => [`work:${item.id}`, item.status])])
-  const taskBlocks = new Map(); const workBlocks = new Map()
-  for (const item of taskDependencies) if (!CLOSED.has(statuses.get(`task:${item.depends_on_task_id}`))) taskBlocks.set(item.task_id, (taskBlocks.get(item.task_id) || 0) + 1)
-  for (const item of workItemDependencies) if (!CLOSED.has(statuses.get(`work:${item.depends_on_work_item_id}`))) workBlocks.set(item.work_item_id, (workBlocks.get(item.work_item_id) || 0) + 1)
+  const statuses = new Map([
+    ...tasks.map(item => [`task:${item.id}`, item.status]),
+    ...dependencyTasks.filter(item => item.project_id === project.id).map(item => [`task:${item.id}`, item.status]),
+    ...workItems.map(item => [`work:${item.id}`, item.status]),
+    ...dependencyWorkItems.filter(item => item.project_id === project.id && item.engagement_id === engagement.id).map(item => [`work:${item.id}`, item.status]),
+  ])
+  const taskBlocks = new Map(); const taskUnknown = new Map(); const workBlocks = new Map(); const workUnknown = new Map()
+  for (const item of taskDependencies) {
+    const status = statuses.get(`task:${item.depends_on_task_id}`)
+    if (!status) taskUnknown.set(item.task_id, (taskUnknown.get(item.task_id) || 0) + 1)
+    else if (!DEPENDENCY_TERMINAL.has(status)) taskBlocks.set(item.task_id, (taskBlocks.get(item.task_id) || 0) + 1)
+  }
+  for (const item of workItemDependencies) {
+    const status = statuses.get(`work:${item.depends_on_work_item_id}`)
+    if (!status) workUnknown.set(item.work_item_id, (workUnknown.get(item.work_item_id) || 0) + 1)
+    else if (!DEPENDENCY_TERMINAL.has(status)) workBlocks.set(item.work_item_id, (workBlocks.get(item.work_item_id) || 0) + 1)
+  }
   const entries = []
   for (const item of tasks) {
     if (item.project_id !== project.id || item.department_id !== 'marketing' || item.archived_at) continue
-    entries.push(Object.freeze({ id: `project_task:${item.id}`, recordKind: 'project_task', recordId: item.id, title: item.title || 'Untitled Project Task', calendarState: state(item.status), plannedDate: item.due_date || '', endDate: item.due_date || '', engagementId: engagement.id, campaignLabel: '', channels: [], ...owner(item.assigned_to, profilesById, active), unresolvedDependencies: taskBlocks.get(item.id) || 0, externallyPublished: false, href: `/sphere/workspace/items/project_task/${encodeURIComponent(item.id)}` }))
+    entries.push(Object.freeze({ id: `project_task:${item.id}`, recordKind: 'project_task', recordId: item.id, title: item.title || 'Untitled Project Task', calendarState: state(item.status), plannedDate: item.due_date || '', endDate: item.due_date || '', engagementId: engagement.id, campaignLabel: '', channels: [], ...owner(item.assigned_to, profilesById, active), unresolvedDependencies: taskBlocks.get(item.id) || 0, unknownDependencies: taskUnknown.get(item.id) || 0, externallyPublished: false, href: `/sphere/workspace/items/project_task/${encodeURIComponent(item.id)}` }))
   }
   for (const item of workItems) {
     if (item.engagement_id !== engagement.id || item.project_id !== project.id || item.department_id !== 'marketing' || item.deleted_at) continue
     const campaignId = campaignByArtifact.get(item.linked_artifact_id) || ''
     const campaign = campaignsById.get(campaignId); const plan = latestPlans.get(campaignId)
-    entries.push(Object.freeze({ id: `engagement_work_item:${item.id}`, recordKind: 'engagement_work_item', recordId: item.id, title: item.title || 'Untitled Engagement Work Item', calendarState: state(item.status), plannedDate: item.start_date || item.due_date || '', endDate: item.due_date || item.start_date || '', engagementId: engagement.id, campaignLabel: campaign?.name || '', channels: unique(plan?.channels || campaign?.planned_channels || []), ...owner(item.assignee_id, profilesById, active), unresolvedDependencies: workBlocks.get(item.id) || 0, externallyPublished: false, href: `/sphere/workspace/items/engagement_work_item/${encodeURIComponent(item.id)}`, plannerHref: item.recurring_occurrence_id ? `/sphere/workspace/projects/${encodeURIComponent(project.id)}?tab=retainer-planning` : '' }))
+    entries.push(Object.freeze({ id: `engagement_work_item:${item.id}`, recordKind: 'engagement_work_item', recordId: item.id, title: item.title || 'Untitled Engagement Work Item', calendarState: state(item.status), plannedDate: item.start_date || item.due_date || '', endDate: item.due_date || item.start_date || '', engagementId: engagement.id, campaignLabel: campaign?.name || '', channels: unique(plan?.channels || campaign?.planned_channels || []), ...owner(item.assignee_id, profilesById, active), unresolvedDependencies: workBlocks.get(item.id) || 0, unknownDependencies: workUnknown.get(item.id) || 0, externallyPublished: false, href: `/sphere/workspace/items/engagement_work_item/${encodeURIComponent(item.id)}`, plannerHref: item.recurring_occurrence_id ? `/sphere/workspace/projects/${encodeURIComponent(project.id)}?tab=retainer-planning` : '' }))
   }
   for (const [campaignId, item] of latestPlans) {
     if (!item.starts_on && !item.ends_on) continue
     const campaign = campaignsById.get(campaignId)
-    entries.push(Object.freeze({ id: `campaign_plan:${item.id}`, recordKind: 'campaign_plan_draft', recordId: item.id, title: item.title || campaign?.name || 'Untitled campaign plan', calendarState: 'draft', plannedDate: item.starts_on || item.ends_on, endDate: item.ends_on || item.starts_on, engagementId: engagement.id, campaignLabel: campaign?.name || '', channels: unique(item.channels || campaign?.planned_channels || []), ...owner(item.created_by, profilesById, active), unresolvedDependencies: 0, externallyPublished: false, href: `/sphere/marketing/studio?engagement=${encodeURIComponent(engagement.id)}&tab=campaigns&campaign=${encodeURIComponent(campaignId)}` }))
+    entries.push(Object.freeze({ id: `campaign_plan:${item.id}`, recordKind: 'campaign_plan_draft', recordId: item.id, title: item.title || campaign?.name || 'Untitled campaign plan', calendarState: 'draft', plannedDate: item.starts_on || item.ends_on, endDate: item.ends_on || item.starts_on, engagementId: engagement.id, campaignLabel: campaign?.name || '', channels: unique(item.channels || campaign?.planned_channels || []), ...owner(item.created_by, profilesById, active), unresolvedDependencies: 0, unknownDependencies: 0, externallyPublished: false, href: `/sphere/marketing/studio?engagement=${encodeURIComponent(engagement.id)}&tab=campaigns&campaign=${encodeURIComponent(campaignId)}` }))
   }
   return Object.freeze({
     timezone: effectiveMarketingTimezone(project, client),
