@@ -13,6 +13,9 @@ import {
   validateCampaign,
   validateCampaignPlan,
   validateMarketingArtifact,
+  safeResearchUrl,
+  validateSeoResearchInput,
+  validateSeoResearchContent,
 } from './index.ts'
 
 Deno.test('Marketing authority keeps approval manager-controlled', () => {
@@ -258,6 +261,26 @@ Deno.test('marketing report preserves source, period, insight, and recommended a
   assertThrows(() => safeDateRange('2026-09-01', '2026-08-01'), Error, 'ordered')
   assertEquals(safeDateRange('2026-01-01', '2027-01-01'), { start: '2026-01-01', end: '2027-01-01' })
   assertThrows(() => safeDateRange('2026-01-01', '2027-01-02'), Error, 'no more than 366 days')
+})
+
+Deno.test('MB03B validates explicit source-only scope, safe URLs, and separated evidence', () => {
+  assertEquals(safeResearchUrl('HTTPS://Example.COM/page/#section'), 'https://example.com/page')
+  assertThrows(() => safeResearchUrl('https://user:secret@example.com/page'), Error, 'without embedded credentials')
+  assertThrows(() => safeResearchUrl('file:///etc/passwd'), Error, 'HTTP or HTTPS')
+  const input = validateSeoResearchInput({ research_type: 'page', target_url: 'https://example.com/page', market: 'Pakistan', language: null, device: null, seed_keywords: ['growth'] })
+  assertEquals(input.language, null)
+  assertEquals(input.device, null)
+  assertThrows(() => validateSeoResearchInput({ ...input, language: 'en' }), Error, 'unavailable')
+  const content = validateSeoResearchContent({
+    input, captured_at: '2026-09-12T00:00:00Z',
+    source_availability: [{ source: 'technical_seo', available: true, record_count: 1 }],
+    source_facts: [{ category: 'index status', observation: 'Latest stored index status: indexed.', source: 'technical_seo_audit', evidence_date: '2026-09-12', affected_url: 'https://example.com/page', source_record_id: '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25' }],
+    interpretations: [{ category: 'index status', proposed_action: 'Retain monitoring.', limitations: 'Stored evidence only.', affected_url: 'https://example.com/page' }],
+    limitations: ['No remote URL was fetched.'],
+  })
+  assertEquals((content.source_facts as unknown[]).length, 1)
+  assertEquals((content.interpretations as unknown[]).length, 1)
+  assertThrows(() => validateSeoResearchContent({ ...content, captured_at: '' }), Error, 'capture time')
 })
 
 Deno.test('unified dashboard requests only its fixed GA4 and Search Console providers', () => {

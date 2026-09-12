@@ -5,8 +5,9 @@ type Client = ReturnType<typeof createClient<any>>
 type Json = Record<string, unknown>
 
 const MARKETING_ARTIFACT_TYPES = new Set([
-  'channel_strategy', 'campaign_brief', 'measurement_plan', 'marketing_report',
+  'channel_strategy', 'campaign_brief', 'measurement_plan', 'marketing_report', 'seo_research',
 ])
+const SEO_RESEARCH_TYPES = new Set(['domain', 'page'])
 const GOOGLE_PROVIDERS = new Set(['google_analytics', 'google_search_console', 'google_ads'])
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 const MANAGER_ROLES = new Set(['department_manager'])
@@ -84,6 +85,7 @@ export function validateMarketingArtifact(type: string, value: unknown): Json {
     throw new Error('Unsupported marketing artifact content')
   }
   const input = value as Json
+  if (type === 'seo_research') return validateSeoResearchContent(input)
   if (type === 'campaign_brief') {
     const campaignGoal = text(input.campaign_goal, 4000)
     const channels = strings(input.channels)
@@ -127,6 +129,90 @@ export function validateMarketingArtifact(type: string, value: unknown): Json {
   }
   if (type === 'marketing_report') safeDateRange(output.period_start, output.period_end)
   return output
+}
+
+export function safeResearchUrl(value: unknown) {
+  const raw = text(value, 2048)
+  if (!raw) throw new Error('Target URL is required')
+  let parsed: URL
+  try { parsed = new URL(raw) } catch { throw new Error('Target URL must be a valid HTTP or HTTPS address') }
+  const validHostname = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/i
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || !validHostname.test(parsed.hostname)) {
+    throw new Error('Target URL must be a valid HTTP or HTTPS address without embedded credentials')
+  }
+  parsed.hash = ''
+  parsed.hostname = parsed.hostname.toLowerCase()
+  if ((parsed.protocol === 'http:' && parsed.port === '80') || (parsed.protocol === 'https:' && parsed.port === '443')) parsed.port = ''
+  if (parsed.pathname.length > 1) parsed.pathname = parsed.pathname.replace(/\/+$/, '')
+  return parsed.toString()
+}
+
+export function validateSeoResearchInput(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('SEO research input is required')
+  const input = value as Json
+  const researchType = text(input.research_type, 40)
+  const market = text(input.market, 240)
+  if (!SEO_RESEARCH_TYPES.has(researchType)) throw new Error('Choose a supported research type')
+  if (!market) throw new Error('Market is required so the research scope is explicit')
+  if (input.language != null || input.device != null) throw new Error('Language and device are unavailable in the current stored sources')
+  const strategyVersionId = text(input.content_strategy_version_id, 80) || null
+  if (strategyVersionId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(strategyVersionId)) {
+    throw new Error('Content strategy must reference an exact version')
+  }
+  return {
+    research_type: researchType, target_url: safeResearchUrl(input.target_url), market,
+    language: null, device: null, seed_keywords: strings(input.seed_keywords, 50),
+    content_strategy_version_id: strategyVersionId,
+  }
+}
+
+function seoFact(value: unknown, index: number) {
+  const item = value && typeof value === 'object' && !Array.isArray(value) ? value as Json : {}
+  const category = text(item.category, 120)
+  const observation = text(item.observation, 2000)
+  const source = text(item.source, 120)
+  if (!category || !observation || !source) throw new Error(`Source fact ${index + 1} is incomplete`)
+  const sourceRecordId = text(item.source_record_id, 80) || null
+  if (sourceRecordId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sourceRecordId)) throw new Error(`Source fact ${index + 1} has an invalid record ID`)
+  return { category, observation, source, evidence_date: text(item.evidence_date, 40) || null,
+    affected_url: item.affected_url ? safeResearchUrl(item.affected_url) : null,
+    source_record_id: sourceRecordId }
+}
+
+function seoInterpretation(value: unknown, index: number) {
+  const item = value && typeof value === 'object' && !Array.isArray(value) ? value as Json : {}
+  const category = text(item.category, 120)
+  const proposedAction = text(item.proposed_action, 2000)
+  const limitations = text(item.limitations, 1000)
+  if (!category || !proposedAction || !limitations) throw new Error(`Interpretation ${index + 1} is incomplete`)
+  return { category, proposed_action: proposedAction, limitations,
+    affected_url: item.affected_url ? safeResearchUrl(item.affected_url) : null }
+}
+
+export function validateSeoResearchContent(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('SEO research content is required')
+  const input = value as Json
+  const facts = Array.isArray(input.source_facts) ? input.source_facts : []
+  const interpretations = Array.isArray(input.interpretations) ? input.interpretations : []
+  if (facts.length > 200 || interpretations.length > 200) throw new Error('SEO research preview is too large')
+  const capturedAt = text(input.captured_at, 40)
+  if (!capturedAt || Number.isNaN(Date.parse(capturedAt))) throw new Error('SEO research capture time is required')
+  const availability = (Array.isArray(input.source_availability) ? input.source_availability : []).slice(0, 20).map((raw, index) => {
+    const item = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Json : {}
+    const source = text(item.source, 120)
+    if (!['technical_seo','keyword_history','content_strategy'].includes(source)) throw new Error(`Source availability ${index + 1} is unsupported`)
+    const count = item.record_count == null ? null : Number(item.record_count)
+    if (count !== null && (!Number.isSafeInteger(count) || count < 0)) throw new Error(`Source availability ${index + 1} has an invalid count`)
+    return { source, available: item.available === true, record_count: count,
+      exact_version: source === 'content_strategy' && item.exact_version && typeof item.exact_version === 'object'
+        ? item.exact_version : null }
+  })
+  return {
+    input: validateSeoResearchInput(input.input), captured_at: new Date(capturedAt).toISOString(),
+    source_availability: availability,
+    source_facts: facts.map(seoFact), interpretations: interpretations.map(seoInterpretation),
+    limitations: strings(input.limitations, 50),
+  }
 }
 
 export function validateCampaign(value: unknown) {
@@ -620,6 +706,9 @@ async function saveArtifact(context: MarketingRequestContext, body: Json, actorI
   if (artifactType === 'campaign_brief') {
     throw Object.assign(new Error('Campaign briefs must be saved through the governed campaign brief workflow'), { status: 409 })
   }
+  if (artifactType === 'seo_research') {
+    throw Object.assign(new Error('SEO research must be saved through the replay-safe research workflow'), { status: 409 })
+  }
   const engagement = await requireMarketingEngagement(context, engagementId)
   const content = validateMarketingArtifact(artifactType, body.content)
   const checksum = await sha256(stableJson(content))
@@ -905,6 +994,132 @@ async function importAdCampaignPerformance(context: MarketingRequestContext, bod
   return { snapshot: existing, imported: false }
 }
 
+function researchPageMatches(pageUrl: string, targetUrl: string, researchType: string) {
+  const page = new URL(safeResearchUrl(pageUrl))
+  const target = new URL(targetUrl)
+  return researchType === 'page'
+    ? page.toString() === target.toString()
+    : page.hostname === target.hostname || page.hostname.endsWith(`.${target.hostname}`)
+}
+
+async function requireContentStrategyVersion(context: MarketingRequestContext, brandId: string, versionId: string | null) {
+  if (!versionId) return null
+  const { data, error } = await context.admin.from('artifact_versions')
+    .select('id, version_number, artifacts!inner(id, title, artifact_type, brand_id)')
+    .eq('organization_id', context.organizationId).eq('id', versionId).maybeSingle()
+  if (error) throw error
+  const artifact = relatedObject(data?.artifacts)
+  if (!data || !artifact || artifact.artifact_type !== 'keyword_strategy' || artifact.brand_id !== brandId) {
+    throw Object.assign(new Error('Content strategy version is unavailable for this brand'), { status: 403 })
+  }
+  return { id: data.id, version_number: data.version_number, artifact_id: artifact.id, title: artifact.title }
+}
+
+export async function previewSeoResearch(context: MarketingRequestContext, body: Json) {
+  const engagement = await requireMarketingEngagement(context, text(body.engagement_id, 80))
+  const input = validateSeoResearchInput(body.research)
+  const targetUrl = input.target_url as string
+  const strategy = await requireContentStrategyVersion(context, engagement.brand_id, input.content_strategy_version_id as string | null)
+  const { data: health, error: healthError } = await context.admin.from('tracked_page_current_health')
+    .select('tracked_page_id, page_url, page_type, latest_audit_id, audit_date, indexed, index_status, core_web_vitals_mobile, core_web_vitals_desktop, schema_valid, issues, source_type, updated_at')
+    .eq('organization_id', context.organizationId).eq('brand_id', engagement.brand_id)
+    .order('page_url').order('tracked_page_id')
+  if (healthError) throw healthError
+  const pages = (health || []).filter(page => researchPageMatches(page.page_url, targetUrl, input.research_type as string))
+  const pageIds = pages.map(page => page.tracked_page_id)
+  const { data: keywords, error: keywordError } = pageIds.length
+    ? await context.admin.from('tracked_keywords')
+      .select('id, tracked_page_id, keyword, active').eq('organization_id', context.organizationId)
+      .eq('brand_id', engagement.brand_id).in('tracked_page_id', pageIds).order('keyword').order('id')
+    : { data: [], error: null }
+  if (keywordError) throw keywordError
+  const selectedSeeds = new Set((input.seed_keywords as string[]).map(item => item.toLocaleLowerCase()))
+  const scopedKeywords = (keywords || []).filter(keyword => !selectedSeeds.size || selectedSeeds.has(text(keyword.keyword, 200).toLocaleLowerCase()))
+  const keywordIds = scopedKeywords.map(keyword => keyword.id)
+  const { data: snapshots, error: snapshotError } = keywordIds.length
+    ? await context.admin.from('keyword_rank_snapshots')
+      .select('id, tracked_keyword_id, snapshot_date, position, search_console_clicks, search_console_impressions, fetched_at')
+      .eq('organization_id', context.organizationId).in('tracked_keyword_id', keywordIds)
+      .order('snapshot_date', { ascending: false }).order('fetched_at', { ascending: false })
+    : { data: [], error: null }
+  if (snapshotError) throw snapshotError
+  const latestByKeyword = new Map<string, Json>()
+  for (const snapshot of snapshots || []) if (!latestByKeyword.has(snapshot.tracked_keyword_id)) latestByKeyword.set(snapshot.tracked_keyword_id, snapshot)
+
+  const facts: Json[] = []
+  const interpretations: Json[] = []
+  for (const page of pages) {
+    facts.push({ category: 'tracked page', observation: `This ${text(page.page_type, 60) || 'page'} URL is present in the stored technical SEO registry.`, source: 'tracked_page_registry', evidence_date: text(page.updated_at, 40) || null, affected_url: page.page_url, source_record_id: page.tracked_page_id })
+    if (page.latest_audit_id) {
+      if (page.index_status) facts.push({ category: 'index status', observation: `Latest stored index status: ${text(page.index_status, 80).replaceAll('_', ' ')}.`, source: page.source_type || 'technical_seo_audit', evidence_date: page.audit_date, affected_url: page.page_url, source_record_id: page.latest_audit_id })
+      for (const issue of Array.isArray(page.issues) ? page.issues.slice(0, 50) : []) {
+        const observation = text(issue, 1000)
+        if (!observation) continue
+        facts.push({ category: 'technical issue', observation, source: page.source_type || 'technical_seo_audit', evidence_date: page.audit_date, affected_url: page.page_url, source_record_id: page.latest_audit_id })
+        interpretations.push({ category: 'technical issue', proposed_action: `Review and prioritize the recorded issue: ${observation}`, limitations: 'This recommendation is based only on the stored audit record and does not prove current live-page state.', affected_url: page.page_url })
+      }
+      if (page.schema_valid != null) facts.push({ category: 'structured data', observation: `Latest stored schema validation: ${page.schema_valid ? 'valid' : 'not valid'}.`, source: page.source_type || 'technical_seo_audit', evidence_date: page.audit_date, affected_url: page.page_url, source_record_id: page.latest_audit_id })
+      for (const [device, score] of [['mobile', page.core_web_vitals_mobile], ['desktop', page.core_web_vitals_desktop]]) {
+        if (score != null) facts.push({ category: 'page experience', observation: `Latest stored ${device} score: ${Number(score)}.`, source: page.source_type || 'technical_seo_audit', evidence_date: page.audit_date, affected_url: page.page_url, source_record_id: page.latest_audit_id })
+      }
+    }
+  }
+  const pageUrls = new Map(pages.map(page => [page.tracked_page_id, page.page_url]))
+  for (const keyword of scopedKeywords) {
+    const snapshot = latestByKeyword.get(keyword.id)
+    if (!snapshot) continue
+    const metrics = [
+      snapshot.position == null ? 'position unavailable' : `position ${Number(snapshot.position)}`,
+      snapshot.search_console_clicks == null ? 'clicks unavailable' : `${Number(snapshot.search_console_clicks)} clicks`,
+      snapshot.search_console_impressions == null ? 'impressions unavailable' : `${Number(snapshot.search_console_impressions)} impressions`,
+    ].join(', ')
+    facts.push({ category: 'keyword observation', observation: `${text(keyword.keyword, 200)}: ${metrics}.`, source: 'google_search_console_stored_snapshot', evidence_date: snapshot.snapshot_date, affected_url: pageUrls.get(keyword.tracked_page_id) || null, source_record_id: snapshot.id })
+    interpretations.push({ category: 'keyword observation', proposed_action: `Review the current page against the stored observation for “${text(keyword.keyword, 200)}”; retain unavailable values as unknown.`, limitations: 'The stored snapshot has no market, language, or device dimension and is not a live rank check.', affected_url: pageUrls.get(keyword.tracked_page_id) || null })
+  }
+  const limitations = [
+    'No remote URL was fetched; findings use only records already stored for this brand.',
+    'Market is user-entered scope context because current stored SEO records do not carry a market dimension.',
+    'Language and device are unavailable in the current stored sources and were not inferred.',
+  ]
+  if (!pages.length) limitations.push('No tracked page matched the requested URL or domain.')
+  else if (!pages.some(page => page.latest_audit_id)) limitations.push('Matching pages have no stored technical SEO audit.')
+  if (!scopedKeywords.length) limitations.push(selectedSeeds.size ? 'No tracked keyword exactly matched the supplied seed keywords.' : 'No tracked keywords were available for the matched pages.')
+  if (scopedKeywords.length && !snapshots?.length) limitations.push('Tracked keywords have no stored rank snapshots.')
+  if (facts.length > 200 || interpretations.length > 200) limitations.push('The preview is limited to the first 200 deterministic findings in the selected scope.')
+  return validateSeoResearchContent({
+    input, captured_at: new Date().toISOString(), source_availability: [
+      { source: 'technical_seo', available: pages.some(page => page.latest_audit_id), record_count: pages.filter(page => page.latest_audit_id).length },
+      { source: 'keyword_history', available: Boolean(snapshots?.length), record_count: snapshots?.length || 0 },
+      { source: 'content_strategy', available: Boolean(strategy), exact_version: strategy },
+    ], source_facts: facts.slice(0, 200), interpretations: interpretations.slice(0, 200), limitations,
+  })
+}
+
+async function saveSeoResearch(context: MarketingRequestContext, body: Json, actorId: string) {
+  const engagementId = text(body.engagement_id, 80)
+  const title = text(body.title, 240)
+  const idempotencyKey = text(body.idempotency_key, 80)
+  if (!title) throw new Error('Research title is required')
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idempotencyKey)) throw new Error('A UUID idempotency key is required')
+  const engagement = await requireMarketingEngagement(context, engagementId)
+  const research = validateSeoResearchContent(body.research)
+  await requireContentStrategyVersion(context, engagement.brand_id, (research.input as Json).content_strategy_version_id as string | null)
+  const contentChecksum = await sha256(stableJson(research))
+  const payloadChecksum = await sha256(stableJson({ organization_id: context.organizationId, actor_id: actorId,
+    engagement_id: engagementId, artifact_id: text(body.artifact_id, 80) || null,
+    expected_latest_version_id: text(body.expected_latest_version_id, 80) || null, title, research,
+    change_summary: text(body.change_summary, 1000) }))
+  const { data, error } = await context.admin.rpc('save_marketing_seo_research', {
+    p_organization_id: context.organizationId, p_engagement_id: engagementId,
+    p_artifact_id: text(body.artifact_id, 80) || null, p_expected_latest_version_id: text(body.expected_latest_version_id, 80) || null,
+    p_title: title, p_content: research, p_content_checksum: contentChecksum,
+    p_change_summary: text(body.change_summary, 1000), p_idempotency_key: idempotencyKey,
+    p_payload_checksum: payloadChecksum, p_actor_id: actorId,
+  })
+  if (error) throw error
+  return data
+}
+
 async function analyticsDashboard(context: MarketingRequestContext, body: Json) {
   const { admin, organizationId } = context
   const engagementId = text(body.engagement_id, 80)
@@ -968,6 +1183,8 @@ export async function handleRequest(
     if (action === 'save_artifact') return response({ data: await saveArtifact(context, body, user.id) })
     if (action === 'save_campaign_brief') return response({ data: await saveCampaignBrief(context, body, user.id) })
     if (action === 'save_campaign_plan') return response({ data: await saveCampaignPlan(context, body, user.id) })
+    if (action === 'preview_seo_research') return response({ data: await previewSeoResearch(context, body) })
+    if (action === 'save_seo_research') return response({ data: await saveSeoResearch(context, body, user.id) })
     if (action === 'approve_artifact') return response({ data: await approveArtifact(context, body, user.id) })
     if (action === 'analytics_dashboard') return response({ data: await analyticsDashboard(context, body) })
     return response({ error: 'Unsupported action' }, 400)
