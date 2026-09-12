@@ -11,7 +11,7 @@ const CONTENT_TYPES = new Set([
   'keyword_strategy', 'content', 'campaign_messaging', 'scripts',
 ])
 const MARKETING_TYPES = new Set([
-  'channel_strategy', 'campaign_brief', 'measurement_plan', 'marketing_report',
+  'channel_strategy', 'campaign_brief', 'measurement_plan', 'marketing_report', 'seo_research',
 ])
 const cors = {
   'Access-Control-Allow-Origin': '*',

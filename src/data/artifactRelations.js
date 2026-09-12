@@ -10,7 +10,7 @@ const CONTENT_TYPES = new Set([
   'keyword_strategy', 'content', 'campaign_messaging', 'scripts',
 ])
 const MARKETING_TYPES = new Set([
-  'channel_strategy', 'campaign_brief', 'measurement_plan', 'marketing_report',
+  'channel_strategy', 'campaign_brief', 'measurement_plan', 'marketing_report', 'seo_research',
 ])
 const DEVELOPMENT_TYPES = new Set(['technical_brief', 'implementation_record', 'launch_record'])
 

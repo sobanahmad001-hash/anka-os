@@ -27,6 +27,7 @@ import { marketingStudio } from '../data/marketingStudioRepository.js'
 import { canEditCampaignPlan } from '../data/marketingCampaignPlan.js'
 import { createMarketingCampaignPlanRepository } from '../data/marketingCampaignPlanRepository.js'
 import { createMarketingCalendarRepository } from '../data/marketingCalendarRepository.js'
+import { createMarketingSeoResearchRepository } from '../data/marketingSeoResearchRepository.js'
 import { shouldApplyDashboardResponse } from '../data/performanceDashboard.js'
 import { loadPerformanceDashboard } from '../data/performanceDashboardRepository.js'
 import { shouldApplyKeywordResearchResponse } from '../data/marketingKeywordResearch.js'
@@ -49,6 +50,7 @@ import MarketingOverview from '../components/MarketingOverview.jsx'
 import MarketingCampaignBrief from '../components/MarketingCampaignBrief.jsx'
 import MarketingCampaignPlan from '../components/MarketingCampaignPlan.jsx'
 import MarketingCalendar from '../components/MarketingCalendar.jsx'
+import MarketingSeoResearch from '../components/MarketingSeoResearch.jsx'
 import QuickTasks from './QuickTasks.jsx'
 import WorkshopContextShell from '../components/WorkshopContextShell.jsx'
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
@@ -61,6 +63,7 @@ const PRIMARY = 'rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-
 const MARKETING_TABS = Object.freeze([
   ['overview', 'Overview'],
   ['brief', 'Campaign brief'],
+  ['seo-research', 'SEO Research'],
   ['campaigns', 'Campaigns'],
   ['calendar', 'Calendar'],
   ['ad-tracking', 'Ad campaign tracking'],
@@ -140,6 +143,9 @@ export default function MarketingStudio() {
     : null, [activeOrganizationId, organizationReady, requestSignal])
   const calendar = useMemo(() => organizationReady
     ? createMarketingCalendarRepository(activeOrganizationId, { signal: requestSignal })
+    : null, [activeOrganizationId, organizationReady, requestSignal])
+  const seoResearch = useMemo(() => organizationReady
+    ? createMarketingSeoResearchRepository(activeOrganizationId, { signal: requestSignal })
     : null, [activeOrganizationId, organizationReady, requestSignal])
   const workspaceGeneration = useRef(0)
   const context = useMemo(
@@ -373,6 +379,17 @@ export default function MarketingStudio() {
             signal={requestSignal}
             onAccessError={handleOrganizationAccessError}
             brand={{ id: workspace.engagement.brand_id, name: workspace.engagement.brands?.name || 'Brand', organization_id: workspace.engagement.organization_id }}
+          />
+        ) : tab === 'seo-research' ? (
+          <MarketingSeoResearch
+            key={`${activeOrganizationId}:${scopeRevision}:${engagementId}:${workspace.engagement.brand_id}`}
+            organizationId={activeOrganizationId}
+            scopeRevision={scopeRevision}
+            signal={requestSignal}
+            engagement={workspace.engagement}
+            repository={seoResearch}
+            act={act}
+            onAccessError={handleOrganizationAccessError}
           />
         ) : tab === 'campaigns' ? (
           <Campaigns

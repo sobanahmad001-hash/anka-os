@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabase.js'
 import { createMarketingProposalTransport } from './marketingProposalTransport.js'
 
-const TYPES = ['channel_strategy', 'campaign_brief', 'measurement_plan', 'marketing_report']
+const TYPES = ['channel_strategy', 'campaign_brief', 'measurement_plan', 'marketing_report', 'seo_research']
 
 async function dataOrThrow(query, { signal } = {}) {
   if (signal && typeof query.abortSignal === 'function') query = query.abortSignal(signal)
