@@ -323,3 +323,71 @@ test('mounted plan keeps read-only and stale-source states non-saveable', async 
   assert.equal(byLabel(environment.container, 'Plan title').disabled, true)
   assert.equal(saves, 0)
 })
+
+test('mounted duplicate confirmation preserves manual inputs on failure and reuses one retry key', async t => {
+  const { MarketingCampaignPlan, environment, root } = await mountedComponent(t)
+  const source = { id: 'plan-v1', organization_id: 'org-a', engagement_id: 'eng-a', campaign_id: 'campaign-a', brand_id: 'brand-a', version_number: 1, lifecycle_status: 'draft', title: 'Saved source', objective: 'Objective', channels: ['Email'], planned_budget: 900, currency_code: 'EUR', created_at: '2026-09-13T00:00:00Z' }
+  let snapshot = { ...emptySnapshot(), versions: [source], requirements: [], reviewSubmissions: [], reviewRequests: [], campaignBriefVersions: [] }
+  const calls = []
+  const repository = {
+    load: async () => snapshot,
+    loadReviewApprovers: async () => [],
+    saveDraft: async () => null,
+    duplicateDraft: async input => {
+      calls.push(input)
+      if (calls.length === 1) throw new Error('Temporary duplicate failure')
+      const result = { ...source, id: 'plan-v2', version_number: 2, parent_version_id: source.id, source_plan_version_id: source.id, created_at: '2026-09-13T00:01:00Z' }
+      snapshot = { ...snapshot, versions: [result, source] }
+      return result
+    },
+  }
+  await act(async () => root.render(createElement(MarketingCampaignPlan, { organizationId: 'org-a', engagement: { id: 'eng-a', name: 'Engagement A' }, campaign: { id: 'campaign-a', name: 'Campaign A' }, repository, canEdit: true })))
+  await setValue(byLabel(environment.container, 'Plan title'), 'Manual unsaved title')
+  await act(async () => byText(environment.container, 'button', 'Duplicate as unapproved draft').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.match(environment.container.textContent, /Source: plan version 1/)
+  assert.match(environment.container.textContent, /one new unapproved plan draft/)
+  await act(async () => byText(environment.container, 'button', 'Confirm').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.match(environment.container.textContent, /Temporary duplicate failure/)
+  assert.equal(byLabel(environment.container, 'Plan title').value, 'Manual unsaved title')
+  assert.match(environment.container.textContent, /Confirm exact destination and effect/)
+  await act(async () => byText(environment.container, 'button', 'Confirm').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.equal(calls.length, 2)
+  assert.equal(calls[0].idempotency_key, calls[1].idempotency_key)
+  assert.equal(calls[1].source_plan_version_id, 'plan-v1')
+  assert.match(environment.container.textContent, /exact source link was retained/)
+})
+
+test('mounted review confirmation pins latest plan, official destination, reviewer and pending history', async t => {
+  const { MarketingCampaignPlan, environment, root } = await mountedComponent(t)
+  const version = { id: 'plan-v1', organization_id: 'org-a', engagement_id: 'eng-a', campaign_id: 'campaign-a', brand_id: 'brand-a', version_number: 1, lifecycle_status: 'draft', title: 'Review source', objective: 'Objective', channels: ['Email'], change_summary: 'Ready for review', created_at: '2026-09-13T00:00:00Z' }
+  let snapshot = { ...emptySnapshot(), versions: [version], requirements: [], reviewSubmissions: [], reviewRequests: [], campaignBriefVersions: [] }
+  const submissions = []
+  const repository = {
+    load: async () => snapshot,
+    loadReviewApprovers: async () => [{ user_id: 'manager-id', full_name: 'Marketing manager', role: 'department_manager', department_id: 'marketing' }],
+    saveDraft: async () => null,
+    duplicateDraft: async () => null,
+    submitReview: async input => {
+      submissions.push(input)
+      const result = { id: 'submission-id', plan_version_id: version.id }
+      snapshot = { ...snapshot,
+        reviewSubmissions: [{ ...result, organization_id: 'org-a', campaign_id: 'campaign-a', approval_request_id: 'request-id', artifact_version_number: 3, submitted_at: '2026-09-13T00:02:00Z' }],
+        reviewRequests: [{ id: 'request-id', campaign_plan_submission_id: 'submission-id', status: 'pending' }],
+        campaignBriefVersions: [{ id: 'brief-v3', version_number: 3 }],
+      }
+      return result
+    },
+  }
+  await act(async () => root.render(createElement(MarketingCampaignPlan, { organizationId: 'org-a', engagement: { id: 'eng-a', name: 'Engagement A' }, campaign: { id: 'campaign-a', name: 'Campaign A' }, repository, canEdit: true })))
+  await act(async () => byText(environment.container, 'button', 'Submit exact version for review').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.match(environment.container.textContent, /canonical campaign brief/)
+  assert.match(environment.container.textContent, /Reviewer: Marketing manager/)
+  assert.match(environment.container.textContent, /does not approve or release anything/)
+  await act(async () => byText(environment.container, 'button', 'Confirm').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.equal(submissions.length, 1)
+  assert.equal(submissions[0].plan_version_id, 'plan-v1')
+  assert.deepEqual(submissions[0].required_approver_ids, ['manager-id'])
+  assert.match(environment.container.textContent, /No approval or release was applied/)
+  assert.match(environment.container.textContent, /campaign brief v3/)
+  assert.match(environment.container.textContent, /pending/i)
+})
