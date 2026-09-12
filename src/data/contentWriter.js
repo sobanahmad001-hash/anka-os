@@ -1,3 +1,8 @@
+import {
+  contentQualityConfiguration,
+  contentQualityConfigurationIssues,
+} from './contentQualityChecks.js'
+
 export const CONTENT_WRITER_OUTPUT_TYPES = Object.freeze([
   ['website_page_copy', 'Website page copy'],
   ['blog_article', 'Blog or article'],
@@ -13,6 +18,8 @@ export function newContentWriterDraft(defaults = {}) {
     output_type: 'website_page_copy', working_title: '', source_architecture_version_id: '',
     target_page_key: '', destination: '', objective: '', audience: '',
     language: defaults.language || '', tone: defaults.tone || '', body: '', cta: '', exclusions: '',
+    required_sections: '', length_unit: 'none', min_length: '', max_length: '',
+    required_terms: '', require_source_citations: false, source_citations: '',
   }
 }
 
@@ -38,7 +45,7 @@ export function architecturePages(version) {
 function clean(value) { return String(value || '').trim() }
 
 export function contentWriterIssues(form, versions = []) {
-  const issues = {}
+  const issues = { ...contentQualityConfigurationIssues(form) }
   if (!OUTPUT_TYPE_SET.has(form.output_type)) issues.output_type = 'Choose a supported text output type.'
   const title = clean(form.working_title)
   if (title.length < 3 || title.length > 160) issues.working_title = 'Use a working title between 3 and 160 characters.'
@@ -59,6 +66,7 @@ export function serializeContentWriter(form, versions = []) {
   const issues = contentWriterIssues(form, versions)
   if (Object.keys(issues).length) throw new Error(Object.values(issues)[0])
   const website = form.output_type === 'website_page_copy'
+  const quality = contentQualityConfiguration(form)
   return {
     schema_version: 2, output_type: form.output_type, working_title: clean(form.working_title),
     source_architecture_version_id: website ? clean(form.source_architecture_version_id) : null,
@@ -67,6 +75,7 @@ export function serializeContentWriter(form, versions = []) {
     audience: clean(form.audience), language: clean(form.language), tone: clean(form.tone) || null,
     body: clean(form.body), cta: clean(form.cta) || null,
     exclusions: String(form.exclusions || '').split(/[,\n]/).map(clean).filter(Boolean), variant_number: 1,
+    ...quality,
   }
 }
 

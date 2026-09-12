@@ -364,11 +364,95 @@ function writerText(input: Json, key: string, max: number, { optional = false }:
   return value
 }
 
+function writerList(value: unknown, key: string, maxItems: number, maxLength: number): string[] {
+  if (value === null || value === undefined) return []
+  if (!Array.isArray(value) || value.length > maxItems) {
+    throw new Error(`${key.replaceAll('_', ' ')} must contain at most ${maxItems} items`)
+  }
+  return value.map((item, index) => {
+    if (typeof item !== 'string' || !item.trim()) {
+      throw new Error(`${key.replaceAll('_', ' ')} item ${index + 1} is invalid`)
+    }
+    const normalized = item.trim()
+    if (normalized.length > maxLength) {
+      throw new Error(`${key.replaceAll('_', ' ')} item ${index + 1} must be ${maxLength} characters or fewer`)
+    }
+    return normalized
+  })
+}
+
+function writerCitationList(value: unknown): string[] {
+  return writerList(value, 'source_citations', 100, 1000).map((reference, index) => {
+    if (reference.length < 3) throw new Error(`Source citation ${index + 1} must be at least 3 characters`)
+    if (!reference.includes('://')) return reference
+    try {
+      const url = new URL(reference)
+      if (!['http:', 'https:'].includes(url.protocol) || !url.hostname) throw new Error()
+    } catch {
+      throw new Error(`Source citation ${index + 1} must be a label or valid HTTP(S) URL`)
+    }
+    return reference
+  })
+}
+
+function writerLength(value: unknown, key: string, max: number): number | null {
+  if (value === null || value === undefined) return null
+  if (!Number.isInteger(value) || Number(value) < 1 || Number(value) > max) {
+    throw new Error(`${key.replaceAll('_', ' ')} must be a positive whole number no greater than ${max}`)
+  }
+  return Number(value)
+}
+
+function writerQualityRequirements(value: unknown): Json | null {
+  if (value === null || value === undefined) return null
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('quality requirements must be an object or null')
+  }
+  const input = value as Json
+  const allowed = new Set([
+    'required_sections', 'length_unit', 'min_length', 'max_length',
+    'required_terms', 'require_source_citations',
+  ])
+  const unexpected = Object.keys(input).find(key => !allowed.has(key))
+  if (unexpected) throw new Error(`Quality requirements contain unsupported field: ${unexpected}`)
+  const requiredSections = writerList(input.required_sections, 'required_sections', 30, 120)
+  const requiredTerms = writerList(input.required_terms, 'required_terms', 100, 200)
+  const lengthUnit = input.length_unit === null || input.length_unit === undefined
+    ? null : writerText(input, 'length_unit', 20)
+  if (lengthUnit !== null && !['words', 'characters'].includes(lengthUnit)) {
+    throw new Error('length unit must be words, characters, or null')
+  }
+  const lengthMaximum = lengthUnit === 'words' ? 30000 : 120000
+  const minimum = writerLength(input.min_length, 'min_length', lengthMaximum)
+  const maximum = writerLength(input.max_length, 'max_length', lengthMaximum)
+  if (lengthUnit === null && (minimum !== null || maximum !== null)) {
+    throw new Error('Length bounds require a configured length unit')
+  }
+  if (lengthUnit !== null && minimum === null && maximum === null) {
+    throw new Error('A configured length unit requires at least one bound')
+  }
+  if (minimum !== null && maximum !== null && minimum > maximum) {
+    throw new Error('Minimum length cannot exceed maximum length')
+  }
+  if (typeof input.require_source_citations !== 'boolean') {
+    throw new Error('require source citations must be true or false')
+  }
+  return {
+    required_sections: requiredSections,
+    length_unit: lengthUnit,
+    min_length: minimum,
+    max_length: maximum,
+    required_terms: requiredTerms,
+    require_source_citations: input.require_source_citations,
+  }
+}
+
 function contentWriterV2(input: Json): Json {
   const allowed = new Set([
     'schema_version', 'output_type', 'working_title', 'source_architecture_version_id',
     'target_page_key', 'target_page_path', 'destination', 'objective', 'audience',
     'language', 'tone', 'body', 'cta', 'exclusions', 'variant_number',
+    'quality_requirements', 'source_citations',
   ])
   const unexpected = Object.keys(input).find(key => !allowed.has(key))
   if (unexpected) throw new Error(`Content writer contains unsupported field: ${unexpected}`)
@@ -413,6 +497,8 @@ function contentWriterV2(input: Json): Json {
       return normalized
     }),
     variant_number: 1,
+    quality_requirements: writerQualityRequirements(input.quality_requirements),
+    source_citations: writerCitationList(input.source_citations),
   }
 }
 

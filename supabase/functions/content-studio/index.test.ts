@@ -499,6 +499,70 @@ Deno.test('B05a validates five strict writer types while preserving the legacy C
   assertThrows(() => validateContentArtifact('content', { ...b05WriterContent(), approved: true }), Error, 'unsupported field')
 })
 
+Deno.test('B05b validates bounded additive quality rules and preserves B05a payloads without configuration', () => {
+  const legacyWriter = validateContentArtifact('content', b05WriterContent('blog_article'))
+  assertEquals(legacyWriter.quality_requirements, null)
+  assertEquals(legacyWriter.source_citations, [])
+
+  const qualityRequirements = {
+    required_sections: ['Summary', 'Sources'],
+    length_unit: 'words',
+    min_length: 100,
+    max_length: 500,
+    required_terms: ['Anka Sphere'],
+    require_source_citations: true,
+  }
+  const content = validateContentArtifact('content', {
+    ...b05WriterContent('blog_article'),
+    quality_requirements: qualityRequirements,
+    source_citations: ['Client brief v2', 'https://example.test/source'],
+  })
+  assertEquals(content.quality_requirements, qualityRequirements)
+  assertEquals(content.source_citations, ['Client brief v2', 'https://example.test/source'])
+
+  for (const [value, message] of [
+    [{ ...qualityRequirements, unexpected: true }, 'unsupported field'],
+    [{ ...qualityRequirements, length_unit: 'sentences' }, 'length unit'],
+    [{ ...qualityRequirements, min_length: 600 }, 'Minimum length'],
+    [{ ...qualityRequirements, min_length: null, max_length: null }, 'at least one bound'],
+    [{ ...qualityRequirements, required_sections: Array.from({ length: 31 }, () => 'Section') }, 'at most 30 items'],
+    [{ ...qualityRequirements, required_terms: ['x'.repeat(201)] }, '200 characters or fewer'],
+  ] as const) {
+    assertThrows(() => validateContentArtifact('content', {
+      ...b05WriterContent('blog_article'), quality_requirements: value, source_citations: [],
+    }), Error, message)
+  }
+  assertThrows(() => validateContentArtifact('content', {
+    ...b05WriterContent('blog_article'),
+    quality_requirements: qualityRequirements,
+    source_citations: ['x'.repeat(1001)],
+  }), Error, '1000 characters or fewer')
+  assertThrows(() => validateContentArtifact('content', {
+    ...b05WriterContent('blog_article'),
+    quality_requirements: qualityRequirements,
+    source_citations: ['ftp://example.test/source'],
+  }), Error, 'valid HTTP(S) URL')
+})
+
+Deno.test('B05b persists advisory request configuration without checks, approval, provider, or structure effects', async () => {
+  const fixture = b04SaveFixture({ sourceVersionId: 'unrelated-version', pages: [] })
+  await createContentArtifactVersion(fixture.admin, b05VersionInput(fixture, {
+    ...b05WriterContent('custom_text'),
+    quality_requirements: {
+      required_sections: [], length_unit: 'characters', min_length: null, max_length: 500,
+      required_terms: ['Anka Sphere'], require_source_citations: true,
+    },
+    source_citations: [],
+  }))
+  const version = fixture.writes.find(write => write.table === 'artifact_versions')?.value as Record<string, unknown>
+  const saved = version.content as Record<string, unknown>
+  assertEquals((saved.quality_requirements as Record<string, unknown>).max_length, 500)
+  assertEquals(saved.source_citations, [])
+  assertEquals(Object.hasOwn(saved, 'check_results'), false)
+  assertEquals(Object.hasOwn(version, 'approval'), false)
+  assertEquals(fixture.writes.some(write => write.table === 'artifact_relations'), false)
+})
+
 Deno.test('B05a save binds exact website version and page before creating one unapproved canonical draft', async () => {
   const fixture = b04SaveFixture()
   const result = await createContentArtifactVersion(fixture.admin, b05VersionInput(fixture, b05WriterContent()))
