@@ -21,7 +21,7 @@ export default function DepartmentChat(props) {
   return <ScopedDepartmentChat key={identity} {...props} userId={user.id} organizationId={activeOrganizationId} requestSignal={requestSignal} handleOrganizationAccessError={handleOrganizationAccessError} />
 }
 
-function ScopedDepartmentChat({
+export function ScopedDepartmentChat({
   departmentId,
   departmentLabel,
   engagement,
@@ -605,7 +605,7 @@ function ScopedDepartmentChat({
           <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-slate-500">Only administrator-approved models verified through this engagement's connector are available. A revoked or stale choice is rejected before dispatch without fallback.</span>
         </label>}
         <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Task mode
-          <select className={`${INPUT} mt-2 normal-case tracking-normal`} value={proposalMode} onChange={event => setProposalMode(event.target.value)}>
+          <select disabled={busy || historyBusy} className={`${INPUT} mt-2 normal-case tracking-normal`} value={proposalMode} onChange={event => setProposalMode(event.target.value)}>
             {supportsSavedConversations && <option value="answer">Conversational answer</option>}
             <option value="artifact">Artifact draft</option>
             <option value="work_item">Work item draft</option>
@@ -760,7 +760,6 @@ function ConversationHistory({ messages, userId, busy, onConfirm, onReject }) {
           <span className={message.status === 'failed' ? 'text-red-300' : ['pending', 'unknown'].includes(message.status) ? 'text-amber-300' : 'text-slate-500'}>{message.status}</span>
         </div>
         {message.role === 'user' && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-200">{message.body}</p>}
-        {message.role === 'assistant' && !proposal && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-200">{message.body}</p>}
         {message.role === 'assistant' && !proposal && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-200">{message.body}</p>}
         {message.role === 'user' && message.attachments?.length > 0 && <div className="mt-3 space-y-2">
           {message.attachments.map(source => <div key={source.attachment_id} className="rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2 text-xs text-slate-400">
