@@ -1,5 +1,8 @@
 import { assertEquals } from 'jsr:@std/assert@1.0.14'
-import { handleRequest, syncInitialDepartmentChatModel } from './index.ts'
+import {
+  currentConnectionHealthObservation, handleRequest, safeConnectionHealthObservations,
+  syncInitialDepartmentChatModel,
+} from './index.ts'
 
 const ORG_A = '11111111-1111-4111-8111-111111111111'
 const ORG_B = '22222222-2222-4222-8222-222222222222'
@@ -191,4 +194,31 @@ Deno.test('P9 initial sync seeds once, preserves deliberate revocation, and resy
   const changed = fixture({ history: [{ model_id: 'gpt-old', revoked_at: null }] })
   await syncInitialDepartmentChatModel(changed.adminClient as any, changed.connection, USER_ID, ORG_B)
   assertEquals(changed.rpcCalls.length, 1)
+})
+
+Deno.test('B05 health observations are restricted to visible connection IDs and safe codes', () => {
+  const observations = safeConnectionHealthObservations(['visible'], [
+    { connection_id: 'foreign', outcome: 'failed', error_code: 'HTTP_403', occurred_at: '2026-09-12T10:02:00Z' },
+    { connection_id: 'visible', outcome: 'failed', error_code: 'RAW_PROVIDER_SECRET_MESSAGE', occurred_at: '2026-09-12T10:01:00Z' },
+  ])
+  assertEquals(observations.has('foreign'), false)
+  assertEquals(observations.get('visible'), {
+    outcome: 'failed', error_code: 'UNKNOWN', observed_at: '2026-09-12T10:01:00Z',
+  })
+})
+
+Deno.test('B05 latest success supersedes failure and stale observations do not survive reconnect', () => {
+  const observations = safeConnectionHealthObservations(['visible'], [
+    { connection_id: 'visible', outcome: 'failed', error_code: 'HTTP_403', occurred_at: '2026-09-12T10:00:00Z' },
+    { connection_id: 'visible', outcome: 'succeeded', error_code: null, occurred_at: '2026-09-12T10:01:00Z' },
+  ])
+  assertEquals(observations.get('visible'), {
+    outcome: 'succeeded', error_code: null, observed_at: '2026-09-12T10:01:00Z',
+  })
+  assertEquals(currentConnectionHealthObservation(
+    { id: 'visible', updated_at: '2026-09-12T10:02:00Z' }, observations.get('visible'),
+  ), null)
+  assertEquals(currentConnectionHealthObservation(
+    { id: 'visible', updated_at: '2026-09-12T10:00:30Z' }, observations.get('visible'),
+  ), observations.get('visible'))
 })

@@ -79,6 +79,17 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
       ? await dataOrThrow(scopedFrom('design_creative_brief_version_sources').select('*')
         .in('creative_brief_version_id', creativeBriefVersions.map(item => item.id)))
       : []
+    const identitySystems = await dataOrThrow(scopedFrom('artifacts').select('*')
+      .eq('brand_id', engagement.brand_id).eq('artifact_type', 'design_system')
+      .order('created_at', { ascending: false }))
+    const identitySystemVersions = identitySystems.length
+      ? await dataOrThrow(scopedFrom('artifact_versions').select('*')
+        .in('artifact_id', identitySystems.map(item => item.id)).order('version_number'))
+      : []
+    const identitySystemApprovals = identitySystems.length
+      ? await dataOrThrow(scopedFrom('artifact_approvals').select('*')
+        .in('artifact_id', identitySystems.map(item => item.id)).order('approved_at'))
+      : []
     const directionData = sessionIds.length ? await Promise.all([
       dataOrThrow(scopedFrom('design_workshop_context_versions').select('*').in('session_id', sessionIds)),
       dataOrThrow(scopedFrom('design_workshop_model_selections').select('*, design_model_registry(*)').in('session_id', sessionIds).order('position')),
@@ -157,6 +168,7 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
       directions, selections: directionData[4], releases: directionData[5], directionVersions,
       experimentalDirectionVersions, experimentReviewers,
       creativeBriefs, creativeBriefVersions, creativeBriefSources, workingDirectionPreferences,
+      identitySystems, identitySystemVersions, identitySystemApprovals,
       navigationWorkRecord: navigationRecord ? {
         kind: navigation.workRecord.kind,
         id: navigationRecord.id,

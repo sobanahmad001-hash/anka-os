@@ -174,6 +174,7 @@ export function designCapabilities(membership) {
     selectDirection: leader || designContributor,
     promoteExperiment: Boolean(membership),
     release: leader || (designContributor && role === 'department_manager'),
+    manageConnections: leader,
   })
 }
 

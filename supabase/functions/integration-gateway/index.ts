@@ -29,6 +29,37 @@ function text(value: unknown, max = 160) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
 }
 
+const SAFE_CONNECTION_ERROR_CODES = new Set([
+  'HTTP_401', 'HTTP_403', 'HTTP_404', 'HTTP_415', 'HTTP_422', 'HTTP_429',
+  'HTTP_500', 'HTTP_502', 'HTTP_503', 'HTTP_504', 'CONNECTION_FAILED', 'TIMEOUT',
+])
+
+export function safeConnectionHealthObservations(connectionIds: string[], events: Array<Record<string, unknown>>) {
+  const visible = new Set(connectionIds)
+  const latest = new Map<string, Record<string, unknown>>()
+  for (const event of [...events].sort((left, right) =>
+    Date.parse(String(right.occurred_at || '')) - Date.parse(String(left.occurred_at || '')))) {
+    const connectionId = text(event.connection_id, 80)
+    if (!visible.has(connectionId) || latest.has(connectionId)) continue
+    const outcome = event.outcome === 'succeeded' ? 'succeeded' : event.outcome === 'failed' ? 'failed' : 'unknown'
+    const rawCode = text(event.error_code, 80)
+    latest.set(connectionId, {
+      outcome,
+      error_code: outcome === 'failed' ? (SAFE_CONNECTION_ERROR_CODES.has(rawCode) ? rawCode : 'UNKNOWN') : null,
+      observed_at: text(event.occurred_at, 80) || null,
+    })
+  }
+  return latest
+}
+
+export function currentConnectionHealthObservation(connection: Record<string, unknown>, observation?: Record<string, unknown>) {
+  if (!observation?.observed_at) return null
+  const observedAt = Date.parse(String(observation.observed_at))
+  const changedAt = Date.parse(String(connection.updated_at || ''))
+  if (!Number.isFinite(observedAt) || (Number.isFinite(changedAt) && observedAt < changedAt)) return null
+  return observation
+}
+
 function safePublicConfig(provider: string, value: unknown) {
   const input = value && typeof value === 'object' ? value as Record<string, unknown> : {}
   if (provider === 'github') {
@@ -276,8 +307,20 @@ export async function handleRequest(req: Request, dependencies: {
           secret_configured: Boolean(connection.secret_name && Deno.env.get(connection.secret_name)),
         }
       }).filter((connection: Record<string, any>) => !departmentId || connection.department_ids.includes(departmentId))
+      const connectionIds = visibleConnections.map((connection: Record<string, any>) => String(connection.id))
+      let observations = new Map<string, Record<string, unknown>>()
+      if (connectionIds.length) {
+        const { data: events, error: eventsError } = await adminClient.from('integration_events')
+          .select('connection_id, outcome, error_code, occurred_at')
+          .eq('organization_id', selectedOrganizationId).eq('operation', 'tested')
+          .in('connection_id', connectionIds)
+        if (!eventsError) observations = safeConnectionHealthObservations(connectionIds, events || [])
+      }
       return json({
-        connections: visibleConnections,
+        connections: visibleConnections.map((connection: Record<string, any>) => ({
+          ...connection,
+          health_observation: currentConnectionHealthObservation(connection, observations.get(String(connection.id))),
+        })),
         can_manage: isLeader,
       })
     }

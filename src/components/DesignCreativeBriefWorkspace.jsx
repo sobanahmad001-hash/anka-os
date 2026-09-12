@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CREATIVE_BRIEF_OUTPUTS, creativeBriefForContext, emptyCreativeBrief, latestBriefVersion, nextOperationKey, validateCreativeBrief } from '../data/designCreativeBriefs.js'
+import { approvedDesignSystemReferences } from '../data/designIdentityReferences.js'
 
 const INPUT = 'w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-violet-500/60'
 const BUTTON = 'rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40'
@@ -13,6 +14,9 @@ export default function DesignCreativeBriefWorkspace({ workspace, activeServiceI
   const [content, setContent] = useState(() => latest?.content || emptyCreativeBrief())
   const [sourceIds, setSourceIds] = useState([])
   const validation = useMemo(() => validateCreativeBrief(content), [content])
+  const identityOptions = useMemo(() => approvedDesignSystemReferences(workspace), [workspace])
+  const identityVersionIds = useMemo(() => new Set((workspace.identitySystemVersions || []).map(item => item.id)), [workspace.identitySystemVersions])
+  const otherSourceVersions = useMemo(() => (workspace.versions || []).filter(version => !identityVersionIds.has(version.id)), [identityVersionIds, workspace.versions])
   useEffect(() => {
     setContent(latest?.content || emptyCreativeBrief())
     setSourceIds((workspace.creativeBriefSources || [])
@@ -45,7 +49,8 @@ export default function DesignCreativeBriefWorkspace({ workspace, activeServiceI
       <Field label="Rights notes"><textarea rows="3" className={INPUT} value={content.rights_notes} onChange={event => set('rights_notes', event.target.value)} /></Field>
       <Field label="Instructions"><textarea rows="4" className={INPUT} value={content.instructions} onChange={event => set('instructions', event.target.value)} /></Field>
       <Field label="Exclusions and constraints"><textarea rows="4" className={INPUT} value={content.exclusions_constraints} onChange={event => set('exclusions_constraints', event.target.value)} /></Field>
-      <fieldset className="lg:col-span-2"><legend className="text-xs font-semibold uppercase tracking-wider text-slate-400">Pinned exact source versions</legend><div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{(workspace.versions || []).map(version => <label key={version.id} className="flex gap-3 rounded-xl border border-white/10 p-3 text-sm"><input type="checkbox" checked={sourceIds.includes(version.id)} onChange={() => toggleSource(version.id)} /><span>Version {version.version_number} · {version.id.slice(0, 8)}</span></label>)}</div></fieldset>
+      <fieldset className="lg:col-span-2"><legend className="text-xs font-semibold uppercase tracking-wider text-violet-300">Approved identity system references</legend><p className="mt-2 text-sm leading-6 text-slate-400">Choose an exact released DS5 version. A newer release is never adopted automatically; changing this selection and saving creates a new immutable brief version.</p><div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{identityOptions.map(({ artifact, version }) => <label key={version.id} className="flex gap-3 rounded-xl border border-violet-500/20 bg-violet-500/5 p-3 text-sm"><input type="checkbox" checked={sourceIds.includes(version.id)} onChange={() => toggleSource(version.id)} /><span><span className="block font-semibold">{artifact.title} · v{version.version_number}</span><span className="mt-1 block text-xs text-slate-500">Exact version {version.id.slice(0, 8)}</span></span></label>)}{!identityOptions.length && <p className="text-sm text-amber-300">No approved Design System version is visible for this brand.</p>}</div></fieldset>
+      <fieldset className="lg:col-span-2"><legend className="text-xs font-semibold uppercase tracking-wider text-slate-400">Other pinned exact source versions</legend><div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{otherSourceVersions.map(version => <label key={version.id} className="flex gap-3 rounded-xl border border-white/10 p-3 text-sm"><input type="checkbox" checked={sourceIds.includes(version.id)} onChange={() => toggleSource(version.id)} /><span>Version {version.version_number} · {version.id.slice(0, 8)}</span></label>)}</div></fieldset>
       {!validation.valid && <p role="status" className="lg:col-span-2 text-sm text-amber-300">Still needed for {content.output_type.replaceAll('_', ' ')}: {validation.missing.join(', ')}.</p>}
       <div className="flex flex-wrap gap-2 lg:col-span-2"><button disabled={!canSave || busy === 'save-brief' || !content.title.trim()} className={BUTTON}>{busy === 'save-brief' ? 'Saving…' : 'Save immutable draft version'}</button><button type="button" disabled={!canSave || !brief || !latest || !latest.validation_snapshot?.valid || busy === 'freeze-brief'} onClick={() => onFreeze({ creative_brief_id: brief.id, creative_brief_version_id: latest.id, expected_revision: brief.revision, operation_key: nextOperationKey() })} className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold disabled:opacity-40">{busy === 'freeze-brief' ? 'Freezing…' : 'Use exact saved version for generation later'}</button></div>
     </form>
