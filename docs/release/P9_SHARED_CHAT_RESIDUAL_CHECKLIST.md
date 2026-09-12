@@ -2,7 +2,7 @@
 
 Original implementation base: `dd3d10425d6c46eaae130b045fae68f75ad97775`.
 Navigation integration base: `af5df30f592a39228e8ecbca28bec22f5cc6122c`.
-Freshness-reconciled current main baseline: `64548bcb2b06119795e9951274804ad363173137`.
+Freshness-reconciled current main baseline: `c1477868c4b9c015e777d6668bece65b2a4fe55d`.
 Scope authority: workspace `P9_SHARED_CHAT_SCOPE.md`.
 Candidate: `P9-MODELS-1` (local only).
 
@@ -27,14 +27,15 @@ The scope note's older statement that attachments are unavailable is superseded 
 - Capabilities remain honest: text generation; validated text attachments only; PNG/JPEG reference-only; PDF/OCR/vision unavailable.
 - The model-selection migration is ordered after CHAT-3 as `20260911130000_p9_department_chat_model_selection.sql`.
 - The rollback-only verifier now exercises schema, RLS/ACLs, tenant/role boundaries, replay, revocation, immutable ledger binding, explicit-empty allowlists and no-side-effect denial paths.
-- The navigation-released main baseline is integrated; local gates pass 814 Node tests, 331 Deno tests (including 9 integration-gateway handler cases), all discovered frozen Edge type-checks, lint with zero errors and the 434-module production build.
+- The freshness-reconciled main baseline is integrated. At accepted code head `719bdeb4aa89d25571f7ce0d30e2764c171d0cd0`, local gates pass 838 Node tests, 88 affected Deno tests (79 department-chat and 9 integration-gateway), both affected Edge type-checks, lint with zero errors and the 438-module production build.
+- A fresh disposable PostgreSQL 17 environment applied 84 ordered migrations and passed all 26 rollback-only verifier checks. Catalog verification confirmed RLS enabled, authenticated read-only access and service-role-only writes; the disposable runtime was then removed.
+- Independent Testing reproduced the focused and full suites, type-checks, lint, build, diff integrity, migration application and all 26 PostgreSQL verifier checks at the accepted code head without finding a code defect.
 
 ## Still required before P9 can be called complete
 
 - Product slice: ordinary conversational answers are not implemented; current actions are only `propose_artifact` and `propose_work_item`.
 - Product slice: streaming/cancel presentation from the scope is not implemented.
-- Verification: run the rollback-only Postgres verifier in an environment with disposable Supabase/Postgres; no reusable local PostgreSQL runtime was discoverable.
-- Review: independent Testing/security review, signed-in three-Workshop acceptance, and accessibility/error-state pass.
+- Review: signed-in three-Workshop acceptance and accessibility/error-state pass.
 - Release: migration application, Edge deployment, push/PR/merge and production verification remain separately authorized actions and were not performed here.
 
 Excluded throughout: attachments beyond the released formats, model/provider calls for discovery, arbitrary model IDs, new providers/accounts, paid tests/actions, releases, publishing, and deployment.
