@@ -344,6 +344,78 @@ function records(value: unknown, fields: Array<[string, 'text' | 'list']>, maxIt
   })
 }
 
+const CONTENT_WRITER_OUTPUT_TYPES = new Set([
+  'website_page_copy', 'blog_article', 'social_copy', 'campaign_copy', 'custom_text',
+])
+
+function writerText(input: Json, key: string, max: number, options: { optional: true }): string | null
+function writerText(input: Json, key: string, max: number, options?: { optional?: false }): string
+function writerText(input: Json, key: string, max: number, { optional = false }: { optional?: boolean } = {}): string | null {
+  const raw = input[key]
+  if (raw === null || raw === undefined) {
+    if (optional) return null
+    throw new Error(`${key.replaceAll('_', ' ')} is required`)
+  }
+  if (typeof raw !== 'string') throw new Error(`${key.replaceAll('_', ' ')} must be text`)
+  const value = raw.trim()
+  if (!value && optional) return null
+  if (!value) throw new Error(`${key.replaceAll('_', ' ')} is required`)
+  if (value.length > max) throw new Error(`${key.replaceAll('_', ' ')} must be ${max} characters or fewer`)
+  return value
+}
+
+function contentWriterV2(input: Json): Json {
+  const allowed = new Set([
+    'schema_version', 'output_type', 'working_title', 'source_architecture_version_id',
+    'target_page_key', 'target_page_path', 'destination', 'objective', 'audience',
+    'language', 'tone', 'body', 'cta', 'exclusions', 'variant_number',
+  ])
+  const unexpected = Object.keys(input).find(key => !allowed.has(key))
+  if (unexpected) throw new Error(`Content writer contains unsupported field: ${unexpected}`)
+  const outputType = writerText(input, 'output_type', 40)
+  if (!CONTENT_WRITER_OUTPUT_TYPES.has(outputType)) throw new Error('Unsupported Content writer output type')
+  const workingTitle = writerText(input, 'working_title', 160)
+  if (workingTitle.length < 3) throw new Error('Working title must be at least 3 characters')
+  const website = outputType === 'website_page_copy'
+  const sourceVersionId = website
+    ? writerText(input, 'source_architecture_version_id', 80)
+    : writerText(input, 'source_architecture_version_id', 80, { optional: true })
+  const targetPageKey = website
+    ? writerText(input, 'target_page_key', 1208)
+    : writerText(input, 'target_page_key', 1208, { optional: true })
+  const destination = website
+    ? writerText(input, 'destination', 1000, { optional: true })
+    : writerText(input, 'destination', 1000)
+  if (!website && (sourceVersionId || targetPageKey || input.target_page_path)) {
+    throw new Error('Only website page copy can select a Website Architecture target')
+  }
+  if (input.variant_number !== 1) throw new Error('This Content writer slice supports exactly one variant')
+  const exclusions = input.exclusions
+  if (!Array.isArray(exclusions) || exclusions.length > 100) throw new Error('Excluded phrases must contain at most 100 items')
+  return {
+    schema_version: 2,
+    output_type: outputType,
+    working_title: workingTitle,
+    source_architecture_version_id: website ? sourceVersionId : null,
+    target_page_key: website ? targetPageKey : null,
+    target_page_path: website ? writerText(input, 'target_page_path', 1200, { optional: true }) : null,
+    destination: website ? null : destination,
+    objective: writerText(input, 'objective', 8000),
+    audience: writerText(input, 'audience', 8000),
+    language: writerText(input, 'language', 120),
+    tone: writerText(input, 'tone', 1000, { optional: true }),
+    body: writerText(input, 'body', 120000),
+    cta: writerText(input, 'cta', 2000, { optional: true }),
+    exclusions: exclusions.map((value, index) => {
+      if (typeof value !== 'string' || !value.trim()) throw new Error(`Excluded phrase ${index + 1} is invalid`)
+      const normalized = value.trim()
+      if (normalized.length > 500) throw new Error(`Excluded phrase ${index + 1} must be 500 characters or fewer`)
+      return normalized
+    }),
+    variant_number: 1,
+  }
+}
+
 export function validateContentArtifact(type: string, value: unknown): Json {
   if (!CONTENT_ARTIFACT_TYPE_SET.has(type) || !value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Unsupported Content artifact')
@@ -398,12 +470,16 @@ export function validateContentArtifact(type: string, value: unknown): Json {
     if (input.schema_version !== undefined && input.schema_version !== null) throw new Error('Unsupported keyword strategy schema version')
     return { keywords: keywordRecords(input.keywords) }
   }
-  if (type === 'content') return {
-    content_strategy: requiredText(input, 'content_strategy'),
-    pages: records(input.pages, [
-      ['page_path', 'text'], ['page_brief', 'text'], ['draft_copy', 'text'],
-      ['meta_title', 'text'], ['meta_description', 'text'], ['primary_cta', 'text'],
-    ], 100),
+  if (type === 'content') {
+    if (input.schema_version === 2) return contentWriterV2(input)
+    if (input.schema_version !== undefined && input.schema_version !== null) throw new Error('Unsupported Content schema version')
+    return {
+      content_strategy: requiredText(input, 'content_strategy'),
+      pages: records(input.pages, [
+        ['page_path', 'text'], ['page_brief', 'text'], ['draft_copy', 'text'],
+        ['meta_title', 'text'], ['meta_description', 'text'], ['primary_cta', 'text'],
+      ], 100),
+    }
   }
   if (type === 'campaign_messaging') return {
     campaign_goal: requiredText(input, 'campaign_goal'), audience: requiredText(input, 'audience'),
@@ -599,6 +675,26 @@ export async function createContentArtifactVersion(admin: AdminClient, input: {
         }
       }
     }
+  }
+  if (input.artifactType === 'content' && content.schema_version === 2
+    && content.output_type === 'website_page_copy') {
+    const sourceVersionId = String(content.source_architecture_version_id)
+    const { data: architectureVersion, error: versionError } = await admin.from('artifact_versions')
+      .select('id, artifact_id, content').eq('id', sourceVersionId)
+      .eq('organization_id', input.organizationId).maybeSingle()
+    if (versionError) throw versionError
+    if (!architectureVersion) throw new Error('Selected Website Architecture version is unavailable')
+    const { data: architecture, error: architectureError } = await admin.from('artifacts')
+      .select('id').eq('id', architectureVersion.artifact_id).eq('organization_id', input.organizationId)
+      .eq('engagement_id', input.engagement.id).eq('brand_id', input.engagement.brand_id)
+      .eq('artifact_type', 'website_architecture').maybeSingle()
+    if (architectureError) throw architectureError
+    if (!architecture) throw new Error('Selected Website Architecture version is unavailable in this workspace')
+    architectureArtifactId = architecture.id
+    const page = websitePages(architectureVersion.content?.pages)
+      .find(candidate => candidate.page_key === content.target_page_key)
+    if (!page) throw new Error('Selected page is unavailable in the exact Website Architecture version')
+    content = { ...content, target_page_path: page.slug }
   }
   let artifactId = text(input.artifactId, 80)
   let createdArtifact = false

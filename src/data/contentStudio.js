@@ -458,6 +458,15 @@ export function latestVersion(rows = []) {
   return [...rows].sort((left, right) => right.version_number - left.version_number)[0] || null
 }
 
+export function legacyContentArtifact(workspace = {}) {
+  const versions = workspace.versions || []
+  return (workspace.artifacts || []).find(artifact => {
+    if (artifact.artifact_type !== 'content') return false
+    const latest = latestVersion(versions.filter(version => version.artifact_id === artifact.id))
+    return !(latest?.content?.schema_version === 2 && latest.content.output_type)
+  }) || null
+}
+
 export function approvalForVersion(approvals = [], versionId) {
   return approvals.find(item => item.artifact_version_id === versionId) || null
 }
@@ -483,7 +492,7 @@ export function buildContentPageTracking(workspace) {
   const versions = workspace?.versions || []
   const tasks = workspace?.contentTasks || []
   const architectureArtifact = artifacts.find(item => item.artifact_type === 'website_architecture')
-  const contentArtifact = artifacts.find(item => item.artifact_type === 'content')
+  const contentArtifact = legacyContentArtifact(workspace)
   const approvedArchitecture = approvedVersionForArtifact(workspace || {}, architectureArtifact)
   const latestContent = latestVersion(versions.filter(version => version.artifact_id === contentArtifact?.id))
   const contentPages = Array.isArray(latestContent?.content?.pages) ? latestContent.content.pages : []

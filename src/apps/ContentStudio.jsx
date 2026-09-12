@@ -6,6 +6,7 @@ import DepartmentChat from '../components/DepartmentChat.jsx'
 import ContentRequestPanel from '../components/ContentRequestPanel.jsx'
 import GeneralContentRequestsPanel from '../components/GeneralContentRequestsPanel.jsx'
 import ContentQueuePanel from '../components/ContentQueuePanel.jsx'
+import ContentWriterEditor from '../components/ContentWriterEditor.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'
 import ContentCustomFieldsPanel from '../components/ContentCustomFieldsPanel.jsx'
@@ -49,6 +50,7 @@ import { contentRequests } from '../data/contentRequestsRepository.js'
 import { contentQueue } from '../data/contentQueueRepository.js'
 import { contentCustomFields } from '../data/contentCustomFieldsRepository.js'
 import { blogLinksForMonth, relatedRecord } from '../data/contentDesignEventLinking.js'
+import { contentArtifactForMode } from '../data/contentWriter.js'
 import { contentSelectionParams, resolveContentContext, resolveContentNavigationScope, selectableContentEngagements } from '../data/contentWorkshopContext.js'
 import { appendWorkshopNavigation, parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
 
@@ -68,7 +70,7 @@ export default function ContentStudio() {
   const [workspace, setWorkspace] = useState(null)
   const [type, setType] = useState('discovery')
   const requestedTab = navigationContext.workshopTab || ''
-  const [tab, setTab] = useState(['general', 'queue', 'calendar'].includes(requestedTab) ? requestedTab : 'artifacts')
+  const [tab, setTab] = useState(['general', 'queue', 'calendar', 'writer'].includes(requestedTab) ? requestedTab : 'artifacts')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -160,7 +162,7 @@ export default function ContentStudio() {
   }, [engagementId, navigationContext, studio])
 
   useEffect(() => {
-    setTab(['general', 'queue', 'calendar'].includes(requestedTab) ? requestedTab : 'artifacts')
+    setTab(['general', 'queue', 'calendar', 'writer'].includes(requestedTab) ? requestedTab : 'artifacts')
   }, [requestedTab])
 
   async function act(callback, success) {
@@ -181,12 +183,14 @@ export default function ContentStudio() {
     } finally { if (currentScope(request)) setSaving(false) }
   }
 
-  const artifactForType = artifactType => workspace?.artifacts.find(item => item.artifact_type === artifactType) || null
+  const artifactForType = artifactType => artifactType === 'content'
+    ? contentArtifactForMode(workspace, 'legacy')
+    : workspace?.artifacts.find(item => item.artifact_type === artifactType) || null
 
   useEffect(() => {
     const originLink = workspace?.blogEventLinks?.find(link => link.id === originLinkId)
     if (!originLink || originLink.status !== 'in_progress') return
-    const contentArtifact = workspace.artifacts.find(item => item.artifact_type === 'content')
+    const contentArtifact = contentArtifactForMode(workspace, 'legacy')
     const currentVersion = latestVersion(workspace.versions.filter(version => version.artifact_id === contentArtifact?.id))
     if (!approvalForVersion(workspace.approvals, currentVersion?.id)) return
     let active = true
@@ -257,9 +261,11 @@ export default function ContentStudio() {
         {workspace?.engagement && <div className="rounded-xl bg-slate-950 px-4 py-3 text-sm text-slate-400"><span className="font-semibold text-white">{workspace.engagement.brands?.name}</span><span className="mx-2 text-slate-700">/</span>{workspace.engagement.agency_clients?.name}</div>}
       </section>}
       <nav className="flex gap-2 overflow-x-auto border-b border-slate-800">
-        {[['general', 'General requests'], ['queue', 'Content queue'], ['artifacts', 'Artifact workspace'], ['requests', 'Content requests'], ['calendar', 'Blog calendar'], ['brand', 'Brief & brand statement'], ['chat', 'Shared Department Chat']].map(([id, label]) => <button type="button" key={id} onClick={() => selectTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-amber-400 text-amber-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>)}
+        {[['general', 'General requests'], ['queue', 'Content queue'], ['writer', 'Production writer'], ['artifacts', 'Artifact workspace'], ['requests', 'Content requests'], ['calendar', 'Blog calendar'], ['brand', 'Brief & brand statement'], ['chat', 'Shared Department Chat']].map(([id, label]) => <button type="button" key={id} onClick={() => selectTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-amber-400 text-amber-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>)}
       </nav>
-      {!repositories ? <div className="py-20 text-center text-sm text-slate-500">Select an active organization to open Content Studio.</div> : tab === 'general' ? <GeneralContentRequestsPanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.requests} /> : loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Content Studio…</div> : tab === 'queue' ? <ContentQueuePanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.queue} /> : !workspace ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Activate a Content service on an engagement to begin, or use General requests without an engagement.</div> : tab === 'artifacts' ? (
+      {!repositories ? <div className="py-20 text-center text-sm text-slate-500">Select an active organization to open Content Studio.</div> : tab === 'general' ? <GeneralContentRequestsPanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.requests} /> : loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Content Studio…</div> : tab === 'queue' ? <ContentQueuePanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.queue} /> : !workspace ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Activate a Content service on an engagement to begin, or use General requests without an engagement.</div> : tab === 'writer' ? (
+        <ContentWriterEditor key={`${activeOrganizationId}:${scopeRevision}:${workspace.engagement.id}`} workspace={workspace} studio={studio} saving={saving} act={act} stageId={bestContentStage(workspace.stages, 'content')?.id || null} defaultLanguage={resolveContentLanguage({ approvedBrandLanguage: approvedVisionLanguage(workspace), organizationDefaultLanguage: workspace.organizationSettings?.content_language || workspace.organizationSettings?.default_language }).language} />
+      ) : tab === 'artifacts' ? (
         <ArtifactWorkspace key={`${activeOrganizationId}:${scopeRevision}:${workspace.engagement.id}`} studio={studio} customFields={repositories.customFields} workspace={workspace} type={type} setType={setType} saving={saving} act={act} onRefresh={() => loadWorkspace(engagementId)} originLinkId={originLinkId} />
       ) : tab === 'calendar' ? (
         <BlogCalendarPanel workspace={workspace} saving={saving} originLinkId={originLinkId} onStart={openBlogDraft} onPublish={link => updateBlogLink(link, 'published', 'Approved blog content marked as published.')} />
@@ -384,13 +390,17 @@ function BlogCalendarPanel({ workspace, saving, originLinkId, onStart, onPublish
 }
 
 function ArtifactWorkspace({ studio, customFields, workspace, type, setType, saving, act, onRefresh, originLinkId }) {
-  const artifact = workspace.artifacts.find(item => item.artifact_type === type)
+  const artifact = type === 'content'
+    ? contentArtifactForMode(workspace, 'legacy')
+    : workspace.artifacts.find(item => item.artifact_type === type)
   const versions = workspace.versions.filter(item => item.artifact_id === artifact?.id)
   const latest = latestVersion(versions)
   const approval = approvalForVersion(workspace.approvals, latest?.id)
   return <div className="grid gap-6 xl:grid-cols-[320px_1fr]">
     <section className="space-y-3">{Object.entries(CONTENT_ARTIFACT_FORMS).map(([id, definition]) => {
-      const item = workspace.artifacts.find(candidate => candidate.artifact_type === id)
+      const item = id === 'content'
+        ? contentArtifactForMode(workspace, 'legacy')
+        : workspace.artifacts.find(candidate => candidate.artifact_type === id)
       const itemLatest = latestVersion(workspace.versions.filter(version => version.artifact_id === item?.id))
       const itemApproval = approvalForVersion(workspace.approvals, itemLatest?.id)
       return <button key={id} onClick={() => setType(id)} className={`w-full rounded-2xl border p-4 text-left ${type === id ? 'border-amber-500/60 bg-amber-950/20' : 'border-slate-800 bg-slate-900/70 hover:border-slate-700'}`}><div className="flex items-start justify-between gap-3"><p className="font-semibold text-white">{definition.label}</p><span className={`rounded-full px-2.5 py-1 text-[10px] uppercase ${itemApproval ? 'bg-emerald-950 text-emerald-300' : itemLatest ? 'bg-amber-950 text-amber-300' : 'bg-slate-950 text-slate-500'}`}>{itemApproval ? 'Approved' : itemLatest ? 'Draft' : 'Missing'}</span></div><p className="mt-2 text-xs leading-5 text-slate-500">{definition.description}</p></button>
