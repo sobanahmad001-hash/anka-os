@@ -111,6 +111,20 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
             .in('source_direction_version_id', visibleDirectionVersionIds).order('created_at', { ascending: false })),
         ])
       : [[], [], [], []]
+    const designAssets = await dataOrThrow(scopedFrom('design_assets').select('*')
+      .eq('engagement_id', engagementId).eq('brand_id', engagement.brand_id).order('created_at', { ascending: false }))
+    const designAssetVersions = designAssets.length
+      ? await dataOrThrow(scopedFrom('design_asset_versions').select('*')
+        .in('asset_id', designAssets.map(item => item.id)).order('version_number', { ascending: false }))
+      : []
+    const versionIdBatches = Array.from({ length: Math.ceil(designAssetVersions.length / 50) },
+      (_, index) => designAssetVersions.slice(index * 50, index * 50 + 50).map(item => item.id))
+    const signedVersionBatches = await Promise.all(versionIdBatches.map(versionIds =>
+      invoke('sign_asset_versions', { version_ids: versionIds })))
+    const signedAssetVersions = {
+      signed_urls: Object.assign({}, ...signedVersionBatches.map(batch => batch?.signed_urls || {})),
+      expires_in: 300,
+    }
     const wordpressExportJobs = pageDesigns.length
       ? await dataOrThrow(scopedFrom('wordpress_export_jobs').select('*')
         .in('website_page_design_id', pageDesigns.map(item => item.id))
@@ -151,6 +165,11 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
         engagementId: navigationRecord.engagement_id,
       } : null,
       mediaAssets: mediaAssets.map(item => ({ ...item, signed_url: signedMedia?.signed_urls?.[item.id] || null })),
+      designAssets,
+      designAssetVersions: designAssetVersions.map(item => ({
+        ...item,
+        signed_url: signedAssetVersions?.signed_urls?.[item.id] || null,
+      })),
       imageGenerationJobs,
       variants,
       handoffPackages,
@@ -189,6 +208,7 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
   retryImageGeneration: (jobId, operationKey) => invoke('retry_image_generation', {
     job_id: jobId, operation_key: operationKey,
   }),
+  uploadAssetVersion: input => invoke('upload_asset_version', input),
   generateVariants: (sourceDirectionVersionId, modelRegistryId, variantFormats) => invoke('generate_variants', {
     source_direction_version_id: sourceDirectionVersionId,
     model_registry_id: modelRegistryId,

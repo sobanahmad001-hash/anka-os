@@ -10,6 +10,7 @@ import {
 import {
   freezeCreativeBrief, saveCreativeBrief, setWorkingDirection, validateCreativeBrief,
 } from './creativeBriefs.ts'
+import { DESIGN_ASSET_BUCKET, uploadDesignAssetVersion } from './assetVersions.ts'
 
 type Client = ReturnType<typeof createClient<any>>
 type ScopedClient = Client & { organizationId: string }
@@ -184,6 +185,41 @@ async function callerMediaRoot(userClient: Client, assetIds: string[]): Promise<
   return root
 }
 
+async function callerDesignAssetRoot(userClient: Client, assetId: string): Promise<CallerRoot> {
+  const { data: asset, error } = await userClient.from('design_assets')
+    .select('id, organization_id, engagement_id, brand_id').eq('id', requiredActionId(assetId, 'Asset')).maybeSingle()
+  if (error || !asset) throw Object.assign(new Error('Design asset not found'), { status: 404 })
+  const { data: engagement, error: engagementError } = await userClient.from('engagements')
+    .select('id, organization_id, brand_id').eq('id', asset.engagement_id).maybeSingle()
+  if (engagementError || !engagement || engagement.organization_id !== asset.organization_id
+    || engagement.brand_id !== asset.brand_id) {
+    throw Object.assign(new Error('Design asset has an invalid organization chain'), { status: 409 })
+  }
+  return { organizationId: asset.organization_id, engagementId: asset.engagement_id }
+}
+
+async function callerAssetVersionRoot(userClient: Client, versionIds: string[]): Promise<CallerRoot | null> {
+  if (!versionIds.length) return null
+  const { data: versions, error } = await userClient.from('design_asset_versions')
+    .select('id, organization_id, asset_id, storage_path').in('id', versionIds)
+  if (error || versions?.length !== versionIds.length) {
+    throw Object.assign(new Error('One or more Design asset versions are not visible'), { status: 404 })
+  }
+  let root: CallerRoot | null = null
+  for (const version of versions) {
+    const candidate = await callerDesignAssetRoot(userClient, version.asset_id)
+    if (candidate.organizationId !== version.organization_id
+      || !String(version.storage_path || '').startsWith(`${version.organization_id}/`)) {
+      throw Object.assign(new Error('Design asset version has an invalid organization chain'), { status: 409 })
+    }
+    if (root && (root.organizationId !== candidate.organizationId || root.engagementId !== candidate.engagementId)) {
+      throw Object.assign(new Error('Design asset versions must belong to one engagement'), { status: 409 })
+    }
+    root = candidate
+  }
+  return root
+}
+
 export async function designWorkshopScope(userClient: Client, body: Json): Promise<ServerOrganizationScope> {
   const action = text(body.action, 80)
   const requestedOrganizationId = text(body.organization_id, 80) || null
@@ -237,6 +273,19 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
   }
   if (action === 'list_experiment_reviewers') {
     return { root: null, requestedOrganizationId: requestedOrganizationId || '' }
+  }
+  if (action === 'upload_asset_version') {
+    const assetId = text(body.asset_id, 80)
+    if (assetId) {
+      const root = await callerDesignAssetRoot(userClient, assetId)
+      return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
+    }
+    return { root: { kind: 'engagement', id: requiredActionId(body.engagement_id, 'Engagement') }, requestedOrganizationId }
+  }
+  if (action === 'sign_asset_versions') {
+    const root = await callerAssetVersionRoot(userClient, uniqueIds(body.version_ids))
+    if (!root) return { root: null, requestedOrganizationId: requestedOrganizationId || '' }
+    return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
   }
   if (action === 'sign_media_assets') {
     const root = await callerMediaRoot(userClient, uniqueIds(body.asset_ids))
@@ -375,7 +424,8 @@ export function hasWorkshopAuthority(membership: Json, action: string) {
   if (action === 'generate_content_request_image' || action === 'create_content_request_video_placeholder') {
     return department === 'content'
   }
-  if (action === 'promote_direction_experiment' || action === 'list_experiment_reviewers' || action === 'sign_media_assets') return true
+  if (action === 'promote_direction_experiment' || action === 'list_experiment_reviewers'
+    || action === 'sign_media_assets' || action === 'sign_asset_versions') return true
   return department === 'design'
 }
 
@@ -870,6 +920,7 @@ async function generateImageForTarget(admin: ScopedClient, input: {
   targetWidth?: number
   targetHeight?: number
   durable?: boolean
+  onAssetReserved?: (asset: Json) => Promise<void>
 }) {
   const { data: model, error: modelError } = await admin.from('design_model_registry').select('*')
     .eq('id', input.modelRegistryId).eq('organization_id', admin.organizationId).eq('is_active', true).maybeSingle()
@@ -890,6 +941,7 @@ async function generateImageForTarget(admin: ScopedClient, input: {
   let uploaded = false
   let phase: 'provider' | 'storage' | 'registration' = 'provider'
   try {
+    if (input.onAssetReserved) await input.onAssetReserved(asset as Json)
     let bytes = input.providerSize
       ? await generateOpenAiImage(credential, model.model_id, input.prompt, input.providerSize)
       : await generateOpenAiImage(credential, model.model_id, input.prompt)
@@ -1176,10 +1228,16 @@ async function generateVariants(admin: ScopedClient, userClient: Client, body: J
         providerSize: spec.providerSize,
         targetWidth: spec.width,
         targetHeight: spec.height,
+        onAssetReserved: async reserved => {
+          const { error: linkError } = await admin.from('design_direction_variants')
+            .update({ design_media_asset_id: reserved.id }).eq('id', variant.id)
+            .eq('organization_id', admin.organizationId)
+          if (linkError) throw linkError
+        },
       })
       const status = asset?.status === 'ready' ? 'ready' : 'failed'
       const { data: finished, error: finishError } = await admin.from('design_direction_variants').update({
-        status, design_media_asset_id: asset?.id || null,
+        status,
       }).eq('id', variant.id).eq('organization_id', admin.organizationId).select('*').single()
       if (finishError) throw finishError
       return { ...finished, media_asset: asset }
@@ -1234,6 +1292,29 @@ async function signMediaAssets(admin: ScopedClient, userClient: Client, body: Js
   if (signedError) throw signedError
   const signedUrls = Object.fromEntries(signable.map((asset, index) => [asset.id, signed?.[index]?.signedUrl || null]))
   return { signed_urls: signedUrls, expires_in: 300 }
+}
+
+async function signAssetVersions(admin: ScopedClient, userClient: Client, body: Json) {
+  const versionIds = uniqueIds(body.version_ids)
+  if (!versionIds.length) return { signed_urls: {}, expires_in: 300 }
+  const { data: versions, error } = await userClient.from('design_asset_versions')
+    .select('id, storage_bucket, storage_path').in('id', versionIds)
+    .eq('organization_id', admin.organizationId)
+  if (error || versions?.length !== versionIds.length) {
+    throw Object.assign(new Error('One or more Design asset versions are not visible'), { status: 404 })
+  }
+  const signable = versions.filter(version => version.storage_bucket === DESIGN_ASSET_BUCKET
+    && String(version.storage_path || '').startsWith(`${admin.organizationId}/`))
+  if (signable.length !== versionIds.length) {
+    throw Object.assign(new Error('One or more Design asset version objects are outside the configured bucket'), { status: 409 })
+  }
+  const { data: signed, error: signedError } = await admin.storage.from(DESIGN_ASSET_BUCKET)
+    .createSignedUrls(signable.map(version => version.storage_path), 300)
+  if (signedError) throw signedError
+  return {
+    signed_urls: Object.fromEntries(signable.map((version, index) => [version.id, signed?.[index]?.signedUrl || null])),
+    expires_in: 300,
+  }
 }
 
 async function validateExperimentReviewers(admin: ScopedClient, reviewerIds: string[], actorId: string) {
@@ -1400,6 +1481,8 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       generate_content_request_image: () => generateContentRequestImage(admin, userClient, body, user.id),
       create_content_request_video_placeholder: () => createContentRequestVideoPlaceholder(admin, userClient, body, user.id),
       sign_media_assets: () => signMediaAssets(admin, userClient, body),
+      upload_asset_version: () => uploadDesignAssetVersion(admin, body, user.id),
+      sign_asset_versions: () => signAssetVersions(admin, userClient, body),
     }
     if (!hasWorkshopAuthority(membership as Json, action)) {
       return response({ error: 'Your department role cannot perform this action' }, 403)
