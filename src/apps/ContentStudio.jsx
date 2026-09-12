@@ -12,6 +12,7 @@ import ContentCustomFieldsPanel from '../components/ContentCustomFieldsPanel.jsx
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import WorkshopContextShell from '../components/WorkshopContextShell.jsx'
 import { WebsiteArchitecturePathAlert, WebsitePageRecordActions } from '../components/WebsitePageStructureControls.js'
+import KeywordStrategyEditor from '../components/KeywordStrategyEditor.jsx'
 import {
   BRAND_STATEMENT_SOURCE_TYPES,
   BRAND_STATEMENT_TYPE,
@@ -34,6 +35,9 @@ import {
   duplicateWebsitePage,
   latestVersion,
   newContentRecord,
+  keywordDuplicateWarnings,
+  keywordStrategyIssues,
+  keywordTargetsChanged,
   resolveContentLanguage,
   serializeContentArtifact,
   websiteArchitecturePathErrors,
@@ -410,6 +414,17 @@ function ArtifactForm({ studio, customFields, workspace, type, artifact, version
   const [classification, setClassification] = useState(latest?.data_classification || 'internal')
   const [aiSafe, setAiSafe] = useState(latest?.ai_use_allowed || false)
   const originLink = type === 'content' ? workspace.blogEventLinks?.find(link => link.id === originLinkId) : null
+  const architectureArtifact = workspace.artifacts.find(item => item.artifact_type === 'website_architecture')
+  const architectureVersions = workspace.versions.filter(version => version.artifact_id === architectureArtifact?.id)
+    .sort((left, right) => right.version_number - left.version_number)
+  const selectedArchitectureVersion = architectureVersions.find(version => version.id === form.source_architecture_version_id)
+  const pageTargetIds = new Set((selectedArchitectureVersion?.content?.pages || []).map(websitePageKey).filter(Boolean))
+  const contentRequestIds = new Set((workspace.contentRequests || []).map(request => request.id))
+  const keywordIssues = type === 'keyword_strategy'
+    ? keywordStrategyIssues(form, { pageTargetIds, contentRequestIds }) : new Map()
+  const keywordWarnings = type === 'keyword_strategy' ? keywordDuplicateWarnings(form.keywords || []) : new Map()
+  const targetAssignmentsChanged = type === 'keyword_strategy' && latest
+    ? keywordTargetsChanged(latest.content?.keywords || [], serializeContentArtifact(type, form).keywords) : false
 
   async function save(event) {
     event.preventDefault()
@@ -439,17 +454,20 @@ function ArtifactForm({ studio, customFields, workspace, type, artifact, version
     })),
   ])) : {}
   const pathErrors = type === 'website_architecture' ? websiteArchitecturePathErrors(form.pages || []) : new Map()
+  const blockingIssues = pathErrors.size > 0 || keywordIssues.size > 0
 
   return <div><form onSubmit={save} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
     <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Canonical immutable artifact</p><h2 className="mt-1 text-2xl font-semibold">{definition.label}</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">{definition.description}</p></div><div className="text-right text-xs text-slate-500"><p>{latest ? `Version ${latest.version_number}` : 'No version yet'}</p><p className={approval ? 'mt-1 text-emerald-400' : 'mt-1 text-amber-400'}>{approval ? 'Exact version approved' : 'Approval pending'}</p></div></div>
     {type === 'discovery' && <div className="mt-5 rounded-xl border border-amber-500/20 bg-amber-950/20 p-4 text-sm text-amber-100"><p className="font-semibold">{DEFAULT_DISCOVERY_TEMPLATE.label}</p><p className="mt-1 text-xs text-amber-200/70">All five canonical fields are required. “Unknown” is permitted only for Evidence and Constraints.</p></div>}
     {type === 'website_architecture' && <div className="mt-5 rounded-xl border border-amber-500/20 bg-amber-950/20 p-4 text-sm text-amber-100"><p className="font-semibold">Stable page identity</p><p className="mt-1 text-xs leading-5 text-amber-200/70">The page key is system managed and remains unchanged when a path is renamed. Paths are normalized on save; use the order controls to define deterministic sitemap order.</p></div>}
+    {type === 'keyword_strategy' && <div className="mt-5 rounded-xl border border-amber-500/20 bg-amber-950/20 p-4 text-sm text-amber-100"><p className="font-semibold">Evidence-aware keyword mapping</p><p className="mt-1 text-xs leading-5 text-amber-200/70">Unmeasured volume, difficulty, and observation date remain “Not available”. Suggestions are not measured opportunities. Import is unavailable because no supported keyword import format is configured; add rows manually. A standalone blog target remains unavailable until a blog or article content-request format is approved.</p></div>}
     {foundation && <label className="mt-5 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Working language<input required maxLength="120" placeholder="Select or enter a language" className={`${INPUT} mt-2 normal-case tracking-normal`} value={form.language || ''} onChange={event => setForm(current => ({ ...current, language: event.target.value }))} /><span className="mt-2 block font-normal normal-case tracking-normal text-slate-500">Precedence: explicit selection, approved Vision value, then organization default. No language is assumed.</span></label>}
-    <div className="mt-6 space-y-5">{definition.fields.map(field => <div key={field.key}><ArtifactField field={field} value={form[field.key]} pageSlugs={(workspace.versions.filter(version => version.artifact_id === workspace.artifacts.find(item => item.artifact_type === 'website_architecture')?.id).sort((left, right) => right.version_number - left.version_number)[0]?.content?.pages || []).map(page => page.slug)} recordErrors={field.recordType === 'website_page' ? pathErrors : new Map()} onChange={value => setForm(current => ({ ...current, [field.key]: value }))} />{foundation && <SourceMetadataField field={field} value={form.source_metadata?.[field.key]} onChange={value => setForm(current => ({ ...current, source_metadata: { ...current.source_metadata, [field.key]: value } }))} />}</div>)}</div>
+    <div className="mt-6 space-y-5">{definition.fields.map(field => <div key={field.key}><ArtifactField field={field} value={form[field.key]} pageSlugs={(architectureVersions[0]?.content?.pages || []).map(page => page.slug)} architectureVersions={architectureVersions} selectedArchitectureVersion={selectedArchitectureVersion} contentRequests={workspace.contentRequests || []} recordErrors={field.recordType === 'website_page' ? pathErrors : keywordIssues} recordWarnings={field.recordType === 'keyword' ? keywordWarnings : new Map()} onChange={value => setForm(current => field.key === 'source_architecture_version_id' ? { ...current, [field.key]: value, keywords: (current.keywords || []).map(keyword => keyword.target_kind === 'page' ? { ...keyword, target_id: '', target_page_slug: '' } : keyword) } : { ...current, [field.key]: value })} />{foundation && <SourceMetadataField field={field} value={form.source_metadata?.[field.key]} onChange={value => setForm(current => ({ ...current, source_metadata: { ...current.source_metadata, [field.key]: value } }))} />}</div>)}</div>
     <WebsiteArchitecturePathAlert hasErrors={pathErrors.size > 0} />
+    {targetAssignmentsChanged && <p role="status" className="mt-4 rounded-xl border border-amber-900/60 bg-amber-950/30 p-4 text-sm text-amber-200">Keyword target assignments changed. Review affected downstream drafts manually; no draft is rewritten or retargeted automatically.</p>}
     <div className="mt-6 grid gap-4 md:grid-cols-2"><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Change summary<input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={summary} onChange={event => setSummary(event.target.value)} /></label><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Data classification<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={classification} onChange={event => setClassification(event.target.value)}><option>internal</option><option>confidential</option><option>public</option><option>restricted</option></select></label></div>
     <label className="mt-4 flex items-start gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300"><input type="checkbox" className="mt-1" checked={aiSafe} onChange={event => setAiSafe(event.target.checked)} /><span>Explicitly allow this exact version to be included in approved AI context. Restricted versions remain excluded.</span></label>
-    <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-800 pt-5"><button disabled={saving || pathErrors.size > 0} className={PRIMARY}>{saving ? 'Saving…' : latest ? 'Create new version' : 'Save first version'}</button></div>
+    <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-800 pt-5"><button disabled={saving || blockingIssues} className={PRIMARY}>{saving ? 'Saving…' : latest ? 'Create new version' : 'Save first version'}</button></div>
   </form><ArtifactApprovalPanel version={latest} approval={approval} theme="amber" singleApprovalLabel={`Use single-manager route for version ${latest?.version_number}`} onSingleApprove={() => act(async () => { const result = await studio.approveArtifact(latest.id); if (originLink) await studio.updateBlogEventLink(originLink, 'ready'); return result }, `${definition.label} exact version approved.${originLink ? ' The originating blog event is ready.' : ''}`)} onChanged={onRefresh} />{['website_architecture', 'content'].includes(type) && <ContentPageTrackingPanel studio={studio} workspace={workspace} saving={saving} act={act} />}<ContentCustomFieldsPanel repository={customFields} artifactType={type} versions={versions} initialVersionId={latest?.id} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="content" theme="amber" regionsByVersion={regionsByVersion} /></div>
 }
 
@@ -487,7 +505,9 @@ function ContentPageTrackingPanel({ studio, workspace, saving, act }) {
   </section>
 }
 
-function ArtifactField({ field, value, pageSlugs, recordErrors, onChange }) {
+function ArtifactField({ field, value, pageSlugs, architectureVersions, selectedArchitectureVersion, contentRequests, recordErrors, recordWarnings, onChange }) {
+  if (field.kind === 'architecture_version') return <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{field.label}<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={value || ''} onChange={event => onChange(event.target.value)}><option value="">Not needed for standalone request targets</option>{(architectureVersions || []).map(version => <option key={version.id} value={version.id}>Version {version.version_number} · {new Date(version.created_at).toLocaleString()}</option>)}</select><span className="mt-2 block font-normal normal-case tracking-normal text-slate-500">Page targets are checked against this exact immutable version.</span></label>
+  if (field.recordType === 'keyword') return <KeywordStrategyEditor field={field} records={value || []} architectureVersion={selectedArchitectureVersion} contentRequests={contentRequests} issues={recordErrors} warnings={recordWarnings} inputClass={INPUT} buttonClass={BUTTON} onAdd={() => onChange([...(value || []), newContentRecord(field)])} onChange={(index, next) => onChange(value.map((item, itemIndex) => itemIndex === index ? next : item))} onRemove={index => onChange(value.filter((_, itemIndex) => itemIndex !== index))} />
   if (field.kind === 'records') return <div><div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{field.label}</p><button type="button" className={BUTTON} onClick={() => onChange([...(value || []), newContentRecord(field)])}>{field.addLabel}</button></div><div className="mt-3 space-y-4">{(value || []).map((record, index) => <RecordEditor key={record.page_key || index} index={index} field={field} records={value} pageSlugs={pageSlugs} record={record} pathError={recordErrors?.get(websitePageKey(record))} onChange={next => onChange(value.map((item, itemIndex) => itemIndex === index ? next : item))} onAddChild={() => onChange(addWebsiteChild(value, field, websitePageKey(record)))} onDuplicate={() => onChange(duplicateWebsitePage(value, field, websitePageKey(record)))} onMove={direction => { const destination = index + direction; if (destination < 0 || destination >= value.length) return; const next = [...value]; [next[index], next[destination]] = [next[destination], next[index]]; onChange(next) }} onRemove={() => onChange(value.filter((_, itemIndex) => itemIndex !== index))} />)}{!(value || []).length && <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-sm text-slate-500">Add at least one structured record.</div>}</div></div>
   const textarea = field.kind === 'textarea' || field.kind === 'list'
   return <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{field.label}{field.kind === 'list' && <span className="ml-2 font-normal normal-case tracking-normal text-slate-600">One item per line</span>}{field.unknownAllowed && <span className="ml-2 font-normal normal-case tracking-normal text-amber-400">Unknown allowed</span>}{textarea ? <textarea required rows={field.kind === 'list' ? 4 : 5} className={`${INPUT} mt-2 normal-case tracking-normal`} value={value || ''} onChange={event => onChange(event.target.value)} /> : <input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={value || ''} onChange={event => onChange(event.target.value)} />}</label>

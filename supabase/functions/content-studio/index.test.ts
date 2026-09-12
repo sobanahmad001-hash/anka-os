@@ -218,6 +218,42 @@ Deno.test('RP2 rejects malformed sitemap hierarchy and keyword categories server
   }), Error, 'category')
 })
 
+Deno.test('B04 validates evidence-aware keywords while retaining absent metrics as unavailable', () => {
+  const strategy = validateContentArtifact('keyword_strategy', {
+    schema_version: 2,
+    source_architecture_version_id: 'architecture-v2',
+    keywords: [{
+      term: '  strategy   agency ', locale: 'en-PK', intent: 'commercial', topic_group: 'services',
+      priority: 'high', evidence_source: '', search_volume: null, difficulty: null, observation_date: null,
+      target_kind: 'page', target_page_key: 'page:home', target_content_request_id: null,
+      target_page_slug: 'stale-client-snapshot', category: null, notes: '',
+    }],
+  })
+  assertEquals(strategy.schema_version, 2)
+  assertEquals((strategy.keywords as Array<Record<string, unknown>>)[0].term, 'strategy agency')
+  assertEquals((strategy.keywords as Array<Record<string, unknown>>)[0].search_volume, null)
+})
+
+Deno.test('B04 rejects unlabelled measurements, invalid dates, and incomplete targets', () => {
+  const keyword = {
+    term: 'strategy agency', locale: 'en-PK', intent: '', topic_group: '', priority: '',
+    evidence_source: '', search_volume: 100, difficulty: null, observation_date: null,
+    target_kind: 'content_request', target_page_key: null, target_content_request_id: 'request-1',
+    target_page_slug: null, category: null, notes: '',
+  }
+  assertThrows(() => validateContentArtifact('keyword_strategy', {
+    schema_version: 2, source_architecture_version_id: null, keywords: [keyword],
+  }), Error, 'evidence source')
+  assertThrows(() => validateContentArtifact('keyword_strategy', {
+    schema_version: 2, source_architecture_version_id: null,
+    keywords: [{ ...keyword, search_volume: null, evidence_source: 'Provider', observation_date: '2026-02-30' }],
+  }), Error, 'real calendar date')
+  assertThrows(() => validateContentArtifact('keyword_strategy', {
+    schema_version: 2, source_architecture_version_id: null,
+    keywords: [{ ...keyword, search_volume: null, target_content_request_id: null }],
+  }), Error, 'target content request')
+})
+
 Deno.test('B03a normalizes paths, sorts deterministically and derives legacy keys', () => {
   const architecture = validateContentArtifact('website_architecture', { pages: [
     { page_key: 'page:child', slug: ' /Services//Web Design/ ', title: 'Web', parent_page_key: 'page:root', position: 2000, page_type: 'service', purpose: 'Explain' },

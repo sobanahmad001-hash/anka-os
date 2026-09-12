@@ -254,6 +254,73 @@ function keywordRecords(value: unknown) {
   })
 }
 
+function keywordText(value: unknown, max = 8000) {
+  return typeof value === 'string' ? value.normalize('NFKC').trim().replace(/\s+/g, ' ').slice(0, max) : ''
+}
+
+function optionalKeywordMetric(keyword: Json, key: string, index: number, { integer = false } = {}) {
+  if (keyword[key] === null || keyword[key] === undefined || keyword[key] === '') return null
+  const value = keyword[key]
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || (integer && !Number.isSafeInteger(value))) {
+    throw new Error(`${key.replaceAll('_', ' ')} in keyword ${index + 1} must be a non-negative ${integer ? 'integer' : 'number'}`)
+  }
+  return value
+}
+
+function optionalKeywordDate(value: unknown, index: number) {
+  if (value === null || value === undefined || value === '') return null
+  const normalized = text(value, 10)
+  const instant = /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? new Date(`${normalized}T00:00:00.000Z`) : null
+  if (!instant || Number.isNaN(instant.getTime()) || instant.toISOString().slice(0, 10) !== normalized) {
+    throw new Error(`observation date in keyword ${index + 1} must be a real calendar date using YYYY-MM-DD`)
+  }
+  return normalized
+}
+
+function keywordRecordsV2(value: unknown) {
+  if (!Array.isArray(value) || !value.length) throw new Error('At least one keyword is required')
+  return value.slice(0, 500).map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`Keyword ${index + 1} is invalid`)
+    const keyword = item as Json
+    const term = keywordText(keyword.term, 500)
+    const locale = keywordText(keyword.locale, 120)
+    if (!term) throw new Error(`term is required in keyword ${index + 1}`)
+    if (!locale) throw new Error(`locale is required in keyword ${index + 1}`)
+    const targetKind = text(keyword.target_kind, 40)
+    if (!['page', 'content_request'].includes(targetKind)) throw new Error(`target kind in keyword ${index + 1} is invalid`)
+    const targetPageKey = targetKind === 'page' ? text(keyword.target_page_key, 1208) : ''
+    const targetContentRequestId = targetKind === 'content_request' ? text(keyword.target_content_request_id, 80) : ''
+    if (targetKind === 'page' && !targetPageKey) throw new Error(`target page is required in keyword ${index + 1}`)
+    if (targetKind === 'content_request' && !targetContentRequestId) throw new Error(`target content request is required in keyword ${index + 1}`)
+    const evidenceSource = keywordText(keyword.evidence_source, 1000)
+    const searchVolume = optionalKeywordMetric(keyword, 'search_volume', index, { integer: true })
+    const difficulty = optionalKeywordMetric(keyword, 'difficulty', index)
+    const observationDate = optionalKeywordDate(keyword.observation_date, index)
+    if ((searchVolume !== null || difficulty !== null || observationDate !== null) && !evidenceSource) {
+      throw new Error(`evidence source is required for measured data in keyword ${index + 1}`)
+    }
+    const category = text(keyword.category, 40)
+    if (category && !['industry', 'brand', 'volume'].includes(category)) throw new Error(`category in keyword ${index + 1} is invalid`)
+    return {
+      term,
+      locale,
+      intent: keywordText(keyword.intent, 500),
+      topic_group: keywordText(keyword.topic_group, 500),
+      priority: keywordText(keyword.priority, 120),
+      evidence_source: evidenceSource,
+      search_volume: searchVolume,
+      difficulty,
+      observation_date: observationDate,
+      target_kind: targetKind,
+      target_page_key: targetPageKey || null,
+      target_content_request_id: targetContentRequestId || null,
+      target_page_slug: targetKind === 'page' ? text(keyword.target_page_slug, 1200) || null : null,
+      category: category || null,
+      notes: text(keyword.notes, 2000),
+    }
+  })
+}
+
 function records(value: unknown, fields: Array<[string, 'text' | 'list']>, maxItems = 80) {
   if (!Array.isArray(value) || !value.length) throw new Error('At least one structured record is required')
   return value.slice(0, maxItems).map((item, index) => {
@@ -316,7 +383,15 @@ export function validateContentArtifact(type: string, value: unknown): Json {
     }
   }
   if (type === 'website_architecture') return { pages: websitePages(input.pages) }
-  if (type === 'keyword_strategy') return { keywords: keywordRecords(input.keywords) }
+  if (type === 'keyword_strategy') {
+    if (input.schema_version === 2) return {
+      schema_version: 2,
+      source_architecture_version_id: text(input.source_architecture_version_id, 80) || null,
+      keywords: keywordRecordsV2(input.keywords),
+    }
+    if (input.schema_version !== undefined && input.schema_version !== null) throw new Error('Unsupported keyword strategy schema version')
+    return { keywords: keywordRecords(input.keywords) }
+  }
   if (type === 'content') return {
     content_strategy: requiredText(input, 'content_strategy'),
     pages: records(input.pages, [
@@ -396,6 +471,34 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value)
 }
 
+function keywordTargetSignature(keyword: Json) {
+  return [
+    keywordText(keyword.term, 500).toLocaleLowerCase(),
+    keywordText(keyword.locale, 120).toLocaleLowerCase(),
+    keywordText(keyword.intent, 500).toLocaleLowerCase(),
+    text(keyword.target_kind, 40),
+    text(keyword.target_page_key, 1208) || text(keyword.target_content_request_id, 80) || text(keyword.target_page_slug, 1200),
+  ].join('\u0000')
+}
+
+function keywordTargetsChanged(previous: unknown, next: Json[]) {
+  if (!previous || typeof previous !== 'object' || Array.isArray(previous)) return false
+  const before = Array.isArray((previous as Json).keywords)
+    ? ((previous as Json).keywords as Json[]).map(keywordTargetSignature).sort() : []
+  const after = next.map(keywordTargetSignature).sort()
+  return before.length !== after.length || before.some((value, index) => value !== after[index])
+}
+
+function hasDuplicateKeywordLocale(keywords: Json[]) {
+  const seen = new Set<string>()
+  return keywords.some(keyword => {
+    const key = `${keywordText(keyword.locale, 120).toLocaleLowerCase()}\u0000${keywordText(keyword.term, 500).toLocaleLowerCase()}`
+    if (seen.has(key)) return true
+    seen.add(key)
+    return false
+  })
+}
+
 export async function createContentArtifactVersion(admin: AdminClient, input: {
   organizationId: string
   engagement: { id: string; brand_id: string }
@@ -412,34 +515,81 @@ export async function createContentArtifactVersion(admin: AdminClient, input: {
   aiRunId?: string | null
   visibilityClient: AdminClient
 }) {
-  const content = validateContentArtifact(input.artifactType, input.content)
+  let content = validateContentArtifact(input.artifactType, input.content)
   const warnings: string[] = []
   let architectureArtifactId: string | null = null
+  let contentRequestTargetIds: string[] = []
   if (input.artifactType === 'keyword_strategy') {
-    const { data: architecture, error: architectureError } = await admin.from('artifacts')
-      .select('id').eq('organization_id', input.organizationId)
-      .eq('engagement_id', input.engagement.id).eq('artifact_type', 'website_architecture')
-      .order('created_at').limit(1).maybeSingle()
-    if (architectureError) throw architectureError
-    architectureArtifactId = architecture?.id || null
-    if (!architectureArtifactId) {
-      warnings.push('No website architecture exists yet, so target page slugs could not be checked or linked.')
+    const keywords = content.keywords as Json[]
+    if (content.schema_version === 2) {
+      const pageKeywords = keywords.filter(keyword => keyword.target_kind === 'page')
+      contentRequestTargetIds = [...new Set(keywords
+        .filter(keyword => keyword.target_kind === 'content_request')
+        .map(keyword => String(keyword.target_content_request_id)))]
+      if (pageKeywords.length) {
+        const sourceVersionId = text(content.source_architecture_version_id, 80)
+        if (!sourceVersionId) throw new Error('Exact Website architecture version is required for page targets')
+        const { data: architecture, error: architectureError } = await admin.from('artifacts')
+          .select('id').eq('organization_id', input.organizationId)
+          .eq('engagement_id', input.engagement.id).eq('artifact_type', 'website_architecture')
+          .order('created_at').limit(1).maybeSingle()
+        if (architectureError) throw architectureError
+        architectureArtifactId = architecture?.id || null
+        if (!architectureArtifactId) throw new Error('Website architecture is required for page targets')
+        const { data: architectureVersion, error: versionError } = await admin.from('artifact_versions')
+          .select('id, content').eq('id', sourceVersionId).eq('organization_id', input.organizationId)
+          .eq('artifact_id', architectureArtifactId).maybeSingle()
+        if (versionError) throw versionError
+        if (!architectureVersion) throw new Error('Selected Website architecture version is unavailable')
+        const pages = websitePages(architectureVersion.content?.pages)
+        const pageByKey = new Map(pages.map(page => [page.page_key, page]))
+        const missing = [...new Set(pageKeywords.map(keyword => String(keyword.target_page_key))
+          .filter(pageKey => !pageByKey.has(pageKey)))]
+        if (missing.length) throw new Error(`Target page key${missing.length === 1 ? '' : 's'} not found in the selected Website architecture version: ${missing.join(', ')}`)
+        content = {
+          ...content,
+          keywords: keywords.map(keyword => keyword.target_kind === 'page'
+            ? { ...keyword, target_page_slug: pageByKey.get(String(keyword.target_page_key))?.slug || null }
+            : keyword),
+        }
+      }
+      if (contentRequestTargetIds.length) {
+        const { data: requests, error: requestError } = await input.visibilityClient.from('content_requests')
+          .select('id, organization_id, brand_id, mode, engagement_id')
+          .in('id', contentRequestTargetIds)
+        if (requestError) throw requestError
+        const validIds = new Set((requests || []).filter((request: Json) => request.organization_id === input.organizationId
+          && request.brand_id === input.engagement.brand_id
+          && (request.mode === 'general' || request.engagement_id === input.engagement.id)).map((request: Json) => request.id))
+        const unavailable = contentRequestTargetIds.filter(id => !validIds.has(id))
+        if (unavailable.length) throw new Error('One or more selected content-request targets are unavailable in this workspace')
+      }
+      if (hasDuplicateKeywordLocale(content.keywords as Json[])) {
+        warnings.push('Duplicate phrase and locale rows were retained without merging; review distinct intents explicitly.')
+      }
     } else {
-      const { data: architectureVersion, error: versionError } = await admin.from('artifact_versions')
-        .select('content').eq('organization_id', input.organizationId)
-        .eq('artifact_id', architectureArtifactId)
-        .order('version_number', { ascending: false }).limit(1).maybeSingle()
-      if (versionError) throw versionError
-      const pageSlugs = new Set(Array.isArray(architectureVersion?.content?.pages)
-        ? architectureVersion.content.pages.map((page: Json) => text(page.slug, 240)).filter(Boolean)
-        : [])
-      if (!architectureVersion || !pageSlugs.size) {
-        warnings.push('The website architecture has no saved RP2 page list, so target page slugs could not be checked.')
+      const { data: architecture, error: architectureError } = await admin.from('artifacts')
+        .select('id').eq('organization_id', input.organizationId)
+        .eq('engagement_id', input.engagement.id).eq('artifact_type', 'website_architecture')
+        .order('created_at').limit(1).maybeSingle()
+      if (architectureError) throw architectureError
+      architectureArtifactId = architecture?.id || null
+      if (!architectureArtifactId) {
+        warnings.push('No website architecture exists yet, so target page slugs could not be checked or linked.')
       } else {
-        const missing = [...new Set((content.keywords as Json[])
-          .map(keyword => String(keyword.target_page_slug)).filter(slug => !pageSlugs.has(slug)))]
-        if (missing.length) {
-          throw new Error(`Target page slug${missing.length === 1 ? '' : 's'} not found in the latest website architecture: ${missing.join(', ')}`)
+        const { data: architectureVersion, error: versionError } = await admin.from('artifact_versions')
+          .select('content').eq('organization_id', input.organizationId)
+          .eq('artifact_id', architectureArtifactId)
+          .order('version_number', { ascending: false }).limit(1).maybeSingle()
+        if (versionError) throw versionError
+        const pageSlugs = new Set(Array.isArray(architectureVersion?.content?.pages)
+          ? architectureVersion.content.pages.map((page: Json) => text(page.slug, 240)).filter(Boolean)
+          : [])
+        if (!architectureVersion || !pageSlugs.size) {
+          warnings.push('The website architecture has no saved RP2 page list, so target page slugs could not be checked.')
+        } else {
+          const missing = [...new Set(keywords.map(keyword => String(keyword.target_page_slug)).filter(slug => !pageSlugs.has(slug)))]
+          if (missing.length) throw new Error(`Target page slug${missing.length === 1 ? '' : 's'} not found in the latest website architecture: ${missing.join(', ')}`)
         }
       }
     }
@@ -474,6 +624,10 @@ export async function createContentArtifactVersion(admin: AdminClient, input: {
   if (input.artifactType === 'website_architecture' && latest?.content) {
     assertWebsitePageIdentityTransition(latest.content, content.pages)
   }
+  if (input.artifactType === 'keyword_strategy' && content.schema_version === 2
+    && latest?.content && keywordTargetsChanged(latest.content, content.keywords as Json[])) {
+    warnings.push('Keyword targets changed; affected downstream drafts require manual review and were not rewritten.')
+  }
   const { data: version, error: versionError } = await admin.from('artifact_versions').insert({
     organization_id: input.organizationId, artifact_id: artifactId,
     version_number: (latest?.version_number || 0) + 1, parent_version_id: latest?.id || null,
@@ -501,6 +655,13 @@ export async function createContentArtifactVersion(admin: AdminClient, input: {
     await createArtifactRelation(input.visibilityClient, admin, {
       source_artifact_id: artifactId,
       target_artifact_id: architectureArtifactId,
+      relation_type: 'targets_page',
+    }, input.actorId, { allowExisting: true })
+  }
+  for (const targetContentRequestId of contentRequestTargetIds) {
+    await createArtifactRelation(input.visibilityClient, admin, {
+      source_artifact_id: artifactId,
+      target_content_request_id: targetContentRequestId,
       relation_type: 'targets_page',
     }, input.actorId, { allowExisting: true })
   }

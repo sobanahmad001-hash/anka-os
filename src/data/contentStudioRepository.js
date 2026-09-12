@@ -62,11 +62,21 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
       recordQuery,
       dataOrThrow(supabase.from('organizations').select('settings').eq('id', organizationId).single(), options),
     ])
-    const [brandBrief, brandSourceArtifacts] = await Promise.all([
+    const [brandBrief, brandSourceArtifacts, contentRequests] = await Promise.all([
       dataOrThrow(supabase.from('brand_briefs').select('*').eq('organization_id', organizationId).eq('brand_id', engagement.brand_id).maybeSingle(), options),
       dataOrThrow(supabase.from('artifacts').select('*').eq('organization_id', organizationId).eq('brand_id', engagement.brand_id)
         .in('artifact_type', BRAND_STATEMENT_SOURCE_TYPES).order('created_at'), options),
+      dataOrThrow(supabase.from('content_requests')
+        .select('id, organization_id, mode, engagement_id, brand_id, format, brief, status, created_at')
+        .eq('organization_id', organizationId).eq('brand_id', engagement.brand_id)
+        .or(`mode.eq.general,engagement_id.eq.${engagementId}`)
+        .order('created_at', { ascending: false }), options),
     ])
+    if (contentRequests.some(request => request.organization_id !== organizationId
+      || request.brand_id !== engagement.brand_id
+      || (request.mode !== 'general' && request.engagement_id !== engagementId))) {
+      throw Object.assign(new Error('Content request target scope mismatch'), { status: 403, membershipMismatch: true })
+    }
     const sourceArtifactIds = brandSourceArtifacts.map(item => item.id)
     const brandSourceApprovals = sourceArtifactIds.length
       ? await dataOrThrow(supabase.from('artifact_approvals').select('*').eq('organization_id', organizationId)
@@ -79,7 +89,7 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
         organizationId: navigationRecord.organization_id, projectId: navigationRecord.project_id,
         engagementId: navigationRecord.engagement_id,
       } : null,
-      brandBrief, brandSourceArtifacts, brandSourceApprovals, blogEventLinks,
+      brandBrief, brandSourceArtifacts, brandSourceApprovals, blogEventLinks, contentRequests,
       organizationSettings: organization?.settings || {} }
   },
 
