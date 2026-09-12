@@ -118,6 +118,15 @@ export function ScopedDepartmentChat({
     setConversations(rows)
     setNextConversationCursor(page.next_cursor || null)
     const selected = rows.find(item => item.id === selectId) || rows[0] || null
+    if ((selected?.id || '') !== conversationId) {
+      setMessages([])
+      setAttachments([])
+      setSelectedAttachmentIds([])
+      setSharing({ can_manage: false, recipients: [] })
+      setShareCandidates([])
+      setRecipientIds([])
+      setPendingFiles([])
+    }
     setConversationId(selected?.id || '')
     setConversationTitle(selected?.title || '')
     return selected
@@ -289,6 +298,7 @@ export function ScopedDepartmentChat({
     setResult(null)
     setAnswerState({ status: 'idle', text: '', durable: false })
     setObservationNotice('')
+    setMessages([])
     setSharing({ can_manage: false, recipients: [] })
     setShareCandidates([])
     setRecipientIds([])

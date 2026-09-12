@@ -26,7 +26,7 @@ test('P9 search is indexed, scope-bound, permission-filtered, and service-only',
 })
 
 test('P9 search returns no message snippets or counts and uses bounded keyset ordering', () => {
-  assert.ok(migration.includes('p_limit not between 1 and 50'))
+  assert.ok(migration.includes('p_limit is null or p_limit not between 1 and 50'))
   assert.ok(migration.includes('order by conversation.last_activity_at desc, conversation.id'))
   assert.ok(migration.includes('conversation.id > p_before_id'))
   assert.ok(!migration.includes('ts_headline'))

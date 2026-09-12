@@ -29,7 +29,7 @@ begin
   if v_definition ilike '%ts_headline%'
      or v_definition ilike '%count(%'
   then raise exception 'search_result_leak_contract_failed'; end if;
-  if v_definition not ilike '%p_limit not between 1 and 50%'
+  if v_definition not ilike '%p_limit is null or p_limit not between 1 and 50%'
      or v_definition not ilike '%order by conversation.last_activity_at desc, conversation.id%'
      or v_definition not ilike '%conversation.id > p_before_id%'
   then raise exception 'search_keyset_pagination_contract_missing'; end if;

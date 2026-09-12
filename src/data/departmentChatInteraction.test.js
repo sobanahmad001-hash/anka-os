@@ -122,3 +122,45 @@ test('mounted chat sends title/message search to the server and renders only ret
   assert.equal(count(container, 'matching-conversation'), 0)
   assert.match(container.textContent, /No permitted conversations match this search/)
 })
+
+test('mounted search clears the prior transcript on denied and failed result loads', async t => {
+  const { document, ScopedDepartmentChat } = await setup(t)
+  for (const scenario of [
+    { query: 'denied result', message: 'Conversation access revoked' },
+    { query: 'network failure', message: 'Conversation load failed' },
+  ]) {
+    const container = document.createElement('div')
+    const repo = repository([], 'OLD_CONVERSATION_BODY')
+    const originalGetConversation = repo.getConversation
+    repo.getConversation = async (departmentId, input) => {
+      if (input.conversation_id === 'matching-conversation') throw new Error(scenario.message)
+      return originalGetConversation(departmentId, input)
+    }
+    globalThis.__departmentChatTestRepository = repo
+    const root = createRoot(container)
+
+    await act(async () => root.render(createElement(
+      ScopedDepartmentChat,
+      props('a', new AbortController().signal),
+    )))
+    await flush()
+    assert.equal(count(container, 'OLD_CONVERSATION_BODY'), 1)
+
+    const input = nodes(container, 'input').find(node => node.type === 'search')
+    assert.ok(input)
+    await value(input, scenario.query)
+    const form = nodes(container, 'form').find(item => nodes(item, 'input').includes(input))
+    assert.ok(form)
+    await act(async () => form.dispatchEvent(new E('submit')))
+    await flush()
+
+    assert.match(container.textContent, new RegExp(scenario.message))
+    assert.match(container.textContent, /matching-conversation/)
+    assert.equal(
+      count(container, 'OLD_CONVERSATION_BODY'),
+      0,
+      'A prior transcript must not remain under a different selected conversation.',
+    )
+    await act(async () => root.unmount())
+  }
+})

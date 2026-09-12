@@ -42,7 +42,7 @@ begin
   if p_department_id not in ('content', 'design', 'marketing') then
     raise exception 'Saved conversation context is unsupported.' using errcode = '22023';
   end if;
-  if p_limit not between 1 and 50 then
+  if p_limit is null or p_limit not between 1 and 50 then
     raise exception 'Conversation search page size must be between 1 and 50.' using errcode = '22023';
   end if;
   if (p_before_last_activity_at is null) <> (p_before_id is null) then
