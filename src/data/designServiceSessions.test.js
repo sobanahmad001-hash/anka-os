@@ -54,7 +54,7 @@ test('the UI and repository expose active engagement services instead of an outp
   assert.match(ui, /Active Design service/)
   assert.match(ui, /engagement_service_id: serviceId/)
   assert.match(ui, /external_event_id: externalEventId \|\| null/)
-  assert.match(repository, /designServices, sessions, externalEvents/)
+  assert.match(repository, /designServices, (?:deliveryServices, )?sessions, externalEvents/)
   assert.doesNotMatch(ui, /Field label="Output family"/)
 })
 

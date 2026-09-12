@@ -49,7 +49,7 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
       : navigation.workRecord?.kind === 'engagement_work_item'
         ? dataOrThrow(scopedFrom('work_items').select('id, organization_id, project_id, engagement_id').eq('id', navigation.workRecord.id).is('deleted_at', null).maybeSingle())
         : Promise.resolve(null)
-    const [engagement, stages, artifacts, versions, approvals, models, designServices, sessions, pageFlows, experimentReviewers, navigationRecord] = await Promise.all([
+    const [engagement, stages, artifacts, versions, approvals, models, designServices, deliveryServices, sessions, pageFlows, experimentReviewers, navigationRecord] = await Promise.all([
       dataOrThrow(scopedFrom('engagements').select('*, agency_clients(name), brands(name), projects(client_id)').eq('id', engagementId).single()),
       dataOrThrow(scopedFrom('engagement_stage_instances').select('*').eq('engagement_id', engagementId).order('position')),
       dataOrThrow(scopedFrom('artifacts').select('*').eq('engagement_id', engagementId).order('created_at')),
@@ -61,6 +61,10 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
         .eq('engagement_id', engagementId).eq('status', 'active')
         .eq('service_catalog.department_id', 'design').eq('service_catalog.is_active', true)
         .order('activated_at')),
+      dataOrThrow(scopedFrom('engagement_services')
+        .select('id, engagement_id, service_id, status, service_catalog!inner(id, name, slug, department_id, is_active)')
+        .eq('engagement_id', engagementId).eq('status', 'active')
+        .eq('service_catalog.is_active', true).order('activated_at')),
       dataOrThrow(scopedFrom('design_workshop_sessions').select('*').eq('engagement_id', engagementId).order('created_at', { ascending: false })),
       dataOrThrow(scopedFrom('design_page_flows').select('*').eq('engagement_id', engagementId).order('created_at', { ascending: false })),
       invoke('list_experiment_reviewers'),
@@ -129,6 +133,16 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
       ? await dataOrThrow(scopedFrom('design_asset_versions').select('*')
         .in('asset_id', designAssets.map(item => item.id)).order('version_number', { ascending: false }))
       : []
+    const packageArtifacts = artifacts.filter(item => item.artifact_type === 'design_delivery_package')
+    const packageVersions = versions.filter(item => packageArtifacts.some(artifact => artifact.id === item.artifact_id))
+    const [packageContexts, packageAssetReferences] = packageVersions.length
+      ? await Promise.all([
+          dataOrThrow(scopedFrom('design_delivery_package_version_contexts').select('*')
+            .in('artifact_version_id', packageVersions.map(item => item.id)).order('created_at', { ascending: false })),
+          dataOrThrow(scopedFrom('design_delivery_package_version_assets').select('*')
+            .in('artifact_version_id', packageVersions.map(item => item.id)).order('position')),
+        ])
+      : [[], []]
     const versionIdBatches = Array.from({ length: Math.ceil(designAssetVersions.length / 50) },
       (_, index) => designAssetVersions.slice(index * 50, index * 50 + 50).map(item => item.id))
     const signedVersionBatches = await Promise.all(versionIdBatches.map(versionIds =>
@@ -164,7 +178,7 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
     const architectureVersion = versions.filter(item => item.artifact_id === architectureArtifact?.id)
       .sort((left, right) => right.version_number - left.version_number)[0]
     return {
-      engagement, stages, artifacts, versions, approvals, models, designServices, sessions, externalEvents, pageFlows,
+      engagement, stages, artifacts, versions, approvals, models, designServices, deliveryServices, sessions, externalEvents, pageFlows,
       contextVersions: directionData[0], modelSelections: directionData[1], runs: directionData[2],
       directions, selections: directionData[4], releases: directionData[5], directionVersions,
       experimentalDirectionVersions, experimentReviewers,
@@ -183,6 +197,10 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
         ...item,
         signed_url: signedAssetVersions?.signed_urls?.[item.id] || null,
       })),
+      deliveryPackageArtifacts: packageArtifacts,
+      deliveryPackageVersions: packageVersions,
+      deliveryPackageContexts: packageContexts,
+      deliveryPackageAssetReferences: packageAssetReferences,
       imageGenerationJobs,
       variants,
       handoffPackages,
@@ -223,6 +241,8 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
   }),
   uploadAssetVersion: input => invoke('upload_asset_version', input),
   archiveAsset: input => invoke('archive_asset', input),
+  previewDeliveryPackage: input => invoke('preview_delivery_package', input),
+  saveDeliveryPackage: input => invoke('save_delivery_package', input),
   generateVariants: (sourceDirectionVersionId, modelRegistryId, variantFormats) => invoke('generate_variants', {
     source_direction_version_id: sourceDirectionVersionId,
     model_registry_id: modelRegistryId,
