@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
   approvedDesignSystemReferences, designConnectionState, figmaFileUrl,
-  identityProvenanceForDirection, pinnedIdentityReferences,
+  identityProvenanceForDirection, isDesignConnectionScopeCurrent, pinnedIdentityReferences,
 } from './designIdentityReferences.js'
 
 const workspace = {
@@ -60,4 +60,29 @@ test('the additive health observation remains compatible with legacy connector c
   const result = { connections: [{ id: 'connection-1', status: 'verified', health_observation: { outcome: 'succeeded' } }] }
   const legacyProjection = result.connections.map(({ id, status }) => ({ id, status }))
   assert.deepEqual(legacyProjection, [{ id: 'connection-1', status: 'verified' }])
+})
+
+test('B05 ignores a delayed old-organization UI response after scope changes', async () => {
+  let resolveOld
+  const oldResponse = new Promise(resolve => { resolveOld = resolve })
+  const rendered = []
+  let current = { organizationId: 'org-a', revision: 1, generation: 1 }
+  const oldRequest = { ...current, signal: new AbortController().signal }
+  const oldLoad = oldResponse.then(value => {
+    if (isDesignConnectionScopeCurrent(current, oldRequest)) rendered.push(value)
+  })
+
+  current = { organizationId: 'org-b', revision: 2, generation: 2 }
+  const newRequest = { ...current, signal: new AbortController().signal }
+  if (isDesignConnectionScopeCurrent(current, newRequest)) rendered.push('organization-b')
+  resolveOld('organization-a')
+  await oldLoad
+  assert.deepEqual(rendered, ['organization-b'])
+
+  const panel = readFileSync(new URL('../components/DesignConnectionsPanel.jsx', import.meta.url), 'utf8')
+  const workshop = readFileSync(new URL('../apps/DesignWorkshop.jsx', import.meta.url), 'utf8')
+  assert.match(panel, /listForOrganization\(organizationId, 'design', \{ signal: requestSignal \}\)/)
+  assert.match(panel, /testForOrganization\(organizationId, connection\.id, \{ signal: requestSignal \}\)/)
+  assert.match(panel, /isDesignConnectionScopeCurrent/)
+  assert.match(workshop, /key=\{`\$\{activeOrganizationId\}:\$\{scopeRevision\}`\}/)
 })

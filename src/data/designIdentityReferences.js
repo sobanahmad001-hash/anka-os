@@ -61,6 +61,11 @@ export function figmaFileUrl(connection) {
   return `https://www.figma.com/file/${encodeURIComponent(key)}`
 }
 
+export function isDesignConnectionScopeCurrent(current, request) {
+  return !request.signal?.aborted && current.organizationId === request.organizationId
+    && current.revision === request.revision && current.generation === request.generation
+}
+
 export const DESIGN_CONNECTION_STATE_COPY = Object.freeze({
   verified: 'Read-only access was verified. External edits never replace pinned local versions.',
   configured: 'Credential metadata exists, but access has not been verified.',

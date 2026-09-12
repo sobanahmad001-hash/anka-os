@@ -15,6 +15,8 @@ function fixture(options: {
   mappedDepartments?: string[]
   verifiedModelIds?: string[]
   history?: Array<Record<string, unknown>>
+  connections?: Array<Record<string, unknown>>
+  events?: Array<Record<string, unknown>>
 } = {}) {
   const calls: Array<{ client: string; table?: string; operation: string; value?: unknown }> = []
   const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = []
@@ -43,7 +45,7 @@ function fixture(options: {
       status: 'active',
       member_kind: 'team',
     }],
-    integration_connections: [connection],
+    integration_connections: options.connections || [connection],
     integration_connection_departments: (options.mappedDepartments || ['content'])
       .map(department_id => ({ organization_id: ORG_B, connection_id: connection.id, department_id })),
     department_chat_model_configurations: (options.history || []).map(row => ({
@@ -51,7 +53,7 @@ function fixture(options: {
       connector_connection_id: connection.id,
       ...row,
     })),
-    integration_events: [],
+    integration_events: options.events || [],
   }
 
   function client(name: string) {
@@ -59,10 +61,23 @@ function fixture(options: {
       auth: { getUser: async () => ({ data: { user: { id: USER_ID } }, error: null }) },
       from(table: string) {
         const filters: Array<[string, unknown]> = []
+        const included: Array<[string, unknown[]]> = []
+        const ordering: Array<{ key: string; ascending: boolean }> = []
+        let limitCount: number | null = null
         let operation = 'select'
         let inserted: unknown = null
-        const matching = () => (rows[table] || []).filter(row =>
-          filters.every(([key, value]) => row[key] === value))
+        const matching = () => {
+          const data = (rows[table] || []).filter(row => filters.every(([key, value]) => row[key] === value)
+            && included.every(([key, values]) => values.includes(row[key])))
+          data.sort((left, right) => {
+            for (const item of ordering) {
+              const comparison = String(left[item.key] || '').localeCompare(String(right[item.key] || ''))
+              if (comparison) return item.ascending ? comparison : -comparison
+            }
+            return 0
+          })
+          return limitCount === null ? data : data.slice(0, limitCount)
+        }
         const result = (single = false) => {
           if (operation === 'insert') {
             calls.push({ client: name, table, operation, value: inserted })
@@ -74,8 +89,12 @@ function fixture(options: {
         const query: any = {
           select: () => query,
           eq: (key: string, value: unknown) => { filters.push([key, value]); return query },
+          in: (key: string, values: unknown[]) => { included.push([key, values]); return query },
           is: (key: string, value: unknown) => { filters.push([key, value]); return query },
-          order: () => query,
+          order: (key: string, options: { ascending?: boolean } = {}) => {
+            ordering.push({ key, ascending: options.ascending !== false }); return query
+          },
+          limit: (value: number) => { limitCount = value; return query },
           insert: (value: unknown) => { operation = 'insert'; inserted = value; return query },
           update: (value: unknown) => { operation = 'update'; inserted = value; return query },
           delete: () => { operation = 'delete'; return query },
@@ -221,4 +240,59 @@ Deno.test('B05 latest success supersedes failure and stale observations do not s
   assertEquals(currentConnectionHealthObservation(
     { id: 'visible', updated_at: '2026-09-12T10:00:30Z' }, observations.get('visible'),
   ), observations.get('visible'))
+})
+
+Deno.test('B05 scoped list uses the selected organization for contributor and leader views', async () => {
+  const foreign = {
+    id: '66666666-6666-4666-8666-666666666666', organization_id: ORG_A,
+    provider: 'figma', status: 'verified', archived_at: null, display_name: 'Foreign Figma',
+    integration_connection_departments: [{ department_id: 'design' }],
+  }
+  for (const [role, canManage] of [['contributor', false], ['operations_admin', true]] as const) {
+    const test = fixture({ role, connections: [foreign, {
+      ...fixture().connection, provider: 'figma', display_name: 'Selected Figma',
+      integration_connection_departments: [{ department_id: 'design' }],
+    }] })
+    const response = await test.request({ action: 'list', organization_id: ORG_B, department_id: 'design' })
+    const body = await response.json()
+    assertEquals(response.status, 200)
+    assertEquals(body.organization_id, ORG_B)
+    assertEquals(body.can_manage, canManage)
+    assertEquals(body.connections.map((item: Record<string, unknown>) => item.display_name), ['Selected Figma'])
+  }
+  const wrongOrganization = fixture({ membershipOrganizationId: ORG_A })
+  const denied = await wrongOrganization.request({ action: 'list', organization_id: ORG_B, department_id: 'design' })
+  assertEquals(denied.status, 403)
+})
+
+Deno.test('B05 scoped test requires selected-organization leadership without calling a provider', async () => {
+  const contributor = fixture({ role: 'contributor' })
+  const response = await contributor.request({
+    action: 'test', organization_id: ORG_B, connection_id: contributor.connection.id,
+  })
+  assertEquals(response.status, 403)
+  assertEquals(contributor.providerCalls(), 0)
+})
+
+Deno.test('B05 latest lookup stays deterministic beyond a provider row cap', async () => {
+  const connectionId = '44444444-4444-4444-8444-444444444444'
+  const historical = Array.from({ length: 1100 }, (_, index) => ({
+    id: String(index).padStart(4, '0'), organization_id: ORG_B, connection_id: connectionId,
+    operation: 'tested', outcome: 'failed', error_code: 'HTTP_403',
+    occurred_at: `2026-09-10T${String(index % 24).padStart(2, '0')}:00:00Z`,
+  }))
+  const test = fixture({
+    connections: [{ ...fixture().connection, provider: 'figma',
+      integration_connection_departments: [{ department_id: 'design' }] }],
+    events: [...historical, {
+      id: 'latest-success', organization_id: ORG_B, connection_id: connectionId,
+      operation: 'tested', outcome: 'succeeded', error_code: null, occurred_at: '2026-09-12T12:00:00Z',
+    }],
+  })
+  const response = await test.request({ action: 'list', organization_id: ORG_B, department_id: 'design' })
+  const body = await response.json()
+  assertEquals(response.status, 200)
+  assertEquals(body.connections[0].health_observation, {
+    outcome: 'succeeded', error_code: null, observed_at: '2026-09-12T12:00:00Z',
+  })
 })
