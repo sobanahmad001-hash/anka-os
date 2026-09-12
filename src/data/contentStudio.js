@@ -105,6 +105,7 @@ export const CONTENT_ARTIFACT_FORMS = Object.freeze({
 
 export const CONTENT_ARTIFACT_TYPES = Object.freeze(Object.keys(CONTENT_ARTIFACT_FORMS))
 export const CONTENT_FOUNDATION_TYPES = Object.freeze(['discovery', 'vision', 'audience'])
+export const MAX_KEYWORD_RECORDS = 500
 
 export const DEFAULT_DISCOVERY_TEMPLATE = Object.freeze({
   id: 'content-discovery-default-v1',
@@ -241,6 +242,9 @@ export function keywordStrategyIssues(editor = {}, { pageTargetIds, contentReque
   const issues = new Map()
   const sourceVersionId = String(editor.source_architecture_version_id || '').trim()
   if (!(editor.keywords || []).length) issues.set('form', 'Add at least one keyword.')
+  if ((editor.keywords || []).length > MAX_KEYWORD_RECORDS) {
+    issues.set('form', `Keyword strategies support at most ${MAX_KEYWORD_RECORDS} rows. Remove extra rows before saving.`)
+  }
   ;(editor.keywords || []).forEach((record, index) => {
     const messages = []
     if (!normalizeKeywordWhitespace(record.term)) messages.push('Keyword phrase is required.')
@@ -254,10 +258,19 @@ export function keywordStrategyIssues(editor = {}, { pageTargetIds, contentReque
     if (record.target_kind === 'content_request' && record.target_id && contentRequestIds && !contentRequestIds.has(record.target_id)) {
       messages.push('The selected content request is not available in this workspace.')
     }
+    for (const [key, label, max] of [
+      ['term', 'Keyword phrase', 500], ['locale', 'Language or locale', 120], ['intent', 'Intent', 500],
+      ['topic_group', 'Topic group', 500], ['priority', 'Priority', 120], ['evidence_source', 'Evidence source', 1000],
+      ['notes', 'Notes', 2000],
+    ]) {
+      if (normalizeKeywordWhitespace(record[key]).length > max) messages.push(`${label} must be ${max} characters or fewer.`)
+    }
     for (const [key, label] of [['search_volume', 'Search volume'], ['difficulty', 'Difficulty']]) {
       if (record[key] !== '' && record[key] !== null && record[key] !== undefined
         && (!Number.isFinite(Number(record[key])) || Number(record[key]) < 0)) messages.push(`${label} must be a non-negative number.`)
     }
+    if (record.search_volume !== '' && record.search_volume !== null && record.search_volume !== undefined
+      && !Number.isSafeInteger(Number(record.search_volume))) messages.push('Search volume must be a whole number.')
     const hasMeasuredValue = [record.search_volume, record.difficulty, record.observation_date]
       .some(value => value !== '' && value !== null && value !== undefined)
     if (hasMeasuredValue && !normalizeKeywordWhitespace(record.evidence_source)) {

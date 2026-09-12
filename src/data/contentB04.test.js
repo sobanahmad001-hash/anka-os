@@ -12,6 +12,7 @@ import {
   keywordDuplicateWarnings,
   keywordStrategyIssues,
   keywordTargetsChanged,
+  MAX_KEYWORD_RECORDS,
   normalizeKeywordWhitespace,
   serializeContentArtifact,
 } from './contentStudio.js'
@@ -43,6 +44,16 @@ test('B04 warns duplicate phrase and locale rows without merging distinct intent
   assert.equal(serializeContentArtifact('keyword_strategy', { source_architecture_version_id: 'v1', keywords: rows }).keywords.length, 2)
 })
 
+test('B04 accepts exactly 500 rows and blocks 501 before save without truncation', () => {
+  const limit = Array.from({ length: MAX_KEYWORD_RECORDS }, (_, index) => pageKeyword({ term: `Keyword ${index}` }))
+  const atLimit = { source_architecture_version_id: 'v1', keywords: limit }
+  assert.equal(keywordStrategyIssues(atLimit, { pageTargetIds: new Set(['page:home']) }).size, 0)
+  assert.equal(serializeContentArtifact('keyword_strategy', atLimit).keywords.length, MAX_KEYWORD_RECORDS)
+  const overLimit = { ...atLimit, keywords: [...limit, pageKeyword({ term: 'Overflow' })] }
+  assert.match(keywordStrategyIssues(overLimit).get('form'), /at most 500 rows/)
+  assert.equal(serializeContentArtifact('keyword_strategy', overLimit).keywords.length, MAX_KEYWORD_RECORDS + 1)
+})
+
 test('B04 blocks missing evidence, stale targets, and page targets without an exact source version', () => {
   const metricIssues = keywordStrategyIssues({ source_architecture_version_id: 'v1', keywords: [pageKeyword({ search_volume: '100' })] }, {
     pageTargetIds: new Set(['page:home']), contentRequestIds: new Set(),
@@ -53,6 +64,8 @@ test('B04 blocks missing evidence, stale targets, and page targets without an ex
   })
   assert.match(staleIssues.get(0), /not in the exact Website architecture version/)
   assert.match(keywordStrategyIssues({ keywords: [pageKeyword()] }).get(0), /exact Website architecture version/)
+  assert.match(keywordStrategyIssues({ source_architecture_version_id: 'v1', keywords: [pageKeyword({ search_volume: '1.5', evidence_source: 'Source' })] }).get(0), /whole number/)
+  assert.match(keywordStrategyIssues({ source_architecture_version_id: 'v1', keywords: [pageKeyword({ term: 'x'.repeat(501) })] }).get(0), /500 characters or fewer/)
 })
 
 test('B04 permits an existing standalone request target without website structure', () => {
@@ -64,6 +77,18 @@ test('B04 permits an existing standalone request target without website structur
   const keyword = serializeContentArtifact('keyword_strategy', { keywords: [record] }).keywords[0]
   assert.equal(keyword.target_content_request_id, 'request-1')
   assert.equal(keyword.target_page_key, null)
+})
+
+test('B04 saved v2 content reopens and resubmits the same exact target and evidence state', () => {
+  const saved = serializeContentArtifact('keyword_strategy', {
+    source_architecture_version_id: 'architecture-v2',
+    keywords: [pageKeyword({ evidence_source: 'Provider export', search_volume: '1200', difficulty: '18', observation_date: '2026-09-12' })],
+  })
+  const reopened = contentArtifactEditor('keyword_strategy', saved)
+  assert.equal(reopened.source_architecture_version_id, 'architecture-v2')
+  assert.equal(reopened.keywords[0].target_id, 'page:home')
+  assert.equal(reopened.keywords[0].search_volume, 1200)
+  assert.deepEqual(serializeContentArtifact('keyword_strategy', reopened), saved)
 })
 
 test('B04 legacy keyword versions remain readable and require deliberate target reselection', () => {

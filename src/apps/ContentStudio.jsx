@@ -12,7 +12,7 @@ import ContentCustomFieldsPanel from '../components/ContentCustomFieldsPanel.jsx
 import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import WorkshopContextShell from '../components/WorkshopContextShell.jsx'
 import { WebsiteArchitecturePathAlert, WebsitePageRecordActions } from '../components/WebsitePageStructureControls.js'
-import KeywordStrategyEditor from '../components/KeywordStrategyEditor.jsx'
+import KeywordStrategyEditor, { KeywordArchitectureVersionSelect } from '../components/KeywordStrategyEditor.jsx'
 import {
   BRAND_STATEMENT_SOURCE_TYPES,
   BRAND_STATEMENT_TYPE,
@@ -25,6 +25,7 @@ import {
   CONTENT_ARTIFACT_FORMS,
   CONTENT_ARTIFACT_TYPES,
   CONTENT_FOUNDATION_TYPES,
+  MAX_KEYWORD_RECORDS,
   DEFAULT_DISCOVERY_TEMPLATE,
   approvalForVersion,
   approvedVisionLanguage,
@@ -506,8 +507,8 @@ function ContentPageTrackingPanel({ studio, workspace, saving, act }) {
 }
 
 function ArtifactField({ field, value, pageSlugs, architectureVersions, selectedArchitectureVersion, contentRequests, recordErrors, recordWarnings, onChange }) {
-  if (field.kind === 'architecture_version') return <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{field.label}<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={value || ''} onChange={event => onChange(event.target.value)}><option value="">Not needed for standalone request targets</option>{(architectureVersions || []).map(version => <option key={version.id} value={version.id}>Version {version.version_number} · {new Date(version.created_at).toLocaleString()}</option>)}</select><span className="mt-2 block font-normal normal-case tracking-normal text-slate-500">Page targets are checked against this exact immutable version.</span></label>
-  if (field.recordType === 'keyword') return <KeywordStrategyEditor field={field} records={value || []} architectureVersion={selectedArchitectureVersion} contentRequests={contentRequests} issues={recordErrors} warnings={recordWarnings} inputClass={INPUT} buttonClass={BUTTON} onAdd={() => onChange([...(value || []), newContentRecord(field)])} onChange={(index, next) => onChange(value.map((item, itemIndex) => itemIndex === index ? next : item))} onRemove={index => onChange(value.filter((_, itemIndex) => itemIndex !== index))} />
+  if (field.kind === 'architecture_version') return <KeywordArchitectureVersionSelect field={field} value={value} versions={architectureVersions} inputClass={INPUT} onChange={onChange} />
+  if (field.recordType === 'keyword') return <KeywordStrategyEditor field={field} records={value || []} architectureVersion={selectedArchitectureVersion} contentRequests={contentRequests} issues={recordErrors} warnings={recordWarnings} inputClass={INPUT} buttonClass={BUTTON} onAdd={() => { if ((value || []).length < MAX_KEYWORD_RECORDS) onChange([...(value || []), newContentRecord(field)]) }} onChange={(index, next) => onChange(value.map((item, itemIndex) => itemIndex === index ? next : item))} onRemove={index => onChange(value.filter((_, itemIndex) => itemIndex !== index))} />
   if (field.kind === 'records') return <div><div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{field.label}</p><button type="button" className={BUTTON} onClick={() => onChange([...(value || []), newContentRecord(field)])}>{field.addLabel}</button></div><div className="mt-3 space-y-4">{(value || []).map((record, index) => <RecordEditor key={record.page_key || index} index={index} field={field} records={value} pageSlugs={pageSlugs} record={record} pathError={recordErrors?.get(websitePageKey(record))} onChange={next => onChange(value.map((item, itemIndex) => itemIndex === index ? next : item))} onAddChild={() => onChange(addWebsiteChild(value, field, websitePageKey(record)))} onDuplicate={() => onChange(duplicateWebsitePage(value, field, websitePageKey(record)))} onMove={direction => { const destination = index + direction; if (destination < 0 || destination >= value.length) return; const next = [...value]; [next[index], next[destination]] = [next[destination], next[index]]; onChange(next) }} onRemove={() => onChange(value.filter((_, itemIndex) => itemIndex !== index))} />)}{!(value || []).length && <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-sm text-slate-500">Add at least one structured record.</div>}</div></div>
   const textarea = field.kind === 'textarea' || field.kind === 'list'
   return <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{field.label}{field.kind === 'list' && <span className="ml-2 font-normal normal-case tracking-normal text-slate-600">One item per line</span>}{field.unknownAllowed && <span className="ml-2 font-normal normal-case tracking-normal text-amber-400">Unknown allowed</span>}{textarea ? <textarea required rows={field.kind === 'list' ? 4 : 5} className={`${INPUT} mt-2 normal-case tracking-normal`} value={value || ''} onChange={event => onChange(event.target.value)} /> : <input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={value || ''} onChange={event => onChange(event.target.value)} />}</label>

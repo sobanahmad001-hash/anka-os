@@ -20,6 +20,7 @@ const FOUNDATION_FIELDS: Record<string, string[]> = {
   audience: ['primary_audience', 'segments', 'motivations', 'objections', 'desired_response', 'accessibility_considerations'],
 }
 const DISCOVERY_UNKNOWN_FIELDS = new Set(['evidence', 'constraints'])
+export const MAX_KEYWORD_RECORDS = 500
 
 function text(value: unknown, max = 8000) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
@@ -228,7 +229,8 @@ export function assertWebsitePageIdentityTransition(previous: unknown, next: unk
 
 function keywordRecords(value: unknown) {
   if (!Array.isArray(value) || !value.length) throw new Error('At least one keyword is required')
-  return value.slice(0, 500).map((item, index) => {
+  if (value.length > MAX_KEYWORD_RECORDS) throw new Error(`Keyword strategies support at most ${MAX_KEYWORD_RECORDS} rows`)
+  return value.map((item, index) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) {
       throw new Error(`Keyword ${index + 1} is invalid`)
     }
@@ -255,7 +257,10 @@ function keywordRecords(value: unknown) {
 }
 
 function keywordText(value: unknown, max = 8000) {
-  return typeof value === 'string' ? value.normalize('NFKC').trim().replace(/\s+/g, ' ').slice(0, max) : ''
+  if (typeof value !== 'string') return ''
+  const normalized = value.normalize('NFKC').trim().replace(/\s+/g, ' ')
+  if (normalized.length > max) throw new Error(`Keyword text must be ${max} characters or fewer`)
+  return normalized
 }
 
 function optionalKeywordMetric(keyword: Json, key: string, index: number, { integer = false } = {}) {
@@ -269,7 +274,7 @@ function optionalKeywordMetric(keyword: Json, key: string, index: number, { inte
 
 function optionalKeywordDate(value: unknown, index: number) {
   if (value === null || value === undefined || value === '') return null
-  const normalized = text(value, 10)
+  const normalized = typeof value === 'string' ? value.trim() : ''
   const instant = /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? new Date(`${normalized}T00:00:00.000Z`) : null
   if (!instant || Number.isNaN(instant.getTime()) || instant.toISOString().slice(0, 10) !== normalized) {
     throw new Error(`observation date in keyword ${index + 1} must be a real calendar date using YYYY-MM-DD`)
@@ -279,17 +284,18 @@ function optionalKeywordDate(value: unknown, index: number) {
 
 function keywordRecordsV2(value: unknown) {
   if (!Array.isArray(value) || !value.length) throw new Error('At least one keyword is required')
-  return value.slice(0, 500).map((item, index) => {
+  if (value.length > MAX_KEYWORD_RECORDS) throw new Error(`Keyword strategies support at most ${MAX_KEYWORD_RECORDS} rows`)
+  return value.map((item, index) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`Keyword ${index + 1} is invalid`)
     const keyword = item as Json
     const term = keywordText(keyword.term, 500)
     const locale = keywordText(keyword.locale, 120)
     if (!term) throw new Error(`term is required in keyword ${index + 1}`)
     if (!locale) throw new Error(`locale is required in keyword ${index + 1}`)
-    const targetKind = text(keyword.target_kind, 40)
+    const targetKind = keywordText(keyword.target_kind, 40)
     if (!['page', 'content_request'].includes(targetKind)) throw new Error(`target kind in keyword ${index + 1} is invalid`)
-    const targetPageKey = targetKind === 'page' ? text(keyword.target_page_key, 1208) : ''
-    const targetContentRequestId = targetKind === 'content_request' ? text(keyword.target_content_request_id, 80) : ''
+    const targetPageKey = targetKind === 'page' ? keywordText(keyword.target_page_key, 1208) : ''
+    const targetContentRequestId = targetKind === 'content_request' ? keywordText(keyword.target_content_request_id, 80) : ''
     if (targetKind === 'page' && !targetPageKey) throw new Error(`target page is required in keyword ${index + 1}`)
     if (targetKind === 'content_request' && !targetContentRequestId) throw new Error(`target content request is required in keyword ${index + 1}`)
     const evidenceSource = keywordText(keyword.evidence_source, 1000)
@@ -299,7 +305,7 @@ function keywordRecordsV2(value: unknown) {
     if ((searchVolume !== null || difficulty !== null || observationDate !== null) && !evidenceSource) {
       throw new Error(`evidence source is required for measured data in keyword ${index + 1}`)
     }
-    const category = text(keyword.category, 40)
+    const category = keywordText(keyword.category, 40)
     if (category && !['industry', 'brand', 'volume'].includes(category)) throw new Error(`category in keyword ${index + 1} is invalid`)
     return {
       term,
@@ -314,9 +320,9 @@ function keywordRecordsV2(value: unknown) {
       target_kind: targetKind,
       target_page_key: targetPageKey || null,
       target_content_request_id: targetContentRequestId || null,
-      target_page_slug: targetKind === 'page' ? text(keyword.target_page_slug, 1200) || null : null,
+      target_page_slug: targetKind === 'page' ? keywordText(keyword.target_page_slug, 1200) || null : null,
       category: category || null,
-      notes: text(keyword.notes, 2000),
+      notes: keywordText(keyword.notes, 2000),
     }
   })
 }
@@ -386,7 +392,7 @@ export function validateContentArtifact(type: string, value: unknown): Json {
   if (type === 'keyword_strategy') {
     if (input.schema_version === 2) return {
       schema_version: 2,
-      source_architecture_version_id: text(input.source_architecture_version_id, 80) || null,
+      source_architecture_version_id: keywordText(input.source_architecture_version_id, 80) || null,
       keywords: keywordRecordsV2(input.keywords),
     }
     if (input.schema_version !== undefined && input.schema_version !== null) throw new Error('Unsupported keyword strategy schema version')
