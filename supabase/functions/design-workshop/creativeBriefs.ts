@@ -59,6 +59,30 @@ function expectedRevision(value: unknown) {
   return revision
 }
 
+function related(value: unknown): Json | null {
+  if (Array.isArray(value)) return value[0] && typeof value[0] === 'object' ? value[0] as Json : null
+  return value && typeof value === 'object' ? value as Json : null
+}
+
+export function validateIdentityReferenceRows(
+  sourceRows: Json[], approvalRows: Json[], organizationId: string, brandId: string | null,
+) {
+  const identityRows = sourceRows.filter(row => related(row.artifacts)?.artifact_type === 'design_system')
+  if (!identityRows.length) return []
+  if (!brandId) throw new Error('Approved identity references require an official brand context')
+  const approvedIds = new Set(approvalRows
+    .filter(row => row.organization_id === organizationId)
+    .map(row => String(row.artifact_version_id || '')))
+  for (const row of identityRows) {
+    const artifact = related(row.artifacts)
+    if (row.organization_id !== organizationId || artifact?.organization_id !== organizationId
+      || artifact?.brand_id !== brandId || !approvedIds.has(String(row.id))) {
+      throw new Error('Identity references must be approved Design System versions from this brand')
+    }
+  }
+  return identityRows.map(row => String(row.id))
+}
+
 export async function saveCreativeBrief(admin: Client, userClient: Client, body: Json, actorId: string) {
   const content = normalizeCreativeBrief(body.content)
   if (!clean(content.title, 200)) throw new Error('A title is required to save a creative brief')
@@ -82,10 +106,19 @@ export async function saveCreativeBrief(admin: Client, userClient: Client, body:
   } else if (visibility !== 'private') throw new Error('Unsupported creative brief visibility')
   const sourceIds = stringList(body.source_version_ids, 50)
   if (sourceIds.length) {
-    const { data, error } = await userClient.from('artifact_versions').select('id, organization_id').in('id', sourceIds)
+    const { data, error } = await userClient.from('artifact_versions')
+      .select('id, organization_id, artifact_id, artifacts!inner(artifact_type, brand_id, organization_id)').in('id', sourceIds)
     if (error || data?.length !== sourceIds.length || data.some((row: Json) => row.organization_id !== admin.organizationId)) {
       throw new Error('One or more pinned source versions are unavailable')
     }
+    const identityIds = (data as Json[]).filter(row => related(row.artifacts)?.artifact_type === 'design_system')
+      .map(row => String(row.id))
+    const approvals = identityIds.length
+      ? await userClient.from('artifact_approvals').select('artifact_version_id, organization_id')
+        .eq('organization_id', admin.organizationId).in('artifact_version_id', identityIds)
+      : { data: [], error: null }
+    if (approvals.error) throw new Error('Approved identity references could not be verified')
+    validateIdentityReferenceRows(data as Json[], (approvals.data || []) as Json[], admin.organizationId, brandId)
   }
   const validation = validateCreativeBrief(content)
   const { data, error } = await admin.rpc('save_design_creative_brief_version', {

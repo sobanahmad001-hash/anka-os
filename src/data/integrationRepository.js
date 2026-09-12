@@ -28,11 +28,17 @@ export const integrations = Object.freeze({
     return data || []
   },
   list: (departmentId = null) => invoke({ action: 'list', department_id: departmentId }),
+  listForOrganization: (organizationId, departmentId = null, options = {}) => invoke({
+    action: 'list', organization_id: organizationId, department_id: departmentId,
+  }, options),
   listModelAllowlist: (organizationId, options = {}) => invoke({
     action: 'list_model_allowlist', organization_id: organizationId,
   }, options),
   save: (connection) => invoke({ action: 'save', ...connection }),
   test: (connectionId) => invoke({ action: 'test', connection_id: connectionId }),
+  testForOrganization: (organizationId, connectionId, options = {}) => invoke({
+    action: 'test', organization_id: organizationId, connection_id: connectionId,
+  }, options),
   disable: (connectionId) => invoke({ action: 'disable', connection_id: connectionId }),
   configureModelAllowlist: (organizationId, connectionId, departmentModelIds, options = {}) => invoke({
     action: 'configure_model_allowlist',

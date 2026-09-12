@@ -29,6 +29,39 @@ function text(value: unknown, max = 160) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
 }
 
+const SAFE_CONNECTION_ERROR_CODES = new Set([
+  'HTTP_401', 'HTTP_403', 'HTTP_404', 'HTTP_415', 'HTTP_422', 'HTTP_429',
+  'HTTP_500', 'HTTP_502', 'HTTP_503', 'HTTP_504', 'CONNECTION_FAILED', 'TIMEOUT',
+])
+
+export function safeConnectionHealthObservations(connectionIds: string[], events: Array<Record<string, unknown>>) {
+  const visible = new Set(connectionIds)
+  const latest = new Map<string, Record<string, unknown>>()
+  for (const event of [...events].sort((left, right) => {
+    const timeDifference = Date.parse(String(right.occurred_at || '')) - Date.parse(String(left.occurred_at || ''))
+    return timeDifference || String(right.id || '').localeCompare(String(left.id || ''))
+  })) {
+    const connectionId = text(event.connection_id, 80)
+    if (!visible.has(connectionId) || latest.has(connectionId)) continue
+    const outcome = event.outcome === 'succeeded' ? 'succeeded' : event.outcome === 'failed' ? 'failed' : 'unknown'
+    const rawCode = text(event.error_code, 80)
+    latest.set(connectionId, {
+      outcome,
+      error_code: outcome === 'failed' ? (SAFE_CONNECTION_ERROR_CODES.has(rawCode) ? rawCode : 'UNKNOWN') : null,
+      observed_at: text(event.occurred_at, 80) || null,
+    })
+  }
+  return latest
+}
+
+export function currentConnectionHealthObservation(connection: Record<string, unknown>, observation?: Record<string, unknown>) {
+  if (!observation?.observed_at) return null
+  const observedAt = Date.parse(String(observation.observed_at))
+  const changedAt = Date.parse(String(connection.updated_at || ''))
+  if (!Number.isFinite(observedAt) || (Number.isFinite(changedAt) && observedAt < changedAt)) return null
+  return observation
+}
+
 function safePublicConfig(provider: string, value: unknown) {
   const input = value && typeof value === 'object' ? value as Record<string, unknown> : {}
   if (provider === 'github') {
@@ -213,8 +246,10 @@ export async function handleRequest(req: Request, dependencies: {
     const body = await req.json()
     const action = text(body.action, 40)
     const modelScopedAction = action === 'list_model_allowlist' || action === 'configure_model_allowlist'
-    const selectedOrganizationId = modelScopedAction ? text(body.organization_id, 80) : ORGANIZATION_ID
-    if (modelScopedAction && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(selectedOrganizationId)) {
+    const designScopedAction = (action === 'list' || action === 'test') && body.organization_id !== undefined
+    const organizationScopedAction = modelScopedAction || designScopedAction
+    const selectedOrganizationId = organizationScopedAction ? text(body.organization_id, 80) : ORGANIZATION_ID
+    if (organizationScopedAction && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(selectedOrganizationId)) {
       return json({ error: 'Selected organization is required' }, 400)
     }
     const { data: membership, error: membershipError } = await userClient
@@ -263,6 +298,7 @@ export async function handleRequest(req: Request, dependencies: {
       if (departmentId && !DEPARTMENTS.has(departmentId)) return json({ error: 'Unknown department' }, 400)
       const { data, error } = await userClient.from('integration_connections')
         .select('*, integration_connection_departments(department_id)')
+        .eq('organization_id', selectedOrganizationId)
         .is('archived_at', null).order('provider').order('display_name')
       if (error) throw error
       const visibleConnections = (data || []).map((connection: Record<string, any>) => {
@@ -276,8 +312,25 @@ export async function handleRequest(req: Request, dependencies: {
           secret_configured: Boolean(connection.secret_name && Deno.env.get(connection.secret_name)),
         }
       }).filter((connection: Record<string, any>) => !departmentId || connection.department_ids.includes(departmentId))
+      const connectionIds: string[] = visibleConnections.map((connection: Record<string, any>) => String(connection.id))
+      let observations = new Map<string, Record<string, unknown>>()
+      if (connectionIds.length) {
+        const latestEvents = await Promise.all(connectionIds.map(async connectionId => {
+          const { data: event, error: eventError } = await adminClient.from('integration_events')
+            .select('id, connection_id, outcome, error_code, occurred_at')
+            .eq('organization_id', selectedOrganizationId).eq('connection_id', connectionId)
+            .eq('operation', 'tested').order('occurred_at', { ascending: false })
+            .order('id', { ascending: false }).limit(1).maybeSingle()
+          return eventError ? null : event
+        }))
+        observations = safeConnectionHealthObservations(connectionIds, latestEvents.filter(Boolean))
+      }
       return json({
-        connections: visibleConnections,
+        organization_id: selectedOrganizationId,
+        connections: visibleConnections.map((connection: Record<string, any>) => ({
+          ...connection,
+          health_observation: currentConnectionHealthObservation(connection, observations.get(String(connection.id))),
+        })),
         can_manage: isLeader,
       })
     }
@@ -334,7 +387,7 @@ export async function handleRequest(req: Request, dependencies: {
 
     const connectionId = text(body.connection_id, 80)
     if (!connectionId) return json({ error: 'Connection ID is required' }, 400)
-    const connectionOrganizationId = action === 'configure_model_allowlist'
+    const connectionOrganizationId = action === 'configure_model_allowlist' || designScopedAction
       ? selectedOrganizationId
       : ORGANIZATION_ID
     const { data: connection, error: connectionError } = await adminClient
@@ -412,7 +465,7 @@ export async function handleRequest(req: Request, dependencies: {
       if (!providerSecret) {
         await adminClient.from('integration_connections').update({
           status: 'disconnected', last_checked_at: new Date().toISOString(), last_check_status: 'not_configured',
-        }).eq('id', connection.id)
+        }).eq('id', connection.id).eq('organization_id', connectionOrganizationId)
         return json({ error: 'The named Edge Function secret is not configured' }, 409)
       }
       const startedAt = Date.now()
@@ -420,10 +473,10 @@ export async function handleRequest(req: Request, dependencies: {
         const result = await testConnection(connection, providerSecret, dependencies.fetcher)
         await adminClient.from('integration_connections').update({
           status: 'verified', last_checked_at: new Date().toISOString(), last_check_status: 'passed',
-        }).eq('id', connection.id)
-        await syncInitialDepartmentChatModel(adminClient, connection, user.id)
+        }).eq('id', connection.id).eq('organization_id', connectionOrganizationId)
+        await syncInitialDepartmentChatModel(adminClient, connection, user.id, connectionOrganizationId)
         await adminClient.from('integration_events').insert({
-          organization_id: ORGANIZATION_ID,
+          organization_id: connectionOrganizationId,
           connection_id: connection.id,
           actor_id: user.id,
           operation: 'tested',
@@ -437,9 +490,9 @@ export async function handleRequest(req: Request, dependencies: {
         const code = testError && typeof testError === 'object' && 'code' in testError ? String(testError.code) : 'CONNECTION_FAILED'
         await adminClient.from('integration_connections').update({
           status: 'error', last_checked_at: new Date().toISOString(), last_check_status: 'failed',
-        }).eq('id', connection.id)
+        }).eq('id', connection.id).eq('organization_id', connectionOrganizationId)
         await adminClient.from('integration_events').insert({
-          organization_id: ORGANIZATION_ID,
+          organization_id: connectionOrganizationId,
           connection_id: connection.id,
           actor_id: user.id,
           operation: 'tested',
