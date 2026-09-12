@@ -68,6 +68,10 @@ Deno.test('MB04A campaign-plan drafts are manual, unapproved, exact-source input
   assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Requirement', channels: ['email'], creative_requirements: [{}] }), Error, 'needs format')
   assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Budget', channels: ['email'], planned_budget: 10 }), Error, 'Currency is required')
   assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Budget', channels: ['email'], planned_budget: Infinity, currency_code: 'USD' }), Error, 'finite')
+  assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Budget', channels: ['email'], planned_budget: 10, currency_code: 'USDX' }), Error, 'three-letter')
+  assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Budget', channels: ['email'], planned_budget: true, currency_code: 'USD' }), Error, 'finite')
+  assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Budget', channels: ['email'], planned_budget: [], currency_code: 'USD' }), Error, 'finite')
+  assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Budget', channels: ['email'], planned_budget: '   ', currency_code: 'USD' }), Error, 'leave both blank')
   assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Budget', channels: ['email'], currency_code: 'USD' }), Error, 'leave both blank')
 })
 

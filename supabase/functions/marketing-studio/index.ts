@@ -287,9 +287,19 @@ export function validateCampaignPlan(value: unknown) {
   const startsOn = safeDate(input.starts_on)
   const endsOn = safeDate(input.ends_on)
   const landingPageUrl = text(input.landing_page_url, 2000)
-  const plannedBudget = input.planned_budget === '' || input.planned_budget === null || input.planned_budget === undefined
-    ? null : Number(input.planned_budget)
-  const currencyCode = text(input.currency_code, 3).toUpperCase()
+  const rawBudget = input.planned_budget
+  const hasBudget = rawBudget !== null && rawBudget !== undefined
+    && !(typeof rawBudget === 'string' && rawBudget.trim() === '')
+  if (hasBudget && !['number', 'string'].includes(typeof rawBudget)) throw new Error('Planning budget must be a non-negative finite number')
+  if (hasBudget && typeof rawBudget === 'string' && !/^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(rawBudget.trim())) {
+    throw new Error('Planning budget must be a non-negative finite number')
+  }
+  const plannedBudget = hasBudget ? Number(rawBudget) : null
+  const rawCurrency = input.currency_code
+  if (rawCurrency !== null && rawCurrency !== undefined && typeof rawCurrency !== 'string') {
+    throw new Error('Currency must use a three-letter code')
+  }
+  const currencyCode = typeof rawCurrency === 'string' ? rawCurrency.trim().toUpperCase() : ''
   if (!title || !objective || !channels.length) throw new Error('Plan title, objective, and at least one channel are required')
   if (startsOn && endsOn && startsOn > endsOn) throw new Error('Plan end date cannot precede its start date')
   if (landingPageUrl) {

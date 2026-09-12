@@ -101,6 +101,28 @@ begin
 end;
 $$;
 
+create or replace function private.assert_mb04b_campaign_context(
+  p_organization_id uuid, p_engagement_id uuid, p_campaign_id uuid, p_actor_id uuid
+) returns void language plpgsql security invoker set search_path = '' as $$
+declare v_membership record;
+begin
+  select role,department_id into v_membership from public.organization_memberships
+  where organization_id=p_organization_id and user_id=p_actor_id and member_kind='team' and status='active';
+  if not found or not (coalesce(v_membership.role in ('system_owner','operations_admin','executive'),false)
+    or coalesce(v_membership.department_id='marketing',false)) then raise exception 'Marketing department access required'; end if;
+  if not exists(select 1 from public.organizations where id=p_organization_id and status='active') then raise exception 'Active organization required'; end if;
+  if not exists(select 1 from public.engagements e
+    join public.engagement_services es on es.engagement_id=e.id and es.organization_id=e.organization_id
+    join public.service_catalog sc on sc.id=es.service_id
+    where e.id=p_engagement_id and e.organization_id=p_organization_id and es.status='active'
+      and sc.department_id='marketing' and sc.is_active) then raise exception 'Active Marketing engagement required'; end if;
+  if not exists(select 1 from public.marketing_campaigns
+    where id=p_campaign_id and organization_id=p_organization_id and engagement_id=p_engagement_id) then
+    raise exception 'Campaign does not match this Marketing engagement';
+  end if;
+end;
+$$;
+
 create or replace function public.duplicate_marketing_campaign_plan_draft(
   p_organization_id uuid, p_engagement_id uuid, p_campaign_id uuid, p_source_plan_version_id uuid,
   p_expected_latest_version_id uuid, p_idempotency_key uuid, p_payload_checksum text, p_actor_id uuid
@@ -108,19 +130,21 @@ create or replace function public.duplicate_marketing_campaign_plan_draft(
 declare
   v_source public.marketing_campaign_plan_versions%rowtype; v_budget public.marketing_campaign_plan_budgets%rowtype;
   v_replay public.marketing_campaign_plan_duplicate_requests%rowtype; v_result jsonb; v_requirements jsonb;
-  v_membership record;
+  v_actual_checksum text;
 begin
   if p_organization_id is null or p_engagement_id is null or p_campaign_id is null or p_source_plan_version_id is null or p_actor_id is null or p_idempotency_key is null then raise exception 'Duplicate context is required'; end if;
-  if p_payload_checksum !~ '^[a-f0-9]{64}$' then raise exception 'Valid payload checksum required'; end if;
-  select role,department_id into v_membership from public.organization_memberships where organization_id=p_organization_id and user_id=p_actor_id and member_kind='team' and status='active';
-  if not found or not (coalesce(v_membership.role in ('system_owner','operations_admin','executive'),false) or coalesce(v_membership.department_id='marketing',false)) then raise exception 'Marketing department access required'; end if;
-  if not exists(select 1 from public.organizations where id=p_organization_id and status='active') then raise exception 'Active organization required'; end if;
-  if not exists(select 1 from public.engagements e join public.engagement_services es on es.engagement_id=e.id and es.organization_id=e.organization_id join public.service_catalog sc on sc.id=es.service_id where e.id=p_engagement_id and e.organization_id=p_organization_id and es.status='active' and sc.department_id='marketing' and sc.is_active) then raise exception 'Active Marketing engagement required'; end if;
-  if not exists(select 1 from public.marketing_campaigns where id=p_campaign_id and organization_id=p_organization_id and engagement_id=p_engagement_id) then raise exception 'Campaign does not match this Marketing engagement'; end if;
+  -- The compatibility checksum input is never trusted; replay identity is derived from the actual typed arguments.
+  v_actual_checksum:=encode(extensions.digest(convert_to(jsonb_build_object(
+    'organization_id',p_organization_id,'actor_id',p_actor_id,'engagement_id',p_engagement_id,
+    'campaign_id',p_campaign_id,'source_plan_version_id',p_source_plan_version_id,
+    'expected_latest_version_id',p_expected_latest_version_id,'idempotency_key',p_idempotency_key
+  )::text,'UTF8'),'sha256'),'hex');
+  perform private.assert_mb04b_campaign_context(p_organization_id,p_engagement_id,p_campaign_id,p_actor_id);
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_organization_id::text||':'||p_actor_id::text||':duplicate_campaign_plan:'||p_idempotency_key::text,0));
+  perform private.assert_mb04b_campaign_context(p_organization_id,p_engagement_id,p_campaign_id,p_actor_id);
   select * into v_replay from public.marketing_campaign_plan_duplicate_requests where organization_id=p_organization_id and actor_id=p_actor_id and idempotency_key=p_idempotency_key;
   if found then
-    if v_replay.payload_checksum<>p_payload_checksum then raise exception 'Idempotency key was already used with a different duplicate payload' using errcode='23505'; end if;
+    if v_replay.payload_checksum<>v_actual_checksum then raise exception 'Idempotency key was already used with a different duplicate payload' using errcode='23505'; end if;
     select to_jsonb(plan)||jsonb_build_object('planned_budget',budget.planned_budget,'currency_code',budget.currency_code,'replayed',true) into v_result
     from public.marketing_campaign_plan_versions plan left join public.marketing_campaign_plan_budgets budget on budget.plan_version_id=plan.id and budget.organization_id=plan.organization_id
     where plan.id=v_replay.created_plan_version_id and plan.organization_id=p_organization_id;
@@ -132,7 +156,7 @@ begin
   select coalesce(jsonb_agg(jsonb_build_object('format',format,'intended_placement',intended_placement,'message_version_id',message_version_id,'due_date',due_date) order by position),'[]'::jsonb) into v_requirements from public.marketing_campaign_plan_creative_requirements where plan_version_id=v_source.id and organization_id=p_organization_id;
   select public.save_marketing_campaign_plan_draft_with_budget(p_organization_id,p_engagement_id,p_campaign_id,p_expected_latest_version_id,v_source.title,v_source.objective,v_source.channels,v_source.starts_on,v_source.ends_on,v_source.audience,v_source.landing_page_url,v_budget.planned_budget,v_budget.currency_code,v_source.approved_message_version_id,v_source.measurement_plan_version_id,v_requirements,'Duplicated from plan version '||v_source.version_number,p_source_plan_version_id,p_actor_id) into v_result;
   insert into public.marketing_campaign_plan_duplicate_requests(organization_id,actor_id,idempotency_key,payload_checksum,source_plan_version_id,created_plan_version_id)
-  values(p_organization_id,p_actor_id,p_idempotency_key,p_payload_checksum,p_source_plan_version_id,(v_result->>'id')::uuid);
+  values(p_organization_id,p_actor_id,p_idempotency_key,v_actual_checksum,p_source_plan_version_id,(v_result->>'id')::uuid);
   return v_result||jsonb_build_object('replayed',false);
 end;
 $$;
@@ -145,24 +169,30 @@ create or replace function public.submit_marketing_campaign_plan_review(
 ) returns jsonb language plpgsql security invoker set search_path = '' as $$
 declare
   v_plan public.marketing_campaign_plan_versions%rowtype; v_budget public.marketing_campaign_plan_budgets%rowtype;
-  v_membership record; v_latest_plan_id uuid; v_artifact_id uuid; v_latest_brief_id uuid;
+  v_latest_plan_id uuid; v_artifact_id uuid; v_latest_brief_id uuid; v_actual_checksum text;
   v_requirements jsonb; v_content jsonb; v_content_checksum text; v_brief_payload_checksum text;
   v_version jsonb; v_request jsonb; v_submission public.marketing_campaign_plan_review_submissions%rowtype;
 begin
   if p_organization_id is null or p_engagement_id is null or p_campaign_id is null or p_plan_version_id is null or p_actor_id is null or p_idempotency_key is null then raise exception 'Review submission context is required'; end if;
-  if p_payload_checksum !~ '^[a-f0-9]{64}$' then raise exception 'Valid payload checksum required'; end if;
-  select role,department_id into v_membership from public.organization_memberships where organization_id=p_organization_id and user_id=p_actor_id and member_kind='team' and status='active';
-  if not found or not (coalesce(v_membership.role in ('system_owner','operations_admin','executive'),false) or coalesce(v_membership.department_id='marketing',false)) then raise exception 'Marketing department access required'; end if;
-  if not exists(select 1 from public.organizations where id=p_organization_id and status='active') then raise exception 'Active organization required'; end if;
-  if not exists(select 1 from public.engagements e join public.engagement_services es on es.engagement_id=e.id and es.organization_id=e.organization_id join public.service_catalog sc on sc.id=es.service_id where e.id=p_engagement_id and e.organization_id=p_organization_id and es.status='active' and sc.department_id='marketing' and sc.is_active) then raise exception 'Active Marketing engagement required'; end if;
-  if not exists(select 1 from public.marketing_campaigns where id=p_campaign_id and organization_id=p_organization_id and engagement_id=p_engagement_id) then raise exception 'Campaign does not match this Marketing engagement'; end if;
+  -- The compatibility checksum input is never trusted; replay identity is derived from the actual typed arguments.
+  v_actual_checksum:=encode(extensions.digest(convert_to(jsonb_build_object(
+    'organization_id',p_organization_id,'actor_id',p_actor_id,'engagement_id',p_engagement_id,
+    'campaign_id',p_campaign_id,'plan_version_id',p_plan_version_id,
+    'expected_latest_plan_version_id',p_expected_latest_plan_version_id,
+    'expected_latest_brief_version_id',p_expected_latest_brief_version_id,
+    'approval_policy',p_approval_policy,'required_approver_ids',to_jsonb(p_required_approver_ids),
+    'idempotency_key',p_idempotency_key
+  )::text,'UTF8'),'sha256'),'hex');
+  perform private.assert_mb04b_campaign_context(p_organization_id,p_engagement_id,p_campaign_id,p_actor_id);
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_organization_id::text||':'||p_actor_id::text||':submit_campaign_plan:'||p_idempotency_key::text,0));
+  perform private.assert_mb04b_campaign_context(p_organization_id,p_engagement_id,p_campaign_id,p_actor_id);
   select * into v_submission from public.marketing_campaign_plan_review_submissions where organization_id=p_organization_id and submitted_by=p_actor_id and idempotency_key=p_idempotency_key;
   if found then
-    if v_submission.payload_checksum<>p_payload_checksum then raise exception 'Idempotency key was already used with a different review payload' using errcode='23505'; end if;
+    if v_submission.payload_checksum<>v_actual_checksum then raise exception 'Idempotency key was already used with a different review payload' using errcode='23505'; end if;
     return to_jsonb(v_submission)||jsonb_build_object('replayed',true);
   end if;
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_organization_id::text||':'||p_campaign_id::text||':campaign_plan',0));
+  perform private.assert_mb04b_campaign_context(p_organization_id,p_engagement_id,p_campaign_id,p_actor_id);
   select id into v_latest_plan_id from public.marketing_campaign_plan_versions where organization_id=p_organization_id and campaign_id=p_campaign_id order by version_number desc limit 1;
   if v_latest_plan_id is distinct from p_expected_latest_plan_version_id or v_latest_plan_id is distinct from p_plan_version_id then raise exception 'Campaign plan changed since review was previewed; reload before submitting' using errcode='40001'; end if;
   select * into v_plan from public.marketing_campaign_plan_versions where id=p_plan_version_id and organization_id=p_organization_id and campaign_id=p_campaign_id and engagement_id=p_engagement_id;
@@ -179,13 +209,15 @@ begin
   select public.save_marketing_campaign_brief(p_organization_id,p_engagement_id,p_campaign_id,v_artifact_id,p_expected_latest_brief_version_id,v_plan.title,v_content,v_content_checksum,'Submitted from campaign plan version '||v_plan.version_number,false,p_idempotency_key,v_brief_payload_checksum,p_actor_id) into v_version;
   select public.create_marketing_campaign_brief_approval_request((v_version->>'id')::uuid,p_approval_policy,p_required_approver_ids,p_actor_id) into v_request;
   insert into public.marketing_campaign_plan_review_submissions(organization_id,campaign_id,plan_version_id,artifact_id,artifact_version_id,artifact_version_number,approval_request_id,submitted_by,idempotency_key,payload_checksum)
-  values(p_organization_id,p_campaign_id,p_plan_version_id,(v_version->>'artifact_id')::uuid,(v_version->>'id')::uuid,(v_version->>'version_number')::integer,(v_request->>'id')::uuid,p_actor_id,p_idempotency_key,p_payload_checksum) returning * into v_submission;
+  values(p_organization_id,p_campaign_id,p_plan_version_id,(v_version->>'artifact_id')::uuid,(v_version->>'id')::uuid,(v_version->>'version_number')::integer,(v_request->>'id')::uuid,p_actor_id,p_idempotency_key,v_actual_checksum) returning * into v_submission;
   return to_jsonb(v_submission)||jsonb_build_object('replayed',false);
 end;
 $$;
 
 revoke all on function public.save_marketing_campaign_plan_draft_with_budget(uuid,uuid,uuid,uuid,text,text,text[],date,date,text,text,numeric,text,uuid,uuid,jsonb,text,uuid,uuid) from public,anon,authenticated;
 grant execute on function public.save_marketing_campaign_plan_draft_with_budget(uuid,uuid,uuid,uuid,text,text,text[],date,date,text,text,numeric,text,uuid,uuid,jsonb,text,uuid,uuid) to service_role;
+revoke all on function private.assert_mb04b_campaign_context(uuid,uuid,uuid,uuid) from public,anon,authenticated;
+grant execute on function private.assert_mb04b_campaign_context(uuid,uuid,uuid,uuid) to service_role;
 revoke all on function public.duplicate_marketing_campaign_plan_draft(uuid,uuid,uuid,uuid,uuid,uuid,text,uuid) from public,anon,authenticated;
 grant execute on function public.duplicate_marketing_campaign_plan_draft(uuid,uuid,uuid,uuid,uuid,uuid,text,uuid) to service_role;
 revoke all on function public.submit_marketing_campaign_plan_review(uuid,uuid,uuid,uuid,uuid,uuid,text,uuid[],uuid,text,uuid) from public,anon,authenticated;

@@ -37,6 +37,10 @@ test('planning budget requires an explicit currency and remains finite and nonne
   assert.throws(() => validateCampaignPlanDraft({ ...valid, currency_code: '' }), /Currency is required/)
   assert.throws(() => validateCampaignPlanDraft({ ...valid, planned_budget: -1 }), /non-negative finite/)
   assert.throws(() => validateCampaignPlanDraft({ ...valid, planned_budget: 'Infinity' }), /non-negative finite/)
+  assert.throws(() => validateCampaignPlanDraft({ ...valid, currency_code: 'USDX' }), /three-letter/)
+  assert.throws(() => validateCampaignPlanDraft({ ...valid, planned_budget: true }), /non-negative finite/)
+  assert.throws(() => validateCampaignPlanDraft({ ...valid, planned_budget: [] }), /non-negative finite/)
+  assert.throws(() => validateCampaignPlanDraft({ ...valid, planned_budget: '   ' }), /leave both blank/)
   assert.throws(() => validateCampaignPlanDraft({ title: 'Plan', objective: 'Outcome', channels: ['Email'], currency_code: 'USD' }), /leave both blank/)
 })
 
@@ -169,6 +173,10 @@ test('MB04B is additive, retry-safe, exact-version governed, and does not create
   assert.match(completion, /Idempotency key was already used with a different duplicate payload/)
   assert.match(completion, /Idempotency key was already used with a different review payload/)
   assert.match(completion, /Campaign plan changed since review was previewed/)
+  assert.match(completion, /compatibility checksum input is never trusted/)
+  assert.match(completion, /v_replay.payload_checksum<>v_actual_checksum/)
+  assert.match(completion, /v_submission.payload_checksum<>v_actual_checksum/)
+  assert.ok((completion.match(/perform private.assert_mb04b_campaign_context/g) || []).length >= 5)
   assert.doesNotMatch(completion, /insert into public\.(work_items|artifact_approvals|provider_connections)|update public\.marketing_campaigns[^]*planned_budget/i)
   for (const check of ['budget_pair_required', 'nonfinite_budget_denied', 'duplicate_replay_same_result',
     'duplicate_key_conflict_denied', 'review_exact_plan_and_brief_version', 'review_pending_not_approved',
@@ -180,6 +188,8 @@ test('MB04B is additive, retry-safe, exact-version governed, and does not create
   assert.match(completionConcurrency, /MB04B_LOCAL_TEMPLATE_URL/)
   assert.match(completionConcurrency, /duplicate contender did not wait on replay lock/)
   assert.match(completionConcurrency, /review contender did not wait on replay lock/)
+  assert.match(completionConcurrency, /duplicate_replay_revocation_denied=true/)
+  assert.match(completionConcurrency, /review_replay_revocation_denied=true/)
   assert.match(completionConcurrency, /stale submit did not wait on plan lock/)
   assert.match(completionConcurrency, /'40001'/)
 })

@@ -64,18 +64,18 @@ begin
 
   select public.duplicate_marketing_campaign_plan_draft(org,engagement,campaign,base_id,base_id,duplicate_key,repeat('a',64),owner) into duplicate_one;
   duplicate_id:=(duplicate_one->>'id')::uuid;
-  select public.duplicate_marketing_campaign_plan_draft(org,engagement,campaign,base_id,base_id,duplicate_key,repeat('a',64),owner) into duplicate_two;
+  select public.duplicate_marketing_campaign_plan_draft(org,engagement,campaign,base_id,base_id,duplicate_key,repeat('9',64),owner) into duplicate_two;
   update mb04b_checks set passed=(duplicate_one->>'source_plan_version_id')::uuid=base_id and (duplicate_one->>'planned_budget')::numeric=1250.50 and exists(select 1 from public.marketing_campaign_plan_creative_requirements where plan_version_id=duplicate_id and format='Static image') where name='duplicate_exact_copy';
   update mb04b_checks set passed=(duplicate_two->>'id')::uuid=duplicate_id and (duplicate_two->>'replayed')::boolean and (select count(*)=2 from public.marketing_campaign_plan_versions where campaign_id=campaign) where name='duplicate_replay_same_result';
-  rejected:=false; begin perform public.duplicate_marketing_campaign_plan_draft(org,engagement,campaign,base_id,duplicate_id,duplicate_key,repeat('b',64),owner); exception when unique_violation then rejected:=true; end;
+  rejected:=false; begin perform public.duplicate_marketing_campaign_plan_draft(org,engagement,campaign,base_id,duplicate_id,duplicate_key,repeat('9',64),owner); exception when unique_violation then rejected:=true; end;
   update mb04b_checks set passed=rejected and (select count(*)=2 from public.marketing_campaign_plan_versions where campaign_id=campaign) where name='duplicate_key_conflict_denied';
 
   select public.submit_marketing_campaign_plan_review(org,engagement,campaign,duplicate_id,duplicate_id,null,'parallel',array[manager],review_key,repeat('c',64),owner) into submission_one;
-  select public.submit_marketing_campaign_plan_review(org,engagement,campaign,duplicate_id,duplicate_id,null,'parallel',array[manager],review_key,repeat('c',64),owner) into submission_two;
+  select public.submit_marketing_campaign_plan_review(org,engagement,campaign,duplicate_id,duplicate_id,null,'parallel',array[manager],review_key,repeat('9',64),owner) into submission_two;
   update mb04b_checks set passed=exists(select 1 from public.marketing_campaign_plan_review_submissions s join public.artifact_versions av on av.id=s.artifact_version_id where s.id=(submission_one->>'id')::uuid and s.plan_version_id=duplicate_id and av.content#>>'{campaign_plan_source,plan_version_id}'=duplicate_id::text and av.content#>>'{campaign_plan_source,currency_code}'='EUR') where name='review_exact_plan_and_brief_version';
   update mb04b_checks set passed=exists(select 1 from public.artifact_approval_requests r join public.marketing_campaign_plan_review_submissions s on s.approval_request_id=r.id where s.id=(submission_one->>'id')::uuid and r.status='pending') and exists(select 1 from public.artifact_approval_signoffs so join public.marketing_campaign_plan_review_submissions s on s.approval_request_id=so.request_id where s.id=(submission_one->>'id')::uuid and so.required_approver_id=manager) and not exists(select 1 from public.artifact_approvals a join public.marketing_campaign_plan_review_submissions s on s.artifact_version_id=a.artifact_version_id where s.id=(submission_one->>'id')::uuid) where name='review_pending_not_approved';
   update mb04b_checks set passed=(submission_two->>'id')::uuid=(submission_one->>'id')::uuid and (submission_two->>'replayed')::boolean and (select count(*)=1 from public.marketing_campaign_plan_review_submissions where campaign_id=campaign) where name='review_replay_same_result';
-  rejected:=false; begin perform public.submit_marketing_campaign_plan_review(org,engagement,campaign,duplicate_id,duplicate_id,null,'parallel',array[manager],review_key,repeat('d',64),owner); exception when unique_violation then rejected:=true; end;
+  rejected:=false; begin perform public.submit_marketing_campaign_plan_review(org,engagement,campaign,duplicate_id,duplicate_id,null,'sequential',array[manager],review_key,repeat('9',64),owner); exception when unique_violation then rejected:=true; end;
   update mb04b_checks set passed=rejected where name='review_key_conflict_denied';
 
   select public.save_marketing_campaign_plan_draft_with_budget(org,engagement,campaign,duplicate_id,'Plan three','Later draft',array['Search'],null,null,'','',null,null,null,null,'[]','later',null,owner) into later;

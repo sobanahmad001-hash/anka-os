@@ -54,6 +54,26 @@ try {
   const reviewReplay=await reviewContender;assert.equal(reviewReplay.id,reviewWinner.rows[0].result.id);assert.equal(reviewReplay.replayed,true)
 
   await begin(first)
+  await first.query("select pg_advisory_xact_lock(hashtextextended($1::text||':'||$2::text||':duplicate_campaign_plan:'||$3::text,0))",[id.org,id.owner,duplicateKey])
+  settled=false
+  const revokedDuplicateReplay=(async()=>{await begin(second);try{await second.query(duplicateSql,[id.org,id.engagement,id.campaign,base,base,duplicateKey,id.owner]);await second.query('commit');return null}catch(error){await second.query('rollback');return error as Error}finally{settled=true}})()
+  await new Promise(resolve=>setTimeout(resolve,150));assert.equal(settled,false,'duplicate replay did not wait on replay lock')
+  await setup.query("update public.organization_memberships set status='suspended' where organization_id=$1 and user_id=$2",[id.org,id.owner])
+  await first.query('commit')
+  assert.match((await revokedDuplicateReplay)?.message || '',/Marketing department access required/)
+  await setup.query("update public.organization_memberships set status='active' where organization_id=$1 and user_id=$2",[id.org,id.owner])
+
+  await begin(first)
+  await first.query("select pg_advisory_xact_lock(hashtextextended($1::text||':'||$2::text||':submit_campaign_plan:'||$3::text,0))",[id.org,id.owner,reviewKey])
+  settled=false
+  const revokedReviewReplay=(async()=>{await begin(second);try{await second.query(reviewSql,[id.org,id.engagement,id.campaign,duplicate,id.manager,reviewKey,id.owner]);await second.query('commit');return null}catch(error){await second.query('rollback');return error as Error}finally{settled=true}})()
+  await new Promise(resolve=>setTimeout(resolve,150));assert.equal(settled,false,'review replay did not wait on replay lock')
+  await setup.query("update public.organization_memberships set status='suspended' where organization_id=$1 and user_id=$2",[id.org,id.owner])
+  await first.query('commit')
+  assert.match((await revokedReviewReplay)?.message || '',/Marketing department access required/)
+  await setup.query("update public.organization_memberships set status='active' where organization_id=$1 and user_id=$2",[id.org,id.owner])
+
+  await begin(first)
   const later=await first.query("select public.save_marketing_campaign_plan_draft_with_budget($1,$2,$3,$4,'Later','Goal',array['Email'],null,null,'','',null,null,null,null,'[]','later',null,$5) result",[id.org,id.engagement,id.campaign,duplicate,id.owner])
   settled=false
   const stale=(async()=>{await begin(second);try{await second.query("select public.submit_marketing_campaign_plan_review($1,$2,$3,$4,$4,$5,'parallel',array[$6::uuid],$7,repeat('c',64),$8)",[id.org,id.engagement,id.campaign,duplicate,reviewWinner.rows[0].result.artifact_version_id,id.manager,crypto.randomUUID(),id.owner]);await second.query('commit');return null}catch(error){await second.query('rollback');return error as {code?:string}}finally{settled=true}})()
@@ -61,7 +81,7 @@ try {
   assert.equal((await stale)?.code,'40001');assert.equal(later.rows[0].result.version_number,3)
   const counts=await setup.query('select (select count(*) from public.marketing_campaign_plan_versions where campaign_id=$1) versions,(select count(*) from public.marketing_campaign_plan_duplicate_requests where organization_id=$2) duplicates,(select count(*) from public.marketing_campaign_plan_review_submissions where organization_id=$2) submissions',[id.campaign,id.org])
   assert.deepEqual(counts.rows[0],{versions:'3',duplicates:'1',submissions:'1'})
-  console.log('loopback_clone=true; duplicate_one_winner=true; duplicate_retry_same=true; review_one_winner=true; review_retry_same=true; stale_submit_sqlstate_40001=true')
+  console.log('loopback_clone=true; duplicate_one_winner=true; duplicate_retry_same=true; review_one_winner=true; review_retry_same=true; duplicate_replay_revocation_denied=true; review_replay_revocation_denied=true; stale_submit_sqlstate_40001=true')
 } finally {
   for(const client of clients){await client.query('rollback').catch(()=>{});await client.end()}
   if(created)await admin.query('DROP DATABASE "'+database+'"')

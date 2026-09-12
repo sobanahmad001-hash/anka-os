@@ -89,9 +89,19 @@ export function validateCampaignPlanDraft(value = {}) {
   const startsOn = clean(value.starts_on, 10)
   const endsOn = clean(value.ends_on, 10)
   const landingPageUrl = clean(value.landing_page_url, 2000)
-  const hasBudget = value.planned_budget !== '' && value.planned_budget !== null && value.planned_budget !== undefined
-  const plannedBudget = hasBudget ? Number(value.planned_budget) : null
-  const currencyCode = clean(value.currency_code, 3).toUpperCase()
+  const rawBudget = value.planned_budget
+  const hasBudget = rawBudget !== null && rawBudget !== undefined
+    && !(typeof rawBudget === 'string' && rawBudget.trim() === '')
+  if (hasBudget && !['number', 'string'].includes(typeof rawBudget)) throw new Error('Planning budget must be a non-negative finite number')
+  if (hasBudget && typeof rawBudget === 'string' && !/^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(rawBudget.trim())) {
+    throw new Error('Planning budget must be a non-negative finite number')
+  }
+  const plannedBudget = hasBudget ? Number(rawBudget) : null
+  const rawCurrency = value.currency_code
+  if (rawCurrency !== null && rawCurrency !== undefined && typeof rawCurrency !== 'string') {
+    throw new Error('Currency must use a three-letter code')
+  }
+  const currencyCode = typeof rawCurrency === 'string' ? rawCurrency.trim().toUpperCase() : ''
   if (!clean(value.title, 180)) throw new Error('Plan title is required')
   if (!clean(value.objective, 4000)) throw new Error('Plan objective is required')
   if (!channels.length) throw new Error('At least one channel is required')

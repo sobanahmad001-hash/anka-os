@@ -103,45 +103,57 @@ export default function MarketingCampaignPlan({ organizationId, engagement, camp
   }
 
   function previewDuplicate() {
-    try { setError(''); setConfirmation({ kind: 'duplicate', idempotencyKey: crypto.randomUUID(), preview: campaignPlanDuplicatePreview(viewing, campaign, latest) }) }
+    try {
+      const preview = campaignPlanDuplicatePreview(viewing, campaign, latest)
+      setError(''); setConfirmation({
+        kind: 'duplicate', idempotencyKey: crypto.randomUUID(), preview,
+        request: Object.freeze({
+          engagement_id: engagement.id, campaign_id: campaign.id,
+          source_plan_version_id: preview.sourcePlanVersionId,
+          expected_latest_version_id: latest?.id || null,
+        }),
+      })
+    }
     catch (reason) { setError(reason.message) }
   }
 
   function previewReview() {
     try {
       const approver = approvers.find(item => item.user_id === approverId)
-      setError(''); setConfirmation({ kind: 'review', idempotencyKey: crypto.randomUUID(), preview: campaignPlanReviewPreview(viewing, approver, campaign, latestBriefVersion) })
+      const preview = campaignPlanReviewPreview(viewing, approver, campaign, latestBriefVersion)
+      setError(''); setConfirmation({
+        kind: 'review', idempotencyKey: crypto.randomUUID(), preview,
+        request: Object.freeze({
+          engagement_id: engagement.id, campaign_id: campaign.id,
+          plan_version_id: preview.sourcePlanVersionId,
+          expected_latest_plan_version_id: latest?.id || null,
+          expected_latest_brief_version_id: latestBriefVersion?.id || null,
+          approval_policy: 'parallel',
+          required_approver_ids: Object.freeze([preview.approverId]),
+        }),
+      })
     } catch (reason) { setError(reason.message) }
   }
 
   async function confirmAction() {
-    if (!confirmation || !canEdit || !viewing) return
+    if (!confirmation || !canEdit) return
     const requestedKey = contextKey
     setBusy(true); setError(''); setMessage('')
     try {
       if (confirmation.kind === 'duplicate') {
-        const saved = await repository.duplicateDraft({
-          engagement_id: engagement.id, campaign_id: campaign.id, source_plan_version_id: viewing.id,
-          expected_latest_version_id: latest?.id || null, idempotency_key: confirmation.idempotencyKey,
-        })
+        const saved = await repository.duplicateDraft({ ...confirmation.request, idempotency_key: confirmation.idempotencyKey })
         if (!acceptCampaignPlanSave(saved, requestedKey, activeKey.current)) return
         const next = await repository.load(engagement.id, campaign.id)
         if (activeKey.current !== requestedKey) return
         setSnapshot(next); setViewingId(saved.id); setDraft(campaignPlanDraft(saved, next.requirements))
-        setMessage(`Duplicated plan version ${viewing.version_number} as unapproved version ${saved.version_number}; the exact source link was retained.`)
+        setMessage(`Duplicated plan version ${confirmation.preview.sourceVersionNumber} as unapproved version ${saved.version_number}; the exact source link was retained.`)
       } else {
-        const result = await repository.submitReview({
-          engagement_id: engagement.id, campaign_id: campaign.id, plan_version_id: viewing.id,
-          expected_latest_plan_version_id: latest?.id || null,
-          expected_latest_brief_version_id: latestBriefVersion?.id || null,
-          approval_policy: 'parallel', required_approver_ids: [confirmation.preview.approverId],
-          idempotency_key: confirmation.idempotencyKey,
-        })
+        const result = await repository.submitReview({ ...confirmation.request, idempotency_key: confirmation.idempotencyKey })
         if (!acceptCampaignPlanSave(result, requestedKey, activeKey.current)) return
         const next = await repository.load(engagement.id, campaign.id)
         if (activeKey.current !== requestedKey) return
         setSnapshot(next)
-        setMessage(`Submitted exact plan version ${viewing.version_number} for campaign brief review. No approval or release was applied.`)
+        setMessage(`Submitted exact plan version ${confirmation.preview.sourceVersionNumber} for campaign brief review. No approval or release was applied.`)
       }
       setConfirmation(null)
     } catch (reason) {
