@@ -44,13 +44,24 @@ export const CONTENT_ARTIFACT_FORMS = Object.freeze({
     ]),
   }),
   keyword_strategy: Object.freeze({
-    label: 'SEO and keyword planning', description: 'Industry, brand, and volume keywords linked to sitemap pages.',
+    label: 'Keyword strategy', description: 'Versioned keyword intent, evidence, and page or standalone request targeting.',
     fields: Object.freeze([
-      { key: 'keywords', label: 'Keyword-to-page map', kind: 'records', addLabel: 'Add keyword', recordFields: [
-        ['term', 'Keyword term', 'text'],
-        ['category', 'Category', 'select', ['industry', 'brand', 'volume']],
-        ['search_volume', 'Search volume', 'number'],
-        ['target_page_slug', 'Target sitemap page', 'target_page_slug'],
+      { key: 'source_architecture_version_id', label: 'Exact Website architecture version', kind: 'architecture_version' },
+      { key: 'keywords', label: 'Keyword strategy', kind: 'records', recordType: 'keyword', addLabel: 'Add keyword', recordFields: [
+        ['term', 'Keyword phrase', 'text'],
+        ['locale', 'Language or locale', 'text'],
+        ['intent', 'Intent', 'text_optional'],
+        ['topic_group', 'Topic group', 'text_optional'],
+        ['priority', 'Priority', 'text_optional'],
+        ['evidence_source', 'Evidence source', 'text_optional'],
+        ['search_volume', 'Search volume', 'number_optional'],
+        ['difficulty', 'Difficulty', 'number_optional'],
+        ['observation_date', 'Observation date', 'date_optional'],
+        ['target_kind', 'Target type', 'select', [
+          { value: 'page', label: 'Existing structure page' },
+          { value: 'content_request', label: 'Standalone content request' },
+        ]],
+        ['target_id', 'Target', 'keyword_target'],
         ['notes', 'Notes', 'textarea_optional'],
       ] },
     ]),
@@ -94,6 +105,7 @@ export const CONTENT_ARTIFACT_FORMS = Object.freeze({
 
 export const CONTENT_ARTIFACT_TYPES = Object.freeze(Object.keys(CONTENT_ARTIFACT_FORMS))
 export const CONTENT_FOUNDATION_TYPES = Object.freeze(['discovery', 'vision', 'audience'])
+export const MAX_KEYWORD_RECORDS = 500
 
 export const DEFAULT_DISCOVERY_TEMPLATE = Object.freeze({
   id: 'content-discovery-default-v1',
@@ -171,6 +183,120 @@ export function normalizeWebsitePath(value) {
     .join('/')
 }
 
+export function normalizeKeywordWhitespace(value) {
+  return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ')
+}
+
+function keywordEditor(content = {}) {
+  const sourceVersionId = String(content.source_architecture_version_id || '')
+  return {
+    source_architecture_version_id: sourceVersionId,
+    keywords: (Array.isArray(content.keywords) ? content.keywords : []).map(keyword => {
+      const targetKind = String(keyword.target_kind || '')
+        || (keyword.target_content_request_id ? 'content_request' : keyword.target_page_key || keyword.target_page_slug ? 'page' : '')
+      return {
+        ...keyword,
+        term: String(keyword.term || ''),
+        locale: String(keyword.locale || ''),
+        intent: String(keyword.intent || ''),
+        topic_group: String(keyword.topic_group || ''),
+        priority: String(keyword.priority || ''),
+        evidence_source: String(keyword.evidence_source || ''),
+        search_volume: keyword.search_volume ?? '',
+        difficulty: keyword.difficulty ?? '',
+        observation_date: String(keyword.observation_date || ''),
+        target_kind: targetKind,
+        target_id: String(targetKind === 'content_request' ? keyword.target_content_request_id || '' : keyword.target_page_key || ''),
+        target_page_slug: String(keyword.target_page_slug || ''),
+        notes: String(keyword.notes || ''),
+      }
+    }),
+  }
+}
+
+function optionalMetric(value) {
+  if (value === '' || value === null || value === undefined) return null
+  return Number(value)
+}
+
+export function keywordDuplicateWarnings(records = []) {
+  const warnings = new Map()
+  const rowsByPhraseLocale = new Map()
+  records.forEach((record, index) => {
+    const phrase = normalizeKeywordWhitespace(record?.term).toLocaleLowerCase()
+    const locale = normalizeKeywordWhitespace(record?.locale).toLocaleLowerCase()
+    if (!phrase || !locale) return
+    const key = `${locale}\u0000${phrase}`
+    const indexes = rowsByPhraseLocale.get(key) || []
+    indexes.push(index)
+    rowsByPhraseLocale.set(key, indexes)
+  })
+  rowsByPhraseLocale.forEach(indexes => {
+    if (indexes.length > 1) indexes.forEach(index => warnings.set(index,
+      'Duplicate phrase in this locale. Keep distinct intents separate; rows are not merged automatically.'))
+  })
+  return warnings
+}
+
+export function keywordStrategyIssues(editor = {}, { pageTargetIds, contentRequestIds } = {}) {
+  const issues = new Map()
+  const sourceVersionId = String(editor.source_architecture_version_id || '').trim()
+  if (!(editor.keywords || []).length) issues.set('form', 'Add at least one keyword.')
+  if ((editor.keywords || []).length > MAX_KEYWORD_RECORDS) {
+    issues.set('form', `Keyword strategies support at most ${MAX_KEYWORD_RECORDS} rows. Remove extra rows before saving.`)
+  }
+  ;(editor.keywords || []).forEach((record, index) => {
+    const messages = []
+    if (!normalizeKeywordWhitespace(record.term)) messages.push('Keyword phrase is required.')
+    if (!normalizeKeywordWhitespace(record.locale)) messages.push('Language or locale is required.')
+    if (!['page', 'content_request'].includes(record.target_kind)) messages.push('Choose a target type.')
+    if (!String(record.target_id || '').trim()) messages.push('Choose an existing target.')
+    if (record.target_kind === 'page' && !sourceVersionId) messages.push('Select the exact Website architecture version for page targets.')
+    if (record.target_kind === 'page' && record.target_id && pageTargetIds && !pageTargetIds.has(record.target_id)) {
+      messages.push('The selected page is not in the exact Website architecture version.')
+    }
+    if (record.target_kind === 'content_request' && record.target_id && contentRequestIds && !contentRequestIds.has(record.target_id)) {
+      messages.push('The selected content request is not available in this workspace.')
+    }
+    for (const [key, label, max] of [
+      ['term', 'Keyword phrase', 500], ['locale', 'Language or locale', 120], ['intent', 'Intent', 500],
+      ['topic_group', 'Topic group', 500], ['priority', 'Priority', 120], ['evidence_source', 'Evidence source', 1000],
+      ['notes', 'Notes', 2000],
+    ]) {
+      if (normalizeKeywordWhitespace(record[key]).length > max) messages.push(`${label} must be ${max} characters or fewer.`)
+    }
+    for (const [key, label] of [['search_volume', 'Search volume'], ['difficulty', 'Difficulty']]) {
+      if (record[key] !== '' && record[key] !== null && record[key] !== undefined
+        && (!Number.isFinite(Number(record[key])) || Number(record[key]) < 0)) messages.push(`${label} must be a non-negative number.`)
+    }
+    if (record.search_volume !== '' && record.search_volume !== null && record.search_volume !== undefined
+      && !Number.isSafeInteger(Number(record.search_volume))) messages.push('Search volume must be a whole number.')
+    const hasMeasuredValue = [record.search_volume, record.difficulty, record.observation_date]
+      .some(value => value !== '' && value !== null && value !== undefined)
+    if (hasMeasuredValue && !normalizeKeywordWhitespace(record.evidence_source)) {
+      messages.push('Evidence source is required when metrics or an observation date are supplied.')
+    }
+    if (messages.length) issues.set(index, messages.join(' '))
+  })
+  return issues
+}
+
+function targetSignature(keyword = {}) {
+  return [
+    normalizeKeywordWhitespace(keyword.term).toLocaleLowerCase(),
+    normalizeKeywordWhitespace(keyword.locale).toLocaleLowerCase(),
+    normalizeKeywordWhitespace(keyword.intent).toLocaleLowerCase(),
+    String(keyword.target_kind || ''),
+    String(keyword.target_page_key || keyword.target_content_request_id || keyword.target_id || ''),
+  ].join('\u0000')
+}
+
+export function keywordTargetsChanged(previous = [], next = []) {
+  const before = previous.map(targetSignature).sort()
+  const after = next.map(targetSignature).sort()
+  return before.length !== after.length || before.some((value, index) => value !== after[index])
+}
+
 export function legacyWebsitePageKey(path) {
   const normalized = normalizeWebsitePath(path)
   return normalized ? `legacy:${normalized}` : ''
@@ -200,6 +326,7 @@ function websiteArchitectureEditorPages(pages = [], { sort = true } = {}) {
 
 export function contentArtifactEditor(type, content = null) {
   const source = content || blankContentArtifact(type)
+  if (type === 'keyword_strategy') return keywordEditor(source)
   const definition = CONTENT_ARTIFACT_FORMS[type]
   const editor = Object.fromEntries(definition.fields.map(field => {
     const value = source[field.key]
@@ -232,6 +359,27 @@ export function serializeContentArtifact(type, editor) {
       page_type: String(page.page_type || '').trim(),
       purpose: String(page.purpose || '').trim(),
     })) }
+  }
+  if (type === 'keyword_strategy') return {
+    schema_version: 2,
+    source_architecture_version_id: String(editor.source_architecture_version_id || '').trim() || null,
+    keywords: (editor.keywords || []).map(record => ({
+      term: normalizeKeywordWhitespace(record.term),
+      locale: normalizeKeywordWhitespace(record.locale),
+      intent: normalizeKeywordWhitespace(record.intent),
+      topic_group: normalizeKeywordWhitespace(record.topic_group),
+      priority: normalizeKeywordWhitespace(record.priority),
+      evidence_source: normalizeKeywordWhitespace(record.evidence_source),
+      search_volume: optionalMetric(record.search_volume),
+      difficulty: optionalMetric(record.difficulty),
+      observation_date: String(record.observation_date || '').trim() || null,
+      target_kind: String(record.target_kind || '').trim(),
+      target_page_key: record.target_kind === 'page' ? String(record.target_id || '').trim() : null,
+      target_content_request_id: record.target_kind === 'content_request' ? String(record.target_id || '').trim() : null,
+      target_page_slug: record.target_kind === 'page' ? String(record.target_page_slug || '').trim() || null : null,
+      category: ['industry', 'brand', 'volume'].includes(record.category) ? record.category : null,
+      notes: String(record.notes || '').trim(),
+    })),
   }
   const content = Object.fromEntries(definition.fields.map(field => {
     const value = editor[field.key]

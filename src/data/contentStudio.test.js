@@ -80,7 +80,7 @@ test('Content vocabulary migration is an isolated additive CHECK change', () => 
   assert.equal((migration.match(/alter table public\./g) || []).length, 4)
 })
 
-test('RP2 sitemap and keyword-to-page content serialize as structured records', () => {
+test('RP2 sitemap and B04 keyword-to-page content serialize as structured records', () => {
   const architecture = serializeContentArtifact('website_architecture', {
     pages: [{ slug: 'home', title: 'Homepage', parent_slug: '', page_type: 'hub', purpose: 'Orient' }],
   })
@@ -89,10 +89,16 @@ test('RP2 sitemap and keyword-to-page content serialize as structured records', 
     parent_slug: null, position: 1000, page_type: 'hub', purpose: 'Orient',
   })
   const keywords = serializeContentArtifact('keyword_strategy', {
-    keywords: [{ term: 'strategy agency', category: 'industry', search_volume: '1200', target_page_slug: 'home', notes: '' }],
+    source_architecture_version_id: 'architecture-v1',
+    keywords: [{ term: ' strategy  agency ', locale: 'en-PK', category: 'industry', search_volume: '1200', evidence_source: 'Provider export 2026-09-12', target_kind: 'page', target_id: 'legacy:home', target_page_slug: 'home', notes: '' }],
   })
+  assert.equal(keywords.schema_version, 2)
+  assert.equal(keywords.source_architecture_version_id, 'architecture-v1')
   assert.deepEqual(keywords.keywords[0], {
-    term: 'strategy agency', category: 'industry', search_volume: 1200, target_page_slug: 'home', notes: '',
+    term: 'strategy agency', locale: 'en-PK', intent: '', topic_group: '', priority: '',
+    evidence_source: 'Provider export 2026-09-12', search_volume: 1200, difficulty: null,
+    observation_date: null, target_kind: 'page', target_page_key: 'legacy:home',
+    target_content_request_id: null, target_page_slug: 'home', category: 'industry', notes: '',
   })
 })
 

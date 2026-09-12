@@ -1,8 +1,8 @@
-import { assertEquals, assertThrows } from 'jsr:@std/assert@1.0.14'
+import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.14'
 import { brandBriefInput, compiledBrandStatement, contentStudioScope, customFieldDefinitionInput, handleRequest, hasContentAuthority, requireBrandBriefMutationToken,
   figmaHandoffUrl, validateContentRequestInput, validateQueueEntryInput } from './index.ts'
 
-import { assertWebsitePageIdentityTransition, CHAT_CONTENT_ARTIFACT_TYPE_SET, CONTENT_ARTIFACT_TYPES, contentArtifactResponseFormat, validateContentArtifact, withGeneratedSourceMetadata } from '../_shared/contentArtifacts.ts'
+import { assertWebsitePageIdentityTransition, CHAT_CONTENT_ARTIFACT_TYPE_SET, CONTENT_ARTIFACT_TYPES, contentArtifactResponseFormat, createContentArtifactVersion, MAX_KEYWORD_RECORDS, validateContentArtifact, withGeneratedSourceMetadata } from '../_shared/contentArtifacts.ts'
 
 Deno.test('B02 foundation contract preserves language and exact per-field source state', () => {
   const discovery = validateContentArtifact('discovery', {
@@ -216,6 +216,247 @@ Deno.test('RP2 rejects malformed sitemap hierarchy and keyword categories server
   assertThrows(() => validateContentArtifact('keyword_strategy', {
     keywords: [{ term: 'agency', category: 'transactional', search_volume: 12, target_page_slug: 'home', notes: '' }],
   }), Error, 'category')
+})
+
+Deno.test('B04 validates evidence-aware keywords while retaining absent metrics as unavailable', () => {
+  const strategy = validateContentArtifact('keyword_strategy', {
+    schema_version: 2,
+    source_architecture_version_id: 'architecture-v2',
+    keywords: [{
+      term: '  strategy   agency ', locale: 'en-PK', intent: 'commercial', topic_group: 'services',
+      priority: 'high', evidence_source: '', search_volume: null, difficulty: null, observation_date: null,
+      target_kind: 'page', target_page_key: 'page:home', target_content_request_id: null,
+      target_page_slug: 'stale-client-snapshot', category: null, notes: '',
+    }],
+  })
+  assertEquals(strategy.schema_version, 2)
+  assertEquals((strategy.keywords as Array<Record<string, unknown>>)[0].term, 'strategy agency')
+  assertEquals((strategy.keywords as Array<Record<string, unknown>>)[0].search_volume, null)
+})
+
+Deno.test('B04 rejects unlabelled measurements, invalid dates, and incomplete targets', () => {
+  const keyword = {
+    term: 'strategy agency', locale: 'en-PK', intent: '', topic_group: '', priority: '',
+    evidence_source: '', search_volume: 100, difficulty: null, observation_date: null,
+    target_kind: 'content_request', target_page_key: null, target_content_request_id: 'request-1',
+    target_page_slug: null, category: null, notes: '',
+  }
+  assertThrows(() => validateContentArtifact('keyword_strategy', {
+    schema_version: 2, source_architecture_version_id: null, keywords: [keyword],
+  }), Error, 'evidence source')
+  assertThrows(() => validateContentArtifact('keyword_strategy', {
+    schema_version: 2, source_architecture_version_id: null,
+    keywords: [{ ...keyword, search_volume: null, evidence_source: 'Provider', observation_date: '2026-02-30' }],
+  }), Error, 'real calendar date')
+  assertThrows(() => validateContentArtifact('keyword_strategy', {
+    schema_version: 2, source_architecture_version_id: null,
+    keywords: [{ ...keyword, search_volume: null, target_content_request_id: null }],
+  }), Error, 'target content request')
+  assertThrows(() => validateContentArtifact('keyword_strategy', {
+    schema_version: 2, source_architecture_version_id: null,
+    keywords: [{ ...keyword, search_volume: null, observation_date: '2026-01-01extra', evidence_source: 'Provider' }],
+  }), Error, 'real calendar date')
+  assertThrows(() => validateContentArtifact('keyword_strategy', {
+    schema_version: 2, source_architecture_version_id: null,
+    keywords: [{ ...keyword, term: 'x'.repeat(501), search_volume: null }],
+  }), Error, '500 characters or fewer')
+  assertThrows(() => validateContentArtifact('keyword_strategy', {
+    schema_version: 2, source_architecture_version_id: null,
+    keywords: [{ ...keyword, search_volume: 1.5, evidence_source: 'Provider' }],
+  }), Error, 'non-negative integer')
+})
+
+Deno.test('B04 accepts 500 keyword rows and rejects 501 without silent truncation', () => {
+  const keyword = (index: number) => ({
+    term: `Keyword ${index}`, locale: 'en-PK', intent: '', topic_group: '', priority: '',
+    evidence_source: '', search_volume: null, difficulty: null, observation_date: null,
+    target_kind: 'content_request', target_page_key: null, target_content_request_id: 'request-1',
+    target_page_slug: null, category: null, notes: '',
+  })
+  const atLimit = validateContentArtifact('keyword_strategy', {
+    schema_version: 2, source_architecture_version_id: null,
+    keywords: Array.from({ length: MAX_KEYWORD_RECORDS }, (_, index) => keyword(index)),
+  })
+  assertEquals((atLimit.keywords as unknown[]).length, MAX_KEYWORD_RECORDS)
+  assertThrows(() => validateContentArtifact('keyword_strategy', {
+    schema_version: 2, source_architecture_version_id: null,
+    keywords: Array.from({ length: MAX_KEYWORD_RECORDS + 1 }, (_, index) => keyword(index)),
+  }), Error, 'at most 500 rows')
+  assertThrows(() => validateContentArtifact('keyword_strategy', {
+    keywords: Array.from({ length: MAX_KEYWORD_RECORDS + 1 }, (_, index) => ({
+      term: `Legacy ${index}`, category: 'industry', search_volume: 0, target_page_slug: 'home', notes: '',
+    })),
+  }), Error, 'at most 500 rows')
+})
+
+function b04SaveFixture(options: {
+  requests?: Array<Record<string, unknown>>
+  visibleRequestIds?: string[]
+  sourceVersionId?: string
+  pages?: Array<Record<string, unknown>>
+} = {}) {
+  const organizationId = 'org-a'
+  const engagementId = 'engagement-a'
+  const brandId = 'brand-a'
+  const rows: Record<string, Array<Record<string, unknown>>> = {
+    artifacts: [
+      { id: 'keyword-artifact', organization_id: organizationId, engagement_id: engagementId, brand_id: brandId, artifact_type: 'keyword_strategy', title: 'Keywords' },
+      { id: 'architecture-artifact', organization_id: organizationId, engagement_id: engagementId, brand_id: brandId, artifact_type: 'website_architecture', title: 'Architecture' },
+    ],
+    artifact_versions: [
+      { id: options.sourceVersionId || 'architecture-v2', organization_id: organizationId, artifact_id: 'architecture-artifact', version_number: 2, content: { pages: options.pages || [
+        { page_key: 'page:home', slug: 'home', title: 'Home', parent_page_key: null, position: 1000, page_type: 'hub', purpose: 'Orient' },
+      ] } },
+      { id: 'keyword-v1', organization_id: organizationId, artifact_id: 'keyword-artifact', version_number: 1, content: { schema_version: 2, source_architecture_version_id: 'architecture-v2', keywords: [] } },
+    ],
+    content_requests: options.requests || [],
+    organization_memberships: [{ id: 'membership-a', organization_id: organizationId, user_id: 'actor-a', member_kind: 'team', status: 'active' }],
+    artifact_relations: [],
+    engagement_events: [],
+  }
+  const writes: Array<{ table: string; value: Record<string, unknown> }> = []
+  const visibleRequestIds = new Set(options.visibleRequestIds ?? (options.requests || []).map(request => String(request.id)))
+
+  class Query {
+    table: string
+    role: 'admin' | 'user'
+    filters: Array<{ kind: 'eq' | 'in'; key: string; value: unknown }> = []
+    operation: 'read' | 'insert' | 'delete' = 'read'
+    value: Record<string, unknown> | null = null
+    orderBy: { key: string; ascending: boolean } | null = null
+    rowLimit: number | null = null
+    constructor(table: string, role: 'admin' | 'user') { this.table = table; this.role = role }
+    select() { return this }
+    eq(key: string, value: unknown) { this.filters.push({ kind: 'eq', key, value }); return this }
+    in(key: string, value: unknown[]) { this.filters.push({ kind: 'in', key, value }); return this }
+    order(key: string, options: { ascending?: boolean } = {}) { this.orderBy = { key, ascending: options.ascending !== false }; return this }
+    limit(value: number) { this.rowLimit = value; return this }
+    insert(value: Record<string, unknown>) { this.operation = 'insert'; this.value = value; return this }
+    delete() { this.operation = 'delete'; return this }
+    maybeSingle() { return Promise.resolve(this.execute(true)) }
+    single() { return Promise.resolve(this.execute(true)) }
+    then(resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) { return Promise.resolve(this.execute(false)).then(resolve, reject) }
+    matchingRows() {
+      let result = [...(rows[this.table] || [])]
+      if (this.role === 'user' && this.table === 'content_requests') result = result.filter(row => visibleRequestIds.has(String(row.id)))
+      for (const filter of this.filters) {
+        result = result.filter(row => filter.kind === 'eq'
+          ? String(row[filter.key] ?? '') === String(filter.value ?? '')
+          : (filter.value as unknown[]).map(String).includes(String(row[filter.key])))
+      }
+      if (this.orderBy) result.sort((left, right) => {
+        const comparison = Number(left[this.orderBy!.key] || 0) - Number(right[this.orderBy!.key] || 0)
+        return this.orderBy!.ascending ? comparison : -comparison
+      })
+      return this.rowLimit === null ? result : result.slice(0, this.rowLimit)
+    }
+    execute(single: boolean) {
+      if (this.operation === 'insert') {
+        const id = this.table === 'artifact_versions' ? 'keyword-v2'
+          : this.table === 'artifact_relations' ? `relation-${rows.artifact_relations.length + 1}`
+          : this.table === 'engagement_events' ? `event-${rows.engagement_events.length + 1}` : `new-${this.table}`
+        const inserted = { id, ...(this.value || {}) }
+        rows[this.table] = [...(rows[this.table] || []), inserted]
+        writes.push({ table: this.table, value: inserted })
+        return { data: single ? inserted : [inserted], error: null }
+      }
+      if (this.operation === 'delete') {
+        const deleting = new Set(this.matchingRows())
+        rows[this.table] = (rows[this.table] || []).filter(row => !deleting.has(row))
+        return { data: null, error: null }
+      }
+      const result = this.matchingRows()
+      return { data: single ? result[0] || null : result, error: null }
+    }
+  }
+
+  const client = (role: 'admin' | 'user') => ({ from: (table: string) => new Query(table, role) })
+  return { admin: client('admin'), user: client('user'), writes, rows, organizationId, engagementId, brandId }
+}
+
+function b04VersionInput(fixture: ReturnType<typeof b04SaveFixture>, content: Record<string, unknown>) {
+  return {
+    organizationId: fixture.organizationId,
+    engagement: { id: fixture.engagementId, brand_id: fixture.brandId },
+    artifactId: 'keyword-artifact', artifactType: 'keyword_strategy', title: 'Keywords', content,
+    changeSummary: 'B04 verification', aiUseAllowed: false, dataClassification: 'internal',
+    actorId: 'actor-a', source: 'manual' as const, visibilityClient: fixture.user,
+  }
+}
+
+function b04KeywordTarget(target: { pageKey?: string; requestId?: string }) {
+  return {
+    term: 'Strategy agency', locale: 'en-PK', intent: 'commercial', topic_group: 'services', priority: 'high',
+    evidence_source: '', search_volume: null, difficulty: null, observation_date: null,
+    target_kind: target.pageKey ? 'page' : 'content_request', target_page_key: target.pageKey || null,
+    target_content_request_id: target.requestId || null, target_page_slug: 'untrusted-client-slug', category: null, notes: '',
+  }
+}
+
+Deno.test('B04 save binds an exact page version, derives slug, and creates a consistent revision and relation', async () => {
+  const fixture = b04SaveFixture()
+  const result = await createContentArtifactVersion(fixture.admin, b04VersionInput(fixture, {
+    schema_version: 2, source_architecture_version_id: 'architecture-v2', keywords: [b04KeywordTarget({ pageKey: 'page:home' })],
+  }))
+  const version = fixture.writes.find(write => write.table === 'artifact_versions')?.value as Record<string, unknown>
+  const savedKeyword = (version.content as Record<string, unknown>).keywords as Array<Record<string, unknown>>
+  assertEquals(savedKeyword[0].target_page_slug, 'home')
+  assertEquals(version.version_number, 2)
+  assertEquals(version.parent_version_id, 'keyword-v1')
+  assertEquals(result.artifact_id, 'keyword-artifact')
+  const relation = fixture.writes.find(write => write.table === 'artifact_relations')?.value
+  assertEquals(relation?.source_artifact_id, 'keyword-artifact')
+  assertEquals(relation?.target_artifact_id, 'architecture-artifact')
+  assertEquals(relation?.relation_type, 'targets_page')
+})
+
+Deno.test('B04 save accepts a visible scoped standalone request and creates the existing relation shape', async () => {
+  const request = { id: 'request-1', organization_id: 'org-a', brand_id: 'brand-a', mode: 'general', engagement_id: null, format: 'reel' }
+  const fixture = b04SaveFixture({ requests: [request] })
+  await createContentArtifactVersion(fixture.admin, b04VersionInput(fixture, {
+    schema_version: 2, source_architecture_version_id: null, keywords: [b04KeywordTarget({ requestId: 'request-1' })],
+  }))
+  const relation = fixture.writes.find(write => write.table === 'artifact_relations')?.value
+  assertEquals(relation?.source_artifact_id, 'keyword-artifact')
+  assertEquals(relation?.target_content_request_id, 'request-1')
+  assertEquals(relation?.target_artifact_id, null)
+  assertEquals(relation?.relation_type, 'targets_page')
+})
+
+Deno.test('B04 save rejects stale page versions and keys before any write', async () => {
+  for (const content of [
+    { schema_version: 2, source_architecture_version_id: 'missing-version', keywords: [b04KeywordTarget({ pageKey: 'page:home' })] },
+    { schema_version: 2, source_architecture_version_id: 'architecture-v2', keywords: [b04KeywordTarget({ pageKey: 'page:missing' })] },
+  ]) {
+    const fixture = b04SaveFixture()
+    await assertRejects(() => createContentArtifactVersion(fixture.admin, b04VersionInput(fixture, content)))
+    assertEquals(fixture.writes.length, 0)
+  }
+})
+
+Deno.test('B04 save rejects hidden, foreign-organization, foreign-brand, and foreign-engagement request targets before writes', async () => {
+  const scenarios = [
+    { request: { id: 'request-1', organization_id: 'org-a', brand_id: 'brand-a', mode: 'general', engagement_id: null }, visibleRequestIds: [] },
+    { request: { id: 'request-1', organization_id: 'org-b', brand_id: 'brand-a', mode: 'general', engagement_id: null } },
+    { request: { id: 'request-1', organization_id: 'org-a', brand_id: 'brand-b', mode: 'general', engagement_id: null } },
+    { request: { id: 'request-1', organization_id: 'org-a', brand_id: 'brand-a', mode: 'project', engagement_id: 'engagement-b' } },
+  ]
+  for (const scenario of scenarios) {
+    const fixture = b04SaveFixture({ requests: [scenario.request], visibleRequestIds: scenario.visibleRequestIds })
+    await assertRejects(() => createContentArtifactVersion(fixture.admin, b04VersionInput(fixture, {
+      schema_version: 2, source_architecture_version_id: null, keywords: [b04KeywordTarget({ requestId: 'request-1' })],
+    })), Error, 'unavailable')
+    assertEquals(fixture.writes.length, 0)
+  }
+})
+
+Deno.test('B04 over-limit save fails before target reads or writes', async () => {
+  const fixture = b04SaveFixture({ requests: [{ id: 'request-1', organization_id: 'org-a', brand_id: 'brand-a', mode: 'general', engagement_id: null }] })
+  await assertRejects(() => createContentArtifactVersion(fixture.admin, b04VersionInput(fixture, {
+    schema_version: 2, source_architecture_version_id: null,
+    keywords: Array.from({ length: MAX_KEYWORD_RECORDS + 1 }, () => b04KeywordTarget({ requestId: 'request-1' })),
+  })), Error, 'at most 500 rows')
+  assertEquals(fixture.writes.length, 0)
 })
 
 Deno.test('B03a normalizes paths, sorts deterministically and derives legacy keys', () => {
