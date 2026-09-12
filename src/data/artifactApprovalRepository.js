@@ -34,4 +34,8 @@ export const artifactApprovals = Object.freeze({
   }),
 
   signOff: requestId => invoke('sign_off', { request_id: requestId }),
+
+  requestChanges: (requestId, comment) => invoke('request_changes', {
+    request_id: requestId, comment,
+  }),
 })

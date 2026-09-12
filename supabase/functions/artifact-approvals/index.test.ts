@@ -1,5 +1,5 @@
 import { assertEquals, assertThrows } from 'jsr:@std/assert@1.0.14'
-import { approvalRequestInput } from './index.ts'
+import { approvalChangeRequestInput, approvalRequestInput } from './index.ts'
 
 Deno.test('D4 preserves the supplied order for sequential approval', () => {
   assertEquals(approvalRequestInput({
@@ -31,4 +31,14 @@ Deno.test('MB02B permits one approver only through the explicit campaign-brief m
   assertThrows(() => approvalRequestInput({
     artifact_version_id: 'version', approval_policy: 'parallel', required_approver_ids: ['leader'],
   }), Error, 'between 2 and 50')
+})
+
+Deno.test('B06a requires an exact pending request identity and non-empty change comment', () => {
+  assertEquals(approvalChangeRequestInput({
+    request_id: 'request-1', comment: '  Correct the product claim.  ',
+  }), { requestId: 'request-1', comment: 'Correct the product claim.' })
+  assertThrows(() => approvalChangeRequestInput({ request_id: 'request-1', comment: '   ' }),
+    Error, 'comment is required')
+  assertThrows(() => approvalChangeRequestInput({ comment: 'Change this.' }),
+    Error, 'Approval request is required')
 })

@@ -171,3 +171,40 @@ test('mounted B04 editor disables Add at the explicit 500-row boundary', async t
   await act(async () => add.dispatchEvent(new TestEvent('click', { bubbles: true })))
   assert.equal(addCalls, 0)
 })
+
+test('mounted B06a library renders authorized results and a distinct true-empty state', async t => {
+  const vite = await createServer({
+    server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent',
+    define: {
+      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify('https://example.supabase.co'),
+      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify('test-key'),
+    },
+  })
+  t.after(() => vite.close())
+  const { default: ContentLibraryPanel } = await vite.ssrLoadModule('/src/components/ContentLibraryPanel.jsx')
+  const environment = mountedEnvironment()
+  const previous = { document: globalThis.document, window: globalThis.window, Event: globalThis.Event, Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT }
+  Object.assign(globalThis, { document: environment.document, window: environment.window, Event: TestEvent, Node: TestNode, HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true })
+  t.after(() => Object.assign(globalThis, { document: previous.document, window: previous.window, Event: previous.Event, Node: previous.Node, HTMLElement: previous.HTMLElement, IS_REACT_ACT_ENVIRONMENT: previous.act }))
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+  const repository = { loadLibrary: async () => ({
+    artifacts: [{
+      id: 'artifact-1', organization_id: 'organization-1', artifact_type: 'content',
+      title: 'Homepage copy', created_by: 'author-1', created_at: '2026-09-13T00:00:00Z',
+      engagements: { id: 'engagement-1', name: 'Website build', project_id: 'project-1', projects: { id: 'project-1', name: 'Launch' } },
+    }],
+    versions: [], approvals: [], approvalRequests: [], comments: [],
+    profiles: [{ id: 'author-1', full_name: 'Aisha' }], sourceVersions: [],
+  }) }
+
+  await act(async () => root.render(createElement(ContentLibraryPanel, { repository })))
+  assert.match(environment.container.textContent, /Homepage copy/)
+  assert.match(environment.container.textContent, /Launch - created by Aisha/)
+  const emptyRepository = { loadLibrary: async () => ({
+    artifacts: [], versions: [], approvals: [], approvalRequests: [], comments: [], profiles: [], sourceVersions: [],
+  }) }
+  await act(async () => root.render(createElement(ContentLibraryPanel, { key: 'empty', repository: emptyRepository })))
+  assert.match(environment.container.textContent, /No saved Content artifacts are visible in this organization/)
+  assert.doesNotMatch(environment.container.textContent, /Try again/)
+})

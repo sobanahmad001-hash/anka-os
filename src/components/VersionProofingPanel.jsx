@@ -23,6 +23,7 @@ function personLabel(profile, id) {
 export default function VersionProofingPanel({
   targetKind, versions, department, theme = 'amber', regionsByVersion = {},
   initialVersionId = '', visualAnchor = null, visualAnchorVersionId = '', onClearVisualAnchor = null,
+  onChanged = null,
 }) {
   const { user, profile } = useAuth()
   const normalizedVersions = Array.isArray(versions) ? versions : []
@@ -63,12 +64,13 @@ export default function VersionProofingPanel({
       await proofing.add(targetKind, selected.id, body, position)
       setBody(''); setRegion(''); onClearVisualAnchor?.()
       await load(selected.id)
+      await onChanged?.()
     } catch (reason) { setError(reason.message); setLoading(false) }
   }
 
   async function resolve(commentId) {
     setLoading(true); setError('')
-    try { await proofing.resolve(commentId); await load(selected.id) }
+    try { await proofing.resolve(commentId); await load(selected.id); await onChanged?.() }
     catch (reason) { setError(reason.message); setLoading(false) }
   }
 

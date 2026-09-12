@@ -125,6 +125,41 @@ async function signOff(userClient: Client, admin: Client, body: Json, actorId: s
   return data
 }
 
+export function approvalChangeRequestInput(input: Json) {
+  const requestId = text(input.request_id, 80)
+  const comment = text(input.comment, 8000)
+  if (!requestId) throw new Error('Approval request is required')
+  if (!comment) throw new Error('A change request comment is required')
+  return { requestId, comment }
+}
+
+async function requestChanges(userClient: Client, admin: Client, body: Json, actorId: string) {
+  const { requestId, comment } = approvalChangeRequestInput(body)
+  const { data: request, error: requestError } = await userClient.from('artifact_approval_requests')
+    .select('id, organization_id, artifact_version_id, status').eq('id', requestId).maybeSingle()
+  if (requestError || !request) throw Object.assign(new Error('Approval request is unavailable'), { status: 404 })
+  if (request.status !== 'pending') {
+    throw Object.assign(new Error('Only a pending approval request can receive requested changes'), { status: 409 })
+  }
+  await requireTeam(admin, String(request.organization_id), actorId)
+  const { data: signoff, error: signoffError } = await admin.from('artifact_approval_signoffs')
+    .select('id').eq('organization_id', request.organization_id).eq('request_id', request.id)
+    .eq('required_approver_id', actorId).is('signed_off_at', null).maybeSingle()
+  if (signoffError) throw signoffError
+  if (!signoff) {
+    throw Object.assign(new Error('Only a pending named approver can request changes'), { status: 403 })
+  }
+  const { data, error } = await admin.from('artifact_version_comments').insert({
+    organization_id: request.organization_id,
+    artifact_version_id: request.artifact_version_id,
+    author_id: actorId,
+    body: comment,
+    comment_position: null,
+  }).select('*').single()
+  if (error) throw error
+  return data
+}
+
 export async function handleRequest(request: Request) {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (request.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
@@ -144,6 +179,9 @@ export async function handleRequest(request: Request) {
     }
     if (action === 'sign_off') {
       return response({ data: await signOff(userClient, admin, body, user.id) })
+    }
+    if (action === 'request_changes') {
+      return response({ data: await requestChanges(userClient, admin, body, user.id) })
     }
     return response({ error: 'Unsupported action' }, 400)
   } catch (error) {
