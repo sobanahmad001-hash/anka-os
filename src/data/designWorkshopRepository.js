@@ -123,7 +123,8 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
         ])
       : [[], [], [], []]
     const designAssets = await dataOrThrow(scopedFrom('design_assets').select('*')
-      .eq('engagement_id', engagementId).eq('brand_id', engagement.brand_id).order('created_at', { ascending: false }))
+      .eq('engagement_id', engagementId).eq('brand_id', engagement.brand_id).is('archived_at', null)
+      .order('created_at', { ascending: false }))
     const designAssetVersions = designAssets.length
       ? await dataOrThrow(scopedFrom('design_asset_versions').select('*')
         .in('asset_id', designAssets.map(item => item.id)).order('version_number', { ascending: false }))
@@ -221,6 +222,7 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
     job_id: jobId, operation_key: operationKey,
   }),
   uploadAssetVersion: input => invoke('upload_asset_version', input),
+  archiveAsset: input => invoke('archive_asset', input),
   generateVariants: (sourceDirectionVersionId, modelRegistryId, variantFormats) => invoke('generate_variants', {
     source_direction_version_id: sourceDirectionVersionId,
     model_registry_id: modelRegistryId,

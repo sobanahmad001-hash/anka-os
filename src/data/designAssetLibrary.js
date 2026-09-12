@@ -88,6 +88,7 @@ export function buildDesignAssetRows(workspace = {}) {
       sessionLabel: clean(session?.output_goal || session?.page_slug || session?.output_family),
       isExperimental: directionVersion?.is_experimental === true,
       assetId: clean(asset.id), assetVersionId: clean(latest.id), assetVersionNumber: latest.version_number,
+      archivedAt: clean(asset.archived_at),
       assetVersions: versions,
       recorded: Object.freeze({
         dimensions: latest.width && latest.height ? `${latest.width}×${latest.height}` : null,
@@ -124,6 +125,16 @@ export function buildDesignAssetRows(workspace = {}) {
 
 export function latestDesignAssetVersion(versions = []) {
   return [...array(versions)].sort((left, right) => right.version_number - left.version_number)[0] || null
+}
+
+export function designAssetArchiveEligibility(row) {
+  if (!row?.assetId || !array(row.assetVersions).length) return { eligible: false, reason: 'Only canonical versioned assets can be archived.' }
+  if (row.archivedAt) return { eligible: false, reason: 'This asset is already archived.' }
+  const blocked = row.assetVersions.some(version => clean(version.lifecycle_status) !== 'draft'
+    || clean(version.source_kind) !== 'upload' || Boolean(version.source_media_asset_id)
+    || Boolean(version.source_direction_version_id))
+  if (blocked) return { eligible: false, reason: 'Generated, variant, direction-linked, reviewed, approved, released, or otherwise referenced assets must remain available.' }
+  return { eligible: true, reason: `Standalone uploaded draft. All ${row.assetVersions.length} immutable version${row.assetVersions.length === 1 ? '' : 's'} and stored files will be retained.` }
 }
 
 export function filterDesignAssetRows(rows, filters = {}, now = Date.now()) {

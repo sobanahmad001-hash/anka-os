@@ -325,3 +325,42 @@ test('mounted asset detail browses and compares two true versions of one asset',
   await act(async () => versionA.dispatchEvent(new TestEvent('change', { bubbles: true })))
   assert.equal(elements(environment.container, 'a').filter(link => link.textContent.includes('Open or download exact')).length, 2)
 })
+
+test('mounted archive confirmation cancels without a call, retries lost response with one key, and resets on context change', async t => {
+  const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  t.after(() => server.close())
+  const { default: DesignAssetLibrary } = await server.ssrLoadModule('/src/components/DesignAssetLibrary.jsx')
+  const environment = mountedEnvironment()
+  const previous = { document: globalThis.document, window: globalThis.window, Event: globalThis.Event, Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT }
+  Object.assign(globalThis, { document: environment.document, window: environment.window, Event: TestEvent, Node: TestNode, HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true })
+  t.after(() => Object.assign(globalThis, { document: previous.document, window: previous.window, Event: previous.Event, Node: previous.Node, HTMLElement: previous.HTMLElement, IS_REACT_ACT_ENVIRONMENT: previous.act }))
+  const data = workspace(Date.now())
+  data.designAssets = [{ id: 'archive-root', name: 'Standalone draft', archived_at: null, created_at: '2026-09-12T10:00:00.000Z' }]
+  data.designAssetVersions = [{ id: 'archive-version', asset_id: 'archive-root', version_number: 1, parent_version_id: null, source_kind: 'upload', source_media_asset_id: null, source_direction_version_id: null, lifecycle_status: 'draft', mime_type: 'image/png', original_filename: 'draft.png', signed_url: 'https://project.supabase.co/storage/v1/object/sign/design/draft.png?token=draft', created_by: 'user-a', created_at: '2026-09-12T10:00:00.000Z' }]
+  const calls = []
+  let confirm = false
+  environment.window.confirm = () => confirm
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+  const props = { workspace: data, contextKey: 'context-a', canArchive: true, onArchive: async (row, key) => { calls.push([row.assetVersionId, key]); return false }, onClose: () => {}, onFocusSource: () => {} }
+
+  await act(async () => root.render(createElement(DesignAssetLibrary, props)))
+  await act(async () => byText(environment.container, 'button', 'View detail').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  await act(async () => byText(environment.container, 'button', 'Archive draft asset').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.equal(calls.length, 0)
+  confirm = true
+  await act(async () => byText(environment.container, 'button', 'Archive draft asset').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  await act(async () => byText(environment.container, 'button', 'Archive draft asset').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.equal(calls.length, 2)
+  assert.equal(calls[0][1], calls[1][1])
+
+  const changedSnapshot = { ...data, designAssetVersions: [{ ...data.designAssetVersions[0], id: 'archive-version-2', version_number: 2, parent_version_id: 'archive-version' }] }
+  await act(async () => root.render(createElement(DesignAssetLibrary, { ...props, workspace: changedSnapshot })))
+  await act(async () => byText(environment.container, 'button', 'Archive draft asset').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.notEqual(calls[2][1], calls[1][1])
+
+  await act(async () => root.render(createElement(DesignAssetLibrary, { ...props, contextKey: 'context-b' })))
+  await act(async () => byText(environment.container, 'button', 'View detail').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  await act(async () => byText(environment.container, 'button', 'Archive draft asset').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.notEqual(calls[3][1], calls[2][1])
+})

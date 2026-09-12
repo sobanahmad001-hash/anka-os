@@ -167,3 +167,20 @@ export async function uploadDesignAssetVersion(admin: AssetAdmin, body: Json, ac
   if (uploadedHere) await removeUploadedObject(admin, storagePath)
   throw error
 }
+
+export async function archiveDesignAsset(admin: AssetAdmin, body: Json, actorId: string) {
+  const assetId = text(body.asset_id, 80)
+  const expectedLatestVersionId = text(body.expected_latest_version_id, 80)
+  const operationKey = text(body.operation_key, 200)
+  const reason = text(body.reason, 500)
+  if (!assetId || !expectedLatestVersionId) throw new Error('Asset and expected latest version are required')
+  if (operationKey.length < 8) throw new Error('A stable archive operation key of at least 8 characters is required')
+  if (!reason) throw new Error('An archive reason is required')
+  const { data, error } = await admin.rpc('archive_design_asset', {
+    p_organization_id: admin.organizationId, p_asset_id: assetId,
+    p_expected_latest_version_id: expectedLatestVersionId, p_operation_key: operationKey,
+    p_reason: reason, p_actor_id: actorId,
+  })
+  if (error) throw error
+  return data
+}

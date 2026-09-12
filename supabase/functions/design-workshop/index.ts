@@ -10,7 +10,7 @@ import {
 import {
   freezeCreativeBrief, saveCreativeBrief, setWorkingDirection, validateCreativeBrief,
 } from './creativeBriefs.ts'
-import { DESIGN_ASSET_BUCKET, uploadDesignAssetVersion } from './assetVersions.ts'
+import { archiveDesignAsset, DESIGN_ASSET_BUCKET, uploadDesignAssetVersion } from './assetVersions.ts'
 
 type Client = ReturnType<typeof createClient<any>>
 type ScopedClient = Client & { organizationId: string }
@@ -281,6 +281,10 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
       return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
     }
     return { root: { kind: 'engagement', id: requiredActionId(body.engagement_id, 'Engagement') }, requestedOrganizationId }
+  }
+  if (action === 'archive_asset') {
+    const root = await callerDesignAssetRoot(userClient, requiredActionId(body.asset_id, 'Asset'))
+    return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
   }
   if (action === 'sign_asset_versions') {
     const root = await callerAssetVersionRoot(userClient, uniqueIds(body.version_ids))
@@ -1482,6 +1486,7 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       create_content_request_video_placeholder: () => createContentRequestVideoPlaceholder(admin, userClient, body, user.id),
       sign_media_assets: () => signMediaAssets(admin, userClient, body),
       upload_asset_version: () => uploadDesignAssetVersion(admin, body, user.id),
+      archive_asset: () => archiveDesignAsset(admin, body, user.id),
       sign_asset_versions: () => signAssetVersions(admin, userClient, body),
     }
     if (!hasWorkshopAuthority(membership as Json, action)) {

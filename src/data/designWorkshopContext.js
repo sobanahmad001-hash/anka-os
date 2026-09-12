@@ -170,6 +170,7 @@ export function designCapabilities(membership) {
   return Object.freeze({
     view: Boolean(membership),
     createDraft: leader || designContributor,
+    archiveDraftAsset: leader || designContributor,
     executeGeneration: leader || designContributor,
     selectDirection: leader || designContributor,
     promoteExperiment: Boolean(membership),
