@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import ArtifactApprovalPanel from './ArtifactApprovalPanel.jsx'
+import ContentVersionComparison from './ContentVersionComparison.jsx'
 import VersionProofingPanel from './VersionProofingPanel.jsx'
 import { CONTENT_ARTIFACT_FORMS } from '../data/contentStudio.js'
 import {
@@ -41,6 +42,7 @@ export default function ContentLibraryPanel({ repository }) {
   const [filters, setFilters] = useState({ query: '', type: '', projectId: '', creatorId: '', reviewStage: '' })
   const [artifactId, setArtifactId] = useState('')
   const [versionId, setVersionId] = useState('')
+  const [comparisonOpen, setComparisonOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -60,7 +62,7 @@ export default function ContentLibraryPanel({ repository }) {
     } catch (reason) {
       if (reason?.name !== 'AbortError' && mounted.current && sequence === loadSequence.current) {
         const denied = [401, 403].includes(Number(reason?.status)) || reason?.membershipMismatch
-        if (denied) { setData(null); setArtifactId(''); setVersionId('') }
+        if (denied) { setData(null); setArtifactId(''); setVersionId(''); setComparisonOpen(false) }
         else setStale(Boolean(dataRef.current))
         setError(reason.message)
       }
@@ -121,7 +123,7 @@ export default function ContentLibraryPanel({ repository }) {
     {error && data && <div className="rounded-2xl border border-red-900/60 bg-red-950/30 p-4 text-sm text-red-300"><p>{error}</p><p className="mt-1 text-xs text-red-200/80">The displayed library snapshot may be stale. Review and approval actions are unavailable until a refresh succeeds.</p><button type="button" onClick={load} className={`${SECONDARY} mt-3`}>Try again</button></div>}
 
     {!entries.length ? <div className="rounded-2xl border border-dashed border-slate-700 p-12 text-center text-sm text-slate-500">No saved Content artifacts are visible in this organization.</div> : !visible.length ? <div className="rounded-2xl border border-dashed border-slate-700 p-12 text-center text-sm text-slate-500">No Content artifacts match these filters. The library has not treated this as a loading error.</div> : <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
-      <div className="space-y-3">{visible.map(entry => { const itemStage = STAGE[entry.reviewStage] || STAGE.draft; return <button type="button" key={entry.artifact.id} onClick={() => { setArtifactId(entry.artifact.id); setVersionId(entry.latest?.id || '') }} className={`w-full rounded-2xl border p-4 text-left ${selectedEntry?.artifact.id === entry.artifact.id ? 'border-amber-500/60 bg-amber-950/20' : 'border-slate-800 bg-slate-900/70 hover:border-slate-700'}`}>
+      <div className="space-y-3">{visible.map(entry => { const itemStage = STAGE[entry.reviewStage] || STAGE.draft; return <button type="button" key={entry.artifact.id} onClick={() => { setArtifactId(entry.artifact.id); setVersionId(entry.latest?.id || ''); setComparisonOpen(false) }} className={`w-full rounded-2xl border p-4 text-left ${selectedEntry?.artifact.id === entry.artifact.id ? 'border-amber-500/60 bg-amber-950/20' : 'border-slate-800 bg-slate-900/70 hover:border-slate-700'}`}>
         <div className="flex items-start justify-between gap-3"><h3 className="font-semibold text-white">{entry.artifact.title}</h3><span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase ${itemStage[1]}`}>{itemStage[0]}</span></div>
         <p className="mt-2 text-xs text-slate-400">{typeLabel(entry.artifact.artifact_type)} - {entry.latest ? `v${entry.latest.version_number}` : 'No saved version'}</p>
         <p className="mt-2 text-[11px] text-slate-600">{entry.project?.name || entry.engagement?.name || 'Project unavailable'} - created by {displayName(entry.creator)}</p>
@@ -132,10 +134,12 @@ export default function ContentLibraryPanel({ repository }) {
           <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Read-only exact snapshot</p><h2 className="mt-1 text-2xl font-semibold">{selectedEntry.artifact.title}</h2><p className="mt-2 text-sm text-slate-400">{selectedEntry.project?.name || selectedEntry.engagement?.name || 'Project unavailable'} - created by {displayName(selectedEntry.creator)}</p></div><span className={`rounded-full px-3 py-1.5 text-xs font-semibold uppercase ${stage[1]}`}>{stage[0]}</span></div>
           <label className="mt-5 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Exact saved version<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={selectedVersion.id} onChange={event => setVersionId(event.target.value)}>{selectedEntry.versions.map(version => <option key={version.id} value={version.id}>Version {version.version_number} - {new Date(version.created_at).toLocaleString()}</option>)}</select></label>
           <dl className="mt-5 grid gap-3 text-sm md:grid-cols-2"><Meta label="Version ID" value={selectedVersion.id} /><Meta label="Checksum" value={selectedVersion.content_checksum} /><Meta label="Change summary" value={selectedVersion.change_summary || 'No summary recorded'} /><Meta label="Classification" value={selectedVersion.data_classification} /></dl>
+          <div className="mt-5 flex flex-wrap items-center gap-3"><button type="button" disabled={selectedEntry.versions.length < 2} onClick={() => setComparisonOpen(true)} className={SECONDARY}>Compare exact versions</button>{selectedEntry.versions.length < 2 && <p className="text-xs text-slate-500">A second authorized saved version is required for comparison.</p>}</div>
           <div className="mt-6 border-t border-slate-800 pt-5"><h3 className="font-semibold text-white">Saved content</h3><dl className="mt-4 space-y-4">{Object.entries(selectedVersion.content || {}).map(([key, value]) => <div key={key}><dt className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">{key.replaceAll('_', ' ')}</dt><dd className="mt-1 text-sm leading-6 text-slate-300">{contentValue(value)}</dd></div>)}</dl></div>
           <div className="mt-6 border-t border-slate-800 pt-5"><h3 className="font-semibold text-white">Recorded source versions</h3>{sourceReferences.length ? <div className="mt-3 space-y-2">{sourceReferences.map(reference => <div key={`${reference.path}:${reference.id}`} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3"><p className="text-sm font-semibold text-slate-200">{reference.accessible ? `${reference.artifact?.title || 'Source artifact'} - version ${reference.version.version_number}` : 'Recorded source is not accessible in the current scope'}</p><p className="mt-1 break-all text-[11px] text-slate-500">{reference.path} - {reference.id}</p></div>)}</div> : <p className="mt-3 rounded-xl border border-dashed border-slate-800 p-4 text-sm text-slate-500">This exact version records no source-version links. No newer source has been substituted.</p>}</div>
           {request?.status === 'pending' && <p className="mt-5 rounded-xl border border-amber-900/50 bg-amber-950/20 p-3 text-xs leading-5 text-amber-200">This exact version has a pending governed review request and {openCommentCount} open proofing comment{openCommentCount === 1 ? '' : 's'}. Open comments are feedback, not a formal review decision; later drafts inherit neither this request nor approval.</p>}
         </article>
+        {comparisonOpen && <ContentVersionComparison versions={selectedEntry.versions} contextKey={selectedEntry.artifact.id} preferredVersionId={selectedVersion.id} stale={stale} onClose={() => setComparisonOpen(false)} />}
         {!error && !stale && <ArtifactApprovalPanel key={`approval:${selectedVersion.id}`} version={selectedVersion} approval={approval} theme="amber" requestLabel="Submit exact version for review" singleApprovalLabel={`Use single-manager route for version ${selectedVersion.version_number}`} onSingleApprove={() => repository.approveArtifact(selectedVersion.id)} onChanged={load} />}
         {!error && !stale && <VersionProofingPanel key={`proofing:${selectedVersion.id}`} targetKind="artifact" versions={[selectedVersion]} initialVersionId={selectedVersion.id} department="content" theme="amber" onChanged={load} />}
       </div>}
