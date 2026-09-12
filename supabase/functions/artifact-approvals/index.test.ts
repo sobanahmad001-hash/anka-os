@@ -36,9 +36,15 @@ Deno.test('MB02B permits one approver only through the explicit campaign-brief m
 Deno.test('B06a requires an exact pending request identity and non-empty change comment', () => {
   assertEquals(approvalChangeRequestInput({
     request_id: 'request-1', comment: '  Correct the product claim.  ',
-  }), { requestId: 'request-1', comment: 'Correct the product claim.' })
-  assertThrows(() => approvalChangeRequestInput({ request_id: 'request-1', comment: '   ' }),
+    idempotency_key: '11111111-1111-4111-8111-111111111111',
+  }), {
+    requestId: 'request-1', comment: 'Correct the product claim.',
+    idempotencyKey: '11111111-1111-4111-8111-111111111111',
+  })
+  assertThrows(() => approvalChangeRequestInput({ request_id: 'request-1', comment: '   ',
+    idempotency_key: '11111111-1111-4111-8111-111111111111' }),
     Error, 'comment is required')
-  assertThrows(() => approvalChangeRequestInput({ comment: 'Change this.' }),
+  assertThrows(() => approvalChangeRequestInput({ comment: 'Change this.',
+    idempotency_key: '11111111-1111-4111-8111-111111111111' }),
     Error, 'Approval request is required')
 })

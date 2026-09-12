@@ -5,6 +5,7 @@ type Client = ReturnType<typeof createClient<any>>
 type Json = Record<string, unknown>
 
 const POLICIES = new Set(['sequential', 'parallel'])
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -66,10 +67,15 @@ async function readableVersion(userClient: Client, artifactVersionId: string) {
 }
 
 async function requireTeam(admin: Client, organizationId: string, userId: string) {
-  const { data, error } = await admin.from('organization_memberships')
-    .select('id').eq('organization_id', organizationId).eq('user_id', userId)
-    .eq('member_kind', 'team').eq('status', 'active').maybeSingle()
-  if (error || !data) throw Object.assign(new Error('Active team membership required'), { status: 403 })
+  const [{ data: organization, error: organizationError }, { data: membership, error: membershipError }] = await Promise.all([
+    admin.from('organizations').select('id').eq('id', organizationId).eq('status', 'active').maybeSingle(),
+    admin.from('organization_memberships').select('id').eq('organization_id', organizationId).eq('user_id', userId)
+      .eq('member_kind', 'team').eq('status', 'active').maybeSingle(),
+  ])
+  if (organizationError) throw organizationError
+  if (membershipError) throw membershipError
+  if (!organization) throw Object.assign(new Error('Active organization required'), { status: 403 })
+  if (!membership) throw Object.assign(new Error('Active team membership required'), { status: 403 })
 }
 
 async function listApprovers(admin: Client, organizationId: string) {
@@ -128,35 +134,30 @@ async function signOff(userClient: Client, admin: Client, body: Json, actorId: s
 export function approvalChangeRequestInput(input: Json) {
   const requestId = text(input.request_id, 80)
   const comment = text(input.comment, 8000)
+  const idempotencyKey = text(input.idempotency_key, 80)
   if (!requestId) throw new Error('Approval request is required')
   if (!comment) throw new Error('A change request comment is required')
-  return { requestId, comment }
+  if (!UUID_PATTERN.test(idempotencyKey)) throw new Error('A valid change request idempotency key is required')
+  return { requestId, comment, idempotencyKey }
 }
 
 async function requestChanges(userClient: Client, admin: Client, body: Json, actorId: string) {
-  const { requestId, comment } = approvalChangeRequestInput(body)
+  const { requestId, comment, idempotencyKey } = approvalChangeRequestInput(body)
   const { data: request, error: requestError } = await userClient.from('artifact_approval_requests')
-    .select('id, organization_id, artifact_version_id, status').eq('id', requestId).maybeSingle()
+    .select('id').eq('id', requestId).maybeSingle()
   if (requestError || !request) throw Object.assign(new Error('Approval request is unavailable'), { status: 404 })
-  if (request.status !== 'pending') {
-    throw Object.assign(new Error('Only a pending approval request can receive requested changes'), { status: 409 })
+  const { data, error } = await admin.rpc('request_artifact_approval_changes', {
+    p_request_id: requestId,
+    p_actor_id: actorId,
+    p_comment: comment,
+    p_idempotency_key: idempotencyKey,
+  })
+  if (error) {
+    const status = error.code === 'P0002' ? 404
+      : error.code === '42501' ? 403
+      : ['23505', '55000'].includes(error.code) ? 409 : 400
+    throw Object.assign(new Error(error.message || 'Unable to request changes'), { status })
   }
-  await requireTeam(admin, String(request.organization_id), actorId)
-  const { data: signoff, error: signoffError } = await admin.from('artifact_approval_signoffs')
-    .select('id').eq('organization_id', request.organization_id).eq('request_id', request.id)
-    .eq('required_approver_id', actorId).is('signed_off_at', null).maybeSingle()
-  if (signoffError) throw signoffError
-  if (!signoff) {
-    throw Object.assign(new Error('Only a pending named approver can request changes'), { status: 403 })
-  }
-  const { data, error } = await admin.from('artifact_version_comments').insert({
-    organization_id: request.organization_id,
-    artifact_version_id: request.artifact_version_id,
-    author_id: actorId,
-    body: comment,
-    comment_position: null,
-  }).select('*').single()
-  if (error) throw error
   return data
 }
 

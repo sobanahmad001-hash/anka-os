@@ -30,7 +30,7 @@ test('B06a maps the canonical request, proofing, and approval records to display
   assert.equal(contentReviewStage('v1'), 'draft')
   assert.equal(contentReviewStage('v1', [], [{ artifact_version_id: 'v1', status: 'pending' }]), 'in_review')
   assert.equal(contentReviewStage('v1', [], [{ artifact_version_id: 'v1', status: 'pending' }],
-    [{ artifact_version_id: 'v1', resolved: false }]), 'changes_requested')
+    [{ artifact_version_id: 'v1', resolved: false }]), 'in_review')
   assert.equal(contentReviewStage('v1', [{ artifact_version_id: 'v1' }],
     [{ artifact_version_id: 'v1', status: 'pending' }], [{ artifact_version_id: 'v1', resolved: false }]), 'approved')
 })
@@ -43,7 +43,7 @@ test('B06a filters latest artifact rows by type, project, factual creator, state
   assert.equal(entries[0].latest.id, 'v2')
   assert.deepEqual(filterContentLibrary(entries, { type: 'content', projectId: 'p1', creatorId: 'u1', reviewStage: 'in_review' }).map(item => item.artifact.id), ['a1'])
   assert.deepEqual(filterContentLibrary(entries, { query: 'campaign bilal' }).map(item => item.artifact.id), ['a2'])
-  assert.deepEqual(filterContentLibrary(entries, { reviewStage: 'changes_requested' }), [])
+  assert.deepEqual(filterContentLibrary(entries, { reviewStage: 'changes_requested' }), entries)
 })
 
 test('B06a keeps recorded source IDs exact and does not rebound inaccessible history', () => {
@@ -75,10 +75,33 @@ test('B06a UI and server reuse canonical exact-version review contracts', () => 
   assert.match(ui, /No newer source has been substituted/)
   assert.match(ui, /Owner filtering is unavailable/)
   assert.match(approvalPanel, /requestChanges/)
-  assert.match(server, /Only a pending named approver can request changes/)
+  assert.match(server, /request_artifact_approval_changes/)
+  assert.match(server, /p_idempotency_key: idempotencyKey/)
   assert.match(server, /A change request comment is required/)
-  assert.match(server, /artifact_version_comments/)
+  assert.doesNotMatch(server, /from\('artifact_version_comments'\)\.insert/)
   assert.doesNotMatch(server, /create table|alter table|review_status/)
   assert.match(repository, /eq\('organization_id', organizationId\)/)
   assert.doesNotMatch(repository, /service_role|SUPABASE_SERVICE_ROLE_KEY/)
+})
+
+test('B06a atomic change-request migration preserves the canonical review model', () => {
+  const migration = read('supabase/migrations/20260912194742_content_b06a_atomic_change_requests.sql')
+  const verifier = read('supabase/verify_20260912194742_content_b06a_atomic_change_requests.sql')
+  assert.match(migration, /request_artifact_approval_changes/)
+  assert.match(migration, /artifact_approval_requests[\s\S]*for update/)
+  assert.match(migration, /organizations[\s\S]*status = 'active'[\s\S]*for share/)
+  assert.match(migration, /organization_memberships[\s\S]*for share/)
+  assert.match(migration, /artifact_approval_signoffs[\s\S]*for update/)
+  assert.match(migration, /request_change_key/)
+  assert.match(migration, /idempotent_replay/)
+  assert.match(migration, /revoke all on function[\s\S]*from public, anon, authenticated/)
+  assert.match(migration, /grant execute on function[\s\S]*to service_role/)
+  assert.doesNotMatch(migration, /create table|create type|changes_requested/)
+  for (const check of [
+    'exact_retry_replays_one_immutable_comment', 'changed_intent_with_same_key_is_denied',
+    'deliberate_new_feedback_uses_new_key', 'inactive_member_is_denied_at_write_time',
+    'inactive_organization_is_denied_at_write_time', 'signed_named_approver_is_denied',
+    'nonpending_request_is_denied',
+  ]) assert.match(verifier, new RegExp(check))
+  assert.match(verifier, /rollback;/)
 })

@@ -1,13 +1,12 @@
-const REVIEW_STAGES = new Set(['draft', 'in_review', 'changes_requested', 'approved'])
+const REVIEW_STAGES = new Set(['draft', 'in_review', 'approved'])
 
 function clean(value) { return String(value || '').trim() }
 function relation(value) { return Array.isArray(value) ? value[0] || null : value || null }
 
-export function contentReviewStage(versionId, approvals = [], requests = [], comments = []) {
+export function contentReviewStage(versionId, approvals = [], requests = []) {
   if (approvals.some(item => item.artifact_version_id === versionId)) return 'approved'
   const request = requests.find(item => item.artifact_version_id === versionId)
-  if (request?.status === 'pending') return comments.some(item => item.artifact_version_id === versionId && !item.resolved)
-    ? 'changes_requested' : 'in_review'
+  if (request?.status === 'pending') return 'in_review'
   return 'draft'
 }
 

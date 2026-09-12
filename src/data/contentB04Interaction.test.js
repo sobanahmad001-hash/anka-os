@@ -85,6 +85,22 @@ async function setValue(node, value) {
   })
 }
 
+const flushMounted = () => act(async () => {
+  await Promise.resolve()
+  await new Promise(resolve => setTimeout(resolve, 0))
+})
+
+function b06PanelStubs() {
+  const stubs = {
+    'AuthContext.jsx': ['b06-auth', 'export const useAuth=()=>({user:{id:"actor"},profile:{role:"contributor",department:"content"}})'],
+    'artifactApprovalRepository.js': ['b06-approvals', 'export const artifactApprovals=new Proxy({}, {get:(_,key)=>(...args)=>globalThis.__b06ApprovalTest[key](...args)})'],
+    'proofingRepository.js': ['b06-proofing', 'export const proofing=new Proxy({}, {get:(_,key)=>(...args)=>globalThis.__b06ProofingTest[key](...args)})'],
+  }
+  return { name: 'b06-panel-stubs', enforce: 'pre', resolveId(source) {
+    for (const [suffix, [id]] of Object.entries(stubs)) if (source.endsWith(suffix)) return `\0${id}`
+  }, load(id) { return Object.values(stubs).find(([key]) => id === `\0${key}`)?.[1] } }
+}
+
 test('mounted B04 editor adds, edits, selects exact source and page target, detects stale context, and removes', async t => {
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
   t.after(() => vite.close())
@@ -207,4 +223,203 @@ test('mounted B06a library renders authorized results and a distinct true-empty 
   await act(async () => root.render(createElement(ContentLibraryPanel, { key: 'empty', repository: emptyRepository })))
   assert.match(environment.container.textContent, /No saved Content artifacts are visible in this organization/)
   assert.doesNotMatch(environment.container.textContent, /Try again/)
+})
+
+test('mounted B06a isolates exact-version review state and makes refresh failures visible', async t => {
+  const vite = await createServer({
+    server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [b06PanelStubs()],
+  })
+  t.after(() => vite.close())
+  const { default: ContentLibraryPanel } = await vite.ssrLoadModule('/src/components/ContentLibraryPanel.jsx')
+  const environment = mountedEnvironment()
+  const previous = {
+    document: globalThis.document, window: globalThis.window, Event: globalThis.Event,
+    Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT,
+    approval: globalThis.__b06ApprovalTest, proofing: globalThis.__b06ProofingTest,
+  }
+  Object.assign(globalThis, {
+    document: environment.document, window: environment.window, Event: TestEvent, Node: TestNode,
+    HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true,
+  })
+  t.after(() => Object.assign(globalThis, {
+    document: previous.document, window: previous.window, Event: previous.Event, Node: previous.Node,
+    HTMLElement: previous.HTMLElement, IS_REACT_ACT_ENVIRONMENT: previous.act,
+    __b06ApprovalTest: previous.approval, __b06ProofingTest: previous.proofing,
+  }))
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+  globalThis.__b06ApprovalTest = {
+    load: async id => {
+      if (id === 'v1') throw new Error('V1 approval unavailable')
+      return { request: { id: 'request-v2', status: 'pending', approval_policy: 'parallel' },
+        signoffs: [{ id: 'signoff-v2', required_approver_id: 'actor', signed_off_at: null }],
+        approvers: [{ user_id: 'actor', full_name: 'Reviewer v2' }] }
+    },
+    requestChanges: async () => {}, signOff: async () => {}, createRequest: async () => {},
+  }
+  globalThis.__b06ProofingTest = {
+    list: async (_kind, id) => {
+      if (id === 'v1') throw new Error('V1 proofing denied')
+      return [{ id: 'comment-v2', body: 'COMMENT ONLY FOR V2', author_id: 'actor', created_at: '2026-09-13', resolved: false }]
+    },
+    add: async () => {}, resolve: async () => {},
+  }
+  const data = {
+    artifacts: [{ id: 'artifact', artifact_type: 'content', title: 'Canonical copy', created_by: 'author', engagements: { id: 'engagement', name: 'Project' } }],
+    versions: [
+      { id: 'v2', artifact_id: 'artifact', version_number: 2, created_at: '2026-09-13', content: { body: 'NEW V2 SNAPSHOT' } },
+      { id: 'v1', artifact_id: 'artifact', version_number: 1, created_at: '2026-09-12', content: { body: 'OLD V1 SNAPSHOT' } },
+    ],
+    approvals: [], approvalRequests: [], comments: [], profiles: [], sourceVersions: [],
+  }
+  let loads = 0
+  const repository = { loadLibrary: async () => {
+    if (loads++) throw new Error('CURRENT ACCESS OR NETWORK FAILURE')
+    return data
+  } }
+  await act(async () => root.render(createElement(ContentLibraryPanel, { repository })))
+  await flushMounted()
+  assert.match(environment.container.textContent, /COMMENT ONLY FOR V2/)
+  const versionSelect = elements(environment.container, 'select').find(node => node.options?.some(option => option.value === 'v1'))
+  assert.ok(versionSelect)
+  await setValue(versionSelect, 'v1')
+  await flushMounted()
+  assert.match(environment.container.textContent, /OLD V1 SNAPSHOT/)
+  assert.doesNotMatch(environment.container.textContent, /COMMENT ONLY FOR V2/)
+  assert.equal(elements(environment.container, 'textarea').some(node => node.getAttribute('placeholder')?.includes('required change')), false)
+  await act(async () => byText(environment.container, 'button', 'Refresh').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  await flushMounted()
+  assert.match(environment.container.textContent, /CURRENT ACCESS OR NETWORK FAILURE/)
+  assert.match(environment.container.textContent, /Review and approval actions are unavailable/)
+})
+
+test('shared approval and proofing panels ignore late reads from a prior exact version', async t => {
+  const vite = await createServer({
+    server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [b06PanelStubs()],
+  })
+  t.after(() => vite.close())
+  const { default: ArtifactApprovalPanel } = await vite.ssrLoadModule('/src/components/ArtifactApprovalPanel.jsx')
+  const { default: VersionProofingPanel } = await vite.ssrLoadModule('/src/components/VersionProofingPanel.jsx')
+  const environment = mountedEnvironment()
+  const previous = {
+    document: globalThis.document, window: globalThis.window, Event: globalThis.Event,
+    Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT,
+    approval: globalThis.__b06ApprovalTest, proofing: globalThis.__b06ProofingTest,
+  }
+  Object.assign(globalThis, {
+    document: environment.document, window: environment.window, Event: TestEvent, Node: TestNode,
+    HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true,
+  })
+  t.after(() => Object.assign(globalThis, {
+    document: previous.document, window: previous.window, Event: previous.Event, Node: previous.Node,
+    HTMLElement: previous.HTMLElement, IS_REACT_ACT_ENVIRONMENT: previous.act,
+    __b06ApprovalTest: previous.approval, __b06ProofingTest: previous.proofing,
+  }))
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+  let resolveApprovalV2
+  let resolveProofingV2
+  const approvalV2 = new Promise(resolve => { resolveApprovalV2 = resolve })
+  const proofingV2 = new Promise(resolve => { resolveProofingV2 = resolve })
+  globalThis.__b06ApprovalTest = {
+    load: id => id === 'v2' ? approvalV2 : Promise.resolve({
+      request: { id: 'request-v1', status: 'pending', approval_policy: 'parallel' },
+      signoffs: [{ id: 'signoff-v1', required_approver_id: 'actor', signed_off_at: null }],
+      approvers: [{ user_id: 'actor', full_name: 'Reviewer v1' }],
+    }),
+    requestChanges: async () => {}, signOff: async () => {}, createRequest: async () => {},
+  }
+  globalThis.__b06ProofingTest = {
+    list: (_kind, id) => id === 'v2' ? proofingV2 : Promise.resolve([
+      { id: 'comment-v1', body: 'COMMENT FOR V1', author_id: 'actor', created_at: '2026-09-12', resolved: false },
+    ]),
+    add: async () => {}, resolve: async () => {},
+  }
+  const render = version => createElement('div', null,
+    createElement(ArtifactApprovalPanel, { version, approval: null }),
+    createElement(VersionProofingPanel, { targetKind: 'artifact', versions: [version], initialVersionId: version.id, department: 'content' }),
+  )
+  await act(async () => root.render(render({ id: 'v2', version_number: 2 })))
+  await act(async () => root.render(render({ id: 'v1', version_number: 1 })))
+  await flushMounted()
+  assert.match(environment.container.textContent, /Reviewer v1/)
+  assert.match(environment.container.textContent, /COMMENT FOR V1/)
+  resolveApprovalV2({
+    request: { id: 'request-v2', status: 'pending', approval_policy: 'parallel' },
+    signoffs: [{ id: 'signoff-v2', required_approver_id: 'actor', signed_off_at: null }],
+    approvers: [{ user_id: 'actor', full_name: 'Reviewer v2' }],
+  })
+  resolveProofingV2([{ id: 'comment-v2', body: 'COMMENT FOR V2', author_id: 'actor', created_at: '2026-09-13', resolved: false }])
+  await flushMounted()
+  assert.match(environment.container.textContent, /Reviewer v1/)
+  assert.match(environment.container.textContent, /COMMENT FOR V1/)
+  assert.doesNotMatch(environment.container.textContent, /Reviewer v2|COMMENT FOR V2/)
+})
+
+test('shared approval panel ignores a prior-version mutation completion and retains its retry identity', async t => {
+  const vite = await createServer({
+    server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [b06PanelStubs()],
+  })
+  t.after(() => vite.close())
+  const { default: ArtifactApprovalPanel } = await vite.ssrLoadModule('/src/components/ArtifactApprovalPanel.jsx')
+  const environment = mountedEnvironment()
+  const previous = {
+    document: globalThis.document, window: globalThis.window, Event: globalThis.Event,
+    Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT,
+    approval: globalThis.__b06ApprovalTest, proofing: globalThis.__b06ProofingTest,
+  }
+  Object.assign(globalThis, {
+    document: environment.document, window: environment.window, Event: TestEvent, Node: TestNode,
+    HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true,
+  })
+  t.after(() => Object.assign(globalThis, {
+    document: previous.document, window: previous.window, Event: previous.Event, Node: previous.Node,
+    HTMLElement: previous.HTMLElement, IS_REACT_ACT_ENVIRONMENT: previous.act,
+    __b06ApprovalTest: previous.approval, __b06ProofingTest: previous.proofing,
+  }))
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+  const loads = []
+  const mutations = []
+  let finishMutation
+  globalThis.__b06ApprovalTest = {
+    load: async id => {
+      loads.push(id)
+      return {
+        request: { id: `request-${id}`, status: 'pending', approval_policy: 'parallel' },
+        signoffs: [{ id: `signoff-${id}`, required_approver_id: 'actor', signed_off_at: null }],
+        approvers: [{ user_id: 'actor', full_name: `Reviewer ${id}` }],
+      }
+    },
+    requestChanges: (...args) => { mutations.push(args); return new Promise(resolve => { finishMutation = resolve }) },
+    signOff: async () => {}, createRequest: async () => {},
+  }
+  globalThis.__b06ProofingTest = { list: async () => [], add: async () => {}, resolve: async () => {} }
+  let changed = 0
+  await act(async () => root.render(createElement(ArtifactApprovalPanel, {
+    version: { id: 'v2', version_number: 2 }, approval: null, onChanged: () => { changed += 1 },
+  })))
+  await flushMounted()
+  const textarea = elements(environment.container, 'textarea').find(node => node.getAttribute('placeholder')?.includes('required change'))
+  assert.ok(textarea)
+  const propsKey = Object.keys(textarea).find(key => key.startsWith('__reactProps'))
+  assert.ok(propsKey)
+  await act(async () => textarea[propsKey].onChange({ target: { value: 'Fix the exact v2 claim' } }))
+  await flushMounted()
+  const form = elements(environment.container, 'form').find(node => node.contains(textarea))
+  await act(async () => form.dispatchEvent(new TestEvent('submit', { bubbles: true })))
+  assert.equal(mutations.length, 1)
+  assert.equal(mutations[0][0], 'request-v2')
+  assert.equal(mutations[0][1], 'Fix the exact v2 claim')
+  assert.match(mutations[0][2], /^[0-9a-f-]{36}$/i)
+  await act(async () => root.render(createElement(ArtifactApprovalPanel, {
+    version: { id: 'v1', version_number: 1 }, approval: null, onChanged: () => { changed += 1 },
+  })))
+  await flushMounted()
+  finishMutation()
+  await flushMounted()
+  assert.deepEqual(loads, ['v2', 'v1'])
+  assert.equal(changed, 0)
+  assert.match(environment.container.textContent, /Reviewer v1/)
+  assert.doesNotMatch(environment.container.textContent, /Reviewer v2/)
 })

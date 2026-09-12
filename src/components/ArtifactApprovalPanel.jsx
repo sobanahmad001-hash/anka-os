@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useAuth } from '../context/AuthContext.jsx'
 import { artifactApprovals } from '../data/artifactApprovalRepository.js'
@@ -10,6 +10,7 @@ const THEMES = {
   blue: { accent: 'text-blue-300', border: 'border-blue-500/30', button: 'bg-blue-600 hover:bg-blue-500' },
 }
 const SECONDARY = 'rounded-xl border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-40'
+const EMPTY_STATE = Object.freeze({ request: null, signoffs: [], approvers: [] })
 
 function label(approver) {
   if (!approver) return 'Team member'
@@ -23,45 +24,102 @@ export default function ArtifactApprovalPanel({
 }) {
   const { user } = useAuth()
   const colors = THEMES[theme] || THEMES.amber
-  const [state, setState] = useState({ request: null, signoffs: [], approvers: [] })
+  const targetId = version?.id || ''
+  const targetRef = useRef(targetId)
+  targetRef.current = targetId
+  const loadSequence = useRef(0)
+  const changeIntent = useRef(null)
+  const [state, setState] = useState({ targetId: '', ...EMPTY_STATE })
   const [policy, setPolicy] = useState('sequential')
   const [selected, setSelected] = useState([])
   const [changeComment, setChangeComment] = useState('')
-  const [loading, setLoading] = useState(Boolean(version))
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  const [loadingTarget, setLoadingTarget] = useState(targetId)
+  const [busyTarget, setBusyTarget] = useState('')
+  const [errorState, setErrorState] = useState({ targetId: '', message: '' })
 
   const load = useCallback(async () => {
-    if (!version?.id) return
-    setLoading(true); setError('')
-    try { setState(await artifactApprovals.load(version.id)) }
-    catch (reason) { setError(reason.message) }
-    finally { setLoading(false) }
+    const requestedTarget = version?.id || ''
+    const sequence = ++loadSequence.current
+    if (!requestedTarget) {
+      setState({ targetId: '', ...EMPTY_STATE })
+      setLoadingTarget('')
+      return
+    }
+    setState({ targetId: '', ...EMPTY_STATE })
+    setLoadingTarget(requestedTarget)
+    setErrorState({ targetId: requestedTarget, message: '' })
+    try {
+      const next = await artifactApprovals.load(requestedTarget)
+      if (targetRef.current === requestedTarget && loadSequence.current === sequence) {
+        setState({ targetId: requestedTarget, ...next })
+      }
+    } catch (reason) {
+      if (targetRef.current === requestedTarget && loadSequence.current === sequence) {
+        setState({ targetId: requestedTarget, ...EMPTY_STATE })
+        setErrorState({ targetId: requestedTarget, message: reason.message })
+      }
+    } finally {
+      if (targetRef.current === requestedTarget && loadSequence.current === sequence) setLoadingTarget('')
+    }
   }, [version?.id])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    setPolicy('sequential')
+    setSelected([])
+    setChangeComment('')
+    changeIntent.current = null
+    load()
+    return () => { loadSequence.current += 1 }
+  }, [load])
 
-  const eligibleApprovers = useMemo(() => approverFilter ? state.approvers.filter(approverFilter) : state.approvers, [approverFilter, state.approvers])
+  const activeState = state.targetId === targetId ? state : EMPTY_STATE
+  const loading = Boolean(targetId) && (loadingTarget === targetId || state.targetId !== targetId)
+  const busy = busyTarget === targetId
+  const error = errorState.targetId === targetId ? errorState.message : ''
+
+  const eligibleApprovers = useMemo(() => approverFilter ? activeState.approvers.filter(approverFilter) : activeState.approvers, [approverFilter, activeState.approvers])
   const approverById = useMemo(() => new Map(
-    state.approvers.map(approver => [approver.user_id, approver]),
-  ), [state.approvers])
-  const orderedSignoffs = useMemo(() => [...state.signoffs].sort((left, right) => {
-    if (state.request?.approval_policy === 'parallel') return label(approverById.get(left.required_approver_id)).localeCompare(label(approverById.get(right.required_approver_id)))
+    activeState.approvers.map(approver => [approver.user_id, approver]),
+  ), [activeState.approvers])
+  const orderedSignoffs = useMemo(() => [...activeState.signoffs].sort((left, right) => {
+    if (activeState.request?.approval_policy === 'parallel') return label(approverById.get(left.required_approver_id)).localeCompare(label(approverById.get(right.required_approver_id)))
     return Number(left.sequence_position) - Number(right.sequence_position)
-  }), [state.signoffs, state.request?.approval_policy, approverById])
-  const ownSignoff = state.signoffs.find(item => item.required_approver_id === user?.id)
-  const earlierPending = state.request?.approval_policy === 'sequential' && ownSignoff
-    ? state.signoffs.some(item => Number(item.sequence_position) < Number(ownSignoff.sequence_position) && !item.signed_off_at)
+  }), [activeState.signoffs, activeState.request?.approval_policy, approverById])
+  const ownSignoff = activeState.signoffs.find(item => item.required_approver_id === user?.id)
+  const earlierPending = activeState.request?.approval_policy === 'sequential' && ownSignoff
+    ? activeState.signoffs.some(item => Number(item.sequence_position) < Number(ownSignoff.sequence_position) && !item.signed_off_at)
     : false
 
   async function run(callback) {
-    setBusy(true); setError('')
+    const actionTarget = targetId
+    if (!actionTarget) return
+    setBusyTarget(actionTarget)
+    setErrorState({ targetId: actionTarget, message: '' })
     try {
-      await callback()
+      await callback(actionTarget)
+      if (targetRef.current !== actionTarget) return
       await load()
-      await onChanged?.()
-    } catch (reason) { setError(reason.message) }
-    finally { setBusy(false) }
+      if (targetRef.current === actionTarget) await onChanged?.()
+    } catch (reason) {
+      if (targetRef.current === actionTarget) setErrorState({ targetId: actionTarget, message: reason.message })
+    } finally {
+      if (targetRef.current === actionTarget) setBusyTarget('')
+    }
+  }
+
+  async function submitChangeRequest() {
+    const requestId = activeState.request?.id
+    const comment = changeComment.trim()
+    if (!requestId || !comment) return
+    const prior = changeIntent.current
+    const intent = prior?.requestId === requestId && prior?.comment === comment ? prior : {
+      requestId,
+      comment,
+      idempotencyKey: globalThis.crypto.randomUUID(),
+    }
+    changeIntent.current = intent
+    await artifactApprovals.requestChanges(requestId, comment, intent.idempotencyKey)
+    if (targetRef.current === targetId) { setChangeComment(''); changeIntent.current = null }
   }
 
   function toggle(userId) {
@@ -76,15 +134,15 @@ export default function ArtifactApprovalPanel({
   return <section className={`mt-4 rounded-2xl border ${colors.border} bg-slate-900/70 p-5`}>
     <div><p className={`text-xs font-semibold uppercase tracking-[0.14em] ${colors.accent}`}>Version approval</p><h3 className="mt-1 font-semibold text-white">Version {version.version_number}</h3></div>
     {error && <p className="mt-3 rounded-xl border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm text-red-300">{error}</p>}
-    {loading ? <p className="mt-4 text-sm text-slate-500">Loading approval policy…</p> : state.request ? <div className="mt-4 space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-slate-300"><span className="font-semibold capitalize text-white">{state.request.approval_policy}</span> policy · <span className="capitalize">{state.request.status}</span></p><span className="text-xs text-slate-500">{state.signoffs.filter(item => item.signed_off_at).length}/{state.signoffs.length} signed</span></div>
-      <ol className="space-y-2">{orderedSignoffs.map(signoff => <li key={signoff.id} className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2.5"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-800 text-[10px] font-semibold text-slate-300">{state.request.approval_policy === 'sequential' ? signoff.sequence_position : '•'}</span><span className="min-w-0 flex-1 text-sm text-slate-300">{label(approverById.get(signoff.required_approver_id))}{signoff.required_approver_id === user?.id ? ' (you)' : ''}</span><span className={`text-xs font-semibold ${signoff.signed_off_at ? 'text-emerald-300' : 'text-amber-300'}`}>{signoff.signed_off_at ? 'Signed' : 'Pending'}</span></li>)}</ol>
-      {state.request.status === 'pending' && ownSignoff && !ownSignoff.signed_off_at && <button type="button" disabled={busy || earlierPending} onClick={() => run(() => artifactApprovals.signOff(state.request.id))} className={`rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${colors.button}`}>{busy ? 'Signing…' : earlierPending ? 'Waiting for earlier approvers' : 'Sign off this exact version'}</button>}
-      {state.request.status === 'pending' && ownSignoff && !ownSignoff.signed_off_at && <form onSubmit={event => { event.preventDefault(); run(async () => { await artifactApprovals.requestChanges(state.request.id, changeComment); setChangeComment('') }) }} className="rounded-xl border border-amber-900/50 bg-amber-950/20 p-3">
+    {loading ? <p className="mt-4 text-sm text-slate-500">Loading approval policy…</p> : error ? <p className="mt-4 text-sm text-slate-500">Review controls are unavailable for this exact version until its approval state can be loaded.</p> : activeState.request ? <div className="mt-4 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-slate-300"><span className="font-semibold capitalize text-white">{activeState.request.approval_policy}</span> policy · <span className="capitalize">{activeState.request.status}</span></p><span className="text-xs text-slate-500">{activeState.signoffs.filter(item => item.signed_off_at).length}/{activeState.signoffs.length} signed</span></div>
+      <ol className="space-y-2">{orderedSignoffs.map(signoff => <li key={signoff.id} className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2.5"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-800 text-[10px] font-semibold text-slate-300">{activeState.request.approval_policy === 'sequential' ? signoff.sequence_position : '•'}</span><span className="min-w-0 flex-1 text-sm text-slate-300">{label(approverById.get(signoff.required_approver_id))}{signoff.required_approver_id === user?.id ? ' (you)' : ''}</span><span className={`text-xs font-semibold ${signoff.signed_off_at ? 'text-emerald-300' : 'text-amber-300'}`}>{signoff.signed_off_at ? 'Signed' : 'Pending'}</span></li>)}</ol>
+      {activeState.request.status === 'pending' && ownSignoff && !ownSignoff.signed_off_at && <button type="button" disabled={busy || earlierPending} onClick={() => run(() => artifactApprovals.signOff(activeState.request.id))} className={`rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${colors.button}`}>{busy ? 'Signing…' : earlierPending ? 'Waiting for earlier approvers' : 'Sign off this exact version'}</button>}
+      {activeState.request.status === 'pending' && ownSignoff && !ownSignoff.signed_off_at && <form onSubmit={event => { event.preventDefault(); run(submitChangeRequest) }} className="rounded-xl border border-amber-900/50 bg-amber-950/20 p-3">
         <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-amber-300">Request changes<textarea required rows="3" maxLength="8000" value={changeComment} onChange={event => setChangeComment(event.target.value)} placeholder="Describe the required change for this exact version..." className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm font-normal normal-case tracking-normal text-white" /></label>
         <div className="mt-2 flex items-center justify-between gap-3"><p className="text-[11px] text-slate-500">This records an immutable unresolved proofing comment. It is not an approval.</p><button disabled={busy || !changeComment.trim()} className={SECONDARY}>{busy ? 'Recording...' : 'Request changes'}</button></div>
       </form>}
-      {state.request.status === 'pending' && (!ownSignoff || ownSignoff.signed_off_at) && <p className="text-xs text-slate-500">{ownSignoff ? 'Your sign-off is recorded. The remaining named approvers must complete this request.' : 'Only a named required approver can sign this request.'}</p>}
+      {activeState.request.status === 'pending' && (!ownSignoff || ownSignoff.signed_off_at) && <p className="text-xs text-slate-500">{ownSignoff ? 'Your sign-off is recorded. The remaining named approvers must complete this request.' : 'Only a named required approver can sign this request.'}</p>}
     </div> : <div className="mt-4 space-y-4">
       <div className="flex flex-wrap gap-2">{onSingleApprove && <button type="button" disabled={busy} onClick={() => run(onSingleApprove)} className={SECONDARY}>{singleApprovalLabel || `Approve version ${version.version_number}`}</button>}<p className="self-center text-xs text-slate-500">Or create a governed request for multiple named approvers.</p></div>
       <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Policy<select value={policy} onChange={event => setPolicy(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm normal-case tracking-normal text-white"><option value="sequential">Sequential — sign in supplied order</option><option value="parallel">Parallel — sign in any order</option></select></label>

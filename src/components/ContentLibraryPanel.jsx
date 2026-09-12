@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import ArtifactApprovalPanel from './ArtifactApprovalPanel.jsx'
 import VersionProofingPanel from './VersionProofingPanel.jsx'
@@ -15,7 +15,6 @@ const SECONDARY = 'rounded-xl border border-slate-700 px-3 py-2 text-xs font-sem
 const STAGE = {
   draft: ['Draft', 'bg-slate-800 text-slate-300'],
   in_review: ['In review', 'bg-amber-950 text-amber-300'],
-  changes_requested: ['Changes requested', 'bg-red-950 text-red-300'],
   approved: ['Approved', 'bg-emerald-950 text-emerald-300'],
 }
 
@@ -45,14 +44,36 @@ export default function ContentLibraryPanel({ repository }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  const [stale, setStale] = useState(false)
+  const loadSequence = useRef(0)
+  const mounted = useRef(true)
+  const dataRef = useRef(data)
+  dataRef.current = data
   const load = useCallback(async () => {
+    const sequence = ++loadSequence.current
     setLoading(true); setError('')
-    try { setData(await repository.loadLibrary()) }
-    catch (reason) { if (reason?.name !== 'AbortError') setError(reason.message) }
-    finally { setLoading(false) }
+    try {
+      const next = await repository.loadLibrary()
+      if (mounted.current && sequence === loadSequence.current) {
+        setData(next); setStale(false)
+      }
+    } catch (reason) {
+      if (reason?.name !== 'AbortError' && mounted.current && sequence === loadSequence.current) {
+        const denied = [401, 403].includes(Number(reason?.status)) || reason?.membershipMismatch
+        if (denied) { setData(null); setArtifactId(''); setVersionId('') }
+        else setStale(Boolean(dataRef.current))
+        setError(reason.message)
+      }
+    } finally {
+      if (mounted.current && sequence === loadSequence.current) setLoading(false)
+    }
   }, [repository])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    mounted.current = true
+    load()
+    return () => { mounted.current = false; loadSequence.current += 1 }
+  }, [load])
 
   const entries = useMemo(() => buildContentLibrary({
     artifacts: data?.artifacts, versions: data?.versions, approvals: data?.approvals,
@@ -64,7 +85,8 @@ export default function ContentLibraryPanel({ repository }) {
     || selectedEntry?.latest || null
   const approval = data?.approvals?.find(item => item.artifact_version_id === selectedVersion?.id) || null
   const request = data?.approvalRequests?.find(item => item.artifact_version_id === selectedVersion?.id) || null
-  const reviewStage = selectedVersion ? contentReviewStage(selectedVersion.id, data?.approvals, data?.approvalRequests, data?.comments) : 'draft'
+  const reviewStage = selectedVersion ? contentReviewStage(selectedVersion.id, data?.approvals, data?.approvalRequests) : 'draft'
+  const openCommentCount = (data?.comments || []).filter(item => item.artifact_version_id === selectedVersion?.id && !item.resolved).length
   const stage = STAGE[reviewStage] || STAGE.draft
   const artifactById = new Map((data?.artifacts || []).map(item => [item.id, item]))
   const accessibleVersions = [
@@ -96,6 +118,8 @@ export default function ContentLibraryPanel({ repository }) {
       </div>
     </div>
 
+    {error && data && <div className="rounded-2xl border border-red-900/60 bg-red-950/30 p-4 text-sm text-red-300"><p>{error}</p><p className="mt-1 text-xs text-red-200/80">The displayed library snapshot may be stale. Review and approval actions are unavailable until a refresh succeeds.</p><button type="button" onClick={load} className={`${SECONDARY} mt-3`}>Try again</button></div>}
+
     {!entries.length ? <div className="rounded-2xl border border-dashed border-slate-700 p-12 text-center text-sm text-slate-500">No saved Content artifacts are visible in this organization.</div> : !visible.length ? <div className="rounded-2xl border border-dashed border-slate-700 p-12 text-center text-sm text-slate-500">No Content artifacts match these filters. The library has not treated this as a loading error.</div> : <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
       <div className="space-y-3">{visible.map(entry => { const itemStage = STAGE[entry.reviewStage] || STAGE.draft; return <button type="button" key={entry.artifact.id} onClick={() => { setArtifactId(entry.artifact.id); setVersionId(entry.latest?.id || '') }} className={`w-full rounded-2xl border p-4 text-left ${selectedEntry?.artifact.id === entry.artifact.id ? 'border-amber-500/60 bg-amber-950/20' : 'border-slate-800 bg-slate-900/70 hover:border-slate-700'}`}>
         <div className="flex items-start justify-between gap-3"><h3 className="font-semibold text-white">{entry.artifact.title}</h3><span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase ${itemStage[1]}`}>{itemStage[0]}</span></div>
@@ -110,10 +134,10 @@ export default function ContentLibraryPanel({ repository }) {
           <dl className="mt-5 grid gap-3 text-sm md:grid-cols-2"><Meta label="Version ID" value={selectedVersion.id} /><Meta label="Checksum" value={selectedVersion.content_checksum} /><Meta label="Change summary" value={selectedVersion.change_summary || 'No summary recorded'} /><Meta label="Classification" value={selectedVersion.data_classification} /></dl>
           <div className="mt-6 border-t border-slate-800 pt-5"><h3 className="font-semibold text-white">Saved content</h3><dl className="mt-4 space-y-4">{Object.entries(selectedVersion.content || {}).map(([key, value]) => <div key={key}><dt className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">{key.replaceAll('_', ' ')}</dt><dd className="mt-1 text-sm leading-6 text-slate-300">{contentValue(value)}</dd></div>)}</dl></div>
           <div className="mt-6 border-t border-slate-800 pt-5"><h3 className="font-semibold text-white">Recorded source versions</h3>{sourceReferences.length ? <div className="mt-3 space-y-2">{sourceReferences.map(reference => <div key={`${reference.path}:${reference.id}`} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3"><p className="text-sm font-semibold text-slate-200">{reference.accessible ? `${reference.artifact?.title || 'Source artifact'} - version ${reference.version.version_number}` : 'Recorded source is not accessible in the current scope'}</p><p className="mt-1 break-all text-[11px] text-slate-500">{reference.path} - {reference.id}</p></div>)}</div> : <p className="mt-3 rounded-xl border border-dashed border-slate-800 p-4 text-sm text-slate-500">This exact version records no source-version links. No newer source has been substituted.</p>}</div>
-          {request?.status === 'pending' && <p className="mt-5 rounded-xl border border-amber-900/50 bg-amber-950/20 p-3 text-xs leading-5 text-amber-200">This exact version has a pending governed review request. Any open proofing comment displays as Changes requested; later drafts inherit neither this request nor approval.</p>}
+          {request?.status === 'pending' && <p className="mt-5 rounded-xl border border-amber-900/50 bg-amber-950/20 p-3 text-xs leading-5 text-amber-200">This exact version has a pending governed review request and {openCommentCount} open proofing comment{openCommentCount === 1 ? '' : 's'}. Open comments are feedback, not a formal review decision; later drafts inherit neither this request nor approval.</p>}
         </article>
-        <ArtifactApprovalPanel version={selectedVersion} approval={approval} theme="amber" requestLabel="Submit exact version for review" singleApprovalLabel={`Use single-manager route for version ${selectedVersion.version_number}`} onSingleApprove={() => repository.approveArtifact(selectedVersion.id)} onChanged={load} />
-        <VersionProofingPanel targetKind="artifact" versions={[selectedVersion]} initialVersionId={selectedVersion.id} department="content" theme="amber" onChanged={load} />
+        {!error && !stale && <ArtifactApprovalPanel key={`approval:${selectedVersion.id}`} version={selectedVersion} approval={approval} theme="amber" requestLabel="Submit exact version for review" singleApprovalLabel={`Use single-manager route for version ${selectedVersion.version_number}`} onSingleApprove={() => repository.approveArtifact(selectedVersion.id)} onChanged={load} />}
+        {!error && !stale && <VersionProofingPanel key={`proofing:${selectedVersion.id}`} targetKind="artifact" versions={[selectedVersion]} initialVersionId={selectedVersion.id} department="content" theme="amber" onChanged={load} />}
       </div>}
     </div>}
   </section>
