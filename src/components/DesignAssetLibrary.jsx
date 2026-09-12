@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useReducer, useState } from 'react'
-import { buildDesignAssetRows, designAssetAccessState, designAssetLibraryReducer, designAssetSourceFocus, filterDesignAssetRows, initialDesignAssetLibraryState } from '../data/designAssetLibrary.js'
+import { buildDesignAssetRows, designAssetAccessState, designAssetArchiveEligibility, designAssetLibraryReducer, designAssetSourceFocus, filterDesignAssetRows, initialDesignAssetLibraryState } from '../data/designAssetLibrary.js'
 import DesignAssetComparison from './DesignAssetComparison.jsx'
 import DesignAssetUpload from './DesignAssetUpload.jsx'
 import DesignAssetVersionBrowser from './DesignAssetVersionBrowser.jsx'
@@ -19,11 +19,12 @@ function exactId(value) {
   return value ? <code className="break-all text-[11px] text-slate-300">{value}</code> : <span className="text-slate-500">Unavailable / not recorded</span>
 }
 
-export default function DesignAssetLibrary({ workspace, contextKey, canUpload = false, busy = false, onUpload, onClose, onFocusSource }) {
+export default function DesignAssetLibrary({ workspace, contextKey, canUpload = false, canArchive = false, busy = false, onUpload, onArchive, onClose, onFocusSource }) {
   const [state, dispatch] = useReducer(designAssetLibraryReducer, contextKey, initialDesignAssetLibraryState)
   const [clock, setClock] = useState(() => Date.now())
   const [comparisonOpen, setComparisonOpen] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
+  const [archiveIntent, setArchiveIntent] = useState(null)
   const rows = useMemo(() => buildDesignAssetRows(workspace), [workspace])
   const issuedAt = Number(workspace.mediaUrlsRequestedAt)
   const effectiveNow = Math.max(clock, Date.now())
@@ -34,6 +35,7 @@ export default function DesignAssetLibrary({ workspace, contextKey, canUpload = 
   useEffect(() => {
     dispatch({ type: 'context_changed', contextKey })
     setUploadOpen(false)
+    setArchiveIntent(null)
   }, [contextKey])
 
   useEffect(() => {
@@ -47,6 +49,20 @@ export default function DesignAssetLibrary({ workspace, contextKey, canUpload = 
   }, [issuedAt, workspace.mediaUrlExpiresIn])
 
   const access = designAssetAccessState(selected, accessOptions)
+  const archive = designAssetArchiveEligibility(selected)
+
+  async function confirmArchive() {
+    if (!canArchive || !archive.eligible) return
+    const versionCount = selected.assetVersions.length
+    const confirmed = window.confirm(`Archive “${selected.directionTitle || 'Untitled asset'}” from normal browsing?\n\nEligible because: ${archive.reason}\n\nThis retains all ${versionCount} exact immutable version${versionCount === 1 ? '' : 's'} and stored files. It does not delete history, approvals, releases, handoffs, or references. New versions will be rejected, and no restore policy is available.`)
+    if (!confirmed) return
+    const sameIntent = archiveIntent?.assetId === selected.assetId
+      && archiveIntent?.latestVersionId === selected.assetVersionId
+    const operationKey = sameIntent ? archiveIntent.operationKey : crypto.randomUUID()
+    if (!sameIntent) setArchiveIntent({ assetId: selected.assetId, latestVersionId: selected.assetVersionId, operationKey })
+    const completed = await onArchive(selected, operationKey)
+    if (completed) setArchiveIntent(null)
+  }
 
   return <section aria-labelledby="design-asset-library-title" className="rounded-2xl border border-violet-400/20 bg-slate-900/80 p-4 shadow-xl shadow-black/10 sm:p-5">
     <div className="flex flex-wrap items-start justify-between gap-4">
@@ -92,7 +108,9 @@ export default function DesignAssetLibrary({ workspace, contextKey, canUpload = 
       <div className="mt-4 flex flex-wrap items-center gap-3">
         {access.canOpen ? <a href={access.url} target="_blank" rel="noreferrer" className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-300">Open or save signed image</a> : <span className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-slate-500">Image link unavailable</span>}
         <button type="button" disabled={!designAssetSourceFocus(selected)} onClick={() => onFocusSource(selected)} className={SECONDARY + ' disabled:cursor-not-allowed disabled:opacity-40'}>Open source in Design desk</button>
+        {canArchive && archive.eligible && <button type="button" disabled={busy} onClick={confirmArchive} className="rounded-xl border border-amber-400/30 px-4 py-2.5 text-sm font-semibold text-amber-200 disabled:opacity-40">{busy ? 'Archiving…' : 'Archive draft asset'}</button>}
       </div>
+      <p className={'mt-3 text-xs leading-5 ' + (archive.eligible ? 'text-amber-200' : 'text-slate-500')}>Archive eligibility: {archive.reason}</p>
       <p className={'mt-3 text-xs leading-5 ' + (access.canOpen ? 'text-slate-400' : 'text-amber-300')}>{access.message}</p>
       {!!selected.assetVersions?.length && <DesignAssetVersionBrowser row={selected} contextKey={contextKey} accessOptions={accessOptions} />}
     </aside>}

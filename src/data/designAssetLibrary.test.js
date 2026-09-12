@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildDesignAssetRows, designAssetAccessState, designAssetLibraryContextKey, designAssetLibraryReducer, designAssetSourceFocus, filterDesignAssetRows, initialDesignAssetLibraryState } from './designAssetLibrary.js'
+import { buildDesignAssetRows, designAssetAccessState, designAssetArchiveEligibility, designAssetLibraryContextKey, designAssetLibraryReducer, designAssetSourceFocus, filterDesignAssetRows, initialDesignAssetLibraryState } from './designAssetLibrary.js'
 
 const now = Date.parse('2026-09-11T12:00:00.000Z')
 const workspace = () => ({
@@ -103,4 +103,19 @@ test('source focus uses exact existing session, immutable direction version and 
   const row = buildDesignAssetRows(workspace())[0]
   assert.deepEqual(designAssetSourceFocus(row), { sessionId: 'session-a', directionVersionId: 'version-a', jobId: 'job-a' })
   assert.equal(designAssetSourceFocus({ ...row, sessionId: '' }), null)
+})
+
+test('archive eligibility fails closed and permits only standalone upload-only draft history', () => {
+  const eligible = { assetId: 'asset-root', archivedAt: '', assetVersions: [
+    { lifecycle_status: 'draft', source_kind: 'upload', source_media_asset_id: null, source_direction_version_id: null },
+    { lifecycle_status: 'draft', source_kind: 'upload', source_media_asset_id: null, source_direction_version_id: null },
+  ] }
+  assert.deepEqual(designAssetArchiveEligibility(eligible), {
+    eligible: true,
+    reason: 'Standalone uploaded draft. All 2 immutable versions and stored files will be retained.',
+  })
+  assert.equal(designAssetArchiveEligibility({ ...eligible, archivedAt: '2026-09-12T00:00:00Z' }).eligible, false)
+  assert.equal(designAssetArchiveEligibility({ ...eligible, assetVersions: [{ ...eligible.assetVersions[0], source_direction_version_id: 'direction-version' }] }).eligible, false)
+  assert.equal(designAssetArchiveEligibility({ ...eligible, assetVersions: [{ ...eligible.assetVersions[0], source_kind: 'generated', source_media_asset_id: 'media' }] }).eligible, false)
+  assert.equal(designAssetArchiveEligibility({ ...eligible, assetVersions: [] }).eligible, false)
 })
