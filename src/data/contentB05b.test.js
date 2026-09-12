@@ -95,6 +95,30 @@ test('B05b reports each deterministic attention condition without changing text'
   assert.equal(content.body, body)
 })
 
+test('B05b colon-labelled sections share the configured 120-character boundary', () => {
+  for (const length of [81, 100, 120]) {
+    const label = 'S'.repeat(length)
+    const requirements = {
+      required_sections: [label],
+      length_unit: null,
+      min_length: null,
+      max_length: null,
+      required_terms: [],
+      require_source_citations: false,
+    }
+    assert.deepEqual(contentQualityConfigurationIssues({ required_sections: label }), {})
+    assert.equal(byId(checkContentQuality({
+      body: `${label}: Present content.`,
+      quality_requirements: requirements,
+    })).required_sections.status, 'pass')
+    assert.equal(byId(checkContentQuality({
+      body: `${label}:`,
+      quality_requirements: requirements,
+    })).required_sections.status, 'attention')
+  }
+  assert.match(contentQualityConfigurationIssues({ required_sections: 'S'.repeat(121) }).required_sections, /120 characters/)
+})
+
 test('B05b bounds optional quality configuration before preview or save', () => {
   assert.match(contentQualityConfigurationIssues({ length_unit: 'words' }).length_rule, /at least one/)
   assert.match(contentQualityConfigurationIssues({ length_unit: 'words', min_length: '20', max_length: '10' }).length_rule, /cannot exceed/)

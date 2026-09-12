@@ -1,3 +1,5 @@
+const MAX_SECTION_LABEL_LENGTH = 120
+
 export const CONTENT_LENGTH_UNITS = Object.freeze([
   ['none', 'Not configured'],
   ['words', 'Words'],
@@ -5,10 +7,11 @@ export const CONTENT_LENGTH_UNITS = Object.freeze([
 ])
 
 const LIMITS = Object.freeze({
-  required_sections: { items: 30, characters: 120 },
+  required_sections: { items: 30, characters: MAX_SECTION_LABEL_LENGTH },
   required_terms: { items: 100, characters: 200 },
   source_citations: { items: 100, characters: 1000 },
 })
+const LABELLED_SECTION = new RegExp(`^\\s*([^:\\n]{1,${MAX_SECTION_LABEL_LENGTH}}):\\s*(.*)$`)
 
 function clean(value) {
   return String(value || '').trim()
@@ -118,7 +121,7 @@ function structuralSections(body) {
   let current = ''
   for (const line of String(body || '').split(/\r?\n/)) {
     const markdown = line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/)
-    const labelled = markdown ? null : line.match(/^\s*([^:\n]{1,80}):\s*(.*)$/)
+    const labelled = markdown ? null : line.match(LABELLED_SECTION)
     if (markdown || labelled) {
       current = normalized(markdown ? markdown[1] : labelled[1])
       if (!sections.has(current)) sections.set(current, '')
