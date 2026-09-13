@@ -24,7 +24,9 @@ export default function ContentHandoffPanel({
     [tasks, workItems, destination, projectId, engagementId])
   const work = workOptions.find(item => `${item.kind}:${item.id}` === workKey) || null
   const readiness = contentHandoffReadiness({ organizationId, artifact, version, destination, work, stale })
-  const targetKey = contentHandoffTargetKey({ organizationId, artifact, version, destination, work, note })
+  const targetKey = contentHandoffTargetKey({
+    organizationId, artifact, version, approval, sourceReferences, destination, work, note, stale,
+  })
   const currentPreview = isCurrentContentHandoffPreview(preview, targetKey) ? preview : null
 
   useEffect(() => {
@@ -46,7 +48,7 @@ export default function ContentHandoffPanel({
   function preparePreview() {
     if (!readiness.previewReady) return
     setPreview(buildContentHandoffPreview({ organizationId, artifact, version, approval,
-      sourceReferences, destination, work, note }))
+      sourceReferences, destination, work, note, stale }))
   }
 
   return <section className="mt-6 rounded-2xl border border-amber-900/40 bg-slate-900/70 p-6">
@@ -87,7 +89,7 @@ export default function ContentHandoffPanel({
     </label>
 
     {readiness.missing.length > 0 && <p className="mt-4 text-xs leading-5 text-amber-300">Preview needs: {readiness.missing.join(', ')}.</p>}
-    {preview && !currentPreview && <p className="mt-4 rounded-xl border border-amber-900/50 bg-amber-950/20 p-3 text-xs text-amber-200">The selection changed. The previous preview is no longer current; prepare it again to use the exact target shown now.</p>}
+    {preview && !currentPreview && <p className="mt-4 rounded-xl border border-amber-900/50 bg-amber-950/20 p-3 text-xs text-amber-200">The selection, approval, source access, or refresh state changed. The previous preview is not current; use a fresh authorized snapshot and prepare it again.</p>}
     <div className="mt-5 flex flex-wrap gap-3">
       <button type="button" className={PRIMARY} disabled={!readiness.previewReady} onClick={preparePreview}>Prepare handoff preview</button>
       <button type="button" className={DISABLED} disabled title="A canonical replay-safe Content handoff contract is not available">Confirm handoff unavailable</button>

@@ -28,11 +28,18 @@ export function contentHandoffWorkOptions({ tasks = [], workItems = [], destinat
   return [...projectOptions, ...engagementOptions]
 }
 
-export function contentHandoffTargetKey({ organizationId, artifact, version, destination, work, note = '' } = {}) {
+export function contentHandoffTargetKey({
+  organizationId, artifact, version, approval, sourceReferences = [], destination, work, note = '', stale = false,
+} = {}) {
+  const sourceEvidence = sourceReferences.map(reference => ({
+    id: id(reference?.id), path: clean(reference?.path, 500), accessible: reference?.accessible === true,
+  })).sort((left, right) => `${left.path}:${left.id}`.localeCompare(`${right.path}:${right.id}`))
   return JSON.stringify({ organizationId: id(organizationId), artifactId: id(artifact), versionId: id(version),
     checksum: clean(version?.content_checksum, 240), destinationId: id(destination),
     destinationDepartment: clean(destination?.departmentId, 40), workKind: clean(work?.kind, 40),
-    workId: id(work), note: clean(note) })
+    workId: id(work), note: clean(note),
+    approval: approval ? { id: id(approval), approvedBy: id(approval?.approved_by), approvedAt: clean(approval?.approved_at, 100) } : null,
+    sourceEvidence, stale: stale === true })
 }
 
 export function contentHandoffReadiness({ organizationId, artifact, version, destination, work, stale = false } = {}) {
@@ -47,8 +54,8 @@ export function contentHandoffReadiness({ organizationId, artifact, version, des
   return { previewReady: missing.length === 0, officialActionAvailable: false, missing }
 }
 
-export function buildContentHandoffPreview({ organizationId, artifact, version, approval, sourceReferences = [], destination, work = null, note = '' } = {}) {
-  const key = contentHandoffTargetKey({ organizationId, artifact, version, destination, work, note })
+export function buildContentHandoffPreview({ organizationId, artifact, version, approval, sourceReferences = [], destination, work = null, note = '', stale = false } = {}) {
+  const key = contentHandoffTargetKey({ organizationId, artifact, version, approval, sourceReferences, destination, work, note, stale })
   return Object.freeze({ key,
     source: { artifactId: id(artifact), title: clean(artifact?.title, 240), artifactType: clean(artifact?.artifact_type, 80),
       versionId: id(version), versionNumber: Number(version?.version_number) || 0,
