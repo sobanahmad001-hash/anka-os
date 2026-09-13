@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   CONTENT_HOME_GROUPS, buildContentHomeIndex, contentHomeAccessState, contentSourceReadiness,
 } from '../data/contentWorkshopHome.js'
+import { CONTENT_ARTIFACT_FORMS } from '../data/contentStudio.js'
+import { isWriterContent } from '../data/contentWriter.js'
 
 const BUTTON = 'rounded-xl border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:cursor-not-allowed disabled:opacity-50'
 const PRIMARY = 'rounded-xl bg-amber-500 px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-300'
@@ -51,6 +53,9 @@ export default function ContentWorkshopHomePanel({
   const access = contentHomeAccessState(context)
   const typeCounts = useMemo(() => new Map((workspace?.artifacts || []).map(item => item.artifact_type)
     .map((type, _index, types) => [type, types.filter(candidate => candidate === type).length])), [workspace])
+  const editorTarget = selectedItem && typeCounts.get(selectedItem.contentType) === 1 && CONTENT_ARTIFACT_FORMS[selectedItem.contentType]
+    ? selectedItem.contentType === 'content' && isWriterContent(selectedVersion?.content) ? 'writer' : 'artifacts'
+    : ''
 
   useEffect(() => {
     setSelectedItemId(''); setSourceSelections({})
@@ -72,13 +77,13 @@ export default function ContentWorkshopHomePanel({
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Content B01</p>
         <h2 id="content-home-title" className="mt-1 text-2xl font-semibold text-white">Content home</h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Browse the current engagement’s Content records, select exact saved versions, and see source readiness without imposing unrelated gates.</p>
-      </div><div className="flex flex-wrap gap-2"><button type="button" className={PRIMARY} onClick={onNewContent}>New content</button><button type="button" className={BUTTON} onClick={onOpenBrief}>Open brief</button><a className={BUTTON} href="/sphere/quick-tasks">Start private exploration</a></div></div>
+      </div><div className="flex flex-wrap gap-2"><button type="button" className={PRIMARY} disabled={stale} onClick={onNewContent}>New content</button><button type="button" className={BUTTON} onClick={onOpenBrief}>Open brief</button><a className={BUTTON} href="/sphere/quick-tasks">Start private exploration</a></div></div>
       <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
         <Meta label="Organization" value={context.organizationId} /><Meta label="Project" value={context.projectId} />
         <Meta label="Engagement" value={workspace.engagement?.name || context.engagementId} /><Meta label="Brand" value={workspace.engagement?.brands?.name || context.brandId} />
       </dl>
       {!access.canCreateOfficial && <p role="status" className="mt-4 text-sm text-amber-300">Official creation unavailable: {access.reason}</p>}
-      {stale && <p role="status" className="mt-4 text-sm text-amber-300">Fresh data could not be loaded. This last verified snapshot is read-only until retry succeeds.</p>}
+      {stale && <div role="status" className="mt-4 flex flex-wrap items-center gap-3 text-sm text-amber-300"><p>Fresh data could not be loaded. This last verified snapshot is read-only until retry succeeds.</p><button type="button" className={BUTTON} onClick={onRetry}>Retry current Content work</button></div>}
     </header>
 
     {empty ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-14 text-center">
@@ -104,8 +109,8 @@ export default function ContentWorkshopHomePanel({
             <div className="mt-5"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Exact saved payload</p><pre className="mt-2 max-h-[34rem] overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-4 text-xs leading-5 text-slate-300">{JSON.stringify(selectedVersion.content || {}, null, 2)}</pre></div>
           </> : <p className="mt-5 rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400">This artifact root has no saved version. No content has been inferred.</p>}
           <div className="mt-5 flex flex-wrap gap-2"><a className={BUTTON} href={`/sphere/artifacts/${encodeURIComponent(selectedItem.id)}`}>Open canonical artifact</a>
-            {typeCounts.get(selectedItem.contentType) === 1 ? <button type="button" className={BUTTON} disabled={stale} onClick={() => onOpenEditor(selectedItem)}>Continue in Content editor</button>
-              : <p className="basis-full text-xs text-amber-300">Multiple {label(selectedItem.contentType)} roots exist. The current editor cannot safely target this root, so no first item is selected.</p>}
+            {editorTarget ? <button type="button" className={BUTTON} disabled={stale} onClick={() => onOpenEditor(selectedItem, editorTarget)}>Continue in Content editor</button>
+              : <p className="basis-full text-xs text-amber-300">{typeCounts.get(selectedItem.contentType) === 1 ? `No compatible exact editor is available for this ${label(selectedItem.contentType)} record, so continuation is withheld.` : `Multiple ${label(selectedItem.contentType)} roots exist. The current editor cannot safely target this root, so no first item is selected.`}</p>}
           </div>
         </>}
       </div>
@@ -113,6 +118,7 @@ export default function ContentWorkshopHomePanel({
       <aside aria-labelledby="content-source-readiness" className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
         <h3 id="content-source-readiness" className="font-semibold text-white">Source readiness</h3>
         <p className="mt-2 text-xs leading-5 text-slate-500">These indicators describe available inputs. Missing optional sources do not block unrelated content work.</p>
+        <p className="mt-2 text-[11px] leading-4 text-slate-600">Changed since use is shown only when durable used-version provenance is loaded. This workspace does not infer that provenance from a selection.</p>
         <div className="mt-4 space-y-3">{CONTENT_HOME_GROUPS.filter(group => group.artifactTypes.length).flatMap(group => group.artifactTypes.map(type => {
           const readiness = contentSourceReadiness(workspace, type, sourceSelections[type])
           const candidates = (workspace.artifacts || []).filter(item => item.artifact_type === type)
