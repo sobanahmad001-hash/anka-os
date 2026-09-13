@@ -26,6 +26,9 @@ export default function DesignSystems() {
   const [searchParams, setSearchParams] = useSearchParams()
   const parentSearch = searchParams.toString()
   const parentWorkshopPath = `/sphere/design${parentSearch ? `?${parentSearch}` : ''}`
+  const requestedArtifactId = searchParams.get('artifact') || ''
+  const requestedVersionId = searchParams.get('version') || ''
+  const hasRequestedTarget = Boolean(requestedArtifactId || requestedVersionId)
   const [workspace, setWorkspace] = useState({ services: [], artifacts: [], versions: [], approvals: [], stages: [] })
   const [chatServiceId, setChatServiceId] = useState('')
   const [selectedId, setSelectedId] = useState(searchParams.get('artifact') || '')
@@ -39,8 +42,9 @@ export default function DesignSystems() {
   const [selectionError, setSelectionError] = useState('')
   const [message, setMessage] = useState('')
   const [creatingNew, setCreatingNew] = useState(false)
+  const creationModeActive = creatingNew && !hasRequestedTarget
   const loadGeneration = useRef(0)
-  const loadContext = `${parentSearch}::${creatingNew ? 'create' : 'browse'}`
+  const loadContext = `${parentSearch}::${creationModeActive ? 'create' : 'browse'}`
   const currentLoadContext = useRef(loadContext)
   currentLoadContext.current = loadContext
 
@@ -54,14 +58,14 @@ export default function DesignSystems() {
       if (!isCurrentRequest()) return
       setWorkspace(result)
       setChatServiceId(current => result.services.some(service => service.id === current) ? current : result.services[0]?.id || '')
-      if (creatingNew && !preferredId) {
+      if (creationModeActive && !preferredId) {
         setSelectionError(''); setSelectedId(''); setVersionId('')
         return
       }
       const selection = resolveDesignSystemLibrarySelection({
         ...result,
-        requestedArtifactId: preferredId ? '' : searchParams.get('artifact') || '',
-        requestedVersionId: preferredId ? '' : searchParams.get('version') || '',
+        requestedArtifactId: preferredId ? '' : requestedArtifactId,
+        requestedVersionId: preferredId ? '' : requestedVersionId,
         preferredArtifactId: preferredId,
         currentArtifactId: selectedId,
       })
@@ -75,9 +79,15 @@ export default function DesignSystems() {
     } finally {
       if (isCurrentRequest()) setLoading(false)
     }
-  }, [creatingNew, searchParams, selectedId])
+  }, [creationModeActive, requestedArtifactId, requestedVersionId, selectedId])
 
   useEffect(() => { load() }, [parentSearch]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (creatingNew && hasRequestedTarget) {
+      setCreatingNew(false)
+    }
+  }, [creatingNew, hasRequestedTarget])
 
   const selectedArtifact = workspace.artifacts.find(item => item.id === selectedId) || null
   const versions = useMemo(() => workspace.versions.filter(item => item.artifact_id === selectedId)

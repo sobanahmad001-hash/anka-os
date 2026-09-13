@@ -180,6 +180,60 @@ test('mounted DesignSystems preserves explicit creation mode across the query-cl
   assert.doesNotMatch(container.textContent, /Alpha exact draft rules|Alpha released rules/)
 })
 
+test('mounted DesignSystems exits New mode when an exact available target arrives on the same mount', async t => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', ssr: { noExternal: ['react-router-dom'] }, plugins: [stubs()] })
+  t.after(() => vite.close())
+  const { default: DesignSystems } = await vite.ssrLoadModule('/src/apps/DesignSystems.jsx')
+  const document = new TestDocument()
+  const window = { document, setTimeout, clearTimeout, addEventListener() {}, removeEventListener() {}, getSelection: () => null, Event: TestEvent, Node: TestNode, Element: TestElement, HTMLElement: TestElement, HTMLIFrameElement: class extends TestElement {}, SVGElement: TestElement }
+  document.defaultView = window
+  Object.assign(globalThis, { document, window, Event: TestEvent, Node: TestNode, HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true, __designSystemsTestSearch: 'artifact=artifact-a&version=a-v2', __designSystemsTestRepository: { loadLibrary: async () => library() } })
+  const { container } = await mountedHarness(t, DesignSystems, document)
+  await flush(); await flush()
+
+  const createButton = findElement(container, node => node.tagName === 'BUTTON' && node.textContent === 'New design system')
+  assert.ok(createButton)
+  await act(async () => createButton.dispatchEvent(new TestEvent('click')))
+  await flush(); await flush()
+
+  assert.match(container.textContent, /Create a design system/)
+
+  await act(async () => globalThis.__designSystemsTestNavigate({ artifact: 'artifact-b', version: 'b-v1' }))
+  await flush(); await flush()
+
+  assert.match(container.textContent, /System Beta/)
+  assert.match(container.textContent, /Beta released rules/)
+  assert.doesNotMatch(container.textContent, /Create a design system/)
+  assert.doesNotMatch(container.textContent, /Exact Design System unavailable/)
+})
+
+test('mounted DesignSystems exits New mode and shows exact-unavailable state on same-mount transition', async t => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', ssr: { noExternal: ['react-router-dom'] }, plugins: [stubs()] })
+  t.after(() => vite.close())
+  const { default: DesignSystems } = await vite.ssrLoadModule('/src/apps/DesignSystems.jsx')
+  const document = new TestDocument()
+  const window = { document, setTimeout, clearTimeout, addEventListener() {}, removeEventListener() {}, getSelection: () => null, Event: TestEvent, Node: TestNode, Element: TestElement, HTMLElement: TestElement, HTMLIFrameElement: class extends TestElement {}, SVGElement: TestElement }
+  document.defaultView = window
+  Object.assign(globalThis, { document, window, Event: TestEvent, Node: TestNode, HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true, __designSystemsTestSearch: 'artifact=artifact-a&version=a-v2', __designSystemsTestRepository: { loadLibrary: async () => library() } })
+  const { container } = await mountedHarness(t, DesignSystems, document)
+  await flush(); await flush()
+
+  const createButton = findElement(container, node => node.tagName === 'BUTTON' && node.textContent === 'New design system')
+  assert.ok(createButton)
+  await act(async () => createButton.dispatchEvent(new TestEvent('click')))
+  await flush(); await flush()
+
+  assert.match(container.textContent, /Create a design system/)
+
+  await act(async () => globalThis.__designSystemsTestNavigate({ artifact: 'artifact-b', version: 'b-missing' }))
+  await flush(); await flush()
+
+  assert.match(container.textContent, /Exact Design System unavailable/)
+  assert.match(container.textContent, /No other artifact or version was substituted/)
+  assert.doesNotMatch(container.textContent, /Create a design system/)
+  assert.doesNotMatch(container.textContent, /Beta released rules/)
+})
+
 test('mounted DesignSystems ignores a stale exact-load result after navigation to an unavailable pair', async t => {
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', ssr: { noExternal: ['react-router-dom'] }, plugins: [stubs()] })
   t.after(() => vite.close())
