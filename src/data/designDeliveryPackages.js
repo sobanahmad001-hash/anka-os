@@ -84,3 +84,65 @@ export function packageVersionStatus(version, approvals = [], contexts = []) {
   const context = contexts.find(item => item.artifact_version_id === version?.id)
   return context ? 'draft' : 'unavailable'
 }
+
+function serviceCatalog(service) {
+  return Array.isArray(service?.service_catalog) ? service.service_catalog[0] : service?.service_catalog
+}
+
+export function designPackageReviewEntries(workspace = {}) {
+  const artifacts = workspace.deliveryPackageArtifacts || []
+  const versions = workspace.deliveryPackageVersions || []
+  const contexts = workspace.deliveryPackageContexts || []
+  const references = workspace.deliveryPackageAssetReferences || []
+  const approvals = workspace.approvals || []
+  return versions.flatMap(version => {
+    const artifact = artifacts.find(item => item.id === version.artifact_id)
+    if (!artifact) return []
+    return [{
+      artifact,
+      version,
+      context: contexts.find(item => item.artifact_version_id === version.id) || null,
+      references: references.filter(item => item.artifact_version_id === version.id)
+        .sort((left, right) => left.position - right.position),
+      approval: approvals.find(item => item.artifact_version_id === version.id) || null,
+    }]
+  }).sort((left, right) => {
+    const time = new Date(right.version.created_at || 0) - new Date(left.version.created_at || 0)
+    return time || Number(right.version.version_number || 0) - Number(left.version.version_number || 0)
+  })
+}
+
+export function designPackageReviewReadiness(entry, workspace = {}) {
+  const missing = []
+  if (!entry?.context) missing.push('stored package context')
+  if (!entry?.references?.length) missing.push('at least one exact asset version')
+
+  const assets = workspace.designAssets || []
+  const versions = workspace.designAssetVersions || []
+  for (const reference of entry?.references || []) {
+    const asset = assets.find(item => item.id === reference.design_asset_id)
+    const version = versions.find(item => item.id === reference.design_asset_version_id
+      && item.asset_id === reference.design_asset_id)
+    if (!asset || asset.archived_at) missing.push(`active asset ${String(reference.design_asset_id).slice(0, 8)}`)
+    if (!version) missing.push(`exact asset version ${String(reference.design_asset_version_id).slice(0, 8)}`)
+    else if (!version.signed_url) missing.push(`accessible object for version ${String(version.id).slice(0, 8)}`)
+  }
+
+  const sourceService = (workspace.designServices || []).find(service =>
+    service.id === entry?.context?.source_engagement_service_id
+    && service.status === 'active'
+    && serviceCatalog(service)?.department_id === 'design'
+    && serviceCatalog(service)?.is_active === true)
+  if (entry?.context && !sourceService) missing.push('current active Design service')
+
+  if (entry?.context?.destination_engagement_service_id) {
+    const destination = (workspace.deliveryServices || []).find(service =>
+      service.id === entry.context.destination_engagement_service_id
+      && service.status === 'active'
+      && serviceCatalog(service)?.department_id === entry.context.destination_department_id
+      && serviceCatalog(service)?.is_active === true)
+    if (!destination) missing.push('current active downstream service')
+  }
+
+  return { ready: missing.length === 0, missing: [...new Set(missing)] }
+}
