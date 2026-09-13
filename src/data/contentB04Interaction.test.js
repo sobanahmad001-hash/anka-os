@@ -280,6 +280,10 @@ test('mounted B06a isolates exact-version review state and makes refresh failure
   await act(async () => root.render(createElement(ContentLibraryPanel, { repository })))
   await flushMounted()
   assert.match(environment.container.textContent, /COMMENT ONLY FOR V2/)
+  await act(async () => byText(environment.container, 'button', 'Compare exact versions').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  await flushMounted()
+  assert.match(environment.container.textContent, /Compare saved versions/)
+  assert.match(environment.container.textContent, /OLD V1 SNAPSHOT[\s\S]*NEW V2 SNAPSHOT/)
   const versionSelect = elements(environment.container, 'select').find(node => node.options?.some(option => option.value === 'v1'))
   assert.ok(versionSelect)
   await setValue(versionSelect, 'v1')
@@ -498,4 +502,60 @@ test('approval mutation lost response keeps the same intent retryable on the exa
   await submit()
   assert.equal(mutations.length, 3)
   assert.notEqual(mutations[2][2], mutations[0][2])
+})
+test('mounted B06b comparison uses distinct exact versions and resets on artifact context change', async t => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  t.after(() => vite.close())
+  const { default: ContentVersionComparison } = await vite.ssrLoadModule('/src/components/ContentVersionComparison.jsx')
+  const environment = mountedEnvironment()
+  const previous = {
+    document: globalThis.document, window: globalThis.window, Event: globalThis.Event,
+    Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT,
+  }
+  Object.assign(globalThis, {
+    document: environment.document, window: environment.window, Event: TestEvent, Node: TestNode,
+    HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true,
+  })
+  t.after(() => Object.assign(globalThis, {
+    document: previous.document, window: previous.window, Event: previous.Event, Node: previous.Node,
+    HTMLElement: previous.HTMLElement, IS_REACT_ACT_ENVIRONMENT: previous.act,
+  }))
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+  const first = [
+    { id: 'v2', artifact_id: 'artifact-a', version_number: 2, created_at: '2026-09-13', content: { headline: 'NEW EXACT TEXT' } },
+    { id: 'v1', artifact_id: 'artifact-a', version_number: 1, created_at: '2026-09-12', content: { headline: 'OLD EXACT TEXT' } },
+  ]
+  await act(async () => root.render(createElement(ContentVersionComparison, {
+    versions: first, contextKey: 'artifact-a', preferredVersionId: 'v2', stale: true, onClose() {},
+  })))
+  await flushMounted()
+  assert.equal(byLabel(environment.container, 'Version A').value, 'v1')
+  assert.equal(byLabel(environment.container, 'Version B').value, 'v2')
+  assert.match(environment.container.textContent, /OLD EXACT TEXT/)
+  assert.match(environment.container.textContent, /NEW EXACT TEXT/)
+  assert.match(environment.container.textContent, /last successfully authorized library snapshot/)
+  assert.equal(elements(environment.container, 'table').length, 2)
+  assert.equal(elements(environment.container, 'caption').length, 2)
+  assert.equal(elements(environment.container, 'th').filter(node => node.getAttribute('scope') === 'col').length, 6)
+  assert.equal(elements(environment.container, 'th').filter(node => node.getAttribute('scope') === 'row').length > 0, true)
+
+  await setValue(byLabel(environment.container, 'Version A'), 'v2')
+  await flushMounted()
+  assert.equal(byLabel(environment.container, 'Version B').value, '')
+  assert.match(environment.container.textContent, /Choose version A and version B/)
+
+  const second = [
+    { id: 'b2', artifact_id: 'artifact-b', version_number: 2, created_at: '2026-09-13', content: { body: 'B NEW' } },
+    { id: 'b1', artifact_id: 'artifact-b', version_number: 1, created_at: '2026-09-12', content: { body: 'B OLD' } },
+  ]
+  await act(async () => root.render(createElement(ContentVersionComparison, {
+    versions: second, contextKey: 'artifact-b', preferredVersionId: 'b2', stale: false, onClose() {},
+  })))
+  await flushMounted()
+  assert.equal(byLabel(environment.container, 'Version A').value, 'b1')
+  assert.equal(byLabel(environment.container, 'Version B').options.some(option => option.value === 'b2'), true)
+  assert.match(environment.container.textContent, /B OLD/)
+  assert.match(environment.container.textContent, /B NEW/)
+  assert.doesNotMatch(environment.container.textContent, /OLD EXACT TEXT|NEW EXACT TEXT|last successfully authorized/)
 })
