@@ -41,25 +41,50 @@ export function contentVersionComparisonReducer(state, action) {
   return state
 }
 
-function stableValue(value) {
-  if (typeof value === 'string') return value
-  if (value === undefined) return 'Not recorded'
-  return JSON.stringify(value, null, 2)
+function valueKind(value) {
+  if (value === null) return 'Null'
+  if (Array.isArray(value)) return 'Array'
+  if (value === undefined) return 'Undefined'
+  return `${typeof value}`.replace(/^./, character => character.toUpperCase())
 }
 
-function flatten(value, path = '', output = new Map()) {
+function stableValue(value) {
+  const kind = valueKind(value)
+  if (value === undefined) return `${kind}\nNot recorded`
+  if (typeof value === 'string') return `${kind}\n${JSON.stringify(value)}`
+  return `${kind}\n${JSON.stringify(value, null, 2)}`
+}
+
+function valueIdentity(value) {
+  return JSON.stringify([valueKind(value), value])
+}
+
+function pathIdentity(segments) {
+  return JSON.stringify(segments)
+}
+
+function displayPath(segments) {
+  if (!segments.length) return 'content'
+  return segments.map((segment, index) => {
+    if (segment.type === 'index') return `[${segment.value}]`
+    if (/^[A-Za-z_$][\w$]*$/.test(segment.value)) return `${index ? '.' : ''}${segment.value}`
+    return `[${JSON.stringify(segment.value)}]`
+  }).join('')
+}
+
+function flatten(value, segments = [], output = new Map()) {
   if (Array.isArray(value)) {
-    if (!value.length) output.set(path || 'content', '[]')
-    else value.forEach((item, index) => flatten(item, `${path}[${index}]`, output))
+    if (!value.length) output.set(pathIdentity(segments), { path: displayPath(segments), value })
+    else value.forEach((item, index) => flatten(item, [...segments, { type: 'index', value: index }], output))
     return output
   }
   if (value && typeof value === 'object') {
     const entries = Object.entries(value).sort(([left], [right]) => left.localeCompare(right))
-    if (!entries.length) output.set(path || 'content', '{}')
-    else entries.forEach(([key, item]) => flatten(item, path ? `${path}.${key}` : key, output))
+    if (!entries.length) output.set(pathIdentity(segments), { path: displayPath(segments), value })
+    else entries.forEach(([key, item]) => flatten(item, [...segments, { type: 'key', value: key }], output))
     return output
   }
-  output.set(path || 'content', stableValue(value))
+  output.set(pathIdentity(segments), { path: displayPath(segments), value })
   return output
 }
 
@@ -100,14 +125,20 @@ export function contentVersionComparisonModel(versions, state) {
   })
   const leftContent = flatten(left.content)
   const rightContent = flatten(right.content)
-  const paths = [...new Set([...leftContent.keys(), ...rightContent.keys()])].sort()
-  const content = paths.map(path => {
-    const leftPresent = leftContent.has(path)
-    const rightPresent = rightContent.has(path)
-    const leftValue = leftPresent ? leftContent.get(path) : 'Not recorded'
-    const rightValue = rightPresent ? rightContent.get(path) : 'Not recorded'
-    return { path, leftValue, rightValue, relationship: relationship(leftValue, rightValue, leftPresent, rightPresent) }
-  })
+  const identities = [...new Set([...leftContent.keys(), ...rightContent.keys()])]
+  const content = identities.map(identity => {
+    const leftItem = leftContent.get(identity)
+    const rightItem = rightContent.get(identity)
+    const leftPresent = Boolean(leftItem)
+    const rightPresent = Boolean(rightItem)
+    const path = leftItem?.path || rightItem?.path || 'content'
+    const leftValue = leftPresent ? stableValue(leftItem.value) : 'Not recorded'
+    const rightValue = rightPresent ? stableValue(rightItem.value) : 'Not recorded'
+    const typedRelationship = leftPresent && rightPresent
+      ? (valueIdentity(leftItem.value) === valueIdentity(rightItem.value) ? 'same' : 'changed')
+      : relationship(leftValue, rightValue, leftPresent, rightPresent)
+    return { identity, path, leftValue, rightValue, relationship: typedRelationship }
+  }).sort((left, right) => left.path.localeCompare(right.path) || left.identity.localeCompare(right.identity))
   const summary = { changed: 0, added: 0, removed: 0, same: 0 }
   content.forEach(item => { summary[item.relationship] += 1 })
   return { left, right, ready, metadata, content, summary }

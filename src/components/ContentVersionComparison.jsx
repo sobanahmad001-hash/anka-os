@@ -63,7 +63,7 @@ export default function ContentVersionComparison({ versions, contextKey, preferr
 
           <ComparisonTable label="Version metadata comparison" rows={comparison.metadata} rowKey="key" rowLabel="label" />
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3"><h4 className="font-semibold text-white">Saved content fields</h4><label className="flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={showUnchanged} onChange={event => setShowUnchanged(event.target.checked)} />Show unchanged fields</label></div>
-          {contentRows.length ? <ComparisonTable label="Saved content field comparison" rows={contentRows} rowKey="path" rowLabel="path" />
+          {contentRows.length ? <ComparisonTable label="Saved content field comparison" rows={contentRows} rowKey="identity" rowLabel="path" preserveLabel />
             : <p className="mt-3 rounded-xl border border-dashed border-slate-700 p-5 text-center text-sm text-slate-500">No recorded content fields differ between these exact versions.</p>}
         </>}
   </section>
@@ -77,10 +77,13 @@ function VersionSelector({ side, label, value, otherValue, versions, dispatch })
   </div>
 }
 
-function ComparisonTable({ label, rows, rowKey, rowLabel }) {
+function ComparisonTable({ label, rows, rowKey, rowLabel, preserveLabel = false }) {
   return <div className="mt-3 overflow-x-auto rounded-xl border border-slate-800" tabIndex={0} aria-label={label}>
-    <div className="grid min-w-[48rem] grid-cols-[minmax(10rem,0.8fr)_minmax(0,1fr)_minmax(0,1fr)] gap-px bg-slate-800 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500"><span className="bg-slate-950 p-3">Recorded field</span><span className="bg-slate-950 p-3">Version A</span><span className="bg-slate-950 p-3">Version B</span></div>
-    {rows.map(row => <div key={row[rowKey]} className="grid min-w-[48rem] grid-cols-[minmax(10rem,0.8fr)_minmax(0,1fr)_minmax(0,1fr)] gap-px border-t border-slate-800 bg-slate-800 text-sm"><div className="bg-slate-950 p-3"><span className="font-semibold text-slate-300">{pathLabel(row[rowLabel])}</span><span className={`ml-2 text-[10px] font-semibold uppercase tracking-[0.1em] ${STATUS[row.relationship] || STATUS.same}`}>{row.relationship}</span></div><pre className="min-w-0 whitespace-pre-wrap break-words bg-slate-950 p-3 font-sans text-xs leading-5 text-slate-300">{row.leftValue}</pre><pre className="min-w-0 whitespace-pre-wrap break-words bg-slate-950 p-3 font-sans text-xs leading-5 text-slate-300">{row.rightValue}</pre></div>)}
+    <table className="w-full min-w-[48rem] border-collapse text-left text-sm">
+      <caption className="sr-only">{label}</caption>
+      <thead className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500"><tr><th scope="col" className="w-[28%] bg-slate-950 p-3">Recorded field</th><th scope="col" className="w-[36%] border-l border-slate-800 bg-slate-950 p-3">Version A</th><th scope="col" className="w-[36%] border-l border-slate-800 bg-slate-950 p-3">Version B</th></tr></thead>
+      <tbody>{rows.map(row => <tr key={row[rowKey]} className="border-t border-slate-800"><th scope="row" className="bg-slate-950 p-3 align-top"><span className="font-semibold text-slate-300">{preserveLabel ? row[rowLabel] : pathLabel(row[rowLabel])}</span><span className={`ml-2 text-[10px] font-semibold uppercase tracking-[0.1em] ${STATUS[row.relationship] || STATUS.same}`}>{row.relationship}</span></th><td className="border-l border-slate-800 bg-slate-950 p-3 align-top"><pre className="min-w-0 whitespace-pre-wrap break-words font-sans text-xs leading-5 text-slate-300">{row.leftValue}</pre></td><td className="border-l border-slate-800 bg-slate-950 p-3 align-top"><pre className="min-w-0 whitespace-pre-wrap break-words font-sans text-xs leading-5 text-slate-300">{row.rightValue}</pre></td></tr>)}</tbody>
+    </table>
   </div>
 }
 

@@ -75,3 +75,29 @@ test('B06b sync removes a version that is no longer in the authorized snapshot',
   )
   assert.deepEqual(state, { contextKey: 'artifact-a', leftVersionId: '', rightVersionId: 'v2' })
 })
+
+test('B06b comparison preserves JSON type identity and exposes types in displayed values', () => {
+  const typedVersions = [
+    { id: 'typed-b', artifact_id: 'typed', version_number: 2, content: { number: '1', boolean: 'true', nullable: 'null', array: '[]', object: '{}' } },
+    { id: 'typed-a', artifact_id: 'typed', version_number: 1, content: { number: 1, boolean: true, nullable: null, array: [], object: {} } },
+  ]
+  const model = contentVersionComparisonModel(typedVersions, { leftVersionId: 'typed-a', rightVersionId: 'typed-b' })
+  assert.deepEqual(model.summary, { changed: 5, added: 0, removed: 0, same: 0 })
+  assert.match(model.content.find(item => item.path === 'number').leftValue, /^Number\n1$/)
+  assert.match(model.content.find(item => item.path === 'number').rightValue, /^String\n"1"$/)
+  assert.match(model.content.find(item => item.path === 'nullable').leftValue, /^Null\nnull$/)
+  assert.match(model.content.find(item => item.path === 'array').leftValue, /^Array\n\[\]$/)
+  assert.match(model.content.find(item => item.path === 'object').leftValue, /^Object\n\{\}$/)
+})
+
+test('B06b comparison keeps structured path identity separate from unambiguous display labels', () => {
+  const collisionVersions = [
+    { id: 'collision-b', artifact_id: 'collision', version_number: 2, content: { a: { b: 'NEW' }, 'a.b': 'literal', list: ['NEW'], 'list[0]': 'literal' } },
+    { id: 'collision-a', artifact_id: 'collision', version_number: 1, content: { a: { b: 'OLD' }, 'a.b': 'literal', list: ['OLD'], 'list[0]': 'literal' } },
+  ]
+  const model = contentVersionComparisonModel(collisionVersions, { leftVersionId: 'collision-a', rightVersionId: 'collision-b' })
+  assert.equal(model.content.length, 4)
+  assert.deepEqual(model.content.filter(item => item.relationship === 'changed').map(item => item.path), ['a.b', 'list[0]'])
+  assert.deepEqual(model.content.filter(item => item.relationship === 'same').map(item => item.path), ['["a.b"]', '["list[0]"]'])
+  assert.equal(new Set(model.content.map(item => item.identity)).size, 4)
+})
