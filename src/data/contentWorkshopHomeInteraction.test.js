@@ -103,7 +103,7 @@ test('mounted B01 Home renders grouped records, exact output, navigation, and ke
   const actions = []
   await act(async () => root.render(createElement(MemoryRouter, null, createElement(ContentWorkshopHomePanel, {
     workspace: workspace(), onNewContent: () => actions.push('new'), onOpenBrief: () => actions.push('brief'),
-    onOpenEditor: item => actions.push(`edit:${item.id}`),
+    onOpenEditor: (item, editorTab) => actions.push(`edit:${item.id}:${editorTab}`),
   }))))
 
   for (const group of ['Brief', 'Brand foundations', 'Website structure', 'Keywords', 'Content', 'Review']) {
@@ -118,7 +118,7 @@ test('mounted B01 Home renders grouped records, exact output, navigation, and ke
   await click(byText(environment.container, 'button', 'Continue in Content editor'))
   await click(byText(environment.container, 'button', 'New content'))
   await click(byText(environment.container, 'button', 'Open brief'))
-  assert.deepEqual(actions, ['edit:brief-a', 'new', 'brief'])
+  assert.deepEqual(actions, ['edit:brief-a:artifacts', 'new', 'brief'])
   assert.ok(elements(environment.container, 'button').every(button => button.tabIndex >= -1))
 })
 
@@ -144,6 +144,32 @@ test('mounted B01 Home keeps ambiguous roots unselected and resolves readiness o
   assert.match(environment.container.textContent, /Clear explicit selection/)
 })
 
+test('mounted B01 Home routes only exact compatible records to their real editor', async t => {
+  const vite = await mountedServer()
+  t.after(() => vite.close())
+  const { default: ContentWorkshopHomePanel } = await vite.ssrLoadModule('/src/components/ContentWorkshopHomePanel.jsx')
+  const environment = installEnvironment(t)
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+  const actions = []
+  const render = nextWorkspace => act(async () => root.render(createElement(MemoryRouter, null, createElement(ContentWorkshopHomePanel, {
+    workspace: nextWorkspace, onNewContent() {}, onOpenBrief() {},
+    onOpenEditor: (item, editorTab) => actions.push(`${item.id}:${editorTab}`),
+  }))))
+
+  await render(workspace('unsupported', [{ id: 'brand-a', artifact_type: 'brand_statement', title: 'Brand statement', created_by: 'a' }]))
+  await click(byText(environment.container, 'button', 'Brand statement'))
+  assert.equal(byText(environment.container, 'button', 'Continue in Content editor'), undefined)
+  assert.match(environment.container.textContent, /No compatible exact editor is available/)
+
+  const writer = workspace('writer', [{ id: 'writer-a', artifact_type: 'content', title: 'Writer draft', created_by: 'a' }])
+  writer.versions[0].content = { schema_version: 2, output_type: 'blog_article', working_title: 'Writer draft', body: 'Exact writer body' }
+  await render(writer)
+  await click(byText(environment.container, 'button', 'Writer draft'))
+  await click(byText(environment.container, 'button', 'Continue in Content editor'))
+  assert.deepEqual(actions, ['writer-a:writer'])
+})
+
 test('mounted B01 Home resets exact selection on engagement switch and distinguishes stale, empty, denied, loading, and failed states', async t => {
   const vite = await mountedServer()
   t.after(() => vite.close())
@@ -160,8 +186,12 @@ test('mounted B01 Home resets exact selection on engagement switch and distingui
   assert.match(environment.container.textContent, /Nothing has been selected automatically/)
   assert.doesNotMatch(environment.container.textContent, /brief-a-v1/)
 
-  await render({ workspace: workspace('engagement-b'), stale: true })
+  let retries = 0
+  await render({ workspace: workspace('engagement-b'), stale: true, onRetry() { retries += 1 } })
   assert.match(environment.container.textContent, /last verified snapshot is read-only/)
+  await click(byText(environment.container, 'button', 'Retry current Content work'))
+  assert.equal(retries, 1)
+  assert.equal(byText(environment.container, 'button', 'New content').disabled, true)
   await render({ workspace: workspace('empty', []), loadState: 'ready' })
   assert.match(environment.container.textContent, /empty result, not a permission denial/)
   await render({ workspace: { secret: 'hidden-record-sentinel' }, loadState: 'denied' })
@@ -178,11 +208,16 @@ test('B01 Home integration reuses released reads and does not adopt B07, chat, s
   const panel = readFileSync(new URL('../components/ContentWorkshopHomePanel.jsx', import.meta.url), 'utf8')
   const studio = readFileSync(new URL('../apps/ContentStudio.jsx', import.meta.url), 'utf8')
   assert.match(studio, /ContentWorkshopHomePanel/)
+  assert.ok(studio.includes('workshopTab: nextTab,'))
+  assert.ok(!studio.includes("nextTab === 'artifacts' ? '' : nextTab"))
+  assert.ok(studio.includes('generation !== loadGeneration.current'))
   assert.match(studio, /requestedTab\) \? requestedTab : 'home'/)
   assert.match(studio, /\['home', 'Content home'\]/)
   assert.match(studio, /onNewContent=\{\(\) => selectTab\('writer'\)\}/)
   assert.match(panel, /buildContentHomeIndex/)
   assert.match(panel, /contentSourceReadiness/)
   assert.match(panel, /View exact source/)
+  assert.ok(panel.includes('No compatible exact editor is available'))
+  assert.ok(panel.includes('durable used-version provenance is loaded'))
   assert.doesNotMatch(panel, /ContentLibraryPanel|contentStudioRepository|DepartmentChat|supabase|functions\.invoke|insert\(|update\(|delete\(/i)
 })
