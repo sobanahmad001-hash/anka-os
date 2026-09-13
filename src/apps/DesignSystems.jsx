@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
@@ -38,13 +38,26 @@ export default function DesignSystems() {
   const [error, setError] = useState('')
   const [selectionError, setSelectionError] = useState('')
   const [message, setMessage] = useState('')
+  const [creatingNew, setCreatingNew] = useState(false)
+  const loadGeneration = useRef(0)
+  const loadContext = `${parentSearch}::${creatingNew ? 'create' : 'browse'}`
+  const currentLoadContext = useRef(loadContext)
+  currentLoadContext.current = loadContext
 
   const load = useCallback(async (preferredId = '') => {
+    const generation = ++loadGeneration.current
+    const requestContext = currentLoadContext.current
+    const isCurrentRequest = () => generation === loadGeneration.current && requestContext === currentLoadContext.current
     setLoading(true); setError('')
     try {
       const result = await designSystems.loadLibrary()
+      if (!isCurrentRequest()) return
       setWorkspace(result)
       setChatServiceId(current => result.services.some(service => service.id === current) ? current : result.services[0]?.id || '')
+      if (creatingNew && !preferredId) {
+        setSelectionError(''); setSelectedId(''); setVersionId('')
+        return
+      }
       const selection = resolveDesignSystemLibrarySelection({
         ...result,
         requestedArtifactId: preferredId ? '' : searchParams.get('artifact') || '',
@@ -57,9 +70,12 @@ export default function DesignSystems() {
         : '')
       setSelectedId(selection.artifactId)
       setVersionId(selection.versionId)
-    } catch (reason) { setError(reason.message) }
-    finally { setLoading(false) }
-  }, [searchParams, selectedId])
+    } catch (reason) {
+      if (isCurrentRequest()) setError(reason.message)
+    } finally {
+      if (isCurrentRequest()) setLoading(false)
+    }
+  }, [creatingNew, searchParams, selectedId])
 
   useEffect(() => { load() }, [parentSearch]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -102,7 +118,7 @@ export default function DesignSystems() {
   function choose(artifactId) {
     const nextVersion = releasedVersionsFor(artifactId, workspace.versions, workspace.approvals)[0]
       || latestVersionFor(artifactId, workspace.versions)
-    setSelectionError(''); setSelectedId(artifactId); setVersionId(nextVersion?.id || '')
+    setCreatingNew(false); setSelectionError(''); setSelectedId(artifactId); setVersionId(nextVersion?.id || '')
     setSearchParams(artifactId ? { artifact: artifactId, ...(nextVersion?.id ? { version: nextVersion.id } : {}) } : {})
     setMessage(''); setError('')
   }
@@ -115,7 +131,7 @@ export default function DesignSystems() {
 
   function startNew() {
     const service = workspace.services[0]
-    setSelectionError(''); setSelectedId(''); setSearchParams({}); setVersionId('')
+    setCreatingNew(true); setSelectionError(''); setSelectedId(''); setSearchParams({}); setVersionId('')
     setForm({ ...EMPTY_FORM, content: cloneDesignSystemContent(), engagement_service_id: service?.id || '' })
     setMessage('Creating a new manual design system draft.')
   }
@@ -153,6 +169,7 @@ export default function DesignSystems() {
         content: form.content, change_summary: form.change_summary,
         data_classification: form.data_classification,
       })
+      setCreatingNew(false)
       setMessage(`Version ${result.version.version_number} saved as an immutable manual draft.`)
       await load(result.artifact_id)
       setVersionId(result.version.id)
@@ -183,7 +200,7 @@ export default function DesignSystems() {
       {selectionError ? <section role="alert" className="mt-7 rounded-2xl border border-amber-800 bg-amber-950/30 p-6">
         <h2 className="text-xl font-semibold text-amber-100">Exact Design System unavailable</h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-200">{selectionError} No other artifact or version was substituted.</p>
-        <button type="button" onClick={() => { setSelectionError(''); setSelectedId(''); setVersionId(''); setSearchParams({}) }} className={`${SECONDARY} mt-4`}>Browse available Design Systems</button>
+        <button type="button" onClick={() => { setCreatingNew(false); setSelectionError(''); setSelectedId(''); setVersionId(''); setSearchParams({}) }} className={`${SECONDARY} mt-4`}>Browse available Design Systems</button>
       </section> : <div className="mt-7 grid gap-6 xl:grid-cols-[330px_1fr]">
         <aside className="space-y-4">
           <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><input className={INPUT} placeholder="Search systems, brands, engagements" value={search} onChange={event => setSearch(event.target.value)} /><label className="mt-3 flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={releasedOnly} onChange={event => setReleasedOnly(event.target.checked)} />Released library only</label></div>

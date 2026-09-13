@@ -54,7 +54,7 @@ const flush = () => act(async () => { await Promise.resolve(); await new Promise
 
 function library() {
   return {
-    services: [], stages: [],
+    services: [{ id: 'service-a', engagement_id: 'engagement-a', engagements: { id: 'engagement-a', name: 'Alpha engagement' } }], stages: [],
     artifacts: [
       { id: 'artifact-a', title: 'System Alpha', engagement_id: 'engagement-a' },
       { id: 'artifact-b', title: 'System Beta', engagement_id: 'engagement-b' },
@@ -73,7 +73,7 @@ function library() {
 
 function stubs() {
   const modules = {
-    'react-router-dom': ['design-systems-router-stub', `import {createElement} from 'react'; export function useSearchParams(){const params=new URLSearchParams(globalThis.__designSystemsTestSearch || ''); return [params,next=>{globalThis.__designSystemsTestSearch=new URLSearchParams(next).toString()}]} export function Link({children,to,...props}){return createElement('a',{...props,href:to},children)}`],
+    'react-router-dom': ['design-systems-router-stub', `import {createElement,useSyncExternalStore} from 'react'; const listeners=new Set(); const read=()=>globalThis.__designSystemsTestSearch || ''; const navigate=next=>{globalThis.__designSystemsTestSearch=new URLSearchParams(next).toString(); for(const listener of listeners) listener()}; globalThis.__designSystemsTestNavigate=navigate; export function useSearchParams(){const value=useSyncExternalStore(listener=>{listeners.add(listener); return ()=>listeners.delete(listener)},read,read); return [new URLSearchParams(value),navigate]} export function Link({children,to,...props}){return createElement('a',{...props,href:to},children)}`],
     'designSystemsRepository.js': ['design-systems-repository-stub', 'export const designSystems=new Proxy({}, {get:(_,key)=>(...args)=>globalThis.__designSystemsTestRepository[key](...args)})'],
     'ArtifactApprovalPanel.jsx': ['design-systems-approval-stub', "import {createElement} from 'react'; export default function Stub(){return createElement('p',null,'Approval panel stub')}"] ,
     'ArtifactRelationsPanel.jsx': ['design-systems-relations-stub', "import {createElement} from 'react'; export default function Stub(){return createElement('p',null,'Relations panel stub')}"] ,
@@ -131,4 +131,74 @@ test('mounted DesignSystems resolves a valid exact pair and fails closed for sta
   const normal = await render('/sphere/design/systems')
   assert.match(normal, /System Alpha/)
   assert.match(normal, /Alpha released rules/)
+})
+
+function findElement(node, predicate) {
+  if (node?.nodeType === 1 && predicate(node)) return node
+  for (const child of node?.childNodes || []) {
+    const match = findElement(child, predicate)
+    if (match) return match
+  }
+  return null
+}
+
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((resolvePromise, rejectPromise) => { resolve = resolvePromise; reject = rejectPromise })
+  return { promise, resolve, reject }
+}
+
+async function mountedHarness(t, DesignSystems, document) {
+  const container = document.createElement('div')
+  const root = createRoot(container)
+  await act(async () => root.render(createElement(DesignSystems)))
+  t.after(() => act(async () => root.unmount()))
+  return { container }
+}
+
+test('mounted DesignSystems preserves explicit creation mode across the query-clearing reload', async t => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', ssr: { noExternal: ['react-router-dom'] }, plugins: [stubs()] })
+  t.after(() => vite.close())
+  const { default: DesignSystems } = await vite.ssrLoadModule('/src/apps/DesignSystems.jsx')
+  const document = new TestDocument()
+  const window = { document, setTimeout, clearTimeout, addEventListener() {}, removeEventListener() {}, getSelection: () => null, Event: TestEvent, Node: TestNode, Element: TestElement, HTMLElement: TestElement, HTMLIFrameElement: class extends TestElement {}, SVGElement: TestElement }
+  document.defaultView = window
+  Object.assign(globalThis, { document, window, Event: TestEvent, Node: TestNode, HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true, __designSystemsTestSearch: 'artifact=artifact-a&version=a-v2', __designSystemsTestRepository: { loadLibrary: async () => library() } })
+  const { container } = await mountedHarness(t, DesignSystems, document)
+  await flush(); await flush()
+
+  const createButton = findElement(container, node => node.tagName === 'BUTTON' && node.textContent === 'New design system')
+  assert.ok(createButton)
+  await act(async () => createButton.dispatchEvent(new TestEvent('click')))
+  await flush(); await flush()
+
+  assert.match(container.textContent, /Create a design system/)
+  assert.match(container.textContent, /Creating a new manual design system draft/)
+  const titleInput = findElement(container, node => node.tagName === 'INPUT' && node.getAttribute('required') !== null)
+  assert.equal(titleInput?.value, '')
+  assert.doesNotMatch(container.textContent, /Alpha exact draft rules|Alpha released rules/)
+})
+
+test('mounted DesignSystems ignores a stale exact-load result after navigation to an unavailable pair', async t => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', ssr: { noExternal: ['react-router-dom'] }, plugins: [stubs()] })
+  t.after(() => vite.close())
+  const { default: DesignSystems } = await vite.ssrLoadModule('/src/apps/DesignSystems.jsx')
+  const document = new TestDocument()
+  const window = { document, setTimeout, clearTimeout, addEventListener() {}, removeEventListener() {}, getSelection: () => null, Event: TestEvent, Node: TestNode, Element: TestElement, HTMLElement: TestElement, HTMLIFrameElement: class extends TestElement {}, SVGElement: TestElement }
+  document.defaultView = window
+  const firstLoad = deferred()
+  let calls = 0
+  Object.assign(globalThis, { document, window, Event: TestEvent, Node: TestNode, HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true, __designSystemsTestSearch: 'artifact=artifact-a&version=a-v2', __designSystemsTestRepository: { loadLibrary: async () => ++calls === 1 ? firstLoad.promise : library() } })
+  const { container } = await mountedHarness(t, DesignSystems, document)
+
+  await act(async () => globalThis.__designSystemsTestNavigate({ artifact: 'unavailable-artifact', version: 'unavailable-version' }))
+  await flush(); await flush()
+  assert.match(container.textContent, /Exact Design System unavailable/)
+
+  firstLoad.resolve(library())
+  await flush(); await flush()
+  assert.match(container.textContent, /Exact Design System unavailable/)
+  assert.match(container.textContent, /No other artifact or version was substituted/)
+  assert.doesNotMatch(container.textContent, /Alpha exact draft rules|Alpha released rules/)
 })
