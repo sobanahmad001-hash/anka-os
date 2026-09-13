@@ -5,6 +5,7 @@ import {
   sha256AttachmentBytes,
   ENABLED_DEPARTMENTS,
   confirmProposal,
+  departmentChatExecutionMetadata,
   departmentChatExternalEndpoint,
   freezeDepartmentChatContext,
   hasDepartmentChatAuthority,
@@ -238,7 +239,7 @@ function selectedOrganizationFixture() {
           : [
             'data: {"type":"response.output_text.delta","delta":"Offline "}\n\n',
             'data: {"type":"response.output_text.delta","delta":"answer"}\n\n',
-            'data: {"type":"response.completed","response":{"output_text":"Offline answer","usage":{"input_tokens":7,"output_tokens":2}}}\n\n',
+            'data: {"type":"response.completed","response":{"output_text":"Offline answer","model":"offline-actual","usage":{"input_tokens":7,"output_tokens":2}}}\n\n',
           ]
         return new Response(new ReadableStream({
           start(controller) {
@@ -454,9 +455,21 @@ Deno.test('conversation transcript returns only persisted timestamp and authoriz
     created_at: '2026-09-12T01:02:03Z', finished_at: '2026-09-12T01:02:04Z',
   }]
   fixture.rows.ai_runs = [{
-    id: 'run-B', organization_id: 'B', provider: 'openai', model: 'recorded-model',
+    id: 'run-B', organization_id: 'B', provider: 'openai', model: 'selected-model',
     capability: 'department_chat_answer', status: 'completed',
-    department_chat_model_configuration_id: 'configuration-B', created_at: '2026-09-12T01:02:03Z',
+    department_chat_model_configuration_id: 'model-configuration-B-content',
+    context_manifest: {
+      approved_artifact_version_ids: ['source-version-B'],
+      selected_model_id: 'selected-model', actual_model_id: 'actual-model',
+      requested_tools: [], executed_tools: [],
+    },
+    created_at: '2026-09-12T01:02:03Z',
+  }]
+  fixture.rows.artifact_approvals = [{
+    organization_id: 'B', engagement_id: 'engagement-B',
+    artifact_id: 'source-artifact-B', artifact_version_id: 'source-version-B',
+    artifacts: { artifact_type: 'content', title: 'Authorized source', engagement_id: 'engagement-B' },
+    artifact_versions: { id: 'source-version-B', version_number: 4, ai_use_allowed: true, data_classification: 'internal' },
   }]
   const response = await fixture.request({
     action: 'get_conversation', organization_id: 'B', project_id: 'project-B',
@@ -465,7 +478,20 @@ Deno.test('conversation transcript returns only persisted timestamp and authoriz
   assertEquals(response.status, 200)
   const message = (await response.json()).data.messages[0]
   assertEquals(message.created_at, '2026-09-12T01:02:03Z')
-  assertEquals(message.run, fixture.rows.ai_runs[0])
+  assertEquals(message.run.selected_model, {
+    configuration_id: 'model-configuration-B-content',
+    model_id: 'offline',
+    display_name: 'Offline fixture',
+  })
+  assertEquals(message.run.recorded_model_id, 'selected-model')
+  assertEquals(message.run.actual_model_id, 'actual-model')
+  assertEquals(message.run.requested_tools, [])
+  assertEquals(message.run.executed_tools, [])
+  assertEquals(message.run.source_versions, [{
+    artifact_id: 'source-artifact-B', artifact_version_id: 'source-version-B',
+    artifact_type: 'content', title: 'Authorized source', version_number: 4,
+  }])
+  assertEquals('context_manifest' in message.run, false)
   assertEquals(JSON.stringify(message).includes('fabricated'), false)
 })
 
@@ -1155,6 +1181,21 @@ Deno.test('context freeze is deterministic across exact approved versions', asyn
   assertEquals(first.manifest.approved_artifact_version_ids, ['version-a', 'version-b'])
 })
 
+Deno.test('execution metadata distinguishes a provider-reported model and a true no-tool run', () => {
+  assertEquals(departmentChatExecutionMetadata({ model: 'provider-actual' }), {
+    selected_model_id: null,
+    actual_model_id: 'provider-actual',
+    requested_tools: [],
+    executed_tools: [],
+  })
+  assertEquals(departmentChatExecutionMetadata({}), {
+    selected_model_id: null,
+    actual_model_id: null,
+    requested_tools: [],
+    executed_tools: [],
+  })
+})
+
 Deno.test('Shared Department Chat exposes only the OpenAI Responses endpoint', () => {
   const endpoint = departmentChatExternalEndpoint()
   assertEquals(endpoint, 'https://api.openai.com/v1/responses')
@@ -1200,6 +1241,10 @@ Deno.test('P9 ordinary answer streams genuine deltas then atomically saves a no-
   assertEquals(completed.args.p_model_configuration_id, 'model-configuration-B-content')
   assertEquals(completed.args.p_output_text, 'Offline answer')
   assertEquals(completed.args.p_context_manifest.model_configuration_id, 'model-configuration-B-content')
+  assertEquals(completed.args.p_context_manifest.selected_model_id, 'offline')
+  assertEquals(completed.args.p_context_manifest.actual_model_id, 'offline-actual')
+  assertEquals(completed.args.p_context_manifest.requested_tools, [])
+  assertEquals(completed.args.p_context_manifest.executed_tools, [])
   assertEquals(fixture.rpcCalls.some(call => call.name.startsWith('save_department_chat_')), false)
   const providerBody = JSON.parse(String(fixture.providerRequests[0].body))
   assertEquals(providerBody.stream, true)

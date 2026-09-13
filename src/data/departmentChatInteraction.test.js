@@ -280,3 +280,59 @@ test('direct selection aligns the editable title before a failed conversation lo
   assert.match(container.textContent, /Conversation load failed/)
   assert.equal(titleInput.value, 'conversation-b')
 })
+
+
+test('mounted chat shows truthful run metadata and an accessible exact-version history link without an official write', async t => {
+  const { container, ScopedDepartmentChat } = await setup(t)
+  const repo = repository([])
+  repo.getConversation = async (_departmentId, input) => ({
+    conversation: conversation(input.conversation_id),
+    sharing: { can_manage: false, recipients: [] },
+    messages: [
+      {
+        id: 'assistant-current', role: 'assistant', status: 'completed', body: 'Current answer',
+        created_at: '2026-09-13T10:00:00Z', proposal: null,
+        run: {
+          id: 'run-current', provider: 'openai', capability: 'department_chat_answer', status: 'completed',
+          created_at: '2026-09-13T10:00:01Z',
+          selected_model: { configuration_id: 'configuration-1', model_id: 'selected-model', display_name: 'Fixture selected' },
+          actual_model_id: 'actual-model', requested_tools: [], executed_tools: [],
+          source_versions: [{
+            artifact_id: 'artifact-1', artifact_version_id: 'version-1',
+            artifact_type: 'content', title: 'Exact content', version_number: 7,
+          }],
+        },
+      },
+      {
+        id: 'assistant-historical', role: 'assistant', status: 'completed', body: 'Historical answer',
+        created_at: '2026-09-12T10:00:00Z', proposal: null,
+        run: {
+          id: 'run-historical', provider: 'openai', capability: 'department_chat_answer',
+          status: 'completed', created_at: '2026-09-12T10:00:01Z',
+          selected_model: null, actual_model_id: null, requested_tools: null, executed_tools: null,
+          source_versions: [],
+        },
+      },
+    ],
+  })
+  globalThis.__departmentChatTestRepository = repo
+  const root = createRoot(container)
+  t.after(() => { try { root.unmount() } catch {} })
+  await act(async () => root.render(createElement(ScopedDepartmentChat, props('a', new AbortController().signal))))
+  await flush()
+
+  assert.ok(container.textContent.includes('Selected modelFixture selected / selected-model'))
+  assert.match(container.textContent, /Actual model usedactual-model/)
+  assert.match(container.textContent, /Requested toolsNone requested/)
+  assert.match(container.textContent, /Executed toolsNone executed/)
+  assert.match(container.textContent, /Not recorded for this historical run/)
+  assert.ok(container.textContent.includes('Exact content / version 7 / version-1'))
+
+  const link = byText(container, 'a', 'View version history')
+  assert.ok(link)
+  const href = new URL(link.getAttribute('href'), 'https://anka.invalid')
+  assert.equal(href.pathname, '/sphere/content/studio')
+  assert.equal(href.searchParams.get('artifact'), 'artifact-1')
+  assert.equal(href.searchParams.get('version'), 'version-1')
+  assert.match(link.getAttribute('aria-label'), /version-1/)
+})

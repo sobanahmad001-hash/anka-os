@@ -28,7 +28,7 @@ export default function DesignSystems() {
   const [workspace, setWorkspace] = useState({ services: [], artifacts: [], versions: [], approvals: [], stages: [] })
   const [chatServiceId, setChatServiceId] = useState('')
   const [selectedId, setSelectedId] = useState(searchParams.get('artifact') || '')
-  const [versionId, setVersionId] = useState('')
+  const [versionId, setVersionId] = useState(searchParams.get('version') || '')
   const [form, setForm] = useState(EMPTY_FORM)
   const [search, setSearch] = useState('')
   const [releasedOnly, setReleasedOnly] = useState(true)
@@ -66,7 +66,8 @@ export default function DesignSystems() {
 
   useEffect(() => {
     if (!selectedArtifact) return
-    const nextVersion = releasedVersions[0] || versions[0] || null
+    const requestedVersionId = searchParams.get('version') || ''
+    const nextVersion = versions.find(item => item.id === requestedVersionId) || releasedVersions[0] || versions[0] || null
     setVersionId(nextVersion?.id || '')
     setForm({
       title: selectedArtifact.title,

@@ -5,6 +5,7 @@ import { createChatCompletionGuard, handleCurrentChatFailure, runCurrentChatOper
 import { selectPendingDepartmentChatAttachments, validateDepartmentChatAttachmentFile } from '../data/departmentChatAttachmentSelection.js'
 import { selectDepartmentChatModelConfiguration } from '../data/departmentChatModelSelection.js'
 import { createAnswerObservationController, reduceAnswerStreamState } from '../data/departmentChatAnswerController.js'
+import { departmentChatVersionHistoryPath, linkedDepartmentChatVersions } from '../data/departmentChatVersionHistory.js'
 
 import { departmentChatProfile } from '../data/departmentChatProfiles.js'
 import { departmentChat } from '../data/departmentChatRepository.js'
@@ -837,6 +838,7 @@ export function ScopedDepartmentChat({
         <p className="mt-2 font-semibold text-white">{engagement.brands?.name || engagement.name}</p>
         <p className="mt-1 text-sm text-slate-400">{engagement.agency_clients?.name}</p>
       </div>
+      {supportsSavedConversations && <VersionHistoryPanel messages={messages} engagement={engagement} />}
       {supportsSavedConversations && <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-sm leading-6 text-slate-400">
         <p className="font-semibold text-white">Configured AI</p>
         {capabilities ? <><p className="mt-2">OpenAI · <span className="text-slate-200">{(capabilities.approved_models || []).find(model => model.configuration_id === modelConfigurationId)?.model_id || capabilities.model_id}</span></p><p className="mt-1 text-xs text-slate-500">Selection is limited to verified, administrator-approved configurations for this engagement.</p></> : <p className="mt-2">{historyBusy ? 'Checking configuration…' : 'Configuration unavailable.'}</p>}
@@ -876,7 +878,7 @@ function ConversationHistory({ messages, userId, busy, onConfirm, onReject }) {
           <span className="font-semibold uppercase tracking-[0.12em] text-slate-400">{message.role === 'user' ? (message.author_id === userId ? 'You' : message.author?.full_name || message.author?.email || 'Internal contributor') : 'Configured assistant'}</span>
           <span className="text-right text-slate-500"><time dateTime={message.created_at}>{new Date(message.created_at).toLocaleString()}</time><span className={`ml-2 ${message.status === 'failed' ? 'text-red-300' : ['pending', 'unknown'].includes(message.status) ? 'text-amber-300' : 'text-slate-500'}`}>{message.status}</span></span>
         </div>
-        {message.run && <p className="mt-2 break-words text-xs text-slate-500">Run {message.run.id} · {message.run.provider || 'Provider not recorded'} · {message.run.model || 'Model not recorded'} · {message.run.capability || 'Mode not recorded'} · {message.run.status}{message.run.department_chat_model_configuration_id ? ` · configuration ${message.run.department_chat_model_configuration_id}` : ''}</p>}
+        {message.run && <RunMetadata run={message.run} />}
         {message.role === 'user' && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-200">{message.body}</p>}
         {message.role === 'assistant' && !proposal && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-200">{message.body}</p>}
         {message.role === 'user' && message.attachments?.length > 0 && <div className="mt-3 space-y-2">
@@ -891,6 +893,50 @@ function ConversationHistory({ messages, userId, busy, onConfirm, onReject }) {
         {proposal && <ProposalPreview result={proposal} official={null} busy={busy} canDecide={proposal.proposer_id === userId} onConfirm={() => onConfirm(proposal)} onReject={() => onReject(proposal)} />}
       </article>
     })}
+  </section>
+}
+
+function metadataValue(value, emptyLabel) {
+  if (value === null || value === undefined) return 'Not recorded for this historical run'
+  if (Array.isArray(value)) return value.length ? value.join(', ') : emptyLabel
+  return String(value)
+}
+
+function RunMetadata({ run }) {
+  const selected = run.selected_model
+    ? `${run.selected_model.display_name || run.selected_model.model_id} / ${run.selected_model.model_id}`
+    : null
+  return <dl aria-label={`Run metadata ${run.id}`} className="mt-3 grid gap-2 rounded-lg border border-slate-800 bg-slate-950/50 p-3 text-xs text-slate-400 sm:grid-cols-2">
+    <MetaDatum label="Run ID" value={run.id} />
+    <MetaDatum label="Run recorded" value={run.created_at ? <time dateTime={run.created_at}>{new Date(run.created_at).toLocaleString()}</time> : 'Not recorded'} />
+    <MetaDatum label="Selected model" value={metadataValue(selected)} />
+    <MetaDatum label="Actual model used" value={metadataValue(run.actual_model_id)} />
+    <MetaDatum label="Provider" value={run.provider || 'Not recorded'} />
+    <MetaDatum label="Run mode" value={run.capability || 'Not recorded'} />
+    <MetaDatum label="Run status" value={run.status || 'Not recorded'} />
+    <MetaDatum label="Requested tools" value={metadataValue(run.requested_tools, 'None requested')} />
+    <MetaDatum label="Executed tools" value={metadataValue(run.executed_tools, 'None executed')} />
+  </dl>
+}
+
+function MetaDatum({ label, value }) {
+  return <div className="min-w-0"><dt className="font-semibold uppercase tracking-[0.1em] text-slate-500">{label}</dt><dd className="mt-1 break-words text-slate-300">{value}</dd></div>
+}
+
+function VersionHistoryPanel({ messages, engagement }) {
+  const linkedVersions = linkedDepartmentChatVersions(messages)
+    .map(version => ({ version, href: departmentChatVersionHistoryPath(engagement, version) }))
+    .filter(item => item.href)
+  return <section aria-labelledby="department-chat-version-history-title" className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-sm leading-6 text-slate-400">
+    <h3 id="department-chat-version-history-title" className="font-semibold text-white">Linked exact versions</h3>
+    {linkedVersions.length ? <ul className="mt-3 space-y-3">{linkedVersions.map(({ version, href }) => {
+      const label = `${version.title || version.artifact_type} / ${version.version_number ? `version ${version.version_number}` : 'exact version'} / ${version.artifact_version_id}`
+      return <li key={version.artifact_version_id} className="rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+        <p className="break-words text-xs text-slate-300">{label}</p>
+        <a href={href} aria-label={`View version history for ${label}`} className="mt-2 inline-block text-xs font-semibold text-sky-300 underline">View version history</a>
+      </li>
+    })}</ul> : <p className="mt-2 text-xs text-slate-500">No currently authorized exact version is linked to this conversation.</p>}
+    <p className="mt-3 text-xs text-slate-500">Links open the existing specialist history surface. Access and exact version identity are checked again there.</p>
   </section>
 }
 
