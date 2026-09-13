@@ -58,7 +58,17 @@ begin
       not coalesce(context_manifest ?| array[
         'selected_model_id', 'actual_model_id', 'requested_tools', 'executed_tools'
       ], false)
-      or context_manifest @> v_execution_metadata
+      or (
+        context_manifest ?& array[
+          'selected_model_id', 'actual_model_id', 'requested_tools', 'executed_tools'
+        ]
+        and jsonb_build_object(
+          'selected_model_id', context_manifest -> 'selected_model_id',
+          'actual_model_id', context_manifest -> 'actual_model_id',
+          'requested_tools', context_manifest -> 'requested_tools',
+          'executed_tools', context_manifest -> 'executed_tools'
+        ) = v_execution_metadata
+      )
     );
   get diagnostics v_updated = row_count;
   if v_updated <> 1 then

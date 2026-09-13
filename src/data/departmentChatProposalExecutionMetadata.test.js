@@ -10,6 +10,10 @@ const verifier = readFileSync(new URL(
   '../../supabase/verify_20260913152101_p9_department_chat_proposal_execution_metadata.sql',
   import.meta.url,
 ), 'utf8')
+const behaviorVerifier = readFileSync(new URL(
+  '../../supabase/verify_20260913152101_p9_department_chat_proposal_execution_metadata_behavior.sql',
+  import.meta.url,
+), 'utf8')
 const edge = readFileSync(new URL(
   '../../supabase/functions/department-chat/index.ts',
   import.meta.url,
@@ -31,7 +35,9 @@ test('P9 proposal telemetry preserves selected versus actual model and true tool
   }
   assert.match(migration, /where id = v_ai_run_id[\s\S]*organization_id = p_organization_id[\s\S]*model = btrim\(p_selected_model_id\)[\s\S]*department_chat_model_configuration_id is not distinct from p_model_configuration_id/)
   assert.match(migration, /get diagnostics v_updated = row_count[\s\S]*v_updated <> 1/)
-  assert.match(migration, /context_manifest @> v_execution_metadata/)
+  assert.match(migration, /context_manifest \?& array\[[\s\S]*'selected_model_id'[\s\S]*'actual_model_id'[\s\S]*'requested_tools'[\s\S]*'executed_tools'[\s\S]*jsonb_build_object\([\s\S]*\) = v_execution_metadata/)
+  assert.doesNotMatch(migration, /context_manifest @> v_execution_metadata/)
+  assert.match(verifier, /any replay must match every telemetry field exactly/)
   assert.match(edge, /p_model_configuration_id: input\.provider\.configurationId \|\| null/)
   assert.match(edge, /p_actual_model_id: input\.executionMetadata\.actual_model_id/)
   assert.match(edge, /p_requested_tools: input\.executionMetadata\.requested_tools/)
@@ -46,6 +52,17 @@ test('P9 proposal telemetry RPCs are invoker-only and browser-closed with rollba
   assert.equal((migration.match(/to service_role;/g) || []).length, 3)
   assert.match(verifier, /^begin;/m)
   assert.match(verifier, /^rollback;/m)
+  assert.match(behaviorVerifier, /^begin;/m)
+  assert.match(behaviorVerifier, /^rollback;/m)
+  for (const replayCheck of [
+    'identical_replay_same_run',
+    'removed_tool_replay_rejected',
+    'changed_tool_replay_rejected',
+    'empty_tool_replay_rejected',
+    'invalid_telemetry_atomic_rollback',
+  ]) {
+    assert.match(behaviorVerifier, new RegExp("'" + replayCheck + "'"))
+  }
   for (const check of ['service_rpc_acl', 'private_helper_acl', 'canonical_atomic_wrappers', 'exact_run_metadata_contract']) {
     assert.match(verifier, new RegExp("'" + check + "'"))
   }

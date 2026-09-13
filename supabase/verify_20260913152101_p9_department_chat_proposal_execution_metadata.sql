@@ -84,13 +84,16 @@ begin
      or position('executed_tools' in v_definition) = 0
      or position('organization_id = p_organization_id' in v_definition) = 0
      or position('department_chat_model_configuration_id is not distinct from p_model_configuration_id' in v_definition) = 0
-     or position('context_manifest @> v_execution_metadata' in v_definition) = 0
+     or position('context_manifest ?& array[' in v_definition) = 0
+     or position('jsonb_build_object(' in v_definition) = 0
+     or position(') = v_execution_metadata' in v_definition) = 0
+     or position('context_manifest @> v_execution_metadata' in v_definition) <> 0
      or position('v_updated <> 1' in v_definition) = 0 then
     raise exception 'Execution metadata helper does not fail closed on the exact AI run';
   end if;
   insert into p9_proposal_execution_metadata_checks values (
     'exact_run_metadata_contract', true,
-    'Selected and actual models plus requested/executed tool arrays update exactly one tenant/configuration-bound AI run.'
+    'Selected and actual models plus requested/executed tool arrays update exactly one tenant/configuration-bound AI run, and any replay must match every telemetry field exactly.'
   );
 end;
 $verify$;
