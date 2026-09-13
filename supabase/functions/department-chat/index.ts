@@ -142,6 +142,44 @@ function text(value: unknown, max = 8000) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
 }
 
+function safeStoredNames(value: unknown) {
+  if (!Array.isArray(value)) return null
+  return [...new Set(value.map(item => text(item, 100)).filter(Boolean))].slice(0, 50)
+}
+
+export function departmentChatExecutionMetadata(providerResult: Json) {
+  const actualModelId = text(providerResult.model, 120)
+  return {
+    selected_model_id: null,
+    actual_model_id: actualModelId || null,
+    requested_tools: [],
+    executed_tools: [],
+  }
+}
+
+function publicDepartmentChatRun(run: Json, configuration: Json | null, sourceVersions: Json[]) {
+  const manifest = run.context_manifest && typeof run.context_manifest === 'object'
+    ? run.context_manifest as Json : {}
+  return {
+    id: run.id,
+    provider: run.provider || null,
+    recorded_model_id: run.model || null,
+    capability: run.capability || null,
+    status: run.status,
+    model_configuration_id: run.department_chat_model_configuration_id || null,
+    selected_model: configuration ? {
+      configuration_id: configuration.id,
+      model_id: configuration.model_id,
+      display_name: configuration.display_name,
+    } : null,
+    actual_model_id: text(manifest.actual_model_id, 120) || null,
+    requested_tools: safeStoredNames(manifest.requested_tools),
+    executed_tools: safeStoredNames(manifest.executed_tools),
+    source_versions: sourceVersions,
+    created_at: run.created_at,
+  }
+}
+
 function attachmentName(value: unknown) {
   const name = text(value, 200)
   if (!name || /[\\/\u0000-\u001f]/.test(name) || name === '.' || name === '..') {
@@ -405,7 +443,7 @@ export function selectApprovedModelConfiguration(
 async function approvedSafeContext(admin: Client, engagementId: string, departmentId: string, organizationId: string) {
   const profile = departmentChatProfile(departmentId)
   const { data: approvals, error } = await admin.from('artifact_approvals')
-    .select('artifact_id, artifact_version_id, approved_at, artifacts!inner(artifact_type, title, engagement_id), artifact_versions!inner(id, content, ai_use_allowed, data_classification)')
+    .select('artifact_id, artifact_version_id, approved_at, artifacts!inner(artifact_type, title, engagement_id), artifact_versions!inner(id, version_number, content, ai_use_allowed, data_classification)')
     .eq('engagement_id', engagementId).eq('artifacts.engagement_id', engagementId)
     .eq('organization_id', organizationId)
     .in('artifacts.artifact_type', profile.contextArtifactTypes)
@@ -420,7 +458,8 @@ async function approvedSafeContext(admin: Client, engagementId: string, departme
     seen.add(item.artifact_id)
     return [{
       artifact_id: item.artifact_id, artifact_version_id: item.artifact_version_id,
-      artifact_type: artifact.artifact_type, title: artifact.title, content: version.content,
+      artifact_type: artifact.artifact_type, title: artifact.title,
+      version_number: version.version_number, content: version.content,
     }]
   })
 }
@@ -829,17 +868,88 @@ async function getConversation(admin: Client, body: Json, actorId: string, organ
     if (result.error) throw result.error
     proposals = result.data || []
   }
-  const byId = new Map(proposals.map(proposal => [proposal.id, proposal]))
+  const acceptedVersionIds = [...new Set(proposals.map(proposal =>
+    text(proposal.accepted_artifact_version_id, 80)).filter(Boolean))]
+  let acceptedVersions: Json[] = []
+  if (acceptedVersionIds.length) {
+    const result = await admin.from('artifact_versions')
+      .select('id, artifact_id, version_number, artifacts!inner(title, artifact_type, engagement_id)')
+      .eq('organization_id', organizationId).eq('artifacts.engagement_id', conversation.engagement_id)
+      .in('id', acceptedVersionIds)
+    if (result.error) throw result.error
+    acceptedVersions = (result.data || []).flatMap(version => {
+      const artifact = Array.isArray(version.artifacts) ? version.artifacts[0] : version.artifacts
+      return artifact ? [{
+        artifact_id: version.artifact_id, artifact_version_id: version.id,
+        artifact_type: artifact.artifact_type, title: artifact.title,
+        version_number: version.version_number,
+      }] : []
+    })
+  }
+  const acceptedVersionById = new Map(acceptedVersions.map(version => [version.artifact_version_id, version]))
+  const byId = new Map(proposals.map(proposal => [proposal.id, {
+    ...proposal,
+    accepted_version: proposal.accepted_artifact_version_id
+      ? acceptedVersionById.get(proposal.accepted_artifact_version_id) || null : null,
+  }]))
   const aiRunIds = [...new Set((messages || []).map(message => text(message.ai_run_id, 80)).filter(Boolean))]
   let aiRuns: Json[] = []
   if (aiRunIds.length) {
     const result = await admin.from('ai_runs')
-      .select('id, provider, model, capability, status, department_chat_model_configuration_id, created_at')
+      .select('id, provider, model, capability, status, department_chat_model_configuration_id, context_manifest, created_at')
       .eq('organization_id', organizationId).in('id', aiRunIds)
     if (result.error) throw result.error
     aiRuns = result.data || []
   }
-  const aiRunById = new Map(aiRuns.map(run => [run.id, run]))
+  const configurationIds = [...new Set(aiRuns.map(run =>
+    text(run.department_chat_model_configuration_id, 80)).filter(Boolean))]
+  let configurations: Json[] = []
+  if (configurationIds.length) {
+    const result = await admin.from('department_chat_model_configurations')
+      .select('id, model_id, display_name').eq('organization_id', organizationId).in('id', configurationIds)
+    if (result.error) throw result.error
+    configurations = result.data || []
+  }
+  const configurationById = new Map(configurations.map(configuration => [configuration.id, configuration]))
+  const referencedSourceVersionIds = [...new Set(aiRuns.flatMap(run => {
+    const manifest = run.context_manifest && typeof run.context_manifest === 'object'
+      ? run.context_manifest as Json : {}
+    return Array.isArray(manifest.approved_artifact_version_ids)
+      ? manifest.approved_artifact_version_ids.map(value => text(value, 80)).filter(Boolean) : []
+  }))]
+  let authorizedSources: Json[] = []
+  if (referencedSourceVersionIds.length) {
+    const profile = departmentChatProfile(text(conversation.department_id, 40))
+    const result = await admin.from('artifact_approvals')
+      .select('artifact_id, artifact_version_id, artifacts!inner(artifact_type, title, engagement_id), artifact_versions!inner(id, version_number, ai_use_allowed, data_classification)')
+      .eq('organization_id', organizationId).eq('engagement_id', conversation.engagement_id)
+      .eq('artifacts.engagement_id', conversation.engagement_id)
+      .in('artifacts.artifact_type', profile.contextArtifactTypes)
+      .in('artifact_version_id', referencedSourceVersionIds)
+      .eq('artifact_versions.ai_use_allowed', true).neq('artifact_versions.data_classification', 'restricted')
+    if (result.error) throw result.error
+    authorizedSources = (result.data || []).flatMap(item => {
+      const artifact = Array.isArray(item.artifacts) ? item.artifacts[0] : item.artifacts
+      const version = Array.isArray(item.artifact_versions) ? item.artifact_versions[0] : item.artifact_versions
+      return artifact && version ? [{
+        artifact_id: item.artifact_id, artifact_version_id: item.artifact_version_id,
+        artifact_type: artifact.artifact_type, title: artifact.title,
+        version_number: version.version_number,
+      }] : []
+    })
+  }
+  const sourceByVersionId = new Map(authorizedSources.map(version => [version.artifact_version_id, version]))
+  const aiRunById = new Map(aiRuns.map(run => {
+    const manifest = run.context_manifest && typeof run.context_manifest === 'object'
+      ? run.context_manifest as Json : {}
+    const sourceVersions = (Array.isArray(manifest.approved_artifact_version_ids)
+      ? manifest.approved_artifact_version_ids : []).map(id => sourceByVersionId.get(id)).filter(Boolean) as Json[]
+    return [run.id, publicDepartmentChatRun(
+      run,
+      configurationById.get(run.department_chat_model_configuration_id) || null,
+      sourceVersions,
+    )]
+  }))
   const authorIds = [...new Set((messages || []).map(message => text(message.author_id, 80)).filter(Boolean))]
   let authors: Json[] = []
   if (authorIds.length) {
@@ -1401,7 +1511,11 @@ export async function answerConversation(
         p_model_configuration_id: provider.configurationId,
         p_connector_connection_id: provider.connectorId,
         p_model_id: provider.model,
-        p_context_manifest: contextFreeze.manifest,
+        p_context_manifest: {
+          ...contextFreeze.manifest,
+          ...departmentChatExecutionMetadata(providerResult),
+          selected_model_id: provider.model,
+        },
         p_output_text: answer,
         p_latency_ms: Date.now() - startedAt,
         p_input_tokens: inputTokens,

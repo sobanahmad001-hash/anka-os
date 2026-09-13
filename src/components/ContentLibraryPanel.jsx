@@ -37,11 +37,11 @@ function contentValue(value) {
   return <span className="whitespace-pre-wrap">{String(value)}</span>
 }
 
-export default function ContentLibraryPanel({ repository }) {
+export default function ContentLibraryPanel({ repository, initialArtifactId = '', initialVersionId = '' }) {
   const [data, setData] = useState(null)
   const [filters, setFilters] = useState({ query: '', type: '', projectId: '', creatorId: '', reviewStage: '' })
-  const [artifactId, setArtifactId] = useState('')
-  const [versionId, setVersionId] = useState('')
+  const [artifactId, setArtifactId] = useState(initialArtifactId)
+  const [versionId, setVersionId] = useState(initialVersionId)
   const [comparisonOpen, setComparisonOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')

@@ -49,10 +49,11 @@ test('P9 edge, repository, and UI use server search with bounded pagination and 
   assert.ok(!chat.includes('.filter(message => message.body'))
 })
 
-test('P9 transcript presents stored timestamps and stored run metadata without invented provider values', () => {
-  assert.ok(edge.includes(".select('id, provider, model, capability, status, department_chat_model_configuration_id, created_at')"))
-  assert.ok(edge.includes('run: message.ai_run_id ? aiRunById.get(message.ai_run_id) || null : null'))
-  for (const required of ['dateTime={message.created_at}', 'message.run.provider', 'message.run.model', 'message.run.capability', 'message.run.status']) {
+test('P9 transcript presents stored timestamps and safely projected run metadata without invented values', () => {
+  assert.ok(edge.includes(".select('id, provider, model, capability, status, department_chat_model_configuration_id, context_manifest, created_at')"))
+  assert.ok(edge.includes('publicDepartmentChatRun('))
+  assert.ok(edge.includes("'context_manifest' in message.run") === false)
+  for (const required of ['dateTime={message.created_at}', 'run.provider', 'run.capability', 'run.status', 'Selected model', 'Actual model used', 'Requested tools', 'Executed tools', 'Not recorded for this historical run']) {
     assert.ok(chat.includes(required), required)
   }
   assert.ok(!chat.includes("provider: 'openai'"))
