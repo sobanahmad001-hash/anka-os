@@ -114,7 +114,7 @@ test('rollback verifier is exhaustive, named, fail-closed, and ends in PASS', ()
 test('unsaved brief uses the router blocker for every SPA transition and beforeunload for document exit', () => {
   assert.match(main, /createBrowserRouter/)
   assert.match(main, /<RouterProvider router=\{router\}/)
-  assert.match(studio, /useBlocker\(briefDirty\)/)
+  assert.match(studio, /useBlocker\(briefDirty \|\| reportDirty\)/)
   assert.match(studio, /navigationBlocker\.reset\(\)/)
   assert.equal((studio.match(/navigationBlocker\.proceed\(\)/g) || []).length, 2)
   assert.doesNotMatch(studio, /setPendingNavigation|runNavigation/)
