@@ -20,8 +20,9 @@ Exact Content and Design history destinations fail closed when the requested art
 - Exact telemetry replay correction: `d7282b9`; any replay must preserve every normalized telemetry field exactly.
 - Integrated Design exact-link correction: `5b05ab46b2ea4840387fcff07956976814862607` (owner source `b955e60e0cf94f0b9b983cc9d04d15103afabfde`).
 - Integrated Design reactive-state correction: `b5e28d5`, plus stale-error regression `9a9e9f9` (owner sources `1c5192997667eb1c0da22ee0f1e4f363b85fb572` and `dae0a6bbdfd7be0e94f562da79ac88f52edb1bf7`).
+- E50 fix: `6eb83c8` (`feat/design-systems-p9-failclosed-20260913` parent `dae0a6b`) prioritizes explicit exact routes over creation mode.
 - Integrated Content exact-link correction: `800b50d` (owner source `ac1fc852b0375fb74bda10120ff1d98c1e25af6a`).
-- Full Node data suite: 964 passed, 0 failed.
+- Full Node data suite: 966 passed, 0 failed.
 - Department Chat Deno suite: 92 passed, 0 failed; Deno typecheck passed.
 - Production build passed. Whole-repository lint completed with 0 errors and 508 pre-existing warnings.
 - Disposable PostgreSQL 17.11 migration/verifier run: 4 passed, 0 failed.
