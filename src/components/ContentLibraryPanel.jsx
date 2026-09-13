@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import ArtifactApprovalPanel from './ArtifactApprovalPanel.jsx'
+import ContentHandoffPanel from './ContentHandoffPanel.jsx'
 import ContentVersionComparison from './ContentVersionComparison.jsx'
 import VersionProofingPanel from './VersionProofingPanel.jsx'
 import { CONTENT_ARTIFACT_FORMS } from '../data/contentStudio.js'
@@ -139,6 +140,12 @@ export default function ContentLibraryPanel({ repository }) {
           <div className="mt-6 border-t border-slate-800 pt-5"><h3 className="font-semibold text-white">Recorded source versions</h3>{sourceReferences.length ? <div className="mt-3 space-y-2">{sourceReferences.map(reference => <div key={`${reference.path}:${reference.id}`} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3"><p className="text-sm font-semibold text-slate-200">{reference.accessible ? `${reference.artifact?.title || 'Source artifact'} - version ${reference.version.version_number}` : 'Recorded source is not accessible in the current scope'}</p><p className="mt-1 break-all text-[11px] text-slate-500">{reference.path} - {reference.id}</p></div>)}</div> : <p className="mt-3 rounded-xl border border-dashed border-slate-800 p-4 text-sm text-slate-500">This exact version records no source-version links. No newer source has been substituted.</p>}</div>
           {request?.status === 'pending' && <p className="mt-5 rounded-xl border border-amber-900/50 bg-amber-950/20 p-3 text-xs leading-5 text-amber-200">This exact version has a pending governed review request and {openCommentCount} open proofing comment{openCommentCount === 1 ? '' : 's'}. Open comments are feedback, not a formal review decision; later drafts inherit neither this request nor approval.</p>}
         </article>
+        <ContentHandoffPanel key={`handoff:${selectedEntry.artifact.id}:${selectedVersion.id}`}
+          organizationId={repository.organizationId} artifact={selectedEntry.artifact} version={selectedVersion}
+          approval={approval} sourceReferences={sourceReferences} services={data?.downstreamServices}
+          tasks={data?.downstreamTasks} workItems={data?.downstreamWorkItems}
+          projectId={selectedEntry.engagement?.project_id} engagementId={selectedEntry.artifact.engagement_id}
+          stale={Boolean(error) || stale} />
         {comparisonOpen && <ContentVersionComparison versions={selectedEntry.versions} contextKey={selectedEntry.artifact.id} preferredVersionId={selectedVersion.id} stale={stale} onClose={() => setComparisonOpen(false)} />}
         {!error && !stale && <ArtifactApprovalPanel key={`approval:${selectedVersion.id}`} version={selectedVersion} approval={approval} theme="amber" requestLabel="Submit exact version for review" singleApprovalLabel={`Use single-manager route for version ${selectedVersion.version_number}`} onSingleApprove={() => repository.approveArtifact(selectedVersion.id)} onChanged={load} />}
         {!error && !stale && <VersionProofingPanel key={`proofing:${selectedVersion.id}`} targetKind="artifact" versions={[selectedVersion]} initialVersionId={selectedVersion.id} department="content" theme="amber" onChanged={load} />}
