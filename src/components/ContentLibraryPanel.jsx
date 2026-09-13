@@ -145,7 +145,7 @@ export default function ContentLibraryPanel({ repository }) {
           approval={approval} sourceReferences={sourceReferences} services={data?.downstreamServices}
           tasks={data?.downstreamTasks} workItems={data?.downstreamWorkItems}
           projectId={selectedEntry.engagement?.project_id} engagementId={selectedEntry.artifact.engagement_id}
-          stale={Boolean(error) || stale} />
+          stale={loading || Boolean(error) || stale} />
         {comparisonOpen && <ContentVersionComparison versions={selectedEntry.versions} contextKey={selectedEntry.artifact.id} preferredVersionId={selectedVersion.id} stale={stale} onClose={() => setComparisonOpen(false)} />}
         {!error && !stale && <ArtifactApprovalPanel key={`approval:${selectedVersion.id}`} version={selectedVersion} approval={approval} theme="amber" requestLabel="Submit exact version for review" singleApprovalLabel={`Use single-manager route for version ${selectedVersion.version_number}`} onSingleApprove={() => repository.approveArtifact(selectedVersion.id)} onChanged={load} />}
         {!error && !stale && <VersionProofingPanel key={`proofing:${selectedVersion.id}`} targetKind="artifact" versions={[selectedVersion]} initialVersionId={selectedVersion.id} department="content" theme="amber" onChanged={load} />}

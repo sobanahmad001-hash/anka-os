@@ -62,13 +62,21 @@ test('B07 preview preserves exact identity, approval, sources, recipient, and op
 })
 
 test('B07 repeated preparation is deterministic and any exact target change invalidates the preview', () => {
-  const input = { organizationId: 'org-1', artifact, version, destination, note: 'Same note' }
+  const input = { organizationId: 'org-1', artifact, version, destination, note: 'Same note',
+    sourceReferences: [{ id: 'source-v1', path: 'source.version_id', accessible: true }] }
   const preview = buildContentHandoffPreview(input)
   assert.equal(preview.key, buildContentHandoffPreview(input).key)
   assert.equal(isCurrentContentHandoffPreview(preview, contentHandoffTargetKey(input)), true)
   assert.equal(isCurrentContentHandoffPreview(preview, contentHandoffTargetKey({ ...input, version: { ...version, id: 'version-2' } })), false)
   assert.equal(isCurrentContentHandoffPreview(preview, contentHandoffTargetKey({ ...input, destination: { ...destination, id: 'service-marketing' } })), false)
   assert.equal(isCurrentContentHandoffPreview(preview, contentHandoffTargetKey({ ...input, note: 'Changed' })), false)
+  assert.equal(isCurrentContentHandoffPreview(preview, contentHandoffTargetKey({
+    ...input, sourceReferences: [{ id: 'source-v1', path: 'source.version_id', accessible: false }],
+  })), false)
+  assert.equal(isCurrentContentHandoffPreview(preview, contentHandoffTargetKey({
+    ...input, approval: { id: 'approval-v2', approved_by: 'reviewer', approved_at: '2026-09-13T14:00:00Z' },
+  })), false)
+  assert.equal(isCurrentContentHandoffPreview(preview, contentHandoffTargetKey({ ...input, stale: true })), false)
 })
 
 test('B07 UI remains a read-only preview with no mutation or substitute-latest route', () => {
@@ -78,7 +86,10 @@ test('B07 UI remains a read-only preview with no mutation or substitute-latest r
   assert.match(ui, /Confirm handoff unavailable/)
   assert.match(ui, /disabled/)
   assert.match(ui, /No handoff, task, work item, service activation, publication, or approval/)
+  assert.match(ui, /approval, source access, or refresh state changed/)
   assert.doesNotMatch(ui, /supabase|functions\.invoke|repository\.|approveArtifact|latest/i)
+  const parent = readFileSync(new URL('../components/ContentLibraryPanel.jsx', import.meta.url), 'utf8')
+  assert.match(parent, /stale=\{loading \|\| Boolean\(error\) \|\| stale\}/)
 })
 
 test('B07 repository additions are organization-scoped reads and add no handoff writer', () => {
