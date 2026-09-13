@@ -8,6 +8,8 @@ Scope authority: `P9_SHARED_CHAT_SCOPE.md`. This checklist covers the remaining 
 
 P9 requires the context/output area to show exact selected input versions and saved outputs, with links to existing version history. It does not require a second inline history browser. The implementation therefore deep-links each currently authorized exact artifact/version identity into its canonical Content, Design, or Marketing history surface. The receiving surface rechecks access and validates that the requested version belongs to the requested artifact.
 
+Provider-dispatched ordinary answers and proposals persist selected-model, provider-reported actual-model, requested-tool, and executed-tool facts in the existing AI-run context manifest. Proposal persistence uses migration `20260913152101_p9_department_chat_proposal_execution_metadata.sql`, whose service-role-only wrapper keeps canonical proposal/message persistence and telemetry in one database transaction.
+
 ## Evidence to record before a signed-in run
 
 - Candidate commit and build identifier.
@@ -53,6 +55,7 @@ Run only after explicit provider and budget authority identifies the safe test o
 
 - No existing signed-in owner, recipient, or revoked-member sessions and safe record IDs were supplied to this local task.
 - No provider-call or budget authority was supplied for the provider acceptance section.
+- The disposable PostgreSQL 17 migration/verifier run must be repeated where the trusted runtime is available; both official EDB download paths returned HTTP 403 in this task, and the partial temporary directory was removed.
 - No release authority is part of this local-only candidate.
 
 These are execution prerequisites only; they do not broaden the candidate scope or permit creating replacement accounts, memberships, records, provider traffic, or releases.

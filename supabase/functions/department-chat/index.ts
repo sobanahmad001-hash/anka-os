@@ -1345,6 +1345,11 @@ async function persistDepartmentChatProposal(admin: Client, input: {
   raw: string
   provider: { connectorId: string; configurationId?: string; model: string }
   contextManifest: Json
+  executionMetadata: {
+    actual_model_id: string | null
+    requested_tools: string[]
+    executed_tools: string[]
+  }
   startedAt: number
   inputTokens: number | null
   outputTokens: number | null
@@ -1382,20 +1387,18 @@ async function persistDepartmentChatProposal(admin: Client, input: {
       input.inputTokens,
       input.outputTokens,
     ),
+    p_model_configuration_id: input.provider.configurationId || null,
+    p_actual_model_id: input.executionMetadata.actual_model_id,
+    p_requested_tools: input.executionMetadata.requested_tools,
+    p_executed_tools: input.executionMetadata.executed_tools,
   }
-  const hasModelConfiguration = Boolean(input.provider.configurationId)
-  const modelParameters = hasModelConfiguration
-    ? { ...parameters, p_model_configuration_id: input.provider.configurationId }
-    : parameters
   const { data, error } = input.conversationId && input.messageId
-    ? await admin.rpc(hasModelConfiguration
-      ? 'save_department_chat_conversation_proposal_with_model'
-      : 'save_department_chat_conversation_proposal', {
-      ...modelParameters,
+    ? await admin.rpc('save_department_chat_conversation_proposal_with_execution_metadata', {
+      ...parameters,
       p_conversation_id: input.conversationId,
       p_message_id: input.messageId,
     })
-    : await admin.rpc(hasModelConfiguration ? 'save_department_chat_proposal_with_model' : 'save_department_chat_proposal', modelParameters)
+    : await admin.rpc('save_department_chat_proposal_with_execution_metadata', parameters)
   if (error) throw error
   return data as Json
 }
@@ -1611,7 +1614,7 @@ export async function proposeArtifact(_userClient: Client, admin: Client, body: 
     stageId,
     payload: { title, content, change_summary: changeSummary },
     preview: { title, artifact_type: artifactType, content, change_summary: changeSummary },
-    prompt, raw, provider, contextManifest: contextFreeze.manifest, startedAt,
+    prompt, raw, provider, contextManifest: contextFreeze.manifest, executionMetadata: departmentChatExecutionMetadata(result), startedAt,
     inputTokens: result.usage?.input_tokens ?? null,
     outputTokens: result.usage?.output_tokens ?? null,
     conversationId: text(body.conversation_id, 80) || undefined,
@@ -1677,7 +1680,7 @@ export async function proposeWorkItem(
     artifactId: null, stageId: null,
     payload: { title, description, priority },
     preview: { title, description, work_item_type: workItemType, priority, status: 'not_started' },
-    prompt, raw: description, provider, contextManifest: contextFreeze.manifest, startedAt,
+    prompt, raw: description, provider, contextManifest: contextFreeze.manifest, executionMetadata: departmentChatExecutionMetadata(result), startedAt,
     inputTokens: result.usage?.input_tokens ?? null,
     outputTokens: result.usage?.output_tokens ?? null,
     conversationId: text(body.conversation_id, 80) || undefined,
