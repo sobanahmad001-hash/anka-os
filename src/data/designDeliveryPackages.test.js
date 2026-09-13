@@ -4,13 +4,16 @@ import test from 'node:test'
 
 import {
   activePackageDestinations, designPackageTargetKey, emptyDesignPackageDraft,
-  designPackageDraftWork, isCurrentPackageResponse, packageReadState, validateDesignPackageDraft,
+  designPackageDraftWork, designPackageReviewEntries, designPackageReviewReadiness,
+  isCurrentPackageResponse, packageReadState, validateDesignPackageDraft,
 } from './designDeliveryPackages.js'
 
 const read = path => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
 const migration = read('supabase/migrations/20260912201144_design_b06a_review_delivery_packages.sql')
 const edge = read('supabase/functions/design-workshop/packageDelivery.ts')
 const ui = read('src/components/DesignDeliveryPackagePanel.jsx')
+const reviewUi = read('src/components/DesignPackageReviewPanel.jsx')
+const workshopUi = read('src/apps/DesignWorkshop.jsx')
 
 const context = {
   organizationId: 'org-1', engagementId: 'eng-1', brandId: 'brand-1', activeServiceId: 'design-service-1',
@@ -102,4 +105,63 @@ test('B06a preview checks private objects and UI remains explicitly unapproved',
   assert.match(ui, /Relink draft to current work/)
   assert.match(ui, /No approval, release, publication, or delivery occurred/)
   assert.doesNotMatch(ui, /ArtifactApprovalPanel|VersionProofingPanel/)
+})
+
+function reviewWorkspace() {
+  return {
+    deliveryPackageArtifacts: [{ id: 'package-1', title: 'Launch package' }],
+    deliveryPackageVersions: [
+      { id: 'package-v1', artifact_id: 'package-1', version_number: 1, created_at: '2026-09-12T10:00:00Z' },
+      { id: 'package-v2', artifact_id: 'package-1', version_number: 2, created_at: '2026-09-13T10:00:00Z' },
+    ],
+    deliveryPackageContexts: [
+      { artifact_version_id: 'package-v1', source_engagement_service_id: 'design-service', project_task_id: 'task-1' },
+      { artifact_version_id: 'package-v2', source_engagement_service_id: 'design-service', destination_engagement_service_id: 'content-service', destination_department_id: 'content', project_task_id: 'task-1' },
+    ],
+    deliveryPackageAssetReferences: [
+      { artifact_version_id: 'package-v1', design_asset_id: 'asset-1', design_asset_version_id: 'asset-v1', position: 1 },
+      { artifact_version_id: 'package-v2', design_asset_id: 'asset-1', design_asset_version_id: 'asset-v2', position: 1 },
+    ],
+    approvals: [{ id: 'approval-v1', artifact_version_id: 'package-v1' }],
+    designAssets: [{ id: 'asset-1', archived_at: null, name: 'Hero' }],
+    designAssetVersions: [
+      { id: 'asset-v1', asset_id: 'asset-1', version_number: 1, signed_url: 'https://example.test/v1' },
+      { id: 'asset-v2', asset_id: 'asset-1', version_number: 2, signed_url: 'https://example.test/v2' },
+    ],
+    designServices: [{ id: 'design-service', status: 'active', service_catalog: { department_id: 'design', is_active: true } }],
+    deliveryServices: [{ id: 'content-service', status: 'active', service_catalog: { department_id: 'content', is_active: true } }],
+  }
+}
+
+test('B06b review entries keep approval, context, and references on their exact immutable version', () => {
+  const entries = designPackageReviewEntries(reviewWorkspace())
+  assert.deepEqual(entries.map(entry => entry.version.id), ['package-v2', 'package-v1'])
+  assert.equal(entries[0].approval, null)
+  assert.equal(entries[0].references[0].design_asset_version_id, 'asset-v2')
+  assert.equal(entries[1].approval.id, 'approval-v1')
+  assert.equal(entries[1].references[0].design_asset_version_id, 'asset-v1')
+})
+
+test('B06b local readiness fails closed for revoked objects and services while preserving exact selection', () => {
+  const workspace = reviewWorkspace()
+  const entry = designPackageReviewEntries(workspace)[0]
+  assert.deepEqual(designPackageReviewReadiness(entry, workspace), { ready: true, missing: [] })
+
+  const objectRevoked = { ...workspace, designAssetVersions: workspace.designAssetVersions.map(version =>
+    version.id === 'asset-v2' ? { ...version, signed_url: null } : version) }
+  assert.match(designPackageReviewReadiness(entry, objectRevoked).missing.join(' '), /accessible object/)
+
+  const serviceRevoked = { ...workspace, deliveryServices: [] }
+  assert.match(designPackageReviewReadiness(entry, serviceRevoked).missing.join(' '), /downstream service/)
+})
+
+test('B06b composes only the released exact-version approval and proofing surfaces', () => {
+  assert.match(reviewUi, /ArtifactApprovalPanel/)
+  assert.match(reviewUi, /VersionProofingPanel/)
+  assert.match(reviewUi, /Submit exact package version for review/)
+  assert.match(reviewUi, /submission response was interrupted/)
+  assert.match(reviewUi, /design-package-approval:\$\{selected\.version\.id\}/)
+  assert.match(reviewUi, /versions=\{\[selected\.version\]\}/)
+  assert.match(workshopUi, /DesignPackageReviewPanel/)
+  assert.doesNotMatch(reviewUi, /supabase|functions\.invoke|\.from\(|artifact_approvals.*insert/i)
 })
