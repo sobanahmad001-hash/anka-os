@@ -54,7 +54,8 @@ export default function ContentWorkshopHomePanel({
   const typeCounts = useMemo(() => new Map((workspace?.artifacts || []).map(item => item.artifact_type)
     .map((type, _index, types) => [type, types.filter(candidate => candidate === type).length])), [workspace])
   const editorTarget = selectedItem && typeCounts.get(selectedItem.contentType) === 1 && CONTENT_ARTIFACT_FORMS[selectedItem.contentType]
-    ? selectedItem.contentType === 'content' && isWriterContent(selectedVersion?.content) ? 'writer' : 'artifacts'
+    && !(selectedItem.contentType === 'content' && isWriterContent(selectedVersion?.content))
+    ? 'artifacts'
     : ''
 
   useEffect(() => {
