@@ -8,6 +8,7 @@ import GeneralContentRequestsPanel from '../components/GeneralContentRequestsPan
 import ContentQueuePanel from '../components/ContentQueuePanel.jsx'
 import ContentWriterEditor from '../components/ContentWriterEditor.jsx'
 import ContentLibraryPanel from '../components/ContentLibraryPanel.jsx'
+import ContentWorkshopHomePanel from '../components/ContentWorkshopHomePanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'
 import ContentCustomFieldsPanel from '../components/ContentCustomFieldsPanel.jsx'
@@ -71,11 +72,15 @@ export default function ContentStudio() {
   const [workspace, setWorkspace] = useState(null)
   const [type, setType] = useState('discovery')
   const requestedTab = navigationContext.workshopTab || ''
-  const [tab, setTab] = useState(['general', 'queue', 'calendar', 'writer', 'library'].includes(requestedTab) ? requestedTab : 'artifacts')
+  const [tab, setTab] = useState(['home', 'general', 'queue', 'calendar', 'writer', 'library', 'artifacts', 'requests', 'brand', 'chat'].includes(requestedTab) ? requestedTab : 'home')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [workspaceStale, setWorkspaceStale] = useState(false)
+  const [workspaceDenied, setWorkspaceDenied] = useState(false)
+  const workspaceRef = useRef(workspace)
+  workspaceRef.current = workspace
   const currentOrganization = useRef({ organizationId: activeOrganizationId, revision: scopeRevision })
   currentOrganization.current = { organizationId: activeOrganizationId, revision: scopeRevision }
   const organizationReady = Boolean(activeOrganizationId) && !organizationLoading && !selectionRequired
@@ -114,15 +119,21 @@ export default function ContentStudio() {
       organizationId: activeOrganizationId, revision: scopeRevision, signal: requestSignal,
     }
     setLoading(true); setError('')
+    setWorkspaceDenied(false)
     try {
       const next = await studio.load(id, navigationContext)
       if (next?.engagement?.organization_id !== request.organizationId) {
         throw Object.assign(new Error('Content workspace organization mismatch'), { status: 403, membershipMismatch: true })
       }
-      if (currentScope(request) && generation === loadGeneration.current) setWorkspace(next)
+      if (currentScope(request) && generation === loadGeneration.current) {
+        setWorkspace(next); setWorkspaceStale(false)
+      }
     } catch (reason) {
-      if (!currentScope(request) || reason?.name === 'AbortError') return
+      if (!currentScope(request) || generation !== loadGeneration.current || reason?.name === 'AbortError') return
+      const denied = [401, 403].includes(Number(reason?.status)) || reason?.membershipMismatch
       handleOrganizationAccessError(reason, { membershipMismatch: reason?.membershipMismatch === true })
+      if (denied) { setWorkspace(null); setWorkspaceDenied(true); setWorkspaceStale(false) }
+      else setWorkspaceStale(Boolean(workspaceRef.current))
       setError(reason.message)
     } finally {
       if (currentScope(request) && generation === loadGeneration.current) setLoading(false)
@@ -132,7 +143,7 @@ export default function ContentStudio() {
   useEffect(() => {
     loadGeneration.current += 1
     setEngagements([]); setWorkspace(null)
-    setSaving(false); setError(''); setMessage(''); setLoading(organizationReady)
+    setSaving(false); setError(''); setMessage(''); setWorkspaceStale(false); setWorkspaceDenied(false); setLoading(organizationReady)
   }, [activeOrganizationId, organizationReady, scopeRevision])
 
   useEffect(() => {
@@ -163,7 +174,7 @@ export default function ContentStudio() {
   }, [engagementId, navigationContext, studio])
 
   useEffect(() => {
-    setTab(['general', 'queue', 'calendar', 'writer', 'library'].includes(requestedTab) ? requestedTab : 'artifacts')
+    setTab(['home', 'general', 'queue', 'calendar', 'writer', 'library', 'artifacts', 'requests', 'brand', 'chat'].includes(requestedTab) ? requestedTab : 'home')
   }, [requestedTab])
 
   async function act(callback, success) {
@@ -218,7 +229,7 @@ export default function ContentStudio() {
   function selectTab(nextTab) {
     setTab(nextTab)
     if (context.engagement) setSearchParams(contentSelectionParams(navigationContext, context.engagement, activeOrganizationId, {
-      workshopTab: nextTab === 'artifacts' ? '' : nextTab,
+      workshopTab: nextTab,
     }), { replace: true })
   }
 
@@ -262,9 +273,9 @@ export default function ContentStudio() {
         {workspace?.engagement && <div className="rounded-xl bg-slate-950 px-4 py-3 text-sm text-slate-400"><span className="font-semibold text-white">{workspace.engagement.brands?.name}</span><span className="mx-2 text-slate-700">/</span>{workspace.engagement.agency_clients?.name}</div>}
       </section>}
       <nav className="flex gap-2 overflow-x-auto border-b border-slate-800">
-        {[['general', 'General requests'], ['queue', 'Content queue'], ['writer', 'Production writer'], ['library', 'Content library'], ['artifacts', 'Artifact workspace'], ['requests', 'Content requests'], ['calendar', 'Blog calendar'], ['brand', 'Brief & brand statement'], ['chat', 'Shared Department Chat']].map(([id, label]) => <button type="button" key={id} onClick={() => selectTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-amber-400 text-amber-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>)}
+        {[['home', 'Content home'], ['general', 'General requests'], ['queue', 'Content queue'], ['writer', 'Production writer'], ['library', 'Content library'], ['artifacts', 'Artifact workspace'], ['requests', 'Content requests'], ['calendar', 'Blog calendar'], ['brand', 'Brief & brand statement'], ['chat', 'Shared Department Chat']].map(([id, label]) => <button type="button" key={id} onClick={() => selectTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-inset focus:ring-amber-400 ${tab === id ? 'border-amber-400 text-amber-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>)}
       </nav>
-      {!repositories ? <div className="py-20 text-center text-sm text-slate-500">Select an active organization to open Content Studio.</div> : tab === 'general' ? <GeneralContentRequestsPanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.requests} /> : tab === 'library' ? <ContentLibraryPanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.studio} initialArtifactId={searchParams.get('artifact') || ''} initialVersionId={searchParams.get('version') || navigationContext.output?.versionId || ''} /> : loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Content Studio…</div> : tab === 'queue' ? <ContentQueuePanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.queue} /> : !workspace ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Activate a Content service on an engagement to begin, or use General requests without an engagement.</div> : tab === 'writer' ? (
+      {!repositories ? <div className="py-20 text-center text-sm text-slate-500">Select an active organization to open Content Studio.</div> : tab === 'general' ? <GeneralContentRequestsPanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.requests} /> : tab === 'library' ? <ContentLibraryPanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.studio} initialArtifactId={searchParams.get('artifact') || ''} initialVersionId={searchParams.get('version') || navigationContext.output?.versionId || ''} /> : tab === 'home' ? <ContentWorkshopHomePanel key={`${activeOrganizationId}:${scopeRevision}:${engagementId}`} workspace={workspace} loadState={loading ? 'loading' : workspaceDenied ? 'denied' : error && !workspace ? 'error' : 'ready'} stale={workspaceStale} error={error} onRetry={() => loadWorkspace(engagementId)} onNewContent={() => selectTab('writer')} onOpenBrief={() => selectTab('brand')} onOpenEditor={(item, editorTab) => { setType(item.contentType); selectTab(editorTab) }} /> : loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Content Studio…</div> : tab === 'queue' ? <ContentQueuePanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.queue} /> : !workspace ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Activate a Content service on an engagement to begin, or use General requests without an engagement.</div> : tab === 'writer' ? (
         <ContentWriterEditor key={`${activeOrganizationId}:${scopeRevision}:${workspace.engagement.id}`} workspace={workspace} studio={studio} saving={saving} act={act} stageId={bestContentStage(workspace.stages, 'content')?.id || null} defaultLanguage={resolveContentLanguage({ approvedBrandLanguage: approvedVisionLanguage(workspace), organizationDefaultLanguage: workspace.organizationSettings?.content_language || workspace.organizationSettings?.default_language }).language} />
       ) : tab === 'artifacts' ? (
         <ArtifactWorkspace key={`${activeOrganizationId}:${scopeRevision}:${workspace.engagement.id}`} studio={studio} customFields={repositories.customFields} workspace={workspace} type={type} setType={setType} saving={saving} act={act} onRefresh={() => loadWorkspace(engagementId)} originLinkId={originLinkId} />

@@ -8,27 +8,6 @@ Scope authority: `P9_SHARED_CHAT_SCOPE.md`. This checklist covers the remaining 
 
 P9 requires the context/output area to show exact selected input versions and saved outputs, with links to existing version history. It does not require a second inline history browser. The implementation therefore deep-links each currently authorized exact artifact/version identity into its canonical Content, Design, or Marketing history surface. The receiving surface rechecks access and validates that the requested version belongs to the requested artifact.
 
-Provider-dispatched ordinary answers and proposals persist selected-model, provider-reported actual-model, requested-tool, and executed-tool facts in the existing AI-run context manifest. Proposal persistence uses migration `20260913152101_p9_department_chat_proposal_execution_metadata.sql`, whose service-role-only wrapper keeps canonical proposal/message persistence and telemetry in one database transaction.
-
-Exact Content and Design history destinations fail closed when the requested artifact/version pair is incomplete, unknown, cross-artifact, or not visible to the current organization. They do not substitute a latest or otherwise visible record. Ordinary navigation without an exact-link request retains the existing default selection behavior.
-
-## Local exact-head evidence
-
-- Composite correction branch: `fix/p9-metadata-history-review`.
-- Metadata/history source: `b02177aadaf915bf121c5b83ffcd731298e5a14e`.
-- Atomic proposal telemetry correction: `651a9aa3cd98677a249635c41505f44b88cfca37`.
-- Exact telemetry replay correction: `d7282b9`; any replay must preserve every normalized telemetry field exactly.
-- Integrated Design exact-link correction: `5b05ab46b2ea4840387fcff07956976814862607` (owner source `b955e60e0cf94f0b9b983cc9d04d15103afabfde`).
-- Integrated Design reactive-state correction: `b5e28d5`, plus stale-error regression `9a9e9f9` (owner sources `1c5192997667eb1c0da22ee0f1e4f363b85fb572` and `dae0a6bbdfd7be0e94f562da79ac88f52edb1bf7`).
-- E50 fix: `6eb83c8` (`feat/design-systems-p9-failclosed-20260913` parent `dae0a6b`) prioritizes explicit exact routes over creation mode.
-- Integrated Content exact-link correction: `800b50d` (owner source `ac1fc852b0375fb74bda10120ff1d98c1e25af6a`).
-- Full Node data suite: 966 passed, 0 failed.
-- Department Chat Deno suite: 92 passed, 0 failed; Deno typecheck passed.
-- Production build passed. Whole-repository lint completed with 0 errors and 508 pre-existing warnings.
-- Disposable PostgreSQL 17.11 migration/verifier run: 4 passed, 0 failed.
-- Actual canonical-wrapper behavior: 7 passed, 0 failed, including identical replay, invalid-metadata rollback, and rejected removed, changed, and empty tool-array replays. The transaction rolled back to 0 messages and 0 runs.
-- The isolated local PostgreSQL server was stopped, its data/password and temporary evidence directory were removed, and zero listeners remained.
-
 ## Evidence to record before a signed-in run
 
 - Candidate commit and build identifier.

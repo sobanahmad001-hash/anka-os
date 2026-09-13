@@ -101,14 +101,39 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
       .order('created_at', { ascending: false }), options)
     if (!artifacts.length) return {
       artifacts: [], versions: [], approvals: [], approvalRequests: [], comments: [], profiles: [], sourceVersions: [],
+      downstreamServices: [], downstreamTasks: [], downstreamWorkItems: [],
     }
     const artifactIds = artifacts.map(item => item.id)
-    const [versions, approvals] = await Promise.all([
+    const engagementIds = [...new Set(artifacts.map(item => item.engagement_id).filter(Boolean))]
+    const projectIds = [...new Set(artifacts.map(item => {
+      const engagement = Array.isArray(item.engagements) ? item.engagements[0] : item.engagements
+      return engagement?.project_id
+    }).filter(Boolean))]
+    const [versions, approvals, downstreamServices, downstreamTasks, downstreamWorkItems] = await Promise.all([
       dataOrThrow(supabase.from('artifact_versions').select('*').eq('organization_id', organizationId)
         .in('artifact_id', artifactIds).order('version_number', { ascending: false }), options),
       dataOrThrow(supabase.from('artifact_approvals').select('*').eq('organization_id', organizationId)
         .in('artifact_id', artifactIds).order('approved_at', { ascending: false }), options),
+      engagementIds.length ? dataOrThrow(supabase.from('engagement_services')
+        .select('id, organization_id, engagement_id, status, service_catalog!inner(id, name, department_id, is_active)')
+        .eq('organization_id', organizationId).in('engagement_id', engagementIds).eq('status', 'active')
+        .in('service_catalog.department_id', ['design', 'marketing']).eq('service_catalog.is_active', true), options) : [],
+      projectIds.length ? dataOrThrow(supabase.from('tasks')
+        .select('id, organization_id, project_id, department_id, title, status, archived_at')
+        .eq('organization_id', organizationId).in('project_id', projectIds)
+        .in('department_id', ['design', 'marketing']).is('archived_at', null).order('updated_at', { ascending: false }), options) : [],
+      engagementIds.length ? dataOrThrow(supabase.from('work_items')
+        .select('id, organization_id, project_id, engagement_id, department_id, title, status, deleted_at')
+        .eq('organization_id', organizationId).in('engagement_id', engagementIds)
+        .in('department_id', ['design', 'marketing']).is('deleted_at', null).order('updated_at', { ascending: false }), options) : [],
     ])
+    const downstreamScopeMismatch = downstreamServices.some(item => item.organization_id !== organizationId
+        || !engagementIds.includes(item.engagement_id))
+      || downstreamTasks.some(item => item.organization_id !== organizationId || !projectIds.includes(item.project_id))
+      || downstreamWorkItems.some(item => item.organization_id !== organizationId || !engagementIds.includes(item.engagement_id))
+    if (downstreamScopeMismatch) {
+      throw Object.assign(new Error('Content handoff readiness scope mismatch'), { status: 403, membershipMismatch: true })
+    }
     const versionIds = versions.map(item => item.id)
     const [approvalRequests, comments] = versionIds.length ? await Promise.all([
       dataOrThrow(supabase.from('artifact_approval_requests').select('*').eq('organization_id', organizationId)
@@ -126,7 +151,8 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
     const sourceVersions = sourceVersionIds.length ? await dataOrThrow(supabase.from('artifact_versions')
       .select('id, organization_id, artifact_id, version_number, created_at, artifacts!inner(id, title, artifact_type, engagement_id)')
       .eq('organization_id', organizationId).in('id', sourceVersionIds), options) : []
-    return { artifacts, versions, approvals, approvalRequests, comments, profiles, sourceVersions }
+    return { artifacts, versions, approvals, approvalRequests, comments, profiles, sourceVersions,
+      downstreamServices, downstreamTasks, downstreamWorkItems }
   },
 
   saveArtifact: input => invoke(organizationId, 'content-studio', 'save_artifact', input, options),
