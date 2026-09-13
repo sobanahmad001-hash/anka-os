@@ -101,6 +101,15 @@ function b06PanelStubs() {
   }, load(id) { return Object.values(stubs).find(([key]) => id === `\0${key}`)?.[1] } }
 }
 
+function contentLibraryChildStubs() {
+  const suffixes = ['ArtifactApprovalPanel.jsx', 'ContentHandoffPanel.jsx', 'ContentVersionComparison.jsx', 'VersionProofingPanel.jsx']
+  return { name: 'content-library-child-stubs', enforce: 'pre', resolveId(source) {
+    if (suffixes.some(suffix => source.endsWith(suffix))) return `\0content-library-child:${source.split('/').at(-1)}`
+  }, load(id) {
+    if (id.startsWith('\0content-library-child:')) return 'export default function Stub(){return null}'
+  } }
+}
+
 test('mounted B04 editor adds, edits, selects exact source and page target, detects stale context, and removes', async t => {
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
   t.after(() => vite.close())
@@ -223,6 +232,72 @@ test('mounted B06a library renders authorized results and a distinct true-empty 
   await act(async () => root.render(createElement(ContentLibraryPanel, { key: 'empty', repository: emptyRepository })))
   assert.match(environment.container.textContent, /No saved Content artifacts are visible in this organization/)
   assert.doesNotMatch(environment.container.textContent, /Try again/)
+})
+
+test('mounted Content library resolves only a requested exact artifact and version pair', async t => {
+  const vite = await createServer({
+    server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent',
+    plugins: [contentLibraryChildStubs()],
+  })
+  t.after(() => vite.close())
+  const { default: ContentLibraryPanel } = await vite.ssrLoadModule('/src/components/ContentLibraryPanel.jsx')
+  const environment = mountedEnvironment()
+  const previous = {
+    document: globalThis.document, window: globalThis.window, Event: globalThis.Event,
+    Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT,
+  }
+  Object.assign(globalThis, {
+    document: environment.document, window: environment.window, Event: TestEvent, Node: TestNode,
+    HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true,
+  })
+  t.after(() => Object.assign(globalThis, previous))
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+
+  const data = {
+    artifacts: [
+      { id: 'artifact-a', organization_id: 'organization-1', artifact_type: 'content', title: 'Artifact A', created_by: 'author', engagements: { id: 'engagement', name: 'Project' } },
+      { id: 'artifact-b', organization_id: 'organization-1', artifact_type: 'content', title: 'Artifact B', created_by: 'author', engagements: { id: 'engagement', name: 'Project' } },
+    ],
+    versions: [
+      { id: 'a-v2', artifact_id: 'artifact-a', version_number: 2, created_at: '2026-09-13', content: { body: 'ALPHA LATEST BODY' } },
+      { id: 'a-v1', artifact_id: 'artifact-a', version_number: 1, created_at: '2026-09-12', content: { body: 'ALPHA EXACT BODY' } },
+      { id: 'b-v1', artifact_id: 'artifact-b', version_number: 1, created_at: '2026-09-12', content: { body: 'BETA FOREIGN BODY' } },
+    ],
+    approvals: [], approvalRequests: [], comments: [], profiles: [], sourceVersions: [],
+  }
+  const repository = { organizationId: 'organization-1', loadLibrary: async () => data }
+  const render = (key, props = {}) => act(async () => {
+    root.render(createElement(ContentLibraryPanel, { key, repository, ...props }))
+    await Promise.resolve()
+  })
+
+  await render('valid', { initialArtifactId: 'artifact-a', initialVersionId: 'a-v1' })
+  await flushMounted()
+  assert.match(environment.container.textContent, /ALPHA EXACT BODY/)
+  assert.doesNotMatch(environment.container.textContent, /ALPHA LATEST BODY/)
+  assert.doesNotMatch(environment.container.textContent, /Exact Content link unavailable/)
+
+  const invalid = [
+    ['unknown-artifact', 'a-v1'],
+    ['artifact-a', 'unknown-version'],
+    ['artifact-a', 'b-v1'],
+    ['foreign-artifact', 'foreign-version'],
+    ['', 'a-v1'],
+    ['artifact-a', ''],
+  ]
+  for (const [index, [initialArtifactId, initialVersionId]] of invalid.entries()) {
+    await render(`invalid-${index}`, { initialArtifactId, initialVersionId })
+    await flushMounted()
+    assert.match(environment.container.textContent, /Exact Content link unavailable/)
+    assert.match(environment.container.textContent, /No different artifact or version has been substituted/)
+    assert.doesNotMatch(environment.container.textContent, /ALPHA LATEST BODY|ALPHA EXACT BODY|BETA FOREIGN BODY/)
+  }
+
+  await render('ordinary')
+  await flushMounted()
+  assert.match(environment.container.textContent, /ALPHA LATEST BODY/)
+  assert.doesNotMatch(environment.container.textContent, /Exact Content link unavailable/)
 })
 
 test('mounted B06a isolates exact-version review state and makes refresh failures visible', async t => {
