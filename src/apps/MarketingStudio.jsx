@@ -105,7 +105,7 @@ export default function MarketingStudio() {
   const [searchParams, setSearchParams] = useSearchParams()
   const {
     activeOrganizationId, selectionRequired, loading: organizationLoading,
-    handleOrganizationAccessError, scopeRevision, requestSignal, activeMembership,
+    handleOrganizationAccessError, scopeRevision, requestSignal, activeMembership, userId,
   } = useOrganization()
   const navigationContext = useMemo(() => parseWorkshopNavigation(searchParams), [searchParams])
   const requestedPrivate = searchParams.get('mode') === 'private'
@@ -427,11 +427,12 @@ export default function MarketingStudio() {
           <DepartmentChat departmentId="marketing" engagement={workspace.engagement} artifactTypes={['channel_strategy', 'campaign_brief', 'measurement_plan']} artifactDefinitions={MARKETING_ARTIFACT_FORMS} artifactForType={artifactType => workspace.artifacts.find(item => item.artifact_type === artifactType)} stageForType={() => null} onPropose={input => reportMarketingAccess(() => studio.proposeArtifact(input))} onProposeWorkItem={input => reportMarketingAccess(() => studio.proposeWorkItem(input))} onCreated={() => loadWorkspace(engagementId, campaignId)} />
         ) : tab === 'reports' ? (
           <MarketingReports
-            key={`${activeOrganizationId}:${scopeRevision}:${engagementId}:${contextValidation.context?.output?.id || ''}:${contextValidation.context?.output?.versionId || ''}`}
+            key={`${userId}:${activeOrganizationId}:${scopeRevision}:${engagementId}:${contextValidation.context?.output?.id || ''}:${contextValidation.context?.output?.versionId || ''}`}
             studio={studio}
             workspace={workspace}
             saving={saving}
             act={act}
+            actorId={userId}
             onRefresh={() => loadWorkspace(engagementId, campaignId)}
             onDirtyChange={setReportDirty}
             requestedOutput={contextValidation.context?.output || null}

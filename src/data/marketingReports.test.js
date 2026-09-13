@@ -47,11 +47,11 @@ test('saved report selection remains tenant, engagement, brand, artifact, and ex
   assert.equal(marketingReportVersion(records).version.id, 'version-a2')
 })
 
-test('ambiguous saves reconcile only to one new authoritative checksum match', async () => {
+test('content checksum matches never attribute an ambiguous save operation', async () => {
   const contentChecksum = await marketingReportContentChecksum(version.content)
   const record = { artifact, versions: [{ ...version, id: 'version-a3', content_checksum: contentChecksum }, version] }
   const pending = { artifactId: artifact.id, contentChecksum, knownVersionIds: [version.id] }
-  assert.equal(reconcileMarketingReportSave([record], pending).version.id, 'version-a3')
+  assert.equal(reconcileMarketingReportSave([record], pending), null)
   assert.equal(reconcileMarketingReportSave([{ ...record, versions: [...record.versions, { ...version, id: 'version-a4', content_checksum: contentChecksum }] }], pending), null)
   assert.equal(reconcileMarketingReportSave([record], { ...pending, artifactId: 'another-report' }), null)
 })
@@ -97,6 +97,7 @@ test('Reports is a dedicated Marketing tab that reuses canonical artifacts and g
   assert.match(studio, /loading && !\(tab === 'reports' && workspace\)/)
   assert.match(studio, /useBlocker\(briefDirty \|\| reportDirty\)/)
   assert.match(studio, /requestedOutput=\{contextValidation\.context\?\.output \|\| null\}/)
+  assert.match(studio, /actorId=\{userId\}/)
   assert.match(reports, /label="Brand"[\s\S]*workspace\.engagement\.brands/)
   assert.match(reports, /studio\.saveArtifact/)
   assert.match(reports, /artifact_type: 'marketing_report'/)

@@ -75,22 +75,24 @@ export function stableMarketingReportJson(value) {
   return JSON.stringify(value)
 }
 
-export async function marketingReportContentChecksum(content, cryptoApi = globalThis.crypto) {
+async function sha256(value, cryptoApi = globalThis.crypto) {
   if (!cryptoApi?.subtle || typeof TextEncoder === 'undefined') throw new Error('Safe report save reconciliation is unavailable in this browser')
-  const digest = await cryptoApi.subtle.digest('SHA-256', new TextEncoder().encode(stableMarketingReportJson(content)))
+  const digest = await cryptoApi.subtle.digest('SHA-256', new TextEncoder().encode(value))
   return [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join('')
 }
 
-export function reconcileMarketingReportSave(records = [], pending = null) {
-  if (!pending?.contentChecksum) return null
-  const known = new Set(pending.knownVersionIds || [])
-  const matches = records.flatMap(record => {
-    if (pending.artifactId && record.artifact.id !== pending.artifactId) return []
-    return record.versions
-      .filter(version => !known.has(version.id) && version.content_checksum === pending.contentChecksum)
-      .map(version => ({ record, version }))
-  })
-  return matches.length === 1 ? matches[0] : null
+export function marketingReportContentChecksum(content, cryptoApi = globalThis.crypto) {
+  return sha256(stableMarketingReportJson(content), cryptoApi)
+}
+
+export function marketingReportActorHash(actorId, cryptoApi = globalThis.crypto) {
+  if (!actorId) throw new Error('An authenticated actor is required for report recovery')
+  return sha256(String(actorId), cryptoApi)
+}
+
+// Content equality cannot attribute a version to an uncertain write operation.
+export function reconcileMarketingReportSave() {
+  return null
 }
 
 export function marketingReportReviewState(version, approvals = []) {

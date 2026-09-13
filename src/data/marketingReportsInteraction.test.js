@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { act, createElement } from 'react'
+import { act, createElement, StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createServer } from 'vite'
 
@@ -78,20 +78,23 @@ test('mounted MB07 report lifecycle preserves drafts, exact identity, reconcilia
   const document = new TestDocument()
   const window = { document, navigator: { userAgent: 'mb07-test' }, Node: TestNode, HTMLElement: TestElement, HTMLIFrameElement: class extends TestElement {} }
   document.defaultView = window
-  const previous = { document: globalThis.document, window: globalThis.window, Event: globalThis.Event, Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT, approval: globalThis.__mb07ApprovalProps }
-  Object.assign(globalThis, { document, window, Event: TestEvent, Node: TestNode, HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true })
+  const stored = new Map()
+  const sessionStorage = { getItem: key => stored.get(key) ?? null, setItem: (key, value) => stored.set(key, String(value)), removeItem: key => stored.delete(key) }
+  const previous = { document: globalThis.document, window: globalThis.window, Event: globalThis.Event, Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, sessionStorage: globalThis.sessionStorage, act: globalThis.IS_REACT_ACT_ENVIRONMENT, approval: globalThis.__mb07ApprovalProps }
+  Object.assign(globalThis, { document, window, Event: TestEvent, Node: TestNode, HTMLElement: TestElement, sessionStorage, IS_REACT_ACT_ENVIRONMENT: true })
   t.after(() => Object.assign(globalThis, {
     document: previous.document, window: previous.window, Event: previous.Event,
-    Node: previous.Node, HTMLElement: previous.HTMLElement,
+    Node: previous.Node, HTMLElement: previous.HTMLElement, sessionStorage: previous.sessionStorage,
     IS_REACT_ACT_ENVIRONMENT: previous.act, __mb07ApprovalProps: previous.approval,
   }))
 
   async function mount(input, extra = {}) {
     const container = document.createElement('div')
     const root = createRoot(container)
-    const base = { studio: { saveArtifact: async () => ({}) }, saving: false, act: async callback => callback(), onRefresh: async () => {}, ...extra }
-    await act(async () => root.render(createElement(MarketingReports, { ...base, workspace: input })))
-    return { container, root, base, render: patch => act(async () => root.render(createElement(MarketingReports, { ...base, workspace: input, ...patch }))), close: () => act(async () => root.unmount()) }
+    const base = { studio: { saveArtifact: async () => ({}) }, saving: false, act: async callback => callback(), actorId: 'actor-test', onRefresh: async () => {}, ...extra }
+    const view = props => createElement(StrictMode, null, createElement(MarketingReports, props))
+    await act(async () => root.render(view({ ...base, workspace: input })))
+    return { container, root, base, render: patch => act(async () => root.render(view({ ...base, workspace: input, ...patch }))), close: () => act(async () => root.unmount()) }
   }
 
   await t.test('same-scope refresh preserves a dirty draft while a denied scope clears it', async () => {
@@ -102,20 +105,24 @@ test('mounted MB07 report lifecycle preserves drafts, exact identity, reconcilia
       await act(async () => reactProps(summary).onChange({ target: { value: 'UNSAVED REVISION' } }))
       await mounted.render({ workspace: { ...first.workspace, versions: [...first.workspace.versions] } })
       assert.equal(elements(mounted.container, 'textarea')[1].value, 'UNSAVED REVISION')
-      await mounted.render({ workspace: reportWorkspace('denied').workspace })
+      await mounted.render({ actorId: 'other-actor', workspace: reportWorkspace('denied').workspace })
       assert.doesNotMatch(mounted.container.textContent, /UNSAVED REVISION/)
     } finally { await mounted.close() }
   })
 
-  await t.test('an ambiguous write remains locked across unmount until one authoritative checksum match appears', async () => {
+  await t.test('same-tick writes are serialized and an ambiguous result stays locked despite a checksum match', async () => {
     const input = reportWorkspace('ambiguous')
     let calls = 0
     const extra = { studio: { saveArtifact: async () => { calls += 1; throw new Error('Response lost') } }, act: async callback => { try { return await callback() } catch { return null } } }
     let mounted = await mount(input.workspace, extra)
     const form = elements(mounted.container, 'form')[0]
-    await act(async () => reactProps(form).onSubmit({ preventDefault() {} }))
-    await act(async () => reactProps(form).onSubmit({ preventDefault() {} }))
+    const submit = reactProps(form).onSubmit
+    await act(async () => Promise.all([submit({ preventDefault() {} }), submit({ preventDefault() {} })]))
     assert.equal(calls, 1)
+    assert.match(mounted.container.textContent, /Save locked/)
+    await mounted.render({ actorId: 'another-actor' })
+    assert.doesNotMatch(mounted.container.textContent, /Save locked/)
+    await mounted.render({ actorId: 'actor-test' })
     assert.match(mounted.container.textContent, /Save locked/)
     await mounted.close()
     mounted = await mount(input.workspace, extra)
@@ -125,9 +132,26 @@ test('mounted MB07 report lifecycle preserves drafts, exact identity, reconcilia
       const checksum = await marketingReportContentChecksum(content)
       const v3 = { ...input.v2, id: 'v3-ambiguous', version_number: 3, created_at: '2026-09-03', content, content_checksum: checksum }
       await mounted.render({ workspace: { ...input.workspace, versions: [v3, input.v2, input.v1] } })
-      assert.equal(elements(mounted.container, 'select')[1].value, v3.id)
-      assert.doesNotMatch(mounted.container.textContent, /Save locked/)
+      assert.match(mounted.container.textContent, /Save locked/)
+      assert.match(mounted.container.textContent, /matching content alone cannot attribute/i)
     } finally { await mounted.close() }
+  })
+
+  await t.test('unavailable durable recovery storage prevents any report write', async () => {
+    const input = reportWorkspace('storage-failure')
+    let calls = 0
+    const availableStorage = globalThis.sessionStorage
+    globalThis.sessionStorage = { getItem() { throw new Error('Storage denied') }, setItem() { throw new Error('Storage denied') }, removeItem() {} }
+    const mounted = await mount(input.workspace, { studio: { saveArtifact: async () => { calls += 1 } } })
+    try {
+      const form = elements(mounted.container, 'form')[0]
+      await act(async () => reactProps(form).onSubmit({ preventDefault() {} }))
+      assert.equal(calls, 0)
+      assert.match(mounted.container.textContent, /Storage denied|saving is disabled/i)
+    } finally {
+      await mounted.close()
+      globalThis.sessionStorage = availableStorage
+    }
   })
 
   await t.test('successful save selects returned exact version and late prior-version review callbacks are ignored', async () => {
@@ -139,7 +163,7 @@ test('mounted MB07 report lifecycle preserves drafts, exact identity, reconcilia
     const extra = {
       studio: { saveArtifact: async () => ({ artifact_id: input.artifact.id, version: v3 }) },
       onRefresh: async () => { refreshes += 1 },
-      act: async callback => { const result = await callback(); mounted.root.render(createElement(MarketingReports, { ...mounted.base, workspace: nextWorkspace })); return result },
+      act: async callback => { const result = await callback(); mounted.root.render(createElement(StrictMode, null, createElement(MarketingReports, { ...mounted.base, workspace: nextWorkspace }))); return result },
     }
     mounted = await mount(input.workspace, extra)
     try {

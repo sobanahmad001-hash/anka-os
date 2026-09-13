@@ -4,13 +4,13 @@ import ArtifactApprovalPanel from './ArtifactApprovalPanel.jsx' // eslint-disabl
 import {
   buildMarketingReportExport,
   emptyMarketingReportDraft,
+  marketingReportActorHash,
   marketingReportContentChecksum,
   marketingReportDraft,
   marketingReportEvidenceState,
   marketingReportRecords,
   marketingReportReviewState,
   marketingReportVersion,
-  reconcileMarketingReportSave,
   reportLines,
   validateMarketingReportDraft,
 } from '../data/marketingReports.js'
@@ -18,16 +18,18 @@ import {
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
 const BUTTON = 'rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-emerald-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50'
 const PRIMARY = 'rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50'
-const unresolvedReportSaves = new Map()
 
-function pendingStorageKey(scopeKey) {
-  return `anka:marketing-report-save:${scopeKey}`
+function pendingStorageKey(actorHash, storageScope) {
+  return `anka:marketing-report-save:${actorHash}:${storageScope}`
 }
 
 function normalizedPendingSave(value) {
-  if (!value || !/^[0-9a-f]{64}$/i.test(String(value.contentChecksum || ''))) return null
+  if (!value || !/^[0-9a-f-]{36}$/i.test(String(value.operationId || '')) || !/^[0-9a-f]{64}$/i.test(String(value.actorHash || '')) || !/^[0-9a-f]{64}$/i.test(String(value.contentChecksum || ''))) return null
   return {
+    operationId: value.operationId,
+    actorHash: value.actorHash,
     artifactId: typeof value.artifactId === 'string' ? value.artifactId.slice(0, 80) : '',
+    versionId: typeof value.versionId === 'string' ? value.versionId.slice(0, 80) : '',
     contentChecksum: value.contentChecksum,
     knownVersionIds: Array.isArray(value.knownVersionIds)
       ? value.knownVersionIds.filter(item => typeof item === 'string').slice(0, 10000)
@@ -35,24 +37,29 @@ function normalizedPendingSave(value) {
   }
 }
 
-function readPendingSave(scopeKey) {
-  if (unresolvedReportSaves.has(scopeKey)) return unresolvedReportSaves.get(scopeKey)
-  try {
-    const stored = globalThis.sessionStorage?.getItem(pendingStorageKey(scopeKey))
-    const parsed = normalizedPendingSave(stored ? JSON.parse(stored) : null)
-    if (parsed) unresolvedReportSaves.set(scopeKey, parsed)
-    return parsed
-  } catch { return null }
+function readPendingSave(storageKey, actorHash) {
+  const storage = globalThis.sessionStorage
+  if (!storage) throw new Error('Durable browser-session recovery is unavailable; report saving is disabled')
+  const stored = storage.getItem(storageKey)
+  const parsed = normalizedPendingSave(stored ? JSON.parse(stored) : null)
+  return parsed?.actorHash === actorHash ? parsed : null
 }
 
-function writePendingSave(scopeKey, intent) {
-  unresolvedReportSaves.set(scopeKey, intent)
-  try { globalThis.sessionStorage?.setItem(pendingStorageKey(scopeKey), JSON.stringify(intent)) } catch { /* in-memory lock remains */ }
+function writePendingSave(storageKey, intent) {
+  const storage = globalThis.sessionStorage
+  if (!storage) throw new Error('Durable browser-session recovery is unavailable; report saving is disabled')
+  const serialized = JSON.stringify(intent)
+  storage.setItem(storageKey, serialized)
+  if (storage.getItem(storageKey) !== serialized) throw new Error('The report recovery lock could not be verified; report saving is disabled')
 }
 
-function clearPendingSave(scopeKey) {
-  unresolvedReportSaves.delete(scopeKey)
-  try { globalThis.sessionStorage?.removeItem(pendingStorageKey(scopeKey)) } catch { /* in-memory lock is already clear */ }
+function clearPendingSave(storageKey, operationId) {
+  const storage = globalThis.sessionStorage
+  if (!storage) return false
+  const current = normalizedPendingSave(JSON.parse(storage.getItem(storageKey) || 'null'))
+  if (current?.operationId !== operationId) return false
+  storage.removeItem(storageKey)
+  return true
 }
 
 function Field({ label, hint, children }) { // eslint-disable-line no-unused-vars
@@ -69,7 +76,12 @@ function editorValue(value) {
   return Array.isArray(value) ? value.join('\n') : value || ''
 }
 
-function reportScopeKey(workspace) {
+function reportScopeKey(workspace, actorId) {
+  const engagement = workspace?.engagement || {}
+  return [actorId, engagement.organization_id, engagement.id, engagement.brand_id].join(':')
+}
+
+function reportStorageScope(workspace) {
   const engagement = workspace?.engagement || {}
   return [engagement.organization_id, engagement.id, engagement.brand_id].join(':')
 }
@@ -85,22 +97,28 @@ function downloadExactVersion(artifact, version, approval, brandName) {
   URL.revokeObjectURL(url)
 }
 
-export default function MarketingReports({ studio, workspace, saving, act, onRefresh, onDirtyChange, requestedOutput = null }) {
+export default function MarketingReports({ studio, workspace, saving, act, actorId = '', onRefresh, onDirtyChange, requestedOutput = null }) {
   const records = useMemo(() => marketingReportRecords(workspace), [workspace])
   const requestedArtifactId = requestedOutput?.kind === 'artifact' ? requestedOutput.id || '' : ''
   const requestedVersionId = requestedOutput?.kind === 'artifact' ? requestedOutput.versionId || '' : ''
-  const scopeKey = reportScopeKey(workspace)
+  const scopeKey = reportScopeKey(workspace, actorId)
+  const storageScope = reportStorageScope(workspace)
   const [artifactId, setArtifactId] = useState(requestedArtifactId)
   const [versionId, setVersionId] = useState(requestedVersionId)
   const [creating, setCreating] = useState(!requestedArtifactId && records.length === 0)
   const [form, setForm] = useState(emptyMarketingReportDraft())
   const [localError, setLocalError] = useState('')
   const [dirty, setDirty] = useState(false)
-  const [pendingSave, setPendingSave] = useState(() => readPendingSave(scopeKey))
+  const [pendingSave, setPendingSave] = useState(null)
+  const [recovery, setRecovery] = useState({ ready: false, storageKey: '', actorHash: '', error: '' })
   const loadedSelection = useRef('')
   const activeScope = useRef(scopeKey)
   const activeVersionId = useRef(versionId)
+  const activeTarget = useRef(null)
+  const inFlightSave = useRef('')
+  const draftRevision = useRef(0)
   activeVersionId.current = versionId
+  activeTarget.current = { scopeKey, actorId, artifactId, versionId, creating, draftRevision: draftRevision.current }
 
   const selection = creating ? { record: null, version: null } : marketingReportVersion(records, artifactId, versionId)
   const artifact = selection.record?.artifact || null
@@ -109,15 +127,42 @@ export default function MarketingReports({ studio, workspace, saving, act, onRef
   const reviewState = marketingReportReviewState(version, workspace.approvals || [])
   const evidenceState = marketingReportEvidenceState(version)
 
+  function invalidateDraftSnapshot() {
+    draftRevision.current += 1
+    if (activeTarget.current) activeTarget.current = { ...activeTarget.current, draftRevision: draftRevision.current }
+  }
+
   useEffect(() => {
     if (activeScope.current === scopeKey) return
     activeScope.current = scopeKey
+    draftRevision.current += 1
+    if (activeTarget.current) activeTarget.current = { ...activeTarget.current, draftRevision: draftRevision.current }
     loadedSelection.current = ''
     setArtifactId(requestedArtifactId); setVersionId(requestedVersionId)
     setCreating(!requestedArtifactId && records.length === 0)
     setForm(emptyMarketingReportDraft()); setDirty(false); setLocalError('')
-    setPendingSave(readPendingSave(scopeKey))
+    setPendingSave(null)
   }, [records.length, requestedArtifactId, requestedVersionId, scopeKey])
+
+  useEffect(() => {
+    let current = true
+    setRecovery({ ready: false, storageKey: '', actorHash: '', error: '' })
+    setPendingSave(null)
+    if (!actorId) {
+      setRecovery({ ready: false, storageKey: '', actorHash: '', error: 'Authenticated actor identity is unavailable; report saving is disabled.' })
+      return () => { current = false }
+    }
+    marketingReportActorHash(actorId).then(actorHash => {
+      if (!current || activeScope.current !== scopeKey) return
+      const storageKey = pendingStorageKey(actorHash, storageScope)
+      const pending = readPendingSave(storageKey, actorHash)
+      setPendingSave(pending)
+      setRecovery({ ready: true, storageKey, actorHash, error: '' })
+    }).catch(error => {
+      if (current && activeScope.current === scopeKey) setRecovery({ ready: false, storageKey: '', actorHash: '', error: error.message })
+    })
+    return () => { current = false }
+  }, [actorId, scopeKey, storageScope])
 
   useEffect(() => {
     onDirtyChange?.(dirty)
@@ -141,32 +186,25 @@ export default function MarketingReports({ studio, workspace, saving, act, onRef
     setArtifactId(next.record.artifact.id)
     setVersionId(next.version.id)
     setForm(marketingReportDraft(next.record.artifact, next.version))
+    draftRevision.current += 1
+    if (activeTarget.current) activeTarget.current = { ...activeTarget.current, draftRevision: draftRevision.current }
     setDirty(false)
     loadedSelection.current = nextSelection
   }, [records, artifactId, versionId, creating])
-
-  useEffect(() => {
-    if (!pendingSave) return
-    const reconciled = reconcileMarketingReportSave(records, pendingSave)
-    if (!reconciled) return
-    clearPendingSave(scopeKey)
-    loadedSelection.current = ''
-    setPendingSave(null); setCreating(false); setDirty(false)
-    setArtifactId(reconciled.record.artifact.id); setVersionId(reconciled.version.id)
-    setLocalError('The authoritative workspace contains the saved exact version. The ambiguous save lock was cleared.')
-  }, [pendingSave, records, scopeKey])
 
   function confirmDiscard() {
     return !dirty || globalThis.confirm?.('Discard the unsaved report changes and change the exact selection?') === true
   }
 
   function updateForm(patch) {
+    invalidateDraftSnapshot()
     setForm(current => ({ ...current, ...patch })); setDirty(true); setLocalError('')
   }
 
   function chooseReport(nextArtifactId) {
     if (!confirmDiscard()) return
     const next = marketingReportVersion(records, nextArtifactId)
+    invalidateDraftSnapshot()
     setCreating(false); setArtifactId(next.record?.artifact.id || ''); setVersionId(next.version?.id || '')
     setForm(marketingReportDraft(next.record?.artifact, next.version)); setDirty(false); setLocalError('')
     loadedSelection.current = next.record && next.version ? `${next.record.artifact.id}:${next.version.id}` : ''
@@ -175,6 +213,7 @@ export default function MarketingReports({ studio, workspace, saving, act, onRef
   function chooseVersion(nextVersionId) {
     if (!confirmDiscard()) return
     const next = marketingReportVersion(records, artifactId, nextVersionId)
+    invalidateDraftSnapshot()
     setVersionId(next.version?.id || '')
     setForm(marketingReportDraft(next.record?.artifact, next.version)); setDirty(false); setLocalError('')
     loadedSelection.current = next.record && next.version ? `${next.record.artifact.id}:${next.version.id}` : ''
@@ -182,23 +221,44 @@ export default function MarketingReports({ studio, workspace, saving, act, onRef
 
   function startReport() {
     if (!confirmDiscard()) return
+    invalidateDraftSnapshot()
     setCreating(true); setArtifactId(''); setVersionId(''); setForm(emptyMarketingReportDraft()); setDirty(false); setLocalError('')
     loadedSelection.current = ''
   }
 
   async function save(event) {
     event.preventDefault()
-    if (saving || pendingSave) return
+    if (saving || pendingSave || inFlightSave.current) return
+    if (!recovery.ready || !recovery.storageKey || !recovery.actorHash) {
+      setLocalError(recovery.error || 'Verified browser-session recovery is not ready; report saving is disabled.')
+      return
+    }
+    const operationId = globalThis.crypto?.randomUUID?.()
+    if (!operationId) {
+      setLocalError('A secure report operation identity is unavailable; report saving is disabled.')
+      return
+    }
+    inFlightSave.current = operationId
+    const captured = { ...activeTarget.current }
     let attempted = false
     let intent = null
+    let persisted = false
     try {
       const validated = validateMarketingReportDraft(form)
       const contentChecksum = await marketingReportContentChecksum(validated.content)
+      const currentTarget = activeTarget.current
+      const targetStillCurrent = inFlightSave.current === operationId && activeScope.current === captured.scopeKey &&
+        currentTarget?.scopeKey === captured.scopeKey && currentTarget.actorId === captured.actorId &&
+        currentTarget.artifactId === captured.artifactId && currentTarget.versionId === captured.versionId &&
+        currentTarget.creating === captured.creating && currentTarget.draftRevision === captured.draftRevision
+      if (!targetStillCurrent) return
       intent = {
-        artifactId: artifact?.id || '', contentChecksum,
+        operationId, actorHash: recovery.actorHash,
+        artifactId: captured.artifactId || '', versionId: captured.versionId || '', contentChecksum,
         knownVersionIds: records.flatMap(record => record.versions.map(item => item.id)),
       }
-      writePendingSave(scopeKey, intent)
+      writePendingSave(recovery.storageKey, intent)
+      persisted = true
       setPendingSave(intent)
       const result = await act(() => {
         attempted = true
@@ -213,7 +273,7 @@ export default function MarketingReports({ studio, workspace, saving, act, onRef
         })
       }, 'Marketing report saved as a new unapproved immutable version.', '', true)
       if (!attempted) {
-        clearPendingSave(scopeKey); setPendingSave(null)
+        if (clearPendingSave(recovery.storageKey, operationId) && activeScope.current === captured.scopeKey) setPendingSave(null)
         return
       }
       const savedVersion = result?.version || result
@@ -224,19 +284,24 @@ export default function MarketingReports({ studio, workspace, saving, act, onRef
         (!intent.artifactId || savedArtifactId === intent.artifactId) &&
         !intent.knownVersionIds.includes(savedVersion.id) && returnedChecksum === intent.contentChecksum
       if (!resultMatchesIntent) {
-        setLocalError('The save outcome is unknown. Do not save again; refresh authoritative data to reconcile the exact version.')
+        if (activeScope.current === captured.scopeKey) setLocalError('The save outcome is unresolved. Do not save again; a separately reviewed authoritative recovery contract is required.')
         return
       }
-      clearPendingSave(scopeKey); setPendingSave(null)
-      loadedSelection.current = ''
-      setCreating(false); setArtifactId(savedArtifactId); setVersionId(savedVersion.id); setDirty(false)
+      const cleared = clearPendingSave(recovery.storageKey, operationId)
+      if (cleared && activeScope.current === captured.scopeKey) {
+        setPendingSave(null)
+        loadedSelection.current = ''
+        setCreating(false); setArtifactId(savedArtifactId); setVersionId(savedVersion.id); setDirty(false)
+      }
     } catch (error) {
       if (attempted && intent) {
-        setLocalError('The save response was not authoritative. Do not retry: check the authoritative workspace for the exact saved version.')
+        if (activeScope.current === captured.scopeKey) setLocalError('The report save outcome is unresolved. Do not retry; a separately reviewed authoritative recovery contract is required.')
       } else {
-        if (intent) { clearPendingSave(scopeKey); setPendingSave(null) }
-        setLocalError(error.message)
+        if (persisted && clearPendingSave(recovery.storageKey, operationId) && activeScope.current === captured.scopeKey) setPendingSave(null)
+        if (activeScope.current === captured.scopeKey) setLocalError(error.message)
       }
+    } finally {
+      if (inFlightSave.current === operationId) inFlightSave.current = ''
     }
   }
 
@@ -246,7 +311,8 @@ export default function MarketingReports({ studio, workspace, saving, act, onRef
       <button type="button" disabled={Boolean(pendingSave)} onClick={startReport} className={BUTTON}>New report draft</button>
     </div>
 
-    {pendingSave && <div role="alert" className="rounded-2xl border border-amber-600/50 bg-amber-950/30 p-4 text-sm leading-6 text-amber-100"><p className="font-semibold">Report save outcome requires reconciliation</p><p className="mt-1">Do not submit this report again. The earlier request may already have committed even though its response was unavailable.</p><button type="button" disabled={saving || !onRefresh} onClick={() => onRefresh?.()} className={`${BUTTON} mt-3`}>{saving ? 'Checking authoritative workspace…' : 'Check authoritative workspace'}</button></div>}
+    {recovery.error && <div role="alert" className="rounded-2xl border border-red-700/50 bg-red-950/30 p-4 text-sm leading-6 text-red-200">{recovery.error}</div>}
+    {pendingSave && <div role="alert" className="rounded-2xl border border-amber-600/50 bg-amber-950/30 p-4 text-sm leading-6 text-amber-100"><p className="font-semibold">Report save outcome is unresolved</p><p className="mt-1">Do not submit this report again. The earlier request may already have committed, and matching content alone cannot attribute a saved version to that operation. A separately reviewed authoritative recovery contract is required to clear this lock.</p><button type="button" disabled={saving || !onRefresh} onClick={() => onRefresh?.()} className={`${BUTTON} mt-3`}>{saving ? 'Refreshing authoritative workspace…' : 'Refresh authoritative workspace — lock remains'}</button></div>}
 
     <div className="grid gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5 md:grid-cols-2">
       <Field label="Saved report"><select disabled={Boolean(pendingSave)} className={INPUT} value={creating ? '' : artifact?.id || ''} onChange={event => event.target.value ? chooseReport(event.target.value) : startReport()}><option value="">{!creating && !artifact ? 'Requested report unavailable — choose deliberately' : 'New unapproved report'}</option>{records.map(item => <option key={item.artifact.id} value={item.artifact.id}>{item.artifact.title}</option>)}</select></Field>
@@ -266,7 +332,7 @@ export default function MarketingReports({ studio, workspace, saving, act, onRef
         <Field label="Executive summary"><textarea required rows="5" className={INPUT} value={form.executive_summary} onChange={event => updateForm({ executive_summary: event.target.value })} /></Field>
         <Field label="Insights" hint="One evidenced interpretation per line"><textarea required rows="5" className={INPUT} value={editorValue(form.insights)} onChange={event => updateForm({ insights: event.target.value })} /></Field>
         <Field label="Recommended actions" hint="One proposed action per line"><textarea required rows="5" className={INPUT} value={editorValue(form.recommended_actions)} onChange={event => updateForm({ recommended_actions: event.target.value })} /></Field>
-        <div className="flex justify-end border-t border-slate-800 pt-5"><button disabled={saving || Boolean(pendingSave) || (!creating && !version)} className={PRIMARY}>{pendingSave ? 'Save locked — reconcile earlier request' : saving ? 'Saving report...' : artifact ? 'Save new draft version' : 'Save first draft version'}</button></div>
+        <div className="flex justify-end border-t border-slate-800 pt-5"><button disabled={saving || !recovery.ready || Boolean(pendingSave) || (!creating && !version)} className={PRIMARY}>{pendingSave ? 'Save locked — recovery contract required' : !recovery.ready ? 'Save unavailable — recovery not ready' : saving ? 'Saving report...' : artifact ? 'Save new draft version' : 'Save first draft version'}</button></div>
       </form>
 
       <div className="space-y-4">
