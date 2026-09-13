@@ -202,3 +202,26 @@ test('mounted DesignSystems ignores a stale exact-load result after navigation t
   assert.match(container.textContent, /No other artifact or version was substituted/)
   assert.doesNotMatch(container.textContent, /Alpha exact draft rules|Alpha released rules/)
 })
+
+test('mounted DesignSystems ignores a stale exact-load error after navigation to an unavailable pair', async t => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', ssr: { noExternal: ['react-router-dom'] }, plugins: [stubs()] })
+  t.after(() => vite.close())
+  const { default: DesignSystems } = await vite.ssrLoadModule('/src/apps/DesignSystems.jsx')
+  const document = new TestDocument()
+  const window = { document, setTimeout, clearTimeout, addEventListener() {}, removeEventListener() {}, getSelection: () => null, Event: TestEvent, Node: TestNode, Element: TestElement, HTMLElement: TestElement, HTMLIFrameElement: class extends TestElement {}, SVGElement: TestElement }
+  document.defaultView = window
+  const firstLoad = deferred()
+  let calls = 0
+  Object.assign(globalThis, { document, window, Event: TestEvent, Node: TestNode, HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true, __designSystemsTestSearch: 'artifact=artifact-a&version=a-v2', __designSystemsTestRepository: { loadLibrary: async () => ++calls === 1 ? firstLoad.promise : library() } })
+  const { container } = await mountedHarness(t, DesignSystems, document)
+
+  await act(async () => globalThis.__designSystemsTestNavigate({ artifact: 'unavailable-artifact', version: 'unavailable-version' }))
+  await flush(); await flush()
+  assert.match(container.textContent, /Exact Design System unavailable/)
+
+  firstLoad.reject(new Error('stale Alpha load failed'))
+  await flush(); await flush()
+  assert.match(container.textContent, /Exact Design System unavailable/)
+  assert.match(container.textContent, /No other artifact or version was substituted/)
+  assert.doesNotMatch(container.textContent, /stale Alpha load failed|Alpha exact draft rules|Alpha released rules/)
+})
