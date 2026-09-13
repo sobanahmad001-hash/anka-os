@@ -287,6 +287,19 @@ export function validateCampaignPlan(value: unknown) {
   const startsOn = safeDate(input.starts_on)
   const endsOn = safeDate(input.ends_on)
   const landingPageUrl = text(input.landing_page_url, 2000)
+  const rawBudget = input.planned_budget
+  const hasBudget = rawBudget !== null && rawBudget !== undefined
+    && !(typeof rawBudget === 'string' && rawBudget.trim() === '')
+  if (hasBudget && !['number', 'string'].includes(typeof rawBudget)) throw new Error('Planning budget must be a non-negative finite number')
+  if (hasBudget && typeof rawBudget === 'string' && !/^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(rawBudget.trim())) {
+    throw new Error('Planning budget must be a non-negative finite number')
+  }
+  const plannedBudget = hasBudget ? Number(rawBudget) : null
+  const rawCurrency = input.currency_code
+  if (rawCurrency !== null && rawCurrency !== undefined && typeof rawCurrency !== 'string') {
+    throw new Error('Currency must use a three-letter code')
+  }
+  const currencyCode = typeof rawCurrency === 'string' ? rawCurrency.trim().toUpperCase() : ''
   if (!title || !objective || !channels.length) throw new Error('Plan title, objective, and at least one channel are required')
   if (startsOn && endsOn && startsOn > endsOn) throw new Error('Plan end date cannot precede its start date')
   if (landingPageUrl) {
@@ -294,11 +307,15 @@ export function validateCampaignPlan(value: unknown) {
     try { parsed = new URL(landingPageUrl) } catch { throw new Error('Landing page must use an HTTP or HTTPS URL') }
     if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Landing page must use an HTTP or HTTPS URL')
   }
+  if (plannedBudget !== null && (!Number.isFinite(plannedBudget) || plannedBudget < 0)) throw new Error('Planning budget must be a non-negative finite number')
+  if (plannedBudget !== null && !/^[A-Z]{3}$/.test(currencyCode)) throw new Error('Currency is required with a planning budget and must use a three-letter code')
+  if (plannedBudget === null && currencyCode) throw new Error('Enter a planning budget with its currency or leave both blank')
   const requirements = Array.isArray(input.creative_requirements) ? input.creative_requirements : []
   if (requirements.length > 100) throw new Error('At most 100 creative requirements are supported')
   return {
     title, objective, channels, starts_on: startsOn, ends_on: endsOn,
     audience: text(input.audience, 4000), landing_page_url: landingPageUrl || null,
+    planned_budget: plannedBudget, currency_code: plannedBudget === null ? null : currencyCode,
     approved_message_version_id: text(input.approved_message_version_id, 80) || null,
     measurement_plan_version_id: text(input.measurement_plan_version_id, 80) || null,
     change_summary: text(input.change_summary, 1000),
@@ -827,7 +844,7 @@ async function saveCampaignPlan(context: MarketingRequestContext, body: Json, ac
   if (!campaignId) throw new Error('Campaign is required')
   await requireMarketingEngagement(context, engagementId)
   const plan = validateCampaignPlan(body.plan)
-  const { data, error } = await context.admin.rpc('save_marketing_campaign_plan_draft', {
+  const { data, error } = await context.admin.rpc('save_marketing_campaign_plan_draft_with_budget', {
     p_organization_id: context.organizationId,
     p_engagement_id: engagementId,
     p_campaign_id: campaignId,
@@ -839,11 +856,92 @@ async function saveCampaignPlan(context: MarketingRequestContext, body: Json, ac
     p_ends_on: plan.ends_on,
     p_audience: plan.audience,
     p_landing_page_url: plan.landing_page_url,
+    p_planned_budget: plan.planned_budget,
+    p_currency_code: plan.currency_code,
     p_approved_message_version_id: plan.approved_message_version_id,
     p_measurement_plan_version_id: plan.measurement_plan_version_id,
     p_creative_requirements: plan.creative_requirements,
     p_change_summary: plan.change_summary,
     p_source_plan_version_id: text(body.source_plan_version_id, 80) || null,
+    p_actor_id: actorId,
+  })
+  if (error) throw error
+  return data
+}
+
+function uuid(value: unknown, label: string) {
+  const result = text(value, 80)
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(result)) throw new Error(`${label} must be a UUID`)
+  return result
+}
+
+function optionalUuid(value: unknown, label: string) {
+  return value === null || value === undefined || value === '' ? null : uuid(value, label)
+}
+
+async function duplicateCampaignPlan(context: MarketingRequestContext, body: Json, actorId: string) {
+  const engagementId = uuid(body.engagement_id, 'Engagement')
+  const campaignId = uuid(body.campaign_id, 'Campaign')
+  await requireMarketingEngagement(context, engagementId)
+  const payload = {
+    engagement_id: engagementId, campaign_id: campaignId,
+    source_plan_version_id: uuid(body.source_plan_version_id, 'Source plan version'),
+    expected_latest_version_id: optionalUuid(body.expected_latest_version_id, 'Expected latest plan version'),
+    idempotency_key: uuid(body.idempotency_key, 'Idempotency key'),
+  }
+  const { data, error } = await context.admin.rpc('duplicate_marketing_campaign_plan_draft', {
+    p_organization_id: context.organizationId, p_engagement_id: engagementId, p_campaign_id: campaignId,
+    p_source_plan_version_id: payload.source_plan_version_id,
+    p_expected_latest_version_id: payload.expected_latest_version_id,
+    p_idempotency_key: payload.idempotency_key,
+    p_payload_checksum: await sha256(stableJson({ ...payload, actor_id: actorId, organization_id: context.organizationId })),
+    p_actor_id: actorId,
+  })
+  if (error) throw error
+  return data
+}
+
+async function listCampaignPlanReviewApprovers(context: MarketingRequestContext, body: Json) {
+  await requireMarketingEngagement(context, uuid(body.engagement_id, 'Engagement'))
+  const { data: memberships, error } = await context.admin.from('organization_memberships')
+    .select('user_id, role, department_id').eq('organization_id', context.organizationId)
+    .eq('member_kind', 'team').eq('status', 'active')
+  if (error) throw error
+  const eligible = (memberships || []).filter(item => LEADER_ROLES.has(text(item.role, 60))
+    || (text(item.department_id, 60) === 'marketing' && MANAGER_ROLES.has(text(item.role, 60))))
+  const ids = eligible.map(item => String(item.user_id))
+  const { data: profiles, error: profilesError } = ids.length
+    ? await context.admin.from('profiles').select('id, full_name, email').in('id', ids)
+    : { data: [], error: null }
+  if (profilesError) throw profilesError
+  const profileById = new Map((profiles || []).map(profile => [String(profile.id), profile]))
+  return eligible.map(item => ({ ...item, full_name: text(profileById.get(String(item.user_id))?.full_name, 240) || 'Team member', email: text(profileById.get(String(item.user_id))?.email, 320) }))
+}
+
+async function submitCampaignPlanReview(context: MarketingRequestContext, body: Json, actorId: string) {
+  const engagementId = uuid(body.engagement_id, 'Engagement')
+  const campaignId = uuid(body.campaign_id, 'Campaign')
+  await requireMarketingEngagement(context, engagementId)
+  const approverIds = Array.isArray(body.required_approver_ids) ? body.required_approver_ids.map((item, index) => uuid(item, `Approver ${index + 1}`)) : []
+  if (approverIds.length < 1 || approverIds.length > 50 || new Set(approverIds).size !== approverIds.length) throw new Error('Select between 1 and 50 unique campaign brief reviewers')
+  const approvalPolicy = text(body.approval_policy, 30)
+  if (!['parallel', 'sequential'].includes(approvalPolicy)) throw new Error('Approval policy must be sequential or parallel')
+  const payload = {
+    engagement_id: engagementId, campaign_id: campaignId,
+    plan_version_id: uuid(body.plan_version_id, 'Plan version'),
+    expected_latest_plan_version_id: uuid(body.expected_latest_plan_version_id, 'Expected latest plan version'),
+    expected_latest_brief_version_id: optionalUuid(body.expected_latest_brief_version_id, 'Expected latest campaign brief version'),
+    approval_policy: approvalPolicy, required_approver_ids: approverIds,
+    idempotency_key: uuid(body.idempotency_key, 'Idempotency key'),
+  }
+  const { data, error } = await context.admin.rpc('submit_marketing_campaign_plan_review', {
+    p_organization_id: context.organizationId, p_engagement_id: engagementId, p_campaign_id: campaignId,
+    p_plan_version_id: payload.plan_version_id,
+    p_expected_latest_plan_version_id: payload.expected_latest_plan_version_id,
+    p_expected_latest_brief_version_id: payload.expected_latest_brief_version_id,
+    p_approval_policy: approvalPolicy, p_required_approver_ids: approverIds,
+    p_idempotency_key: payload.idempotency_key,
+    p_payload_checksum: await sha256(stableJson({ ...payload, actor_id: actorId, organization_id: context.organizationId })),
     p_actor_id: actorId,
   })
   if (error) throw error
@@ -1234,6 +1332,9 @@ export async function handleRequest(
     if (action === 'save_artifact') return response({ data: await saveArtifact(context, body, user.id) })
     if (action === 'save_campaign_brief') return response({ data: await saveCampaignBrief(context, body, user.id) })
     if (action === 'save_campaign_plan') return response({ data: await saveCampaignPlan(context, body, user.id) })
+    if (action === 'duplicate_campaign_plan') return response({ data: await duplicateCampaignPlan(context, body, user.id) })
+    if (action === 'list_campaign_plan_review_approvers') return response({ data: await listCampaignPlanReviewApprovers(context, body) })
+    if (action === 'submit_campaign_plan_review') return response({ data: await submitCampaignPlanReview(context, body, user.id) })
     if (action === 'preview_seo_research') return response({ data: await previewSeoResearch(context, body) })
     if (action === 'save_seo_research') return response({ data: await saveSeoResearch(context, body, user.id) })
     if (action === 'approve_artifact') return response({ data: await approveArtifact(context, body, user.id) })

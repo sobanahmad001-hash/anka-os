@@ -31,7 +31,8 @@ Deno.test('non-Marketing members cannot execute any MK3 write action', () => {
   const writeActions = [
     'create_ad_campaign', 'update_ad_campaign', 'delete_ad_campaign',
     'save_ad_group', 'delete_ad_group', 'save_ad_keyword', 'delete_ad_keyword',
-    'import_ad_campaign_performance', 'save_campaign_plan',
+    'import_ad_campaign_performance', 'save_campaign_plan', 'duplicate_campaign_plan',
+    'list_campaign_plan_review_approvers', 'submit_campaign_plan_review',
   ]
   for (const action of writeActions) {
     assertEquals(hasMarketingAuthority({ role: 'contributor', department_id: 'content' }, action), false)
@@ -53,15 +54,25 @@ Deno.test('MB04A campaign-plan drafts are manual, unapproved, exact-source input
     title: 'Autumn launch', objective: 'Qualified demand', channels: ['email', 'search'],
     starts_on: '2026-09-12', ends_on: '2026-10-12',
     landing_page_url: 'https://example.com/launch',
+    planned_budget: '2500.50', currency_code: 'eur',
     approved_message_version_id: 'message-version',
     measurement_plan_version_id: 'measurement-version',
     creative_requirements: [{ format: 'Static image', intended_placement: 'Homepage hero', message_version_id: 'message-version', due_date: '2026-09-20' }],
   })
   assertEquals(plan.channels, ['email', 'search'])
   assertEquals(plan.creative_requirements[0].due_date, '2026-09-20')
+  assertEquals(plan.planned_budget, 2500.5)
+  assertEquals(plan.currency_code, 'EUR')
   assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Date', channels: ['email'], starts_on: '2026-10-01', ends_on: '2026-09-01' }), Error, 'cannot precede')
   assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'URL', channels: ['email'], landing_page_url: 'ftp://example.com' }), Error, 'HTTP or HTTPS')
   assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Requirement', channels: ['email'], creative_requirements: [{}] }), Error, 'needs format')
+  assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Budget', channels: ['email'], planned_budget: 10 }), Error, 'Currency is required')
+  assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Budget', channels: ['email'], planned_budget: Infinity, currency_code: 'USD' }), Error, 'finite')
+  assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Budget', channels: ['email'], planned_budget: 10, currency_code: 'USDX' }), Error, 'three-letter')
+  assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Budget', channels: ['email'], planned_budget: true, currency_code: 'USD' }), Error, 'finite')
+  assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Budget', channels: ['email'], planned_budget: [], currency_code: 'USD' }), Error, 'finite')
+  assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Budget', channels: ['email'], planned_budget: '   ', currency_code: 'USD' }), Error, 'leave both blank')
+  assertThrows(() => validateCampaignPlan({ title: 'Bad', objective: 'Budget', channels: ['email'], currency_code: 'USD' }), Error, 'leave both blank')
 })
 
 Deno.test('MB04A authenticated save routes exact context and concurrency inputs to the server RPC', async () => {
@@ -107,7 +118,7 @@ Deno.test('MB04A authenticated save routes exact context and concurrency inputs 
   })
   assertEquals(response.status, 200)
   assertEquals(rpcCalls.length, 1)
-  assertEquals(rpcCalls[0].name, 'save_marketing_campaign_plan_draft')
+  assertEquals(rpcCalls[0].name, 'save_marketing_campaign_plan_draft_with_budget')
   assertEquals(rpcCalls[0].args.p_organization_id, organizationId)
   assertEquals(rpcCalls[0].args.p_engagement_id, 'engagement-id')
   assertEquals(rpcCalls[0].args.p_campaign_id, 'campaign-id')

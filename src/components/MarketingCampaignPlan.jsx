@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   acceptCampaignPlanSave, campaignPlanContextKey, campaignPlanDraft,
-  campaignPlanSourceOptions, latestCampaignPlanVersion, validateCampaignPlanDraft,
+  campaignPlanDuplicatePreview, campaignPlanReviewPreview, campaignPlanSourceOptions,
+  latestCampaignPlanVersion, validateCampaignPlanDraft,
 } from '../data/marketingCampaignPlan.js'
 
 const INPUT = 'mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60'
 const BUTTON = 'rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-emerald-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50'
 const PRIMARY = 'rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50'
-const EMPTY_SNAPSHOT = Object.freeze({ versions: [], requirements: [], artifacts: [], sourceVersions: [], approvals: [] })
-const emptyDraft = () => ({ title: '', objective: '', channels: [], starts_on: '', ends_on: '', audience: '', landing_page_url: '', approved_message_version_id: '', measurement_plan_version_id: '', creative_requirements: [], change_summary: '' })
+const EMPTY_SNAPSHOT = Object.freeze({ versions: [], requirements: [], artifacts: [], sourceVersions: [], approvals: [], reviewSubmissions: [], reviewRequests: [], campaignBriefLinks: [], campaignBriefVersions: [] })
+const emptyDraft = () => ({ title: '', objective: '', channels: [], starts_on: '', ends_on: '', audience: '', landing_page_url: '', planned_budget: '', currency_code: '', approved_message_version_id: '', measurement_plan_version_id: '', creative_requirements: [], change_summary: '' })
 const lines = value => String(value || '').split('\n').map(item => item.trim()).filter(Boolean)
 const Label = ({ children, title }) => <label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{title}{children}</label>
 const ignoreAccessError = () => {}
@@ -21,11 +22,15 @@ export default function MarketingCampaignPlan({ organizationId, engagement, camp
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [approvers, setApprovers] = useState([])
+  const [approverId, setApproverId] = useState('')
+  const [confirmation, setConfirmation] = useState(null)
   const contextKey = campaignPlanContextKey(organizationId, engagement?.id, campaign?.id)
   const activeKey = useRef(contextKey)
   activeKey.current = contextKey
   const latest = latestCampaignPlanVersion(snapshot.versions, campaign?.id)
   const viewing = snapshot.versions.find(item => item.id === viewingId) || latest
+  const latestBriefVersion = [...(snapshot.campaignBriefVersions || [])].sort((left, right) => right.version_number - left.version_number)[0] || null
   const requirements = snapshot.requirements.filter(item => item.plan_version_id === viewing?.id)
   const sources = useMemo(() => campaignPlanSourceOptions({ artifacts: snapshot.artifacts, versions: snapshot.sourceVersions, approvals: snapshot.approvals }), [snapshot])
   const staleMessage = Boolean(draft.approved_message_version_id) && !sources.approvedMessages.some(item => item.id === draft.approved_message_version_id)
@@ -37,14 +42,16 @@ export default function MarketingCampaignPlan({ organizationId, engagement, camp
   useEffect(() => {
     let live = true
     setLoading(true); setBusy(false); setError(''); setMessage('')
-    setSnapshot(EMPTY_SNAPSHOT); setViewingId(''); setDraft(emptyDraft())
+    setSnapshot(EMPTY_SNAPSHOT); setViewingId(''); setDraft(emptyDraft()); setApprovers([]); setApproverId(''); setConfirmation(null)
     if (!organizationId || !engagement?.id || !campaign?.id || !repository) {
       setLoading(false)
       return () => { live = false }
     }
-    repository.load(engagement.id, campaign.id).then(next => {
+    Promise.all([repository.load(engagement.id, campaign.id), repository.loadReviewApprovers?.(engagement.id).catch(() => []) || []]).then(([next, availableApprovers]) => {
       if (!live || activeKey.current !== contextKey) return
       setSnapshot(next)
+      setApprovers(availableApprovers)
+      setApproverId(availableApprovers[0]?.user_id || '')
       const current = latestCampaignPlanVersion(next.versions, campaign.id)
       setViewingId(current?.id || '')
       setDraft(current ? campaignPlanDraft(current, next.requirements) : {
@@ -95,6 +102,66 @@ export default function MarketingCampaignPlan({ organizationId, engagement, camp
     }
   }
 
+  function previewDuplicate() {
+    try {
+      const preview = campaignPlanDuplicatePreview(viewing, campaign, latest)
+      setError(''); setConfirmation({
+        kind: 'duplicate', idempotencyKey: crypto.randomUUID(), preview,
+        request: Object.freeze({
+          engagement_id: engagement.id, campaign_id: campaign.id,
+          source_plan_version_id: preview.sourcePlanVersionId,
+          expected_latest_version_id: latest?.id || null,
+        }),
+      })
+    }
+    catch (reason) { setError(reason.message) }
+  }
+
+  function previewReview() {
+    try {
+      const approver = approvers.find(item => item.user_id === approverId)
+      const preview = campaignPlanReviewPreview(viewing, approver, campaign, latestBriefVersion)
+      setError(''); setConfirmation({
+        kind: 'review', idempotencyKey: crypto.randomUUID(), preview,
+        request: Object.freeze({
+          engagement_id: engagement.id, campaign_id: campaign.id,
+          plan_version_id: preview.sourcePlanVersionId,
+          expected_latest_plan_version_id: latest?.id || null,
+          expected_latest_brief_version_id: latestBriefVersion?.id || null,
+          approval_policy: 'parallel',
+          required_approver_ids: Object.freeze([preview.approverId]),
+        }),
+      })
+    } catch (reason) { setError(reason.message) }
+  }
+
+  async function confirmAction() {
+    if (!confirmation || !canEdit) return
+    const requestedKey = contextKey
+    setBusy(true); setError(''); setMessage('')
+    try {
+      if (confirmation.kind === 'duplicate') {
+        const saved = await repository.duplicateDraft({ ...confirmation.request, idempotency_key: confirmation.idempotencyKey })
+        if (!acceptCampaignPlanSave(saved, requestedKey, activeKey.current)) return
+        const next = await repository.load(engagement.id, campaign.id)
+        if (activeKey.current !== requestedKey) return
+        setSnapshot(next); setViewingId(saved.id); setDraft(campaignPlanDraft(saved, next.requirements))
+        setMessage(`Duplicated plan version ${confirmation.preview.sourceVersionNumber} as unapproved version ${saved.version_number}; the exact source link was retained.`)
+      } else {
+        const result = await repository.submitReview({ ...confirmation.request, idempotency_key: confirmation.idempotencyKey })
+        if (!acceptCampaignPlanSave(result, requestedKey, activeKey.current)) return
+        const next = await repository.load(engagement.id, campaign.id)
+        if (activeKey.current !== requestedKey) return
+        setSnapshot(next)
+        setMessage(`Submitted exact plan version ${confirmation.preview.sourceVersionNumber} for campaign brief review. No approval or release was applied.`)
+      }
+      setConfirmation(null)
+    } catch (reason) {
+      if (activeKey.current !== requestedKey || reason?.name === 'AbortError') return
+      onAccessError(reason, { membershipMismatch: reason?.membershipMismatch === true }); setError(reason.message)
+    } finally { if (activeKey.current === requestedKey) setBusy(false) }
+  }
+
   if (!campaign || !engagement) return <section className="rounded-2xl border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500">Select an official campaign context to edit a plan.</section>
   return <section className="marketing-campaign-plan rounded-2xl border border-slate-800 bg-slate-900/70 p-6" aria-labelledby="campaign-plan-title">
     <header className="flex flex-wrap items-start justify-between gap-4">
@@ -116,6 +183,9 @@ export default function MarketingCampaignPlan({ organizationId, engagement, camp
         <Label title="Ends on"><input aria-label="Plan ends on" className={INPUT} type="date" value={draft.ends_on} disabled={!canEdit || busy} onInput={event => update('ends_on', event.target.value)} /></Label>
         <div className="md:col-span-2"><Label title="Audience"><textarea aria-label="Plan audience" className={INPUT} value={draft.audience} maxLength="4000" disabled={!canEdit || busy} onInput={event => update('audience', event.target.value)} /></Label></div>
         <div className="md:col-span-2"><Label title="Landing page link"><input aria-label="Plan landing page" className={INPUT} type="url" value={draft.landing_page_url} maxLength="2000" disabled={!canEdit || busy} onInput={event => update('landing_page_url', event.target.value)} /></Label></div>
+        <Label title="Planning budget"><input aria-label="Plan planning budget" className={INPUT} type="number" min="0" step="any" value={draft.planned_budget} disabled={!canEdit || busy} placeholder="Optional; planning only" onInput={event => update('planned_budget', event.target.value)} /></Label>
+        <Label title="Currency"><input aria-label="Plan currency" className={INPUT} value={draft.currency_code} maxLength="3" disabled={!canEdit || busy} placeholder="Required with amount, e.g. EUR" onInput={event => update('currency_code', event.target.value.toUpperCase())} /></Label>
+        <p className="md:col-span-2 text-xs text-slate-500">Budget is a planning estimate only. It does not authorize spend and no currency is assumed.</p>
         <Label title="Approved message version"><select aria-label="Approved message version" className={INPUT} value={draft.approved_message_version_id} disabled={!canEdit || busy} onChange={event => update('approved_message_version_id', event.target.value)}>
           <option value="">No approved message pinned</option>{sources.approvedMessages.map(item => <option key={item.id} value={item.id}>{item.title} · v{item.versionNumber}</option>)}
         </select></Label>
@@ -150,14 +220,33 @@ export default function MarketingCampaignPlan({ organizationId, engagement, camp
           <p><strong className="text-white">{viewing.title}</strong><br />{viewing.objective}</p>
           <p>Channels: {viewing.channels.join(', ')}<br />Dates: {viewing.starts_on || 'Not set'} — {viewing.ends_on || 'Not set'}<br />Audience: {viewing.audience || 'Not set'}</p>
           <p>Landing page: {viewing.landing_page_url || 'None pinned'}</p>
+          <p>Planning budget: {viewing.planned_budget == null ? 'Not set' : `${viewing.currency_code} ${viewing.planned_budget}`}<br />Source plan: {viewing.source_plan_version_id || 'Original draft'}</p>
           <p>Message source: {viewing.approved_message_version_id || 'None pinned'}<br />Measurement source: {viewing.measurement_plan_version_id || 'None pinned'}</p>
           <p>Creative requirements: {requirements.length}</p>
           <ol className="list-decimal space-y-1 pl-4">{requirements.map(item => <li key={item.id}>{item.format} · {item.intended_placement} · message {item.message_version_id || 'not pinned'} · due {item.due_date || 'not set'}</li>)}</ol>
         </div> : <p className="mt-3 text-xs text-slate-500">No saved plan version yet.</p>}
         <h3 className="mt-6 font-semibold">History</h3>
         <ol className="mt-3 space-y-2">{snapshot.versions.map(version => <li key={version.id}><button type="button" className="text-left text-xs text-emerald-300 hover:text-emerald-200" onClick={() => setViewingId(version.id)}>Version {version.version_number} · {version.lifecycle_status}</button></li>)}</ol>
+        {viewing && <div className="mt-6 space-y-3 border-t border-slate-800 pt-5">
+          <button type="button" className={BUTTON + ' w-full'} disabled={!canEdit || busy} onClick={previewDuplicate}>Duplicate as unapproved draft…</button>
+          <Label title="Permitted campaign brief reviewer"><select aria-label="Campaign plan reviewer" className={INPUT} value={approverId} disabled={!canEdit || busy || !approvers.length} onChange={event => setApproverId(event.target.value)}><option value="">Choose reviewer</option>{approvers.map(item => <option key={item.user_id} value={item.user_id}>{item.full_name || item.email || item.user_id}</option>)}</select></Label>
+          <button type="button" className={PRIMARY + ' w-full'} disabled={!canEdit || busy || !approverId || viewing.id !== latest?.id} onClick={previewReview}>Submit exact version for review…</button>
+          {viewing.id !== latest?.id && <p className="text-xs text-amber-300">Only the current latest plan can be newly submitted. The older version remains available as evidence.</p>}
+        </div>}
+        <h3 className="mt-6 font-semibold">Review history</h3>
+        <ol className="mt-3 space-y-3">{(snapshot.reviewSubmissions || []).map(submission => { const plan = snapshot.versions.find(item => item.id === submission.plan_version_id); const request = (snapshot.reviewRequests || []).find(item => item.id === submission.approval_request_id); return <li key={submission.id} className="rounded-lg border border-slate-800 p-3 text-xs leading-5 text-slate-400"><strong className="text-white">Plan v{plan?.version_number || '?'}</strong> → campaign brief v{submission.artifact_version_number}<br />{request?.status || 'Submitted'} · {submission.submitted_at}<br />{plan?.change_summary || 'No change summary'}<br /><span className="font-mono text-[10px]">{submission.plan_version_id}</span></li> })}</ol>
       </aside>
       </div>
+      {confirmation && <section role="dialog" aria-modal="true" aria-label={confirmation.kind === 'duplicate' ? 'Confirm campaign plan duplicate' : 'Confirm campaign plan review submission'} className="mt-6 rounded-2xl border border-amber-800/60 bg-amber-950/20 p-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">Confirm exact destination and effect</p>
+        <h3 className="mt-2 font-semibold text-white">{confirmation.kind === 'duplicate' ? 'Duplicate as draft' : 'Submit for campaign brief review'}</h3>
+        <p className="mt-3 text-sm text-slate-300">Source: plan version {confirmation.preview.sourceVersionNumber} · <span className="font-mono text-xs">{confirmation.preview.sourcePlanVersionId}</span></p>
+        <p className="mt-2 text-sm text-slate-300">Destination: {confirmation.preview.destination}</p>
+        {confirmation.preview.approverLabel && <p className="mt-2 text-sm text-slate-300">Reviewer: {confirmation.preview.approverLabel}</p>}
+        <p className="mt-2 text-sm text-amber-200">{confirmation.preview.effect}</p>
+        <p className="mt-2 text-xs text-slate-500">Current permission: {canEdit ? 'authorized to confirm in this Marketing context; the server will recheck' : 'not authorized'}. Retrying this same confirmation returns the same result.</p>
+        <div className="mt-4 flex gap-3"><button type="button" className={PRIMARY} disabled={busy || !canEdit} onClick={confirmAction}>{busy ? 'Confirming…' : 'Confirm'}</button><button type="button" className={BUTTON} disabled={busy} onClick={() => setConfirmation(null)}>Cancel</button></div>
+      </section>}
     </>}
   </section>
 }

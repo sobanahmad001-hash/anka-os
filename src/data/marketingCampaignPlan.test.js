@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   acceptCampaignPlanSave, campaignPlanContextKey, campaignPlanDraft, campaignPlanSourceOptions,
-  canEditCampaignPlan, latestCampaignPlanVersion, validateCampaignPlanDraft, validateCampaignPlanSnapshot,
+  campaignPlanDuplicatePreview, campaignPlanReviewPreview, canEditCampaignPlan,
+  latestCampaignPlanVersion, validateCampaignPlanDraft, validateCampaignPlanSnapshot,
 } from './marketingCampaignPlan.js'
 
 const migration = readFileSync(new URL('../../supabase/migrations/20260911161329_mb04a_campaign_plan_versions.sql', import.meta.url), 'utf8')
@@ -13,6 +14,9 @@ const component = readFileSync(new URL('../components/MarketingCampaignPlan.jsx'
 const repository = readFileSync(new URL('./marketingCampaignPlanRepository.js', import.meta.url), 'utf8')
 const studio = readFileSync(new URL('../apps/MarketingStudio.jsx', import.meta.url), 'utf8')
 const concurrency = readFileSync(new URL('../../scripts/mb04a-concurrency.ts', import.meta.url), 'utf8')
+const completion = readFileSync(new URL('../../supabase/migrations/20260913100000_mb04b_campaign_plan_completion.sql', import.meta.url), 'utf8')
+const completionVerifier = readFileSync(new URL('../../supabase/verify_20260913100000_mb04b_campaign_plan_completion.sql', import.meta.url), 'utf8')
+const completionConcurrency = readFileSync(new URL('../../scripts/mb04b-concurrency.ts', import.meta.url), 'utf8')
 
 test('manual plan draft validates required fields, exact dates, URL and creative requirements', () => {
   const result = validateCampaignPlanDraft({
@@ -24,6 +28,29 @@ test('manual plan draft validates required fields, exact dates, URL and creative
   assert.equal(result.creative_requirements[0].intended_placement, 'Homepage hero')
   assert.throws(() => validateCampaignPlanDraft({ title: 'Bad', objective: 'Date', channels: ['Email'], starts_on: '2026-10-01', ends_on: '2026-09-01' }), /cannot precede/)
   assert.throws(() => validateCampaignPlanDraft({ title: 'Bad', objective: 'URL', channels: ['Email'], landing_page_url: 'ftp://example.com' }), /HTTP or HTTPS/)
+})
+
+test('planning budget requires an explicit currency and remains finite and nonnegative', () => {
+  const valid = { title: 'Plan', objective: 'Outcome', channels: ['Email'], planned_budget: '1250.50', currency_code: 'eur' }
+  assert.deepEqual(validateCampaignPlanDraft(valid), { ...validateCampaignPlanDraft({ title: 'Plan', objective: 'Outcome', channels: ['Email'] }), planned_budget: 1250.5, currency_code: 'EUR' })
+  assert.equal(validateCampaignPlanDraft({ title: 'Plan', objective: 'Outcome', channels: ['Email'] }).currency_code, null)
+  assert.throws(() => validateCampaignPlanDraft({ ...valid, currency_code: '' }), /Currency is required/)
+  assert.throws(() => validateCampaignPlanDraft({ ...valid, planned_budget: -1 }), /non-negative finite/)
+  assert.throws(() => validateCampaignPlanDraft({ ...valid, planned_budget: 'Infinity' }), /non-negative finite/)
+  assert.throws(() => validateCampaignPlanDraft({ ...valid, currency_code: 'USDX' }), /three-letter/)
+  assert.throws(() => validateCampaignPlanDraft({ ...valid, planned_budget: true }), /non-negative finite/)
+  assert.throws(() => validateCampaignPlanDraft({ ...valid, planned_budget: [] }), /non-negative finite/)
+  assert.throws(() => validateCampaignPlanDraft({ ...valid, planned_budget: '   ' }), /leave both blank/)
+  assert.throws(() => validateCampaignPlanDraft({ title: 'Plan', objective: 'Outcome', channels: ['Email'], currency_code: 'USD' }), /leave both blank/)
+})
+
+test('duplicate and review confirmations pin source, destination, effect, and permitted reviewer', () => {
+  const version = { id: 'plan-v2', version_number: 2 }
+  assert.equal(campaignPlanDuplicatePreview(version, { name: 'Launch' }).sourcePlanVersionId, 'plan-v2')
+  const review = campaignPlanReviewPreview(version, { user_id: 'reviewer', full_name: 'Marketing lead' }, { name: 'Launch' })
+  assert.match(review.destination, /canonical campaign brief/)
+  assert.equal(review.approverId, 'reviewer')
+  assert.match(review.effect, /does not approve or release/)
 })
 
 test('history uses exact immutable versions and clones the selected saved source into a new local draft', () => {
@@ -118,7 +145,7 @@ test('atomic save enforces context, authority, approved-message sources and opti
   assert.match(migration, /artifact_type = 'measurement_plan'/)
   assert.match(migration, /grant execute on function public\.save_marketing_campaign_plan_draft[\s\S]*to service_role/)
   assert.match(edge, /action === 'save_campaign_plan'/)
-  assert.match(edge, /rpc\('save_marketing_campaign_plan_draft'/)
+  assert.match(edge, /rpc\('save_marketing_campaign_plan_draft_with_budget'/)
 })
 
 test('editor exposes honest draft state, exact preview, revision history and no execution controls', () => {
@@ -129,7 +156,48 @@ test('editor exposes honest draft state, exact preview, revision history and no 
   assert.match(component, /activeKey\.current !== requestedKey/)
   assert.match(component, /Loading campaign plan/)
   assert.match(component, /A previously selected source is no longer readable or eligible/)
-  assert.doesNotMatch(component, />Submit for review<|>Approve<|>Publish<|>Launch<|>Apply budget<|>Request content<|>Request design</)
+  assert.match(component, /Submit exact version for review/)
+  assert.match(component, /Duplicate as unapproved draft/)
+  assert.match(component, /No approval or release was applied/)
+  assert.doesNotMatch(component, />Approve<|>Publish<|>Launch<|>Apply budget<|>Request content<|>Request design</)
+})
+
+test('MB04B is additive, retry-safe, exact-version governed, and does not create execution paths', () => {
+  assert.match(completion, /create table public\.marketing_campaign_plan_budgets/)
+  assert.match(completion, /planning estimates only; never spend authority/)
+  assert.match(completion, /duplicate_marketing_campaign_plan_draft/)
+  assert.match(completion, /submit_marketing_campaign_plan_review/)
+  assert.match(completion, /save_marketing_campaign_brief/)
+  assert.match(completion, /create_marketing_campaign_brief_approval_request/)
+  assert.match(completion, /plan_version_id[^]*unique \(organization_id, plan_version_id\)/)
+  assert.match(completion, /Idempotency key was already used with a different duplicate payload/)
+  assert.match(completion, /Idempotency key was already used with a different review payload/)
+  assert.match(completion, /Campaign plan changed since review was previewed/)
+  assert.match(completion, /compatibility checksum input is never trusted/)
+  assert.match(completion, /v_replay.payload_checksum<>v_actual_checksum/)
+  assert.match(completion, /v_submission.payload_checksum<>v_actual_checksum/)
+  assert.ok((completion.match(/perform private.assert_mb04b_campaign_context/g) || []).length >= 5)
+  assert.match(completion, /lock_mb04b_campaign_context/)
+  assert.match(completion, /campaign_brief_lineage/)
+  assert.doesNotMatch(completion, /insert into public\.(work_items|artifact_approvals|provider_connections)|update public\.marketing_campaigns[^]*planned_budget/i)
+  for (const check of ['budget_pair_required', 'nonfinite_budget_denied', 'duplicate_replay_same_result',
+    'duplicate_key_conflict_denied', 'review_exact_plan_and_brief_version', 'review_pending_not_approved',
+    'later_plan_preserves_submission', 'stale_submission_denied', 'null_department_denied',
+    'inactive_service_replay_denied', 'cross_organization_denied', 'generic_two_approver_unchanged',
+    'no_execution_side_effects']) assert.match(completionVerifier, new RegExp(check))
+  assert.match(completionVerifier, /select 'PASS' as mb04b_final_result/)
+  assert.match(completionVerifier, /rollback;/)
+  assert.match(completionConcurrency, /MB04B_LOCAL_TEMPLATE_URL/)
+  assert.match(completionConcurrency, /duplicate contender did not wait on replay lock/)
+  assert.match(completionConcurrency, /review contender did not wait on replay lock/)
+  assert.match(completionConcurrency, /duplicate_replay_revocation_denied=true/)
+  assert.match(completionConcurrency, /review_replay_revocation_denied=true/)
+  assert.match(completionConcurrency, /direct_save_revocation_denied=true/)
+  assert.match(completionConcurrency, /fresh_duplicate_revocation_denied=true/)
+  assert.match(completionConcurrency, /fresh_review_revocation_denied=true/)
+  assert.match(completionConcurrency, /pg_blocking_pids/)
+  assert.match(completionConcurrency, /stale submit did not wait on plan lock/)
+  assert.match(completionConcurrency, /'40001'/)
 })
 
 test('actual Marketing Studio campaigns tab mounts the organization-scoped repository without replacing campaign budget editing', () => {
