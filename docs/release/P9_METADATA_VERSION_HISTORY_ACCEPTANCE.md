@@ -10,6 +10,20 @@ P9 requires the context/output area to show exact selected input versions and sa
 
 Provider-dispatched ordinary answers and proposals persist selected-model, provider-reported actual-model, requested-tool, and executed-tool facts in the existing AI-run context manifest. Proposal persistence uses migration `20260913152101_p9_department_chat_proposal_execution_metadata.sql`, whose service-role-only wrapper keeps canonical proposal/message persistence and telemetry in one database transaction.
 
+Exact Content and Design history destinations fail closed when the requested artifact/version pair is incomplete, unknown, cross-artifact, or not visible to the current organization. They do not substitute a latest or otherwise visible record. Ordinary navigation without an exact-link request retains the existing default selection behavior.
+
+## Local exact-head evidence
+
+- Composite correction branch: `fix/p9-metadata-history-review`.
+- Metadata/history source: `b02177aadaf915bf121c5b83ffcd731298e5a14e`.
+- Atomic proposal telemetry correction: `651a9aa3cd98677a249635c41505f44b88cfca37`.
+- Integrated Design exact-link correction: `5b05ab46b2ea4840387fcff07956976814862607` (owner source `b955e60e0cf94f0b9b983cc9d04d15103afabfde`).
+- Integrated Content exact-link correction: `800b50d` (owner source `ac1fc852b0375fb74bda10120ff1d98c1e25af6a`).
+- Full Node data suite: 961 passed, 0 failed.
+- Department Chat Deno suite: 92 passed, 0 failed; Deno typecheck passed.
+- Production build passed. Whole-repository lint completed with 0 errors and 508 pre-existing warnings.
+- The PostgreSQL migration/verifier execution remains an explicit prerequisite below; it was not represented as completed by static or mocked checks.
+
 ## Evidence to record before a signed-in run
 
 - Candidate commit and build identifier.
