@@ -1,8 +1,13 @@
 const rows = value => Array.isArray(value) ? value : []
 const text = value => typeof value === 'string' ? value.trim() : ''
 
-export function productionHandoffContextKey(release) {
-  return [text(release?.id), text(release?.direction_version_id)].join(':')
+export function productionHandoffContextKey(release, scope = {}) {
+  const releaseKey = [text(release?.id), text(release?.direction_version_id)].join(':')
+  const organizationId = text(scope?.organizationId)
+  const contextKey = text(scope?.contextKey)
+  return organizationId || contextKey
+    ? [encodeURIComponent(organizationId), encodeURIComponent(contextKey), releaseKey].join(':')
+    : releaseKey
 }
 
 export function productionHandoffReadiness({

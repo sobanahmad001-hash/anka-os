@@ -148,6 +148,70 @@ test('handoff uncertainty survives the real loading replacement until exact refr
   assert.match(environment.container.textContent, /remains locked/)
 })
 
+test('multiple ambiguous targets remain independently locked and exact refresh clears only its target', async t => {
+  const environment = await setup(t)
+  const first = fixture()
+  const second = {
+    ...fixture(),
+    release: { id: 'release-2', direction_version_id: 'version-3' },
+    directionVersions: [{ id: 'version-3', version_number: 3, content_checksum: 'checksum-3' }],
+    mediaAssets: [{ id: 'asset-second', design_direction_version_id: 'version-3', content_request_id: null, media_type: 'image', status: 'ready', storage_path: 'org/version-3/image.png' }],
+  }
+  const scope = { organizationId: 'org-1', contextKey: 'official:org-1:engagement-1' }
+  let creates = 0
+  let verifiedTarget = ''
+
+  function Parent() {
+    const [selected, setSelected] = useState(0)
+    const [uncertainTargets, setUncertainTargets] = useState(() => new Set())
+    const props = selected === 0 ? first : second
+    const targetKey = environment.productionHandoffContextKey(props.release, scope)
+    async function prepare(release) {
+      creates += 1
+      const failedKey = environment.productionHandoffContextKey(release, scope)
+      setUncertainTargets(current => new Set(current).add(failedKey))
+      throw new Error('Lost committed create response')
+    }
+    async function refresh(release) {
+      const refreshedKey = environment.productionHandoffContextKey(release, scope)
+      if (verifiedTarget !== refreshedKey) return false
+      setUncertainTargets(current => {
+        const next = new Set(current)
+        next.delete(refreshedKey)
+        return next
+      })
+      return true
+    }
+    return createElement('div', null,
+      createElement('button', { type: 'button', onClick: () => setSelected(value => value === 0 ? 1 : 0) }, 'Switch exact release'),
+      createElement(environment.Panel, {
+        ...props, key: targetKey,
+        createUncertain: uncertainTargets.has(targetKey),
+        onPrepare: prepare,
+        onRefresh: () => refresh(props.release),
+      }),
+    )
+  }
+
+  await act(async () => environment.root.render(createElement(Parent)))
+  await flushMounted()
+  await click(environment.container, 'Prepare production')
+  assert.equal(byText(environment.container, 'button', 'Prepare production').disabled, true)
+  await click(environment.container, 'Switch exact release')
+  assert.equal(byText(environment.container, 'button', 'Prepare production').disabled, false)
+  await click(environment.container, 'Prepare production')
+  assert.equal(creates, 2)
+  assert.equal(byText(environment.container, 'button', 'Prepare production').disabled, true)
+  await click(environment.container, 'Switch exact release')
+  assert.equal(byText(environment.container, 'button', 'Prepare production').disabled, true)
+
+  verifiedTarget = environment.productionHandoffContextKey(first.release, scope)
+  await click(environment.container, 'Refresh exact handoff status')
+  assert.equal(byText(environment.container, 'button', 'Prepare production').disabled, false)
+  await click(environment.container, 'Switch exact release')
+  assert.equal(byText(environment.container, 'button', 'Prepare production').disabled, true)
+})
+
 test('an open temporary preview expires without interaction and cannot remain activatable', async t => {
   const environment = await setup(t)
   const props = fixture()

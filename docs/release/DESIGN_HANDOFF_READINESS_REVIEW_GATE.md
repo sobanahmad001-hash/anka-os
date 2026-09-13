@@ -27,7 +27,10 @@ previews are validated through the released Design asset access helper.
 
 Preparing, refreshing, previewing, and downloading remain distinct. An uncertain create response
 is retained by the Workshop parent across its loading replacement and locks another create until
-an explicit successful read refresh. Refreshing does not rebuild a package.
+an explicit successful read refresh. Outstanding uncertainty is stored independently by exact
+organization, Design context, release, and direction-version key: a failure for another release
+cannot overwrite or unlock it, and a successful refresh removes only the verified target.
+Refreshing does not rebuild a package.
 Download failure offers a safe repeat of the existing signed-link action and does not recreate the
 archive. A context-keyed panel clears local errors and locks when the exact release changes.
 Open preview links re-evaluate at their conservative expiry without unrelated user interaction.
@@ -39,10 +42,11 @@ publication behavior.
 ## Verification and remaining acceptance
 
 - Lockfile install: PASS; the unchanged lockfile still reports 12 existing audit findings.
-- Focused handoff, asset-access, Workshop, and B06b regression suite: 42/42 PASS,
-  including mounted parent-remount uncertainty and automatic expiry regressions.
-- Full Node suite: 960/960 PASS.
-- Lint: PASS with zero errors.
+- Focused handoff, asset-access, Workshop, and B06b regression suite: 43/43 PASS,
+  including mounted parent-remount, multi-target uncertainty, exact-target clearing, and automatic
+  expiry regressions.
+- Full Node suite: 961/961 PASS.
+- Lint: PASS with zero errors; the existing repository warning baseline remains.
 - Production build: PASS.
 - Patch whitespace and clean-worktree checks are required after the final commit.
 - Backend and shared approval/proofing sources are unchanged; their prior evidence remains
@@ -63,5 +67,8 @@ No push, PR, merge, migration, deployment, provider call, paid action, external 
 fixture, publication, or release is authorized by this packet.
 
 The initial candidate `1aeffdc887c6a33f3c860e492649181af70fd4d2` is preserved as
-rejected. The correction retains exact-release uncertainty in the Workshop parent until a
-successful authoritative refresh and adds expiry-driven plus activation-time preview checks.
+rejected. Candidate `337e0c4d55c9285080d1ae755fe38cae98640a59` is also preserved as
+Testing E40 `NOT ACCEPTED`: its single uncertainty target allowed a second ambiguous create to
+overwrite the first lock. This correction retains every exact-keyed uncertainty entry until that
+specific target receives a successful authoritative refresh, while preserving the earlier
+parent-remount, expiry-driven, and activation-time preview corrections.

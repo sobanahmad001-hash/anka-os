@@ -72,6 +72,14 @@ test('ready archives remain downloadable when a current source row is no longer 
 
 test('release context key invalidates local recovery state on exact target change', () => {
   assert.equal(productionHandoffContextKey(release), 'release-1:version-2')
+  assert.equal(
+    productionHandoffContextKey(release, { organizationId: 'org-1', contextKey: 'official:org-1:engagement-1' }),
+    'org-1:official%3Aorg-1%3Aengagement-1:release-1:version-2',
+  )
+  assert.notEqual(
+    productionHandoffContextKey(release, { organizationId: 'org-1', contextKey: 'official:org-1:engagement-1' }),
+    productionHandoffContextKey(release, { organizationId: 'org-2', contextKey: 'official:org-2:engagement-1' }),
+  )
   assert.notEqual(
     productionHandoffContextKey(release),
     productionHandoffContextKey({ id: 'release-2', direction_version_id: 'version-3' }),
@@ -88,8 +96,9 @@ test('handoff UI retains native keyboard controls, adjacent errors, and read-onl
   assert.match(panel, /aria-live="polite"/)
   assert.match(panel, /Refresh exact handoff status/)
   assert.match(panel, /No package was rebuilt/)
-  assert.match(workshop, /key=\{productionHandoffContextKey\(release\)\}/)
-  assert.match(workshop, /handoffUncertainTarget === productionHandoffContextKey\(release\)/)
+  assert.match(workshop, /key=\{productionHandoffContextKey\(release, handoffContext\)\}/)
+  assert.match(workshop, /handoffUncertainTargets\.has\(productionHandoffContextKey\(release, handoffContext\)\)/)
+  assert.match(workshop, /const \[handoffUncertainTargets, setHandoffUncertainTargets\] = useState\(\(\) => new Set\(\)\)/)
   assert.match(panel, /window\.setTimeout\(\(\) => setClock\(Date\.now\(\)\), delay \+ 25\)/)
   assert.match(panel, /event\.preventDefault\(\)[\s\S]*Refresh exact handoff status before opening/)
 })
