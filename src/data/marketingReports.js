@@ -29,13 +29,14 @@ export function marketingReportDraft(artifact = null, version = null) {
 }
 
 export function validateMarketingReportDraft(value = {}) {
-  const title = clean(value.title)
+  const title = clean(value.title).slice(0, 240)
   const periodStart = clean(value.period_start)
   const periodEnd = clean(value.period_end)
-  const sources = reportLines(value.sources)
-  const executiveSummary = clean(value.executive_summary)
-  const insights = reportLines(value.insights)
-  const recommendedActions = reportLines(value.recommended_actions)
+  const contractLines = input => reportLines(input).slice(0, 20).map(item => item.slice(0, 500))
+  const sources = contractLines(value.sources)
+  const executiveSummary = clean(value.executive_summary).slice(0, 4000)
+  const insights = contractLines(value.insights)
+  const recommendedActions = contractLines(value.recommended_actions)
   if (!title) throw new Error('Report title is required')
   if (!isCalendarDate(periodStart) || !isCalendarDate(periodEnd)) throw new Error('Reporting period requires exact start and end dates')
   if (periodEnd < periodStart) throw new Error('Reporting period end cannot precede its start')
@@ -60,9 +61,36 @@ export function marketingReportRecords(workspace = {}) {
 }
 
 export function marketingReportVersion(records = [], artifactId = '', versionId = '') {
-  const record = records.find(item => item.artifact.id === artifactId) || records[0] || null
+  const record = artifactId ? records.find(item => item.artifact.id === artifactId) || null : records[0] || null
   if (!record) return { record: null, version: null }
-  return { record, version: record.versions.find(item => item.id === versionId) || record.versions[0] || null }
+  return { record, version: versionId ? record.versions.find(item => item.id === versionId) || null : record.versions[0] || null }
+}
+
+export function stableMarketingReportJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableMarketingReportJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value).sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableMarketingReportJson(item)}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+export async function marketingReportContentChecksum(content, cryptoApi = globalThis.crypto) {
+  if (!cryptoApi?.subtle || typeof TextEncoder === 'undefined') throw new Error('Safe report save reconciliation is unavailable in this browser')
+  const digest = await cryptoApi.subtle.digest('SHA-256', new TextEncoder().encode(stableMarketingReportJson(content)))
+  return [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join('')
+}
+
+export function reconcileMarketingReportSave(records = [], pending = null) {
+  if (!pending?.contentChecksum) return null
+  const known = new Set(pending.knownVersionIds || [])
+  const matches = records.flatMap(record => {
+    if (pending.artifactId && record.artifact.id !== pending.artifactId) return []
+    return record.versions
+      .filter(version => !known.has(version.id) && version.content_checksum === pending.contentChecksum)
+      .map(version => ({ record, version }))
+  })
+  return matches.length === 1 ? matches[0] : null
 }
 
 export function marketingReportReviewState(version, approvals = []) {
@@ -75,10 +103,6 @@ export function marketingReportEvidenceState(version) {
   if (!version) return { status: 'missing', message: 'Choose an exact saved report version.' }
   if (!sources.length) return { status: 'missing', message: 'This exact version has no selected source notes.' }
   return { status: 'unverified', message: 'Source notes are preserved, but the current report contract does not pin metric rows, definitions, filters, or retrieval timestamps.' }
-}
-
-export function shouldApplyMarketingReportResponse(response, request, activeGeneration, activeScopeRevision = request.scopeRevision) {
-  return request.generation === activeGeneration && request.scopeRevision === activeScopeRevision && response?.organizationId === request.organizationId && response?.engagementId === request.engagementId && response?.brandId === request.brandId
 }
 
 export function buildMarketingReportExport({ artifact, version, approval = null, brandName = 'Brand' }) {

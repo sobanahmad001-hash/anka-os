@@ -31,6 +31,17 @@
 - Focused lint: no errors. Remaining warnings in `MarketingStudio.jsx` pre-date this candidate and are unchanged JSX/no-unused-variable false positives.
 - Supabase changelog relevance check: no platform change was required for this local reuse of the existing artifact/version/approval contracts.
 
+## Product Design correction
+
+- An explicit unavailable report or version now fails closed instead of silently selecting the latest record. An empty initial selection may still choose the documented first report and latest version.
+- The exact output pointer is retained when the generic artifact route directs a report into the dedicated Reports tab.
+- Same-scope authoritative refreshes preserve unsaved editor state. Deliberate report, version, tab, or context changes require discard confirmation; denied or changed scope clears the old editor content.
+- An uncertain save response creates a checksum-only lock before the write begins. The lock survives component unmount and browser-session reload, disables repeated submission, and clears only when one new authoritative version has the exact server-normalized checksum or when a successful response identifies the exact saved version.
+- Successful saves select the returned artifact and version IDs explicitly rather than falling back to the first or latest record.
+- Late review callbacks are ignored after the active exact version or authorized scope changes.
+- Permanent unit and mounted correction suite: 14 passed, 0 failed. The production build passes and focused lint remains at 0 errors with the same 27 pre-existing Marketing Studio warnings.
+- Product Design's original sequential harness now validates fail-closed selection, dirty refresh preservation, and repeated-write blocking. Its final success scenario intentionally remains blocked because the prior scenario leaves an unresolved save in the same scope and its mocked returned version still contains the old content rather than the submitted revision. The permanent suite isolates a response that matches the submitted tenant, artifact, and checksum, and separately proves lock persistence and authoritative reconciliation.
+
 ## Evidence and decision gates
 
 - The deployed report content validator preserves only `sources`, `period_start`, `period_end`, `executive_summary`, `insights`, and `recommended_actions`; this candidate deliberately stays within that contract.

@@ -132,8 +132,9 @@ export default function MarketingStudio() {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [briefDirty, setBriefDirty] = useState(false)
+  const [reportDirty, setReportDirty] = useState(false)
   const briefSaveRef = useRef(null)
-  const navigationBlocker = useBlocker(briefDirty)
+  const navigationBlocker = useBlocker(briefDirty || reportDirty)
   const scope = useRef({ organizationId: activeOrganizationId, revision: scopeRevision })
   scope.current = { organizationId: activeOrganizationId, revision: scopeRevision }
   const organizationReady = Boolean(activeOrganizationId) && !organizationLoading && !selectionRequired
@@ -355,7 +356,7 @@ export default function MarketingStudio() {
           ))}
         </nav>
 
-        {loading ? <div className="py-20 text-center text-sm text-slate-500">Loading Marketing Studio…</div> : !workspace ? (
+        {loading && !(tab === 'reports' && workspace) ? <div className="py-20 text-center text-sm text-slate-500">Loading Marketing Studio…</div> : !workspace ? (
           <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Select an engagement with a Marketing service to begin.</div>
         ) : tab === 'overview' ? (
           <MarketingOverview
@@ -426,11 +427,14 @@ export default function MarketingStudio() {
           <DepartmentChat departmentId="marketing" engagement={workspace.engagement} artifactTypes={['channel_strategy', 'campaign_brief', 'measurement_plan']} artifactDefinitions={MARKETING_ARTIFACT_FORMS} artifactForType={artifactType => workspace.artifacts.find(item => item.artifact_type === artifactType)} stageForType={() => null} onPropose={input => reportMarketingAccess(() => studio.proposeArtifact(input))} onProposeWorkItem={input => reportMarketingAccess(() => studio.proposeWorkItem(input))} onCreated={() => loadWorkspace(engagementId, campaignId)} />
         ) : tab === 'reports' ? (
           <MarketingReports
+            key={`${activeOrganizationId}:${scopeRevision}:${engagementId}:${contextValidation.context?.output?.id || ''}:${contextValidation.context?.output?.versionId || ''}`}
             studio={studio}
             workspace={workspace}
             saving={saving}
             act={act}
             onRefresh={() => loadWorkspace(engagementId, campaignId)}
+            onDirtyChange={setReportDirty}
+            requestedOutput={contextValidation.context?.output || null}
           />
         ) : tab === 'connections' ? (
           <MarketingConnectionReadinessPanel
@@ -447,7 +451,7 @@ export default function MarketingStudio() {
         )}
         </WorkshopContextShell>
       </main>
-      {navigationBlocker.state === 'blocked' && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-5"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">Unsaved campaign brief</p><h2 className="mt-2 text-xl font-semibold">Keep, save, or discard your changes?</h2><p className="mt-2 text-sm text-slate-400">The current context will not change until you choose.</p><div className="mt-6 flex flex-wrap justify-end gap-2"><button type="button" className={BUTTON} onClick={() => navigationBlocker.reset()}>Stay</button><button type="button" className={BUTTON} onClick={() => { setBriefDirty(false); navigationBlocker.proceed() }}>Discard and continue</button><button type="button" className={PRIMARY} disabled={saving} onClick={async () => { const result = await briefSaveRef.current?.(); if (result) { setBriefDirty(false); navigationBlocker.proceed() } }}>{saving ? 'Saving…' : 'Save current and continue'}</button></div></section></div>}
+      {navigationBlocker.state === 'blocked' && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-5"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">{reportDirty ? 'Unsaved marketing report' : 'Unsaved campaign brief'}</p><h2 className="mt-2 text-xl font-semibold">Keep, save, or discard your changes?</h2><p className="mt-2 text-sm text-slate-400">The current context will not change until you choose.</p><div className="mt-6 flex flex-wrap justify-end gap-2"><button type="button" className={BUTTON} onClick={() => navigationBlocker.reset()}>Stay</button><button type="button" className={BUTTON} onClick={() => { setBriefDirty(false); setReportDirty(false); navigationBlocker.proceed() }}>Discard and continue</button>{!reportDirty && <button type="button" className={PRIMARY} disabled={saving} onClick={async () => { const result = await briefSaveRef.current?.(); if (result) { setBriefDirty(false); navigationBlocker.proceed() } }}>{saving ? 'Saving…' : 'Save current and continue'}</button>}</div>{reportDirty && <p className="mt-3 text-xs text-slate-500">Stay on the report to save it deliberately. An ambiguous earlier save must be reconciled before another submission.</p>}</section></div>}
     </div>
   )
 }

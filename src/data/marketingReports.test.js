@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { buildMarketingReportExport, marketingReportDraft, marketingReportEvidenceState, marketingReportRecords, marketingReportReviewState, marketingReportVersion, shouldApplyMarketingReportResponse, validateMarketingReportDraft } from './marketingReports.js'
+import { buildMarketingReportExport, marketingReportContentChecksum, marketingReportDraft, marketingReportEvidenceState, marketingReportRecords, marketingReportReviewState, marketingReportVersion, reconcileMarketingReportSave, validateMarketingReportDraft } from './marketingReports.js'
 
 const organizationId = 'org-a'
 const root = fileURLToPath(new URL('../../', import.meta.url))
@@ -42,6 +42,18 @@ test('saved report selection remains tenant, engagement, brand, artifact, and ex
   assert.equal(records.length, 1)
   assert.deepEqual(records[0].versions.map(item => item.id), ['version-a2', 'version-a1'])
   assert.equal(marketingReportVersion(records, artifact.id, 'version-a1').version.id, 'version-a1')
+  assert.equal(marketingReportVersion(records, artifact.id, 'unavailable-version').version, null)
+  assert.equal(marketingReportVersion(records, 'unavailable-report', '').record, null)
+  assert.equal(marketingReportVersion(records).version.id, 'version-a2')
+})
+
+test('ambiguous saves reconcile only to one new authoritative checksum match', async () => {
+  const contentChecksum = await marketingReportContentChecksum(version.content)
+  const record = { artifact, versions: [{ ...version, id: 'version-a3', content_checksum: contentChecksum }, version] }
+  const pending = { artifactId: artifact.id, contentChecksum, knownVersionIds: [version.id] }
+  assert.equal(reconcileMarketingReportSave([record], pending).version.id, 'version-a3')
+  assert.equal(reconcileMarketingReportSave([{ ...record, versions: [...record.versions, { ...version, id: 'version-a4', content_checksum: contentChecksum }] }], pending), null)
+  assert.equal(reconcileMarketingReportSave([record], { ...pending, artifactId: 'another-report' }), null)
 })
 
 test('review state is tied to the exact immutable version', () => {
@@ -54,15 +66,6 @@ test('current contract reports missing metric pins instead of inventing freshnes
   assert.equal(marketingReportEvidenceState(version).status, 'unverified')
   assert.match(marketingReportEvidenceState(version).message, /does not pin metric rows/i)
   assert.equal(marketingReportEvidenceState(null).status, 'missing')
-})
-
-test('stale permission or context responses cannot replace the active report selection', () => {
-  const request = { generation: 4, scopeRevision: 7, organizationId, engagementId: engagement.id, brandId: engagement.brand_id }
-  const response = { organizationId, engagementId: engagement.id, brandId: engagement.brand_id }
-  assert.equal(shouldApplyMarketingReportResponse(response, request, 4, 7), true)
-  assert.equal(shouldApplyMarketingReportResponse(response, request, 5, 7), false)
-  assert.equal(shouldApplyMarketingReportResponse(response, request, 4, 8), false)
-  assert.equal(shouldApplyMarketingReportResponse({ ...response, brandId: 'brand-b' }, request, 4, 7), false)
 })
 
 test('exact-version export is deterministic, escaped, visibly draft, and performs no release action', () => {
@@ -91,6 +94,9 @@ test('Reports is a dedicated Marketing tab that reuses canonical artifacts and g
   assert.match(studio, /\['reports', 'Reports'\]/)
   assert.match(studio, /<MarketingReports/)
   assert.match(studio, /type === 'marketing_report'[\s\S]*Open Reports/)
+  assert.match(studio, /loading && !\(tab === 'reports' && workspace\)/)
+  assert.match(studio, /useBlocker\(briefDirty \|\| reportDirty\)/)
+  assert.match(studio, /requestedOutput=\{contextValidation\.context\?\.output \|\| null\}/)
   assert.match(reports, /label="Brand"[\s\S]*workspace\.engagement\.brands/)
   assert.match(reports, /studio\.saveArtifact/)
   assert.match(reports, /artifact_type: 'marketing_report'/)
