@@ -16,8 +16,14 @@ function owner(id, profiles, active) {
 }
 
 export function effectiveMarketingTimezone(project, client) {
-  if (project?.engagement_type === 'internal') return clean(project.planning_timezone) || 'UTC'
-  return clean(project?.planning_timezone) || clean(client?.default_timezone) || 'UTC'
+  const candidate = project?.engagement_type === 'internal'
+    ? clean(project.planning_timezone)
+    : clean(project?.planning_timezone) || clean(client?.default_timezone)
+  if (!candidate) return 'UTC'
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: candidate }).format(new Date(0))
+    return candidate
+  } catch { return 'UTC' }
 }
 
 export function monthInTimezone(now = new Date(), timezone = 'UTC') {

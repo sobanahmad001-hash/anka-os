@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { createServer } from 'vite'
-import { buildMarketingCalendar, entriesForDay, filterMarketingCalendar, marketingMonthDays, moveMarketingMonth } from './marketingCalendar.js'
+import { buildMarketingCalendar, entriesForDay, filterMarketingCalendar, marketingMonthDays, monthInTimezone, moveMarketingMonth } from './marketingCalendar.js'
 
 const repository = readFileSync(new URL('./marketingCalendarRepository.js', import.meta.url), 'utf8')
 const component = readFileSync(new URL('../components/MarketingCalendar.jsx', import.meta.url), 'utf8')
@@ -84,6 +84,14 @@ test('month, channel, owner, status and date-range helpers are deterministic', (
   assert.equal(filterMarketingCalendar(calendar.entries, {}, '2026-10').length, 0)
 })
 
+test('organization timezone month boundaries are explicit and invalid configured zones fall back to UTC', () => {
+  const edge = new Date('2026-09-30T20:30:00.000Z')
+  assert.equal(monthInTimezone(edge, 'Asia/Karachi'), '2026-10')
+  assert.equal(monthInTimezone(edge, 'UTC'), '2026-09')
+  const input = fixture(); input.project.planning_timezone = 'Not/A_Timezone'
+  assert.equal(buildMarketingCalendar(input).timezone, 'UTC')
+})
+
 test('cancelled Project Tasks remain cancelled while still satisfying dependency-terminal semantics', () => {
   const input = fixture()
   input.tasks[0].status = 'cancelled'
@@ -159,7 +167,9 @@ test('foreign organization rows fail closed before projection', () => {
 test('MB05 is a SELECT-only projection and surfaces the verified scheduling gap', () => {
   for (const table of ['projects', 'clients', 'tasks', 'work_items', 'task_dependencies', 'work_item_dependencies', 'marketing_campaigns', 'marketing_campaign_plan_versions']) assert.match(repository, new RegExp(`from\\('${table}'\\)`))
   assert.doesNotMatch(repository, /functions\.invoke|\.insert\(|\.update\(|\.upsert\(|\.delete\(|rpc\(/)
-  assert.match(component, /project-owner\/project-manager authority and dependency revalidation/)
+  assert.match(component, /date-only command that preserves the rest of the record/)
+  assert.match(component, /revalidates dependencies under the same lock/)
+  assert.match(component, /No scheduled work matches this month and filters/)
   assert.match(component, /Completed work; no external publication evidence is linked/)
   assert.match(component, /Recurring planner/)
   assert.doesNotMatch(component, /draggable|onDrop|>Schedule work<|>Confirm date<|>Publish</)
