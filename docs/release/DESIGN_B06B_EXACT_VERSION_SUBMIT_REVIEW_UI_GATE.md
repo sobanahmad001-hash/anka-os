@@ -48,6 +48,8 @@ requests retain the released idempotency-key behavior.
   parent package snapshot and therefore cannot erase an unsaved draft on the current version.
 - An uncertain initial approval-request response remains action-specifically locked until an
   authoritative refresh reconciles the selected exact version.
+- The mounted lifecycle guard is restored during every effect setup, including React Strict
+  Mode's development setup-cleanup-setup cycle.
 - A loading or failed parent refresh marks the snapshot stale and removes mutations.
 - Missing signed object access, exact asset versions, active Design service, or active downstream
   service blocks submission locally; the server remains authoritative and repeats the full check.
@@ -67,7 +69,8 @@ requests retain the released idempotency-key behavior.
 ## Verification
 
 - Lockfile install: `npm ci` PASS.
-- Focused B06a/B06b Node tests: 15/15 PASS.
+- Focused B06a/B06b Node tests: 15/15 PASS, including the ambiguous-create regression mounted
+  under React Strict Mode.
 - Full Node data and mounted-interaction suite: 944/944 PASS.
 - Testing Wave exact reproducer: 5/5 PASS, including late old-version completion with a current
   unsaved draft and interrupted initial submission requiring authoritative reconciliation.
@@ -96,5 +99,6 @@ change. Rollback is a frontend/model/test commit revert only.
 Testing Wave must independently review the exact final commit. Any later code change requires
 impact-appropriate renewed checks.
 
-The initial candidate `675326c3a3b9a3756e8c8097b0b58f3bb077f11a` is preserved as rejected.
-The final candidate includes the two bounded Testing Wave corrections described above.
+The initial candidate `675326c3a3b9a3756e8c8097b0b58f3bb077f11a` and first correction
+`7af3416ebaa732c5c59560b1fe56e7fe7121946a` are preserved as rejected. The final candidate
+includes the bounded Testing Wave corrections described above.

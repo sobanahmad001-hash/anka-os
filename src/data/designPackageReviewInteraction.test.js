@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { act, createElement } from 'react'
+import { act, createElement, StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createServer } from 'vite'
 
@@ -282,9 +282,11 @@ test('B06b combined panels lock ambiguous initial create until exact-request ref
     requestChanges: async () => {},
   }
   globalThis.__b06bProofingRepository = { list: async () => [], add: async () => {}, resolve: async () => {} }
-  await act(async () => root.render(createElement(DesignPackageReviewPanel, {
-    workspace: workspace(), reviewAvailable: true, snapshotFresh: true, onRefresh: async () => {},
-  })))
+  await act(async () => root.render(createElement(StrictMode, null,
+    createElement(DesignPackageReviewPanel, {
+      workspace: workspace(), reviewAvailable: true, snapshotFresh: true, onRefresh: async () => {},
+    }),
+  )))
   await flushMounted()
   for (const checkbox of elements(environment.container, 'input').filter(node => reactProps(node).type === 'checkbox')) {
     await act(async () => reactProps(checkbox).onChange({ target: { checked: true } }))

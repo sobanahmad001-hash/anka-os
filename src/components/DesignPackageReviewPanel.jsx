@@ -48,7 +48,10 @@ export default function DesignPackageReviewPanel({
     if (!selected && selectedVersionId) setSelectedVersionId('')
     else if (selected && selected.version.id !== selectedVersionId) setSelectedVersionId(selected.version.id)
   }, [selected, selectedVersionId])
-  useEffect(() => () => { mountedRef.current = false }, [])
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
   function setSubmissionLocked(targetId, locked) {
     const next = new Set(submissionLocksRef.current)
