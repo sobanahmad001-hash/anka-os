@@ -166,8 +166,9 @@ test('mounted B01 Home routes only exact compatible records to their real editor
   writer.versions[0].content = { schema_version: 2, output_type: 'blog_article', working_title: 'Writer draft', body: 'Exact writer body' }
   await render(writer)
   await click(byText(environment.container, 'button', 'Writer draft'))
-  await click(byText(environment.container, 'button', 'Continue in Content editor'))
-  assert.deepEqual(actions, ['writer-a:writer'])
+  assert.equal(byText(environment.container, 'button', 'Continue in Content editor'), undefined)
+  assert.match(environment.container.textContent, /No compatible exact editor is available/)
+  assert.deepEqual(actions, [])
 })
 
 test('mounted B01 Home resets exact selection on engagement switch and distinguishes stale, empty, denied, loading, and failed states', async t => {
