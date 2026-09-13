@@ -11,6 +11,7 @@ import {
   freezeCreativeBrief, saveCreativeBrief, setWorkingDirection, validateCreativeBrief,
 } from './creativeBriefs.ts'
 import { archiveDesignAsset, DESIGN_ASSET_BUCKET, uploadDesignAssetVersion } from './assetVersions.ts'
+import { previewDeliveryPackage, saveDeliveryPackage } from './packageDelivery.ts'
 
 type Client = ReturnType<typeof createClient<any>>
 type ScopedClient = Client & { organizationId: string }
@@ -220,6 +221,16 @@ async function callerAssetVersionRoot(userClient: Client, versionIds: string[]):
   return root
 }
 
+async function callerDeliveryPackageRoot(userClient: Client, artifactId: string): Promise<CallerRoot> {
+  const { data, error } = await userClient.from('artifacts')
+    .select('id, organization_id, engagement_id, artifact_type')
+    .eq('id', artifactId).eq('artifact_type', 'design_delivery_package').maybeSingle()
+  if (error || !data?.engagement_id) {
+    throw Object.assign(new Error('Design delivery package is unavailable'), { status: 404 })
+  }
+  return { organizationId: data.organization_id, engagementId: data.engagement_id }
+}
+
 export async function designWorkshopScope(userClient: Client, body: Json): Promise<ServerOrganizationScope> {
   const action = text(body.action, 80)
   const requestedOrganizationId = text(body.organization_id, 80) || null
@@ -284,6 +295,14 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
   }
   if (action === 'archive_asset') {
     const root = await callerDesignAssetRoot(userClient, requiredActionId(body.asset_id, 'Asset'))
+    return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
+  }
+  if (action === 'preview_delivery_package'
+    || (action === 'save_delivery_package' && !text(body.artifact_id, 80))) {
+    return { root: { kind: 'engagement', id: requiredActionId(body.engagement_id, 'Engagement') }, requestedOrganizationId }
+  }
+  if (action === 'save_delivery_package') {
+    const root = await callerDeliveryPackageRoot(userClient, requiredActionId(body.artifact_id, 'Design delivery package'))
     return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
   }
   if (action === 'sign_asset_versions') {
@@ -1488,6 +1507,8 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       upload_asset_version: () => uploadDesignAssetVersion(admin, body, user.id),
       archive_asset: () => archiveDesignAsset(admin, body, user.id),
       sign_asset_versions: () => signAssetVersions(admin, userClient, body),
+      preview_delivery_package: () => previewDeliveryPackage(admin, userClient, body),
+      save_delivery_package: () => saveDeliveryPackage(admin, userClient, body, user.id),
     }
     if (!hasWorkshopAuthority(membership as Json, action)) {
       return response({ error: 'Your department role cannot perform this action' }, 403)
