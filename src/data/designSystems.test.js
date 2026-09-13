@@ -6,6 +6,7 @@ import {
   cloneDesignSystemContent,
   latestVersionFor,
   releasedVersionsFor,
+  resolveDesignSystemLibrarySelection,
 } from './designSystems.js'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
@@ -84,4 +85,24 @@ test('design-system editor clones immutable content for safe local editing', () 
   const cloned = cloneDesignSystemContent(source)
   cloned.color_tokens[0].name = 'B'
   assert.equal(source.color_tokens[0].name, 'A')
+})
+
+test('exact Design System requests never substitute another root or version', () => {
+  const artifacts = [{ id: 'artifact-a' }, { id: 'artifact-b' }]
+  const versions = [
+    { id: 'a-v1', artifact_id: 'artifact-a', version_number: 1 },
+    { id: 'a-v2', artifact_id: 'artifact-a', version_number: 2 },
+    { id: 'b-v1', artifact_id: 'artifact-b', version_number: 1 },
+  ]
+  const approvals = [{ artifact_version_id: 'a-v1' }, { artifact_version_id: 'b-v1' }]
+  assert.deepEqual(resolveDesignSystemLibrarySelection({ artifacts, versions, approvals, requestedArtifactId: 'artifact-a', requestedVersionId: 'a-v2' }), {
+    status: 'ready', reason: '', artifactId: 'artifact-a', versionId: 'a-v2',
+  })
+  for (const request of [
+    { requestedArtifactId: 'missing', requestedVersionId: 'a-v2' },
+    { requestedArtifactId: 'artifact-a', requestedVersionId: 'missing' },
+    { requestedArtifactId: 'artifact-a', requestedVersionId: 'b-v1' },
+    { requestedArtifactId: '', requestedVersionId: 'a-v2' },
+  ]) assert.equal(resolveDesignSystemLibrarySelection({ artifacts, versions, approvals, ...request }).status, 'invalid')
+  assert.equal(resolveDesignSystemLibrarySelection({ artifacts, versions, approvals }).versionId, 'a-v1')
 })

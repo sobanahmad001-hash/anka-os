@@ -9,6 +9,7 @@ import {
   EMPTY_DESIGN_SYSTEM,
   latestVersionFor,
   releasedVersionsFor,
+  resolveDesignSystemLibrarySelection,
 } from '../data/designSystems.js'
 import { designSystems } from '../data/designSystemsRepository.js'
 
@@ -35,6 +36,7 @@ export default function DesignSystems() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [selectionError, setSelectionError] = useState('')
   const [message, setMessage] = useState('')
 
   const load = useCallback(async (preferredId = '') => {
@@ -43,21 +45,32 @@ export default function DesignSystems() {
       const result = await designSystems.loadLibrary()
       setWorkspace(result)
       setChatServiceId(current => result.services.some(service => service.id === current) ? current : result.services[0]?.id || '')
-      const requested = preferredId || searchParams.get('artifact') || selectedId
-      const nextId = result.artifacts.some(item => item.id === requested) ? requested : result.artifacts[0]?.id || ''
-      setSelectedId(nextId)
+      const selection = resolveDesignSystemLibrarySelection({
+        ...result,
+        requestedArtifactId: preferredId ? '' : searchParams.get('artifact') || '',
+        requestedVersionId: preferredId ? '' : searchParams.get('version') || '',
+        preferredArtifactId: preferredId,
+        currentArtifactId: selectedId,
+      })
+      setSelectionError(selection.status === 'invalid'
+        ? 'The exact Design System version is unavailable in the active organization. The link may be stale, invalid, or outside your current access.'
+        : '')
+      setSelectedId(selection.artifactId)
+      setVersionId(selection.versionId)
     } catch (reason) { setError(reason.message) }
     finally { setLoading(false) }
   }, [searchParams, selectedId])
 
-  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, [parentSearch]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedArtifact = workspace.artifacts.find(item => item.id === selectedId) || null
   const versions = useMemo(() => workspace.versions.filter(item => item.artifact_id === selectedId)
     .sort((left, right) => right.version_number - left.version_number), [workspace.versions, selectedId])
   const releasedVersions = useMemo(() => releasedVersionsFor(selectedId, workspace.versions, workspace.approvals),
     [selectedId, workspace.versions, workspace.approvals])
-  const viewedVersion = versions.find(item => item.id === versionId) || releasedVersions[0] || versions[0] || null
+  const viewedVersion = versionId
+    ? versions.find(item => item.id === versionId) || null
+    : releasedVersions[0] || versions[0] || null
   const latestVersion = latestVersionFor(selectedId, workspace.versions)
   const latestApproval = workspace.approvals.find(item => item.artifact_version_id === latestVersion?.id) || null
   const activeService = workspace.services.find(item => item.engagement_id === selectedArtifact?.engagement_id) || null
@@ -66,8 +79,10 @@ export default function DesignSystems() {
 
   useEffect(() => {
     if (!selectedArtifact) return
-    const requestedVersionId = searchParams.get('version') || ''
-    const nextVersion = versions.find(item => item.id === requestedVersionId) || releasedVersions[0] || versions[0] || null
+    const requestedVersionId = searchParams.get('artifact') === selectedArtifact.id ? searchParams.get('version') || '' : ''
+    const nextVersion = requestedVersionId
+      ? versions.find(item => item.id === requestedVersionId && item.artifact_id === selectedArtifact.id) || null
+      : releasedVersions[0] || versions[0] || null
     setVersionId(nextVersion?.id || '')
     setForm({
       title: selectedArtifact.title,
@@ -85,13 +100,22 @@ export default function DesignSystems() {
   }), [workspace, search, releasedOnly])
 
   function choose(artifactId) {
-    setSelectedId(artifactId); setSearchParams(artifactId ? { artifact: artifactId } : {})
+    const nextVersion = releasedVersionsFor(artifactId, workspace.versions, workspace.approvals)[0]
+      || latestVersionFor(artifactId, workspace.versions)
+    setSelectionError(''); setSelectedId(artifactId); setVersionId(nextVersion?.id || '')
+    setSearchParams(artifactId ? { artifact: artifactId, ...(nextVersion?.id ? { version: nextVersion.id } : {}) } : {})
+    setMessage(''); setError('')
+  }
+
+  function chooseVersion(nextVersionId) {
+    setVersionId(nextVersionId)
+    setSearchParams({ artifact: selectedId, version: nextVersionId })
     setMessage(''); setError('')
   }
 
   function startNew() {
     const service = workspace.services[0]
-    setSelectedId(''); setSearchParams({}); setVersionId('')
+    setSelectionError(''); setSelectedId(''); setSearchParams({}); setVersionId('')
     setForm({ ...EMPTY_FORM, content: cloneDesignSystemContent(), engagement_service_id: service?.id || '' })
     setMessage('Creating a new manual design system draft.')
   }
@@ -131,7 +155,8 @@ export default function DesignSystems() {
       })
       setMessage(`Version ${result.version.version_number} saved as an immutable manual draft.`)
       await load(result.artifact_id)
-      setSearchParams({ artifact: result.artifact_id })
+      setVersionId(result.version.id)
+      setSearchParams({ artifact: result.artifact_id, version: result.version.id })
     } catch (reason) { setError(reason.message) }
     finally { setSaving(false) }
   }
@@ -155,14 +180,18 @@ export default function DesignSystems() {
       {error && <div className="mt-4 rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">{error}</div>}
       {message && <div className="mt-4 rounded-xl border border-emerald-800 bg-emerald-950/25 px-4 py-3 text-sm text-emerald-300">{message}</div>}
 
-      <div className="mt-7 grid gap-6 xl:grid-cols-[330px_1fr]">
+      {selectionError ? <section role="alert" className="mt-7 rounded-2xl border border-amber-800 bg-amber-950/30 p-6">
+        <h2 className="text-xl font-semibold text-amber-100">Exact Design System unavailable</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-200">{selectionError} No other artifact or version was substituted.</p>
+        <button type="button" onClick={() => { setSelectionError(''); setSelectedId(''); setVersionId(''); setSearchParams({}) }} className={`${SECONDARY} mt-4`}>Browse available Design Systems</button>
+      </section> : <div className="mt-7 grid gap-6 xl:grid-cols-[330px_1fr]">
         <aside className="space-y-4">
           <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><input className={INPUT} placeholder="Search systems, brands, engagements" value={search} onChange={event => setSearch(event.target.value)} /><label className="mt-3 flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={releasedOnly} onChange={event => setReleasedOnly(event.target.checked)} />Released library only</label></div>
           <div className="space-y-3">{cards.map(artifact => { const released = releasedVersionsFor(artifact.id, workspace.versions, workspace.approvals)[0]; return <button type="button" key={artifact.id} onClick={() => choose(artifact.id)} className={`w-full rounded-2xl border p-4 text-left ${artifact.id === selectedId ? 'border-pink-500/60 bg-pink-950/20' : 'border-slate-800 bg-slate-900/60 hover:border-slate-700'}`}><div className="flex items-start justify-between gap-3"><p className="font-semibold text-white">{artifact.title}</p><span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase ${released ? 'bg-emerald-950 text-emerald-300' : 'bg-amber-950 text-amber-300'}`}>{released ? `Released v${released.version_number}` : 'Draft'}</span></div><p className="mt-2 text-xs text-slate-500">{related(artifact.brands)?.name || 'Brand'} · {related(artifact.engagements)?.name || 'Engagement'}</p></button>})}{!cards.length && <p className="rounded-2xl border border-dashed border-slate-800 p-6 text-center text-sm text-slate-600">No matching released design systems.</p>}</div>
         </aside>
 
         <main className="min-w-0 space-y-6">
-          {selectedArtifact && viewedVersion && <DesignSystemViewer artifact={selectedArtifact} version={viewedVersion} versions={versions} releasedVersions={releasedVersions} setVersionId={setVersionId} />}
+          {selectedArtifact && viewedVersion && <DesignSystemViewer artifact={selectedArtifact} version={viewedVersion} versions={versions} releasedVersions={releasedVersions} setVersionId={chooseVersion} />}
           <DesignSystemEditor form={form} setForm={setForm} services={workspace.services} selectedArtifact={selectedArtifact} activeService={activeService} saving={saving} onSubmit={save} onServiceChanged={serviceChanged} updateItem={updateItem} addItem={addItem} removeItem={removeItem} />
           <DesignDepartmentChat
             services={workspace.services} serviceId={chatServiceId} onServiceChange={setChatServiceId}
@@ -173,7 +202,7 @@ export default function DesignSystems() {
           {selectedArtifact && versions.length > 0 && <VersionProofingPanel targetKind="artifact" versions={versions} department="design" theme="violet" />}
           {selectedArtifact && <ArtifactRelationsPanel artifact={selectedArtifact} />}
         </main>
-      </div>
+      </div>}
     </div>
   </div>
 }
