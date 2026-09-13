@@ -65,6 +65,7 @@ function elements(root, tagName) {
 }
 
 const byText = (root, tagName, text) => elements(root, tagName).find(node => node.textContent.includes(text))
+const reactProps = node => node[Object.keys(node).find(key => key.startsWith('__reactProps'))]
 const flushMounted = () => act(async () => { await Promise.resolve(); await new Promise(resolve => setTimeout(resolve, 0)) })
 
 async function setValue(node, value) {
@@ -93,6 +94,7 @@ function approvalRepositoryStubs() {
   const stubs = {
     'AuthContext.jsx': ['b06b-auth', 'export const useAuth=()=>({user:{id:"actor"},profile:{role:"contributor",department:"design"}})'],
     'artifactApprovalRepository.js': ['b06b-approval-repository', 'export const artifactApprovals=new Proxy({}, {get:(_,key)=>(...args)=>globalThis.__b06bApprovalRepository[key](...args)})'],
+    'proofingRepository.js': ['b06b-proofing-repository', 'export const proofing=new Proxy({}, {get:(_,key)=>(...args)=>globalThis.__b06bProofingRepository[key](...args)})'],
   }
   return {
     name: 'b06b-approval-repository-stubs', enforce: 'pre',
@@ -251,6 +253,94 @@ test('B06b shared submit control sends one exact-version request across a normal
   finishRequest()
   await flushMounted()
   assert.match(environment.container.textContent, /Pending/)
+})
+
+test('B06b combined panels lock ambiguous initial create until exact-request refresh', async t => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [approvalRepositoryStubs()] })
+  t.after(() => vite.close())
+  const { default: DesignPackageReviewPanel } = await vite.ssrLoadModule('/src/components/DesignPackageReviewPanel.jsx')
+  const environment = mountedEnvironment()
+  const previous = { document: globalThis.document, window: globalThis.window, Event: globalThis.Event, Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT, approval: globalThis.__b06bApprovalRepository, proofing: globalThis.__b06bProofingRepository }
+  Object.assign(globalThis, { document: environment.document, window: environment.window, Event: TestEvent, Node: TestNode, HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true })
+  t.after(() => Object.assign(globalThis, { document: previous.document, window: previous.window, Event: previous.Event, Node: previous.Node, HTMLElement: previous.HTMLElement, IS_REACT_ACT_ENVIRONMENT: previous.act, __b06bApprovalRepository: previous.approval, __b06bProofingRepository: previous.proofing }))
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+
+  let created = false
+  let createCalls = 0
+  globalThis.__b06bApprovalRepository = {
+    load: async id => created ? {
+      request: { id: `request-${id}`, approval_policy: 'parallel', status: 'pending' },
+      signoffs: [{ id: 'signoff', required_approver_id: 'actor', sequence_position: 1, signed_off_at: null }],
+      approvers: [{ user_id: 'reviewer-1', full_name: 'One' }, { user_id: 'reviewer-2', full_name: 'Two' }],
+    } : {
+      request: null, signoffs: [],
+      approvers: [{ user_id: 'reviewer-1', full_name: 'One' }, { user_id: 'reviewer-2', full_name: 'Two' }],
+    },
+    createRequest: async () => { createCalls += 1; created = true; throw new Error('Lost response after commit') },
+    signOff: async () => {},
+    requestChanges: async () => {},
+  }
+  globalThis.__b06bProofingRepository = { list: async () => [], add: async () => {}, resolve: async () => {} }
+  await act(async () => root.render(createElement(DesignPackageReviewPanel, {
+    workspace: workspace(), reviewAvailable: true, snapshotFresh: true, onRefresh: async () => {},
+  })))
+  await flushMounted()
+  for (const checkbox of elements(environment.container, 'input').filter(node => reactProps(node).type === 'checkbox')) {
+    await act(async () => reactProps(checkbox).onChange({ target: { checked: true } }))
+  }
+  await flushMounted()
+  await act(async () => byText(environment.container, 'button', 'Submit exact package version for review').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  await flushMounted()
+  assert.equal(createCalls, 1)
+  assert.match(environment.container.textContent, /Lost response/)
+  assert.equal(byText(environment.container, 'button', 'Submit exact package version for review'), undefined)
+  await act(async () => byText(environment.container, 'button', 'Refresh review status').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  await flushMounted()
+  assert.match(environment.container.textContent, /Sign off this exact version/)
+  assert.equal(createCalls, 1)
+})
+
+test('B06b ignores an old-version mutation completion without erasing current proofing draft', async t => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [approvalRepositoryStubs()] })
+  t.after(() => vite.close())
+  const { default: DesignPackageReviewPanel } = await vite.ssrLoadModule('/src/components/DesignPackageReviewPanel.jsx')
+  const environment = mountedEnvironment()
+  const previous = { document: globalThis.document, window: globalThis.window, Event: globalThis.Event, Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT, approval: globalThis.__b06bApprovalRepository, proofing: globalThis.__b06bProofingRepository }
+  Object.assign(globalThis, { document: environment.document, window: environment.window, Event: TestEvent, Node: TestNode, HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true })
+  t.after(() => Object.assign(globalThis, { document: previous.document, window: previous.window, Event: previous.Event, Node: previous.Node, HTMLElement: previous.HTMLElement, IS_REACT_ACT_ENVIRONMENT: previous.act, __b06bApprovalRepository: previous.approval, __b06bProofingRepository: previous.proofing }))
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+
+  let finishSignoff
+  let refreshCalls = 0
+  globalThis.__b06bApprovalRepository = {
+    load: async id => ({
+      request: { id: `request-${id}`, approval_policy: 'parallel', status: 'pending' },
+      signoffs: [{ id: `signoff-${id}`, required_approver_id: 'actor', sequence_position: 1, signed_off_at: null }],
+      approvers: [{ user_id: 'actor', full_name: 'Actor' }],
+    }),
+    createRequest: async () => {},
+    signOff: () => new Promise(resolve => { finishSignoff = resolve }),
+    requestChanges: async () => {},
+  }
+  globalThis.__b06bProofingRepository = { list: async () => [], add: async () => {}, resolve: async () => {} }
+  await act(async () => root.render(createElement(DesignPackageReviewPanel, {
+    workspace: workspace(), reviewAvailable: true, snapshotFresh: true,
+    onRefresh: async () => { refreshCalls += 1 },
+  })))
+  await flushMounted()
+  await act(async () => byText(environment.container, 'button', 'Sign off this exact version').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  await setValue(elements(environment.container, 'select')[0], 'package-v1')
+  await flushMounted()
+  const draft = elements(environment.container, 'textarea').at(-1)
+  await act(async () => reactProps(draft).onChange({ target: { value: 'NEW VERSION UNSAVED FEEDBACK' } }))
+  await flushMounted()
+  finishSignoff()
+  await flushMounted()
+  await flushMounted()
+  assert.equal(elements(environment.container, 'textarea').at(-1).value, 'NEW VERSION UNSAVED FEEDBACK')
+  assert.equal(refreshCalls, 0)
 })
 
 test('B06b hides mutations on stale or revoked snapshots but keeps exact read-only evidence visible', async t => {

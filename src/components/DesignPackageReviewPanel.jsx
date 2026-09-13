@@ -33,24 +33,62 @@ export default function DesignPackageReviewPanel({
   const [reviewEpoch, setReviewEpoch] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshError, setRefreshError] = useState('')
+  const [submissionLocks, setSubmissionLocks] = useState([])
+  const [reviewChangedTarget, setReviewChangedTarget] = useState('')
   const refreshLock = useRef(false)
+  const submissionLocksRef = useRef(new Set())
+  const selectedVersionRef = useRef(entries[0]?.version.id || '')
+  const mountedRef = useRef(true)
   const selected = entries.find(entry => entry.version.id === selectedVersionId) || entries[0] || null
   const readiness = designPackageReviewReadiness(selected, workspace)
   const selectedAssets = selected?.references.map(reference => assetDetails(reference, workspace)) || []
+  selectedVersionRef.current = selected?.version.id || ''
 
   useEffect(() => {
     if (!selected && selectedVersionId) setSelectedVersionId('')
     else if (selected && selected.version.id !== selectedVersionId) setSelectedVersionId(selected.version.id)
   }, [selected, selectedVersionId])
+  useEffect(() => () => { mountedRef.current = false }, [])
+
+  function setSubmissionLocked(targetId, locked) {
+    const next = new Set(submissionLocksRef.current)
+    if (locked) next.add(targetId); else next.delete(targetId)
+    submissionLocksRef.current = next
+    if (mountedRef.current) setSubmissionLocks([...next])
+  }
+
+  function captureApprovalSubmit(event) {
+    const button = event.target?.closest?.('button') || event.target
+    if (button?.textContent?.trim() !== 'Submit exact package version for review') return
+    const targetId = selected?.version.id
+    if (targetId && !submissionLocksRef.current.has(targetId)) setSubmissionLocked(targetId, true)
+  }
+
+  function approvalChanged(targetId) {
+    setSubmissionLocked(targetId, false)
+    if (!mountedRef.current || selectedVersionRef.current !== targetId) return
+    setReviewChangedTarget(targetId)
+  }
+
+  function proofingChanged(targetId) {
+    if (!mountedRef.current || selectedVersionRef.current !== targetId) return
+    setReviewChangedTarget(targetId)
+  }
 
   async function refreshReviewStatus() {
     if (refreshLock.current) return
+    const targetId = selected?.version.id
+    if (!targetId) return
     refreshLock.current = true
     setRefreshing(true)
     setRefreshError('')
     try {
       await onRefresh()
-      setReviewEpoch(value => value + 1)
+      if (mountedRef.current && selectedVersionRef.current === targetId) {
+        setSubmissionLocked(targetId, false)
+        setReviewChangedTarget('')
+        setReviewEpoch(value => value + 1)
+      }
     } catch (reason) {
       setRefreshError(reason instanceof Error ? reason.message : String(reason))
     } finally {
@@ -67,6 +105,7 @@ export default function DesignPackageReviewPanel({
 
   const status = selected.approval ? 'Approved' : 'Unapproved'
   const storedContent = selected.version.content || {}
+  const submissionLocked = submissionLocks.includes(selected.version.id)
   return <section aria-labelledby="design-package-review-title" className="mt-6 rounded-2xl border border-blue-400/20 bg-slate-900/70 p-5">
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div>
@@ -79,7 +118,7 @@ export default function DesignPackageReviewPanel({
 
     <div className="mt-5 flex flex-wrap items-end gap-3">
       <label className="min-w-72 flex-1 text-xs font-semibold uppercase tracking-wider text-slate-500">Exact saved package version
-        <select aria-label="Exact saved package version" value={selected.version.id} onChange={event => { setSelectedVersionId(event.target.value); setRefreshError('') }} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm font-normal normal-case tracking-normal text-white">
+        <select aria-label="Exact saved package version" value={selected.version.id} onChange={event => { setSelectedVersionId(event.target.value); setRefreshError(''); setReviewChangedTarget('') }} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm font-normal normal-case tracking-normal text-white">
           {entries.map(entry => <option key={entry.version.id} value={entry.version.id}>{entry.artifact.title} · version {entry.version.version_number} · {new Date(entry.version.created_at).toLocaleString()}</option>)}
         </select>
       </label>
@@ -87,6 +126,8 @@ export default function DesignPackageReviewPanel({
     </div>
     <p className="mt-2 text-xs text-slate-500">If a submission response was interrupted, refresh first. The existing exact-version request is read back before another action is offered.</p>
     {refreshError && <p role="alert" className="mt-3 rounded-xl border border-red-900/60 bg-red-950/30 p-3 text-sm text-red-300">{refreshError}</p>}
+    {submissionLocked && <p role="status" className="mt-3 rounded-xl border border-blue-900/60 bg-blue-950/30 p-3 text-sm text-blue-200">This exact-version submission is being confirmed and remains locked. Lost response or delayed confirmation can mean the server already holds the request; refresh review status before submitting again.</p>}
+    {reviewChangedTarget === selected.version.id && <p role="status" className="mt-3 text-xs text-slate-400">Review state changed. The panel is current; refresh when you want to reconcile the package-level approval badge.</p>}
 
     <article className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/45 p-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -114,14 +155,16 @@ export default function DesignPackageReviewPanel({
     {snapshotFresh && !readiness.ready && <p role="alert" className="mt-4 rounded-xl border border-amber-900/60 bg-amber-950/30 p-3 text-sm text-amber-200">Review submission is blocked locally: {readiness.missing.join(', ')}. The server also rechecks package context, services, work, exact versions, and objects.</p>}
     {snapshotFresh && readiness.ready && !reviewAvailable && <p className="mt-4 rounded-xl border border-amber-900/60 bg-amber-950/30 p-3 text-sm text-amber-200">Review submission is unavailable until the current official work context and existing server capability are valid.</p>}
 
-    {snapshotFresh && readiness.ready && reviewAvailable && <ArtifactApprovalPanel
-      key={`design-package-approval:${selected.version.id}:${reviewEpoch}`}
-      version={selected.version}
-      approval={selected.approval}
-      theme="blue"
-      requestLabel="Submit exact package version for review"
-      onChanged={onRefresh}
-    />}
+    {snapshotFresh && readiness.ready && reviewAvailable && !submissionLocked && <div onClickCapture={captureApprovalSubmit}>
+      <ArtifactApprovalPanel
+        key={`design-package-approval:${selected.version.id}:${reviewEpoch}`}
+        version={selected.version}
+        approval={selected.approval}
+        theme="blue"
+        requestLabel="Submit exact package version for review"
+        onChanged={() => approvalChanged(selected.version.id)}
+      />
+    </div>}
     {snapshotFresh && <VersionProofingPanel
       key={`design-package-proofing:${selected.version.id}:${reviewEpoch}`}
       targetKind="artifact"
@@ -129,7 +172,7 @@ export default function DesignPackageReviewPanel({
       initialVersionId={selected.version.id}
       department="design"
       theme="violet"
-      onChanged={onRefresh}
+      onChanged={() => proofingChanged(selected.version.id)}
     />}
   </section>
 }

@@ -33,9 +33,10 @@ organization, Design service, typed work, downstream service, exact asset refere
 assets, and physical private objects at both review boundaries.
 
 Initial approval-request creation is unique per artifact version but does not accept a caller
-replay key. B06b does not automatically retry that mutation. If the HTTP response is interrupted,
-the user refreshes review status; the exact existing request is loaded before another action is
-offered. Duplicate clicks on the refresh recovery are serialized in the component. Change
+replay key. B06b does not automatically retry that mutation. Submission immediately locks that
+exact version and removes the create action. If the HTTP response is interrupted, the lock remains
+until the user explicitly refreshes review status; the exact existing request is loaded before
+another create action can be offered. Duplicate clicks are serialized in the component. Change
 requests retain the released idempotency-key behavior.
 
 ## UI integrity
@@ -43,6 +44,10 @@ requests retain the released idempotency-key behavior.
 - Every review and proofing panel is keyed and populated with the selected exact package version.
 - Switching versions unmounts the prior target, so late approval or proofing responses cannot
   populate or act on the newly selected version.
+- Completion of an older version's in-flight approval or proofing action does not refresh the
+  parent package snapshot and therefore cannot erase an unsaved draft on the current version.
+- An uncertain initial approval-request response remains action-specifically locked until an
+  authoritative refresh reconciles the selected exact version.
 - A loading or failed parent refresh marks the snapshot stale and removes mutations.
 - Missing signed object access, exact asset versions, active Design service, or active downstream
   service blocks submission locally; the server remains authoritative and repeats the full check.
@@ -62,8 +67,10 @@ requests retain the released idempotency-key behavior.
 ## Verification
 
 - Lockfile install: `npm ci` PASS.
-- Focused B06a/B06b Node tests: 13/13 PASS.
-- Full Node data and mounted-interaction suite: 942/942 PASS.
+- Focused B06a/B06b Node tests: 15/15 PASS.
+- Full Node data and mounted-interaction suite: 944/944 PASS.
+- Testing Wave exact reproducer: 5/5 PASS, including late old-version completion with a current
+  unsaved draft and interrupted initial submission requiring authoritative reconciliation.
 - Artifact approval Deno tests: 6/6 PASS.
 - Full backend Deno suite: 326/326 PASS.
 - Integration gateway Deno tests: 14/14 PASS.
@@ -88,3 +95,6 @@ change. Rollback is a frontend/model/test commit revert only.
 
 Testing Wave must independently review the exact final commit. Any later code change requires
 impact-appropriate renewed checks.
+
+The initial candidate `675326c3a3b9a3756e8c8097b0b58f3bb077f11a` is preserved as rejected.
+The final candidate includes the two bounded Testing Wave corrections described above.
