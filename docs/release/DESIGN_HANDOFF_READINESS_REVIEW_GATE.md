@@ -26,9 +26,11 @@ source object is unavailable, and never substitutes another version. Existing te
 previews are validated through the released Design asset access helper.
 
 Preparing, refreshing, previewing, and downloading remain distinct. An uncertain create response
-locks another create until an explicit read refresh. Refreshing does not rebuild a package.
+is retained by the Workshop parent across its loading replacement and locks another create until
+an explicit successful read refresh. Refreshing does not rebuild a package.
 Download failure offers a safe repeat of the existing signed-link action and does not recreate the
 archive. A context-keyed panel clears local errors and locks when the exact release changes.
+Open preview links re-evaluate at their conservative expiry without unrelated user interaction.
 
 This candidate changes no schema, migration, Edge Function, RLS policy, Storage policy, provider,
 generation capability, shared approval/proofing component, release action, client delivery, or
@@ -37,8 +39,9 @@ publication behavior.
 ## Verification and remaining acceptance
 
 - Lockfile install: PASS; the unchanged lockfile still reports 12 existing audit findings.
-- Focused handoff, asset-access, Workshop, and B06b regression suite: 40/40 PASS.
-- Full Node suite: 958/958 PASS.
+- Focused handoff, asset-access, Workshop, and B06b regression suite: 42/42 PASS,
+  including mounted parent-remount uncertainty and automatic expiry regressions.
+- Full Node suite: 960/960 PASS.
 - Lint: PASS with zero errors.
 - Production build: PASS.
 - Patch whitespace and clean-worktree checks are required after the final commit.
@@ -58,3 +61,7 @@ Still open:
 
 No push, PR, merge, migration, deployment, provider call, paid action, external write, production
 fixture, publication, or release is authorized by this packet.
+
+The initial candidate `1aeffdc887c6a33f3c860e492649181af70fd4d2` is preserved as
+rejected. The correction retains exact-release uncertainty in the Workshop parent until a
+successful authoritative refresh and adds expiry-driven plus activation-time preview checks.

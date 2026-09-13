@@ -89,4 +89,7 @@ test('handoff UI retains native keyboard controls, adjacent errors, and read-onl
   assert.match(panel, /Refresh exact handoff status/)
   assert.match(panel, /No package was rebuilt/)
   assert.match(workshop, /key=\{productionHandoffContextKey\(release\)\}/)
+  assert.match(workshop, /handoffUncertainTarget === productionHandoffContextKey\(release\)/)
+  assert.match(panel, /window\.setTimeout\(\(\) => setClock\(Date\.now\(\)\), delay \+ 25\)/)
+  assert.match(panel, /event\.preventDefault\(\)[\s\S]*Refresh exact handoff status before opening/)
 })

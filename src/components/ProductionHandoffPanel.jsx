@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { designAssetAccessState } from '../data/designAssetLibrary.js'
 import {
@@ -23,16 +23,18 @@ export default function ProductionHandoffPanel({
   variants,
   mediaAccess,
   canPrepare,
+  createUncertain = false,
   busy,
   onPrepare,
   onDownload,
   onRefresh,
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const [clock, setClock] = useState(() => Date.now())
   const [localBusy, setLocalBusy] = useState('')
   const [actionError, setActionError] = useState('')
   const [message, setMessage] = useState('')
-  const [createUncertain, setCreateUncertain] = useState(false)
+  const [localCreateUncertain, setLocalCreateUncertain] = useState(false)
   const readiness = useMemo(() => productionHandoffReadiness({
     release, directionVersions, mediaAssets, variants,
   }), [release, directionVersions, mediaAssets, variants])
@@ -43,13 +45,27 @@ export default function ProductionHandoffPanel({
   const exactVersionLabel = readiness.version
     ? `v${readiness.version.version_number} · ${readiness.version.id}`
     : readiness.exactVersionId || 'Unavailable in this authorized snapshot'
+  const issuedAt = Number(mediaAccess?.issuedAt)
+  const effectiveNow = Math.max(clock, Date.now())
+  const accessOptions = { ...mediaAccess, now: effectiveNow }
+  const submissionUncertain = createUncertain || localCreateUncertain
+
+  useEffect(() => {
+    setClock(Date.now())
+    const seconds = Number(mediaAccess?.expiresInSeconds)
+    if (!Number.isFinite(issuedAt) || !Number.isFinite(seconds) || seconds <= 5) return undefined
+    const expiresAt = issuedAt + ((seconds - 5) * 1000)
+    const delay = Math.max(0, expiresAt - Date.now())
+    const timer = window.setTimeout(() => setClock(Date.now()), delay + 25)
+    return () => window.clearTimeout(timer)
+  }, [issuedAt, mediaAccess?.expiresInSeconds])
 
   async function prepare() {
     setLocalBusy('prepare'); setActionError(''); setMessage('')
     try {
       await onPrepare(release)
     } catch (reason) {
-      setCreateUncertain(true)
+      setLocalCreateUncertain(true)
       setActionError(`${reason instanceof Error ? reason.message : String(reason)} The server may already hold a package. Refresh exact handoff status before preparing another.`)
     } finally {
       setLocalBusy('')
@@ -72,13 +88,23 @@ export default function ProductionHandoffPanel({
     try {
       const refreshed = await onRefresh()
       if (refreshed === false) throw new Error('The authorized handoff snapshot could not be refreshed.')
-      setCreateUncertain(false)
+      setLocalCreateUncertain(false)
       setMessage('Exact release, package status, and temporary source previews were refreshed. No package was rebuilt.')
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       setLocalBusy('')
     }
+  }
+
+  function guardPreview(event, asset) {
+    const current = designAssetAccessState({
+      mediaType: asset.media_type, status: asset.status, previewUrl: asset.signed_url,
+    }, { ...mediaAccess, now: Date.now() })
+    if (current.canOpen) return
+    event.preventDefault()
+    setClock(Date.now())
+    setActionError(`${current.message} Refresh exact handoff status before opening this source again.`)
   }
 
   return <section aria-labelledby="production-handoff-title" aria-busy={Boolean(localBusy)} className="rounded-2xl border border-violet-400/20 bg-slate-900/70 p-5">
@@ -98,7 +124,7 @@ export default function ProductionHandoffPanel({
         <button
           type="button"
           className={BUTTON}
-          disabled={!canPrepare || !readiness.ready || packagePreparing || createUncertain || busy === `handoff-${release.id}` || localBusy !== ''}
+          disabled={!canPrepare || !readiness.ready || packagePreparing || submissionUncertain || busy === `handoff-${release.id}` || localBusy !== ''}
           onClick={prepare}
         >
           {busy === `handoff-${release.id}` || localBusy === 'prepare' ? 'Preparing package…' : 'Prepare production package'}
@@ -115,7 +141,7 @@ export default function ProductionHandoffPanel({
 
     {!canPrepare && <p className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-100">Read-only handoff view. Your current Design capability does not permit preparing a package.</p>}
     {!readiness.ready && <p role="alert" className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">Preparation is blocked: {readiness.blockers.join(', ')}. Refresh the authorized context; no substitute version or file will be used.</p>}
-    {createUncertain && <p role="status" className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-100">Package creation remains locked because its result is uncertain. Refresh status before another create action.</p>}
+    {submissionUncertain && <p role="status" className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-100">Package creation remains locked because its result is uncertain. Refresh status before another create action.</p>}
     {actionError && <p role="alert" className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-200">{actionError}</p>}
     {message && <p aria-live="polite" className="mt-4 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-sm text-emerald-100">{message}</p>}
 
@@ -125,12 +151,12 @@ export default function ProductionHandoffPanel({
         {readiness.assets.map(asset => {
           const access = designAssetAccessState({
             mediaType: asset.media_type, status: asset.status, previewUrl: asset.signed_url,
-          }, mediaAccess)
+          }, accessOptions)
           return <article key={asset.id} className="rounded-xl border border-white/10 p-3">
             <p className="text-sm font-semibold capitalize">{asset.media_type} · {asset.id.slice(0, 8)}</p>
             <p className="mt-1 text-xs text-slate-500">Exact version {readiness.exactVersionId.slice(0, 8) || 'unavailable'} · {asset.status}</p>
             {access.canOpen
-              ? <a className="mt-3 block focus:outline-none focus:ring-2 focus:ring-violet-400" href={access.url} target="_blank" rel="noreferrer"><img className="aspect-video w-full rounded-lg object-cover" src={access.url} alt={asset.prompt || `Preview of source asset ${asset.id.slice(0, 8)}`} /><span className="mt-2 block text-xs font-semibold text-violet-200">Open temporary authorized preview</span></a>
+              ? <a className="mt-3 block focus:outline-none focus:ring-2 focus:ring-violet-400" href={access.url} target="_blank" rel="noreferrer" onClick={event => guardPreview(event, asset)}><img className="aspect-video w-full rounded-lg object-cover" src={access.url} alt={asset.prompt || `Preview of source asset ${asset.id.slice(0, 8)}`} /><span className="mt-2 block text-xs font-semibold text-violet-200">Open temporary authorized preview</span></a>
               : <p className="mt-3 rounded-lg bg-amber-500/10 p-3 text-xs leading-5 text-amber-200">{access.message}</p>}
           </article>
         })}
