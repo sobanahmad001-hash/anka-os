@@ -32,3 +32,34 @@ export function latestVersionFor(artifactId, versions) {
   return (versions || []).filter(version => version.artifact_id === artifactId)
     .sort((left, right) => right.version_number - left.version_number)[0] || null
 }
+
+export function resolveDesignSystemLibrarySelection({
+  artifacts = [], versions = [], approvals = [], requestedArtifactId = '', requestedVersionId = '',
+  preferredArtifactId = '', currentArtifactId = '',
+} = {}) {
+  const exactArtifactId = typeof requestedArtifactId === 'string' ? requestedArtifactId.trim() : ''
+  const exactVersionId = typeof requestedVersionId === 'string' ? requestedVersionId.trim() : ''
+  const preferredId = typeof preferredArtifactId === 'string' ? preferredArtifactId.trim() : ''
+  const currentId = typeof currentArtifactId === 'string' ? currentArtifactId.trim() : ''
+
+  if (exactVersionId && !exactArtifactId) return { status: 'invalid', reason: 'exact_target_unavailable', artifactId: '', versionId: '' }
+  if (exactArtifactId && !artifacts.some(item => item.id === exactArtifactId)) {
+    return { status: 'invalid', reason: 'exact_target_unavailable', artifactId: '', versionId: '' }
+  }
+
+  const artifactId = exactArtifactId
+    || (artifacts.some(item => item.id === preferredId) ? preferredId : '')
+    || (artifacts.some(item => item.id === currentId) ? currentId : '')
+    || artifacts[0]?.id || ''
+  if (!artifactId) return { status: 'empty', reason: '', artifactId: '', versionId: '' }
+
+  if (exactVersionId) {
+    const exactVersion = versions.find(item => item.id === exactVersionId && item.artifact_id === artifactId)
+    if (!exactVersion) return { status: 'invalid', reason: 'exact_target_unavailable', artifactId: '', versionId: '' }
+    return { status: 'ready', reason: '', artifactId, versionId: exactVersion.id }
+  }
+
+  const defaultVersion = releasedVersionsFor(artifactId, versions, approvals)[0]
+    || latestVersionFor(artifactId, versions)
+  return { status: 'ready', reason: '', artifactId, versionId: defaultVersion?.id || '' }
+}

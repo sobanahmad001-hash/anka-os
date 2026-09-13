@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import ArtifactApprovalPanel from '../components/ArtifactApprovalPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
@@ -36,21 +36,96 @@ export default function DesignSystems() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [exactUnavailable, setExactUnavailable] = useState(false)
+  const [isCreating, setIsCreating] = useState(false)
 
-  const load = useCallback(async (preferredId = '') => {
-    setLoading(true); setError('')
+  const requestedArtifactId = searchParams.get('artifact') || ''
+  const requestedVersionId = searchParams.get('version') || ''
+  const requestToken = useRef(0)
+
+  const load = useCallback(async (artifactRequest = requestedArtifactId, versionRequest = requestedVersionId) => {
+    const token = ++requestToken.current
+    const shouldPreserveCreateMode = isCreating && !artifactRequest && !versionRequest
+
+    if (shouldPreserveCreateMode) {
+      setExactUnavailable(false)
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
+    setError('')
+    setMessage('')
+
+
     try {
       const result = await designSystems.loadLibrary()
+      if (token !== requestToken.current) return
+
+      const workspaceArtifacts = result.artifacts || []
+      const workspaceVersions = result.versions || []
+      const hasRequestedArtifact = Boolean(artifactRequest && workspaceArtifacts.some(item => item.id === artifactRequest))
+      const artifactVersions = hasRequestedArtifact ? workspaceVersions.filter(item => item.artifact_id === artifactRequest) : []
+      const requestedVersion = versionRequest || ''
+      const hasRequestedVersion = Boolean(requestedVersion && artifactVersions.some(item => item.id === requestedVersion))
+
       setWorkspace(result)
       setChatServiceId(current => result.services.some(service => service.id === current) ? current : result.services[0]?.id || '')
-      const requested = preferredId || searchParams.get('artifact') || selectedId
-      const nextId = result.artifacts.some(item => item.id === requested) ? requested : result.artifacts[0]?.id || ''
-      setSelectedId(nextId)
-    } catch (reason) { setError(reason.message) }
-    finally { setLoading(false) }
-  }, [searchParams, selectedId])
 
-  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+      if ((artifactRequest || requestedVersion) && (!hasRequestedArtifact || (requestedVersion && !hasRequestedVersion))) {
+        setExactUnavailable(true)
+        setSelectedId('')
+        setVersionId('')
+        setForm({
+          ...EMPTY_FORM,
+          content: cloneDesignSystemContent(),
+          engagement_service_id: result.services[0]?.id || '',
+        })
+        return
+      }
+
+      const nextId = hasRequestedArtifact
+        ? artifactRequest
+        : workspaceArtifacts[0]?.id || ''
+
+      setExactUnavailable(false)
+      setSelectedId(nextId)
+
+      if (!nextId) {
+        setVersionId('')
+        return
+      }
+
+      const selectedArtifact = workspaceArtifacts.find(item => item.id === nextId)
+      const versionsForArtifact = workspaceVersions.filter(item => item.artifact_id === nextId).sort((left, right) => right.version_number - left.version_number)
+      const releasedVersionsForArtifact = releasedVersionsFor(nextId, workspaceVersions, result.approvals)
+      const nextVersion = requestedVersion && versionsForArtifact.find(item => item.id === requestedVersion)
+        ? versionsForArtifact.find(item => item.id === requestedVersion)
+        : (releasedVersionsForArtifact[0] || versionsForArtifact[0] || null)
+
+      setVersionId(nextVersion?.id || '')
+      setForm({
+        title: selectedArtifact?.title || '',
+        engagement_service_id: result.services.find(item => item.engagement_id === selectedArtifact?.engagement_id)?.id || '',
+        change_summary: '',
+        data_classification: nextVersion?.data_classification || 'internal',
+        content: cloneDesignSystemContent(versionsForArtifact[0]?.content || EMPTY_DESIGN_SYSTEM),
+      })
+      setIsCreating(false)
+    } catch (reason) {
+      if (token !== requestToken.current) return
+      setError(reason.message)
+      setExactUnavailable(false)
+    } finally {
+      if (token === requestToken.current) {
+        setLoading(false)
+      }
+    }
+  }, [isCreating, requestedArtifactId, requestedVersionId])
+
+  useEffect(() => {
+    load()
+  }, [load, requestedArtifactId, requestedVersionId])
 
   const selectedArtifact = workspace.artifacts.find(item => item.id === selectedId) || null
   const versions = useMemo(() => workspace.versions.filter(item => item.artifact_id === selectedId)
@@ -66,16 +141,20 @@ export default function DesignSystems() {
 
   useEffect(() => {
     if (!selectedArtifact) return
-    const requestedVersionId = searchParams.get('version') || ''
-    const nextVersion = versions.find(item => item.id === requestedVersionId) || releasedVersions[0] || versions[0] || null
+    const versionsForArtifact = workspace.versions.filter(item => item.artifact_id === selectedId).sort((left, right) => right.version_number - left.version_number)
+    const requestedVersionFromRoute = requestedVersionId
+    const releasedVersionsForArtifact = releasedVersionsFor(selectedId, workspace.versions, workspace.approvals)
+    const nextVersion = versionsForArtifact.find(item => item.id === requestedVersionFromRoute) || releasedVersionsForArtifact[0] || versionsForArtifact[0] || null
     setVersionId(nextVersion?.id || '')
-    setForm({
+    setForm(current => ({
+      ...current,
       title: selectedArtifact.title,
       engagement_service_id: activeService?.id || '',
-      change_summary: '', data_classification: nextVersion?.data_classification || 'internal',
-      content: cloneDesignSystemContent(versions[0]?.content || EMPTY_DESIGN_SYSTEM),
-    })
-  }, [selectedArtifact?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+      change_summary: current.change_summary || '',
+      data_classification: nextVersion?.data_classification || 'internal',
+      content: cloneDesignSystemContent(versionsForArtifact[0]?.content || EMPTY_DESIGN_SYSTEM),
+    }))
+  }, [selectedArtifact?.id, requestedVersionId, activeService?.id, selectedId, workspace.versions, workspace.approvals])
 
   const cards = useMemo(() => workspace.artifacts.filter(artifact => {
     const released = releasedVersionsFor(artifact.id, workspace.versions, workspace.approvals)[0]
@@ -85,13 +164,20 @@ export default function DesignSystems() {
   }), [workspace, search, releasedOnly])
 
   function choose(artifactId) {
-    setSelectedId(artifactId); setSearchParams(artifactId ? { artifact: artifactId } : {})
-    setMessage(''); setError('')
+    setSelectedId(artifactId)
+    setIsCreating(false)
+    setSearchParams(artifactId ? { artifact: artifactId } : {})
+    setMessage('')
+    setError('')
   }
 
   function startNew() {
     const service = workspace.services[0]
-    setSelectedId(''); setSearchParams({}); setVersionId('')
+    setIsCreating(true)
+    setSelectedId('')
+    setSearchParams({})
+    setVersionId('')
+    setExactUnavailable(false)
     setForm({ ...EMPTY_FORM, content: cloneDesignSystemContent(), engagement_service_id: service?.id || '' })
     setMessage('Creating a new manual design system draft.')
   }
@@ -119,7 +205,10 @@ export default function DesignSystems() {
   }
 
   async function save(event) {
-    event.preventDefault(); setSaving(true); setError(''); setMessage('')
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    setMessage('')
     try {
       const service = workspace.services.find(item => item.id === form.engagement_service_id)
       if (!service) throw new Error('Select an active Design Systems service')
@@ -130,6 +219,7 @@ export default function DesignSystems() {
         data_classification: form.data_classification,
       })
       setMessage(`Version ${result.version.version_number} saved as an immutable manual draft.`)
+      setIsCreating(false)
       await load(result.artifact_id)
       setSearchParams({ artifact: result.artifact_id })
     } catch (reason) { setError(reason.message) }
@@ -162,8 +252,17 @@ export default function DesignSystems() {
         </aside>
 
         <main className="min-w-0 space-y-6">
-          {selectedArtifact && viewedVersion && <DesignSystemViewer artifact={selectedArtifact} version={viewedVersion} versions={versions} releasedVersions={releasedVersions} setVersionId={setVersionId} />}
-          <DesignSystemEditor form={form} setForm={setForm} services={workspace.services} selectedArtifact={selectedArtifact} activeService={activeService} saving={saving} onSubmit={save} onServiceChanged={serviceChanged} updateItem={updateItem} addItem={addItem} removeItem={removeItem} />
+          {exactUnavailable ? (
+            <div className="rounded-2xl border border-amber-800 bg-amber-950/25 px-5 py-4 text-amber-100">
+              <p className="font-semibold">Exact Design System unavailable</p>
+              <p className="mt-1 text-sm">No other artifact or version was substituted.</p>
+            </div>
+          ) : (
+            <>
+              {selectedArtifact && viewedVersion && <DesignSystemViewer artifact={selectedArtifact} version={viewedVersion} versions={versions} releasedVersions={releasedVersions} setVersionId={setVersionId} />}
+              <DesignSystemEditor form={form} setForm={setForm} services={workspace.services} selectedArtifact={selectedArtifact} activeService={activeService} saving={saving} onSubmit={save} onServiceChanged={serviceChanged} updateItem={updateItem} addItem={addItem} removeItem={removeItem} />
+            </>
+          )}
           <DesignDepartmentChat
             services={workspace.services} serviceId={chatServiceId} onServiceChange={setChatServiceId}
             engagement={chatEngagement} artifacts={workspace.artifacts} stages={workspace.stages}
@@ -177,7 +276,6 @@ export default function DesignSystems() {
     </div>
   </div>
 }
-
 function DesignDepartmentChat({ services, serviceId, onServiceChange, engagement, artifacts, stages, onPropose, onCreated }) {
   return <section className="rounded-2xl border border-violet-900/50 bg-violet-950/10 p-5">
     <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-violet-300">Design workflow</p><h2 className="mt-1 text-xl font-semibold">Shared Department Chat</h2><p className="mt-1 text-sm text-slate-400">Propose an unapproved Design System draft from this engagement's approved AI-safe context.</p></div><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Design Systems service<select className={`${INPUT} mt-2 min-w-72 normal-case`} value={serviceId} onChange={event => onServiceChange(event.target.value)}><option value="">Select active service</option>{services.map(service => <option key={service.id} value={service.id}>{related(service.engagements)?.name || 'Engagement'} · {related(related(service.engagements)?.brands)?.name || 'Brand'}</option>)}</select></label></div>
@@ -214,3 +312,5 @@ function DesignSystemEditor({ form, setForm, services, selectedArtifact, activeS
 function EditorSection({ title, onAdd, children }) { return <section className="mt-6"><div className="mb-3 flex items-center justify-between gap-3"><h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-400">{title}</h3><button type="button" onClick={onAdd} className={SECONDARY}>Add</button></div><div className="space-y-3">{children}</div></section> }
 function Field({ label: fieldLabel, children }) { return <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{fieldLabel}<div className="mt-2 normal-case tracking-normal">{children}</div></label> }
 function Remove({ disabled, onClick }) { return <button type="button" disabled={disabled} onClick={onClick} className={`${SECONDARY} mt-2`}>Remove</button> }
+
+
