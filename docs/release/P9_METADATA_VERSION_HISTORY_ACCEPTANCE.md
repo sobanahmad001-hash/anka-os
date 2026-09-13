@@ -17,12 +17,16 @@ Exact Content and Design history destinations fail closed when the requested art
 - Composite correction branch: `fix/p9-metadata-history-review`.
 - Metadata/history source: `b02177aadaf915bf121c5b83ffcd731298e5a14e`.
 - Atomic proposal telemetry correction: `651a9aa3cd98677a249635c41505f44b88cfca37`.
+- Exact telemetry replay correction: `d7282b9`; any replay must preserve every normalized telemetry field exactly.
 - Integrated Design exact-link correction: `5b05ab46b2ea4840387fcff07956976814862607` (owner source `b955e60e0cf94f0b9b983cc9d04d15103afabfde`).
+- Integrated Design reactive-state correction: `b5e28d5`, plus stale-error regression `9a9e9f9` (owner sources `1c5192997667eb1c0da22ee0f1e4f363b85fb572` and `dae0a6bbdfd7be0e94f562da79ac88f52edb1bf7`).
 - Integrated Content exact-link correction: `800b50d` (owner source `ac1fc852b0375fb74bda10120ff1d98c1e25af6a`).
-- Full Node data suite: 961 passed, 0 failed.
+- Full Node data suite: 964 passed, 0 failed.
 - Department Chat Deno suite: 92 passed, 0 failed; Deno typecheck passed.
 - Production build passed. Whole-repository lint completed with 0 errors and 508 pre-existing warnings.
-- The PostgreSQL migration/verifier execution remains an explicit prerequisite below; it was not represented as completed by static or mocked checks.
+- Disposable PostgreSQL 17.11 migration/verifier run: 4 passed, 0 failed.
+- Actual canonical-wrapper behavior: 7 passed, 0 failed, including identical replay, invalid-metadata rollback, and rejected removed, changed, and empty tool-array replays. The transaction rolled back to 0 messages and 0 runs.
+- The isolated local PostgreSQL server was stopped, its data/password and temporary evidence directory were removed, and zero listeners remained.
 
 ## Evidence to record before a signed-in run
 
@@ -69,7 +73,6 @@ Run only after explicit provider and budget authority identifies the safe test o
 
 - No existing signed-in owner, recipient, or revoked-member sessions and safe record IDs were supplied to this local task.
 - No provider-call or budget authority was supplied for the provider acceptance section.
-- The disposable PostgreSQL 17 migration/verifier run must be repeated where the trusted runtime is available; both official EDB download paths returned HTTP 403 in this task, and the partial temporary directory was removed.
 - No release authority is part of this local-only candidate.
 
 These are execution prerequisites only; they do not broaden the candidate scope or permit creating replacement accounts, memberships, records, provider traffic, or releases.
