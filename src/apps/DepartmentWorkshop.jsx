@@ -103,6 +103,11 @@ const initialResearch = { title: '', researchType: 'general', question: '', find
 const initialDeliverable = { title: '', deliverableType: 'general', dueDate: '' }
 const initialRequest = { title: '', requestedOutput: '', receivingWorkstreamId: '', priority: 'medium', requiredBy: '' }
 
+function withWorkshopContextMatch(entity, engagement) {
+  return Boolean(entity && engagement && entity.id && entity.engagement_id === engagement.id)
+}
+
+
 export default function DepartmentWorkshop({ departmentId }) {
   const { user } = useAuth()
   const [searchParams] = useSearchParams()
@@ -311,8 +316,8 @@ export default function DepartmentWorkshop({ departmentId }) {
     projectId: linkedProject?.project_id || '',
     engagementId: linkedEngagement?.id || '',
     brandId: linkedEngagement?.brand_id || '',
-    activeServiceId: linkedService?.engagement_id === linkedEngagement?.id ? linkedService.id : '',
-    stageId: linkedStage?.engagement_id === linkedEngagement?.id ? linkedStage.id : '',
+    activeServiceId: withWorkshopContextMatch(linkedService, linkedEngagement) ? linkedService.id : '',
+    stageId: withWorkshopContextMatch(linkedStage, linkedEngagement) ? linkedStage.id : '',
     workRecord: resolvedWorkRecord,
     permissions: { viewDepartment: departmentAllowed },
     allowedActions: [],
