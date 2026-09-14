@@ -5,6 +5,7 @@ import {
   sha256AttachmentBytes,
   ENABLED_DEPARTMENTS,
   confirmProposal,
+  departmentChatExecutionMetadata,
   departmentChatExternalEndpoint,
   freezeDepartmentChatContext,
   hasDepartmentChatAuthority,
@@ -202,13 +203,46 @@ function selectedOrganizationFixture() {
           }))
         return { data: result, error: null }
       }
+      if (name === 'save_department_chat_proposal_with_execution_metadata'
+        || name === 'save_department_chat_conversation_proposal_with_execution_metadata') {
+        const runId = 'run-B'
+        const proposalId = 'saved-B'
+        rows.ai_runs = (rows.ai_runs || []).filter(row => row.id !== runId)
+        rows.ai_runs.push({
+          id: runId, organization_id: args.p_organization_id, provider: 'openai',
+          model: args.p_model_id, capability: 'action_proposal', status: 'completed',
+          department_chat_model_configuration_id: args.p_model_configuration_id,
+          context_manifest: {
+            approved_artifact_version_ids: args.p_context_artifact_version_ids,
+            selected_model_id: args.p_model_id, actual_model_id: args.p_actual_model_id,
+            requested_tools: args.p_requested_tools, executed_tools: args.p_executed_tools,
+          },
+          created_at: '2026-09-13T11:00:00Z',
+        })
+        if (args.p_conversation_id) {
+          rows.department_chat_proposals = (rows.department_chat_proposals || [])
+            .filter(row => row.id !== proposalId)
+          rows.department_chat_proposals.push({
+            id: proposalId, organization_id: args.p_organization_id,
+            conversation_id: args.p_conversation_id, proposal_kind: args.p_proposal_kind,
+            target_key: args.p_target_key, preview_payload: args.p_preview_payload,
+            status: 'pending', accepted_artifact_version_id: null,
+          })
+          ;(rows.department_chat_messages ||= []).push({
+            id: 'assistant-proposal-B', organization_id: args.p_organization_id,
+            project_id: args.p_project_id, engagement_id: args.p_engagement_id,
+            department_id: args.p_department_id, conversation_id: args.p_conversation_id,
+            owner_id: 'actor', author_id: null, role: 'assistant', body: args.p_output_text,
+            status: 'completed', ai_run_id: runId, proposal_id: proposalId,
+            sequence: 2, created_at: '2026-09-13T11:00:00Z',
+            finished_at: '2026-09-13T11:00:01Z',
+          })
+        }
+        return { data: { status: 'pending', proposal_id: proposalId, ai_run_id: runId }, error: null }
+      }
       return { data: name === 'begin_department_chat_turn_with_attachments' ? {
           message: { id: 'message-B', status: 'pending' }, replayed: beginReplay,
         }
-        : name === 'save_department_chat_proposal' || name === 'save_department_chat_conversation_proposal'
-          || name === 'save_department_chat_proposal_with_model'
-          || name === 'save_department_chat_conversation_proposal_with_model'
-          ? { status: 'pending', proposal_id: 'saved-B', ai_run_id: 'run-B' }
         : name === 'complete_department_chat_answer' ? {
           conversation_id: args.p_conversation_id, user_message_id: args.p_message_id,
           assistant_message_id: 'assistant-B', ai_run_id: 'run-answer-B',
@@ -238,7 +272,7 @@ function selectedOrganizationFixture() {
           : [
             'data: {"type":"response.output_text.delta","delta":"Offline "}\n\n',
             'data: {"type":"response.output_text.delta","delta":"answer"}\n\n',
-            'data: {"type":"response.completed","response":{"output_text":"Offline answer","usage":{"input_tokens":7,"output_tokens":2}}}\n\n',
+            'data: {"type":"response.completed","response":{"output_text":"Offline answer","model":"offline-actual","usage":{"input_tokens":7,"output_tokens":2}}}\n\n',
           ]
         return new Response(new ReadableStream({
           start(controller) {
@@ -247,7 +281,16 @@ function selectedOrganizationFixture() {
           },
         }), { headers: { 'Content-Type': 'text/event-stream' } })
       }
-      return new Response(JSON.stringify({ output_text: JSON.stringify({ notes: 'Offline', checklist: ['Test'] }) }))
+      const generated = requestBody.text?.format?.schema
+        ? schemaFixture(requestBody.text.format.schema)
+        : 'Offline work item description'
+      if (requestBody.text?.format?.name === 'anka_design_system_draft') {
+        generated.color_tokens[0].value = '#123456'
+      }
+      return new Response(JSON.stringify({
+        output_text: typeof generated === 'string' ? generated : JSON.stringify(generated),
+        model: 'offline-actual', usage: { input_tokens: 7, output_tokens: 2 },
+      }))
     }) as typeof fetch,
     waitUntil: promise => { backgroundTasks.push(promise) },
     proposal: { estimatedCost: () => 0, resolveSingleOpenAiModel: (client, engagement, department, organization, _credential, selected) =>
@@ -319,7 +362,7 @@ Deno.test('selected B succeeds through real request boundaries with every read, 
   for (const { table, filters } of fixture.queries) {
     assertEquals(filters.some(([key, value]) => key === (table === 'organizations' ? 'id' : 'organization_id') && value === 'B'), true, table)
   }
-  const save = fixture.rpcCalls.find(call => call.name === 'save_department_chat_proposal')!
+  const save = fixture.rpcCalls.find(call => call.name === 'save_department_chat_proposal_with_execution_metadata')!
   assertEquals(save.args.p_organization_id, 'B')
   assertEquals(save.args.p_engagement_id, 'engagement-B')
   assertEquals(save.args.p_project_id, 'project-B')
@@ -454,9 +497,21 @@ Deno.test('conversation transcript returns only persisted timestamp and authoriz
     created_at: '2026-09-12T01:02:03Z', finished_at: '2026-09-12T01:02:04Z',
   }]
   fixture.rows.ai_runs = [{
-    id: 'run-B', organization_id: 'B', provider: 'openai', model: 'recorded-model',
+    id: 'run-B', organization_id: 'B', provider: 'openai', model: 'selected-model',
     capability: 'department_chat_answer', status: 'completed',
-    department_chat_model_configuration_id: 'configuration-B', created_at: '2026-09-12T01:02:03Z',
+    department_chat_model_configuration_id: 'model-configuration-B-content',
+    context_manifest: {
+      approved_artifact_version_ids: ['source-version-B'],
+      selected_model_id: 'selected-model', actual_model_id: 'actual-model',
+      requested_tools: [], executed_tools: [],
+    },
+    created_at: '2026-09-12T01:02:03Z',
+  }]
+  fixture.rows.artifact_approvals = [{
+    organization_id: 'B', engagement_id: 'engagement-B',
+    artifact_id: 'source-artifact-B', artifact_version_id: 'source-version-B',
+    artifacts: { artifact_type: 'content', title: 'Authorized source', engagement_id: 'engagement-B' },
+    artifact_versions: { id: 'source-version-B', version_number: 4, ai_use_allowed: true, data_classification: 'internal' },
   }]
   const response = await fixture.request({
     action: 'get_conversation', organization_id: 'B', project_id: 'project-B',
@@ -465,7 +520,20 @@ Deno.test('conversation transcript returns only persisted timestamp and authoriz
   assertEquals(response.status, 200)
   const message = (await response.json()).data.messages[0]
   assertEquals(message.created_at, '2026-09-12T01:02:03Z')
-  assertEquals(message.run, fixture.rows.ai_runs[0])
+  assertEquals(message.run.selected_model, {
+    configuration_id: 'model-configuration-B-content',
+    model_id: 'offline',
+    display_name: 'Offline fixture',
+  })
+  assertEquals(message.run.recorded_model_id, 'selected-model')
+  assertEquals(message.run.actual_model_id, 'actual-model')
+  assertEquals(message.run.requested_tools, [])
+  assertEquals(message.run.executed_tools, [])
+  assertEquals(message.run.source_versions, [{
+    artifact_id: 'source-artifact-B', artifact_version_id: 'source-version-B',
+    artifact_type: 'content', title: 'Authorized source', version_number: 4,
+  }])
+  assertEquals('context_manifest' in message.run, false)
   assertEquals(JSON.stringify(message).includes('fabricated'), false)
 })
 
@@ -590,13 +658,72 @@ Deno.test('saved work-item turn reserves once and uses the atomic conversation p
   assertEquals(begin.args.p_conversation_id, 'conversation-B')
   assertEquals(begin.args.p_client_request_id, 'request-B')
   assertEquals(begin.args.p_attachment_ids, [])
-  const save = fixture.rpcCalls.find(call => call.name === 'save_department_chat_conversation_proposal_with_model')!
+  const save = fixture.rpcCalls.find(call => call.name === 'save_department_chat_conversation_proposal_with_execution_metadata')!
   assertEquals(save.args.p_conversation_id, 'conversation-B')
   assertEquals(save.args.p_message_id, 'message-B')
   assertEquals(fixture.rpcCalls.some(call => call.name === 'save_department_chat_proposal'
     || call.name === 'save_department_chat_proposal_with_model'), false)
   assertEquals(fixture.rpcCalls.some(call => call.name === 'fail_department_chat_turn'), false)
 })
+
+function configureSavedContentProposalFixture(fixture: ReturnType<typeof selectedOrganizationFixture>) {
+  fixture.rows.organization_memberships.find(row => row.organization_id === 'B').department_id = 'content'
+  fixture.rows.engagement_services.find(row => row.organization_id === 'B').service_catalog.department_id = 'content'
+  const connection = fixture.rows.integration_connections.find(row => row.organization_id === 'B')
+  connection.integration_connection_departments.department_id = 'content'
+  connection.integration_connection_engagements.department_id = 'content'
+  fixture.rows.department_chat_conversations.find(row => row.organization_id === 'B').department_id = 'content'
+}
+
+for (const scenario of ['artifact', 'work-item']) {
+  Deno.test('saved ' + scenario + ' proposal transcript projects selected and actual model plus true no-tool telemetry', async () => {
+    const fixture = selectedOrganizationFixture()
+    configureSavedContentProposalFixture(fixture)
+    const common = {
+      organization_id: 'B', project_id: 'project-B', engagement_id: 'engagement-B',
+      department_id: 'content', conversation_id: 'conversation-B',
+      client_request_id: scenario + '-metadata-request',
+      prompt: 'Persist truthful execution metadata.', prompt_safe_for_ai: true,
+      model_configuration_id: 'model-configuration-B-content',
+    }
+    const response = await fixture.request(scenario === 'artifact' ? {
+      ...common, action: 'propose_artifact', artifact_type: 'content',
+      title: 'Metadata artifact',
+    } : {
+      ...common, action: 'propose_work_item', work_item_type: 'task',
+      priority: 'medium', title: 'Metadata work item',
+    })
+    assertEquals(response.status, 200)
+    const providerBody = JSON.parse(String(fixture.providerRequests[0].body))
+    assertEquals('tools' in providerBody, false)
+    const save = fixture.rpcCalls.find(call =>
+      call.name === 'save_department_chat_conversation_proposal_with_execution_metadata')!
+    assertEquals(save.args.p_model_configuration_id, 'model-configuration-B-content')
+    assertEquals(save.args.p_model_id, 'offline')
+    assertEquals(save.args.p_actual_model_id, 'offline-actual')
+    assertEquals(save.args.p_requested_tools, [])
+    assertEquals(save.args.p_executed_tools, [])
+
+    const opened = await fixture.request({
+      action: 'get_conversation', organization_id: 'B', project_id: 'project-B',
+      engagement_id: 'engagement-B', department_id: 'content',
+      conversation_id: 'conversation-B',
+    })
+    assertEquals(opened.status, 200)
+    const message = (await opened.json()).data.messages.find((item: any) =>
+      item.id === 'assistant-proposal-B')
+    assertEquals(message.run.selected_model, {
+      configuration_id: 'model-configuration-B-content',
+      model_id: 'offline',
+      display_name: 'Offline fixture',
+    })
+    assertEquals(message.run.recorded_model_id, 'offline')
+    assertEquals(message.run.actual_model_id, 'offline-actual')
+    assertEquals(message.run.requested_tools, [])
+    assertEquals(message.run.executed_tools, [])
+    assertEquals('context_manifest' in message.run, false)
+  })
+}
 
 Deno.test('a replayed pending client request never starts a second provider run', async () => {
   const fixture = selectedOrganizationFixture()
@@ -788,8 +915,7 @@ for (const department of ['content','design','marketing','development']) {
         prompt: 'Fixture', prompt_safe_for_ai: true,
         organization_id: 'injected', project_id: 'injected', actor_id: 'injected', approval: true,
       }, 'member-1', ORGANIZATION_ID, async () => new Response(JSON.stringify({ output_text: JSON.stringify(fixture) })), contextDependencies)
-      const save = rpcCalls.find(call => call.name === (department === 'development'
-        ? 'save_department_chat_proposal' : 'save_department_chat_proposal_with_model'))!
+      const save = rpcCalls.find(call => call.name === 'save_department_chat_proposal_with_execution_metadata')!
       assertEquals(Boolean(save), true)
       assertEquals(save.args.p_actor_id, 'member-1')
       assertEquals(save.args.p_project_id, 'project-1')
@@ -811,8 +937,7 @@ for (const department of ['content','design','marketing','development']) {
         department_id: department, engagement_id: 'engagement-1', work_item_type: target,
         title: 'Fixture', prompt: 'Fixture', prompt_safe_for_ai: true, status: 'done', assignee_id: 'injected',
       }, 'member-1', ORGANIZATION_ID, async () => new Response(JSON.stringify({output_text:'Fixture'})), contextDependencies)
-      const save = rpcCalls.find(call => call.name === (department === 'development'
-        ? 'save_department_chat_proposal' : 'save_department_chat_proposal_with_model'))!
+      const save = rpcCalls.find(call => call.name === 'save_department_chat_proposal_with_execution_metadata')!
       assertEquals(Boolean(save), true)
       assertEquals((save.args.p_preview_payload as any).status, 'not_started')
       assertEquals((save.args.p_validated_payload as any).assignee_id, undefined)
@@ -1003,7 +1128,7 @@ Deno.test('Development artifact preview persists only an atomic pending proposal
   })), contextDependencies)
   assertEquals(result.status, 'pending')
   assertEquals(rpcCalls.length, 1)
-  assertEquals(rpcCalls[0].name, 'save_department_chat_proposal')
+  assertEquals(rpcCalls[0].name, 'save_department_chat_proposal_with_execution_metadata')
   assertEquals(rpcCalls[0].args.p_proposal_kind, 'artifact_version')
   assertEquals(rpcCalls[0].args.p_target_key, 'technical_brief')
   assertEquals((rpcCalls[0].args.p_validated_payload as any).content.notes, 'Use the existing API.')
@@ -1023,7 +1148,7 @@ Deno.test('work-item preview fixes the future official state to not_started with
     output_text: 'Reproduce and correct the issue.', usage: { input_tokens: 4, output_tokens: 8 },
   })), contextDependencies)
   assertEquals((result.preview as any).status, 'not_started')
-  assertEquals(rpcCalls[0].name, 'save_department_chat_proposal')
+  assertEquals(rpcCalls[0].name, 'save_department_chat_proposal_with_execution_metadata')
   assertEquals(rpcCalls[0].args.p_proposal_kind, 'work_item')
   assertEquals(rpcCalls[0].args.p_target_key, 'bug')
 })
@@ -1155,6 +1280,21 @@ Deno.test('context freeze is deterministic across exact approved versions', asyn
   assertEquals(first.manifest.approved_artifact_version_ids, ['version-a', 'version-b'])
 })
 
+Deno.test('execution metadata distinguishes a provider-reported model and a true no-tool run', () => {
+  assertEquals(departmentChatExecutionMetadata({ model: 'provider-actual' }), {
+    selected_model_id: null,
+    actual_model_id: 'provider-actual',
+    requested_tools: [],
+    executed_tools: [],
+  })
+  assertEquals(departmentChatExecutionMetadata({}), {
+    selected_model_id: null,
+    actual_model_id: null,
+    requested_tools: [],
+    executed_tools: [],
+  })
+})
+
 Deno.test('Shared Department Chat exposes only the OpenAI Responses endpoint', () => {
   const endpoint = departmentChatExternalEndpoint()
   assertEquals(endpoint, 'https://api.openai.com/v1/responses')
@@ -1200,6 +1340,10 @@ Deno.test('P9 ordinary answer streams genuine deltas then atomically saves a no-
   assertEquals(completed.args.p_model_configuration_id, 'model-configuration-B-content')
   assertEquals(completed.args.p_output_text, 'Offline answer')
   assertEquals(completed.args.p_context_manifest.model_configuration_id, 'model-configuration-B-content')
+  assertEquals(completed.args.p_context_manifest.selected_model_id, 'offline')
+  assertEquals(completed.args.p_context_manifest.actual_model_id, 'offline-actual')
+  assertEquals(completed.args.p_context_manifest.requested_tools, [])
+  assertEquals(completed.args.p_context_manifest.executed_tools, [])
   assertEquals(fixture.rpcCalls.some(call => call.name.startsWith('save_department_chat_')), false)
   const providerBody = JSON.parse(String(fixture.providerRequests[0].body))
   assertEquals(providerBody.stream, true)

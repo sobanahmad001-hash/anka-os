@@ -4,6 +4,7 @@ import { OUTPUT_FAMILIES, latestByVersion } from '../data/designWorkshop.js'
 import { canRequestDesignExperimentPromotion, designAllowedActions, designCapabilities, designSelectionParams, loadDesignEngagements, privateDesignParams, resolveDesignContext, resolveDesignNavigationScope, selectableDesignEngagements } from '../data/designWorkshopContext.js'
 import { designWorkshop } from '../data/designWorkshopRepository.js'
 import { productionHandoffs } from '../data/productionHandoffsRepository.js'
+import { productionHandoffContextKey } from '../data/productionHandoffReadiness.js'
 import { appendWorkshopNavigation, parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
 import { composePageDesignPreview } from '../data/websitePageDesigns.js'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -53,6 +54,7 @@ export default function DesignWorkshop() {
   const [workspaceLoadState, setWorkspaceLoadState] = useState('idle')
   const [engagementRetry, setEngagementRetry] = useState(0)
   const [pendingSelection, setPendingSelection] = useState(null)
+  const [handoffUncertainTargets, setHandoffUncertainTargets] = useState(() => new Set())
   const context = useMemo(() => resolveDesignContext(navigationContext, engagements, activeOrganizationId, requestedPrivate), [activeOrganizationId, engagements, navigationContext, requestedPrivate])
   const selectableEngagements = useMemo(() => selectableDesignEngagements(navigationContext, engagements), [engagements, navigationContext])
   const engagementId = context.engagement?.id || ''
@@ -77,7 +79,7 @@ export default function DesignWorkshop() {
   useEffect(() => {
     const generation = ++requestGeneration.current
     deferredContext.current = null
-    setEngagements([]); setWorkspace(null); setModal(null); setPendingSelection(null); setEngagementLoadState(studio ? 'loading' : 'error'); setWorkspaceLoadState('idle'); setBusy(studio ? 'load' : ''); setError('')
+    setEngagements([]); setWorkspace(null); setModal(null); setPendingSelection(null); setHandoffUncertainTargets(new Set()); setEngagementLoadState(studio ? 'loading' : 'error'); setWorkspaceLoadState('idle'); setBusy(studio ? 'load' : ''); setError('')
     if (!studio) return undefined
     loadDesignEngagements(studio, { signal: requestSignal, isCurrent: () => generation === requestGeneration.current }).then(result => {
       if (result.status === 'stale') return
@@ -91,7 +93,10 @@ export default function DesignWorkshop() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopeRevision, studio, engagementRetry])
   useEffect(() => { setTab(requestedTab) }, [requestedTab])
-  useEffect(() => { if (engagementId) refresh(); else { setWorkspace(null); setWorkspaceLoadState('idle') } }, [engagementId, navigationContext]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (engagementId) refresh()
+    else { setWorkspace(null); setWorkspaceLoadState('idle') }
+  }, [engagementId, navigationContext]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function capture(reason, generation = requestGeneration.current) {
     if (requestSignal.aborted || generation !== requestGeneration.current) return
@@ -107,9 +112,10 @@ export default function DesignWorkshop() {
       if (!requestSignal.aborted && generation === requestGeneration.current) {
         let mediaUrlOrigin = ''
         try { mediaUrlOrigin = new URL(import.meta.env.VITE_SUPABASE_URL).origin } catch { /* invalid configuration fails signed links closed */ }
-        setWorkspace({ ...result, mediaUrlsRequestedAt, mediaUrlOrigin }); setWorkspaceLoadState('ready')
+        setWorkspace({ ...result, mediaUrlsRequestedAt, mediaUrlOrigin }); setWorkspaceLoadState('ready'); return true
       }
-    } catch (reason) { if (!requestSignal.aborted && generation === requestGeneration.current) setWorkspaceLoadState('error'); capture(reason, generation) }
+      return false
+    } catch (reason) { if (!requestSignal.aborted && generation === requestGeneration.current) setWorkspaceLoadState('error'); capture(reason, generation); return false }
     finally { if (!requestSignal.aborted && generation === requestGeneration.current) setBusy('') }
   }
   async function act(key, action, capability = 'createDraft') {
@@ -142,14 +148,40 @@ export default function DesignWorkshop() {
     const next = pendingSelection?.params || new URLSearchParams()
     deferredContext.current = null; setPendingSelection(null); setModal(null); setWorkspace(null); setSearchParams(next)
   }
+  function handoffTargetKey(release) {
+    return productionHandoffContextKey(release, { organizationId: activeOrganizationId, contextKey: context.contextKey })
+  }
+  function setHandoffTargetUncertain(targetKey) {
+    setHandoffUncertainTargets(current => {
+      const next = new Set(current)
+      next.add(targetKey)
+      return next
+    })
+  }
+  function clearHandoffTargetUncertain(targetKey) {
+    setHandoffUncertainTargets(current => {
+      if (!current.has(targetKey)) return current
+      const next = new Set(current)
+      next.delete(targetKey)
+      return next
+    })
+  }
   async function prepareHandoff(release) {
     if (!officialReady || !capabilities.createDraft) { setError('An authorized official Design context is required before saving a handoff.'); return }
+    const targetKey = handoffTargetKey(release)
     setBusy(`handoff-${release.id}`); setError('')
-    try { await productionHandoffs.create(release.id, engagementId); await refresh() }
+    try {
+      await productionHandoffs.create(release.id, engagementId)
+      if (!await refresh()) throw new Error('Package creation completed without a confirmed refreshed handoff snapshot.')
+      clearHandoffTargetUncertain(targetKey)
+      return true
+    }
     catch (reason) {
       const message = reason instanceof Error ? reason.message : String(reason)
       try { setWorkspace(await studio.load(engagementId, navigationContext)) } catch { /* Keep the packaging failure primary. */ }
+      setHandoffTargetUncertain(targetKey)
       setError(message)
+      throw reason
     } finally { setBusy('') }
   }
   async function downloadHandoff(packageId) {
@@ -157,7 +189,13 @@ export default function DesignWorkshop() {
     try {
       const signed = await productionHandoffs.signDownload(packageId)
       window.location.assign(signed.signed_url)
-    } catch (reason) { capture(reason) } finally { setBusy('') }
+    } catch (reason) { capture(reason); throw reason } finally { setBusy('') }
+  }
+  async function refreshHandoffStatus(release) {
+    const targetKey = handoffTargetKey(release)
+    const refreshed = await refresh()
+    if (refreshed) clearHandoffTargetUncertain(targetKey)
+    return refreshed
   }
 
   if (engagementLoadState === 'error') return <Shell><div role="alert" className="mx-auto max-w-xl rounded-2xl border border-red-500/20 bg-red-500/10 p-6 text-center"><h1 className="text-xl font-semibold text-red-100">Design work could not be loaded</h1><p className="mt-2 text-sm text-red-200">The active organization could not be checked. No work has been selected.</p><button type="button" onClick={() => setEngagementRetry(value => value + 1)} className={`${BUTTON} mt-5`}>Retry</button></div></Shell>
@@ -181,7 +219,7 @@ export default function DesignWorkshop() {
     <div className="mt-5 flex gap-2 overflow-x-auto">{[['artifacts', 'References'], ['workshop', 'Design desk']].map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold ${tab === id ? 'bg-white text-slate-950' : 'bg-white/5 text-slate-300'}`}>{label}</button>)}</div>
     {busy === 'load' || !workspace ? <div className="py-20 text-center text-sm text-slate-500">Loading exact versions…</div>
       : tab === 'artifacts' ? <><ArtifactWorkspace workspace={workspace} /><DesignConnectionsPanel key={`${activeOrganizationId}:${scopeRevision}`} organizationId={activeOrganizationId} scopeRevision={scopeRevision} requestSignal={requestSignal} handleOrganizationAccessError={handleOrganizationAccessError} canManage={capabilities.manageConnections} /></>
-        : <><div className="mt-6"><DesignCreativeBriefWorkspace workspace={workspace} activeServiceId={context.service?.id || workspace.designServices[0]?.id || ''} workRecord={workspace.navigationWorkRecord} busy={busy} canSave={officialReady && capabilities.createDraft} onSave={input => act('save-brief', () => studio.saveCreativeBrief(input))} onFreeze={input => act('freeze-brief', () => studio.freezeCreativeBrief(input))} /></div><WorkshopWorkspace workspace={workspace} assetLibraryContextKey={designAssetLibraryContextKey({ ...canonicalScope, contextKey: context.contextKey })} focusedSessionId={navigationContext.output?.kind === 'design_session' ? navigationContext.output.id : ''} focusedVersionId={navigationContext.output?.versionId || ''} focusedDraftId={navigationContext.draft?.kind === 'private_experiment' ? navigationContext.draft.id : ''} canUploadAsset={officialReady && capabilities.createDraft} onUploadAsset={input => act('asset-upload', () => studio.uploadAssetVersion(input))} canArchiveAsset={officialReady && capabilities.archiveDraftAsset} onArchiveAsset={(row, operationKey) => act(`asset-archive-${row.assetId}`, () => studio.archiveAsset({ asset_id: row.assetId, expected_latest_version_id: row.assetVersionId, operation_key: operationKey, reason: 'Archived from the Design asset library after explicit human confirmation.' }), 'archiveDraftAsset')} canPromoteExperiment={version => canRequestDesignExperimentPromotion(activeMembership, version, user?.id)} onCreateFlow={() => setModal({ kind: 'flow' })} onCreate={() => setModal({ kind: 'session' })} onGenerate={session => act(`generate-${session.id}`, () => studio.generateDirections(session.id), 'executeGeneration')} onGenerateImage={(version, modelId, prompt, requestKey) => act(`image-${version.id}`, () => studio.generateImage(version.id, modelId, prompt, requestKey), 'executeGeneration')} onRefreshImageJob={jobId => act(`image-job-${jobId}`, () => studio.getImageGenerationJob(jobId), 'executeGeneration')} onRetryImageJob={(jobId, requestKey) => act(`retry-image-${jobId}`, () => studio.retryImageGeneration(jobId, requestKey), 'executeGeneration')} onGenerateVariants={(versionId, modelId, formats) => act(`variants-${versionId}`, () => studio.generateVariants(versionId, modelId, formats), 'executeGeneration')} onGenerateVideo={(version, prompt) => act(`video-${version.id}`, () => studio.createVideoPlaceholder(version.id, prompt), 'executeGeneration')} onGeneratePage={(versionId, slug, modelId) => act('generate-page', () => studio.generatePageDesign(versionId, slug, modelId), 'executeGeneration')} onSubmitPage={designId => act(`submit-page-${designId}`, () => studio.submitPageDesignReview(designId))} onApprovePage={designId => act(`approve-page-${designId}`, () => studio.approvePageDesign(designId), 'release')} onExportPage={designId => act(`export-page-${designId}`, () => studio.exportPageDesign(designId), 'release')} onDownloadExport={jobId => act(`download-export-${jobId}`, async () => { const result = await studio.getWordPressExportDownload(jobId); window.location.assign(result.download_url) })} onPrepareHandoff={prepareHandoff} onDownloadHandoff={downloadHandoff} onRefine={(direction, version) => setModal({ kind: 'refine', direction, version })} onPromote={version => act(`promote-${version.id}`, () => studio.promoteDirectionExperiment(version.id), 'promoteExperiment')} onSetWorking={(session, version) => { const preference = workspace.workingDirectionPreferences?.find(item => item.session_id === session.id); return act(`working-${version.id}`, () => studio.setWorkingDirection({ engagement_id: session.engagement_id, session_id: session.id, direction_version_id: version.id, expected_revision: preference?.revision || 0, operation_key: crypto.randomUUID() }), 'selectDirection') }} onSelect={(session, version) => act(`select-${version.id}`, () => studio.selectDirection(session.id, version.id), 'selectDirection')} onRelease={session => act(`release-${session.id}`, () => studio.releaseDirection(session.id, 'Released by the accountable human reviewer.'), 'release')} busy={busy} /></>}
+        : <><div className="mt-6"><DesignCreativeBriefWorkspace workspace={workspace} activeServiceId={context.service?.id || workspace.designServices[0]?.id || ''} workRecord={workspace.navigationWorkRecord} busy={busy} canSave={officialReady && capabilities.createDraft} onSave={input => act('save-brief', () => studio.saveCreativeBrief(input))} onFreeze={input => act('freeze-brief', () => studio.freezeCreativeBrief(input))} /></div><WorkshopWorkspace workspace={workspace} assetLibraryContextKey={designAssetLibraryContextKey({ ...canonicalScope, contextKey: context.contextKey })} focusedSessionId={navigationContext.output?.kind === 'design_session' ? navigationContext.output.id : ''} focusedVersionId={navigationContext.output?.versionId || ''} focusedDraftId={navigationContext.draft?.kind === 'private_experiment' ? navigationContext.draft.id : ''} canUploadAsset={officialReady && capabilities.createDraft} onUploadAsset={input => act('asset-upload', () => studio.uploadAssetVersion(input))} canArchiveAsset={officialReady && capabilities.archiveDraftAsset} onArchiveAsset={(row, operationKey) => act(`asset-archive-${row.assetId}`, () => studio.archiveAsset({ asset_id: row.assetId, expected_latest_version_id: row.assetVersionId, operation_key: operationKey, reason: 'Archived from the Design asset library after explicit human confirmation.' }), 'archiveDraftAsset')} canPromoteExperiment={version => canRequestDesignExperimentPromotion(activeMembership, version, user?.id)} onCreateFlow={() => setModal({ kind: 'flow' })} onCreate={() => setModal({ kind: 'session' })} onGenerate={session => act(`generate-${session.id}`, () => studio.generateDirections(session.id), 'executeGeneration')} onGenerateImage={(version, modelId, prompt, requestKey) => act(`image-${version.id}`, () => studio.generateImage(version.id, modelId, prompt, requestKey), 'executeGeneration')} onRefreshImageJob={jobId => act(`image-job-${jobId}`, () => studio.getImageGenerationJob(jobId), 'executeGeneration')} onRetryImageJob={(jobId, requestKey) => act(`retry-image-${jobId}`, () => studio.retryImageGeneration(jobId, requestKey), 'executeGeneration')} onGenerateVariants={(versionId, modelId, formats) => act(`variants-${versionId}`, () => studio.generateVariants(versionId, modelId, formats), 'executeGeneration')} onGenerateVideo={(version, prompt) => act(`video-${version.id}`, () => studio.createVideoPlaceholder(version.id, prompt), 'executeGeneration')} onGeneratePage={(versionId, slug, modelId) => act('generate-page', () => studio.generatePageDesign(versionId, slug, modelId), 'executeGeneration')} onSubmitPage={designId => act(`submit-page-${designId}`, () => studio.submitPageDesignReview(designId))} onApprovePage={designId => act(`approve-page-${designId}`, () => studio.approvePageDesign(designId), 'release')} onExportPage={designId => act(`export-page-${designId}`, () => studio.exportPageDesign(designId), 'release')} onDownloadExport={jobId => act(`download-export-${jobId}`, async () => { const result = await studio.getWordPressExportDownload(jobId); window.location.assign(result.download_url) })} canPrepareHandoff={officialReady && capabilities.createDraft} handoffUncertainTargets={handoffUncertainTargets} handoffContext={{ organizationId: activeOrganizationId, contextKey: context.contextKey }} onPrepareHandoff={prepareHandoff} onDownloadHandoff={downloadHandoff} onRefreshHandoffs={refreshHandoffStatus} onRefine={(direction, version) => setModal({ kind: 'refine', direction, version })} onPromote={version => act(`promote-${version.id}`, () => studio.promoteDirectionExperiment(version.id), 'promoteExperiment')} onSetWorking={(session, version) => { const preference = workspace.workingDirectionPreferences?.find(item => item.session_id === session.id); return act(`working-${version.id}`, () => studio.setWorkingDirection({ engagement_id: session.engagement_id, session_id: session.id, direction_version_id: version.id, expected_revision: preference?.revision || 0, operation_key: crypto.randomUUID() }), 'selectDirection') }} onSelect={(session, version) => act(`select-${version.id}`, () => studio.selectDirection(session.id, version.id), 'selectDirection')} onRelease={session => act(`release-${session.id}`, () => studio.releaseDirection(session.id, 'Released by the accountable human reviewer.'), 'release')} busy={busy} /></>}
     {workspace && tab === 'workshop' && <DesignDeliveryPackagePanel workspace={workspace} context={{ organizationId: activeOrganizationId, engagementId, brandId: workspace.engagement.brand_id, activeServiceId: context.service?.id || workspace.designServices[0]?.id || '', workRecord: workspace.navigationWorkRecord }} canSave={officialReady && capabilities.createDraft} onPreview={input => studio.previewDeliveryPackage(input)} onSave={async input => { const result = await studio.saveDeliveryPackage(input); await refresh(); return result }} />}
     {workspace && tab === 'workshop' && <DesignPackageReviewPanel workspace={workspace} reviewAvailable={officialReady && capabilities.view} snapshotFresh={workspaceLoadState === 'ready'} onRefresh={refresh} />}
     {modal?.kind === 'flow' && <FlowModal workspace={workspace} busy={busy} onClose={() => setModal(null)} onSave={input => act('create-flow', () => studio.createPageFlow(input))} />}
@@ -231,7 +269,7 @@ function ArtifactWorkspace({ workspace }) {
   })}</div></div>
 }
 
-function WorkshopWorkspace({ workspace, assetLibraryContextKey, focusedSessionId, focusedVersionId: navigationFocusedVersionId, focusedDraftId, canUploadAsset, onUploadAsset, canArchiveAsset, onArchiveAsset, canPromoteExperiment, onCreateFlow, onCreate, onGenerate, onGenerateImage, onRefreshImageJob, onRetryImageJob, onGenerateVariants, onGenerateVideo, onGeneratePage, onSubmitPage, onApprovePage, onExportPage, onDownloadExport, onPrepareHandoff, onDownloadHandoff, onRefine, onPromote, onSetWorking, onSelect, onRelease, busy }) {
+function WorkshopWorkspace({ workspace, assetLibraryContextKey, focusedSessionId, focusedVersionId: navigationFocusedVersionId, focusedDraftId, canUploadAsset, onUploadAsset, canArchiveAsset, onArchiveAsset, canPromoteExperiment, onCreateFlow, onCreate, onGenerate, onGenerateImage, onRefreshImageJob, onRetryImageJob, onGenerateVariants, onGenerateVideo, onGeneratePage, onSubmitPage, onApprovePage, onExportPage, onDownloadExport, canPrepareHandoff, handoffUncertainTargets, handoffContext, onPrepareHandoff, onDownloadHandoff, onRefreshHandoffs, onRefine, onPromote, onSetWorking, onSelect, onRelease, busy }) {
   const approvedTypes = new Set(workspace.approvals.map(approval => workspace.artifacts.find(item => item.id === approval.artifact_id)?.artifact_type).filter(Boolean))
   const ready = ['discovery', 'vision', 'audience'].every(type => approvedTypes.has(type))
   const [flowSessionId, updateFlowSessionId] = useState('')
@@ -279,7 +317,7 @@ function WorkshopWorkspace({ workspace, assetLibraryContextKey, focusedSessionId
     {session && <IdentityProvenanceLedger workspace={workspace} session={session} />}
     {!!directions.length && <section aria-label={storyboard ? 'Storyboard sequence' : 'Design direction comparison'}>{storyboard && <div className="mb-4"><p className="text-xs font-semibold uppercase tracking-wider text-violet-300">Ordered storyboard sequence</p><h2 className="mt-2 text-xl font-semibold">Static frames in narrative order</h2><p className="mt-2 text-sm text-slate-400">Direction slots are frame order for this service. Scroll through the filmstrip from frame 1 onward; each frame keeps its own proofing comments.</p></div>}<div className={storyboard ? 'grid auto-cols-[min(82vw,26rem)] grid-flow-col gap-5 overflow-x-auto pb-3' : 'grid gap-5 xl:grid-cols-3'}>{directions.map(direction => { const versions = workspace.directionVersions.filter(item => item.direction_id === direction.id); const version = versions.find(item => item.id === focusedVersionId) || latestByVersion(versions); const selected = selection?.direction_version_id === version?.id; const working = workingPreference?.direction_version_id === version?.id; return <DirectionCard key={direction.id} direction={direction} versions={versions} version={version} models={workspace.models} mediaAssets={workspace.mediaAssets} generationJobs={workspace.imageGenerationJobs || []} storyboard={storyboard} working={working} selected={selected} released={release?.direction_version_id === version?.id} onGenerateImage={(modelId, prompt, requestKey) => onGenerateImage(version, modelId, prompt, requestKey)} onRefreshImageJob={onRefreshImageJob} onRetryImageJob={onRetryImageJob} onGenerateVideo={prompt => onGenerateVideo(version, prompt)} onRefine={() => onRefine(direction, version)} onSetWorking={() => onSetWorking(session, version)} onSelect={() => onSelect(session, version)} canSelect={!selection} busy={busy} /> })}</div></section>}
     {release && variantEligible && <VariantWorkspace key={release.direction_version_id} workspace={workspace} release={release} onGenerate={onGenerateVariants} busy={busy} />}
-    {release && <ProductionHandoffPanel release={release} packages={workspace.handoffPackages} busy={busy} onPrepare={onPrepareHandoff} onDownload={onDownloadHandoff} />}
+    {release && <ProductionHandoffPanel key={productionHandoffContextKey(release, handoffContext)} release={release} packages={workspace.handoffPackages} directionVersions={workspace.directionVersions} mediaAssets={workspace.mediaAssets} variants={workspace.variants} mediaAccess={{ issuedAt: workspace.mediaUrlsRequestedAt, expiresInSeconds: workspace.mediaUrlExpiresIn, trustedOrigin: workspace.mediaUrlOrigin }} canPrepare={canPrepareHandoff} createUncertain={handoffUncertainTargets.has(productionHandoffContextKey(release, handoffContext))} busy={busy} onPrepare={onPrepareHandoff} onDownload={onDownloadHandoff} onRefresh={() => onRefreshHandoffs(release)} />}
     {!!experimentVersions.length && <Panel><div><p className="text-xs font-semibold uppercase tracking-wider text-amber-300">Private experiments</p><h2 className="mt-2 text-xl font-semibold">Experimental versions</h2><p className="mt-2 text-sm text-slate-400">Visible only to each creator and invited reviewers. Experiments stay outside the main history until promoted.</p></div><div className="mt-5 grid gap-4 lg:grid-cols-2">{experimentVersions.map(version => { const direction = directions.find(item => item.id === version.direction_id); const canPromote = canPromoteExperiment(version); return <ExperimentCard key={version.id} direction={direction} version={version} models={workspace.models} mediaAssets={workspace.mediaAssets} generationJobs={workspace.imageGenerationJobs || []} storyboard={storyboard} focused={version.id === focusedDraftId} canPromote={canPromote} onGenerateImage={(modelId, prompt, requestKey) => onGenerateImage(version, modelId, prompt, requestKey)} onRefreshImageJob={onRefreshImageJob} onRetryImageJob={onRetryImageJob} onGenerateVideo={prompt => onGenerateVideo(version, prompt)} onPromote={() => onPromote(version)} busy={busy} /> })}</div></Panel>}
     {!!directions.length && <PageDesignWorkspace workspace={workspace} onGenerate={onGeneratePage} onSubmit={onSubmitPage} onApprove={onApprovePage} onExport={onExportPage} onDownload={onDownloadExport} busy={busy} />}
     {selection && !release && <Panel><h3 className="font-semibold">{storyboard ? 'Storyboard sequence ready for release' : 'Human selection recorded'}</h3><p className="mt-2 text-sm text-slate-400">{storyboard ? 'The selected exact frame version anchors the existing session-level release record; release applies to the whole ordered sequence.' : 'Selection does not equal release. The accountable Design manager must perform the separate release action.'}</p><button disabled={busy === `release-${session.id}`} onClick={() => onRelease(session)} className={`${BUTTON} mt-4`}>{storyboard ? 'Release whole storyboard sequence' : 'Release selected exact version'}</button></Panel>}

@@ -38,11 +38,12 @@ function contentValue(value) {
   return <span className="whitespace-pre-wrap">{String(value)}</span>
 }
 
-export default function ContentLibraryPanel({ repository }) {
+export default function ContentLibraryPanel({ repository, initialArtifactId = '', initialVersionId = '' }) {
   const [data, setData] = useState(null)
   const [filters, setFilters] = useState({ query: '', type: '', projectId: '', creatorId: '', reviewStage: '' })
-  const [artifactId, setArtifactId] = useState('')
-  const [versionId, setVersionId] = useState('')
+  const [artifactId, setArtifactId] = useState(initialArtifactId)
+  const [versionId, setVersionId] = useState(initialVersionId)
+  const [followExactLink, setFollowExactLink] = useState(Boolean(initialArtifactId || initialVersionId))
   const [comparisonOpen, setComparisonOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -78,14 +79,30 @@ export default function ContentLibraryPanel({ repository }) {
     return () => { mounted.current = false; loadSequence.current += 1 }
   }, [load])
 
+  useEffect(() => {
+    setArtifactId(initialArtifactId)
+    setVersionId(initialVersionId)
+    setFollowExactLink(Boolean(initialArtifactId || initialVersionId))
+    setComparisonOpen(false)
+  }, [initialArtifactId, initialVersionId])
+
   const entries = useMemo(() => buildContentLibrary({
     artifacts: data?.artifacts, versions: data?.versions, approvals: data?.approvals,
     requests: data?.approvalRequests, comments: data?.comments, profiles: data?.profiles,
   }), [data])
   const visible = useMemo(() => filterContentLibrary(entries, filters), [entries, filters])
-  const selectedEntry = visible.find(item => item.artifact.id === artifactId) || visible[0] || null
-  const selectedVersion = selectedEntry?.versions.find(item => item.id === versionId)
-    || selectedEntry?.latest || null
+  const requestedEntry = followExactLink && initialArtifactId
+    ? entries.find(item => item.artifact.id === initialArtifactId) || null : null
+  const requestedVersion = requestedEntry && initialVersionId
+    ? requestedEntry.versions.find(item => item.id === initialVersionId) || null : null
+  const exactLinkUnavailable = followExactLink
+    && (!initialArtifactId || !initialVersionId || !requestedEntry || !requestedVersion)
+  const selectedEntry = followExactLink
+    ? (exactLinkUnavailable ? null : requestedEntry)
+    : visible.find(item => item.artifact.id === artifactId) || visible[0] || null
+  const selectedVersion = followExactLink
+    ? requestedVersion
+    : selectedEntry?.versions.find(item => item.id === versionId) || selectedEntry?.latest || null
   const approval = data?.approvals?.find(item => item.artifact_version_id === selectedVersion?.id) || null
   const request = data?.approvalRequests?.find(item => item.artifact_version_id === selectedVersion?.id) || null
   const reviewStage = selectedVersion ? contentReviewStage(selectedVersion.id, data?.approvals, data?.approvalRequests) : 'draft'
@@ -123,8 +140,8 @@ export default function ContentLibraryPanel({ repository }) {
 
     {error && data && <div className="rounded-2xl border border-red-900/60 bg-red-950/30 p-4 text-sm text-red-300"><p>{error}</p><p className="mt-1 text-xs text-red-200/80">The displayed library snapshot may be stale. Review and approval actions are unavailable until a refresh succeeds.</p><button type="button" onClick={load} className={`${SECONDARY} mt-3`}>Try again</button></div>}
 
-    {!entries.length ? <div className="rounded-2xl border border-dashed border-slate-700 p-12 text-center text-sm text-slate-500">No saved Content artifacts are visible in this organization.</div> : !visible.length ? <div className="rounded-2xl border border-dashed border-slate-700 p-12 text-center text-sm text-slate-500">No Content artifacts match these filters. The library has not treated this as a loading error.</div> : <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
-      <div className="space-y-3">{visible.map(entry => { const itemStage = STAGE[entry.reviewStage] || STAGE.draft; return <button type="button" key={entry.artifact.id} onClick={() => { setArtifactId(entry.artifact.id); setVersionId(entry.latest?.id || ''); setComparisonOpen(false) }} className={`w-full rounded-2xl border p-4 text-left ${selectedEntry?.artifact.id === entry.artifact.id ? 'border-amber-500/60 bg-amber-950/20' : 'border-slate-800 bg-slate-900/70 hover:border-slate-700'}`}>
+    {exactLinkUnavailable ? <div role="alert" className="rounded-2xl border border-red-900/60 bg-red-950/30 p-6"><h3 className="font-semibold text-red-200">Exact Content link unavailable</h3><p className="mt-2 text-sm leading-6 text-red-300">The requested artifact and version pair is not available in the current authorized organization. No different artifact or version has been substituted.</p></div> : !entries.length ? <div className="rounded-2xl border border-dashed border-slate-700 p-12 text-center text-sm text-slate-500">No saved Content artifacts are visible in this organization.</div> : !visible.length ? <div className="rounded-2xl border border-dashed border-slate-700 p-12 text-center text-sm text-slate-500">No Content artifacts match these filters. The library has not treated this as a loading error.</div> : <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
+      <div className="space-y-3">{visible.map(entry => { const itemStage = STAGE[entry.reviewStage] || STAGE.draft; return <button type="button" key={entry.artifact.id} onClick={() => { setFollowExactLink(false); setArtifactId(entry.artifact.id); setVersionId(entry.latest?.id || ''); setComparisonOpen(false) }} className={`w-full rounded-2xl border p-4 text-left ${selectedEntry?.artifact.id === entry.artifact.id ? 'border-amber-500/60 bg-amber-950/20' : 'border-slate-800 bg-slate-900/70 hover:border-slate-700'}`}>
         <div className="flex items-start justify-between gap-3"><h3 className="font-semibold text-white">{entry.artifact.title}</h3><span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase ${itemStage[1]}`}>{itemStage[0]}</span></div>
         <p className="mt-2 text-xs text-slate-400">{typeLabel(entry.artifact.artifact_type)} - {entry.latest ? `v${entry.latest.version_number}` : 'No saved version'}</p>
         <p className="mt-2 text-[11px] text-slate-600">{entry.project?.name || entry.engagement?.name || 'Project unavailable'} - created by {displayName(entry.creator)}</p>
@@ -133,7 +150,7 @@ export default function ContentLibraryPanel({ repository }) {
       {selectedEntry && selectedVersion && <div>
         <article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
           <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Read-only exact snapshot</p><h2 className="mt-1 text-2xl font-semibold">{selectedEntry.artifact.title}</h2><p className="mt-2 text-sm text-slate-400">{selectedEntry.project?.name || selectedEntry.engagement?.name || 'Project unavailable'} - created by {displayName(selectedEntry.creator)}</p></div><span className={`rounded-full px-3 py-1.5 text-xs font-semibold uppercase ${stage[1]}`}>{stage[0]}</span></div>
-          <label className="mt-5 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Exact saved version<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={selectedVersion.id} onChange={event => setVersionId(event.target.value)}>{selectedEntry.versions.map(version => <option key={version.id} value={version.id}>Version {version.version_number} - {new Date(version.created_at).toLocaleString()}</option>)}</select></label>
+          <label className="mt-5 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Exact saved version<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={selectedVersion.id} onChange={event => { setFollowExactLink(false); setVersionId(event.target.value) }}>{selectedEntry.versions.map(version => <option key={version.id} value={version.id}>Version {version.version_number} - {new Date(version.created_at).toLocaleString()}</option>)}</select></label>
           <dl className="mt-5 grid gap-3 text-sm md:grid-cols-2"><Meta label="Version ID" value={selectedVersion.id} /><Meta label="Checksum" value={selectedVersion.content_checksum} /><Meta label="Change summary" value={selectedVersion.change_summary || 'No summary recorded'} /><Meta label="Classification" value={selectedVersion.data_classification} /></dl>
           <div className="mt-5 flex flex-wrap items-center gap-3"><button type="button" disabled={selectedEntry.versions.length < 2} onClick={() => setComparisonOpen(true)} className={SECONDARY}>Compare exact versions</button>{selectedEntry.versions.length < 2 && <p className="text-xs text-slate-500">A second authorized saved version is required for comparison.</p>}</div>
           <div className="mt-6 border-t border-slate-800 pt-5"><h3 className="font-semibold text-white">Saved content</h3><dl className="mt-4 space-y-4">{Object.entries(selectedVersion.content || {}).map(([key, value]) => <div key={key}><dt className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">{key.replaceAll('_', ' ')}</dt><dd className="mt-1 text-sm leading-6 text-slate-300">{contentValue(value)}</dd></div>)}</dl></div>
