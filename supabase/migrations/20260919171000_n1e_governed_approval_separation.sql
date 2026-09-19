@@ -69,10 +69,6 @@ begin
  insert into public.deliverable_pm_confirmations(organization_id,project_id,deliverable_id,deliverable_version_id,confirmed_by,confirmed_state_version,request_id) values(p_organization_id,c.project_id,c.deliverable_id,p_deliverable_version_id,actor,p_expected_state_version,p_request_id);
  return jsonb_build_object('deliverable_version_id',p_deliverable_version_id,'confirmed',true,'idempotent_replay',false);
 end; $$;
-create function private.n1e_guard_release_confirmation() returns trigger language plpgsql security invoker set search_path='' as $$
-begin if old.review_status='ready_for_client_review' and new.review_status='client_reviewing' and not exists(select 1 from public.deliverable_pm_confirmations c where c.deliverable_version_id=new.id and c.organization_id=new.organization_id) then raise exception 'Exact-project PM confirmation required before release.' using errcode='42501'; end if; return new; end; $$;
-create trigger zz_n1e_guard_release_confirmation before update on public.deliverable_versions for each row execute function private.n1e_guard_release_confirmation();
-
 create or replace function public.get_deliverable_version_capabilities(p_organization_id uuid,p_deliverable_version_id uuid)
 returns jsonb language plpgsql stable security definer set search_path='' as $$
 declare actor uuid:=auth.uid(); c record; membership record; assigned uuid; client_allowed boolean:=false; feature_enabled boolean:=false; client_approved boolean:=false; released boolean:=false; delivered_fact boolean:=false; published_fact boolean:=false; pm_confirmed boolean:=false;
@@ -95,7 +91,7 @@ begin
   'can_assign_reviewer',c.review_status='ready_for_internal_review' and private.p7_assignment_authority(p_organization_id,c.project_id,c.department_id,actor),
   'can_review',c.review_status='ready_for_internal_review' and assigned=actor and private.p7_eligible_reviewer(p_organization_id,c.project_id,c.department_id,c.created_by,c.deliverable_owner_id,actor),
   'can_confirm_pm',c.review_status='ready_for_client_review' and not pm_confirmed and actor is distinct from c.created_by and actor is distinct from c.deliverable_owner_id and actor is distinct from c.internal_reviewer_id and (private.n1e_org_authority(p_organization_id,c.project_id,actor) or private.n1e_exact_project_manager(p_organization_id,c.project_id,actor)),
-  'can_release',c.review_status='ready_for_client_review' and pm_confirmed and c.client_id is not null and private.p7_release_authority(p_organization_id,c.project_id,actor),
+  'can_release',c.review_status='ready_for_client_review' and c.client_id is not null and private.p7_release_authority(p_organization_id,c.project_id,actor),
   'can_client_decide',c.review_status='client_reviewing' and feature_enabled and client_allowed and membership.role in ('client_admin','client_approver'),
   'can_mark_delivered',released and not delivered_fact and c.review_status in ('client_reviewing','client_approved','delivered_published') and private.p7_release_authority(p_organization_id,c.project_id,actor) and not(c.client_approval_required and feature_enabled and not client_approved),
   'can_mark_published',released and not published_fact and c.review_status in ('client_reviewing','client_approved','delivered_published') and private.p7_release_authority(p_organization_id,c.project_id,actor) and not(c.client_approval_required and feature_enabled and not client_approved));
@@ -143,7 +139,7 @@ begin
  if r.status<>'pending' then raise exception 'Only a pending approval request can receive requested changes' using errcode='55000'; end if; insert into public.artifact_version_comments(organization_id,artifact_version_id,author_id,body,comment_position,approval_request_id,request_change_key) values(r.organization_id,r.artifact_version_id,p_actor_id,body,null,r.id,p_idempotency_key) returning * into saved; return to_jsonb(saved)||jsonb_build_object('idempotent_replay',false);
 end; $$;
 
-revoke all on function private.n1e_org_authority(uuid,uuid,uuid),private.n1e_exact_project_manager(uuid,uuid,uuid),private.n1e_department_head(uuid,uuid,text,uuid),private.n1e_specialist_authority(uuid,uuid,text,uuid),private.n1e_artifact_department(text),private.n1e_artifact_approval_authority(uuid,uuid,text,uuid,uuid,uuid),private.n1e_artifact_nomination_authority(uuid,uuid,text,uuid),private.n1e_guard_release_confirmation() from public,anon,authenticated,service_role;
+revoke all on function private.n1e_org_authority(uuid,uuid,uuid),private.n1e_exact_project_manager(uuid,uuid,uuid),private.n1e_department_head(uuid,uuid,text,uuid),private.n1e_specialist_authority(uuid,uuid,text,uuid),private.n1e_artifact_department(text),private.n1e_artifact_approval_authority(uuid,uuid,text,uuid,uuid,uuid),private.n1e_artifact_nomination_authority(uuid,uuid,text,uuid) from public,anon,authenticated,service_role;
 revoke all on function public.confirm_governed_deliverable_project_manager(uuid,uuid,bigint,uuid),public.create_artifact_approval_request(uuid,text,uuid[],uuid),public.sign_off_artifact_approval(uuid,uuid),public.request_artifact_approval_changes(uuid,uuid,text,uuid) from public,anon,authenticated;
 grant execute on function public.confirm_governed_deliverable_project_manager(uuid,uuid,bigint,uuid) to authenticated;
 grant execute on function public.create_artifact_approval_request(uuid,text,uuid[],uuid),public.sign_off_artifact_approval(uuid,uuid),public.request_artifact_approval_changes(uuid,uuid,text,uuid) to service_role;
