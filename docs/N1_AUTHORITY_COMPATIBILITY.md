@@ -46,7 +46,7 @@ The histories are snapshot facts, not effective current authority: ownership or 
 
 - Node: `node --test src/data/authorityCompatibility.test.js src/data/organizationScope.test.js` — **19 passed**.
 - Deno: `deno test --cached-only --frozen --allow-env supabase/functions/_shared/serverOrganizationContext.test.ts` — **22 passed**, including type checking and unchanged root/organization isolation cases. Initial attempts stopped before tests for missing node_modules and alternate cached-mode lock mismatch; final run reused the existing exact Supabase 2.112.4 dependency directory via an ignored local junction. No packages or lockfiles were changed.
-- PostgreSQL **17.11**: `supabase/tests/run-n1-local.ps1 -PostgresBin <existing-local-pg-bin>` — migration applied successfully to a fresh localhost-only synthetic fixture; **41 assertions passed**. Covers existing grants/policies/rows unchanged, deterministic eligibility, title-only rejection, multi-PM/multi-department records, cross-tenant FK rejection, designation without elevation, immutable/re-added history, self-only RLS, RPC ACL, and already-open revoked/client/inactive/anonymous session rejection. Initial expected department count omitted a valid second-tenant row; only the fixture expectation was corrected, then SQL validation rerun.
+- PostgreSQL **17.11**: `supabase/tests/run-n1-local.ps1 -PostgresBin <existing-local-pg-bin>` — migration applied successfully to a fresh localhost-only synthetic fixture; **41 assertions passed**. Covers existing grants/policies/rows unchanged, deterministic eligibility, title-only rejection, multi-PM/multi-department records, cross-tenant FK rejection, designation without elevation, immutable/re-added history, self-only RLS, RPC ACL, and revoked organization memberships using an existing caller identity, plus client/inactive/no-identity rejection. Initial expected department count omitted a valid second-tenant row; only the fixture expectation was corrected, then SQL validation rerun. This does not test Supabase Auth session revocation or `auth.sessions`.
 - Focused ESLint on the three changed/new JavaScript files — **passed**.
 - `vite build` — **passed**, 470 modules; chunk-size warning only.
 - Diff whitespace check — **passed** before final commit.
@@ -57,7 +57,33 @@ The failed file-edit wrapper was replaced by the verified installed apply_patch 
 
 Supabase guidance consulted: [changelog](https://supabase.com/changelog) and [RLS documentation](https://supabase.com/docs/guides/database/postgres/row-level-security). This guided explicit new-table grants/RLS, current database membership checks, tenant keys, and avoiding new SECURITY DEFINER endpoints. No relevant listed breaking change required altering this additive contract.
 
-## Deferred enforcement
+## Bounded master-review follow-up — service-role verification
+
+Master reviewed the source of `bc593feef6dcd5cb14924a7d0de44172f0e2cc28` and identified the missing positive service-role mutation coverage. This follow-up changes only fixture/behavior SQL, the local runner and this record; the N1 migration and application readers are unchanged. No production acceptance is claimed.
+
+`n1_authority_compatibility.service-role.sql` now switches to the actual non-superuser `service_role` fixture role with no caller identity and checks:
+
+- Insert/revoke/re-add across all three shadow tables, with one active and one revoked row retained for each round trip.
+- Trigger schema/function access and reads of parent organization/membership tables. Temporarily revoking SELECT on either parent makes an insert fail; transaction savepoints restore fixture grants.
+- Denied DELETE on all three shadow tables; allowed private issue-ledger SELECT and denied ledger DELETE; rejected binding for a revoked membership.
+- All three mutation ACLs plus actual INSERT/UPDATE/DELETE attempts under each of `authenticated` and `anon`, across all three tables (18 denied write attempts).
+
+### Parent-contract reconciliation and explicit assumptions
+
+The source was checked only for relevant grants/policies at the frozen baseline, not by replaying historical migrations:
+
+- `20260825010000_organization_access_foundation.sql:186` and `:219` define the organization/role read helpers; `:254` and `:269` define organization-member and own/elevated membership reads. The fixture now models those SELECT semantics instead of its narrower ad-hoc own-only policy. No later definitions of those helpers/read policies were found in this bounded search. The owner FOR ALL mutation policies are deliberately not modeled; these tests do not mutate parent rows as authenticated.
+- `20260825040000_canonical_delivery_core.sql:29`–`:30` establishes private-schema USAGE for authenticated/service roles, denying PUBLIC/anon. The fixture mirrors that. `20260825020000_security_boundary_hardening.sql:36`–`:40` revokes default PUBLIC/anon execution on new public functions; the fixture now mirrors that before applying N1.
+- No application migration in the bounded grant/role search explicitly establishes `service_role` BYPASSRLS or SELECT on `organizations`/`organization_memberships`. These are **platform assumptions**, not facts verified against the installed database. The fixture explicitly creates non-superuser BYPASSRLS and grants only parent SELECT, replacing its blanket service-role ALL-table grant. Authenticated parent SELECT and public/auth schema USAGE are also explicit fixture assumptions, not a live ACL receipt.
+- Parent shapes remain a minimal synthetic subset. Project/department composite keys were reconciled previously; unrelated columns, constraints, policies and triggers are not replayed. `auth.uid()` remains a synthetic existing-caller-identity setting, not JWT verification, token expiry, sign-out or `auth.sessions` behavior. Before any release, verify installed parent grants, schema USAGE, helper privileges, role attributes and full-schema compatibility through an explicitly authorized acceptance step. Do not add production grants merely to make this fixture pass.
+
+### Targeted result
+
+One local SQL run passed **82 assertions total**: the original 41 plus 17 direct and 24 looped assertions in the service-role section. PostgreSQL 17.11 applied the unchanged migration successfully. Command: `supabase/tests/run-n1-local.ps1 -PostgresBin <existing-local-pg-bin> -ClusterParent G:/AnkaSphereN1LocalChecks`.
+
+The runner validates an existing physical cluster-parent directory and creates a unique child. Evidence is retained in `G:/AnkaSphereN1LocalChecks/anka-n1-175d089ea2304a92a12b97a11a5cf43d` with its server stopped; no new C-drive cluster was created for this follow-up. No existing evidence was deleted. Node/Deno/lint/build evidence above was reused unchanged; no broad rerun. Full-schema, hosted/live and signed-in acceptance remain open.
+
+## Deferred enforcement (unchanged)
 
 Cutover must cover direct Project Task writes, task update/transition RPCs, shared Engagement Work Item saves and alternate callers, deliverable governance, artifact nomination/signoff, and corresponding UI capabilities. The additive slice alone does not close existing permission gaps.
 

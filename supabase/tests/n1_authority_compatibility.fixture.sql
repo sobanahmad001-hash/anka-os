@@ -2,10 +2,16 @@
 \set ON_ERROR_STOP on
 create role anon nologin;
 create role authenticated nologin;
+-- Platform assumptions, not proven by the application migrations or a live check:
+-- service_role is non-superuser with BYPASSRLS; public/auth schema USAGE and
+-- parent SELECT grants exist. Keep these explicit and minimal below.
 create role service_role nologin bypassrls;
 create schema auth;
 create schema private;
-grant usage on schema public, auth, private to authenticated, service_role;
+grant usage on schema public, auth to anon, authenticated, service_role;
+-- canonical_delivery_core.sql:29-30 establishes private schema access.
+revoke all on schema private from public, anon;
+grant usage on schema private to authenticated, service_role;
 create function auth.uid() returns uuid language sql stable as $$
   select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
 $$;
@@ -38,12 +44,30 @@ create table public.engagements(id uuid primary key, project_id uuid unique refe
 
 alter table public.organizations enable row level security;
 alter table public.organization_memberships enable row level security;
-create policy fixture_own_membership on public.organization_memberships for select to authenticated using(user_id=auth.uid());
-create policy fixture_own_organization on public.organizations for select to authenticated using(exists(
-  select 1 from public.organization_memberships m where m.organization_id=organizations.id and m.user_id=auth.uid()
-));
+-- Relevant SELECT policy/helper semantics from organization_access_foundation
+-- :186-200, :219-237, :254-279. Owner FOR ALL policies are outside this fixture;
+-- no parent mutations as authenticated are needed or claimed by these tests.
+create function public.is_organization_member(target_organization_id uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists(select 1 from public.organization_memberships m
+    where m.organization_id=target_organization_id and m.user_id=auth.uid() and m.status='active')
+$$;
+create function public.has_organization_role(target_organization_id uuid, allowed_roles text[])
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists(select 1 from public.organization_memberships m
+    where m.organization_id=target_organization_id and m.user_id=auth.uid()
+      and m.status='active' and m.role=any(allowed_roles))
+$$;
+revoke all on function public.is_organization_member(uuid),public.has_organization_role(uuid,text[]) from public,anon;
+grant execute on function public.is_organization_member(uuid),public.has_organization_role(uuid,text[]) to authenticated,service_role;
+create policy fixture_permitted_membership on public.organization_memberships for select to authenticated using(
+  user_id=auth.uid() or public.has_organization_role(organization_id,array['system_owner','operations_admin','executive','department_manager'])
+);
+create policy fixture_member_organization on public.organizations for select to authenticated using(public.is_organization_member(id));
 grant select on public.organizations,public.organization_memberships to authenticated;
-grant all on all tables in schema public to service_role;
+grant select on public.organizations,public.organization_memberships,public.departments,public.projects,public.engagements to service_role;
+-- Match security_boundary_hardening.sql:36-40 for subsequent public functions.
+alter default privileges in schema public revoke execute on functions from public,anon;
 
 insert into public.organizations values(pg_temp.id('org-a'),'active'),(pg_temp.id('org-b'),'active'),(pg_temp.id('org-inactive'),'suspended');
 insert into public.departments values('design',pg_temp.id('org-a')),('content',pg_temp.id('org-a')),('foreign',pg_temp.id('org-b'));

@@ -76,7 +76,7 @@ select pg_temp.expect_error($q$select * from private.n1_authority_backfill_issue
 reset role;
 update public.organization_memberships set status='revoked' where user_id=pg_temp.id('alice');
 set local role authenticated;
-select pg_temp.check_true((select count(*)=0 from public.project_manager_bindings), 'revoked session cannot read bindings');
+select pg_temp.check_true((select count(*)=0 from public.project_manager_bindings), 'revoked organization membership using existing caller identity cannot read bindings');
 select pg_temp.expect_error($q$select public.get_my_authority_compatibility(pg_temp.id('org-a'))$q$, '42501');
 select set_config('request.jwt.claim.sub',pg_temp.id('client')::text,true);
 select pg_temp.expect_error($q$select public.get_my_authority_compatibility(pg_temp.id('org-a'))$q$, '42501');
