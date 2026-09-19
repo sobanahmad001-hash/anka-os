@@ -17,7 +17,9 @@ export function departmentChatAttachmentMime(file) {
 
 export function validateDepartmentChatAttachmentFile(file) {
   const claimedMime = departmentChatAttachmentMime(file)
-  if (!claimedMime) throw new Error(`${file?.name || 'File'}: file type could not be verified.`)
+  if (!['text/plain', 'text/markdown', DOCX_MIME, 'image/png', 'image/jpeg'].includes(claimedMime)) {
+    throw new Error(`${file?.name || 'File'}: unsupported file type. Choose TXT, Markdown, DOCX, PNG, or JPEG.`)
+  }
   const byteLimit = claimedMime === DOCX_MIME
     ? DEPARTMENT_CHAT_ATTACHMENT_LIMITS.docxBytes
     : DEPARTMENT_CHAT_ATTACHMENT_LIMITS.fileBytes

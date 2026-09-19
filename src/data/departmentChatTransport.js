@@ -30,6 +30,7 @@ export function createDepartmentChatRepository(client) {
       original_name: metadata.original_name || file.name,
       claimed_mime: claimedMime,
     }, scope)
+    scope?.signal?.throwIfAborted()
     const { bucket, path, token } = reserved.upload
     const uploaded = await client.storage.from(bucket).uploadToSignedUrl(path, token, file, {
       contentType: claimedMime,

@@ -79,6 +79,51 @@ async function setup(t) {
   return { ...env, ScopedDepartmentChat }
 }
 
+for (const outcome of ['success', 'failure']) test(`attachment ${outcome} after conversation switch cannot alter the new conversation`, async t => {
+  const { container, ScopedDepartmentChat } = await setup(t)
+  const repo = repository([])
+  repo.searchConversations = async () => ({ items: [conversation('conversation-a'), conversation('conversation-b')], next_cursor: null })
+  repo.getCapabilities = async () => ({ approved_models: [{ configuration_id: 'configuration-1', is_default: true }], attachments: { supported: true } })
+  const uploads = []
+  const reads = []
+  let accessErrors = 0
+  repo.listAttachments = async (_department, input) => { reads.push(input.conversation_id); return [] }
+  repo.uploadAttachment = async (_department, input) => new Promise((resolve, reject) => uploads.push({ input, resolve, reject }))
+  globalThis.__departmentChatTestRepository = repo
+  const root = createRoot(container)
+  t.after(() => { try { root.unmount() } catch {} })
+  await act(async () => root.render(createElement(ScopedDepartmentChat, { ...props('a', new AbortController().signal), handleOrganizationAccessError() { accessErrors += 1 } })))
+  await flush()
+  const chooseFiles = async names => {
+    const input = nodes(container, 'input').find(node => node.type === 'file')
+    input.files = names.map(name => ({ name, type: 'image/png', size: 10 }))
+    await act(async () => input.dispatchEvent(new E('change')))
+  }
+  await chooseFiles(['old-one.png', 'old-two.png'])
+  await act(async () => byText(container, 'button', 'Upload and validate').dispatchEvent(new E('click')))
+  assert.equal(uploads.length, 1)
+  assert.equal(uploads[0].input.conversation_id, 'conversation-a')
+  await act(async () => byText(container, 'button', 'conversation-b').dispatchEvent(new E('click')))
+  await flush()
+  await chooseFiles(['new.png'])
+  await act(async () => byText(container, 'button', 'Upload and validate').dispatchEvent(new E('click')))
+  assert.equal(uploads.length, 2)
+  const readsBefore = [...reads]
+  await act(async () => {
+    if (outcome === 'success') uploads[0].resolve({ id: 'old-attachment' })
+    else uploads[0].reject(new Error('OLD_UPLOAD_DENIED'))
+  })
+  await flush()
+  assert.equal(uploads.length, 2, 'no second old-context upload starts')
+  assert.deepEqual(reads, readsBefore, 'no old attachment list refresh')
+  assert.equal(accessErrors, 0)
+  assert.doesNotMatch(container.textContent, /OLD_UPLOAD_DENIED|old-one.png|old-two.png/)
+  assert.ok(byText(container, 'button', 'Validating privately'), 'old finally cannot clear new upload busy state')
+  await act(async () => uploads[1].resolve({ id: 'new-attachment' }))
+  await flush()
+  assert.equal(reads.at(-1), 'conversation-b')
+})
+
 test('mounted chat renders one saved answer and preserves answer mode through partial and durable states', async t => {
   const { container, ScopedDepartmentChat } = await setup(t); const streams = []; const repo = repository(streams, 'SAVED_SENTINEL'); globalThis.__departmentChatTestRepository = repo; const root = createRoot(container); t.after(() => { try { root.unmount() } catch {} })
   await act(async () => root.render(createElement(ScopedDepartmentChat, props('a', new AbortController().signal)))); await flush()

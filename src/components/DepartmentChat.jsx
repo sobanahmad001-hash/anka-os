@@ -37,6 +37,7 @@ export function ScopedDepartmentChat({
 }) {
   const completion = useRef(null)
   const answerObservation = useRef(null)
+  const attachmentCompletion = useRef(null)
   const requestScope = useMemo(
     () => ({ organizationId, signal: requestSignal }),
     [organizationId, requestSignal],
@@ -90,6 +91,12 @@ export function ScopedDepartmentChat({
   const [attachmentShare, setAttachmentShare] = useState(false)
   const [attachmentBusy, setAttachmentBusy] = useState(false)
 
+  useLayoutEffect(() => {
+    const guard = createChatCompletionGuard(requestSignal)
+    attachmentCompletion.current = guard
+    return () => guard.dispose()
+  }, [requestSignal, conversationId])
+
   useEffect(() => {
     setModelConfigurationId(current => selectDepartmentChatModelConfiguration(capabilities, current))
   }, [capabilities])
@@ -120,6 +127,7 @@ export function ScopedDepartmentChat({
     setNextConversationCursor(page.next_cursor || null)
     const selected = rows.find(item => item.id === selectId) || rows[0] || null
     if ((selected?.id || '') !== conversationId) {
+      setAttachmentBusy(false)
       setResult(null)
       setOfficial(null)
       setAnswerState({ status: 'idle', text: '', durable: false })
@@ -255,6 +263,7 @@ export function ScopedDepartmentChat({
       setConversationSearchQuery('')
       setNextConversationCursor(null)
       setConversationId(created.id)
+      setAttachmentBusy(false)
       setConversationTitle(created.title)
       setMessages([])
       setAttachments([])
@@ -295,9 +304,11 @@ export function ScopedDepartmentChat({
   }
 
   async function selectConversation(id) {
+    if (id === conversationId && attachmentBusy) return
     const isCurrent = completion.current.begin()
     if (!isCurrent()) return
     setConversationId(id)
+    setAttachmentBusy(false)
     setConversationTitle(conversations.find(item => item.id === id)?.title || '')
     setHistoryBusy(true)
     setError('')
@@ -477,7 +488,10 @@ export function ScopedDepartmentChat({
   }
 
   async function uploadPendingAttachments() {
-    if (!conversationId || !pendingFiles.length) return
+    if (!conversationId || !pendingFiles.length || attachmentBusy || busy || historyBusy) return
+    const isCurrent = attachmentCompletion.current.begin()
+    if (!isCurrent()) return
+    const targetConversationId = conversationId
     setAttachmentBusy(true)
     setError('')
     try {
@@ -487,30 +501,34 @@ export function ScopedDepartmentChat({
       const uploaded = []
       if (pendingFiles.length > 3) throw new Error('Choose no more than three files. No files were uploaded.')
       for (const file of pendingFiles) {
+        if (!isCurrent()) return
         const claimedMime = validateDepartmentChatAttachmentFile(file)
         const isImage = claimedMime === 'image/png' || claimedMime === 'image/jpeg'
         if (!isImage && !attachmentAiUse) throw new Error('Approve AI use before uploading text-bearing files.')
         uploaded.push(await departmentChat.uploadAttachment(departmentId, {
-          file, conversation_id: conversationId, engagement_id: engagement.id, project_id: projectId,
+          file, conversation_id: targetConversationId, engagement_id: engagement.id, project_id: projectId,
           claimed_mime: claimedMime, original_name: file.name,
           data_classification: attachmentClassification,
           ai_use_allowed: isImage ? false : attachmentAiUse,
           share_with_recipients: attachmentShare,
         }, requestScope))
       }
+      if (!isCurrent()) return
       setPendingFiles([])
-      await loadAttachments(conversationId)
+      await loadAttachments(targetConversationId, isCurrent)
+      if (!isCurrent()) return
       setSelectedAttachmentIds(uploaded.map(item => item.id))
     } catch (reason) {
-      handleOrganizationAccessError?.(reason)
-      setError(reason.message || 'Attachment upload failed')
+      handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError,
+        failure => setError(failure.message || 'Attachment upload failed'))
     } finally {
-      setAttachmentBusy(false)
+      if (isCurrent()) setAttachmentBusy(false)
     }
   }
 
   async function submit(event) {
     event.preventDefault()
+    if (busy || historyBusy || attachmentBusy || !prompt.trim()) return
     const isCurrent = completion.current.begin()
     if (!isCurrent()) return
     const targetConversationId = conversationId
@@ -807,7 +825,7 @@ export function ScopedDepartmentChat({
               const selected = selectedAttachmentIds.includes(item.id)
               return <label key={item.id} className={`flex items-start gap-3 rounded-lg border p-3 text-xs ${ready ? 'border-slate-800 text-slate-300' : 'border-slate-900 text-slate-500'}`}>
                 <input type="checkbox" disabled={!ready || busy || attachmentBusy} checked={selected} onChange={() => setSelectedAttachmentIds(current => selected ? current.filter(id => id !== item.id) : current.length < 3 ? [...current, item.id] : current)} />
-                <span className="min-w-0"><span className="block truncate font-medium">{item.original_name}</span><span className="mt-1 block capitalize text-slate-500">{item.status.replaceAll('_', ' ')} · {item.data_classification} · {item.share_with_recipients ? 'source shared' : 'uploader only'} · {item.extraction_notice}</span></span>
+                <span className="min-w-0"><span className="block truncate font-medium">{item.original_name}</span><span className="mt-1 block text-slate-500">{item.verified_mime || item.claimed_mime} · {Number.isFinite(item.byte_size) ? `${item.byte_size.toLocaleString()} bytes` : 'Size pending validation'}</span><span className="mt-1 block capitalize text-slate-500">{item.status.replaceAll('_', ' ')} · {item.data_classification} · {item.share_with_recipients ? 'source shared' : 'uploader only'} · {item.extraction_notice}</span></span>
               </label>
             })}
           </div>}
@@ -815,7 +833,7 @@ export function ScopedDepartmentChat({
         </section>}
 
         <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{isAnswerMode ? 'Message' : 'Draft request'}
-          <textarea required rows="10" className={`${INPUT} mt-2 normal-case tracking-normal`} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder={isAnswerMode ? 'Ask a question or explore the work context. This will not create an official output.' : 'Describe the draft you need, the evidence to prioritize, known constraints, tone, and gaps the team should keep visible.'} />
+          <textarea required rows="10" className={`${INPUT} mt-2 normal-case tracking-normal`} value={prompt} onInput={event => setPrompt(event.currentTarget.value)} placeholder={isAnswerMode ? 'Ask a question or explore the work context. This will not create an official output.' : 'Describe the draft you need, the evidence to prioritize, known constraints, tone, and gaps the team should keep visible.'} />
         </label>
 
         <label className="flex items-start gap-3 rounded-xl border border-amber-900/50 bg-amber-950/20 p-4 text-sm leading-6 text-amber-200">
@@ -824,7 +842,7 @@ export function ScopedDepartmentChat({
         </label>
 
         <button
-          disabled={busy || historyBusy || !safe || (supportsSavedConversations && (!currentConversation || currentConversation.state !== 'active' || !modelConfigurationId)) || (isWorkItemMode && !title.trim()) || (!isAnswerMode && !isWorkItemMode && !artifactType)}
+          disabled={busy || historyBusy || attachmentBusy || !prompt.trim() || !safe || (supportsSavedConversations && (!currentConversation || currentConversation.state !== 'active' || !modelConfigurationId)) || (isWorkItemMode && !title.trim()) || (!isAnswerMode && !isWorkItemMode && !artifactType)}
           className={`${PRIMARY} w-full`}
         >
           {busy ? (isAnswerMode ? 'Receiving genuine response…' : 'Generating safe preview…') : isAnswerMode ? 'Ask configured AI' : isWorkItemMode ? 'Preview draft work item' : 'Preview draft artifact'}
