@@ -9,12 +9,14 @@ import { appendWorkshopNavigation, parseWorkshopNavigation } from '../data/works
 const TABS = [
   ['overview', 'Setup & context'],
   ['journey', 'Journey'],
+  ['work', 'Work'],
   ['project-tasks', 'Project Tasks'],
   ['engagement-work', 'Engagement Work Items'],
   ['planning', 'Planning'],
   ['outputs', 'Deliverables & Reviews'],
   ['activity', 'Activity'],
 ]
+const planningTabIndex = TABS.findIndex(([id]) => id === 'planning')
 
 const label = (value) => value ? value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) : 'Unknown'
 const date = (value) => value ? new Date(`${value.slice(0, 10)}T00:00:00Z`).toLocaleDateString() : 'Not set'
@@ -109,7 +111,7 @@ export default function ProjectEngagementWorkspace() {
   const showRetainerPlanning = identity.hasEngagement
     && (project.engagement_type === 'retainer' || workspace.engagement?.engagement_type === 'retainer')
   const tabs = showRetainerPlanning
-    ? [...TABS.slice(0, 5), ['retainer-planning', 'Retainer Planning'], ...TABS.slice(5)]
+    ? [...TABS.slice(0, planningTabIndex + 1), ['retainer-planning', 'Retainer Planning'], ...TABS.slice(planningTabIndex + 1)]
     : TABS
   const onTabKeyDown = (event, index) => {
     const keys = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: tabs.length - 1 }
@@ -152,6 +154,7 @@ export default function ProjectEngagementWorkspace() {
         <div id="project-workspace-panel" role="tabpanel" aria-labelledby={`project-tab-${tab}`} className="mt-6" tabIndex={0}>
           {tab === 'overview' && <Overview workspace={workspace} />}
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
+          {tab === 'work' && <div className="space-y-5"><ProjectTasks rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" /><EngagementWork rows={workspace.engagementWorkItems} hasEngagement={identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" /></div>}
           {tab === 'project-tasks' && <ProjectTasks rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
           {tab === 'engagement-work' && <EngagementWork rows={workspace.engagementWorkItems} hasEngagement={identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
           {tab === 'planning' && <ProjectPlanningPanel workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} onRefresh={load} />}
@@ -184,13 +187,13 @@ function recordWorkshopPath(link, item, kind, originTab) {
   })
 }
 
-function ProjectTasks({ rows, workshopLinks, navigate }) {
-  return <Panel title="Project Tasks" description="Canonical project-level planning and execution tasks. These are not Engagement Work Items."><RecordList rows={rows} empty="No Project Tasks recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="project_task" context={item.workstreamName} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'project_task', 'project-tasks')} navigate={navigate} />} /></Panel>
+function ProjectTasks({ rows, workshopLinks, navigate, originTab = 'project-tasks' }) {
+  return <Panel title="Project Tasks" description="Canonical project-level planning and execution tasks. These are not Engagement Work Items."><RecordList rows={rows} empty="No Project Tasks recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="project_task" context={item.workstreamName} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'project_task', originTab)} navigate={navigate} />} /></Panel>
 }
 
-function EngagementWork({ rows, hasEngagement, workshopLinks, navigate }) {
+function EngagementWork({ rows, hasEngagement, workshopLinks, navigate, originTab = 'engagement-work' }) {
   if (!hasEngagement) return <Empty title="No engagement extension" note="Engagement Work Items do not apply to this project. Project Tasks remain available separately." />
-  return <Panel title="Engagement Work Items" description="Delivery work attached to the engagement extension. These are not Project Tasks."><RecordList rows={rows} empty="No Engagement Work Items recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="engagement_work_item" context={label(item.department_id)} automation={Boolean(item.automation_flagged_at)} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'engagement_work_item', 'engagement-work')} navigate={navigate} />} /></Panel>
+  return <Panel title="Engagement Work Items" description="Delivery work attached to the engagement extension. These are not Project Tasks."><RecordList rows={rows} empty="No Engagement Work Items recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="engagement_work_item" context={label(item.department_id)} automation={Boolean(item.automation_flagged_at)} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'engagement_work_item', originTab)} navigate={navigate} />} /></Panel>
 }
 
 function WorkRecord({ item, kind, context, automation = false, workshopPath, navigate }) {
