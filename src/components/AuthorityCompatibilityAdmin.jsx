@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { createAuthorityAdministrationRepository } from '../data/authorityAdministration'
+import ProjectDepartmentParticipation from './ProjectDepartmentParticipation'
 
 const field = 'rounded border border-slate-600 bg-slate-900 p-2 text-sm'
 const button = 'rounded border border-violet-400/40 px-3 py-2 text-sm disabled:opacity-40'
@@ -130,5 +131,7 @@ export default function AuthorityCompatibilityAdmin({ organizationId, organizati
         {row.status === 'active' && row.action && <button className={button} disabled={disabled} onClick={() => change(row.action, row.id)}>Revoke compatibility record</button>}
       </li>)}</ul>
     </>}
+    {data && <ProjectDepartmentParticipation key={organizationId} organizationId={organizationId} projects={data.projects}
+      departments={data.departments} client={client} requestSignal={requestSignal} />}
   </section>
 }

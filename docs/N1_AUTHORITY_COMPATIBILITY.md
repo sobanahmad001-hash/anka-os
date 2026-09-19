@@ -166,3 +166,20 @@ Still blocked for release: explicit head participation controls and recurring as
 The precise purge conflict is unchanged: `invite-user/index.ts:76` calls `auth.admin.deleteUser(targetUserId)`; line 115 calls the same hard-delete operation to compensate failed invitation setup. Organization membership user_id cascades on auth-user deletion (`20260825010000_organization_access_foundation.sql:117`), but any N1 department/designation/PM history row restricts deletion of its referenced membership, including revoked history. Either auth hard-delete may therefore fail when such history exists. The compensation path also ignores the delete result. Do not erase history, silently alter purge semantics, or ship until a separately reviewed retention/deprovisioning reconciliation resolves both operations.
 
 Next: integrate explicit project–department participation/admin controls, then immutable recurring assignment delegation and scheduler revalidation/retry tests. Specialist review, PM confirmation and release remain the next separately scoped enforcement slice.
+
+## N1-C2 — explicit project–department participation (local, release blocked)
+
+Dependency: common boundary `219ae257cc7c7091be5a92e300976fe60c9d18f9`. No inferred/backfilled participation is created. Only current System Owner/Operations Admin can include or revoke a same-organization department in a canonical project, through tokenized, idempotent commands. Immutable history survives revocation; direct browser table access and service insertion are denied.
+
+A current active canonical `department_manager` can assign their own department's Project Tasks and Engagement Work Items only while explicit participation is active. Profile titles, contributor designations, arbitrary multi-department affiliations and organization-wide project visibility do not establish head authority. Cross-department handoff requires authority over both old and new scope; exact-project PM/org authorities remain cross-department. Server capabilities distinguish per-department assignment from cross-department handoff. Specialist review, confirmation and release remain separate/ungranted.
+
+Participation administration is appended to the existing authority panel. Selection alone does not mutate; explicit include/revoke uses snapshot token and request identity, blocks duplicate submits, discards late wrong-scope responses and reloads stale outcomes without automatic mutation retries.
+
+Focused verification:
+- Real migration and both record paths passed in the synthetic local SQL runner: no backfill, head/PM self-enrollment denied, foreign project/department denied, request replay and conflict/stale token checks, head-only department assignment, cross-project/cross-department denial, handoff isolation, current role/membership revocation and participation revoke, retained immutable history, unchanged PM scope.
+- Two real sessions: stale concurrent administration rejected; exact replay deduplicated; replay after admin revocation denied.
+- Four new participation-specific JS/mounted UI tests passed. Previously completed nine assignment capability/UI checks reused rather than rerun.
+- Build passed (475 modules; existing chunk warning). Scoped lint 0 errors, 27 JSX-used-name warnings. `git diff --check` passed. Local security advisor: No issues found.
+- Retained stopped evidence cluster: `G:/AnkaSphereN1LocalChecks/anka-n1-6b45e22471c44fc99248955e73e187aa`. Synthetic parent/ACL and mounted-DOM limitations remain exactly as in C1; no hosted/signed-in acceptance claimed.
+
+Next approved dependency is recurring assignment delegation. Installed parent ACL/full-schema acceptance and the recorded auth hard-delete/history conflict remain release blockers. No live migration, deployment, push, provider or paid action.

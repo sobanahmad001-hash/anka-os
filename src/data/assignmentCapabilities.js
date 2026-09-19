@@ -19,10 +19,14 @@ export async function readAssignmentCapabilities(client, organizationId, project
     typeof data.can_assign !== 'boolean' || data.can_create_unassigned !== true) throw new Error('Invalid assignment capability scope')
   for (const key of ['project_tasks', 'engagement_work_items']) {
     if (!Array.isArray(data[key]) || data[key].some(item => !item?.id || !Number.isSafeInteger(Number(item.row_version)) ||
-      Number(item.row_version) < 1 || typeof item.can_assign !== 'boolean' || typeof item.can_execute !== 'boolean')) {
+      Number(item.row_version) < 1 || typeof item.can_assign !== 'boolean' || typeof item.can_execute !== 'boolean' ||
+      (item.can_handoff !== undefined && typeof item.can_handoff !== 'boolean'))) {
       throw new Error('Invalid assignment capability records')
     }
   }
+  if (data.assignable_departments !== undefined && (!Array.isArray(data.assignable_departments) ||
+    data.assignable_departments.some(id => typeof id !== 'string' || !id))) throw new Error('Invalid assignment department scope')
   return { organization_id: organizationId, project_id: projectId, assignment_enforced: true, can_assign: data.can_assign,
-    can_create_unassigned: true, project_tasks: data.project_tasks, engagement_work_items: data.engagement_work_items }
+    can_create_unassigned: true, assignable_departments: Array.isArray(data.assignable_departments) ? data.assignable_departments : [],
+    project_tasks: data.project_tasks, engagement_work_items: data.engagement_work_items }
 }

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
-const [bin, port] = process.argv.slice(2)
+const [bin, port, mode] = process.argv.slice(2)
 if (!/^\d+$/.test(port || '') || Number(port) < 1024) throw new Error('Unprivileged local test port required')
 const source = file => readFileSync(new URL('../migrations/' + file, import.meta.url), 'utf8')
 const testFile = file => readFileSync(new URL(file, import.meta.url), 'utf8')
@@ -40,7 +40,8 @@ const sql = [
      public.move_p5_work_item(uuid,uuid,bigint,text,uuid,uuid),
      private.p5_require_active_actor(uuid,uuid),private.p5_raise_stale_write(text,uuid,bigint,bigint) to service_role;`,
   source('20260919145156_n1c_assignment_enforcement.sql'),
-  testFile('n1c_assignment.behavior.sql'),
+  ...(mode === 'participation' ? [source('20260919151214_n1c_project_department_participation.sql'),
+    testFile('n1c_participation.behavior.sql')] : [testFile('n1c_assignment.behavior.sql')]),
 ].join('\n')
 const result = spawnSync(join(bin, 'psql.exe'), ['-X','-h','127.0.0.1','-p',port,'-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1'],
   { input: sql, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: 60000 })

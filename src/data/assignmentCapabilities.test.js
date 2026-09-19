@@ -7,6 +7,17 @@ const envelope = overrides => ({ schema_version: 1, assignment_enforced: true, o
   project_tasks: [{ id: 'task', row_version: 2, can_assign: false, can_execute: true }],
   engagement_work_items: [], ...overrides })
 
+test('participation capabilities distinguish department assignment from cross-department handoff', async () => {
+  const data = envelope({ assignable_departments: ['design'], project_tasks: [{ id: 'task', row_version: 2, can_assign: true, can_execute: true, can_handoff: false }] })
+  const result = await readAssignmentCapabilities({ rpc: () => Promise.resolve({ data }) }, 'org', 'project')
+  assert.deepEqual(result.assignable_departments, ['design'])
+  assert.equal(recordAssignmentCapabilities(result, 'project_tasks', { id: 'task', row_version: 2 }).can_handoff, false)
+  for (const invalid of [{ ...data, assignable_departments: [null] }, { ...data, assignable_departments: 'design' },
+    { ...data, project_tasks: [{ ...data.project_tasks[0], can_handoff: 'true' }] }]) {
+    await assert.rejects(readAssignmentCapabilities({ rpc: () => Promise.resolve({ data: invalid }) }, 'org', 'project'))
+  }
+})
+
 test('server capabilities are project/organization scoped and project task identity stays distinct', async () => {
   const calls = []
   const result = await readAssignmentCapabilities({ rpc(name, args) { calls.push({ name, args }); return Promise.resolve({ data: envelope() }) } }, 'org', 'project')
