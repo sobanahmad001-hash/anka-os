@@ -1,4 +1,4 @@
-import { appendWorkshopNavigation } from './workshopNavigation.js'
+import { appendWorkshopNavigation, WORKSHOP_DESTINATIONS } from './workshopNavigation.js'
 
 const CLOSED_PROJECT_TASK = new Set(['done', 'cancelled'])
 const CLOSED_WORK_ITEM = new Set(['done'])
@@ -123,15 +123,14 @@ export function buildProjectEngagementWorkspace(snapshot, options = {}) {
   const projectOwner = owner(project.owner_id)
   const engagementOwner = engagement ? owner(engagement.lead_owner_id) : null
 
-  const workshopPaths = { content: '/sphere/content', design: '/sphere/design', development: '/sphere/delivery', marketing: '/sphere/marketing' }
   const workshopLinks = [...new Set(services.filter((item) => item.status === 'active').map((item) => item.service_catalog?.department_id).filter(Boolean))]
-    .filter((department) => workshopPaths[department])
+    .filter((department) => WORKSHOP_DESTINATIONS[department])
     .map((department) => {
       const service = services.find(item => item.status === 'active' && item.service_catalog?.department_id === department)
       const stage = journey.find(item => item.accountable_department_id === department && !['completed', 'cancelled'].includes(item.status))
       return {
         department,
-        path: appendWorkshopNavigation(workshopPaths[department], {
+        path: appendWorkshopNavigation(WORKSHOP_DESTINATIONS[department], {
           organizationId: project.organization_id,
           clientId: client?.id,
           projectId: project.id,
