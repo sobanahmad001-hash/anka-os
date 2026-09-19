@@ -24,19 +24,22 @@ test('P7 adapter sends exact organization/version/state to separate governed RPC
   const governed = createDeliverableGovernance(client)
   await governed.submit({ organizationId: 'org-a', deliverableVersionId: 'version-a', expectedStateVersion: 4, reviewerId: 'reviewer-a', requestId: 'request-a' })
   await governed.review({ organizationId: 'org-a', deliverableVersionId: 'version-a', expectedStateVersion: 5, decision: 'approved', requestId: 'request-b' })
-  await governed.release({ organizationId: 'org-a', deliverableVersionId: 'version-a', expectedStateVersion: 6, clientApprovalRequired: true, requestId: 'request-c' })
-  await governed.clientDecision({ organizationId: 'org-a', deliverableVersionId: 'version-a', expectedStateVersion: 7, decision: 'approved', requestId: 'request-d' })
-  await governed.delivered({ organizationId: 'org-a', deliverableVersionId: 'version-a', expectedStateVersion: 8, requestId: 'request-e' })
-  await governed.published({ organizationId: 'org-a', deliverableVersionId: 'version-a', expectedStateVersion: 9, requestId: 'request-f' })
+  await governed.confirmProjectManager({ organizationId: 'org-a', deliverableVersionId: 'version-a', expectedStateVersion: 6, requestId: 'request-c' })
+  await governed.release({ organizationId: 'org-a', deliverableVersionId: 'version-a', expectedStateVersion: 6, clientApprovalRequired: true, requestId: 'request-d' })
+  await governed.clientDecision({ organizationId: 'org-a', deliverableVersionId: 'version-a', expectedStateVersion: 7, decision: 'approved', requestId: 'request-e' })
+  await governed.delivered({ organizationId: 'org-a', deliverableVersionId: 'version-a', expectedStateVersion: 8, requestId: 'request-f' })
+  await governed.published({ organizationId: 'org-a', deliverableVersionId: 'version-a', expectedStateVersion: 9, requestId: 'request-g' })
   assert.deepEqual(client.calls.map(call => call.name), [
     'submit_governed_deliverable_version', 'review_governed_deliverable_version',
+    'confirm_governed_deliverable_project_manager',
     'release_governed_deliverable_version', 'decide_governed_deliverable_version',
     'mark_governed_deliverable_delivered', 'mark_governed_deliverable_published',
   ])
   assert.equal(client.calls[0].args.p_organization_id, 'org-a')
   assert.equal(client.calls[0].args.p_expected_state_version, 4)
   assert.equal(client.calls[0].args.p_nominated_reviewer_id, 'reviewer-a')
-  assert.equal(client.calls[2].args.p_client_approval_required, true)
+  assert.equal(client.calls[2].args.p_expected_state_version, 6)
+  assert.equal(client.calls[3].args.p_client_approval_required, true)
 })
 
 test('P7 adapter preserves response-envelope status on governed failures', async () => {

@@ -801,6 +801,12 @@ export function createDeliveryRepository(client) {
       return governance.review(input)
     },
 
+    async confirmDeliverableProjectManager(input) {
+      requireOrganizationId(input?.organizationId)
+      assertIdentifier(input?.deliverableVersionId, 'deliverableVersionId')
+      return governance.confirmProjectManager(input)
+    },
+
     async releaseDeliverableVersion(input, actorId) {
       requireOrganizationId(input?.organizationId)
       assertIdentifier(input?.deliverableVersionId, 'deliverableVersionId')

@@ -80,6 +80,14 @@ export function createDeliverableGovernance(client) {
         p_request_id: requestId(input.requestId),
       })
     },
+    confirmProjectManager(input) {
+      return rpc(client, 'confirm_governed_deliverable_project_manager', {
+        p_organization_id: input.organizationId,
+        p_deliverable_version_id: input.deliverableVersionId,
+        p_expected_state_version: input.expectedStateVersion,
+        p_request_id: requestId(input.requestId),
+      })
+    },
     release(input) {
       return rpc(client, 'release_governed_deliverable_version', {
         p_organization_id: input.organizationId,
