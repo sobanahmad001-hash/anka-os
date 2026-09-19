@@ -49,7 +49,9 @@ export default function AuthorityCompatibilityAdmin({ organizationId, organizati
     setNotice('')
     try {
       await repository.change({ organizationId, userId, action, value, token: data.token, requestId: crypto.randomUUID() }, { signal: requestSignal })
-      if (usable()) setNotice('Compatibility record saved. Effective permissions and legacy access are unchanged.')
+      if (usable()) setNotice(data.assignment_enforced
+        ? 'Record saved. Assignment controls recheck current PM bindings; other legacy access is unchanged.'
+        : 'Compatibility record saved. Effective permissions and legacy access are unchanged.')
     } catch (failure) {
       if (usable()) setError(failure.code === '40001'
         ? 'Another edit changed these records. Reloading; review the latest state before submitting again.'
@@ -74,7 +76,9 @@ export default function AuthorityCompatibilityAdmin({ organizationId, organizati
       <p className="text-sm text-slate-400">Selected organization: {organizationName || organizationId}</p>
     </header>
     <p className="rounded border border-amber-400/30 bg-amber-400/5 p-3 text-sm text-amber-100">
-      These are compatibility records, not effective permissions. Removing a record does not revoke all legacy access.
+      {data?.assignment_enforced
+        ? 'Assignment enforcement is installed: explicit PM bindings affect task assignment only. These records are not a complete permissions model.'
+        : 'These are compatibility records, not effective permissions.'} Removing a record does not revoke all legacy access.
       Contributor Executive is a designation, not the legacy elevated Executive role. Legacy controls remain separate.
     </p>
     {error && <p role="alert" className="text-sm text-red-300">{error}</p>}

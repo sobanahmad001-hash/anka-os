@@ -567,8 +567,8 @@ export function createDeliveryRepository(client) {
             priority: 'medium',
             user_id: actorId,
             created_by: actorId,
-            assigned_by: actorId,
-            assigned_to: actorId,
+            assigned_by: null,
+            assigned_to: null,
             visibility: 'internal_only',
           }
         })).select()
@@ -628,8 +628,8 @@ export function createDeliveryRepository(client) {
             due_date: input.dueDate || null,
             user_id: actorId,
             created_by: actorId,
-            assigned_by: actorId,
-            assigned_to: input.assignedTo || actorId,
+            assigned_by: input.assignedTo ? actorId : null,
+            assigned_to: input.assignedTo || null,
             visibility: 'internal_only',
           })
           .select()

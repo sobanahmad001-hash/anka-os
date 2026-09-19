@@ -23,7 +23,7 @@ export function validateAdministration(data, organizationId, userId) {
           row.user_id !== userId || !['active', 'revoked'].includes(row.status))) invalid()
     }
   } else if (snapshot !== null || data.token !== null) invalid()
-  return { organization_id: organizationId, compatibility_only: true, actor_id: data.actor_id,
+  return { organization_id: organizationId, compatibility_only: true, actor_id: data.actor_id, assignment_enforced: data.assignment_enforced === true,
     members: data.members, departments: data.departments, projects: data.projects, snapshot, token: data.token }
 }
 
