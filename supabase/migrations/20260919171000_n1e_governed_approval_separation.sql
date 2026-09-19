@@ -58,6 +58,11 @@ returns jsonb language plpgsql security definer set search_path='' as $$
 declare actor uuid:=auth.uid(); c record; existing public.deliverable_pm_confirmations%rowtype;
 begin
  if actor is null or p_request_id is null then raise exception 'Authentication and request id are required.' using errcode='42501'; end if;
+ -- A replay is still a privileged current action: a revoked PM cannot use an
+ -- old request ID as a capability after their exact-project binding is gone.
+ select v.project_id into c from public.deliverable_versions v where v.id=p_deliverable_version_id and v.organization_id=p_organization_id for share;
+ if not found then raise exception 'Exact deliverable version not found.' using errcode='P0002'; end if;
+ if not (private.n1e_org_authority(p_organization_id,c.project_id,actor) or private.n1e_exact_project_manager(p_organization_id,c.project_id,actor)) then raise exception 'Exact-project PM confirmation authority required.' using errcode='42501'; end if;
  select * into existing from public.deliverable_pm_confirmations where organization_id=p_organization_id and confirmed_by=actor and request_id=p_request_id for share;
  if found then if existing.deliverable_version_id<>p_deliverable_version_id or existing.confirmed_state_version<>p_expected_state_version then raise exception 'Request ID conflict.' using errcode='23505'; end if; return jsonb_build_object('deliverable_version_id',existing.deliverable_version_id,'confirmed',true,'idempotent_replay',true); end if;
  select v.*,d.owner_id deliverable_owner_id into c from public.deliverable_versions v join public.deliverables d on d.id=v.deliverable_id and d.project_id=v.project_id and d.organization_id=v.organization_id where v.id=p_deliverable_version_id and v.organization_id=p_organization_id for update of v;
@@ -65,7 +70,6 @@ begin
  if c.state_version<>p_expected_state_version then raise exception 'Deliverable version changed; reload before confirmation.' using errcode='40001'; end if;
  if c.review_status<>'ready_for_client_review' then raise exception 'Only specialist-approved versions can receive PM confirmation.' using errcode='23514'; end if;
  if actor is not distinct from c.created_by or actor is not distinct from c.deliverable_owner_id or actor is not distinct from c.internal_reviewer_id then raise exception 'A PM confirmation cannot self-confirm or duplicate specialist review.' using errcode='42501'; end if;
- if not (private.n1e_org_authority(p_organization_id,c.project_id,actor) or private.n1e_exact_project_manager(p_organization_id,c.project_id,actor)) then raise exception 'Exact-project PM confirmation authority required.' using errcode='42501'; end if;
  insert into public.deliverable_pm_confirmations(organization_id,project_id,deliverable_id,deliverable_version_id,confirmed_by,confirmed_state_version,request_id) values(p_organization_id,c.project_id,c.deliverable_id,p_deliverable_version_id,actor,p_expected_state_version,p_request_id);
  return jsonb_build_object('deliverable_version_id',p_deliverable_version_id,'confirmed',true,'idempotent_replay',false);
 end; $$;
