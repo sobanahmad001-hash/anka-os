@@ -1,7 +1,8 @@
 param(
   [Parameter(Mandatory = $true)][string]$PostgresBin,
   [int]$Port = 55439,
-  [string]$ClusterParent = [System.IO.Path]::GetTempPath()
+  [string]$ClusterParent = [System.IO.Path]::GetTempPath(),
+  [switch]$Administration
 )
 $ErrorActionPreference = 'Stop'
 if ($Port -lt 1024 -or $Port -gt 65535) { throw 'Use an unprivileged local test port.' }
@@ -22,12 +23,22 @@ try {
   & (Join-Path $PostgresBin 'pg_ctl.exe') -D $taskData -l (Join-Path $taskCluster 'postgres.log') -o "-h 127.0.0.1 -p $Port" -w start
   if ($LASTEXITCODE -ne 0) { throw 'Local PostgreSQL startup failed.' }
   $started = $true
-  & (Join-Path $PostgresBin 'psql.exe') -X -h 127.0.0.1 -p $Port -U postgres -d postgres -v ON_ERROR_STOP=1 `
-    -f (Join-Path $PSScriptRoot 'n1_authority_compatibility.fixture.sql') `
-    -f (Join-Path $PSScriptRoot '../migrations/20260919135700_n1_authority_compatibility.sql') `
-    -f (Join-Path $PSScriptRoot 'n1_authority_compatibility.behavior.sql') `
-    -f (Join-Path $PSScriptRoot 'n1_authority_compatibility.service-role.sql')
+  $taskSqlFiles = @('n1_authority_compatibility.fixture.sql', '../migrations/20260919135700_n1_authority_compatibility.sql')
+  if ($Administration) {
+    $taskSqlFiles += @('n1b_authority_administration.fixture.sql', '../migrations/20260919142833_n1b_authority_administration.sql', 'n1b_authority_administration.behavior.sql')
+  } else {
+    $taskSqlFiles += @('n1_authority_compatibility.behavior.sql', 'n1_authority_compatibility.service-role.sql')
+  }
+  $taskSqlArgs = @('-X', '-h', '127.0.0.1', '-p', $Port, '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1')
+  foreach ($taskSql in $taskSqlFiles) { $taskSqlArgs += @('-f', (Join-Path $PSScriptRoot $taskSql)) }
+  & (Join-Path $PostgresBin 'psql.exe') @taskSqlArgs
   if ($LASTEXITCODE -ne 0) { throw 'N1 isolated SQL validation failed.' }
+  if ($Administration) {
+    & node (Join-Path $PSScriptRoot 'n1b-concurrency.mjs') $PostgresBin $Port
+    if ($LASTEXITCODE -ne 0) { throw 'N1-B concurrent SQL validation failed.' }
+    & (Join-Path $PSScriptRoot '../../node_modules/.bin/supabase.cmd') db advisors --db-url "postgresql://postgres@127.0.0.1:${Port}/postgres?sslmode=disable" --type security --level warn
+    if ($LASTEXITCODE -ne 0) { Write-Warning 'Synthetic local advisor unavailable; not hosted acceptance.' }
+  }
 } finally {
   if ($started) {
     & (Join-Path $PostgresBin 'pg_ctl.exe') -D $taskData -m fast -w stop
