@@ -1,5 +1,7 @@
 # P9 Shared Workshop Chat — actual-code residual checklist
 
+Historical P9-MODELS-1 record. For the reconciliation against current main on 2026-09-19, see `P9_CURRENT_MAIN_CLOSEOUT.md`. Its ordinary-answer/streaming and release-pending statements below describe that earlier candidate, not current main.
+
 Original implementation base: `dd3d10425d6c46eaae130b045fae68f75ad97775`.
 Navigation integration base: `af5df30f592a39228e8ecbca28bec22f5cc6122c`.
 Freshness-reconciled current main baseline: `c1477868c4b9c015e777d6668bece65b2a4fe55d`.

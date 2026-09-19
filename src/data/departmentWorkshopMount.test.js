@@ -241,8 +241,11 @@ async function mountWorkshop(t, DepartmentWorkshop, departmentId, harness) {
   })
 
   const root = createRoot(environment.container)
-  t.after(() => {
-    try { root.unmount() } catch { /* already unmounted */ }
+  let cleaned = false
+  const cleanup = async () => {
+    if (cleaned) return
+    cleaned = true
+    await act(async () => root.unmount())
     Object.assign(globalThis, {
       document: previous.document,
       window: previous.window,
@@ -252,12 +255,13 @@ async function mountWorkshop(t, DepartmentWorkshop, departmentId, harness) {
       IS_REACT_ACT_ENVIRONMENT: previous.IS_REACT_ACT_ENVIRONMENT,
       __dwsHarness: previous.dwsHarness,
     })
-  })
+  }
+  t.after(cleanup)
 
   await act(async () => root.render(createElement(DepartmentWorkshop, { departmentId })))
   await flush()
 
-  return { environment, root }
+  return { environment, root, cleanup }
 }
 
 function withOrganizationScope(overrides) {
@@ -341,7 +345,7 @@ test('mounted workshops keep integrity when no engagement matches context', asyn
   }
 
   for (const department of departments) {
-    const { environment } = await mountWorkshop(t, DepartmentWorkshop, department, {
+    const { environment, cleanup } = await mountWorkshop(t, DepartmentWorkshop, department, {
       auth: { user: { id: 'user-1' } },
       organization: withOrganizationScope(),
       delivery: { getDepartmentWorkspace: async () => workspace },
@@ -353,6 +357,7 @@ test('mounted workshops keep integrity when no engagement matches context', asyn
     assert.equal(/Cannot read properties/.test(text), false)
     assert.equal(/TypeError: Cannot/.test(text), false)
     assert.ok(/Workshop context not opened|No active (Content|Design|Marketing) workstreams/.test(text))
+    await cleanup()
   }
 })
 
@@ -363,7 +368,7 @@ test('mounted workshops accept valid exact context and reject missing pointers',
   const validWorkspace = workspaceBase()
   const validQuery = '?ctxOrg=org-1&ctxProject=project-a&ctxEngagement=engagement-a&ctxService=service-a&ctxStage=stage-a'
   for (const department of departments) {
-    const { environment } = await mountWorkshop(t, DepartmentWorkshop, department, {
+    const { environment, cleanup } = await mountWorkshop(t, DepartmentWorkshop, department, {
       auth: { user: { id: 'user-1' } },
       organization: withOrganizationScope(),
       delivery: { getDepartmentWorkspace: async () => validWorkspace },
@@ -379,6 +384,7 @@ test('mounted workshops accept valid exact context and reject missing pointers',
     const validText = environment.container.textContent
     assert.equal(/Cannot read properties/.test(validText), false)
     assert.ok(/No Project Tasks in this workstream|No active/.test(validText))
+    await cleanup()
   }
 
   const invalidWorkspace = {
@@ -388,7 +394,7 @@ test('mounted workshops accept valid exact context and reject missing pointers',
   }
 
   for (const department of departments) {
-    const { environment } = await mountWorkshop(t, DepartmentWorkshop, department, {
+    const { environment, cleanup } = await mountWorkshop(t, DepartmentWorkshop, department, {
       auth: { user: { id: 'user-1' } },
       organization: withOrganizationScope(),
       delivery: { getDepartmentWorkspace: async () => invalidWorkspace },
@@ -400,6 +406,7 @@ test('mounted workshops accept valid exact context and reject missing pointers',
     assert.equal(/Cannot read properties/.test(invalidText), false)
     assert.equal(/TypeError: Cannot/.test(invalidText), false)
     assert.equal(/Workshop context not opened/.test(invalidText), true)
+    await cleanup()
   }
 })
 

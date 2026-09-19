@@ -129,3 +129,27 @@ test('CHAT-3 verifier is rollback-only and names storage, ACL, manifest, and rev
     'attachment_exact_manifest_and_hash', 'attachment_share_and_dispatch_revocation',
     'attachment_finalization_reauthorization']) assert.ok(verifier.includes(gate), gate)
 })
+
+test('unsupported attachment MIME types are rejected before upload', () => {
+  for (const type of ['application/pdf', 'application/zip', 'application/octet-stream']) {
+    const result = selectPendingDepartmentChatAttachments([{ name: 'source.txt', type, size: 10 }])
+    assert.deepEqual(result.files, [])
+    assert.match(result.error, /unsupported file type/)
+  }
+})
+
+test('attachment reservation completed after scope revocation cannot start a storage upload', async () => {
+  const controller = new AbortController()
+  let uploadCount = 0
+  const client = {
+    functions: { invoke: async () => {
+      controller.abort()
+      return { data: { data: { attachment: { id: 'reserved' }, upload: { bucket: 'private', path: 'staging', token: 'token' } } } }
+    } },
+    storage: { from: () => ({ uploadToSignedUrl: async () => { uploadCount += 1; return {} } }) },
+  }
+  await assert.rejects(createDepartmentChatRepository(client).uploadAttachment('content', {
+    file: new Blob(['safe'], { type: 'text/plain' }), conversation_id: 'conversation',
+  }, { organizationId: 'organization', signal: controller.signal }), { name: 'AbortError' })
+  assert.equal(uploadCount, 0)
+})
