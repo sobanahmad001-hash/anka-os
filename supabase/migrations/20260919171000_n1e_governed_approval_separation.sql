@@ -144,6 +144,9 @@ begin
 end; $$;
 
 revoke all on function private.n1e_org_authority(uuid,uuid,uuid),private.n1e_exact_project_manager(uuid,uuid,uuid),private.n1e_department_head(uuid,uuid,text,uuid),private.n1e_specialist_authority(uuid,uuid,text,uuid),private.n1e_artifact_department(text),private.n1e_artifact_approval_authority(uuid,uuid,text,uuid,uuid,uuid),private.n1e_artifact_nomination_authority(uuid,uuid,text,uuid) from public,anon,authenticated,service_role;
+-- Artifact approval RPCs remain SECURITY INVOKER on the trusted service lane.
+-- That role needs these read-only helpers to evaluate current scope at decision time.
+grant execute on function private.n1e_org_authority(uuid,uuid,uuid),private.n1e_exact_project_manager(uuid,uuid,uuid),private.n1e_department_head(uuid,uuid,text,uuid),private.n1e_specialist_authority(uuid,uuid,text,uuid),private.n1e_artifact_department(text),private.n1e_artifact_approval_authority(uuid,uuid,text,uuid,uuid,uuid),private.n1e_artifact_nomination_authority(uuid,uuid,text,uuid) to service_role;
 revoke all on function public.confirm_governed_deliverable_project_manager(uuid,uuid,bigint,uuid),public.create_artifact_approval_request(uuid,text,uuid[],uuid),public.sign_off_artifact_approval(uuid,uuid),public.request_artifact_approval_changes(uuid,uuid,text,uuid) from public,anon,authenticated;
 grant execute on function public.confirm_governed_deliverable_project_manager(uuid,uuid,bigint,uuid) to authenticated;
 grant execute on function public.create_artifact_approval_request(uuid,text,uuid[],uuid),public.sign_off_artifact_approval(uuid,uuid),public.request_artifact_approval_changes(uuid,uuid,text,uuid) to service_role;

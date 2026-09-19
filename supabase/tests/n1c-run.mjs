@@ -12,6 +12,13 @@ function actualFunction(file, name) {
   if (matches.length !== 1) throw new Error('Expected exact source function: ' + name)
   return matches[0][0]
 }
+function actualTable(file, name) {
+  const sourceText = source(file)
+  const marker = name.replaceAll('.', '\\.')
+  const matches = [...sourceText.matchAll(new RegExp('create table ' + marker + '\\s*\\([\\s\\S]*?\\n\\);', 'gi'))]
+  if (matches.length !== 1) throw new Error('Expected exact source table: ' + name)
+  return matches[0][0]
+}
 const sql = [
   testFile('n1_authority_compatibility.fixture.sql'),
   source('20260919135700_n1_authority_compatibility.sql'),
@@ -46,7 +53,24 @@ const sql = [
     source('20260919154909_n1c_recurring_assignment_delegation.sql'),
     ...(mode === 'deprovisioning' ? [testFile('n1d_deprovisioning.fixture.sql'),source('20260919162508_n1d_scoped_deprovisioning.sql'),testFile('n1d_deprovisioning.behavior.sql')]
       : [testFile('n1c_recurring.behavior.sql')])] : mode === 'participation' ? [source('20260919151214_n1c_project_department_participation.sql'),
-    testFile('n1c_participation.behavior.sql')] : [testFile('n1c_assignment.behavior.sql')]),
+    testFile('n1c_participation.behavior.sql')] : mode === 'n1e' ? [
+      source('20260919151214_n1c_project_department_participation.sql'),
+      testFile('n1e_governed_approval.fixture.sql'),
+      actualFunction('20260825010000_organization_access_foundation.sql', 'public.is_team_organization_member'),
+      ...['public.deliverable_review_assignments','public.deliverable_lifecycle_events','public.deliverable_action_requests']
+        .map(name => actualTable('20260904130000_p7_governed_deliverable_release.sql', name)),
+      ...['public.artifact_approval_requests','public.artifact_approval_signoffs']
+        .map(name => actualTable('20260829095245_multi_approver_policies.sql', name)),
+      ...['private.p7_reject_history_mutation','private.p7_team','private.p7_replay','private.p7_record',
+        'public.release_governed_deliverable_version']
+        .map(name => actualFunction('20260904130000_p7_governed_deliverable_release.sql', name)),
+      source('20260919171000_n1e_governed_approval_separation.sql'),
+      `grant execute on function public.release_governed_deliverable_version(uuid,uuid,bigint,boolean,text,uuid) to authenticated;
+       grant all on public.artifacts,public.artifact_versions,public.artifact_approvals,
+         public.artifact_approval_requests,public.artifact_approval_signoffs,
+         public.artifact_version_comments,public.engagement_events to service_role;`,
+      testFile('n1e_governed_approval.behavior.sql'),
+    ] : [testFile('n1c_assignment.behavior.sql')]),
 ].join('\n')
 const result = spawnSync(join(bin, 'psql.exe'), ['-X','-h','127.0.0.1','-p',port,'-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1'],
   { input: sql, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: 60000 })

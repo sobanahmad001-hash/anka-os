@@ -6,7 +6,8 @@ param(
   [switch]$Assignment,
   [switch]$Participation,
   [switch]$Recurring,
-  [switch]$Deprovisioning
+  [switch]$Deprovisioning,
+  [switch]$GovernedApproval
 )
 $ErrorActionPreference = 'Stop'
 if ($Port -lt 1024 -or $Port -gt 65535) { throw 'Use an unprivileged local test port.' }
@@ -27,7 +28,12 @@ try {
   & (Join-Path $PostgresBin 'pg_ctl.exe') -D $taskData -l (Join-Path $taskCluster 'postgres.log') -o "-h 127.0.0.1 -p $Port" -w start
   if ($LASTEXITCODE -ne 0) { throw 'Local PostgreSQL startup failed.' }
   $started = $true
-  if ($Deprovisioning) {
+  if ($GovernedApproval) {
+    & node (Join-Path $PSScriptRoot 'n1c-run.mjs') $PostgresBin $Port n1e
+    if ($LASTEXITCODE -ne 0) { throw 'N1-E governed approval validation failed.' }
+    & node (Join-Path $PSScriptRoot 'n1e-concurrency.mjs') $PostgresBin $Port
+    if ($LASTEXITCODE -ne 0) { throw 'N1-E concurrent approval validation failed.' }
+  } elseif ($Deprovisioning) {
     & node (Join-Path $PSScriptRoot 'n1c-run.mjs') $PostgresBin $Port deprovisioning
     if ($LASTEXITCODE -ne 0) { throw 'N1-D deprovisioning validation failed.' }
     & node (Join-Path $PSScriptRoot 'n1d-concurrency.mjs') $PostgresBin $Port
@@ -67,7 +73,7 @@ try {
     & (Join-Path $PSScriptRoot '../../node_modules/.bin/supabase.cmd') db advisors --db-url "postgresql://postgres@127.0.0.1:${Port}/postgres?sslmode=disable" --type security --level warn
     if ($LASTEXITCODE -ne 0) { Write-Warning 'Synthetic local advisor unavailable; not hosted acceptance.' }
   }
-  if ($Assignment -or $Participation -or $Recurring -or $Deprovisioning) {
+  if ($Assignment -or $Participation -or $Recurring -or $Deprovisioning -or $GovernedApproval) {
     & (Join-Path $PSScriptRoot '../../node_modules/.bin/supabase.cmd') db advisors --db-url "postgresql://postgres@127.0.0.1:${Port}/postgres?sslmode=disable" --type security --level warn
     if ($LASTEXITCODE -ne 0) { Write-Warning 'Synthetic local advisor unavailable; not hosted acceptance.' }
   }
