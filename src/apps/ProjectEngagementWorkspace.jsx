@@ -8,6 +8,7 @@ import { appendWorkshopNavigation, parseWorkshopNavigation } from '../data/works
 
 const TABS = [
   ['overview', 'Setup & context'],
+  ['services', 'Services & Scope'],
   ['journey', 'Journey'],
   ['work', 'Work'],
   ['project-tasks', 'Project Tasks'],
@@ -153,6 +154,7 @@ export default function ProjectEngagementWorkspace() {
 
         <div id="project-workspace-panel" role="tabpanel" aria-labelledby={`project-tab-${tab}`} className="mt-6" tabIndex={0}>
           {tab === 'overview' && <Overview workspace={workspace} />}
+          {tab === 'services' && <ServicesAndScope workspace={workspace} />}
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
           {tab === 'work' && <div className="space-y-5"><ProjectTasks rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" /><EngagementWork rows={workspace.engagementWorkItems} hasEngagement={identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" /></div>}
           {tab === 'project-tasks' && <ProjectTasks rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
@@ -170,6 +172,30 @@ export default function ProjectEngagementWorkspace() {
 function Overview({ workspace }) {
   const { project, context } = workspace
   return <div className="grid gap-5 xl:grid-cols-[1.3fr_1fr]"><div className="space-y-5"><Panel title="Project brief" description="The canonical project brief and optional engagement objective remain separate records."><TextBlock value={context.brief} empty="No project brief recorded." />{context.objective && <div className="mt-4 border-t border-white/[0.07] pt-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Engagement objective</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">{context.objective}</p></div>}</Panel><Panel title="Scope and exclusions"><TextBlock value={context.scope} empty="No scope statement recorded." /><div className="mt-4 border-t border-white/[0.07] pt-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Explicit exclusions</p><TextBlock value={context.exclusions} empty="No exclusions recorded." /></div></Panel><Panel title="Existing assets" description="Supplied engagement context is shown as recorded; missing upstream artifacts are not inferred."><RecordList rows={workspace.existingAssets} empty={workspace.identity.hasEngagement ? 'No existing assets were supplied.' : 'No engagement extension; supplied engagement assets do not apply.'} render={(item) => <AssetRecord key={item.id} item={item} />} /></Panel><Panel title="Milestones"><RecordList rows={workspace.milestones} empty="No milestones recorded." render={(item) => <Record key={item.id} title={item.name} note={`Target ${date(item.target_date)} · ${item.owner.name}`} status={item.status} attention={item.overdue || item.status === 'at_risk'} />} /></Panel></div><div className="space-y-5"><Panel title="Client and brand context"><Record title={context.client?.company || context.client?.name || (workspace.identity.workType === 'Internal Work' ? 'Internal Work' : 'No canonical client')} note={context.client ? [context.client.industry, context.client.status].filter(Boolean).map(label).join(' · ') || 'Canonical client' : 'No client identity is attached to this project.'} /><Record title={context.brand?.name || 'No brand extension'} note={context.brand?.description || 'Brand context is available only through a valid engagement extension.'} /></Panel><Panel title="Ownership"><Record title={context.projectOwner.name} note={`Project owner · ${date(project.start_date)} to ${date(project.due_date)}`} /><Record title={context.engagementOwner?.name || 'No separate engagement lead'} note={workspace.identity.hasEngagement ? 'Operating engagement lead' : 'The canonical project remains the workspace root.'} /></Panel><Panel title="Active workstreams"><RecordList rows={workspace.workstreams} empty="No workstreams recorded." render={(item) => <Record key={item.id} title={item.name} note={`${label(item.department_id)} · ${item.owner.name}`} status={item.status} />} /></Panel><Panel title="Attention signals"><RecordList rows={workspace.attentionSignals} empty="No current attention signals." render={(item) => <p key={item} className="rounded-xl border border-amber-500/15 bg-amber-500/[0.06] px-3 py-2 text-sm text-amber-200">{item}</p>} /></Panel></div></div>
+}
+
+function ServicesAndScope({ workspace }) {
+  const { context, deliveryShape, engagement, identity } = workspace
+  return <div className="space-y-5">
+    <div className="grid gap-5 xl:grid-cols-2">
+      <Panel title="Project scope" description="The canonical project statement remains the source for scope and exclusions.">
+        <TextBlock value={context.scope} empty="No scope statement recorded." />
+        <div className="mt-4 border-t border-white/[0.07] pt-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Explicit exclusions</p>
+          <TextBlock value={context.exclusions} empty="No exclusions recorded." />
+        </div>
+      </Panel>
+      <Panel title="Service context" description="Service selection and the project scope are separate records.">
+        <Record title={deliveryShape.label} note={deliveryShape.note} />
+        {identity.hasEngagement && <div className="mt-3"><Record title={engagement?.name || 'Operating engagement'} note={context.objective || 'No engagement objective recorded.'} status={engagement?.status} /></div>}
+      </Panel>
+    </div>
+    {identity.hasEngagement
+      ? <Panel title="Services on this engagement" description="Only recorded service selections are shown. Changing service scope is handled outside this read-only view.">
+        <RecordList rows={workspace.services} empty="No services recorded for this engagement." render={(item) => <Record key={item.id} title={item.service_catalog?.name || 'Service'} note={[label(item.service_catalog?.department_id), item.owner.name, 'Target ' + date(item.target_date)].join(' · ')} status={item.status} />} />
+      </Panel>
+      : <Empty title="No engagement extension" note="This project has a canonical scope but no service selection record." />}
+  </div>
 }
 
 function Journey({ workspace, navigate }) {
