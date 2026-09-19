@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { createAuthorityAdministrationRepository } from '../data/authorityAdministration'
 import ProjectDepartmentParticipation from './ProjectDepartmentParticipation'
+import OrganizationDeactivation from './OrganizationDeactivation'
 
 const field = 'rounded border border-slate-600 bg-slate-900 p-2 text-sm'
 const button = 'rounded border border-violet-400/40 px-3 py-2 text-sm disabled:opacity-40'
@@ -130,6 +131,12 @@ export default function AuthorityCompatibilityAdmin({ organizationId, organizati
         <div className="break-all text-xs text-slate-400">Source: {row.source}; created: {row.created_at}; revoked: {row.revoked_at || 'never'}</div>
         {row.status === 'active' && row.action && <button className={button} disabled={disabled} onClick={() => change(row.action, row.id)}>Revoke compatibility record</button>}
       </li>)}</ul>
+      <OrganizationDeactivation key={organizationId + ':' + userId} organizationId={organizationId} userId={userId}
+        actorId={data.actor_id} status={snapshot.status} client={client} requestSignal={requestSignal}
+        onDeactivated={result => {
+          setNotice(`Organization access deactivated. ${result.reassignment_records?.length || 0} assignments recorded for review; history and other organizations are preserved.`)
+          setData(null); setLoading(true); setRevision(value => value + 1)
+        }} />
     </>}
     {data && <ProjectDepartmentParticipation key={organizationId} organizationId={organizationId} projects={data.projects}
       departments={data.departments} client={client} requestSignal={requestSignal} />}

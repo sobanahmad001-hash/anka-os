@@ -77,7 +77,7 @@ function LegacyTeamManagement() {
       setUsers([])
     } else {
       const byUser = new Map((memberships || []).map(item => [item.user_id, item]))
-      setUsers((profiles || []).map(item => ({ ...item, membership: byUser.get(item.id) || null })))
+      setUsers((profiles || []).filter(item => byUser.has(item.id)).map(item => ({ ...item, membership: byUser.get(item.id) })))
     }
     setLoading(false)
   }
@@ -138,13 +138,14 @@ function LegacyTeamManagement() {
     }
   }
 
-  async function removeUser(user) {
-    if (!confirm(`Remove ${user.full_name || user.email} from Anka Sphere?`)) return
+  async function deactivateUser(user) {
+    if (!confirm(`Deactivate ${user.full_name || user.email} in Anka only? Work and history will be retained. Assigned work must be reviewed for reassignment. Other organizations and Auth sessions are unchanged.`)) return
     setSaving(user.id)
     setError('')
     try {
-      await callTeamFunction('DELETE', { user_id: user.id })
-      setUsers(current => current.filter(item => item.id !== user.id))
+      const result = await callTeamFunction('POST', { action: 'deactivate', user_id: user.id, request_id: crypto.randomUUID() })
+      setNotice(result.message)
+      await loadUsers()
     } catch (removeError) {
       setError(removeError.message)
     } finally {
@@ -237,7 +238,7 @@ function LegacyTeamManagement() {
                   {role === 'system_owner' && <option value="system_owner">System owner</option>}
                 </select>
               </Field>
-              {user.id !== profile?.id && <button onClick={() => removeUser(user)} disabled={saving === user.id} className="rounded-lg px-3 py-2 text-xs text-red-300 hover:bg-red-950/50 disabled:opacity-50">Remove</button>}
+              {user.id !== profile?.id && <button onClick={() => deactivateUser(user)} disabled={saving === user.id || user.membership?.status === 'revoked'} className="rounded-lg px-3 py-2 text-xs text-red-300 hover:bg-red-950/50 disabled:opacity-50">{user.membership?.status === 'revoked' ? 'Deactivated' : 'Deactivate Anka access'}</button>}
             </article>
           )
         })}

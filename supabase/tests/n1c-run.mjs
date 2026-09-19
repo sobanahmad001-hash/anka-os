@@ -40,10 +40,12 @@ const sql = [
      public.move_p5_work_item(uuid,uuid,bigint,text,uuid,uuid),
      private.p5_require_active_actor(uuid,uuid),private.p5_raise_stale_write(text,uuid,bigint,bigint) to service_role;`,
   source('20260919145156_n1c_assignment_enforcement.sql'),
-  ...(mode === 'recurring' ? [source('20260919151214_n1c_project_department_participation.sql'),
+  ...(['recurring','deprovisioning'].includes(mode) ? [source('20260919151214_n1c_project_department_participation.sql'),
     testFile('n1c_recurring.fixture.sql'),source('20260903071706_ret1_recurring_plan_foundation.sql'),
     source('20260903123259_ret2_manual_period_generation.sql'),source('20260903195540_ret4_scheduled_recurrence.sql'),
-    source('20260919154909_n1c_recurring_assignment_delegation.sql'),testFile('n1c_recurring.behavior.sql')] : mode === 'participation' ? [source('20260919151214_n1c_project_department_participation.sql'),
+    source('20260919154909_n1c_recurring_assignment_delegation.sql'),
+    ...(mode === 'deprovisioning' ? [testFile('n1d_deprovisioning.fixture.sql'),source('20260919162508_n1d_scoped_deprovisioning.sql'),testFile('n1d_deprovisioning.behavior.sql')]
+      : [testFile('n1c_recurring.behavior.sql')])] : mode === 'participation' ? [source('20260919151214_n1c_project_department_participation.sql'),
     testFile('n1c_participation.behavior.sql')] : [testFile('n1c_assignment.behavior.sql')]),
 ].join('\n')
 const result = spawnSync(join(bin, 'psql.exe'), ['-X','-h','127.0.0.1','-p',port,'-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1'],
