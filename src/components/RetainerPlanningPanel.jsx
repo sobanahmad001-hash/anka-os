@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { recurringPlans } from '../data/recurringPlansRepository'
 import RetainerReviewPanel from './RetainerReviewPanel'
+import RecurringAssignmentDelegation from './RecurringAssignmentDelegation'
 import {
   applyRetainerMonthPreview,
   buildRetainerPlanning,
@@ -20,11 +21,14 @@ const date = (value) => value
 
 export default function RetainerPlanningPanel(props) {
   const [view, setView] = useState('planning')
+  const { user } = useAuth()
   return <div className="space-y-4">
     <nav aria-label="Retainer views" className="flex gap-3">
-      {['planning', 'review'].map(value => <button type="button" key={value} aria-pressed={view === value} onClick={() => setView(value)} className="rounded-xl border border-white/15 px-4 py-2 text-sm">{value === 'planning' ? 'Planning' : 'Retainer review'}</button>)}
+      {['planning', 'review', 'delegation'].map(value => <button type="button" key={value} aria-pressed={view === value} onClick={() => setView(value)} className="rounded-xl border border-white/15 px-4 py-2 text-sm">{value === 'planning' ? 'Planning' : value === 'review' ? 'Retainer review' : 'Assignment delegation'}</button>)}
     </nav>
-    {view === 'review' ? <RetainerReviewPanel {...props} /> : <RetainerPlanningContent {...props} />}
+    {view === 'review' ? <RetainerReviewPanel {...props} /> : view === 'delegation'
+      ? <RecurringAssignmentDelegation key={`${props.project.organization_id}:${props.project.id}:${user?.id}`} project={props.project} />
+      : <RetainerPlanningContent {...props} />}
   </div>
 }
 

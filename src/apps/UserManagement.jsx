@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
+import { useOrganization } from '../context/OrganizationContext'
+import AuthorityCompatibilityAdmin from '../components/AuthorityCompatibilityAdmin'
+import { canShowAuthorityAdministration } from '../data/authorityAdministration'
 
 const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
 const DEPARTMENTS = [
@@ -26,6 +29,26 @@ const profileRole = role => {
 }
 
 export default function UserManagement() {
+  const { profile, user } = useAuth()
+  const scope = useOrganization()
+  const [legacy, setLegacy] = useState(false)
+  const canAdmin = canShowAuthorityAdministration(scope.activeMembership)
+  const canLegacy = profile?.role === 'admin'
+  if (scope.loading) return <p className="p-6 text-slate-300">Loading organization…</p>
+  if (!canAdmin && !canLegacy) return <div className="p-6 text-slate-300">Select an organization where you are an active System Owner or Operations Admin to manage compatibility records.</div>
+  const showLegacy = canLegacy && (legacy || !canAdmin)
+  return <div className="flex h-full flex-col overflow-auto bg-gray-950">
+    <nav aria-label="Team administration modes" className="flex flex-wrap gap-3 border-b border-slate-800 p-4 text-sm text-slate-200">
+      {canAdmin && <button aria-pressed={!showLegacy} onClick={() => setLegacy(false)}>Compatibility records — selected organization</button>}
+      {canLegacy && <button aria-pressed={showLegacy} onClick={() => setLegacy(true)}>Legacy team controls — Anka organization</button>}
+    </nav>
+    {showLegacy ? <LegacyTeamManagement /> : <AuthorityCompatibilityAdmin
+      key={user?.id + ':' + scope.activeOrganizationId + ':' + scope.scopeRevision}
+      organizationId={scope.activeOrganizationId} organizationName={scope.activeOrganization?.name} requestSignal={scope.requestSignal} />}
+  </div>
+}
+
+function LegacyTeamManagement() {
   const { profile } = useAuth()
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -54,7 +77,7 @@ export default function UserManagement() {
       setUsers([])
     } else {
       const byUser = new Map((memberships || []).map(item => [item.user_id, item]))
-      setUsers((profiles || []).map(item => ({ ...item, membership: byUser.get(item.id) || null })))
+      setUsers((profiles || []).filter(item => byUser.has(item.id)).map(item => ({ ...item, membership: byUser.get(item.id) })))
     }
     setLoading(false)
   }
@@ -115,13 +138,14 @@ export default function UserManagement() {
     }
   }
 
-  async function removeUser(user) {
-    if (!confirm(`Remove ${user.full_name || user.email} from Anka Sphere?`)) return
+  async function deactivateUser(user) {
+    if (!confirm(`Deactivate ${user.full_name || user.email} in Anka only? Work and history will be retained. Assigned work must be reviewed for reassignment. Other organizations and Auth sessions are unchanged.`)) return
     setSaving(user.id)
     setError('')
     try {
-      await callTeamFunction('DELETE', { user_id: user.id })
-      setUsers(current => current.filter(item => item.id !== user.id))
+      const result = await callTeamFunction('POST', { action: 'deactivate', user_id: user.id, request_id: crypto.randomUUID() })
+      setNotice(result.message)
+      await loadUsers()
     } catch (removeError) {
       setError(removeError.message)
     } finally {
@@ -214,7 +238,7 @@ export default function UserManagement() {
                   {role === 'system_owner' && <option value="system_owner">System owner</option>}
                 </select>
               </Field>
-              {user.id !== profile?.id && <button onClick={() => removeUser(user)} disabled={saving === user.id} className="rounded-lg px-3 py-2 text-xs text-red-300 hover:bg-red-950/50 disabled:opacity-50">Remove</button>}
+              {user.id !== profile?.id && <button onClick={() => deactivateUser(user)} disabled={saving === user.id || user.membership?.status === 'revoked'} className="rounded-lg px-3 py-2 text-xs text-red-300 hover:bg-red-950/50 disabled:opacity-50">{user.membership?.status === 'revoked' ? 'Deactivated' : 'Deactivate Anka access'}</button>}
             </article>
           )
         })}

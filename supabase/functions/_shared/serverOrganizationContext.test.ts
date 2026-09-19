@@ -3,11 +3,32 @@ import { assertEquals, assertRejects } from "jsr:@std/assert@1.0.14";
 import {
   assertSameOrganization,
   requireSameOrganizationResource,
+  readServerAuthorityCompatibility,
   resolveServerOrganizationContext,
+  type ServerOrganizationContext,
   type ServerOrganizationScope,
 } from "./serverOrganizationContext.ts";
 
 type Row = Record<string, unknown>;
+
+Deno.test('N1 opt-in reader uses caller client, validates actor and preserves legacy role', async () => {
+  const response = {
+    schema_version: 1, compatibility_only: true, organization_id: 'org-a',
+    user_id: 'actor', membership_id: 'membership-a', legacy_role: 'executive',
+    legacy_department_id: 'design', department_memberships: [],
+    contributor_designations: [], project_manager_bindings: [],
+  };
+  const calls: unknown[] = [];
+  const context = {
+    user: { id: 'actor' }, organizationId: 'org-a',
+    userClient: { rpc(name: string, args: unknown) { calls.push([name, args]); return Promise.resolve({ data: response, error: null }); } },
+    admin: { rpc() { throw new Error('must not use privileged client'); } },
+  } as unknown as ServerOrganizationContext;
+  assertEquals((await readServerAuthorityCompatibility(context)).legacy_role, 'executive');
+  assertEquals(calls, [['get_my_authority_compatibility', { p_organization_id: 'org-a' }]]);
+  response.user_id = 'other';
+  await assertRejects(() => readServerAuthorityCompatibility(context), Error, 'mismatched');
+});
 const environment = {
   supabaseUrl: "https://project.supabase.co",
   publishableKey: "publishable",

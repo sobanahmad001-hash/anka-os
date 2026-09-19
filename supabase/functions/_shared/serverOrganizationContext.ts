@@ -1,5 +1,6 @@
 // deno-lint-ignore-file no-import-prefix
 import { createClient, type User } from "npm:@supabase/supabase-js@2.112.4";
+import { readAuthorityCompatibility } from "./authorityCompatibility.js";
 
 // The repository's ungenerated Supabase client has no database type parameter.
 // deno-lint-ignore no-explicit-any
@@ -38,6 +39,13 @@ export type ServerOrganizationContext = {
   artifactId?: string;
   artifactType?: string;
 };
+
+/** Opt-in compatibility history; does not change resolver membership or authority. */
+export function readServerAuthorityCompatibility(context: ServerOrganizationContext) {
+  return readAuthorityCompatibility(context.userClient, context.organizationId, {
+    expectedUserId: context.user.id,
+  });
+}
 
 export type ServerOrganizationDependencies = {
   createClient?: typeof createClient;

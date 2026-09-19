@@ -40,7 +40,8 @@ export function createSchedulerHandler(getContext: (request: Request) => Promise
       const input = schedulerInput(body)
       // Identity always comes from verified auth; database checks the private machine binding.
       const { data, error } = await ctx.rpc(input.name, { ...input.args, p_actor_id: ctx.actorId })
-      if (error) return json({ error: 'Scheduler request rejected' }, 403)
+      if (error) return json({ error: 'Scheduler request rejected', required_action:
+        'Review machine registration, the due window, and current PM/admin assignment delegation for this exact approved plan version. Historical schedules are not automatically delegated; use manual recovery after review.' }, 403)
       return json({ data })
     } catch { return json({ error: 'Invalid scheduler request' }, 400) }
   }

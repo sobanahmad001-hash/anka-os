@@ -1,3 +1,5 @@
+import { readAuthorityCompatibility } from '../../supabase/functions/_shared/authorityCompatibility.js'
+
 export const ACTIVE_ORGANIZATION_STORAGE_PREFIX = 'anka:active-organization'
 
 function required(value, label) {
@@ -68,6 +70,10 @@ export function resolveOrganizationGateState({ memberships = [], activeOrganizat
 export function createOrganizationScopeRepository(client) {
   if (!client?.from) throw new TypeError('A Supabase-compatible client is required')
   return Object.freeze({
+    // Opt-in, shadow records only. Existing membership selection stays unchanged.
+    readAuthorityCompatibility(organizationId, options = {}) {
+      return readAuthorityCompatibility(client, organizationId, options)
+    },
     async listActiveTeamMemberships(userId, { signal } = {}) {
       required(userId, 'userId')
       let query = client.from('organization_memberships')

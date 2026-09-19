@@ -1,10 +1,13 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useOrganization } from '../context/OrganizationContext'
+import { canShowAuthorityAdministration } from '../data/authorityAdministration'
 import { environmentNav, getEnvironmentFromPath, isNavigationItemActive, visibleEnvironmentItems } from '../config/environmentNav'
 import { featureFlags } from '../config/featureFlags'
 
 export default function Sidebar() {
   const { profile } = useAuth()
+  const { activeMembership } = useOrganization()
   const location = useLocation()
   const activeEnvKey = getEnvironmentFromPath(location.pathname)
   const activeEnv = environmentNav.find((environment) => environment.key === activeEnvKey)
@@ -16,6 +19,9 @@ export default function Sidebar() {
     department: userDept,
     aiAssistance: featureFlags.aiAssistance,
   })
+  if (canShowAuthorityAdministration(activeMembership) && !visibleItems.some(item => item.path === '/users')) {
+    visibleItems.push({ label: 'Compatibility administration', path: '/users' })
+  }
   const departmentBadgeColors = {
     content: 'bg-amber-900/50 text-amber-300',
     design: 'bg-pink-900/50 text-pink-300',

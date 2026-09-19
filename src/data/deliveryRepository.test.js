@@ -110,6 +110,8 @@ test('new tasks are internal and use the canonical lifecycle', async () => {
   assert.equal(payload.visibility, 'internal_only')
   assert.equal(payload.user_id, 'user-1')
   assert.equal(payload.created_by, 'user-1')
+  assert.equal(payload.assigned_to, null)
+  assert.equal(payload.assigned_by, null)
 })
 
 test('workstream creation deduplicates departments and stays client-hidden', async () => {

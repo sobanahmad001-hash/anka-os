@@ -13,12 +13,11 @@ test('team invitations are authorized by canonical organization membership', () 
   assert.doesNotMatch(inviteFunction, /profile\?\.role/)
 })
 
-test('invited users receive both identity and active organization access', () => {
+test('invited users use atomic organization setup and never blind-delete failed accounts', () => {
   assert.match(inviteFunction, /auth\.admin\.inviteUserByEmail/)
-  assert.match(inviteFunction, /from\('profiles'\)\.upsert/)
-  assert.match(inviteFunction, /from\('organization_memberships'\)\.upsert/)
-  assert.match(inviteFunction, /status: 'active'/)
-  assert.match(inviteFunction, /auth\.admin\.deleteUser/)
+  assert.match(inviteFunction, /complete_team_invitation/)
+  assert.match(inviteFunction, /cleanup_incomplete: true/)
+  assert.doesNotMatch(inviteFunction, /auth\.admin\.deleteUser|from\('profiles'\)\.upsert/)
 })
 
 test('self-signup metadata cannot create organization membership', () => {
@@ -38,7 +37,9 @@ test('team admin supports all canonical departments and roles', () => {
   }
 })
 
-test('user removal stays server-side and never deletes profiles first', () => {
-  assert.match(adminScreen, /callTeamFunction\('DELETE'/)
+test('organization deactivation stays server-side and preserves profiles and work', () => {
+  assert.match(adminScreen, /action: 'deactivate'/)
+  assert.match(adminScreen, /Deactivate Anka access/)
+  assert.match(inviteFunction, /deactivate_organization_member/)
   assert.doesNotMatch(adminScreen, /from\('profiles'\)\.delete/)
 })

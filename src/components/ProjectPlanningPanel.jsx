@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { buildPlanningWorkspace, PLANNING_VIEWS, PROJECT_TASK_STATUSES, WORK_ITEM_STATUSES } from '../data/planningModel.js'
 import { planningRepository } from '../data/planningRepository.js'
+import { recordAssignmentCapabilities } from '../data/assignmentCapabilities.js'
+import { useAssignmentCapabilities } from './useAssignmentCapabilities.js'
 
 const label = value => String(value || '').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
 const dateLabel = value => value || 'No date'
@@ -9,6 +11,7 @@ const INPUT = 'rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 text-xs
 
 export default function ProjectPlanningPanel({ workspace, organizationId, membership, onRefresh }) {
   const plan = useMemo(() => buildPlanningWorkspace(workspace), [workspace])
+  const authority = useAssignmentCapabilities(organizationId, workspace.project?.id, workspace)
   const [view, setView] = useState('list')
   const [saving, setSaving] = useState('')
   const [error, setError] = useState('')
@@ -25,14 +28,16 @@ export default function ProjectPlanningPanel({ workspace, organizationId, member
   }
 
   return <div className="space-y-5">
+    {authority.error && <p role="alert" className="text-sm text-amber-200">{authority.error}. Assignment controls are unavailable.</p>}
+    <p className="text-xs text-slate-400">Contributors create unassigned work. Assignment requires current organization authority or an explicit project-manager binding. Execution does not grant approval or release.</p>
     <section className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5">
       <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="font-semibold">Planning & work management</h2><p className="mt-1 text-xs text-slate-500">One planning surface, two canonical record types. Their statuses and actions never translate into each other.</p></div><div className="flex gap-1">{PLANNING_VIEWS.map(item => <button type="button" key={item} aria-pressed={view === item} onClick={() => setView(item)} className={`rounded-lg px-3 py-2 text-xs ${view === item ? 'bg-violet-500 text-white' : 'border border-white/10 text-slate-400'}`}>{tabs[item]}</button>)}</div></div>
       <div className="mt-4 flex flex-wrap gap-2 text-xs"><Pill>Timezone: {plan.timezone}</Pill><Pill>Project Tasks: {plan.projectTasks.length}</Pill><Pill>Engagement Work Items: {plan.engagementWorkItems.length}</Pill></div>
       {error && <p role="alert" className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-100">{error}</p>}
     </section>
 
-    {view === 'list' && <ListView plan={plan} workspace={workspace} saving={saving} mutate={mutate} organizationId={organizationId} />}
-    {view === 'board' && <BoardView plan={plan} saving={saving} mutate={mutate} organizationId={organizationId} />}
+    {view === 'list' && <ListView plan={plan} workspace={workspace} authority={authority.data} saving={saving} mutate={mutate} organizationId={organizationId} />}
+    {view === 'board' && <BoardView plan={plan} authority={authority.data} saving={saving} mutate={mutate} organizationId={organizationId} />}
     {view === 'calendar' && <CalendarView plan={plan} />}
     {view === 'timeline' && <TimelineView plan={plan} />}
     {view === 'workload' && <WorkloadView plan={plan} workspace={workspace} />}
@@ -41,18 +46,19 @@ export default function ProjectPlanningPanel({ workspace, organizationId, member
   </div>
 }
 
-function ListView({ plan, workspace, saving, mutate, organizationId }) {
+function ListView({ plan, workspace, authority, saving, mutate, organizationId }) {
   return <div className="grid gap-5 xl:grid-cols-2">
     <Section title="Project Tasks" note="Due date, creation time, then ID. Manual reordering is intentionally unavailable.">
-      <Rows rows={plan.projectTasks} saving={saving} renderAction={record => <RecordEditor record={record} workspace={workspace} disabled={saving === record.key} save={changes => mutate(record.key, () => planningRepository.updateProjectTask(organizationId, record.source, changes))} />} />
+      <Rows rows={plan.projectTasks} saving={saving} renderAction={record => <RecordEditor record={record} workspace={workspace} capability={recordAssignmentCapabilities(authority, 'project_tasks', record.source)} disabled={saving === record.key} save={changes => mutate(record.key, () => planningRepository.updateProjectTask(organizationId, record.source, changes))} />} />
     </Section>
     <Section title="Engagement Work Items" note="Native position order is retained; handoffs and dependencies remain attached to the work item.">
-      <Rows rows={plan.engagementWorkItems} saving={saving} renderAction={record => <RecordEditor record={record} workspace={workspace} disabled={saving === record.key} save={changes => mutate(record.key, () => planningRepository.updateWorkItem(organizationId, record.source, changes))} />} />
+      <Rows rows={plan.engagementWorkItems} saving={saving} renderAction={record => <RecordEditor record={record} workspace={workspace} capability={recordAssignmentCapabilities(authority, 'engagement_work_items', record.source)} disabled={saving === record.key} save={changes => mutate(record.key, () => planningRepository.updateWorkItem(organizationId, record.source, changes))} />} />
     </Section>
   </div>
 }
 
-function RecordEditor({ record, workspace, disabled, save }) {
+function RecordEditor({ record, workspace, capability, disabled, save }) {
+  disabled = disabled || !capability.can_execute
   const isTask = record.recordKind === 'project_task'
   const [status, setStatus] = useState(record.status)
   const [assigneeId, setAssigneeId] = useState(record.assigneeId || '')
@@ -65,19 +71,19 @@ function RecordEditor({ record, workspace, disabled, save }) {
     : { assigneeId: assigneeId || null, departmentId: departmentId || null, startDate: startDate || null, dueDate: dueDate || null }
   return <div className="mt-3 grid gap-2 border-t border-white/[0.06] pt-3 sm:grid-cols-2">
     {isTask && <label className="text-[10px] text-slate-500">Status<select className={`${INPUT} mt-1 w-full`} value={status} disabled={disabled} onChange={event => setStatus(event.target.value)}>{PROJECT_TASK_STATUSES.map(value => <option key={value} value={value}>{label(value)}</option>)}</select></label>}
-    {!isTask && <label className="text-[10px] text-slate-500">Handoff department<select className={`${INPUT} mt-1 w-full`} value={departmentId} disabled={disabled} onChange={event => setDepartmentId(event.target.value)}><option value="">Unassigned</option>{departments.map(item => <option key={item.department_id} value={item.department_id}>{label(item.department_id)}</option>)}</select></label>}
-    <label className="text-[10px] text-slate-500">Assignee<select className={`${INPUT} mt-1 w-full`} value={assigneeId} disabled={disabled} onChange={event => setAssigneeId(event.target.value)}><option value="">Unassigned</option>{(workspace.teamMembers || []).map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
+    {!isTask && <label className="text-[10px] text-slate-500">Handoff department<select className={`${INPUT} mt-1 w-full`} value={departmentId} disabled={disabled || !(capability.can_handoff ?? capability.can_assign)} onChange={event => setDepartmentId(event.target.value)}><option value="">Unassigned</option>{departments.map(item => <option key={item.department_id} value={item.department_id}>{label(item.department_id)}</option>)}</select></label>}
+    <label className="text-[10px] text-slate-500">Assignee<select className={`${INPUT} mt-1 w-full`} value={assigneeId} disabled={disabled || !capability.can_assign} onChange={event => setAssigneeId(event.target.value)}><option value="">Unassigned</option>{(workspace.teamMembers || []).map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
     {!isTask && <label className="text-[10px] text-slate-500">Start date<input type="date" className={`${INPUT} mt-1 w-full`} value={startDate} disabled={disabled} onChange={event => setStartDate(event.target.value)} /></label>}
     <label className="text-[10px] text-slate-500">Due date<input type="date" className={`${INPUT} mt-1 w-full`} value={dueDate} disabled={disabled} onChange={event => setDueDate(event.target.value)} /></label>
     <button type="button" disabled={disabled} onClick={() => save(changes)} className="self-end rounded-lg border border-violet-500/25 px-3 py-2 text-xs text-violet-200 disabled:opacity-40">Save {isTask ? 'Project Task' : 'Work Item'}</button>
   </div>
 }
 
-function BoardView({ plan, saving, mutate, organizationId }) {
+function BoardView({ plan, authority, saving, mutate, organizationId }) {
   return <div className="space-y-5">
     <Section title="Project Task lifecycle" note="Eight native states; Project Tasks are not draggable.">{<Columns statuses={PROJECT_TASK_STATUSES} groups={plan.board.projectTasks} />}</Section>
     <Section title="Engagement Work Item lifecycle" note="Four native states. Moving a card atomically updates this engagement’s target-column order.">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{WORK_ITEM_STATUSES.map(status => <div key={status} className="rounded-xl border border-white/[0.06] bg-black/10 p-3"><p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{label(status)}</p>{plan.board.engagementWorkItems[status].map(record => <div key={record.key} className="mb-2 rounded-lg border border-white/[0.06] bg-white/[0.025] p-3"><p className="text-sm">{record.title}</p><select aria-label={`Move ${record.title}`} className={`${INPUT} mt-2 w-full`} value={record.status} disabled={saving === record.key} onChange={event => mutate(record.key, () => planningRepository.moveWorkItem(organizationId, record.source, event.target.value))}>{WORK_ITEM_STATUSES.map(next => <option key={next} value={next}>{label(next)}</option>)}</select></div>)}</div>)}</div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{WORK_ITEM_STATUSES.map(status => <div key={status} className="rounded-xl border border-white/[0.06] bg-black/10 p-3"><p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{label(status)}</p>{plan.board.engagementWorkItems[status].map(record => <div key={record.key} className="mb-2 rounded-lg border border-white/[0.06] bg-white/[0.025] p-3"><p className="text-sm">{record.title}</p><select aria-label={`Move ${record.title}`} className={`${INPUT} mt-2 w-full`} value={record.status} disabled={saving === record.key || !recordAssignmentCapabilities(authority, 'engagement_work_items', record.source).can_execute} onChange={event => mutate(record.key, () => planningRepository.moveWorkItem(organizationId, record.source, event.target.value))}>{WORK_ITEM_STATUSES.map(next => <option key={next} value={next}>{label(next)}</option>)}</select></div>)}</div>)}</div>
     </Section>
   </div>
 }
