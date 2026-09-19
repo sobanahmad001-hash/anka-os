@@ -26,4 +26,3 @@ assert.equal(await query("select count(*) from public.project_department_partici
 await query("update public.organization_memberships set status='revoked' where user_id=md5('owner')::uuid;")
 await assert.rejects(query(command('design','first')),error=>/42501/.test(error.stderr))
 console.log('N1-C participation concurrency passed: stale competitor rejected, replay deduplicated, revoked admin replay denied.')
-

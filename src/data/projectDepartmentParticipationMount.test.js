@@ -60,4 +60,3 @@ test('participation UI missing migration exposes reload and no mutation controls
  await click(env,find(env,'BUTTON','Reload participation'));await flush()
  assert.equal(find(env,'BUTTON','Include department'),undefined)
 })
-

@@ -79,4 +79,3 @@ select pg_temp.work('alice','content','bob');
 reset role;
 rollback;
 \echo N1-C explicit participation behavior passed.
-
