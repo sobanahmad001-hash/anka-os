@@ -183,3 +183,35 @@ Focused verification:
 - Retained stopped evidence cluster: `G:/AnkaSphereN1LocalChecks/anka-n1-6b45e22471c44fc99248955e73e187aa`. Synthetic parent/ACL and mounted-DOM limitations remain exactly as in C1; no hosted/signed-in acceptance claimed.
 
 Next approved dependency is recurring assignment delegation. Installed parent ACL/full-schema acceptance and the recorded auth hard-delete/history conflict remain release blockers. No live migration, deployment, push, provider or paid action.
+
+## N1-C3 — immutable recurring assignment delegation (local, release blocked)
+
+Dependency: participation `cd169bab56bd2ca5fa1e7653cb23fc8ffa4b0849`. Both approved local follow-on dependencies are implemented; this is not production acceptance.
+
+### Authority and reproduction contract
+
+- Explicit authenticated read/approve/withdraw RPCs use private fixed-search-path definer entry points and current same-project PM or System Owner/Operations Admin authority. Legacy elevated Executive alone, head scope, service ownership and contributor designations cannot approve delegation. Existing plan-version approval remains separate and is required first.
+- Each private delegation preserves the entire immutable version and ordered template payload, approver, time and authority basis. PM approval binds the exact PM-binding ID: revoking and creating a new binding does not revive old delegation. Tokenized request receipts reauthorize replay; records are immutable except one-way withdrawal. Browser/service table mutation is denied.
+- Approval seals template additions as well as existing update/delete immutability. Template insertion and approval serialize on the version row. Changed versions require fresh explicit delegation. No historical enrollment/backfill is inferred.
+- Scheduler admission/execution and manual generation require delegation. The shared table guard permits only exact initial recurring reproduction: canonical org/project/engagement/service/occurrence/version/period, original machine or manual service-owner identity, exact template/content/department/assignee/dates/position, initial status/version, and no extra artifact/page/parent/automation links. Ordinary machine writes/updates remain denied.
+- Existing machine registration/auth checks, plan/service/catalog state, applicable approved version, deadlines, occurrence uniqueness, request receipts and immutable generation/execution history remain intact. Current approver membership/authority and assignee eligibility are checked/locked. Assignment audit records reference the delegation.
+- Manual service owners reproduce approved assignments without acquiring general assignment rights. Delegation covers the entire recurring template payload, including unassigned entries; assignees are never silently stripped.
+- Missing/withdrawn/stale delegation fails closed with actionable manual-review/rejection guidance. Scheduler Edge errors add safe recovery guidance while preserving verified getUser identity and hiding internal database details. No machine identity, enrollment, secret or Cron job is provisioned.
+
+Retainer planning has a separate Assignment delegation view: exact immutable version/payload inspection, explicit confirmation, approval/withdrawal, history and server-derived controls. Recorded active history is not presented as guaranteed current execution eligibility. This grants no specialist review, PM confirmation or release.
+
+### Focused evidence
+
+- Selective localhost harness loads actual RET1/RET2/RET4 migrations on explicit minimal N1-C synthetic parents, then C3; not a full historical or installed-schema replay.
+- SQL behavior passed: no backfill; contributor/other-project Executive denial; exact-PM approval; replay/conflict/stale receipts; sealed templates; actual scheduler admission/execution and manual generation; forged assignment denial; no general machine writes; original actor/delegation audit; no duplicate occurrence/request/work; withdrawal, PM revocation/rebinding, assignee revocation, machine disable, archived project and changed-version denial; manual/scheduler collision preserves occurrence.
+- Two-session concurrency passed: retry replays winner; exactly one occurrence/request and two assignments; concurrent committed withdrawal is rechecked without extra work.
+- Final changed-helper delta reused the retained cluster: valid next manual period succeeds; forged page link and malformed period fail. A bounded Project Task insertion/versioned assignment smoke passed after replacement of the polymorphic common guard.
+- Four new mounted UI tests passed: exact-payload confirmation, duplicate/stale writes, unauthorized controls, withdrawal and delayed wrong-scope reads. Four targeted Deno scheduler tests passed with cached/frozen dependencies, including verified actor preservation and safe actionable rejection.
+- Build passed (476 modules, existing chunk warning). Scoped UI lint: 0 errors, 9 JSX-used-name warnings. Whitespace check passed. Final localhost security advisor: No issues found.
+- Final behavior/concurrency/delta evidence retained/stopped: `G:/AnkaSphereN1LocalChecks/anka-n1-7a79094bf9ee49d4ba4c46d751fae53f`. Earlier successful pre-binding pass retained/stopped: `G:/AnkaSphereN1LocalChecks/anka-n1-5779800ca88747b1acd1c409edfa5f2d`. Prior N1/C1/C2 evidence reused, no broad rerun.
+
+### Handoff / unchanged release gates
+
+C1 common assignment, C2 participation and C3 delegation are ready for master local review together. Sole implementation lane preserved. No publication, live migration, production fixture, provider, paid action or broad historical review occurred.
+
+Still release-blocked: installed parent lock ACLs/full-schema compatibility, signed-in integrated acceptance, and the exact auth hard-delete/retained-history conflict documented above. Supabase security skills guided private definer boundaries, explicit ACLs and localhost advisor checks. Specialist review, PM confirmation and release enforcement remain separate later scope. Local receipts are not production readiness.

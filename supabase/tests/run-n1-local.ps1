@@ -4,7 +4,8 @@ param(
   [string]$ClusterParent = [System.IO.Path]::GetTempPath(),
   [switch]$Administration,
   [switch]$Assignment,
-  [switch]$Participation
+  [switch]$Participation,
+  [switch]$Recurring
 )
 $ErrorActionPreference = 'Stop'
 if ($Port -lt 1024 -or $Port -gt 65535) { throw 'Use an unprivileged local test port.' }
@@ -25,7 +26,14 @@ try {
   & (Join-Path $PostgresBin 'pg_ctl.exe') -D $taskData -l (Join-Path $taskCluster 'postgres.log') -o "-h 127.0.0.1 -p $Port" -w start
   if ($LASTEXITCODE -ne 0) { throw 'Local PostgreSQL startup failed.' }
   $started = $true
-  if ($Participation) {
+  if ($Recurring) {
+    & node (Join-Path $PSScriptRoot 'n1c-run.mjs') $PostgresBin $Port recurring
+    if ($LASTEXITCODE -ne 0) { throw 'N1-C recurring delegation validation failed.' }
+    & node (Join-Path $PSScriptRoot 'n1c-recurring-concurrency.mjs') $PostgresBin $Port
+    if ($LASTEXITCODE -ne 0) { throw 'N1-C recurring delegation concurrency failed.' }
+    & (Join-Path $PostgresBin 'psql.exe') -X -h 127.0.0.1 -p $Port -U postgres -d postgres -v ON_ERROR_STOP=1 -f (Join-Path $PSScriptRoot 'n1c_recurring.final-scope.sql')
+    if ($LASTEXITCODE -ne 0) { throw 'N1-C recurring final scope validation failed.' }
+  } elseif ($Participation) {
     & node (Join-Path $PSScriptRoot 'n1c-run.mjs') $PostgresBin $Port participation
     if ($LASTEXITCODE -ne 0) { throw 'N1-C participation validation failed.' }
     & node (Join-Path $PSScriptRoot 'n1c-participation-concurrency.mjs') $PostgresBin $Port
@@ -47,13 +55,13 @@ try {
   & (Join-Path $PostgresBin 'psql.exe') @taskSqlArgs
   if ($LASTEXITCODE -ne 0) { throw 'N1 isolated SQL validation failed.' }
   }
-  if ($Administration -and -not $Assignment -and -not $Participation) {
+  if ($Administration -and -not $Assignment -and -not $Participation -and -not $Recurring) {
     & node (Join-Path $PSScriptRoot 'n1b-concurrency.mjs') $PostgresBin $Port
     if ($LASTEXITCODE -ne 0) { throw 'N1-B concurrent SQL validation failed.' }
     & (Join-Path $PSScriptRoot '../../node_modules/.bin/supabase.cmd') db advisors --db-url "postgresql://postgres@127.0.0.1:${Port}/postgres?sslmode=disable" --type security --level warn
     if ($LASTEXITCODE -ne 0) { Write-Warning 'Synthetic local advisor unavailable; not hosted acceptance.' }
   }
-  if ($Assignment -or $Participation) {
+  if ($Assignment -or $Participation -or $Recurring) {
     & (Join-Path $PSScriptRoot '../../node_modules/.bin/supabase.cmd') db advisors --db-url "postgresql://postgres@127.0.0.1:${Port}/postgres?sslmode=disable" --type security --level warn
     if ($LASTEXITCODE -ne 0) { Write-Warning 'Synthetic local advisor unavailable; not hosted acceptance.' }
   }

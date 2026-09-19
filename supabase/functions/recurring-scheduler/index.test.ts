@@ -21,3 +21,10 @@ Deno.test('RET4 scheduler propagates database authority rejection without intern
   const response = await handler(new Request('https://local.test', { method: 'POST', body: JSON.stringify({ action: 'execute', admissionId: id }) }))
   assert(response.status === 403 && !(await response.text()).includes('private details'))
 })
+
+Deno.test('N1 recurring delegation rejection is actionable without exposing database details', async () => {
+  const handler = createSchedulerHandler(async () => ({ actorId: id, rpc: async () => ({ data: null, error: { code: '42501', message: 'private ledger details' } }) }))
+  const response = await handler(new Request('https://local.test', { method: 'POST', body: JSON.stringify({ action: 'admit', planId: id, periodStart: '2026-09-19' }) }))
+  const body = await response.json()
+  assert(response.status === 403 && body.required_action.includes('exact approved plan version') && !JSON.stringify(body).includes('private ledger'))
+})
