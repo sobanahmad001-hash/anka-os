@@ -44,8 +44,8 @@ test('specialist URLs highlight exactly their parent Workshop', () => {
     assert.deepEqual(activeLabels(pathname), [label], pathname)
   }
   assert.deepEqual(activeLabels('/sphere/workspace'), ['Home'])
-  assert.deepEqual(activeLabels('/sphere/portfolio'), ['Portfolio'])
-  assert.deepEqual(activeLabels('/sphere/workspace/projects/project-1'), ['Home'])
+  assert.deepEqual(activeLabels('/sphere/portfolio'), ['Projects'])
+  assert.deepEqual(activeLabels('/sphere/workspace/projects/project-1'), ['Projects'])
   assert.deepEqual(activeLabels('/sphere/workspace/items/project_task/task-1'), ['My Work'])
 })
 

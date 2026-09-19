@@ -1,7 +1,7 @@
 export const environmentNav = [
   {
     key: 'admin',
-    label: 'Admin',
+    label: 'Administration',
     basePath: '/admin',
     description: 'Central hub',
     items: [
@@ -19,9 +19,9 @@ export const environmentNav = [
     description: 'Client delivery',
     items: [
       { label: 'Workspace', path: null, dept: null, isHeader: true },
-      { label: 'Home', path: '/sphere/workspace', dept: null, activePrefixes: ['/sphere/workspace/projects'] },
-      { label: 'Portfolio', path: '/sphere/portfolio', dept: null },
-      { label: 'Client Work', path: '/sphere/clients', dept: null, activePrefixes: ['/sphere/clients'] },
+      { label: 'Home', path: '/sphere/workspace', dept: null },
+      { label: 'Projects', path: '/sphere/portfolio', dept: null, activePrefixes: ['/sphere/workspace/projects'] },
+      { label: 'Clients', path: '/sphere/clients', dept: null, activePrefixes: ['/sphere/clients'] },
       { label: 'Internal Work', path: '/sphere/internal', dept: null },
       { label: 'My Work', path: '/sphere/my-work', dept: null, activePrefixes: ['/sphere/workspace/items'] },
 
