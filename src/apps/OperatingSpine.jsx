@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 
 import DevelopmentTrackingPanel from '../components/DevelopmentTrackingPanel.jsx'
 import OrganizationGate from '../components/OrganizationGate.jsx'
+import PipelineTemplateDraftPanel from '../components/PipelineTemplateDraftPanel.jsx'
 import PipelineTemplateJourneyPreview from '../components/PipelineTemplateJourneyPreview.jsx'
 import PortfolioDashboard from '../components/PortfolioDashboard.jsx'
 import WorkItemsPanel from '../components/WorkItemsPanel.jsx'
@@ -53,6 +54,7 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
   const [brandForm, setBrandForm] = useState(INITIAL_BRAND)
   const [engagementForm, setEngagementForm] = useState(INITIAL_ENGAGEMENT)
   const [templateCatalog, setTemplateCatalog] = useState({ templates: [], versions: [], selections: [], publications: [] })
+  const [templateLoadError, setTemplateLoadError] = useState('')
   const [journeyPreview, setJourneyPreview] = useState(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState('')
@@ -113,6 +115,8 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
       setTemplateCatalog(templateResult.status === 'fulfilled' && templateResult.value
         ? templateResult.value
         : { templates: [], versions: [], selections: [], publications: [] })
+      setTemplateLoadError(templateResult.status === 'rejected' ? templateResult.reason?.message || 'Pipeline preset read failed' : '')
+      if (templateResult.status === 'rejected') handleOrganizationAccessError(templateResult.reason)
     } catch (loadError) {
       if (signal.aborted || generation !== catalogGeneration.current) return
       handleOrganizationAccessError(loadError)
@@ -222,6 +226,25 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
     } finally { if (!requestSignal.aborted) setSaving(false) }
   }
 
+  async function createPipelineDraft(input) {
+    setSaving(true); setError(''); setNotice('')
+    try {
+      const result = await pipelineTemplates.createVersion(input, activeOrganizationId, { signal: requestSignal })
+      if (requestSignal.aborted) return false
+      await loadAll()
+      if (requestSignal.aborted) return false
+      setNotice(`Draft preset version ${result?.version_number || ''} saved. Publication is a separate governed step.`)
+      return true
+    } catch (saveError) {
+      if (!requestSignal.aborted) {
+        handleOrganizationAccessError(saveError)
+        setError(saveError.message)
+      }
+      return false
+    } finally {
+      if (!requestSignal.aborted) setSaving(false)
+    }
+  }
   function chooseTemplate(versionId) {
     const selections = templateCatalog.selections
       .filter(item => item.pipeline_template_version_id === versionId)
@@ -306,9 +329,9 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
         {error && <div className="mt-5 rounded-xl border border-red-900/60 bg-red-950/50 px-4 py-3 text-sm text-red-300">{error}</div>}
         {notice && <div className="mt-5 rounded-xl border border-emerald-900/60 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">{notice}</div>}
 
-        {view === 'engagements' && <PortfolioDashboard snapshot={portfolioSnapshot} owners={ownerOptions} onOpen={openEngagement} onRefresh={loadAll} supportNote="Partial journeys supported." />}
+        {view === 'engagements' && <PortfolioDashboard snapshot={portfolioSnapshot} owners={ownerOptions} onOpen={openEngagement} onRefresh={() => loadAll()} supportNote="Partial journeys supported." />}
         {view === 'clients' && <ClientRegistry clients={clients} onNewBrand={clientId => { setBrandForm({ ...INITIAL_BRAND, clientId }); setModal('brand') }} />}
-        {view === 'services' && <ServiceCatalogue services={services} />}
+        {view === 'services' && <><ServiceCatalogue services={services} /><PipelineTemplateDraftPanel catalog={templateCatalog} services={services} membership={activeMembership} onCreate={createPipelineDraft} onRefresh={() => loadAll()} busy={saving} loadError={templateLoadError} /></>}
       </div>
 
       {modal === 'client' && <Modal title="Create client and first brand" onClose={() => setModal('')}><ClientForm form={clientForm} setForm={setClientForm} onSubmit={createClient} saving={saving} /></Modal>}
