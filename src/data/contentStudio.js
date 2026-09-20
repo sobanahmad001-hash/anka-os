@@ -33,7 +33,7 @@ export const CONTENT_ARTIFACT_FORMS = Object.freeze({
     ]),
   }),
   website_architecture: Object.freeze({
-    label: 'Website architecture', description: 'Structured sitemap with stable page identity, hierarchy, order, and purpose.',
+    label: 'Website architecture', description: 'Versioned sitemap and page briefs with ordered sections and exact source links.',
     fields: Object.freeze([
       { key: 'pages', label: 'Page inventory', kind: 'records', recordType: 'website_page', addLabel: 'Add page', recordFields: [
         ['page_key', 'Stable page key', 'readonly'], ['slug', 'Proposed path', 'text'], ['title', 'Page title', 'text'],
@@ -337,6 +337,7 @@ export function contentArtifactEditor(type, content = null) {
     }
     return [field.key, value || '']
   }))
+  if (type === 'website_architecture') editor.schema_version = source.schema_version === 2 || !content ? 2 : null
   if (CONTENT_FOUNDATION_TYPES.includes(type)) {
     editor.language = String(source.language || '')
     editor.source_metadata = sourceMetadataEditor(type, source.source_metadata)
@@ -349,7 +350,8 @@ export function serializeContentArtifact(type, editor) {
   if (type === 'website_architecture') {
     const pages = websiteArchitectureEditorPages(editor.pages || [], { sort: false })
     const pathByKey = new Map(pages.map(page => [page.page_key, normalizeWebsitePath(page.slug)]))
-    return { pages: pages.map((page, index) => ({
+    const v2 = editor.schema_version === 2
+    return { ...(v2 ? { schema_version: 2 } : {}), pages: pages.map((page, index) => ({
       page_key: page.page_key,
       slug: normalizeWebsitePath(page.slug),
       title: String(page.title || '').trim(),
@@ -358,6 +360,21 @@ export function serializeContentArtifact(type, editor) {
       position: (index + 1) * 1000,
       page_type: String(page.page_type || '').trim(),
       purpose: String(page.purpose || '').trim(),
+      ...(v2 ? {
+        audience: String(page.audience || '').trim() || null,
+        sections: (page.sections || []).map((section, sectionIndex) => ({
+          section_key: String(section.section_key || '').trim(),
+          position: (sectionIndex + 1) * 1000,
+          heading: String(section.heading || '').trim(),
+          purpose: String(section.purpose || '').trim(),
+          cta: String(section.cta || '').trim() || null,
+        })),
+        conversion_action: page.conversion_action?.kind === 'action'
+          ? { kind: 'action', text: String(page.conversion_action.text || '').trim() }
+          : page.conversion_action?.kind === 'none' ? { kind: 'none', text: null } : null,
+        source_version_ids: [...new Set(page.source_version_ids || [])],
+        keyword_strategy_version_id: String(page.keyword_strategy_version_id || '').trim() || null,
+      } : {}),
     })) }
   }
   if (type === 'keyword_strategy') return {
@@ -404,7 +421,13 @@ export function serializeContentArtifact(type, editor) {
 
 export function newContentRecord(field) {
   const record = Object.fromEntries(field.recordFields.map(([key]) => [key, '']))
-  if (field.recordType === 'website_page') record.page_key = `page:${globalThis.crypto.randomUUID()}`
+  if (field.recordType === 'website_page') {
+    record.page_key = `page:${globalThis.crypto.randomUUID()}`
+    record.sections = []
+    record.source_version_ids = []
+    record.conversion_action = null
+    record.keyword_strategy_version_id = null
+  }
   return record
 }
 
@@ -423,6 +446,11 @@ export function duplicateWebsitePage(records = [], field, pageKey) {
   const duplicate = Object.fromEntries(field.recordFields.map(([key]) => [key, source[key] ?? '']))
   duplicate.page_key = newContentRecord(field).page_key
   duplicate.slug = ''
+  duplicate.audience = source.audience || ''
+  duplicate.sections = (source.sections || []).map(section => ({ ...section, section_key: `section:${globalThis.crypto.randomUUID()}` }))
+  duplicate.conversion_action = source.conversion_action ? { ...source.conversion_action } : null
+  duplicate.source_version_ids = [...(source.source_version_ids || [])]
+  duplicate.keyword_strategy_version_id = source.keyword_strategy_version_id || null
   return [...records, duplicate]
 }
 

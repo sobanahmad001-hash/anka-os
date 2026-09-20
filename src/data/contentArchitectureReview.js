@@ -1,6 +1,7 @@
 import { serializeContentArtifact, websitePageKey } from './contentStudio.js'
 
-const FIELDS = ['slug', 'title', 'parent_page_key', 'position', 'page_type', 'purpose']
+const FIELDS = ['slug', 'title', 'parent_page_key', 'position', 'page_type', 'purpose',
+  'audience', 'sections', 'conversion_action', 'source_version_ids', 'keyword_strategy_version_id']
 
 export function websiteSitemapPreview(editor, latest = null, workspace = {}) {
   const pages = serializeContentArtifact('website_architecture', editor).pages
@@ -9,7 +10,7 @@ export function websiteSitemapPreview(editor, latest = null, workspace = {}) {
   const nextByKey = new Map(pages.map(page => [websitePageKey(page), page]))
   const entries = pages.map(page => {
     const before = previousByKey.get(page.page_key)
-    const fields = before ? FIELDS.filter(key => (before[key] ?? null) !== (page[key] ?? null)) : []
+    const fields = before ? FIELDS.filter(key => JSON.stringify(before[key] ?? null) !== JSON.stringify(page[key] ?? null)) : []
     return { key: page.page_key, title: page.title, slug: page.slug, parentKey: page.parent_page_key,
       kind: !before ? 'added' : fields.length ? 'changed' : 'unchanged', fields }
   })
