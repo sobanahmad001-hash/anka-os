@@ -7,6 +7,7 @@ import ProjectPlanningPanel from '../components/ProjectPlanningPanel.jsx'
 import ProjectDraftActivation from './ProjectDraftActivation.jsx'
 import ProjectServiceScopePanel from './ProjectServiceScopePanel.jsx'
 import ProjectManagerAssignment from './ProjectManagerAssignment.jsx'
+import ProjectDiscussionPanel from './ProjectDiscussionPanel.jsx'
 import { appendWorkshopNavigation, parseWorkshopNavigation } from '../data/workshopNavigation.js'
 
 const TABS = [
@@ -14,6 +15,7 @@ const TABS = [
   ['services', 'Services & Scope'],
   ['journey', 'Journey'],
   ['work', 'Work'],
+  ['discussion', 'Discussion'],
   ['project-tasks', 'Project Tasks'],
   ['engagement-work', 'Engagement Work Items'],
   ['planning', 'Planning'],
@@ -162,6 +164,7 @@ export default function ProjectEngagementWorkspace() {
           {tab === 'services' && <ServicesAndScope workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={load} onAccessError={handleOrganizationAccessError} />}
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
           {tab === 'work' && <WorkViews workspace={workspace} navigate={navigate} searchParams={searchParams} setSearchParams={setSearchParams} />}
+          {tab === 'discussion' && <ProjectDiscussionPanel organizationId={activeOrganizationId} projectId={project.id} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={handleOrganizationAccessError} />}
           {tab === 'project-tasks' && <ProjectTasks rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
           {tab === 'engagement-work' && <EngagementWork rows={workspace.engagementWorkItems} hasEngagement={identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
           {tab === 'planning' && <ProjectPlanningPanel workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} onRefresh={load} />}
