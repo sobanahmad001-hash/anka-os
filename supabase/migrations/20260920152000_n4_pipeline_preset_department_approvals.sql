@@ -158,6 +158,7 @@ declare
   v_publication_number integer;
   v_departments text[];
   v_department text;
+  v_selected_service uuid;
 begin
   if v_actor_id is null then
     raise exception 'Authentication required.' using errcode = '42501';
@@ -221,6 +222,25 @@ begin
   if coalesce(cardinality(v_service_ids), 0) = 0 then
     raise exception 'Pipeline template version has no services.' using errcode = '22023';
   end if;
+  -- Lock every selected catalogue row in deterministic ID order before
+  -- availability, affected-department, and manifest reads. A concurrent
+  -- reassignment or retirement must finish first and be revalidated, or wait
+  -- until this publication transaction commits with its validated snapshot.
+  for v_selected_service in
+    select item.service_id from public.pipeline_template_version_services item
+    where item.pipeline_template_version_id = v_version.id
+    order by item.service_id
+  loop
+    perform 1 from public.service_catalog service
+      where service.id = v_selected_service
+        and service.organization_id = v_version.organization_id
+      for share;
+    if not found then
+      raise exception 'Pipeline template contains an unavailable service.'
+        using errcode = '22023';
+    end if;
+  end loop;
+
   if exists (
     select 1 from unnest(v_service_ids) selected(service_id)
     left join public.service_catalog service
