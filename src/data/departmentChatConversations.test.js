@@ -114,7 +114,7 @@ test('P9 conversation metadata actions share the same latest-completion controll
     assert.ok(body.includes('runCurrentChatOperation(completion.current'), action)
   }
   assert.ok(chat.includes('loadConversationList(targetConversationId, checked, isCurrent)'))
-  assert.ok(chat.includes("loadConversation(selected?.id || '', isCurrent)"))
+  assert.ok(chat.includes("loadConversation(selected?.id || '', isCurrent, true)"))
 })
 
 test('P9 preserves proposal-only Development and official confirmation boundaries', () => {
