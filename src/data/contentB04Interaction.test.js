@@ -744,3 +744,52 @@ test('mounted C01 writer keeps dirty edits through cancelled switches and a pend
   assert.equal(field('Output type', 'select').value, 'custom_text')
   assert.match(environment.container.textContent, /Continuing exact version 1/)
 })
+
+
+test('mounted C05 copy preview retains one retry identity and leaves the source untouched', async t => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  t.after(() => vite.close())
+  const { default: ContentWriterEditor } = await vite.ssrLoadModule('/src/components/ContentWriterEditor.jsx')
+  const environment = mountedEnvironment()
+  const previous = {
+    document: globalThis.document, window: globalThis.window, Event: globalThis.Event,
+    Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT,
+  }
+  Object.assign(globalThis, {
+    document: environment.document, window: environment.window, Event: TestEvent, Node: TestNode,
+    HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true,
+  })
+  t.after(() => Object.assign(globalThis, previous))
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+  const content = {
+    schema_version: 2, output_type: 'blog_article', working_title: 'Source article',
+    destination: 'Launch blog', objective: 'Explain service', audience: 'Project leads',
+    language: 'English', body: 'Immutable source body', variant_number: 1,
+  }
+  const source = { id: 'writer-v1', artifact_id: 'writer-a', version_number: 1,
+    content_checksum: 'a'.repeat(64), content }
+  const workspace = { engagement: { id: 'engagement-a' },
+    artifacts: [{ id: 'writer-a', artifact_type: 'content', title: 'Source article' }],
+    versions: [source], approvals: [], copyRoots: [] }
+  const inputs = []
+  await act(async () => root.render(createElement(ContentWriterEditor, {
+    workspace, studio: { copyContentWriterVersion: async input => {
+      inputs.push(input)
+      return inputs.length === 1 ? null : { artifact_id: 'copied-a', replayed: true }
+    } }, saving: false, act: callback => callback(), stageId: null,
+    defaultLanguage: 'English', onRefresh() {},
+  })))
+  const click = label => act(async () => byText(environment.container, 'button', label).dispatchEvent(new TestEvent('click')))
+  await click('Copy exact v1 into new draft')
+  assert.match(environment.container.textContent, /Copy preview.*Source article/)
+  assert.match(environment.container.textContent, /approval, and its comments remain unchanged/)
+  await click('Confirm new unapproved copy')
+  await click('Confirm new unapproved copy')
+  assert.equal(inputs.length, 2)
+  assert.equal(inputs[0].operation_key, inputs[1].operation_key)
+  assert.equal(inputs[0].source_artifact_version_id, source.id)
+  assert.equal(inputs[0].source_checksum, source.content_checksum)
+  assert.equal(source.content.body, 'Immutable source body')
+  assert.doesNotMatch(environment.container.textContent, /Copy preview/)
+})

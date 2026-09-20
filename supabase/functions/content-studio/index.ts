@@ -12,6 +12,7 @@ type Json = Record<string, unknown>
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 const MANAGER_ROLES = new Set(['department_manager'])
 const CLASSIFICATIONS = new Set(['internal', 'confidential', 'public', 'restricted'])
+const CLASSIFICATION_RANK: Record<string, number> = { public: 0, internal: 1, confidential: 2, restricted: 3 }
 const CUSTOM_FIELD_TYPES = new Set(['text', 'number', 'date', 'single_select', 'multi_select', 'checkbox'])
 const BRAND_STATEMENT_SOURCE_TYPES = ['discovery', 'vision', 'audience']
 const CONTENT_REQUEST_MODES = new Set(['project', 'general'])
@@ -107,6 +108,7 @@ export function compiledBrandStatement(brief: Json, contextManifest: Json) {
 }
 
 export function hasContentAuthority(membership: Json, action: string) {
+  if (membership.member_kind && membership.member_kind !== 'team') return false
   const role = text(membership.role, 60)
   if (LEADER_ROLES.has(role)) return true
   if (text(membership.department_id, 60) !== 'content') return false
@@ -148,6 +150,18 @@ export function validateContentRequestInput(body: Json) {
 
 const GENERATION_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const GENERATION_TYPES = new Set(['website_page_copy', 'blog_article', 'social_copy', 'campaign_copy', 'custom_text'])
+
+export function copyContentWriterVersionInput(body: Json) {
+  const engagementId = text(body.engagement_id, 80)
+  const sourceVersionId = text(body.source_artifact_version_id, 80)
+  const sourceChecksum = text(body.source_checksum, 80)
+  const operationKey = text(body.operation_key, 80)
+  if (![engagementId, sourceVersionId, operationKey].every(value => GENERATION_UUID.test(value))
+    || !/^[0-9a-f]{64}$/.test(sourceChecksum)) {
+    throw new Error('Copy requires an exact engagement, source version, checksum, and operation ID')
+  }
+  return { engagementId, sourceVersionId, sourceChecksum, operationKey }
+}
 
 export function blockedContentGenerationInput(body: Json) {
   const requestId = text(body.request_id, 80)
@@ -266,6 +280,10 @@ export function contentStudioScope(body: Json): ServerOrganizationScope {
       : { kind: 'engagement', id: requiredActionId(body.engagement_id, 'Engagement') },
     requestedOrganizationId }
   }
+  if (action === 'copy_content_writer_version') {
+    const input = copyContentWriterVersionInput(body)
+    return { root: { kind: 'engagement', id: input.engagementId }, requestedOrganizationId }
+  }
   if (action === 'request_content_generation') {
     const input = blockedContentGenerationInput(body)
     return { root: { kind: 'engagement', id: input.engagementId }, requestedOrganizationId }
@@ -332,6 +350,31 @@ async function safeStage(context: ServerOrganizationContext, engagementId: strin
     throw new Error('Content stage does not match this engagement')
   }
   return stage.id
+}
+
+async function copyContentWriterVersion(context: ServerOrganizationContext, body: Json, actorId: string) {
+  const input = copyContentWriterVersionInput(body)
+  await requireContentEngagement(context, input.engagementId)
+  const { data: visibleVersion, error: versionError } = await context.userClient.from('artifact_versions')
+    .select('id, artifact_id, content_checksum').eq('id', input.sourceVersionId)
+    .eq('organization_id', context.organizationId).maybeSingle()
+  if (versionError || !visibleVersion || visibleVersion.content_checksum !== input.sourceChecksum) {
+    throw Object.assign(new Error('Exact Content source version is unavailable; refresh before copying'), { status: 409 })
+  }
+  const { data: visibleArtifact, error: artifactError } = await context.userClient.from('artifacts')
+    .select('id, engagement_id, artifact_type').eq('id', visibleVersion.artifact_id)
+    .eq('organization_id', context.organizationId).maybeSingle()
+  if (artifactError || !visibleArtifact || visibleArtifact.engagement_id !== input.engagementId
+    || visibleArtifact.artifact_type !== 'content') {
+    throw Object.assign(new Error('Content source is unavailable in this engagement'), { status: 403 })
+  }
+  const { data, error } = await context.admin.rpc('copy_content_writer_version', {
+    p_organization_id: context.organizationId, p_engagement_id: input.engagementId,
+    p_source_version_id: input.sourceVersionId, p_source_checksum: input.sourceChecksum,
+    p_operation_key: input.operationKey, p_actor_id: actorId,
+  })
+  if (error) throw error
+  return data
 }
 
 async function recordBlockedContentGeneration(context: ServerOrganizationContext, body: Json, actorId: string) {
@@ -527,6 +570,19 @@ async function saveArtifact(context: ServerOrganizationContext, body: Json, acto
     throw Object.assign(new Error('Reopen the latest writer version before saving.'), { status: 409 })
   }
   if (writerContinuation && !artifactId && parentId != null) throw new Error('A new writer draft cannot have a parent version')
+  if (writerContinuation && artifactId) {
+    const { data: latest, error: latestError } = await context.admin.from('artifact_versions')
+      .select('id, data_classification').eq('artifact_id', artifactId)
+      .eq('organization_id', context.organizationId)
+      .order('version_number', { ascending: false }).limit(1).maybeSingle()
+    if (latestError) throw latestError
+    if (!latest || latest.id !== parentId) {
+      throw Object.assign(new Error('Reopen the latest writer version before saving.'), { status: 409 })
+    }
+    if (CLASSIFICATION_RANK[classification] < CLASSIFICATION_RANK[latest.data_classification]) {
+      throw Object.assign(new Error('A writer continuation cannot lower the source classification.'), { status: 409 })
+    }
+  }
   return createContentArtifactVersion(context.admin, {
     organizationId: context.organizationId, engagement, stageId,
     artifactId, expectedParentVersionId: writerContinuation && artifactId ? parentId?.trim() : undefined, artifactType,
@@ -676,6 +732,9 @@ export async function handleRequest(request: Request) {
         ? 'Content manager approval required' : 'Content department access required' }, 403)
     }
     if (action === 'save_artifact') return response({ data: await saveArtifact(context, body, context.user.id) })
+    if (action === 'copy_content_writer_version') {
+      return response({ data: await copyContentWriterVersion(context, body, context.user.id) })
+    }
     if (action === 'request_content_generation') {
       return response({ data: await recordBlockedContentGeneration(context, body, context.user.id) })
     }
