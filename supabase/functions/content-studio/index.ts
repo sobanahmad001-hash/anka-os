@@ -18,7 +18,7 @@ const CONTENT_REQUEST_MODES = new Set(['project', 'general'])
 const CONTENT_REQUEST_OUTPUT_PATHS = new Set(['internal_engine', 'figma_handoff'])
 const CONTENT_REQUEST_FORMATS = new Set([
   'reel', 'carousel', 'single_image', 'stories',
-  'carousel_stories', 'reel_carousel', 'web_design_element',
+  'carousel_stories', 'reel_carousel', 'web_design_element', 'article',
 ])
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -126,6 +126,7 @@ export function validateContentRequestInput(body: Json) {
   if (!CONTENT_REQUEST_MODES.has(mode)) throw new Error('Unsupported content request mode')
   if (!CONTENT_REQUEST_OUTPUT_PATHS.has(outputPath)) throw new Error('Unsupported content request output path')
   if (!CONTENT_REQUEST_FORMATS.has(format)) throw new Error('Unsupported content request format')
+  if (format === 'article' && outputPath !== 'internal_engine') throw new Error('Article requests do not support Figma handoff')
   if (!brief) throw new Error('Content request brief is required')
   if (createEventLink && !linkedEventId) throw new Error('Select an event before adding it to the event plan')
   if (!['social', 'blog'].includes(eventContentType)) throw new Error('Event-plan content type must be social or blog')

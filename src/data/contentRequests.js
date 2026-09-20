@@ -6,6 +6,7 @@ export const CONTENT_REQUEST_FORMATS = Object.freeze([
   ['carousel_stories', 'Carousel + stories'],
   ['reel_carousel', 'Reel + carousel'],
   ['web_design_element', 'Web design element'],
+  ['article', 'Article / blog post'],
 ])
 
 export const CONTENT_REQUEST_OUTPUT_PATHS = Object.freeze([

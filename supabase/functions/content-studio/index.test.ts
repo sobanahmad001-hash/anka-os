@@ -4,6 +4,18 @@ import { brandBriefInput, compiledBrandStatement, contentStudioScope, customFiel
 
 import { assertWebsitePageIdentityTransition, CHAT_CONTENT_ARTIFACT_TYPE_SET, CONTENT_ARTIFACT_TYPES, contentArtifactResponseFormat, createContentArtifactVersion, MAX_KEYWORD_RECORDS, validateContentArtifact, withGeneratedSourceMetadata } from '../_shared/contentArtifacts.ts'
 
+Deno.test('C03 article format allows text requests and queue plans, but rejects Figma handoff', () => {
+  const article = validateContentRequestInput({
+    mode: 'project', engagement_id: 'engagement-1', brand_id: 'brand-1',
+    format: 'article', output_path: 'internal_engine', brief: 'Article outline',
+  })
+  assertEquals(article.format, 'article')
+  assertEquals(validateQueueEntryInput({ brand_id: 'brand-1', planned_date: '2026-09-21',
+    format: 'article', brief_template: 'Article outline' }).format, 'article')
+  assertThrows(() => validateContentRequestInput({ format: 'article', output_path: 'figma_handoff',
+    brief: 'Article outline' }), Error, 'Article requests do not support Figma handoff')
+})
+
 Deno.test('B02 foundation contract preserves language and exact per-field source state', () => {
   const discovery = validateContentArtifact('discovery', {
     summary: 'Accepted context', objectives: ['Grow'], offers: ['Advisory'], evidence: ['Unknown'], constraints: ['Budget'],
