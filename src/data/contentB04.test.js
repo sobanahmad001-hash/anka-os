@@ -133,10 +133,10 @@ test('B04 renders real keyword controls, warnings, and unavailable labels', asyn
   }
 })
 
-test('B04 keeps unsupported import and downstream behavior explicit and adds no schema', () => {
+test('B04 keeps downstream behavior explicit and adds no schema', () => {
   const ui = read('src/apps/ContentStudio.jsx')
   const edge = read('supabase/functions/_shared/contentArtifacts.ts')
-  assert.match(ui, /Import is unavailable because no supported keyword import format is configured/)
+  assert.match(ui, /UTF-8 CSV import previews invalid rows/)
   assert.match(ui, /standalone blog target remains unavailable until a blog or article content-request format is approved/)
   assert.match(ui, /no draft is rewritten or retargeted automatically/)
   assert.match(edge, /target_content_request_id/)
@@ -144,6 +144,5 @@ test('B04 keeps unsupported import and downstream behavior explicit and adds no 
   const repository = read('src/data/contentStudioRepository.js')
   assert.match(repository, /from\('content_requests'\)[\s\S]*eq\('organization_id', organizationId\)\.eq\('brand_id', engagement\.brand_id\)/)
   assert.match(repository, /mode !== 'general' && request\.engagement_id !== engagementId/)
-  assert.doesNotMatch(ui, /parseCsv|accept="\.csv"|bulk import/i)
   assert.doesNotMatch(edge, /create table|alter table|create policy/i)
 })

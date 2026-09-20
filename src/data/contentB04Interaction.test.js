@@ -204,6 +204,45 @@ test('mounted B04 editor disables Add at the explicit 500-row boundary', async t
   assert.equal(addCalls, 0)
 })
 
+test('mounted C03 import previews CSV, blocks stale drafts, and applies only to unsaved rows', async t => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  t.after(() => vite.close())
+  const { default: KeywordCsvImportPanel } = await vite.ssrLoadModule('/src/components/KeywordCsvImportPanel.jsx')
+  const environment = mountedEnvironment()
+  const previous = { document: globalThis.document, window: globalThis.window, Event: globalThis.Event, Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT }
+  Object.assign(globalThis, { document: environment.document, window: environment.window, Event: TestEvent, Node: TestNode, HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true })
+  t.after(() => Object.assign(globalThis, { document: previous.document, window: previous.window, Event: previous.Event, Node: previous.Node, HTMLElement: previous.HTMLElement, IS_REACT_ACT_ENVIRONMENT: previous.act }))
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+  let imported = null
+  const csv = new TextEncoder().encode('phrase,locale\nLocal SEO,en-PK').buffer
+  const file = { size: csv.byteLength, arrayBuffer: async () => csv }
+  const render = records => root.render(createElement(KeywordCsvImportPanel, {
+    records, onImport: rows => { imported = rows }, buttonClass: 'button',
+  }))
+  await act(async () => render([]))
+  const input = byLabel(environment.container, 'Choose keyword CSV file')
+  Object.defineProperty(input, 'files', { configurable: true, value: [file] })
+  await act(async () => input.dispatchEvent(new TestEvent('change', { bubbles: true })))
+  await flushMounted()
+  assert.match(environment.container.textContent, /1 valid of 1 data rows/)
+  await act(async () => render([{ term: 'Existing', locale: 'en' }]))
+  const apply = byText(environment.container, 'button', 'Add previewed rows to draft')
+  assert.equal(apply.disabled, true)
+  assert.match(environment.container.textContent, /keyword list changed after this preview/)
+  await act(async () => render([]))
+  await act(async () => apply.dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.equal(imported?.length, 1)
+  assert.equal(imported[0].target_id, '')
+  const invalid = new TextEncoder().encode('phrase,locale,search_volume\nInvalid,,12').buffer
+  Object.defineProperty(input, 'files', { configurable: true, value: [{ size: invalid.byteLength, name: 'invalid.csv', arrayBuffer: async () => invalid }] })
+  await act(async () => input.dispatchEvent(new TestEvent('change', { bubbles: true })))
+  await flushMounted()
+  assert.match(environment.container.textContent, /Fix the CSV and choose it again/)
+  assert.equal(byText(environment.container, 'button', 'Add previewed rows to draft').disabled, true)
+  assert.equal(imported.length, 1)
+})
+
 test('mounted B06a library renders authorized results and a distinct true-empty state', async t => {
   const vite = await createServer({
     server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent',
