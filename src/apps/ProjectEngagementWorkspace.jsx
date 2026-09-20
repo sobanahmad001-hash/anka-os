@@ -5,6 +5,8 @@ import { projectEngagementWorkspace } from '../data/projectEngagementWorkspace'
 import RetainerPlanningPanel from '../components/RetainerPlanningPanel'
 import ProjectPlanningPanel from '../components/ProjectPlanningPanel.jsx'
 import ProjectDraftActivation from './ProjectDraftActivation.jsx'
+import ProjectServiceScopePanel from './ProjectServiceScopePanel.jsx'
+import ProjectManagerAssignment from './ProjectManagerAssignment.jsx'
 import { appendWorkshopNavigation, parseWorkshopNavigation } from '../data/workshopNavigation.js'
 
 const TABS = [
@@ -138,11 +140,13 @@ export default function ProjectEngagementWorkspace() {
           <div className="flex items-center gap-2"><button type="button" onClick={load} disabled={loading} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm hover:bg-white/[0.08] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={project.status} /><ProjectDraftActivation project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onActivated={load} onAccessError={handleOrganizationAccessError} /></div>
         </header>
 
+        <ProjectManagerAssignment project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onAssigned={load} onAccessError={handleOrganizationAccessError} />
+
         {error && <div role="alert" className="mt-5 rounded-xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100"><p className="font-medium">Refresh failed; showing previously loaded data.</p><p className="mt-1 text-xs text-amber-200/80">{error}{loadedAt ? ` · Loaded ${loadedAt.toLocaleTimeString()}` : ''}</p></div>}
         <section aria-label="Workspace summary" className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
           <Metric title="Project Tasks" value={summary.openProjectTasks} note="Open canonical tasks" />
           <Metric title="Engagement Work Items" value={summary.openEngagementWorkItems} note="Open delivery items" />
-          <Metric title="Active services" value={workspace.activeServices.length} note={workspace.deliveryShape.label} />
+          <Metric title="Active engagement services" value={workspace.activeServices.length} note={workspace.deliveryShape.label} />
           <Metric title="Journey" value={`${summary.completedJourneyStages}/${summary.totalJourneyStages}`} note="Completed stages" />
           <Metric title="Milestones" value={summary.openMilestones} note="Open checkpoints" />
           <Metric title="Review queue" value={summary.reviewQueue} note="Versions in review/revision" />
@@ -155,7 +159,7 @@ export default function ProjectEngagementWorkspace() {
 
         <div id="project-workspace-panel" role="tabpanel" aria-labelledby={`project-tab-${tab}`} className="mt-6" tabIndex={0}>
           {tab === 'overview' && <Overview workspace={workspace} />}
-          {tab === 'services' && <ServicesAndScope workspace={workspace} />}
+          {tab === 'services' && <ServicesAndScope workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={load} onAccessError={handleOrganizationAccessError} />}
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
           {tab === 'work' && <WorkViews workspace={workspace} navigate={navigate} searchParams={searchParams} setSearchParams={setSearchParams} />}
           {tab === 'project-tasks' && <ProjectTasks rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
@@ -175,7 +179,7 @@ function Overview({ workspace }) {
   return <div className="grid gap-5 xl:grid-cols-[1.3fr_1fr]"><div className="space-y-5"><Panel title="Project brief" description="The canonical project brief and optional engagement objective remain separate records."><TextBlock value={context.brief} empty="No project brief recorded." />{context.objective && <div className="mt-4 border-t border-white/[0.07] pt-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Engagement objective</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">{context.objective}</p></div>}</Panel><Panel title="Scope and exclusions"><TextBlock value={context.scope} empty="No scope statement recorded." /><div className="mt-4 border-t border-white/[0.07] pt-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Explicit exclusions</p><TextBlock value={context.exclusions} empty="No exclusions recorded." /></div></Panel><Panel title="Existing assets" description="Supplied engagement context is shown as recorded; missing upstream artifacts are not inferred."><RecordList rows={workspace.existingAssets} empty={workspace.identity.hasEngagement ? 'No existing assets were supplied.' : 'No engagement extension; supplied engagement assets do not apply.'} render={(item) => <AssetRecord key={item.id} item={item} />} /></Panel><Panel title="Milestones"><RecordList rows={workspace.milestones} empty="No milestones recorded." render={(item) => <Record key={item.id} title={item.name} note={`Target ${date(item.target_date)} · ${item.owner.name}`} status={item.status} attention={item.overdue || item.status === 'at_risk'} />} /></Panel></div><div className="space-y-5"><Panel title="Client and brand context"><Record title={context.client?.company || context.client?.name || (workspace.identity.workType === 'Internal Work' ? 'Internal Work' : 'No canonical client')} note={context.client ? [context.client.industry, context.client.status].filter(Boolean).map(label).join(' · ') || 'Canonical client' : 'No client identity is attached to this project.'} /><Record title={context.brand?.name || 'No brand extension'} note={context.brand?.description || 'Brand context is available only through a valid engagement extension.'} /></Panel><Panel title="Ownership"><Record title={context.projectOwner.name} note={`Project owner · ${date(project.start_date)} to ${date(project.due_date)}`} /><Record title={context.engagementOwner?.name || 'No separate engagement lead'} note={workspace.identity.hasEngagement ? 'Operating engagement lead' : 'The canonical project remains the workspace root.'} /></Panel><Panel title="Active workstreams"><RecordList rows={workspace.workstreams} empty="No workstreams recorded." render={(item) => <Record key={item.id} title={item.name} note={`${label(item.department_id)} · ${item.owner.name}`} status={item.status} />} /></Panel><Panel title="Attention signals"><RecordList rows={workspace.attentionSignals} empty="No current attention signals." render={(item) => <p key={item} className="rounded-xl border border-amber-500/15 bg-amber-500/[0.06] px-3 py-2 text-sm text-amber-200">{item}</p>} /></Panel></div></div>
 }
 
-function ServicesAndScope({ workspace }) {
+function ServicesAndScope({ workspace, organizationId, membership, scopeRevision, requestSignal, onChanged, onAccessError }) {
   const { context, deliveryShape, engagement, identity } = workspace
   return <div className="space-y-5">
     <div className="grid gap-5 xl:grid-cols-2">
@@ -191,11 +195,7 @@ function ServicesAndScope({ workspace }) {
         {identity.hasEngagement && <div className="mt-3"><Record title={engagement?.name || 'Operating engagement'} note={context.objective || 'No engagement objective recorded.'} status={engagement?.status} /></div>}
       </Panel>
     </div>
-    {identity.hasEngagement
-      ? <Panel title="Services on this engagement" description="Only recorded service selections are shown. Changing service scope is handled outside this read-only view.">
-        <RecordList rows={workspace.services} empty="No services recorded for this engagement." render={(item) => <Record key={item.id} title={item.service_catalog?.name || 'Service'} note={[label(item.service_catalog?.department_id), item.owner.name, 'Target ' + date(item.target_date)].join(' · ')} status={item.status} />} />
-      </Panel>
-      : <Empty title="No engagement extension" note="This project has a canonical scope but no service selection record." />}
+    <ProjectServiceScopePanel project={workspace.project} organizationId={organizationId} membership={membership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={onChanged} onAccessError={onAccessError} />
   </div>
 }
 

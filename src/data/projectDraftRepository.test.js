@@ -75,3 +75,23 @@ test('activation validates exact project, organization, and request IDs', async 
   assert.equal((await repository.activate({ organizationId: org, projectId: project, requestId: request })).status, 'active')
   await assert.rejects(repository.activate({ organizationId: org, projectId: engagement, requestId: request }), /did not match/)
 })
+
+test('manager assignment validates the exact planning project and binding', async () => {
+  const manager = '80000000-0000-4000-8000-000000000001'
+  const binding = '90000000-0000-4000-8000-000000000001'
+  const calls = []
+  const repository = createProjectDraftRepository({ rpc(name, args) {
+    calls.push({ name, args })
+    return Promise.resolve({ data: name === 'get_draft_project_manager_state'
+      ? { organization_id: org, project_id: project, manager_id: null, members: [{ id: manager, name: 'PM' }] }
+      : { organization_id: org, project_id: project, manager_id: manager,
+        manager_binding_id: binding, request_id: request } })
+  } })
+  assert.equal((await repository.managerState(org, project)).manager_id, null)
+  assert.equal((await repository.assignManager({ organizationId: org, projectId: project,
+    managerId: manager, requestId: request })).manager_binding_id, binding)
+  assert.equal(calls[1].name, 'assign_draft_project_manager')
+  assert.equal(calls[1].args.p_manager_id, manager)
+  await assert.rejects(repository.assignManager({ organizationId: org, projectId: engagement,
+    managerId: manager, requestId: request }), /did not match/)
+})

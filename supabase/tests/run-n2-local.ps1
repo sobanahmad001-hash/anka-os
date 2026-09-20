@@ -25,15 +25,18 @@ try {
   foreach ($file in @(
     (Join-Path $PSScriptRoot 'n2_project_draft.fixture.sql'),
     (Join-Path $PSScriptRoot '../migrations/20260919234015_n2_governed_draft_projects.sql'),
+    (Join-Path $PSScriptRoot '../migrations/20260920004251_n2_service_scope.sql'),
     (Join-Path $PSScriptRoot 'n2_project_draft.behavior.sql'),
-    (Join-Path $PSScriptRoot 'n2_project_draft.extended.sql')
+    (Join-Path $PSScriptRoot 'n2_project_draft.extended.sql'),
+    (Join-Path $PSScriptRoot 'n2_project_request.behavior.sql'),
+    (Join-Path $PSScriptRoot 'n2_service_scope.behavior.sql')
   )) {
     & (Join-Path $PostgresBin 'psql.exe') -X -h 127.0.0.1 -p $Port -U postgres -d postgres -v ON_ERROR_STOP=1 -q -f $file | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "N2 local SQL verification failed: $file" }
   }
   & node (Join-Path $PSScriptRoot 'n2-project-concurrency.mjs') (Join-Path $PostgresBin 'psql.exe') $Port
   if ($LASTEXITCODE -ne 0) { throw 'N2 local concurrent replay verification failed.' }
-  Write-Output 'N2 local draft-project SQL authority and behavior checks passed.'
+  Write-Output 'N2 local project requests, draft authority, service scope, and concurrency checks passed.'
 } finally {
   if ($started) {
     & (Join-Path $PostgresBin 'pg_ctl.exe') -D $data -m fast -w stop

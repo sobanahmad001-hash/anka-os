@@ -5,6 +5,7 @@ import { filterPortfolioRows, PORTFOLIO_DUE_FILTERS } from '../data/portfolioWor
 import { portfolioWorkspace } from '../data/portfolioWorkspace'
 import { canShowAuthorityAdministration } from '../data/authorityAdministration.js'
 import ProjectDraftSetupPanel from './ProjectDraftSetupPanel.jsx'
+import ProjectRequestPanel from './ProjectRequestPanel.jsx'
 
 const label = (value) => value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
 const metric = (title, value, note) => ({ title, value, note })
@@ -86,7 +87,9 @@ export default function PortfolioWorkspace({ initialOwnerKind = 'all' }) {
           <div className="flex gap-2">{canShowAuthorityAdministration(activeMembership) && <button type="button" onClick={() => setShowSetup(true)} disabled={showSetup} className="rounded-xl bg-violet-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">New draft project</button>}<button type="button" onClick={load} disabled={loading} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-slate-200 hover:bg-white/[0.08] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button></div>
         </div>
 
-        {showSetup && canShowAuthorityAdministration(activeMembership) && <ProjectDraftSetupPanel organizationId={activeOrganizationId} scopeRevision={scopeRevision} requestSignal={requestSignal} initialType="project" onCreated={(result) => navigate(`/sphere/workspace/projects/${result.project_id}`)} onCancel={() => setShowSetup(false)} onAccessError={handleOrganizationAccessError} />}
+        {showSetup && canShowAuthorityAdministration(activeMembership) && <ProjectDraftSetupPanel organizationId={activeOrganizationId} scopeRevision={scopeRevision} requestSignal={requestSignal} initialType="project" onCreated={(result) => navigate(`/sphere/workspace/projects/${result.project_id}?tab=services`)} onCancel={() => setShowSetup(false)} onAccessError={handleOrganizationAccessError} />}
+
+        {!organizationLoading && !selectionRequired && activeOrganizationId && <ProjectRequestPanel organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={handleOrganizationAccessError} />}
 
         {error && <div role="alert" className="mt-6 rounded-2xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>}
         {loading && !snapshot && <div className="mt-8 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-10 text-center text-sm text-slate-400">Loading live portfolio data…</div>}

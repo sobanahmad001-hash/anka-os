@@ -37,6 +37,36 @@ export function normalizeProjectDraft(input) {
 export function createProjectDraftRepository(client) {
   if (!client?.rpc) throw new TypeError('A Supabase client is required')
   return {
+    async managerState(organizationId, projectId, { signal } = {}) {
+      if (!validId(organizationId) || !validId(projectId)) throw new TypeError('Valid project IDs required')
+      let query = client.rpc('get_draft_project_manager_state', {
+        p_organization_id: organizationId, p_project_id: projectId,
+      })
+      if (signal && typeof query.abortSignal === 'function') query = query.abortSignal(signal)
+      const { data, error, status } = await query
+      if (error) throw errorFrom(error, status, 'Unable to load project manager assignment')
+      if (data?.organization_id !== organizationId || data.project_id !== projectId
+        || !Array.isArray(data.members) || (data.manager_id !== null && !validId(data.manager_id))) {
+        throw Object.assign(new Error('Manager assignment did not match the active project'), { status: 409 })
+      }
+      return data
+    },
+    async assignManager({ organizationId, projectId, managerId, requestId }) {
+      if (![organizationId, projectId, managerId, requestId].every(validId)) {
+        throw new TypeError('Valid manager assignment IDs required')
+      }
+      const { data, error, status } = await client.rpc('assign_draft_project_manager', {
+        p_organization_id: organizationId, p_project_id: projectId,
+        p_manager_id: managerId, p_request_id: requestId,
+      })
+      if (error) throw errorFrom(error, status, 'Unable to assign project manager')
+      if (data?.organization_id !== organizationId || data.project_id !== projectId
+        || data.manager_id !== managerId || data.request_id !== requestId
+        || !validId(data.manager_binding_id)) {
+        throw Object.assign(new Error('Manager assignment result did not match the selected project'), { status: 409 })
+      }
+      return data
+    },
     async options(organizationId, { signal } = {}) {
       required(organizationId, 'Organization')
       let query = client.rpc('get_project_draft_options', { p_organization_id: organizationId })

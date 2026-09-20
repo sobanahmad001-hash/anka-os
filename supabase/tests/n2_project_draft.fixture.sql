@@ -10,6 +10,9 @@ create table public.organization_memberships(
  organization_id uuid not null references public.organizations(id), user_id uuid not null references auth.users(id),
  member_kind text not null, status text not null, role text not null, primary key(organization_id,user_id));
 create table public.profiles(id uuid primary key references auth.users(id),full_name text);
+create function public.is_team_organization_member(p_org uuid) returns boolean language sql stable as $$
+ select exists(select 1 from public.organization_memberships m where m.organization_id=p_org
+  and m.user_id=auth.uid() and m.member_kind='team' and m.status='active') $$;
 create table public.clients(id uuid primary key,organization_id uuid not null references public.organizations(id),name text);
 create table public.agency_clients(id uuid primary key,organization_id uuid not null,canonical_client_id uuid not null,name text);
 create table public.brands(id uuid primary key,organization_id uuid not null,client_id uuid not null,name text,status text not null);
@@ -23,9 +26,25 @@ create table public.engagements(
  id uuid primary key default gen_random_uuid(),organization_id uuid not null,client_id uuid not null,brand_id uuid not null,
  project_id uuid not null,legacy_project_id uuid not null,name text not null,engagement_type text not null,
  objective text not null,status text not null,lead_owner_id uuid,start_date date,target_date date,created_by uuid not null);
+create table public.service_catalog(id uuid primary key,organization_id uuid not null,
+ department_id text not null,name text not null,description text not null default '',
+ is_active boolean not null default true,display_order integer not null default 0,
+ unique(id,organization_id));
+create table public.engagement_services(id uuid primary key default gen_random_uuid(),
+ organization_id uuid not null,engagement_id uuid not null,service_id uuid not null,
+ owner_id uuid,target_date date,status text not null default 'active',
+ activated_by uuid not null,activated_at timestamptz not null default now(),
+ unique(id,organization_id),unique(engagement_id,service_id));
+create table public.tasks(id uuid primary key default gen_random_uuid(),organization_id uuid not null,
+ project_id uuid not null,status text not null default 'backlog',archived_at timestamptz);
+create table public.work_items(id uuid primary key default gen_random_uuid(),organization_id uuid not null,
+ project_id uuid not null,status text not null default 'backlog',deleted_at timestamptz);
+create table public.deliverables(id uuid primary key default gen_random_uuid(),organization_id uuid not null,
+ project_id uuid not null,archived_at timestamptz);
 create table public.project_manager_bindings(
  id uuid primary key default gen_random_uuid(),organization_id uuid not null,user_id uuid not null,project_id uuid not null,
- source text not null,source_details jsonb not null,status text not null default 'active');
+ source text not null,source_details jsonb not null,status text not null default 'active',
+ created_at timestamptz not null default now());
 create function private.n1b_preserve_receipt() returns trigger language plpgsql as $$
 begin raise exception 'Immutable receipt.' using errcode='42501'; end; $$;
 create function private.n1b_require_admin(p_org uuid) returns uuid
@@ -67,11 +86,17 @@ alter table public.organization_memberships enable row level security;
 create policy n1_self_read on public.organization_memberships for select to authenticated using(user_id=auth.uid());
 alter table public.project_manager_bindings enable row level security;
 create policy n1_pm_self_read on public.project_manager_bindings for select to authenticated using(user_id=auth.uid());
+alter table public.engagement_services enable row level security;
+create policy "Team can manage engagement services" on public.engagement_services to authenticated
+ using(true) with check(true);
 grant usage on schema public,auth,private to authenticated;
 grant execute on function auth.uid() to authenticated;
+grant execute on function public.is_team_organization_member(uuid) to authenticated;
 grant select on public.organization_memberships,public.organizations,public.clients,public.agency_clients,
  public.brands,public.engagements,public.project_manager_bindings,public.profiles to authenticated;
 grant select,insert,update on public.projects to authenticated;
+grant select,insert,update,delete on public.engagement_services to authenticated;
+grant select on public.tasks,public.work_items,public.deliverables to authenticated;
 insert into public.organizations values
  ('00000000-0000-4000-8000-000000000001','active'),
  ('00000000-0000-4000-8000-000000000002','active');
@@ -97,3 +122,21 @@ insert into public.clients values('20000000-0000-4000-8000-000000000001','000000
 insert into public.agency_clients values('30000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','Client A');
 insert into public.brands values('40000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Brand A','active');
 insert into public.brands values('40000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Retired brand','retired');
+insert into public.service_catalog values
+ ('80000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','design','Design','Visual production',true,1),
+ ('80000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000001','marketing','Paid media','Paid campaign',true,2),
+ ('80000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000002','design','Other organization service','',true,1);
+insert into public.projects(id,organization_id,client_id,name,engagement_type,status,owner_id)
+ values('90000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001',
+ '20000000-0000-4000-8000-000000000001','Existing service project','project','active',
+ '10000000-0000-4000-8000-000000000001');
+insert into public.engagements(id,organization_id,client_id,brand_id,project_id,legacy_project_id,
+ name,engagement_type,objective,status,created_by)
+ values('90000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000001',
+ '30000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001',
+ '90000000-0000-4000-8000-000000000001','90000000-0000-4000-8000-000000000001',
+ 'Existing service project','project','','active','10000000-0000-4000-8000-000000000001');
+insert into public.engagement_services(id,organization_id,engagement_id,service_id,status,activated_by)
+ values('90000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000001',
+ '90000000-0000-4000-8000-000000000002','80000000-0000-4000-8000-000000000001',
+ 'active','10000000-0000-4000-8000-000000000001');

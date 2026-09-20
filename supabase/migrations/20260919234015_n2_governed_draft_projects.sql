@@ -7,10 +7,11 @@ create table private.n2_project_commands (
   organization_id uuid not null,
   actor_id uuid not null,
   request_id uuid not null,
-  command text not null check (command in ('create_draft', 'activate')),
+  command text not null check (command in ('create_draft', 'activate', 'assign_manager')),
   payload jsonb not null,
   result jsonb not null,
   project_id uuid not null,
+  transaction_id bigint not null default txid_current(),
   created_at timestamptz not null default clock_timestamp(),
   primary key (organization_id, actor_id, request_id),
   foreign key (project_id, organization_id) references public.projects(id, organization_id) on delete restrict
@@ -19,6 +20,28 @@ alter table private.n2_project_commands enable row level security;
 revoke all on private.n2_project_commands from public, anon, authenticated, service_role;
 create trigger n2_project_commands_immutable before update or delete on private.n2_project_commands
 for each row execute function private.n1b_preserve_receipt();
+
+create table private.n2_project_requests (
+  request_id uuid primary key,
+  organization_id uuid not null,
+  requester_id uuid not null,
+  payload jsonb not null,
+  status text not null default 'pending' check (status in ('pending','converted')),
+  converted_project_id uuid,
+  conversion_request_id uuid,
+  conversion_manager_id uuid,
+  converted_by uuid,
+  created_at timestamptz not null default clock_timestamp(),
+  converted_at timestamptz,
+  foreign key (organization_id, requester_id) references public.organization_memberships(organization_id,user_id) on delete restrict,
+  foreign key (converted_project_id, organization_id) references public.projects(id,organization_id) on delete restrict,
+  check ((status='pending' and converted_project_id is null and converted_at is null)
+    or (status='converted' and converted_project_id is not null and conversion_request_id is not null
+      and converted_by is not null and converted_at is not null))
+);
+alter table private.n2_project_requests enable row level security;
+revoke all on private.n2_project_requests from public,anon,authenticated,service_role;
+create index n2_project_requests_org_status on private.n2_project_requests(organization_id,status,created_at desc);
 
 -- The previous P3 internal setup creates active projects for every team member.
 -- Its form is replaced by the common draft form; the old RPC cannot bypass N2.
@@ -128,6 +151,11 @@ begin
     if not found then raise exception 'Client work requires a canonical same-organization client.' using errcode='42501'; end if;
   end if;
   if tg_op='UPDATE' and new.status='active' and old.status is distinct from 'active' then
+    if not exists (select 1 from private.n2_project_commands c
+      where c.organization_id=new.organization_id and c.project_id=new.id
+        and c.command='activate' and c.transaction_id=txid_current()) then
+      raise exception 'Use governed project activation.' using errcode='42501';
+    end if;
     select exists(
       select 1 from public.project_manager_bindings b
       join public.organization_memberships m on m.organization_id=b.organization_id and m.user_id=b.user_id
@@ -196,7 +224,7 @@ begin
   end if;
   payload := jsonb_build_object('name',trim(p_name),'description',trim(coalesce(p_description,'')),
     'engagement_type',p_engagement_type,'client_id',p_client_id,'brand_id',p_brand_id,
-    'manager_id',p_manager_id,'start_date',p_start_date,'due_date',p_due_date,
+      'manager_id',p_manager_id,'start_date',p_start_date,'due_date',p_due_date,
     'scope',trim(coalesce(p_scope_statement,'')),'exclusions',trim(coalesce(p_exclusions,'')));
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
     p_organization_id::text || ':' || actor::text || ':' || p_request_id::text, 0));
@@ -234,6 +262,112 @@ begin
   insert into private.n2_project_commands(organization_id,actor_id,request_id,command,payload,result,project_id)
     values(p_organization_id,actor,p_request_id,'create_draft',payload,result,project_id);
   return result;
+end; $$;
+
+create function public.submit_project_request(
+  p_organization_id uuid,p_request_id uuid,p_name text,p_description text,
+  p_engagement_type text,p_client_id uuid,p_brand_id uuid,p_start_date date,p_due_date date
+) returns jsonb language plpgsql security definer set search_path='' as $$
+declare
+  actor uuid:=auth.uid();
+  payload jsonb;
+  existing private.n2_project_requests%rowtype;
+begin
+  if actor is null or p_organization_id is null or p_request_id is null then
+    raise exception 'Authenticated project request required.' using errcode='42501';
+  end if;
+  perform 1 from public.organization_memberships m join public.organizations o on o.id=m.organization_id
+    where m.organization_id=p_organization_id and m.user_id=actor and m.member_kind='team'
+      and m.status='active' and o.status='active' for share of m,o;
+  if not found then raise exception 'Active same-organization team member required.' using errcode='42501'; end if;
+  if nullif(trim(coalesce(p_name,'')),'') is null or length(trim(p_name))>240
+    or p_engagement_type is null or p_engagement_type not in ('internal','project','retainer')
+    or (p_start_date is not null and p_due_date is not null and p_due_date<p_start_date) then
+    raise exception 'Valid project request details required.' using errcode='22023';
+  end if;
+  if p_engagement_type='internal' then
+    if p_client_id is not null or p_brand_id is not null then
+      raise exception 'Internal Work cannot select client or brand.' using errcode='22023';
+    end if;
+  else
+    perform 1 from public.agency_clients a join public.brands b on b.client_id=a.id
+      and b.organization_id=a.organization_id where a.organization_id=p_organization_id
+      and a.canonical_client_id=p_client_id and b.id=p_brand_id and b.status='active' for share of a,b;
+    if not found then raise exception 'Active same-organization client brand required.' using errcode='42501'; end if;
+  end if;
+  payload:=jsonb_build_object('name',trim(p_name),'description',trim(coalesce(p_description,'')),
+    'engagement_type',p_engagement_type,'client_id',p_client_id,'brand_id',p_brand_id,
+    'start_date',p_start_date,'due_date',p_due_date);
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('n2-project-request:'||p_request_id::text,0));
+  select * into existing from private.n2_project_requests where request_id=p_request_id;
+  if found then
+    if existing.organization_id is distinct from p_organization_id or existing.requester_id is distinct from actor
+      or existing.payload is distinct from payload then
+      raise exception 'Request ID already used with different inputs.' using errcode='23505';
+    end if;
+    return jsonb_build_object('organization_id',p_organization_id,'request_id',p_request_id,
+      'status',existing.status,'converted_project_id',existing.converted_project_id,'replayed',true);
+  end if;
+  insert into private.n2_project_requests(request_id,organization_id,requester_id,payload)
+    values(p_request_id,p_organization_id,actor,payload);
+  return jsonb_build_object('organization_id',p_organization_id,'request_id',p_request_id,
+    'status','pending','converted_project_id',null,'replayed',false);
+end; $$;
+
+create function public.get_project_requests(p_organization_id uuid)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare actor uuid:=auth.uid(); actor_role text;
+begin
+  select m.role into actor_role from public.organization_memberships m join public.organizations o
+    on o.id=m.organization_id where m.organization_id=p_organization_id and m.user_id=actor
+    and m.member_kind='team' and m.status='active' and o.status='active';
+  if not found then raise exception 'Active same-organization team member required.' using errcode='42501'; end if;
+  return jsonb_build_object('organization_id',p_organization_id,
+    'requests',coalesce((select jsonb_agg(jsonb_build_object('request_id',r.request_id,
+      'requester_id',r.requester_id,'payload',r.payload,'status',r.status,
+      'converted_project_id',r.converted_project_id,'created_at',r.created_at)
+      order by r.created_at desc) from private.n2_project_requests r
+      where r.organization_id=p_organization_id and (actor_role in ('system_owner','operations_admin')
+        or r.requester_id=actor)),'[]'::jsonb),
+    'clients',coalesce((select jsonb_agg(jsonb_build_object('id',a.canonical_client_id,'name',a.name,
+      'brands',coalesce((select jsonb_agg(jsonb_build_object('id',b.id,'name',b.name) order by b.name)
+        from public.brands b where b.organization_id=p_organization_id and b.client_id=a.id
+          and b.status='active'),'[]'::jsonb)) order by a.name)
+      from public.agency_clients a where a.organization_id=p_organization_id),'[]'::jsonb));
+end; $$;
+
+create function public.convert_project_request(
+  p_organization_id uuid,p_source_request_id uuid,p_request_id uuid,p_manager_id uuid default null
+) returns jsonb language plpgsql security definer set search_path='' as $$
+declare actor uuid; request private.n2_project_requests%rowtype; created jsonb;
+begin
+  actor:=private.n1b_require_admin(p_organization_id);
+  if p_source_request_id is null or p_request_id is null then
+    raise exception 'Source and conversion request IDs required.' using errcode='22023';
+  end if;
+  select * into request from private.n2_project_requests
+    where request_id=p_source_request_id and organization_id=p_organization_id for update;
+  if not found then raise exception 'Same-organization project request required.' using errcode='42501'; end if;
+  if request.status='converted' then
+    if request.conversion_request_id is distinct from p_request_id
+      or request.conversion_manager_id is distinct from p_manager_id then
+      raise exception 'Project request was already converted with different inputs.' using errcode='23505';
+    end if;
+    return jsonb_build_object('organization_id',p_organization_id,'source_request_id',p_source_request_id,
+      'project_id',request.converted_project_id,'status','converted','replayed',true);
+  end if;
+  perform 1 from private.n2_project_commands where organization_id=p_organization_id
+    and actor_id=actor and request_id=p_request_id;
+  if found then raise exception 'Conversion ID was already used.' using errcode='23505'; end if;
+  created:=public.create_draft_project(p_organization_id,p_request_id,request.payload->>'name',
+    request.payload->>'description',request.payload->>'engagement_type',
+    (request.payload->>'client_id')::uuid,(request.payload->>'brand_id')::uuid,p_manager_id,
+    (request.payload->>'start_date')::date,(request.payload->>'due_date')::date,'','');
+  update private.n2_project_requests set status='converted',converted_project_id=(created->>'project_id')::uuid,
+    conversion_request_id=p_request_id,conversion_manager_id=p_manager_id,converted_by=actor,
+    converted_at=clock_timestamp() where request_id=p_source_request_id;
+  return jsonb_build_object('organization_id',p_organization_id,'source_request_id',p_source_request_id,
+    'project_id',created->>'project_id','status','converted','replayed',false);
 end; $$;
 
 create function public.activate_draft_project(
@@ -286,15 +420,76 @@ begin
   if project.status <> 'planning' then
     raise exception 'Only a planning draft can be activated.' using errcode='40001';
   end if;
+  result := jsonb_build_object('organization_id',p_organization_id,'project_id',p_project_id,
+    'status','active','request_id',p_request_id,'replayed',false);
+  insert into private.n2_project_commands(organization_id,actor_id,request_id,command,payload,result,project_id)
+    values(p_organization_id,actor,p_request_id,'activate',payload,result,p_project_id);
   update public.projects set status='active' where id=p_project_id and organization_id=p_organization_id;
   if project.engagement_type <> 'internal' then
     update public.engagements set status='active' where project_id=p_project_id and organization_id=p_organization_id
       and status='planning';
   end if;
-  result := jsonb_build_object('organization_id',p_organization_id,'project_id',p_project_id,
-    'status','active','request_id',p_request_id,'replayed',false);
+  return result;
+end; $$;
+
+create function public.get_draft_project_manager_state(p_organization_id uuid,p_project_id uuid)
+returns jsonb language plpgsql security definer set search_path='' as $$
+begin
+  perform private.n1b_require_admin(p_organization_id);
+  perform 1 from public.projects where id=p_project_id and organization_id=p_organization_id
+    and status='planning' and archived_at is null;
+  if not found then raise exception 'Planning project required.' using errcode='42501'; end if;
+  return jsonb_build_object('organization_id',p_organization_id,'project_id',p_project_id,
+    'manager_id',(select b.user_id from public.project_manager_bindings b
+      where b.organization_id=p_organization_id and b.project_id=p_project_id and b.status='active'
+      order by b.created_at,b.id limit 1),
+    'members',coalesce((select jsonb_agg(jsonb_build_object('id',m.user_id,
+      'name',coalesce(nullif(trim(p.full_name),''),m.user_id::text)) order by m.user_id)
+      from public.organization_memberships m left join public.profiles p on p.id=m.user_id
+      where m.organization_id=p_organization_id and m.member_kind='team' and m.status='active'),'[]'::jsonb));
+end; $$;
+
+create function public.assign_draft_project_manager(
+  p_organization_id uuid,p_project_id uuid,p_manager_id uuid,p_request_id uuid
+) returns jsonb language plpgsql security definer set search_path='' as $$
+declare actor uuid; project public.projects%rowtype; receipt private.n2_project_commands%rowtype;
+  payload jsonb; result jsonb; binding_id uuid;
+begin
+  actor:=private.n1b_require_admin(p_organization_id);
+  if p_project_id is null or p_manager_id is null or p_request_id is null then
+    raise exception 'Complete manager assignment required.' using errcode='22023';
+  end if;
+  payload:=jsonb_build_object('project_id',p_project_id,'manager_id',p_manager_id);
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
+    p_organization_id::text||':'||actor::text||':'||p_request_id::text,0));
+  select * into receipt from private.n2_project_commands where organization_id=p_organization_id
+    and actor_id=actor and request_id=p_request_id;
+  if found then
+    if receipt.command<>'assign_manager' or receipt.payload is distinct from payload then
+      raise exception 'Request ID already used with different inputs.' using errcode='23505';
+    end if;
+    return receipt.result||jsonb_build_object('replayed',true);
+  end if;
+  select * into project from public.projects where id=p_project_id and organization_id=p_organization_id
+    and status='planning' and archived_at is null for update;
+  if not found then raise exception 'Planning project required.' using errcode='42501'; end if;
+  perform 1 from public.organization_memberships m where m.organization_id=p_organization_id
+    and m.user_id=p_manager_id and m.member_kind='team' and m.status='active' for share;
+  if not found then raise exception 'Active same-organization PM required.' using errcode='42501'; end if;
+  if exists(select 1 from public.project_manager_bindings b where b.organization_id=p_organization_id
+    and b.project_id=p_project_id and b.status='active') then
+    raise exception 'Project already has an active manager binding.' using errcode='40001';
+  end if;
+  insert into public.project_manager_bindings(organization_id,user_id,project_id,source,source_details)
+    values(p_organization_id,p_manager_id,p_project_id,'explicit',
+      jsonb_build_object('n2_request_id',p_request_id,'assigned_by',actor)) returning id into binding_id;
+  update public.projects set owner_id=p_manager_id where id=p_project_id and organization_id=p_organization_id;
+  update public.engagements set lead_owner_id=p_manager_id where project_id=p_project_id
+    and organization_id=p_organization_id and status='planning';
+  result:=jsonb_build_object('organization_id',p_organization_id,'project_id',p_project_id,
+    'manager_id',p_manager_id,'manager_binding_id',binding_id,'request_id',p_request_id,'replayed',false);
   insert into private.n2_project_commands(organization_id,actor_id,request_id,command,payload,result,project_id)
-    values(p_organization_id,actor,p_request_id,'activate',payload,result,p_project_id);
+    values(p_organization_id,actor,p_request_id,'assign_manager',payload,result,p_project_id);
   return result;
 end; $$;
 
@@ -319,6 +514,15 @@ end; $$;
 
 revoke all on function public.create_draft_project(uuid,uuid,text,text,text,uuid,uuid,uuid,date,date,text,text),
   public.activate_draft_project(uuid,uuid,uuid), public.get_project_draft_options(uuid) from public,anon,authenticated,service_role;
+revoke all on function public.submit_project_request(uuid,uuid,text,text,text,uuid,uuid,date,date),
+  public.get_project_requests(uuid),public.convert_project_request(uuid,uuid,uuid,uuid)
+  from public,anon,authenticated,service_role;
 grant execute on function public.create_draft_project(uuid,uuid,text,text,text,uuid,uuid,uuid,date,date,text,text),
   public.activate_draft_project(uuid,uuid,uuid), public.get_project_draft_options(uuid) to authenticated;
+grant execute on function public.submit_project_request(uuid,uuid,text,text,text,uuid,uuid,date,date),
+  public.get_project_requests(uuid),public.convert_project_request(uuid,uuid,uuid,uuid) to authenticated;
+revoke all on function public.get_draft_project_manager_state(uuid,uuid),
+  public.assign_draft_project_manager(uuid,uuid,uuid,uuid) from public,anon,authenticated,service_role;
+grant execute on function public.get_draft_project_manager_state(uuid,uuid),
+  public.assign_draft_project_manager(uuid,uuid,uuid,uuid) to authenticated;
 commit;
