@@ -42,8 +42,18 @@ export function buildProjectEngagementWorkspace(snapshot, options = {}) {
   const deliverables = snapshot.deliverables.filter((item) => sameProject(item, project) && !item.archived_at && workstreamIds.has(item.workstream_id))
   const deliverableIds = new Set(deliverables.map((item) => item.id))
   const versionsByDeliverable = groupBy(snapshot.deliverableVersions.filter((item) => sameProject(item, project) && deliverableIds.has(item.deliverable_id) && !item.withdrawn_at), 'deliverable_id')
+  const versionIds = new Set([...versionsByDeliverable.values()].flat().map(item => item.id))
+  const reviewEvidence = rows => groupBy((rows || []).filter(item => sameProject(item, project)
+    && deliverableIds.has(item.deliverable_id) && versionIds.has(item.deliverable_version_id)), 'deliverable_version_id')
+  const approvalsByVersion = reviewEvidence(snapshot.deliverableApprovals)
+  const confirmationsByVersion = reviewEvidence(snapshot.pmConfirmations)
+  const eventsByVersion = reviewEvidence(snapshot.lifecycleEvents)
   const delivery = deliverables.map((item) => {
-    const versions = versionsByDeliverable.get(item.id) || []
+    const versions = (versionsByDeliverable.get(item.id) || []).map(version => ({ ...version,
+      approvals: approvalsByVersion.get(version.id) || [],
+      pmConfirmations: confirmationsByVersion.get(version.id) || [],
+      lifecycleEvents: eventsByVersion.get(version.id) || [],
+    }))
     return { ...item, owner: owner(item.owner_id), workstreamName: workstreams.find((row) => row.id === item.workstream_id)?.name || 'Unknown workstream', versions, latestVersion: versions[0] || null }
   })
 

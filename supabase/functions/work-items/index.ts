@@ -33,6 +33,17 @@ function optionalId(value: unknown) {
   return text(value, 80) || null
 }
 
+export function projectTaskProposalDecisionArgs(body: Json, organizationId: string, actorId: string) {
+  const projectId = optionalId(body.projectId)
+  const proposalId = optionalId(body.proposalId)
+  const decision = text(body.decision, 20)
+  if (!projectId || !proposalId || !['approve', 'reject'].includes(decision)) return null
+  return {
+    p_organization_id: organizationId, p_project_id: projectId,
+    p_proposal_id: proposalId, p_actor_id: actorId, p_decision: decision,
+  }
+}
+
 export function selectedOrganizationId(input: Json) {
   const camelCase = optionalId(input.organizationId)
   const snakeCase = optionalId(input.organization_id)
@@ -181,16 +192,11 @@ export async function handleRequest(request: Request) {
       return response({ data })
     }
     if (action === 'decide_project_task_change_proposal') {
-      const projectId = optionalId(body.projectId)
-      const proposalId = optionalId(body.proposalId)
-      const decision = text(body.decision, 20)
-      if (!projectId || !proposalId || !['approve', 'reject'].includes(decision)) {
+      const args = projectTaskProposalDecisionArgs(body, organizationId, user.id)
+      if (!args) {
         return response({ error: 'Project, proposal, and human decision are required' }, 400)
       }
-      const { data, error } = await admin.rpc('decide_project_task_change_proposal', {
-        p_organization_id: organizationId, p_project_id: projectId,
-        p_proposal_id: proposalId, p_actor_id: user.id, p_decision: decision,
-      })
+      const { data, error } = await admin.rpc('decide_project_task_change_proposal', args)
       if (error) throw error
       return response({ data })
     }

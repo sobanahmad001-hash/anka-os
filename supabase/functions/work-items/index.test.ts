@@ -1,4 +1,4 @@
-import { normalizeWorkItemInput, requireGenerateContentScope, selectedOrganizationId, staleWrite } from './index.ts'
+import { normalizeWorkItemInput, projectTaskProposalDecisionArgs, requireGenerateContentScope, selectedOrganizationId, staleWrite } from './index.ts'
 
 function equal(actual: unknown, expected: unknown) {
   if (actual !== expected) throw new Error(`Expected ${String(expected)}, received ${String(actual)}`)
@@ -105,4 +105,15 @@ Deno.test('content generation rejects an engagement outside the selected organiz
     equal((error as { status?: number }).status, 403)
   }
   equal(rejected, true)
+})
+
+Deno.test('proposal decision binds the selected organization and authenticated actor', () => {
+  const result = projectTaskProposalDecisionArgs({ projectId: 'project-a', proposalId: 'proposal-a', decision: 'approve' }, 'org-a', 'actor-a')
+  equal(result?.p_organization_id, 'org-a')
+  equal(result?.p_project_id, 'project-a')
+  equal(result?.p_proposal_id, 'proposal-a')
+  equal(result?.p_actor_id, 'actor-a')
+  equal(result?.p_decision, 'approve')
+  equal(projectTaskProposalDecisionArgs({ projectId: 'project-a', proposalId: 'proposal-a', decision: 'publish' }, 'org-a', 'actor-a'), null)
+  equal(projectTaskProposalDecisionArgs({ projectId: '', proposalId: 'proposal-a', decision: 'reject' }, 'org-a', 'actor-a'), null)
 })

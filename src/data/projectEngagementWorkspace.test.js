@@ -103,6 +103,23 @@ test('WKS2 rejects cross-organization extension data in the read model', () => {
   assert.equal(workspace.workshopArtifacts.length, 0)
 })
 
+test('N3 keeps specialist, PM, and release evidence on one exact project version', () => {
+  const evidence = { organization_id: 'org-a', project_id: 'project-a',
+    deliverable_id: 'deliverable-a', deliverable_version_id: 'delivery-version-a' }
+  const workspace = buildProjectEngagementWorkspace(fixture({
+    deliverableApprovals: [{ ...evidence, id: 'quality-a', approval_type: 'internal_quality', decision: 'approved' },
+      { ...evidence, id: 'foreign-quality', organization_id: 'org-b', approval_type: 'internal_quality', decision: 'approved' },
+      { ...evidence, id: 'other-version', deliverable_version_id: 'version-b', approval_type: 'release', decision: 'approved' }],
+    pmConfirmations: [{ ...evidence, id: 'pm-a', confirmed_by: 'manager-a' }],
+    lifecycleEvents: [{ ...evidence, id: 'release-a', event_type: 'released' },
+      { ...evidence, id: 'foreign-release', project_id: 'project-b', event_type: 'released' }],
+  }))
+  const version = workspace.deliverables[0].versions[0]
+  assert.deepEqual(version.approvals.map(item => item.id), ['quality-a'])
+  assert.deepEqual(version.pmConfirmations.map(item => item.id), ['pm-a'])
+  assert.deepEqual(version.lifecycleEvents.map(item => item.id), ['release-a'])
+})
+
 test('P3 repository reads canonical setup context and remains read-only', () => {
   const repository = readFileSync(new URL('./projectEngagementWorkspaceRepository.js', import.meta.url), 'utf8')
   for (const table of ['projects', 'engagements', 'engagement_assets', 'engagement_pipeline_origins', 'pipeline_template_versions', 'pipeline_templates', 'tasks', 'work_items', 'engagement_stage_instances', 'deliverables', 'activity_events']) assert.match(repository, new RegExp(`from\\('${table}'\\)`))

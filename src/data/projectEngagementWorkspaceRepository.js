@@ -33,7 +33,7 @@ assertProjectId(projectId)
   if (!project) throw Object.assign(new Error('Project unavailable in the active organization.'), { status: 404 })
   const org = organizationId
 
-  const [client, engagement, workstreams, tasks, milestones, deliverables, deliverableVersions, projectActivity, memberships, profiles] = await Promise.all([
+  const [client, engagement, workstreams, tasks, milestones, deliverables, deliverableVersions, projectActivity, memberships, profiles, deliverableApprovals, pmConfirmations, lifecycleEvents] = await Promise.all([
     project.client_id ? supabase.from('clients').select('id, organization_id, name, company, industry, status, default_timezone').eq('organization_id', organizationId).abortSignal(signal).eq('id', project.client_id).eq('organization_id', org).maybeSingle() : Promise.resolve({ data: null, error: null }),
     supabase.from('engagements').select('id, organization_id, project_id, brand_id, name, engagement_type, objective, status, lead_owner_id, start_date, target_date').eq('organization_id', organizationId).abortSignal(signal).eq('project_id', projectId).eq('organization_id', org).maybeSingle(),
     supabase.from('workstreams').select('id, organization_id, project_id, department_id, name, status, owner_id').eq('organization_id', organizationId).abortSignal(signal).eq('project_id', projectId).eq('organization_id', org).order('created_at'),
@@ -44,6 +44,9 @@ assertProjectId(projectId)
     supabase.from('activity_events').select('id, organization_id, project_id, actor_id, action, target_type, target_id, metadata, occurred_at').eq('organization_id', organizationId).abortSignal(signal).eq('project_id', projectId).eq('organization_id', org).order('occurred_at', { ascending: false }).limit(100),
     supabase.from('organization_memberships').select('organization_id, user_id').eq('organization_id', organizationId).abortSignal(signal).eq('organization_id', org).eq('member_kind', 'team').eq('status', 'active'),
     supabase.from('profiles').select('id, full_name, email').abortSignal(signal),
+    supabase.from('approvals').select('id, organization_id, project_id, deliverable_id, deliverable_version_id, approval_type, decision, rationale, decided_by, decided_at').eq('organization_id', organizationId).abortSignal(signal).eq('project_id', projectId).order('decided_at', { ascending: false }),
+    supabase.from('deliverable_pm_confirmations').select('id, organization_id, project_id, deliverable_id, deliverable_version_id, confirmed_by, confirmed_state_version, confirmed_at').eq('organization_id', organizationId).abortSignal(signal).eq('project_id', projectId).order('confirmed_at', { ascending: false }),
+    supabase.from('deliverable_lifecycle_events').select('id, organization_id, project_id, deliverable_id, deliverable_version_id, event_type, actor_id, actor_kind, occurred_at').eq('organization_id', organizationId).abortSignal(signal).eq('project_id', projectId).order('occurred_at', { ascending: false }),
   ])
 
   const extension = row(engagement, 'engagement extension')
@@ -88,6 +91,7 @@ assertProjectId(projectId)
     brand: row(brand, 'brand'),
     workstreams: rows(workstreams, 'workstreams'), tasks: rows(tasks, 'Project Tasks'), milestones: rows(milestones, 'milestones'),
     deliverables: rows(deliverables, 'deliverables'), deliverableVersions: rows(deliverableVersions, 'deliverable versions'), projectActivity: rows(projectActivity, 'project activity'),
+    deliverableApprovals: rows(deliverableApprovals, 'deliverable approvals'), pmConfirmations: rows(pmConfirmations, 'PM confirmations'), lifecycleEvents: rows(lifecycleEvents, 'deliverable lifecycle events'),
     memberships: rows(memberships, 'memberships'), profiles: rows(profiles, 'profiles'), services: rows(services, 'services'), stages: rows(stages, 'journey stages'),
     stageDependencies: rows(stageDependencies, 'stage dependencies'), prerequisites: rows(prerequisites, 'prerequisites'), engagementAssets: rows(engagementAssets, 'engagement assets'), workItems: rows(workItems, 'Engagement Work Items'),
     taskDependencies: rows(taskDependencies, 'Project Task dependencies'),
