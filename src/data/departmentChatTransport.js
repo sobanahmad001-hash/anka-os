@@ -74,6 +74,8 @@ export function createDepartmentChatRepository(client) {
     listConversations: (departmentId, input, scope) => invoke('list_conversations', { ...input, department_id: departmentId }, scope),
     searchConversations: (departmentId, input, scope) => invoke('search_conversations', { ...input, department_id: departmentId }, scope),
     createConversation: (departmentId, input, scope) => invoke('create_conversation', { ...input, department_id: departmentId }, scope),
+    listSourceVersions: (departmentId, input, scope) => invoke('list_source_versions', { ...input, department_id: departmentId }, scope),
+    previewSourceVersion: (departmentId, input, scope) => invoke('preview_source_version', { ...input, department_id: departmentId }, scope),
     getUnsentDraft: (departmentId, input, scope) => invoke('get_unsent_draft', { ...input, department_id: departmentId }, scope),
     saveUnsentDraft: (departmentId, input, scope) => invoke('save_unsent_draft', { ...input, department_id: departmentId }, scope),
     discardUnsentDraft: (departmentId, input, scope) => invoke('discard_unsent_draft', { ...input, department_id: departmentId }, scope),

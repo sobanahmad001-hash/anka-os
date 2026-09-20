@@ -23,7 +23,62 @@ import {
   selectSingleOpenAiModel,
   safeAttemptReason,
   validateUnsentDepartmentChatDraft,
+  selectedDepartmentChatSourceIds,
+  boundedDepartmentChatContext,
+  approvedSourceVersions,
 } from './index.ts'
+
+Deno.test('P9B requires distinct exact version identities and rejects implicit or truncated source input', () => {
+  const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222']
+  assertEquals(selectedDepartmentChatSourceIds(undefined), [])
+  assertEquals(selectedDepartmentChatSourceIds(ids), ids)
+  assertThrows(() => selectedDepartmentChatSourceIds([...ids, ids[0]]))
+  assertThrows(() => selectedDepartmentChatSourceIds(['not-a-version']))
+  assertThrows(() => selectedDepartmentChatSourceIds(Array(6).fill(ids[0])))
+  assertThrows(() => selectedDepartmentChatSourceIds('all-approved'))
+  const payload = { content: 'x'.repeat(70001) }
+  assertThrows(() => boundedDepartmentChatContext(payload))
+  assertEquals(boundedDepartmentChatContext({ content: 'exact' }), '{"content":"exact"}')
+})
+
+Deno.test('P9B source catalog omits content and exact selection rechecks every approved identity', async () => {
+  const id = '11111111-1111-4111-8111-111111111111'
+  const missing = '22222222-2222-4222-8222-222222222222'
+  const calls: Array<{ select?: string, filters: Array<[string, unknown]>, limit?: number }> = []
+  const reader = {
+    from(table: string) {
+      assertEquals(table, 'artifact_approvals')
+      const call: { select?: string, filters: Array<[string, unknown]>, limit?: number } = { filters: [] }
+      calls.push(call)
+      const query: any = {
+        select(value: string) { call.select = value; return query },
+        eq(key: string, value: unknown) { call.filters.push([key, value]); return query },
+        in(key: string, value: unknown) { call.filters.push([key, value]); return query },
+        neq(key: string, value: unknown) { call.filters.push([key, value]); return query },
+        order() { return query },
+        limit(value: number) { call.limit = value; return query },
+        then(resolve: any) {
+          return Promise.resolve({ data: [{
+            artifact_id: 'artifact', artifact_version_id: id, approved_at: '2026-09-01T00:00:00Z',
+            artifacts: { artifact_type: 'vision', title: 'Brand vision' },
+            artifact_versions: { id, version_number: 2, content: { body: 'Exact' } },
+          }], error: null }).then(resolve)
+        },
+      }
+      return query
+    },
+  }
+  const catalog = await approvedSourceVersions(reader as any, 'engagement', 'content', 'organization')
+  assertEquals(catalog.length, 1)
+  assertEquals(calls[0].select?.includes('content'), false)
+  assertEquals(calls[0].limit, 501)
+  assertEquals(calls[0].filters.some(([key, value]) => key === 'engagement_id' && value === 'engagement'), true)
+  assertEquals(calls[0].filters.some(([key, value]) => key === 'artifact_versions.ai_use_allowed' && value === true), true)
+  const selected = await approvedSourceVersions(reader as any, 'engagement', 'content', 'organization', [id])
+  assertEquals(selected[0].content, { body: 'Exact' })
+  assertEquals(calls[1].select?.includes('content'), true)
+  await assertRejects(() => approvedSourceVersions(reader as any, 'engagement', 'content', 'organization', [id, missing]))
+})
 
 Deno.test('P9A preserves exact unsent text but never persists consent, model, or file selections', () => {
   const draft = validateUnsentDepartmentChatDraft({
@@ -138,7 +193,7 @@ function selectedOrganizationFixture() {
         eq: (key: string, value: unknown) => { filters.push([key, value]); return query },
         is: (key: string, value: unknown) => { filters.push([key, value]); return query },
         // No dated/approved rows are present in this fixture.
-        gte: () => query, in: () => query, neq: () => query, order: () => query,
+        gte: () => query, in: () => query, neq: () => query, order: () => query, limit: () => query,
         single: async () => result(true), maybeSingle: async () => result(true),
         then: (resolve: any) => Promise.resolve(result()).then(resolve),
       }
@@ -275,7 +330,7 @@ function selectedOrganizationFixture() {
   const request = (body: any) => handleRequest(new Request('http://offline/department-chat', {
     method: 'POST', headers: { Authorization: 'Bearer synthetic', 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }), {
-    clients: { admin, userClient: { auth: { getUser: async () => ({ data: { user: { id: 'actor' } }, error: null }) } } as any },
+    clients: { admin, userClient: { from: admin.from.bind(admin), auth: { getUser: async () => ({ data: { user: { id: 'actor' } }, error: null }) } } as any },
     fetcher: (async (_url, init) => {
       providerCalls++
       providerRequests.push(init || {})
@@ -390,6 +445,34 @@ Deno.test('selected B succeeds through real request boundaries with every read, 
   assertEquals(save.args.p_engagement_stage_instance_id, 'stage-B')
   assertEquals(fixture.rpcCalls.filter(call => call.name === 'record_department_chat_attempt').every(call =>
     call.args.p_organization_id === 'B' && !JSON.stringify(call.args).includes('Offline fixture')), true)
+})
+
+Deno.test('P9B source actions require current conversation access and return content only for an exact preview', async () => {
+  const fixture = selectedOrganizationFixture()
+  fixture.rows.organization_memberships.find(row => row.organization_id === 'B').department_id = 'content'
+  fixture.rows.engagement_services.find(row => row.organization_id === 'B').service_catalog.department_id = 'content'
+  fixture.rows.department_chat_conversations.find(row => row.organization_id === 'B').department_id = 'content'
+  const id = '11111111-1111-4111-8111-111111111111'
+  fixture.rows.artifact_approvals = [{
+    organization_id: 'B', engagement_id: 'engagement-B',
+    artifact_id: 'artifact-B', artifact_version_id: id, approved_at: '2026-09-01T00:00:00Z',
+    artifacts: { engagement_id: 'engagement-B', artifact_type: 'vision', title: 'Exact vision' },
+    artifact_versions: { id, version_number: 2, content: { body: 'PRIVATE_EXACT_CONTENT' }, ai_use_allowed: true, data_classification: 'internal' },
+  }]
+  const scope = { organization_id: 'B', project_id: 'project-B', engagement_id: 'engagement-B',
+    department_id: 'content', conversation_id: 'conversation-B' }
+  const listing = await fixture.request({ action: 'list_source_versions', ...scope })
+  assertEquals(listing.status, 200, await listing.clone().text())
+  const listed = (await listing.json()).data
+  assertEquals(listed.length, 1)
+  assertEquals(Object.hasOwn(listed[0], 'content'), false)
+  const preview = await fixture.request({ action: 'preview_source_version', ...scope, artifact_version_id: id })
+  assertEquals(preview.status, 200, await preview.clone().text())
+  assertEquals((await preview.json()).data.content, { body: 'PRIVATE_EXACT_CONTENT' })
+  fixture.rows.organization_memberships.find(row => row.organization_id === 'B').status = 'suspended'
+  const revoked = await fixture.request({ action: 'preview_source_version', ...scope, artifact_version_id: id })
+  assertEquals(revoked.status, 403)
+  assertEquals(fixture.providerCalls(), 0)
 })
 
 Deno.test('saved conversations list and open only the current actor exact B work context', async () => {
@@ -617,7 +700,7 @@ Deno.test('an active internal recipient can list, open, and reply without becomi
     work_item_type: 'task', priority: 'medium', prompt: 'Reply as the actual author.',
     prompt_safe_for_ai: true,
   })
-  assertEquals(reply.status, 200)
+  assertEquals(reply.status, 200, await reply.clone().text())
   assertEquals(fixture.rpcCalls.find(call => call.name === 'begin_department_chat_turn_with_attachments')!.args.p_actor_id, 'actor')
 })
 

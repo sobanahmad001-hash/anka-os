@@ -464,6 +464,91 @@ async function approvedSafeContext(admin: Client, engagementId: string, departme
   })
 }
 
+const SOURCE_VERSION_LIMIT = 5
+const SOURCE_CONTEXT_CHARACTERS = 60000
+const SOURCE_VERSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+export function selectedDepartmentChatSourceIds(value: unknown) {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.length > SOURCE_VERSION_LIMIT
+    || value.some(id => typeof id !== 'string' || !SOURCE_VERSION_ID.test(id))
+    || new Set(value).size !== value.length) {
+    throw Object.assign(new Error('Choose up to five distinct exact artifact versions.'), { status: 400 })
+  }
+  return value as string[]
+}
+
+function sourceVersionDetails(item: Json) {
+  const artifact = (Array.isArray(item.artifacts) ? item.artifacts[0] : item.artifacts) as Json | null
+  const version = (Array.isArray(item.artifact_versions) ? item.artifact_versions[0] : item.artifact_versions) as Json | null
+  if (!artifact || !version) return null
+  return {
+    artifact_id: item.artifact_id, artifact_version_id: item.artifact_version_id,
+    artifact_type: artifact.artifact_type, title: artifact.title,
+    version_number: version.version_number, content: version.content,
+    approved_at: item.approved_at,
+  }
+}
+
+export async function approvedSourceVersions(
+  reader: Client, engagementId: string, departmentId: string, organizationId: string,
+  selectedIds?: string[],
+) {
+  if (selectedIds && !selectedIds.length) return []
+  const profile = departmentChatProfile(departmentId)
+  let query = reader.from('artifact_approvals')
+    .select(`artifact_id, artifact_version_id, approved_at, artifacts!inner(artifact_type, title, engagement_id), artifact_versions!inner(id, version_number, ${selectedIds ? 'content, ' : ''}ai_use_allowed, data_classification)`)
+    .eq('engagement_id', engagementId).eq('artifacts.engagement_id', engagementId)
+    .eq('organization_id', organizationId)
+    .in('artifacts.artifact_type', profile.contextArtifactTypes)
+    .eq('artifact_versions.ai_use_allowed', true).neq('artifact_versions.data_classification', 'restricted')
+  if (selectedIds) {
+    query = query.in('artifact_version_id', selectedIds)
+  }
+  if (!selectedIds) query = query.limit(501)
+  const { data, error } = await query.order('approved_at', { ascending: false }).order('artifact_version_id')
+  if (error) throw error
+  const found = (data || []).map(sourceVersionDetails).filter(Boolean) as Json[]
+  if (selectedIds) {
+    const byId = new Map(found.map(item => [item.artifact_version_id, item]))
+    if (byId.size !== selectedIds.length) {
+      throw Object.assign(new Error('A selected exact source is unavailable or no longer permitted. Refresh sources before sending.'), {
+        status: 409, outcome: 'stale',
+      })
+    }
+    const selected = selectedIds.map(id => byId.get(id)!)
+    if (JSON.stringify(selected.map(item => item.content)).length > SOURCE_CONTEXT_CHARACTERS) {
+      throw Object.assign(new Error('Selected artifact content exceeds the 60,000-character context limit; reduce your selection.'), { status: 413 })
+    }
+    return selected
+  }
+  if (found.length > 500) {
+    throw Object.assign(new Error('More than 500 permitted source versions exist. Narrow this engagement before selection; none were silently omitted.'), { status: 413 })
+  }
+  return found
+}
+
+async function conversationSourceVersions(
+  userClient: Client, admin: Client, body: Json, actorId: string, organizationId: string,
+  action: 'list_source_versions' | 'preview_source_version',
+) {
+  const conversation = await requireConversationContext(admin, body, actorId, organizationId)
+  const rows = await approvedSourceVersions(
+    userClient, conversation.engagement_id, conversation.department_id, organizationId,
+    action === 'preview_source_version' ? selectedDepartmentChatSourceIds([body.artifact_version_id]) : undefined,
+  )
+  if (action === 'preview_source_version') return rows[0]
+  return rows.map(({ content: _content, ...metadata }) => metadata)
+}
+
+export function boundedDepartmentChatContext(value: unknown) {
+  const serialized = JSON.stringify(value)
+  if (serialized.length > 70000) {
+    throw Object.assign(new Error('Selected context exceeds the 70,000-character model limit; reduce exact sources. Nothing was truncated or sent.'), { status: 413 })
+  }
+  return serialized
+}
+
 async function safeStage(admin: Client, engagementId: string, stageId: unknown, departmentId: string, organizationId: string) {
   const id = text(stageId, 80)
   if (!id) return null
@@ -598,6 +683,8 @@ async function loadDepartmentChatContext(
   departmentId: string,
   dependencies: ProposalDependencies,
   selectedConfigurationId?: string,
+  selectedSourceIds?: string[],
+  sourceReader?: Client,
 ) {
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
   const { count: recentRuns, error: rateError } = await admin.from('ai_runs')
@@ -624,7 +711,9 @@ async function loadDepartmentChatContext(
   }
 
   const { engagement, services, commercialContext } = await (dependencies.requireDepartmentEngagement || requireDepartmentEngagement)(admin, engagementId, departmentId, organizationId)
-  const context = await (dependencies.approvedSafeContext || approvedSafeContext)(admin, engagement.id, departmentId, organizationId)
+  const context = selectedSourceIds === undefined
+    ? await (dependencies.approvedSafeContext || approvedSafeContext)(admin, engagement.id, departmentId, organizationId)
+    : await approvedSourceVersions(sourceReader || admin, engagement.id, departmentId, organizationId, selectedSourceIds)
   const provider = await (dependencies.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(
     admin, engagement.id, departmentId, organizationId, undefined,
     selectedConfigurationId,
@@ -1515,6 +1604,7 @@ export async function answerConversation(
   fetcher: typeof fetch = fetch,
   dependencies: ProposalDependencies = {},
   waitUntil?: (promise: Promise<void>) => void,
+  sourceReader?: Client,
 ) {
   const startedAt = Date.now()
   const engagementId = text(body.engagement_id, 80)
@@ -1530,6 +1620,8 @@ export async function answerConversation(
   const { engagement, services, commercialContext, context, provider } = await loadDepartmentChatContext(
     admin, organizationId, actorId, engagementId, departmentId, dependencies,
     text(body.model_configuration_id, 80),
+    text(body.conversation_id, 80) ? selectedDepartmentChatSourceIds(body.selected_artifact_version_ids) : undefined,
+    sourceReader,
   )
   if (!provider.configurationId) throw Object.assign(new Error('An approved model configuration is required'), { status: 409 })
   const attachments = await attachmentContext(admin, body)
@@ -1547,7 +1639,7 @@ export async function answerConversation(
     'State uncertainty and missing evidence plainly. Images are reference-only and are not model input.',
     '',
     'ENGAGEMENT CONTEXT JSON:',
-    JSON.stringify(contextFreeze.frozen),
+    boundedDepartmentChatContext(contextFreeze.frozen),
   ].join('\n')
   await assertModelDispatch(admin, body, actorId, provider)
   const upstream = await callDepartmentChatProviderStream(admin, body, actorId, fetcher, {
@@ -1612,7 +1704,7 @@ export async function answerConversation(
   for (const [key, value] of Object.entries(cors)) headers.set(key, value)
   return new Response(streamed.body, { status: streamed.status, headers })
 }
-export async function proposeArtifact(_userClient: Client, admin: Client, body: Json, actorId: string, organizationId: string, fetcher: typeof fetch = fetch, dependencies: ProposalDependencies = {}) {
+export async function proposeArtifact(userClient: Client, admin: Client, body: Json, actorId: string, organizationId: string, fetcher: typeof fetch = fetch, dependencies: ProposalDependencies = {}) {
   const startedAt = Date.now()
   const engagementId = text(body.engagement_id, 80)
   const departmentId = text(body.department_id, 40)
@@ -1625,6 +1717,8 @@ export async function proposeArtifact(_userClient: Client, admin: Client, body: 
   const { engagement, services, commercialContext, context, provider, organizationSettings } = await loadDepartmentChatContext(
     admin, organizationId, actorId, engagementId, departmentId, dependencies,
     text(body.model_configuration_id, 80),
+    text(body.conversation_id, 80) ? selectedDepartmentChatSourceIds(body.selected_artifact_version_ids) : undefined,
+    userClient,
   )
   const proposalLanguage = departmentId === 'content'
     ? resolveContentProposalLanguage(body, context, organizationSettings, artifactType) : null
@@ -1643,7 +1737,7 @@ export async function proposeArtifact(_userClient: Client, admin: Client, body: 
     ...(proposalLanguage ? [`Write the draft in this exact selected language: ${proposalLanguage}.`] : []),
     '',
     'ENGAGEMENT CONTEXT JSON:',
-    JSON.stringify(contextFreeze.frozen).slice(0, 70000),
+    boundedDepartmentChatContext(contextFreeze.frozen),
   ].join('\n')
   await assertModelDispatch(admin, body, actorId, provider)
   const result = await callDepartmentChatProvider(admin, body, actorId, fetcher, {
@@ -1692,7 +1786,7 @@ export async function proposeArtifact(_userClient: Client, admin: Client, body: 
   }, dependencies)
 }
 export async function proposeWorkItem(
-  _userClient: Client,
+  userClient: Client,
   admin: Client,
   body: Json,
   actorId: string,
@@ -1716,6 +1810,8 @@ export async function proposeWorkItem(
   const { engagement, services, commercialContext, context, provider } = await loadDepartmentChatContext(
     admin, organizationId, actorId, engagementId, departmentId, dependencies,
     text(body.model_configuration_id, 80),
+    text(body.conversation_id, 80) ? selectedDepartmentChatSourceIds(body.selected_artifact_version_ids) : undefined,
+    userClient,
   )
   const attachments = await attachmentContext(admin, body)
   const contextFreeze = await freezeDepartmentChatContext({
@@ -1729,7 +1825,7 @@ export async function proposeWorkItem(
     'No approvals, connectors, outside requests, releases, stage changes, publishing, or deployment.',
     '',
     'ENGAGEMENT CONTEXT JSON:',
-    JSON.stringify(contextFreeze.frozen).slice(0, 70000),
+    boundedDepartmentChatContext(contextFreeze.frozen),
   ].join('\n')
   await assertModelDispatch(admin, body, actorId, provider)
   const result = await callDepartmentChatProvider(admin, body, actorId, fetcher, {
@@ -1760,7 +1856,7 @@ export async function proposeWorkItem(
 async function proposalForDecision(admin: Client, proposalId: string, organizationId: string) {
   if (!proposalId) throw Object.assign(new Error('proposal_id is required'), { status: 400 })
   const { data, error } = await admin.from('department_chat_proposals')
-    .select('id, organization_id, engagement_id, project_id, department_id, proposer_id, proposal_kind, target_key, artifact_id, engagement_stage_instance_id, context_checksum, connector_connection_id, model_configuration_id, model_id, status, expires_at')
+    .select('id, organization_id, engagement_id, project_id, department_id, conversation_id, context_artifact_version_ids, proposer_id, proposal_kind, target_key, artifact_id, engagement_stage_instance_id, context_checksum, connector_connection_id, model_configuration_id, model_id, status, expires_at')
     .eq('id', proposalId).eq('organization_id', organizationId).maybeSingle()
   if (error) throw error
   if (!data) throw Object.assign(new Error('Department Chat proposal not found'), { status: 404 })
@@ -1773,6 +1869,7 @@ export async function confirmProposal(
   actorId: string,
   membership: Json,
   dependencies: ProposalDependencies = {},
+  sourceReader?: Client,
 ) {
   const organizationId = text(membership.organization_id, 80)
   if (!organizationId) throw Object.assign(new Error('Selected organization is required'), { status: 400 })
@@ -1810,12 +1907,12 @@ export async function confirmProposal(
   const { engagement, services, commercialContext } = await (
     dependencies.requireDepartmentEngagement || requireDepartmentEngagement
   )(admin, proposal.engagement_id, proposal.department_id, organizationId)
-  const context = await (dependencies.approvedSafeContext || approvedSafeContext)(
-    admin,
-    engagement.id,
-    proposal.department_id,
-    organizationId,
-  )
+  const context = proposal.conversation_id
+    ? await approvedSourceVersions(sourceReader || admin, engagement.id, proposal.department_id, organizationId,
+      selectedDepartmentChatSourceIds(proposal.context_artifact_version_ids))
+    : await (dependencies.approvedSafeContext || approvedSafeContext)(
+      admin, engagement.id, proposal.department_id, organizationId,
+    )
   const provider = await (dependencies.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(
     admin,
     engagement.id,
@@ -1929,7 +2026,7 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
     previewAttempt = ['propose_artifact', 'propose_work_item'].includes(action)
     if (previewAttempt) await auditAttempt(admin, organizationId, user.id, 'preview_requested', '')
     if (action === 'confirm_proposal') {
-      return response({ data: await confirmProposal(admin, text(body.proposal_id, 80), user.id, membership, dependencies.proposal) })
+      return response({ data: await confirmProposal(admin, text(body.proposal_id, 80), user.id, membership, dependencies.proposal, userClient) })
     }
     if (action === 'reject_proposal') {
       return response({ data: await rejectProposal(admin, text(body.proposal_id, 80), user.id, membership) })
@@ -1944,6 +2041,9 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
     }
     if (action === 'save_unsent_draft' || action === 'get_unsent_draft') {
       return response({ data: await unsentDraftAction(admin, body, user.id, organizationId, action) })
+    }
+    if (action === 'list_source_versions' || action === 'preview_source_version') {
+      return response({ data: await conversationSourceVersions(userClient, admin, body, user.id, organizationId, action) })
     }
     if (action === 'list_conversations') {
       return response({ data: await listConversations(admin, body, user.id, organizationId, dependencies.proposal || {}) })
@@ -1994,6 +2094,7 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
         throw Object.assign(new Error('Saved conversations are not available for this department'), { status: 409 })
       }
       const conversation = await requireConversationContext(admin, body, user.id, organizationId, true)
+      selectedDepartmentChatSourceIds(body.selected_artifact_version_ids)
       const clientRequestId = text(body.client_request_id, 80)
       if (!clientRequestId) throw Object.assign(new Error('client_request_id is required'), { status: 400 })
       const attachmentIds = Array.isArray(body.attachment_ids)
@@ -2045,7 +2146,7 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
     if (action === 'answer') {
       const runtime = (globalThis as typeof globalThis & { EdgeRuntime?: { waitUntil?: (promise: Promise<void>) => void } }).EdgeRuntime
       const waitUntil = dependencies.waitUntil || runtime?.waitUntil?.bind(runtime)
-      return await answerConversation(admin, body, user.id, organizationId, dependencies.fetcher, dependencies.proposal, waitUntil)
+      return await answerConversation(admin, body, user.id, organizationId, dependencies.fetcher, dependencies.proposal, waitUntil, userClient)
     }
     return response({ error: 'Unsupported action' }, 400)
   } catch (error) {

@@ -45,10 +45,11 @@ export function ScopedDepartmentChat({
   const answerObservation = useRef(null)
   const attachmentCompletion = useRef(null)
   const draftSwitchGeneration = useRef(0)
+  const sourceGeneration = useRef(0)
   const mounted = useRef(true)
   useLayoutEffect(() => {
     mounted.current = true
-    return () => { mounted.current = false; draftSwitchGeneration.current += 1 }
+    return () => { mounted.current = false; draftSwitchGeneration.current += 1; sourceGeneration.current += 1 }
   }, [])
   const requestScope = useMemo(
     () => ({ organizationId, signal: requestSignal }),
@@ -102,6 +103,13 @@ export function ScopedDepartmentChat({
   const [attachmentAiUse, setAttachmentAiUse] = useState(false)
   const [attachmentShare, setAttachmentShare] = useState(false)
   const [attachmentBusy, setAttachmentBusy] = useState(false)
+  const [sourceVersions, setSourceVersions] = useState([])
+  const [sourceConversationId, setSourceConversationId] = useState('')
+  const [selectedSourceVersionIds, setSelectedSourceVersionIds] = useState([])
+  const [sourcePreview, setSourcePreview] = useState(null)
+  const [sourceBusy, setSourceBusy] = useState(false)
+  const [sourceError, setSourceError] = useState('')
+  const [sourceRefresh, setSourceRefresh] = useState(0)
 
   const [pendingDraftSwitch, setPendingDraftSwitch] = useState(null)
   const [draftSaving, setDraftSaving] = useState(false)
@@ -117,6 +125,8 @@ export function ScopedDepartmentChat({
     setPriority('medium')
     setLanguage('')
     setSelectedAttachmentIds([])
+    setSelectedSourceVersionIds([])
+    setSourcePreview(null)
     setPendingFiles([])
     setAttachmentAiUse(false)
     setAttachmentShare(false)
@@ -140,16 +150,16 @@ export function ScopedDepartmentChat({
     setTitle(saved.work_item_title || '')
     setPriority(['low', 'medium', 'high', 'urgent'].includes(saved.priority) ? saved.priority : 'medium')
     setLanguage(saved.language || '')
-    setDraftNotice('Unsent text restored from this conversation. Recheck files, model, and AI-use consent before sending.')
+    setDraftNotice('Unsent text restored from this conversation. Recheck exact sources, files, model, and AI-use consent before sending.')
   }
 
   const hasUnsentComposer = Boolean(prompt.trim() || title.trim() || language.trim()
-    || pendingFiles.length || selectedAttachmentIds.length)
+    || pendingFiles.length || selectedAttachmentIds.length || selectedSourceVersionIds.length)
   useEffect(() => { onComposerDirtyChange?.(hasUnsentComposer) }, [hasUnsentComposer, onComposerDirtyChange])
   useEffect(() => {
-    if (navigationBlocker?.state !== 'blocked' || busy || historyBusy || attachmentBusy || draftSaving) return
+    if (navigationBlocker?.state !== 'blocked' || busy || historyBusy || attachmentBusy || sourceBusy || draftSaving) return
     setPendingDraftSwitch(current => current || { label: 'leave this page', proceed: () => navigationBlocker.proceed() })
-  }, [navigationBlocker?.state, navigationBlocker?.proceed, busy, historyBusy, attachmentBusy, draftSaving])
+  }, [navigationBlocker?.state, navigationBlocker?.proceed, busy, historyBusy, attachmentBusy, sourceBusy, draftSaving])
   useEffect(() => {
     if (!hasUnsentComposer) return undefined
     const warn = event => { event.preventDefault(); event.returnValue = '' }
@@ -161,15 +171,15 @@ export function ScopedDepartmentChat({
     const guard = event => {
       if (!hasUnsentComposer || event.detail?.organizationId === organizationId) return
       event.preventDefault()
-      if (!busy && !historyBusy && !attachmentBusy && !draftSaving) {
+      if (!busy && !historyBusy && !attachmentBusy && !sourceBusy && !draftSaving) {
         setPendingDraftSwitch({ label: 'switch organization', proceed: () => selectOrganization(event.detail.organizationId) })
       }
     }
     window.addEventListener('anka:organization-change', guard)
     return () => window.removeEventListener('anka:organization-change', guard)
-  }, [hasUnsentComposer, selectOrganization, organizationId, busy, historyBusy, attachmentBusy, draftSaving])
+  }, [hasUnsentComposer, selectOrganization, organizationId, busy, historyBusy, attachmentBusy, sourceBusy, draftSaving])
   function requestDraftSwitch(label, proceed) {
-    if (busy || historyBusy || attachmentBusy || draftSaving) return
+    if (busy || historyBusy || attachmentBusy || sourceBusy || draftSaving) return
     if (hasUnsentComposer) { setPendingDraftSwitch({ label, proceed }); return }
     clearComposer()
     proceed()
@@ -188,7 +198,7 @@ export function ScopedDepartmentChat({
         },
       }, requestScope)
       if (requestSignal?.aborted || !mounted.current) return false
-      setDraftNotice('Draft saved to this original conversation. Files, model, and AI-use consent are not saved.')
+      setDraftNotice('Draft saved to this original conversation. Exact sources, files, model, and AI-use consent are not saved.')
       return true
     } catch (reason) {
       handleCurrentChatFailure(() => !requestSignal?.aborted && mounted.current, reason, handleOrganizationAccessError,
@@ -268,6 +278,8 @@ export function ScopedDepartmentChat({
       setMessages([])
       setAttachments([])
       setSelectedAttachmentIds([])
+      setSelectedSourceVersionIds([])
+      setSourcePreview(null)
       setSharing({ can_manage: false, recipients: [] })
       setShareCandidates([])
       setRecipientIds([])
@@ -276,6 +288,54 @@ export function ScopedDepartmentChat({
     setConversationId(selected?.id || '')
     setConversationTitle(selected?.title || '')
     return selected
+  }
+
+  useEffect(() => {
+    const generation = ++sourceGeneration.current
+    setSourceVersions([])
+    setSourceConversationId('')
+    setSelectedSourceVersionIds([])
+    setSourcePreview(null)
+    setSourceError('')
+    setSourceBusy(false)
+    if (!supportsSavedConversations || !conversationId || !projectId) return
+    let active = true
+    departmentChat.listSourceVersions(departmentId, {
+      conversation_id: conversationId, engagement_id: engagement.id, project_id: projectId,
+    }, requestScope).then(rows => {
+      if (!active || !mounted.current || requestSignal?.aborted || sourceGeneration.current !== generation) return
+      setSourceVersions(rows || [])
+      setSourceConversationId(conversationId)
+    }).catch(reason => {
+      if (!active || !mounted.current || requestSignal?.aborted || sourceGeneration.current !== generation) return
+      setSourceConversationId(conversationId)
+      handleCurrentChatFailure(() => true, reason, handleOrganizationAccessError,
+        failure => setSourceError(failure.message || 'Exact sources are unavailable.'))
+    })
+    return () => { active = false; sourceGeneration.current += 1 }
+  }, [conversationId, departmentId, engagement.id, projectId, requestScope, requestSignal, supportsSavedConversations, handleOrganizationAccessError, sourceRefresh])
+
+  async function previewExactSource(id) {
+    if (sourceBusy || busy || historyBusy || sourceConversationId !== conversationId) return
+    const generation = sourceGeneration.current
+    const targetConversationId = conversationId
+    setSourceBusy(true)
+    setSourceError('')
+    setSourcePreview(null)
+    try {
+      const preview = await departmentChat.previewSourceVersion(departmentId, {
+        conversation_id: targetConversationId, engagement_id: engagement.id, project_id: projectId,
+        artifact_version_id: id,
+      }, requestScope)
+      if (!mounted.current || requestSignal?.aborted || sourceGeneration.current !== generation) return
+      setSourcePreview(preview)
+    } catch (reason) {
+      if (!mounted.current || requestSignal?.aborted || sourceGeneration.current !== generation) return
+      handleCurrentChatFailure(() => true, reason, handleOrganizationAccessError,
+        failure => setSourceError(failure.message || 'Exact source preview failed.'))
+    } finally {
+      if (mounted.current && !requestSignal?.aborted && sourceGeneration.current === generation) setSourceBusy(false)
+    }
   }
 
   async function loadConversation(id = conversationId, isCurrent = () => true, restoreDraft = false) {
@@ -457,6 +517,8 @@ export function ScopedDepartmentChat({
     setRecipientIds([])
     setAttachments([])
     setSelectedAttachmentIds([])
+    setSelectedSourceVersionIds([])
+    setSourcePreview(null)
     setPendingFiles([])
     try {
       const data = await departmentChat.getConversation(departmentId, {
@@ -664,7 +726,7 @@ export function ScopedDepartmentChat({
 
   async function submit(event) {
     event.preventDefault()
-    if (busy || historyBusy || attachmentBusy || draftSaving || !prompt.trim()) return
+    if (busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim()) return
     const isCurrent = completion.current.begin()
     if (!isCurrent()) return
     const targetConversationId = conversationId
@@ -673,6 +735,7 @@ export function ScopedDepartmentChat({
       conversation_id: supportsSavedConversations ? targetConversationId : undefined,
       client_request_id: clientRequestId,
       attachment_ids: supportsSavedConversations ? selectedAttachmentIds : undefined,
+      selected_artifact_version_ids: supportsSavedConversations ? selectedSourceVersionIds : undefined,
       project_id: supportsSavedConversations ? projectId : undefined,
       engagement_id: engagement.id,
       model_configuration_id: modelConfigurationId,
@@ -727,6 +790,8 @@ export function ScopedDepartmentChat({
       setLanguage('')
       setSafe(false)
       setSelectedAttachmentIds([])
+      setSelectedSourceVersionIds([])
+      setSourcePreview(null)
       setDraftNotice('')
       if (supportsSavedConversations && targetConversationId) {
         try {
@@ -935,6 +1000,38 @@ export function ScopedDepartmentChat({
           </>
         )}
 
+        {supportsSavedConversations && <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4" aria-label="Exact artifact sources">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Exact approved artifact versions</p>
+          <p className="mt-2 text-xs leading-5 text-slate-500">Only versions approved for this engagement and eligible for AI use appear. Preview the full content, then include up to five exact versions for this turn. No artifact is included automatically.</p>
+          <button type="button" disabled={sourceBusy || busy || historyBusy} onClick={() => setSourceRefresh(value => value + 1)} className="mt-2 text-xs text-sky-300 disabled:opacity-50">Refresh permitted versions</button>
+          {sourceError && <p role="alert" className="mt-2 text-xs text-red-300">{sourceError}</p>}
+          {sourceConversationId !== conversationId ? <p className="mt-2 text-xs text-slate-500">Checking permitted versions…</p>
+            : sourceVersions.length === 0 ? <p className="mt-2 text-xs text-slate-500">No permitted approved versions available.</p>
+              : <ul className="mt-3 space-y-2">{sourceVersions.map(item => {
+                const selected = selectedSourceVersionIds.includes(item.artifact_version_id)
+                return <li key={item.artifact_version_id} className="rounded-lg border border-slate-800 p-3 text-xs text-slate-300">
+                  <span className="block font-medium">{item.title} · {item.artifact_type} · version {item.version_number}</span>
+                  <span className="mt-1 block text-slate-500">Approved {new Date(item.approved_at).toLocaleString()} · AI eligible</span>
+                  <div className="mt-2 flex gap-3">
+                    <button type="button" disabled={sourceBusy || busy || historyBusy} onClick={() => previewExactSource(item.artifact_version_id)} aria-label={`Preview ${item.title} version ${item.version_number}`} className="text-sky-300 disabled:opacity-50">Preview exact version</button>
+                    {selected && <button type="button" disabled={busy || historyBusy} onClick={() => { setSelectedSourceVersionIds(ids => ids.filter(id => id !== item.artifact_version_id)); setSafe(false) }} className="text-amber-300">Remove</button>}
+                  </div>
+                </li>
+              })}</ul>}
+          {sourcePreview && sourceConversationId === conversationId && <div className="mt-3 rounded-lg border border-sky-800 p-3 text-xs text-slate-300">
+            <p className="font-semibold">{sourcePreview.title} · {sourcePreview.artifact_type} · version {sourcePreview.version_number}</p>
+            <p className="mt-1 text-slate-500">Exact content size: {new TextEncoder().encode(JSON.stringify(sourcePreview.content)).length.toLocaleString()} bytes · AI eligible</p>
+            <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950 p-2">{JSON.stringify(sourcePreview.content, null, 2)}</pre>
+            <button type="button" disabled={busy || historyBusy || (selectedSourceVersionIds.length >= 5 && !selectedSourceVersionIds.includes(sourcePreview.artifact_version_id))} onClick={() => {
+              setSelectedSourceVersionIds(ids => ids.includes(sourcePreview.artifact_version_id) ? ids : [...ids, sourcePreview.artifact_version_id])
+              setSafe(false)
+            }} className="mt-2 rounded border border-sky-700 px-3 py-1.5 text-sky-200 disabled:opacity-50">
+              {selectedSourceVersionIds.includes(sourcePreview.artifact_version_id) ? 'Included for this turn' : 'Include this exact version'}
+            </button>
+          </div>}
+          <p className="mt-2 text-xs text-slate-500">{selectedSourceVersionIds.length} of 5 exact versions selected. Permission and approval are rechecked at send.</p>
+        </section>}
+
         {supportsSavedConversations && capabilities?.attachments?.supported && <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Explicit source files</p>
           <p className="mt-2 text-xs leading-5 text-slate-500">TXT, Markdown, and DOCX contribute validated text. PNG/JPEG are reference-only and are never sent to the model. PDF and scanned/OCR documents are unavailable. Choose up to 3 files: 5 MiB per file; DOCX 4 MiB. Extracted text is limited to 16,000 characters per file and 24,000 per turn; rejected limits never truncate content.</p>
@@ -988,12 +1085,12 @@ export function ScopedDepartmentChat({
 
         <label className="flex items-start gap-3 rounded-xl border border-amber-900/50 bg-amber-950/20 p-4 text-sm leading-6 text-amber-200">
           <input required type="checkbox" className="mt-1" checked={safe} onChange={event => setSafe(event.target.checked)} />
-          <span>I confirm this message and the validated text from explicitly selected files are safe to send to the engagement-mapped {resolvedDepartmentLabel} model. Restricted sources are never included.</span>
+          <span>I confirm this message, the previewed exact artifact versions, and the validated text from explicitly selected files are safe to send to the engagement-mapped {resolvedDepartmentLabel} model. Restricted sources are never included.</span>
         </label>
 
         {supportsSavedConversations && currentConversation && <button type="button" disabled={busy || historyBusy || attachmentBusy || draftSaving || !prompt.trim()} onClick={saveUnsentDraft} className="w-full rounded-xl border border-sky-700 px-4 py-2.5 text-sm font-semibold text-sky-200 disabled:opacity-50">{draftSaving ? 'Saving draft…' : 'Save draft to this conversation'}</button>}
         <button
-          disabled={busy || historyBusy || attachmentBusy || draftSaving || !prompt.trim() || !safe || (supportsSavedConversations && (!currentConversation || currentConversation.state !== 'active' || !modelConfigurationId)) || (isWorkItemMode && !title.trim()) || (!isAnswerMode && !isWorkItemMode && !artifactType)}
+          disabled={busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim() || !safe || (supportsSavedConversations && (!currentConversation || currentConversation.state !== 'active' || !modelConfigurationId)) || (isWorkItemMode && !title.trim()) || (!isAnswerMode && !isWorkItemMode && !artifactType)}
           className={`${PRIMARY} w-full`}
         >
           {busy ? (isAnswerMode ? 'Receiving genuine response…' : 'Generating safe preview…') : isAnswerMode ? 'Ask configured AI' : isWorkItemMode ? 'Preview draft work item' : 'Preview draft artifact'}
@@ -1019,7 +1116,7 @@ export function ScopedDepartmentChat({
       </div>
     </aside>
   </div>
-  {pendingDraftSwitch && <div role="dialog" aria-modal="true" aria-label="Unsent chat draft" className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-5"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><h2 className="text-xl font-semibold text-white">Keep this unsent work?</h2><p className="mt-2 text-sm text-slate-300">Before you {pendingDraftSwitch.label}, stay here, save text to the original conversation, or discard it. File selections, model choice, and AI-use consent are never saved.</p>{error && <p className="mt-3 text-sm text-red-300">{error}</p>}<div className="mt-6 flex flex-wrap justify-end gap-2"><button type="button" disabled={draftSaving} onClick={() => { draftSwitchGeneration.current += 1; setPendingDraftSwitch(null); navigationBlocker?.state === 'blocked' && navigationBlocker.reset() }}>Stay</button><button type="button" disabled={draftSaving} onClick={() => finishDraftSwitch(false)}>Discard and continue</button><button type="button" disabled={draftSaving || !conversationId || !prompt.trim()} onClick={() => finishDraftSwitch(true)} className={PRIMARY}>{draftSaving ? 'Saving…' : 'Save to original and continue'}</button></div>{!prompt.trim() && <p className="mt-3 text-xs text-amber-300">Add a message to save a draft; file selections alone cannot be saved.</p>}</section></div>}
+  {pendingDraftSwitch && <div role="dialog" aria-modal="true" aria-label="Unsent chat draft" className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-5"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><h2 className="text-xl font-semibold text-white">Keep this unsent work?</h2><p className="mt-2 text-sm text-slate-300">Before you {pendingDraftSwitch.label}, stay here, save text to the original conversation, or discard it. Exact source and file selections, model choice, and AI-use consent are never saved.</p>{error && <p className="mt-3 text-sm text-red-300">{error}</p>}<div className="mt-6 flex flex-wrap justify-end gap-2"><button type="button" disabled={draftSaving} onClick={() => { draftSwitchGeneration.current += 1; setPendingDraftSwitch(null); navigationBlocker?.state === 'blocked' && navigationBlocker.reset() }}>Stay</button><button type="button" disabled={draftSaving} onClick={() => finishDraftSwitch(false)}>Discard and continue</button><button type="button" disabled={draftSaving || !conversationId || !prompt.trim()} onClick={() => finishDraftSwitch(true)} className={PRIMARY}>{draftSaving ? 'Saving…' : 'Save to original and continue'}</button></div>{!prompt.trim() && <p className="mt-3 text-xs text-amber-300">Add a message to save a draft; source selections alone cannot be saved.</p>}</section></div>}
   </>
 }
 
