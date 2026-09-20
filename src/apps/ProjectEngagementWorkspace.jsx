@@ -4,17 +4,23 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { projectEngagementWorkspace } from '../data/projectEngagementWorkspace'
 import RetainerPlanningPanel from '../components/RetainerPlanningPanel'
 import ProjectPlanningPanel from '../components/ProjectPlanningPanel.jsx'
+import ProjectDraftActivation from './ProjectDraftActivation.jsx'
+import ProjectServiceScopePanel from './ProjectServiceScopePanel.jsx'
+import ProjectManagerAssignment from './ProjectManagerAssignment.jsx'
 import { appendWorkshopNavigation, parseWorkshopNavigation } from '../data/workshopNavigation.js'
 
 const TABS = [
   ['overview', 'Setup & context'],
+  ['services', 'Services & Scope'],
   ['journey', 'Journey'],
+  ['work', 'Work'],
   ['project-tasks', 'Project Tasks'],
   ['engagement-work', 'Engagement Work Items'],
   ['planning', 'Planning'],
-  ['outputs', 'Deliverables & Reviews'],
+  ['outputs', 'Files & Outputs'],
   ['activity', 'Activity'],
 ]
+const planningTabIndex = TABS.findIndex(([id]) => id === 'planning')
 
 const label = (value) => value ? value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) : 'Unknown'
 const date = (value) => value ? new Date(`${value.slice(0, 10)}T00:00:00Z`).toLocaleDateString() : 'Not set'
@@ -109,7 +115,7 @@ export default function ProjectEngagementWorkspace() {
   const showRetainerPlanning = identity.hasEngagement
     && (project.engagement_type === 'retainer' || workspace.engagement?.engagement_type === 'retainer')
   const tabs = showRetainerPlanning
-    ? [...TABS.slice(0, 5), ['retainer-planning', 'Retainer Planning'], ...TABS.slice(5)]
+    ? [...TABS.slice(0, planningTabIndex + 1), ['retainer-planning', 'Retainer Planning'], ...TABS.slice(planningTabIndex + 1)]
     : TABS
   const onTabKeyDown = (event, index) => {
     const keys = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: tabs.length - 1 }
@@ -131,14 +137,16 @@ export default function ProjectEngagementWorkspace() {
             <p className="mt-2 text-sm text-slate-400">{[identity.clientName, identity.brandName].filter(Boolean).join(' · ') || (identity.workType === 'Internal Work' ? 'Internal project; no client identity is required.' : 'No client or brand identity is attached.')}</p>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">{project.description || project.scope_statement || 'No project description recorded.'}</p>
           </div>
-          <div className="flex items-center gap-2"><button type="button" onClick={load} disabled={loading} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm hover:bg-white/[0.08] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={project.status} /></div>
+          <div className="flex items-center gap-2"><button type="button" onClick={load} disabled={loading} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm hover:bg-white/[0.08] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={project.status} /><ProjectDraftActivation project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onActivated={load} onAccessError={handleOrganizationAccessError} /></div>
         </header>
+
+        <ProjectManagerAssignment project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onAssigned={load} onAccessError={handleOrganizationAccessError} />
 
         {error && <div role="alert" className="mt-5 rounded-xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100"><p className="font-medium">Refresh failed; showing previously loaded data.</p><p className="mt-1 text-xs text-amber-200/80">{error}{loadedAt ? ` · Loaded ${loadedAt.toLocaleTimeString()}` : ''}</p></div>}
         <section aria-label="Workspace summary" className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
           <Metric title="Project Tasks" value={summary.openProjectTasks} note="Open canonical tasks" />
           <Metric title="Engagement Work Items" value={summary.openEngagementWorkItems} note="Open delivery items" />
-          <Metric title="Active services" value={workspace.activeServices.length} note={workspace.deliveryShape.label} />
+          <Metric title="Active engagement services" value={workspace.activeServices.length} note={workspace.deliveryShape.label} />
           <Metric title="Journey" value={`${summary.completedJourneyStages}/${summary.totalJourneyStages}`} note="Completed stages" />
           <Metric title="Milestones" value={summary.openMilestones} note="Open checkpoints" />
           <Metric title="Review queue" value={summary.reviewQueue} note="Versions in review/revision" />
@@ -151,7 +159,9 @@ export default function ProjectEngagementWorkspace() {
 
         <div id="project-workspace-panel" role="tabpanel" aria-labelledby={`project-tab-${tab}`} className="mt-6" tabIndex={0}>
           {tab === 'overview' && <Overview workspace={workspace} />}
+          {tab === 'services' && <ServicesAndScope workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={load} onAccessError={handleOrganizationAccessError} />}
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
+          {tab === 'work' && <WorkViews workspace={workspace} navigate={navigate} searchParams={searchParams} setSearchParams={setSearchParams} />}
           {tab === 'project-tasks' && <ProjectTasks rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
           {tab === 'engagement-work' && <EngagementWork rows={workspace.engagementWorkItems} hasEngagement={identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
           {tab === 'planning' && <ProjectPlanningPanel workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} onRefresh={load} />}
@@ -169,36 +179,122 @@ function Overview({ workspace }) {
   return <div className="grid gap-5 xl:grid-cols-[1.3fr_1fr]"><div className="space-y-5"><Panel title="Project brief" description="The canonical project brief and optional engagement objective remain separate records."><TextBlock value={context.brief} empty="No project brief recorded." />{context.objective && <div className="mt-4 border-t border-white/[0.07] pt-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Engagement objective</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">{context.objective}</p></div>}</Panel><Panel title="Scope and exclusions"><TextBlock value={context.scope} empty="No scope statement recorded." /><div className="mt-4 border-t border-white/[0.07] pt-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Explicit exclusions</p><TextBlock value={context.exclusions} empty="No exclusions recorded." /></div></Panel><Panel title="Existing assets" description="Supplied engagement context is shown as recorded; missing upstream artifacts are not inferred."><RecordList rows={workspace.existingAssets} empty={workspace.identity.hasEngagement ? 'No existing assets were supplied.' : 'No engagement extension; supplied engagement assets do not apply.'} render={(item) => <AssetRecord key={item.id} item={item} />} /></Panel><Panel title="Milestones"><RecordList rows={workspace.milestones} empty="No milestones recorded." render={(item) => <Record key={item.id} title={item.name} note={`Target ${date(item.target_date)} · ${item.owner.name}`} status={item.status} attention={item.overdue || item.status === 'at_risk'} />} /></Panel></div><div className="space-y-5"><Panel title="Client and brand context"><Record title={context.client?.company || context.client?.name || (workspace.identity.workType === 'Internal Work' ? 'Internal Work' : 'No canonical client')} note={context.client ? [context.client.industry, context.client.status].filter(Boolean).map(label).join(' · ') || 'Canonical client' : 'No client identity is attached to this project.'} /><Record title={context.brand?.name || 'No brand extension'} note={context.brand?.description || 'Brand context is available only through a valid engagement extension.'} /></Panel><Panel title="Ownership"><Record title={context.projectOwner.name} note={`Project owner · ${date(project.start_date)} to ${date(project.due_date)}`} /><Record title={context.engagementOwner?.name || 'No separate engagement lead'} note={workspace.identity.hasEngagement ? 'Operating engagement lead' : 'The canonical project remains the workspace root.'} /></Panel><Panel title="Active workstreams"><RecordList rows={workspace.workstreams} empty="No workstreams recorded." render={(item) => <Record key={item.id} title={item.name} note={`${label(item.department_id)} · ${item.owner.name}`} status={item.status} />} /></Panel><Panel title="Attention signals"><RecordList rows={workspace.attentionSignals} empty="No current attention signals." render={(item) => <p key={item} className="rounded-xl border border-amber-500/15 bg-amber-500/[0.06] px-3 py-2 text-sm text-amber-200">{item}</p>} /></Panel></div></div>
 }
 
+function ServicesAndScope({ workspace, organizationId, membership, scopeRevision, requestSignal, onChanged, onAccessError }) {
+  const { context, deliveryShape, engagement, identity } = workspace
+  return <div className="space-y-5">
+    <div className="grid gap-5 xl:grid-cols-2">
+      <Panel title="Project scope" description="The canonical project statement remains the source for scope and exclusions.">
+        <TextBlock value={context.scope} empty="No scope statement recorded." />
+        <div className="mt-4 border-t border-white/[0.07] pt-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Explicit exclusions</p>
+          <TextBlock value={context.exclusions} empty="No exclusions recorded." />
+        </div>
+      </Panel>
+      <Panel title="Service context" description="Service selection and the project scope are separate records.">
+        <Record title={deliveryShape.label} note={deliveryShape.note} />
+        {identity.hasEngagement && <div className="mt-3"><Record title={engagement?.name || 'Operating engagement'} note={context.objective || 'No engagement objective recorded.'} status={engagement?.status} /></div>}
+      </Panel>
+    </div>
+    <ProjectServiceScopePanel project={workspace.project} organizationId={organizationId} membership={membership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={onChanged} onAccessError={onAccessError} />
+  </div>
+}
+
 function Journey({ workspace, navigate }) {
   if (!workspace.identity.hasEngagement) return <Empty title="No engagement extension" note="This project has no service journey. No engagement data has been fabricated." />
   const pipelineName = workspace.pipelineVersion?.name || workspace.pipelineTemplate?.slug
   return <div className="space-y-5"><Panel title="Delivery and pipeline preview" description="Read-only presentation of the already-instantiated service journey; this does not change active services."><div className="grid gap-3 md:grid-cols-3"><Record title={workspace.deliveryShape.label} note={workspace.deliveryShape.note} /><Record title={pipelineName || 'Direct or unrecorded composition'} note={workspace.pipelineOrigin ? `Template version ${workspace.pipelineVersion?.version_number || 'unknown'} · ${workspace.pipelineOrigin.was_customized ? 'Customized before creation' : 'Original selection'}` : 'No immutable pipeline-template origin is recorded.'} /><Record title={`${workspace.activeServices.length} active service${workspace.activeServices.length === 1 ? '' : 's'}`} note={`${workspace.summary.completedJourneyStages} of ${workspace.summary.totalJourneyStages} stages completed`} /></div></Panel><div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]"><Panel title="Instantiated journey"><RecordList rows={workspace.journey} empty="No journey stages were instantiated." render={(stage, index) => <div key={stage.id} className="rounded-xl border border-white/[0.07] bg-black/10 p-4"><div className="flex items-start gap-3"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-violet-500/15 text-xs font-semibold text-violet-300">{index + 1}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{stage.name}</p><Status value={stage.status} /></div><p className="mt-1 text-xs text-slate-500">{label(stage.accountable_department_id)} · {label(stage.stage_kind)}</p>{stage.blockers.length > 0 && <p className="mt-2 text-xs text-amber-300">Depends on: {stage.blockers.join(', ')}</p>}</div></div></div>} /></Panel><div className="space-y-5"><Panel title="Activated services"><RecordList rows={workspace.services} empty="No services activated." render={(item) => <Record key={item.id} title={item.service_catalog?.name || 'Service'} note={`${label(item.service_catalog?.department_id)} · ${item.owner.name}`} status={item.status} />} /></Panel><Panel title="Prerequisites"><RecordList rows={workspace.prerequisites} empty="No additional prerequisites recorded." render={(item) => <Record key={item.id} title={label(item.prerequisite_key)} note={`${label(item.satisfaction_method)} · ${item.description || 'No note'}`} status={item.status} />} /></Panel>{workspace.workshopLinks.length > 0 && <Panel title="Department Workshops"><div className="flex flex-wrap gap-2">{workspace.workshopLinks.map((item) => <button type="button" key={item.department} onClick={() => navigate(item.path)} className="rounded-xl border border-violet-500/20 bg-violet-500/10 px-3 py-2 text-sm font-medium text-violet-200 outline-none hover:bg-violet-500/15 focus-visible:ring-2 focus-visible:ring-violet-400">Open {label(item.department)} Workshop</button>)}</div></Panel>}</div></div></div>
 }
 
-function recordWorkshopPath(link, item, kind, originTab) {
+function recordWorkshopPath(link, item, kind, originTab, origin) {
   if (!link) return null
   const context = parseWorkshopNavigation(new URL(link.path, 'https://anka.invalid').searchParams)
   return appendWorkshopNavigation(new URL(link.path, 'https://anka.invalid').pathname, {
-    ...context, originTab, workRecord: { kind, id: item.id },
+    ...context, origin: origin || context.origin, originTab, workRecord: { kind, id: item.id },
     workshopTab: kind === 'project_task' ? 'tasks' : 'engagement-work',
   })
 }
 
-function ProjectTasks({ rows, workshopLinks, navigate }) {
-  return <Panel title="Project Tasks" description="Canonical project-level planning and execution tasks. These are not Engagement Work Items."><RecordList rows={rows} empty="No Project Tasks recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="project_task" context={item.workstreamName} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'project_task', 'project-tasks')} navigate={navigate} />} /></Panel>
+function ProjectTasks({ rows, workshopLinks, navigate, originTab = 'project-tasks', origin }) {
+  return <Panel title="Project Tasks" description="Canonical project-level planning and execution tasks. These are not Engagement Work Items."><RecordList rows={rows} empty="No Project Tasks recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="project_task" context={item.workstreamName} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'project_task', originTab, origin)} navigate={navigate} />} /></Panel>
 }
 
-function EngagementWork({ rows, hasEngagement, workshopLinks, navigate }) {
+function EngagementWork({ rows, hasEngagement, workshopLinks, navigate, originTab = 'engagement-work', origin }) {
   if (!hasEngagement) return <Empty title="No engagement extension" note="Engagement Work Items do not apply to this project. Project Tasks remain available separately." />
-  return <Panel title="Engagement Work Items" description="Delivery work attached to the engagement extension. These are not Project Tasks."><RecordList rows={rows} empty="No Engagement Work Items recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="engagement_work_item" context={label(item.department_id)} automation={Boolean(item.automation_flagged_at)} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'engagement_work_item', 'engagement-work')} navigate={navigate} />} /></Panel>
+  return <Panel title="Engagement Work Items" description="Delivery work attached to the engagement extension. These are not Project Tasks."><RecordList rows={rows} empty="No Engagement Work Items recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="engagement_work_item" context={label(item.department_id)} automation={Boolean(item.automation_flagged_at)} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'engagement_work_item', originTab, origin)} navigate={navigate} />} /></Panel>
 }
 
-function WorkRecord({ item, kind, context, automation = false, workshopPath, navigate }) {
-  return <div id={`work-record-${kind}-${item.id}`} tabIndex={-1} className={`rounded-xl border p-4 outline-none focus:ring-2 focus:ring-violet-400 ${item.overdue || item.status === 'blocked' ? 'border-amber-500/20 bg-amber-500/[0.04]' : 'border-white/[0.07] bg-black/10'}`}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium text-white">{item.title}</p><p className="mt-1 text-xs text-slate-500">{context} · {item.owner.name} · Due {date(item.due_date)}</p></div><Status value={item.status} /></div>{item.description && <p className="mt-3 text-sm leading-6 text-slate-400">{item.description}</p>}<div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">{item.overdue && <Pill attention>Overdue</Pill>}{automation && <Pill attention>Automation flag</Pill>}<Pill>{label(item.priority)}</Pill>{workshopPath && <button type="button" onClick={() => navigate(workshopPath)} className="ml-auto rounded-lg border border-violet-500/25 px-2.5 py-1.5 font-semibold text-violet-200 hover:bg-violet-500/10 focus:outline-none focus:ring-2 focus:ring-violet-400">Open in Workshop</button>}</div></div>
+const WORK_VIEWS = ['list', 'board', 'calendar']
+const MONTH_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+function WorkViews({ workspace, navigate, searchParams, setSearchParams }) {
+  const view = WORK_VIEWS.includes(searchParams.get('workView')) ? searchParams.get('workView') : 'list'
+  const suppliedMonth = searchParams.get('workMonth')
+  const monthKey = /^\d{4}-(0[1-9]|1[0-2])$/.test(suppliedMonth || '')
+    ? suppliedMonth : new Date().toISOString().slice(0, 7)
+  const [year, monthNumber] = monthKey.split('-').map(Number)
+  const allRecords = [
+    ...workspace.projectTasks.map(item => ({ kind: 'project_task', item, context: item.workstreamName })),
+    ...workspace.engagementWorkItems.map(item => ({ kind: 'engagement_work_item', item, context: label(item.department_id) })),
+  ]
+  const kindFilter = ['project_task', 'engagement_work_item'].includes(searchParams.get('workKind')) ? searchParams.get('workKind') : 'all'
+  const requestedStatus = searchParams.get('workStatus') || 'all'
+  const query = (searchParams.get('workQuery') || '').trim().toLowerCase()
+  const availableStatuses = [...new Set(allRecords.map(({ item }) => item.status || 'unknown'))].sort()
+  const statusFilter = availableStatuses.includes(requestedStatus) ? requestedStatus : 'all'
+  const returnParams = new URLSearchParams({ tab: 'work' })
+  for (const key of ['workView', 'workKind', 'workStatus', 'workQuery', 'workMonth']) {
+    if (searchParams.has(key)) returnParams.set(key, searchParams.get(key))
+  }
+  const origin = `/sphere/workspace/projects/${encodeURIComponent(workspace.project.id)}?${returnParams}`
+  const records = allRecords.filter(({ kind, item, context }) =>
+    (kindFilter === 'all' || kind === kindFilter)
+    && (statusFilter === 'all' || (item.status || 'unknown') === statusFilter)
+    && (!query || [item.title, item.description, context, item.owner.name].some(value => String(value || '').toLowerCase().includes(query))))
+  const setWorkParam = (key, value) => {
+    const next = new URLSearchParams(searchParams)
+    next.set(key, value)
+    setSearchParams(next, { replace: true })
+  }
+  const card = ({ kind, item, context }) => <WorkRecord key={`${kind}-${item.id}`} item={item} kind={kind}
+    context={context} automation={kind === 'engagement_work_item' && Boolean(item.automation_flagged_at)}
+    workshopPath={recordWorkshopPath(workspace.workshopLinks.find(link => link.department === item.department_id), item, kind, 'work', origin)}
+    navigate={navigate} showKind />
+  const monthStart = new Date(Date.UTC(year, monthNumber - 1, 1))
+  const monthEnd = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate()
+  const calendarDays = Array.from({ length: Math.ceil((monthStart.getUTCDay() + monthEnd) / 7) * 7 }, (_, index) => {
+    const day = index - monthStart.getUTCDay() + 1
+    return day >= 1 && day <= monthEnd ? `${monthKey}-${String(day).padStart(2, '0')}` : null
+  })
+  const shiftMonth = offset => {
+    const next = new Date(Date.UTC(year, monthNumber - 1 + offset, 1)).toISOString().slice(0, 7)
+    setWorkParam('workMonth', next)
+  }
+  const statuses = [...new Set(records.map(({ item }) => item.status || 'unknown'))].sort()
+  return <div className="space-y-5">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
+      <div><h2 className="font-semibold">Project work</h2><p className="mt-1 text-xs text-slate-500">Showing {records.length} of {allRecords.length} records. Statuses keep their source meaning; calendar dates are task due dates.</p></div>
+      <div role="group" aria-label="Work view" className="flex gap-1 rounded-xl border border-white/10 p-1">
+        {WORK_VIEWS.map(option => <button type="button" key={option} aria-pressed={view === option} onClick={() => setWorkParam('workView', option)} className={`rounded-lg px-3 py-1.5 text-sm ${view === option ? 'bg-violet-500/20 text-violet-100' : 'text-slate-400 hover:text-white'}`}>{label(option)}</button>)}
+      </div>
+    </div>
+    <div className="grid gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4 md:grid-cols-[minmax(0,1fr)_220px_220px]">
+      <label className="text-xs font-medium text-slate-400">Search work<input type="search" maxLength={120} value={searchParams.get('workQuery') || ''} onChange={event => setWorkParam('workQuery', event.target.value)} placeholder="Title, owner, or description" className="mt-1 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" /></label>
+      <label className="text-xs font-medium text-slate-400">Record type<select value={kindFilter} onChange={event => setWorkParam('workKind', event.target.value)} className="mt-1 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white"><option value="all">All work</option><option value="project_task">Project Tasks</option><option value="engagement_work_item">Engagement Work Items</option></select></label>
+      <label className="text-xs font-medium text-slate-400">Recorded status<select value={statusFilter} onChange={event => setWorkParam('workStatus', event.target.value)} className="mt-1 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white"><option value="all">All statuses</option>{availableStatuses.map(status => <option key={status} value={status}>{label(status)}</option>)}</select></label>
+    </div>
+    {view === 'list' && <><ProjectTasks rows={records.filter(({ kind }) => kind === 'project_task').map(({ item }) => item)} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" origin={origin} /><EngagementWork rows={records.filter(({ kind }) => kind === 'engagement_work_item').map(({ item }) => item)} hasEngagement={workspace.identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" origin={origin} /></>}
+    {view === 'board' && (records.length
+      ? <div className="flex gap-4 overflow-x-auto pb-3">{statuses.map(status => <section key={status} className="w-72 shrink-0 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3"><h3 className="mb-3 text-sm font-semibold">{label(status)} <span className="text-slate-500">({records.filter(({ item }) => (item.status || 'unknown') === status).length})</span></h3><div className="space-y-3">{records.filter(({ item }) => (item.status || 'unknown') === status).map(card)}</div></section>)}</div>
+      : <Empty title="No project work" note="No Project Tasks or Engagement Work Items have been recorded." />)}
+    {view === 'calendar' && <div className="space-y-4"><div className="flex items-center justify-between"><h3 className="font-semibold">{monthStart.toLocaleString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' })}</h3><div className="flex gap-2"><button type="button" aria-label="Previous month" onClick={() => shiftMonth(-1)} className="rounded-lg border border-white/10 px-3 py-1.5">←</button><button type="button" aria-label="Next month" onClick={() => shiftMonth(1)} className="rounded-lg border border-white/10 px-3 py-1.5">→</button></div></div><div className="overflow-x-auto"><div className="grid min-w-[840px] grid-cols-7 gap-2">{MONTH_DAYS.map(day => <div key={day} className="px-2 text-xs font-semibold text-slate-500">{day}</div>)}{calendarDays.map((day, index) => <div key={day || `blank-${index}`} aria-label={day || undefined} className="min-h-32 rounded-xl border border-white/[0.07] bg-white/[0.025] p-2"><p className="mb-2 text-xs text-slate-400">{day?.slice(-2) || ''}</p>{day && records.filter(({ item }) => item.due_date?.slice(0, 10) === day).map(({ kind, item }) => <div key={`${kind}-${item.id}`} className="mb-1 rounded-lg border border-violet-500/20 bg-violet-500/[0.06] p-2 text-xs"><p className="font-medium">{item.title}</p><p className="text-slate-500">{kind === 'project_task' ? 'Project Task' : 'Engagement Work Item'} · {label(item.status)}</p></div>)}</div>)}</div></div>{records.some(({ item }) => !item.due_date) && <Panel title="No due date" description="These records remain visible until a due date is set."><div className="grid gap-3 md:grid-cols-2">{records.filter(({ item }) => !item.due_date).map(card)}</div></Panel>}</div>}
+  </div>
+}
+
+function WorkRecord({ item, kind, context, automation = false, workshopPath, navigate, showKind = false }) {
+  return <div id={`work-record-${kind}-${item.id}`} tabIndex={-1} className={`rounded-xl border p-4 outline-none focus:ring-2 focus:ring-violet-400 ${item.overdue || item.status === 'blocked' ? 'border-amber-500/20 bg-amber-500/[0.04]' : 'border-white/[0.07] bg-black/10'}`}><div className="flex flex-wrap items-start justify-between gap-3"><div>{showKind && <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-violet-300">{kind === 'project_task' ? 'Project Task' : 'Engagement Work Item'}</p>}<p className="font-medium text-white">{item.title}</p><p className="mt-1 text-xs text-slate-500">{context} · {item.owner.name} · Due {date(item.due_date)}</p></div><Status value={item.status} /></div>{item.description && <p className="mt-3 text-sm leading-6 text-slate-400">{item.description}</p>}<div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">{item.overdue && <Pill attention>Overdue</Pill>}{automation && <Pill attention>Automation flag</Pill>}<Pill>{label(item.priority)}</Pill>{workshopPath && <button type="button" onClick={() => navigate(workshopPath)} className="ml-auto rounded-lg border border-violet-500/25 px-2.5 py-1.5 font-semibold text-violet-200 hover:bg-violet-500/10 focus:outline-none focus:ring-2 focus:ring-violet-400">Open in Workshop</button>}</div></div>
 }
 
 function Outputs({ workspace }) {
-  return <div className="space-y-5"><Panel title="Delivery lifecycle" description="Generation, approval, client release, and completion are separate states."><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Record title="Generation" note="Version records show produced outputs." /><Record title="Approval" note="Review status shows internal or client decisions." /><Record title="Release" note="Client release is shown only from a recorded release timestamp." /><Record title="Completion" note="Deliverable status remains independent of release." /></div></Panel><div className="grid gap-5 xl:grid-cols-[1.2fr_1fr]"><Panel title="Canonical deliverables"><RecordList rows={workspace.deliverables} empty="No deliverables recorded." render={(item) => <div key={item.id} className="rounded-xl border border-white/[0.07] bg-black/10 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium">{item.title}</p><p className="mt-1 text-xs text-slate-500">{item.workstreamName} · Due {date(item.due_date)}</p></div><Status value={item.status} /></div><dl className="mt-4 grid gap-2 text-xs sm:grid-cols-3"><LifecycleFact term="Generated" value={item.versions.length ? `${item.versions.length} version${item.versions.length === 1 ? '' : 's'}` : 'No version'} /><LifecycleFact term="Approval" value={item.latestVersion ? label(item.latestVersion.review_status) : 'Not started'} /><LifecycleFact term="Client release" value={item.latestVersion?.client_released_at ? new Date(item.latestVersion.client_released_at).toLocaleString() : 'Not released'} /></dl></div>} /></Panel><div className="space-y-5"><Panel title="Review queue"><RecordList rows={workspace.reviewQueue} empty="No deliverable versions are currently in review or revision." render={(item) => <Record key={item.id} title={`${item.deliverableTitle} · v${item.version_number}`} note={item.change_summary || 'No change summary'} status={item.review_status} />} /></Panel><Panel title="Workshop artifacts"><RecordList rows={workspace.workshopArtifacts} empty={workspace.identity.hasEngagement ? 'No Workshop artifacts recorded.' : 'No engagement extension; Workshop artifacts do not apply.'} render={(item) => <Record key={item.id} title={item.title} note={`${label(item.artifact_type)} · ${item.versions.length} versions · ${item.approvedVersions} approved`} />} /></Panel></div></div></div>
+  return <div className="space-y-5"><Panel title="Recorded source assets" description="Existing engagement assets are shown from their original records; listing them here does not approve or release them."><RecordList rows={workspace.existingAssets} empty={workspace.identity.hasEngagement ? 'No source assets were supplied for this engagement.' : 'No engagement extension; supplied assets do not apply.'} render={(item) => <AssetRecord key={item.id} item={item} />} /></Panel><Panel title="Delivery lifecycle" description="Generation, approval, client release, and completion are separate states."><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Record title="Generation" note="Version records show produced outputs." /><Record title="Approval" note="Review status shows internal or client decisions." /><Record title="Release" note="Client release is shown only from a recorded release timestamp." /><Record title="Completion" note="Deliverable status remains independent of release." /></div></Panel><div className="grid gap-5 xl:grid-cols-[1.2fr_1fr]"><Panel title="Canonical deliverables"><RecordList rows={workspace.deliverables} empty="No deliverables recorded." render={(item) => <div key={item.id} className="rounded-xl border border-white/[0.07] bg-black/10 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium">{item.title}</p><p className="mt-1 text-xs text-slate-500">{item.workstreamName} · Due {date(item.due_date)}</p></div><Status value={item.status} /></div><dl className="mt-4 grid gap-2 text-xs sm:grid-cols-3"><LifecycleFact term="Generated" value={item.versions.length ? `${item.versions.length} version${item.versions.length === 1 ? '' : 's'}` : 'No version'} /><LifecycleFact term="Approval" value={item.latestVersion ? label(item.latestVersion.review_status) : 'Not started'} /><LifecycleFact term="Client release" value={item.latestVersion?.client_released_at ? new Date(item.latestVersion.client_released_at).toLocaleString() : 'Not released'} /></dl></div>} /></Panel><div className="space-y-5"><Panel title="Review queue"><RecordList rows={workspace.reviewQueue} empty="No deliverable versions are currently in review or revision." render={(item) => <Record key={item.id} title={`${item.deliverableTitle} · v${item.version_number}`} note={item.change_summary || 'No change summary'} status={item.review_status} />} /></Panel><Panel title="Workshop artifacts"><RecordList rows={workspace.workshopArtifacts} empty={workspace.identity.hasEngagement ? 'No Workshop artifacts recorded.' : 'No engagement extension; Workshop artifacts do not apply.'} render={(item) => <Record key={item.id} title={item.title} note={`${label(item.artifact_type)} · ${item.versions.length} versions · ${item.approvedVersions} approved`} />} /></Panel></div></div></div>
 }
 
 function Activity({ rows }) {

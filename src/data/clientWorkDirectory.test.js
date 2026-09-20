@@ -84,7 +84,7 @@ test('P2 directory UI preserves routes, local filters, honest states, and compan
     assert.match(source, /Internal Work/)
     assert.match(source, /type="search"/)
     assert.match(source, /Showing \{filtered/)
-    assert.doesNotMatch(source, /organization(Id)?=/)
+    assert.doesNotMatch(source, /[?&]organization(Id)?=/)
   }
   assert.match(clientDirectory, /Access denied/)
   assert.match(clientDirectory, /Client Work is stale/)

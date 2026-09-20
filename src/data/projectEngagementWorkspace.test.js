@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { buildProjectEngagementWorkspace } from './projectEngagementWorkspaceModel.js'
-import { parseWorkshopNavigation } from './workshopNavigation.js'
+import { parseWorkshopNavigation, WORKSHOP_DESTINATIONS } from './workshopNavigation.js'
 
 function fixture(overrides = {}) {
   return {
@@ -54,7 +54,7 @@ test('WKS2 composes one canonical project with its validated engagement extensio
   assert.deepEqual(workspace.activity.map((item) => item.source), ['Engagement', 'Project'])
   assert.equal(workspace.workshopLinks.length, 1)
   assert.equal(workspace.workshopLinks[0].department, 'design')
-  assert.equal(new URL(workspace.workshopLinks[0].path, 'https://anka.invalid').pathname, '/sphere/design')
+  assert.equal(new URL(workspace.workshopLinks[0].path, 'https://anka.invalid').pathname, WORKSHOP_DESTINATIONS.design)
   const workshopContext = parseWorkshopNavigation(new URL(workspace.workshopLinks[0].path, 'https://anka.invalid').searchParams)
   assert.equal(workshopContext.organizationId, 'org-a')
   assert.equal(workshopContext.clientId, 'client-a')
