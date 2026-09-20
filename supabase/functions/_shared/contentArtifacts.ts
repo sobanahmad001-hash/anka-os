@@ -763,7 +763,7 @@ export async function createContentArtifactVersion(admin: AdminClient, input: {
       const byId = new Map<string, Json>((visibleArtifacts || []).map((artifact: Json): [string, Json] => [String(artifact.id), artifact]))
       for (const id of referenceIds) {
         const version = visibleById.get(id) as Json
-        const artifact = byId.get(version.artifact_id) as Json | undefined
+        const artifact = byId.get(String(version.artifact_id)) as Json | undefined
         if (!artifact || artifact.organization_id !== input.organizationId
           || artifact.engagement_id !== input.engagement.id || artifact.brand_id !== input.engagement.brand_id
           || !CONTENT_ARTIFACT_TYPE_SET.has(String(artifact.artifact_type))
