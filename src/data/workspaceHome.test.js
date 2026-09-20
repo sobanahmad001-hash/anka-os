@@ -35,7 +35,7 @@ test('Workspace Home scopes records and keeps Project Tasks separate from Engage
 })
 
 test('Workspace Home is read-only, active-organization scoped, and exposes every required section', () => {
-  const repository = readFileSync(new URL('./workspaceHomeRepository.js', import.meta.url), 'utf8')
+  const repository = readFileSync(new URL('./workspaceHomeRepositoryFactory.js', import.meta.url), 'utf8')
   const screen = readFileSync(new URL('../apps/WorkspaceHome.jsx', import.meta.url), 'utf8')
   const project = readFileSync(new URL('../apps/ProjectEngagementWorkspace.jsx', import.meta.url), 'utf8')
   assert.match(repository, /\.eq\('organization_id', organizationId\)/)

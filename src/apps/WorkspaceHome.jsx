@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
@@ -18,24 +18,36 @@ export default function WorkspaceHome() {
     requestSignal,
     handleOrganizationAccessError,
   } = useOrganization()
-  const [snapshot, setSnapshot] = useState(null)
+  const [snapshotState, setSnapshotState] = useState(null)
+  const request = useRef(0)
+  const snapshot = snapshotState?.organizationId === activeOrganizationId && snapshotState.requestSignal === requestSignal ? snapshotState.data : null
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const home = useMemo(() => workspaceHome.forOrganization(activeOrganizationId, { signal: requestSignal }), [activeOrganizationId, requestSignal])
+  const [errorState, setErrorState] = useState(null)
+  const error = errorState?.organizationId === activeOrganizationId && errorState.requestSignal === requestSignal ? errorState.message : ''
+  const home = useMemo(() => activeOrganizationId ? workspaceHome.forOrganization(activeOrganizationId, { signal: requestSignal }) : null, [activeOrganizationId, requestSignal])
 
   const load = useCallback(async () => {
+    const generation = ++request.current
+    if (!home) { setSnapshotState(null); setLoading(false); setErrorState(null); return }
     setLoading(true)
-    setError('')
-    try { setSnapshot(await home.getSnapshot()) }
-    catch (cause) {
-      if (cause?.name !== 'AbortError') {
+    setErrorState(null)
+    try {
+      const data = await home.getSnapshot()
+      if (generation === request.current && !requestSignal?.aborted) setSnapshotState({ organizationId: activeOrganizationId, requestSignal, data })
+    } catch (cause) {
+      if (generation === request.current && cause?.name !== 'AbortError' && !requestSignal?.aborted) {
         handleOrganizationAccessError(cause)
-        setError(cause.message || 'Unable to load Workspace Home.')
+        setErrorState({ organizationId: activeOrganizationId, requestSignal, message: cause.message || 'Unable to load Workspace Home.' })
       }
-    } finally { setLoading(false) }
-  }, [handleOrganizationAccessError, home])
+    } finally {
+      if (generation === request.current) setLoading(false)
+    }
+  }, [activeOrganizationId, handleOrganizationAccessError, home, requestSignal])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    return () => { request.current += 1 }
+  }, [load])
 
   return (
     <div className="workspace-page">
