@@ -46,6 +46,9 @@ export function ScopedDepartmentChat({
   const attachmentCompletion = useRef(null)
   const draftSwitchGeneration = useRef(0)
   const dialogRef = useRef(null)
+  const dialogOriginRef = useRef(null)
+  const dialogOpenedRef = useRef(false)
+  const composerRef = useRef(null)
   const stayButtonRef = useRef(null)
   const discardButtonRef = useRef(null)
   const saveButtonRef = useRef(null)
@@ -145,12 +148,26 @@ export function ScopedDepartmentChat({
     }
   }, [result, contextExpanded])
   useEffect(() => {
-    if (pendingDraftSwitch) (draftSaving ? dialogRef.current : stayButtonRef.current)?.focus()
+    if (!pendingDraftSwitch) {
+      dialogOpenedRef.current = false
+      dialogOriginRef.current = null
+      return
+    }
+    if (!dialogOpenedRef.current) {
+      dialogOriginRef.current = document.activeElement
+      dialogOpenedRef.current = true
+    }
+    ;(draftSaving ? dialogRef.current : stayButtonRef.current)?.focus()
   }, [pendingDraftSwitch, draftSaving])
   function closeDraftSwitch() {
+    const origin = dialogOriginRef.current
     draftSwitchGeneration.current += 1
     setPendingDraftSwitch(null)
     if (navigationBlocker?.state === 'blocked') navigationBlocker.reset()
+    if (!mounted.current || requestSignal?.aborted) return
+    const currentOrigin = origin && origin !== document.body
+      && origin.ownerDocument === document && (origin.isConnected ?? Boolean(origin.parentNode))
+    ;(currentOrigin ? origin : composerRef.current)?.focus()
   }
   function handleDraftDialogKey(event) {
     if (event.key === 'Escape' && !draftSaving) {
@@ -1136,7 +1153,7 @@ export function ScopedDepartmentChat({
         </section>}
 
         <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{isAnswerMode ? 'Message' : 'Draft request'}
-          <textarea required rows="10" className={`${INPUT} mt-2 normal-case tracking-normal`} value={prompt} onInput={event => setPrompt(event.currentTarget.value)} placeholder={isAnswerMode ? 'Ask a question or explore the work context. This will not create an official output.' : 'Describe the draft you need, the evidence to prioritize, known constraints, tone, and gaps the team should keep visible.'} />
+          <textarea ref={composerRef} required rows="10" className={`${INPUT} mt-2 normal-case tracking-normal`} value={prompt} onInput={event => setPrompt(event.currentTarget.value)} placeholder={isAnswerMode ? 'Ask a question or explore the work context. This will not create an official output.' : 'Describe the draft you need, the evidence to prioritize, known constraints, tone, and gaps the team should keep visible.'} />
         </label>
 
         <label className="flex items-start gap-3 rounded-xl border border-amber-900/50 bg-amber-950/20 p-4 text-sm leading-6 text-amber-200">
