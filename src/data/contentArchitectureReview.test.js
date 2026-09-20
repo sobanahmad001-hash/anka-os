@@ -8,7 +8,7 @@ const priorPages = [
   { page_key: 'page:home', slug: 'home', title: 'Home', parent_page_key: null, position: 1000, page_type: 'hub', purpose: 'Orient' },
   { page_key: 'page:service', slug: 'services', title: 'Services', parent_page_key: 'page:home', position: 2000, page_type: 'service', purpose: 'Explain services' },
 ]
-const current = { id: 'architecture-v2', content: { pages: priorPages } }
+const current = { id: 'architecture-v2', artifact_id: 'architecture-a', content: { pages: priorPages } }
 const workspace = {
   artifacts: [
     { id: 'copy-a', artifact_type: 'content' },
@@ -36,6 +36,20 @@ test('C02 preview keeps stable page identity and exposes removed-page downstream
   assert.equal(review.errors.length, 0)
   assert.equal(review.pages[0].page_key, 'page:home')
   assert.equal(priorPages[0].slug, 'home')
+})
+
+test('C02 impact follows older exact versions of the same architecture root only', () => {
+  const older = {
+    ...workspace,
+    versions: [
+      { id: 'architecture-v1', artifact_id: 'architecture-a', version_number: 1, content: { pages: priorPages } },
+      { id: 'architecture-other-v1', artifact_id: 'architecture-other', version_number: 1, content: { pages: priorPages } },
+      { ...workspace.versions[0], content: { ...workspace.versions[0].content, source_architecture_version_id: 'architecture-v1' } },
+      { ...workspace.versions[1], content: { ...workspace.versions[1].content, source_architecture_version_id: 'architecture-other-v1' } },
+    ],
+  }
+  const review = websiteSitemapPreview({ pages: [priorPages[0]] }, current, older)
+  assert.deepEqual(review.affected.find(item => item.key === 'page:service').dependents.sort(), ['content task', 'saved page copy'])
 })
 
 test('C02 preview rejects orphan/cyclic draft hierarchies and never guesses a tree', () => {

@@ -43,6 +43,7 @@ export function websiteSitemapPreview(editor, latest = null, workspace = {}) {
 
   const artifactIds = new Set((workspace.artifacts || []).filter(item =>
     ['content', 'keyword_strategy'].includes(item.artifact_type)).map(item => item.id))
+  const sourceVersions = new Map((workspace.versions || []).map(version => [version.id, version]))
   const latestVersions = new Map()
   for (const version of workspace.versions || []) {
     if (!artifactIds.has(version.artifact_id)) continue
@@ -57,7 +58,10 @@ export function websiteSitemapPreview(editor, latest = null, workspace = {}) {
     downstream.set(key, labels)
   }
   for (const version of latestVersions.values()) {
-    if (version.content?.source_architecture_version_id !== latest?.id) continue
+    const sourceId = version.content?.source_architecture_version_id
+    const sameRoot = sourceId === latest?.id || (latest?.artifact_id
+      && sourceVersions.get(sourceId)?.artifact_id === latest.artifact_id)
+    if (!sourceId || !sameRoot) continue
     if (version.content?.output_type === 'website_page_copy') record(version.content.target_page_key, 'saved page copy')
     for (const keyword of version.content?.keywords || []) {
       if (keyword.target_kind === 'page') record(keyword.target_page_key, 'keyword target')
