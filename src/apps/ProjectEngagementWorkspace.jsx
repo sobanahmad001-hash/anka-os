@@ -205,22 +205,22 @@ function Journey({ workspace, navigate }) {
   return <div className="space-y-5"><Panel title="Delivery and pipeline preview" description="Read-only presentation of the already-instantiated service journey; this does not change active services."><div className="grid gap-3 md:grid-cols-3"><Record title={workspace.deliveryShape.label} note={workspace.deliveryShape.note} /><Record title={pipelineName || 'Direct or unrecorded composition'} note={workspace.pipelineOrigin ? `Template version ${workspace.pipelineVersion?.version_number || 'unknown'} · ${workspace.pipelineOrigin.was_customized ? 'Customized before creation' : 'Original selection'}` : 'No immutable pipeline-template origin is recorded.'} /><Record title={`${workspace.activeServices.length} active service${workspace.activeServices.length === 1 ? '' : 's'}`} note={`${workspace.summary.completedJourneyStages} of ${workspace.summary.totalJourneyStages} stages completed`} /></div></Panel><div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]"><Panel title="Instantiated journey"><RecordList rows={workspace.journey} empty="No journey stages were instantiated." render={(stage, index) => <div key={stage.id} className="rounded-xl border border-white/[0.07] bg-black/10 p-4"><div className="flex items-start gap-3"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-violet-500/15 text-xs font-semibold text-violet-300">{index + 1}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{stage.name}</p><Status value={stage.status} /></div><p className="mt-1 text-xs text-slate-500">{label(stage.accountable_department_id)} · {label(stage.stage_kind)}</p>{stage.blockers.length > 0 && <p className="mt-2 text-xs text-amber-300">Depends on: {stage.blockers.join(', ')}</p>}</div></div></div>} /></Panel><div className="space-y-5"><Panel title="Activated services"><RecordList rows={workspace.services} empty="No services activated." render={(item) => <Record key={item.id} title={item.service_catalog?.name || 'Service'} note={`${label(item.service_catalog?.department_id)} · ${item.owner.name}`} status={item.status} />} /></Panel><Panel title="Prerequisites"><RecordList rows={workspace.prerequisites} empty="No additional prerequisites recorded." render={(item) => <Record key={item.id} title={label(item.prerequisite_key)} note={`${label(item.satisfaction_method)} · ${item.description || 'No note'}`} status={item.status} />} /></Panel>{workspace.workshopLinks.length > 0 && <Panel title="Department Workshops"><div className="flex flex-wrap gap-2">{workspace.workshopLinks.map((item) => <button type="button" key={item.department} onClick={() => navigate(item.path)} className="rounded-xl border border-violet-500/20 bg-violet-500/10 px-3 py-2 text-sm font-medium text-violet-200 outline-none hover:bg-violet-500/15 focus-visible:ring-2 focus-visible:ring-violet-400">Open {label(item.department)} Workshop</button>)}</div></Panel>}</div></div></div>
 }
 
-function recordWorkshopPath(link, item, kind, originTab) {
+function recordWorkshopPath(link, item, kind, originTab, origin) {
   if (!link) return null
   const context = parseWorkshopNavigation(new URL(link.path, 'https://anka.invalid').searchParams)
   return appendWorkshopNavigation(new URL(link.path, 'https://anka.invalid').pathname, {
-    ...context, originTab, workRecord: { kind, id: item.id },
+    ...context, origin: origin || context.origin, originTab, workRecord: { kind, id: item.id },
     workshopTab: kind === 'project_task' ? 'tasks' : 'engagement-work',
   })
 }
 
-function ProjectTasks({ rows, workshopLinks, navigate, originTab = 'project-tasks' }) {
-  return <Panel title="Project Tasks" description="Canonical project-level planning and execution tasks. These are not Engagement Work Items."><RecordList rows={rows} empty="No Project Tasks recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="project_task" context={item.workstreamName} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'project_task', originTab)} navigate={navigate} />} /></Panel>
+function ProjectTasks({ rows, workshopLinks, navigate, originTab = 'project-tasks', origin }) {
+  return <Panel title="Project Tasks" description="Canonical project-level planning and execution tasks. These are not Engagement Work Items."><RecordList rows={rows} empty="No Project Tasks recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="project_task" context={item.workstreamName} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'project_task', originTab, origin)} navigate={navigate} />} /></Panel>
 }
 
-function EngagementWork({ rows, hasEngagement, workshopLinks, navigate, originTab = 'engagement-work' }) {
+function EngagementWork({ rows, hasEngagement, workshopLinks, navigate, originTab = 'engagement-work', origin }) {
   if (!hasEngagement) return <Empty title="No engagement extension" note="Engagement Work Items do not apply to this project. Project Tasks remain available separately." />
-  return <Panel title="Engagement Work Items" description="Delivery work attached to the engagement extension. These are not Project Tasks."><RecordList rows={rows} empty="No Engagement Work Items recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="engagement_work_item" context={label(item.department_id)} automation={Boolean(item.automation_flagged_at)} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'engagement_work_item', originTab)} navigate={navigate} />} /></Panel>
+  return <Panel title="Engagement Work Items" description="Delivery work attached to the engagement extension. These are not Project Tasks."><RecordList rows={rows} empty="No Engagement Work Items recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="engagement_work_item" context={label(item.department_id)} automation={Boolean(item.automation_flagged_at)} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'engagement_work_item', originTab, origin)} navigate={navigate} />} /></Panel>
 }
 
 const WORK_VIEWS = ['list', 'board', 'calendar']
@@ -231,10 +231,24 @@ function WorkViews({ workspace, navigate, searchParams, setSearchParams }) {
   const monthKey = /^\d{4}-(0[1-9]|1[0-2])$/.test(suppliedMonth || '')
     ? suppliedMonth : new Date().toISOString().slice(0, 7)
   const [year, monthNumber] = monthKey.split('-').map(Number)
-  const records = [
+  const allRecords = [
     ...workspace.projectTasks.map(item => ({ kind: 'project_task', item, context: item.workstreamName })),
     ...workspace.engagementWorkItems.map(item => ({ kind: 'engagement_work_item', item, context: label(item.department_id) })),
   ]
+  const kindFilter = ['project_task', 'engagement_work_item'].includes(searchParams.get('workKind')) ? searchParams.get('workKind') : 'all'
+  const requestedStatus = searchParams.get('workStatus') || 'all'
+  const query = (searchParams.get('workQuery') || '').trim().toLowerCase()
+  const availableStatuses = [...new Set(allRecords.map(({ item }) => item.status || 'unknown'))].sort()
+  const statusFilter = availableStatuses.includes(requestedStatus) ? requestedStatus : 'all'
+  const returnParams = new URLSearchParams({ tab: 'work' })
+  for (const key of ['workView', 'workKind', 'workStatus', 'workQuery', 'workMonth']) {
+    if (searchParams.has(key)) returnParams.set(key, searchParams.get(key))
+  }
+  const origin = `/sphere/workspace/projects/${encodeURIComponent(workspace.project.id)}?${returnParams}`
+  const records = allRecords.filter(({ kind, item, context }) =>
+    (kindFilter === 'all' || kind === kindFilter)
+    && (statusFilter === 'all' || (item.status || 'unknown') === statusFilter)
+    && (!query || [item.title, item.description, context, item.owner.name].some(value => String(value || '').toLowerCase().includes(query))))
   const setWorkParam = (key, value) => {
     const next = new URLSearchParams(searchParams)
     next.set(key, value)
@@ -242,7 +256,7 @@ function WorkViews({ workspace, navigate, searchParams, setSearchParams }) {
   }
   const card = ({ kind, item, context }) => <WorkRecord key={`${kind}-${item.id}`} item={item} kind={kind}
     context={context} automation={kind === 'engagement_work_item' && Boolean(item.automation_flagged_at)}
-    workshopPath={recordWorkshopPath(workspace.workshopLinks.find(link => link.department === item.department_id), item, kind, 'work')}
+    workshopPath={recordWorkshopPath(workspace.workshopLinks.find(link => link.department === item.department_id), item, kind, 'work', origin)}
     navigate={navigate} showKind />
   const monthStart = new Date(Date.UTC(year, monthNumber - 1, 1))
   const monthEnd = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate()
@@ -257,12 +271,17 @@ function WorkViews({ workspace, navigate, searchParams, setSearchParams }) {
   const statuses = [...new Set(records.map(({ item }) => item.status || 'unknown'))].sort()
   return <div className="space-y-5">
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
-      <div><h2 className="font-semibold">Project work</h2><p className="mt-1 text-xs text-slate-500">List, board and calendar show the same {records.length} records. Statuses keep their source meaning; dates are task due dates.</p></div>
+      <div><h2 className="font-semibold">Project work</h2><p className="mt-1 text-xs text-slate-500">Showing {records.length} of {allRecords.length} records. Statuses keep their source meaning; calendar dates are task due dates.</p></div>
       <div role="group" aria-label="Work view" className="flex gap-1 rounded-xl border border-white/10 p-1">
         {WORK_VIEWS.map(option => <button type="button" key={option} aria-pressed={view === option} onClick={() => setWorkParam('workView', option)} className={`rounded-lg px-3 py-1.5 text-sm ${view === option ? 'bg-violet-500/20 text-violet-100' : 'text-slate-400 hover:text-white'}`}>{label(option)}</button>)}
       </div>
     </div>
-    {view === 'list' && <><ProjectTasks rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" /><EngagementWork rows={workspace.engagementWorkItems} hasEngagement={workspace.identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" /></>}
+    <div className="grid gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4 md:grid-cols-[minmax(0,1fr)_220px_220px]">
+      <label className="text-xs font-medium text-slate-400">Search work<input type="search" maxLength={120} value={searchParams.get('workQuery') || ''} onChange={event => setWorkParam('workQuery', event.target.value)} placeholder="Title, owner, or description" className="mt-1 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" /></label>
+      <label className="text-xs font-medium text-slate-400">Record type<select value={kindFilter} onChange={event => setWorkParam('workKind', event.target.value)} className="mt-1 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white"><option value="all">All work</option><option value="project_task">Project Tasks</option><option value="engagement_work_item">Engagement Work Items</option></select></label>
+      <label className="text-xs font-medium text-slate-400">Recorded status<select value={statusFilter} onChange={event => setWorkParam('workStatus', event.target.value)} className="mt-1 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white"><option value="all">All statuses</option>{availableStatuses.map(status => <option key={status} value={status}>{label(status)}</option>)}</select></label>
+    </div>
+    {view === 'list' && <><ProjectTasks rows={records.filter(({ kind }) => kind === 'project_task').map(({ item }) => item)} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" origin={origin} /><EngagementWork rows={records.filter(({ kind }) => kind === 'engagement_work_item').map(({ item }) => item)} hasEngagement={workspace.identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" origin={origin} /></>}
     {view === 'board' && (records.length
       ? <div className="flex gap-4 overflow-x-auto pb-3">{statuses.map(status => <section key={status} className="w-72 shrink-0 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3"><h3 className="mb-3 text-sm font-semibold">{label(status)} <span className="text-slate-500">({records.filter(({ item }) => (item.status || 'unknown') === status).length})</span></h3><div className="space-y-3">{records.filter(({ item }) => (item.status || 'unknown') === status).map(card)}</div></section>)}</div>
       : <Empty title="No project work" note="No Project Tasks or Engagement Work Items have been recorded." />)}
