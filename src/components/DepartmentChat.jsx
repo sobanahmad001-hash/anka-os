@@ -44,6 +44,12 @@ export function ScopedDepartmentChat({
   const completion = useRef(null)
   const answerObservation = useRef(null)
   const attachmentCompletion = useRef(null)
+  const draftSwitchGeneration = useRef(0)
+  const mounted = useRef(true)
+  useLayoutEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false; draftSwitchGeneration.current += 1 }
+  }, [])
   const requestScope = useMemo(
     () => ({ organizationId, signal: requestSignal }),
     [organizationId, requestSignal],
@@ -181,18 +187,20 @@ export function ScopedDepartmentChat({
           work_item_title: title, work_item_type: workItemType, priority, language,
         },
       }, requestScope)
-      if (requestSignal?.aborted) return false
+      if (requestSignal?.aborted || !mounted.current) return false
       setDraftNotice('Draft saved to this original conversation. Files, model, and AI-use consent are not saved.')
       return true
     } catch (reason) {
-      handleCurrentChatFailure(() => !requestSignal?.aborted, reason, handleOrganizationAccessError,
+      handleCurrentChatFailure(() => !requestSignal?.aborted && mounted.current, reason, handleOrganizationAccessError,
         failure => setError(failure.message || 'Draft could not be saved. Stay in this conversation.'))
       return false
-    } finally { if (!requestSignal?.aborted) setDraftSaving(false) }
+    } finally { if (!requestSignal?.aborted && mounted.current) setDraftSaving(false) }
   }
 
   async function finishDraftSwitch(save) {
     if (!pendingDraftSwitch || draftSaving) return
+    const generation = ++draftSwitchGeneration.current
+    const pending = pendingDraftSwitch
     if (save) {
       if (!await saveUnsentDraft()) return
     } else if (conversationId) {
@@ -202,14 +210,15 @@ export function ScopedDepartmentChat({
           conversation_id: conversationId, engagement_id: engagement.id, project_id: projectId,
         }, requestScope)
       } catch (reason) {
-        handleCurrentChatFailure(() => !requestSignal?.aborted, reason, handleOrganizationAccessError,
+        handleCurrentChatFailure(() => !requestSignal?.aborted && mounted.current && draftSwitchGeneration.current === generation, reason, handleOrganizationAccessError,
           failure => setError(failure.message || 'Draft could not be discarded. Stay in this conversation.'))
-        setDraftSaving(false)
+        if (mounted.current && !requestSignal?.aborted) setDraftSaving(false)
         return
       }
-      setDraftSaving(false)
+      if (mounted.current && !requestSignal?.aborted) setDraftSaving(false)
     }
-    const proceed = pendingDraftSwitch.proceed
+    if (!mounted.current || requestSignal?.aborted || draftSwitchGeneration.current !== generation) return
+    const proceed = pending.proceed
     setPendingDraftSwitch(null)
     clearComposer()
     onComposerDirtyChange?.(false)
@@ -269,7 +278,7 @@ export function ScopedDepartmentChat({
     return selected
   }
 
-  async function loadConversation(id = conversationId, isCurrent = () => true) {
+  async function loadConversation(id = conversationId, isCurrent = () => true, restoreDraft = false) {
     if (!id || !projectId) {
       setMessages([])
       setAttachments([])
@@ -305,6 +314,7 @@ export function ScopedDepartmentChat({
     }
     setConversationTitle(data.conversation?.title || '')
     setConversations(current => current.map(item => item.id === id ? data.conversation : item))
+    if (restoreDraft && isCurrent()) await restoreUnsentDraft(id, isCurrent)
     return data
   }
 
@@ -514,7 +524,7 @@ export function ScopedDepartmentChat({
       success: async (updated, isCurrent) => {
         const selected = await loadConversationList(state === 'active' ? updated.id : '', includeArchived, isCurrent)
         if (!isCurrent()) return
-        if (selected) await loadConversation(selected.id, isCurrent)
+        if (selected) await loadConversation(selected.id, isCurrent, true)
         else { setMessages([]); setAttachments([]); setSelectedAttachmentIds([]) }
       },
       failure: (reason, isCurrent) => handleCurrentChatFailure(
@@ -529,7 +539,7 @@ export function ScopedDepartmentChat({
     return runCurrentChatOperation(completion.current, {
       start: () => { setIncludeArchived(checked); setHistoryBusy(true); setError('') },
       operation: isCurrent => loadConversationList(targetConversationId, checked, isCurrent),
-      success: async (selected, isCurrent) => loadConversation(selected?.id || '', isCurrent),
+      success: async (selected, isCurrent) => loadConversation(selected?.id || '', isCurrent, true),
       failure: (reason, isCurrent) => handleCurrentChatFailure(
         isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message),
       ),
@@ -543,7 +553,7 @@ export function ScopedDepartmentChat({
     return runCurrentChatOperation(completion.current, {
       start: () => { setHistoryBusy(true); setError('') },
       operation: isCurrent => loadConversationList(conversationId, includeArchived, isCurrent, query),
-      success: async (selected, isCurrent) => { setConversationSearchQuery(query); await loadConversation(selected?.id || '', isCurrent) },
+      success: async (selected, isCurrent) => { setConversationSearchQuery(query); await loadConversation(selected?.id || '', isCurrent, true) },
       failure: (reason, isCurrent) => handleCurrentChatFailure(
         isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message),
       ),
@@ -556,7 +566,7 @@ export function ScopedDepartmentChat({
     return runCurrentChatOperation(completion.current, {
       start: () => { setHistoryBusy(true); setError('') },
       operation: isCurrent => loadConversationList(conversationId, includeArchived, isCurrent, ''),
-      success: async (selected, isCurrent) => { setConversationSearchQuery(''); await loadConversation(selected?.id || '', isCurrent) },
+      success: async (selected, isCurrent) => { setConversationSearchQuery(''); await loadConversation(selected?.id || '', isCurrent, true) },
       failure: (reason, isCurrent) => handleCurrentChatFailure(
         isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message),
       ),
@@ -1009,7 +1019,7 @@ export function ScopedDepartmentChat({
       </div>
     </aside>
   </div>
-  {pendingDraftSwitch && <div role="dialog" aria-modal="true" aria-label="Unsent chat draft" className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-5"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><h2 className="text-xl font-semibold text-white">Keep this unsent work?</h2><p className="mt-2 text-sm text-slate-300">Before you {pendingDraftSwitch.label}, stay here, save text to the original conversation, or discard it. File selections, model choice, and AI-use consent are never saved.</p>{error && <p className="mt-3 text-sm text-red-300">{error}</p>}<div className="mt-6 flex flex-wrap justify-end gap-2"><button type="button" onClick={() => { setPendingDraftSwitch(null); navigationBlocker?.state === 'blocked' && navigationBlocker.reset() }}>Stay</button><button type="button" disabled={draftSaving} onClick={() => finishDraftSwitch(false)}>Discard and continue</button><button type="button" disabled={draftSaving || !conversationId || !prompt.trim()} onClick={() => finishDraftSwitch(true)} className={PRIMARY}>{draftSaving ? 'Saving…' : 'Save to original and continue'}</button></div>{!prompt.trim() && <p className="mt-3 text-xs text-amber-300">Add a message to save a draft; file selections alone cannot be saved.</p>}</section></div>}
+  {pendingDraftSwitch && <div role="dialog" aria-modal="true" aria-label="Unsent chat draft" className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-5"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><h2 className="text-xl font-semibold text-white">Keep this unsent work?</h2><p className="mt-2 text-sm text-slate-300">Before you {pendingDraftSwitch.label}, stay here, save text to the original conversation, or discard it. File selections, model choice, and AI-use consent are never saved.</p>{error && <p className="mt-3 text-sm text-red-300">{error}</p>}<div className="mt-6 flex flex-wrap justify-end gap-2"><button type="button" disabled={draftSaving} onClick={() => { draftSwitchGeneration.current += 1; setPendingDraftSwitch(null); navigationBlocker?.state === 'blocked' && navigationBlocker.reset() }}>Stay</button><button type="button" disabled={draftSaving} onClick={() => finishDraftSwitch(false)}>Discard and continue</button><button type="button" disabled={draftSaving || !conversationId || !prompt.trim()} onClick={() => finishDraftSwitch(true)} className={PRIMARY}>{draftSaving ? 'Saving…' : 'Save to original and continue'}</button></div>{!prompt.trim() && <p className="mt-3 text-xs text-amber-300">Add a message to save a draft; file selections alone cannot be saved.</p>}</section></div>}
   </>
 }
 

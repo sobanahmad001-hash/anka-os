@@ -441,3 +441,68 @@ test('P9A router navigation stays blocked until the author saves to the original
   assert.equal(saved[0].conversation_id, 'conversation-a')
   assert.equal(nodes(container, 'textarea')[0].value, '')
 })
+
+test('P9A search and archived filters restore the selected conversation draft only', async t => {
+  const { container, ScopedDepartmentChat } = await setup(t)
+  const repo = repository([])
+  repo.searchConversations = async (_department, input) => ({
+    items: input.query || input.include_archived ? [conversation('conversation-b')] : [conversation('conversation-a')],
+    next_cursor: null,
+  })
+  repo.getUnsentDraft = async (_department, input) => input.conversation_id === 'conversation-b'
+    ? { prompt: 'Draft B only', proposal_mode: 'answer' } : null
+  globalThis.__departmentChatTestRepository = repo
+  const root = createRoot(container)
+  t.after(() => { try { root.unmount() } catch {} })
+  await act(async () => root.render(createElement(ScopedDepartmentChat, props('a', new AbortController().signal))))
+  await flush()
+  const search = nodes(container, 'input').find(node => node.type === 'search')
+  await value(search, 'B')
+  const form = nodes(container, 'form').find(item => nodes(item, 'input').includes(search))
+  await act(async () => form.dispatchEvent(new E('submit')))
+  await flush()
+  assert.equal(nodes(container, 'textarea')[0].value, 'Draft B only')
+  const consent = nodes(container, 'input').find(node => node.parentNode?.textContent.includes('I confirm this message'))
+  assert.equal(consent.checked, false)
+  await act(async () => byText(container, 'button', 'Clear').dispatchEvent(new E('click')))
+  await flush()
+  await act(async () => byText(container, 'button', 'Discard and continue').dispatchEvent(new E('click')))
+  await flush()
+  assert.equal(nodes(container, 'textarea')[0].value, '')
+  const archived = nodes(container, 'input').find(node => node.type === 'checkbox' && node.parentNode?.textContent.includes('Show archived'))
+  archived.checked = true
+  await act(async () => { archived.dispatchEvent(new E('click')); archived.dispatchEvent(new E('change')) })
+  await flush()
+  assert.equal(nodes(container, 'textarea')[0].value, 'Draft B only')
+})
+
+for (const action of ['Save to original and continue', 'Discard and continue']) {
+  test('P9A ' + action + ' cannot navigate after scope abort and unmount', async t => {
+    const { container, ScopedDepartmentChat } = await setup(t)
+    const repo = repository([])
+    let release
+    const pending = new Promise(resolve => { release = resolve })
+    if (action.startsWith('Save')) repo.saveUnsentDraft = () => pending
+    else repo.discardUnsentDraft = () => pending
+    globalThis.__departmentChatTestRepository = repo
+    const root = createRoot(container)
+    const controller = new AbortController()
+    const calls = []
+    const base = props('a', controller.signal)
+    await act(async () => root.render(createElement(ScopedDepartmentChat, {
+      ...base, navigationBlocker: { state: 'unblocked', proceed: () => calls.push('proceed'), reset: () => calls.push('reset') },
+    })))
+    await flush()
+    await value(nodes(container, 'textarea')[0], 'Unsaved scoped intent')
+    await act(async () => root.render(createElement(ScopedDepartmentChat, {
+      ...base, navigationBlocker: { state: 'blocked', proceed: () => calls.push('proceed'), reset: () => calls.push('reset') },
+    })))
+    await flush()
+    await act(async () => byText(container, 'button', action).dispatchEvent(new E('click')))
+    assert.equal(byText(container, 'button', 'Stay').disabled, true)
+    controller.abort()
+    await act(async () => root.unmount())
+    await act(async () => release({}))
+    assert.deepEqual(calls, [])
+  })
+}
