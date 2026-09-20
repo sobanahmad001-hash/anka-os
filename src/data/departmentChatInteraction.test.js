@@ -61,6 +61,9 @@ function repository(streams, savedBody = '', searches = []) {
     getConversation: async (_d, input) => ({ conversation: conversation(input.conversation_id), messages: savedBody ? [{ id: 'assistant-1', role: 'assistant', status: 'completed', body: savedBody, proposal: null }] : [], sharing: { can_manage: false, recipients: [] } }),
     listAttachments: async () => [],
     listConversationShareCandidates: async () => [],
+    getUnsentDraft: async () => null,
+    saveUnsentDraft: async () => ({}),
+    discardUnsentDraft: async () => true,
     answer: async (_d, _input, scope, { onEvent }) => new Promise((resolve, reject) => {
       streams.push({ onEvent, signal: scope.signal, resolve, reject })
       onEvent({ type: 'started' }); onEvent({ type: 'delta', delta: 'PARTIAL_SENTINEL' })
@@ -71,7 +74,7 @@ function repository(streams, savedBody = '', searches = []) {
 function props(id, signal) { return { departmentId: 'content', departmentLabel: 'Content', engagement: { id, project_id: 'project-' + id, organization_id: 'organization-1', name: 'Engagement', agency_clients: { name: 'Client' } }, userId: 'user-1', organizationId: 'organization-1', requestSignal: signal, handleOrganizationAccessError() {} } }
 async function start(root) { await value(nodes(root, 'textarea')[0], 'Explain'); await authorize(root); const form = nodes(root, 'form').find(item => nodes(item, 'textarea').length); assert.ok(form); await act(async () => form.dispatchEvent(new E('submit'))); await flush() }
 async function setup(t) {
-  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', define: { 'import.meta.env.VITE_SUPABASE_URL': JSON.stringify('http://127.0.0.1:54321'), 'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify('local-test-anon-key') }, plugins: [{ name: 'department-chat-test-repository', enforce: 'pre', resolveId(source) { if (source.endsWith('departmentChatRepository.js')) return '\0department-chat-test-repository' }, load(id) { if (id === '\0department-chat-test-repository') return `export const departmentChat = new Proxy({}, { get(_target, key) { return (...args) => globalThis.__departmentChatTestRepository[key](...args) } })` } }] }); t.after(() => vite.close())
+  const vite = await createServer({ server: { middlewareMode: true }, ssr: { noExternal: ['react-router-dom', 'react-router'] }, appType: 'custom', logLevel: 'silent', define: { 'import.meta.env.VITE_SUPABASE_URL': JSON.stringify('http://127.0.0.1:54321'), 'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify('local-test-anon-key') }, plugins: [{ name: 'department-chat-test-repository', enforce: 'pre', resolveId(source) { if (source === 'react-router-dom') return '\0department-chat-router-test'; if (source.endsWith('departmentChatRepository.js')) return '\0department-chat-test-repository' }, load(id) { if (id === '\0department-chat-router-test') return 'export const useBlocker = () => ({ state: "unblocked" })'; if (id === '\0department-chat-test-repository') return `export const departmentChat = new Proxy({}, { get(_target, key) { return (...args) => globalThis.__departmentChatTestRepository[key](...args) } })` } }] }); t.after(() => vite.close())
   const { ScopedDepartmentChat } = await vite.ssrLoadModule('/src/components/DepartmentChat.jsx')
   const env = environment(); const old = { document: globalThis.document, window: globalThis.window, Event: globalThis.Event, Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT, repository: globalThis.__departmentChatTestRepository }
   Object.assign(globalThis, { document: env.document, window: env.window, Event: E, Node: N, HTMLElement: El, IS_REACT_ACT_ENVIRONMENT: true })
@@ -79,49 +82,36 @@ async function setup(t) {
   return { ...env, ScopedDepartmentChat }
 }
 
-for (const outcome of ['success', 'failure']) test(`attachment ${outcome} after conversation switch cannot alter the new conversation`, async t => {
+for (const outcome of ['success', 'failure']) test('attachment ' + outcome + ' keeps the original conversation while upload is in flight', async t => {
   const { container, ScopedDepartmentChat } = await setup(t)
   const repo = repository([])
   repo.searchConversations = async () => ({ items: [conversation('conversation-a'), conversation('conversation-b')], next_cursor: null })
   repo.getCapabilities = async () => ({ approved_models: [{ configuration_id: 'configuration-1', is_default: true }], attachments: { supported: true } })
   const uploads = []
-  const reads = []
-  let accessErrors = 0
-  repo.listAttachments = async (_department, input) => { reads.push(input.conversation_id); return [] }
   repo.uploadAttachment = async (_department, input) => new Promise((resolve, reject) => uploads.push({ input, resolve, reject }))
   globalThis.__departmentChatTestRepository = repo
   const root = createRoot(container)
   t.after(() => { try { root.unmount() } catch {} })
-  await act(async () => root.render(createElement(ScopedDepartmentChat, { ...props('a', new AbortController().signal), handleOrganizationAccessError() { accessErrors += 1 } })))
+  await act(async () => root.render(createElement(ScopedDepartmentChat, props('a', new AbortController().signal))))
   await flush()
-  const chooseFiles = async names => {
-    const input = nodes(container, 'input').find(node => node.type === 'file')
-    input.files = names.map(name => ({ name, type: 'image/png', size: 10 }))
-    await act(async () => input.dispatchEvent(new E('change')))
-  }
-  await chooseFiles(['old-one.png', 'old-two.png'])
+  const input = nodes(container, 'input').find(node => node.type === 'file')
+  input.files = [{ name: 'old.png', type: 'image/png', size: 10 }]
+  await act(async () => input.dispatchEvent(new E('change')))
   await act(async () => byText(container, 'button', 'Upload and validate').dispatchEvent(new E('click')))
   assert.equal(uploads.length, 1)
-  assert.equal(uploads[0].input.conversation_id, 'conversation-a')
   await act(async () => byText(container, 'button', 'conversation-b').dispatchEvent(new E('click')))
-  await flush()
-  await chooseFiles(['new.png'])
-  await act(async () => byText(container, 'button', 'Upload and validate').dispatchEvent(new E('click')))
-  assert.equal(uploads.length, 2)
-  const readsBefore = [...reads]
+  assert.match(container.textContent, /old.png/)
   await act(async () => {
     if (outcome === 'success') uploads[0].resolve({ id: 'old-attachment' })
     else uploads[0].reject(new Error('OLD_UPLOAD_DENIED'))
   })
   await flush()
-  assert.equal(uploads.length, 2, 'no second old-context upload starts')
-  assert.deepEqual(reads, readsBefore, 'no old attachment list refresh')
-  assert.equal(accessErrors, 0)
-  assert.doesNotMatch(container.textContent, /OLD_UPLOAD_DENIED|old-one.png|old-two.png/)
-  assert.ok(byText(container, 'button', 'Validating privately'), 'old finally cannot clear new upload busy state')
-  await act(async () => uploads[1].resolve({ id: 'new-attachment' }))
+  await act(async () => byText(container, 'button', 'conversation-b').dispatchEvent(new E('click')))
+  assert.ok(byText(container, 'button', 'Discard and continue'))
+  await act(async () => byText(container, 'button', 'Discard and continue').dispatchEvent(new E('click')))
   await flush()
-  assert.equal(reads.at(-1), 'conversation-b')
+  assert.doesNotMatch(container.textContent, /old.png|OLD_UPLOAD_DENIED/)
+  assert.ok(byText(container, 'button', 'conversation-b').getAttribute('class')?.includes('border-sky-600'))
 })
 
 test('mounted chat renders one saved answer and preserves answer mode through partial and durable states', async t => {
@@ -221,6 +211,8 @@ test('mounted conversation changes clear transient answer and proposal state', a
     assert.ok(form)
     await act(async () => form.dispatchEvent(new E('submit')))
     await flush()
+    const discard = byText(container, 'button', 'Discard and continue')
+    if (discard) { await act(async () => discard.dispatchEvent(new E('click'))); await flush() }
   }
 
   {
@@ -380,4 +372,72 @@ test('mounted chat shows truthful run metadata and an accessible exact-version h
   assert.equal(href.searchParams.get('artifact'), 'artifact-1')
   assert.equal(href.searchParams.get('version'), 'version-1')
   assert.match(link.getAttribute('aria-label'), /version-1/)
+})
+
+test('P9A saves unsent text only to its original conversation and restores without AI consent', async t => {
+  const { container, ScopedDepartmentChat } = await setup(t)
+  const repo = repository([])
+  const drafts = new Map()
+  const saved = []
+  repo.searchConversations = async () => ({ items: [conversation('conversation-a'), conversation('conversation-b')], next_cursor: null })
+  repo.saveUnsentDraft = async (_department, input) => { saved.push(input); drafts.set(input.conversation_id, input.draft); return input.draft }
+  repo.getUnsentDraft = async (_department, input) => drafts.get(input.conversation_id) || null
+  repo.discardUnsentDraft = async (_department, input) => drafts.delete(input.conversation_id)
+  globalThis.__departmentChatTestRepository = repo
+  const root = createRoot(container)
+  t.after(() => { try { root.unmount() } catch {} })
+  await act(async () => root.render(createElement(ScopedDepartmentChat, props('a', new AbortController().signal))))
+  await flush()
+  await value(nodes(container, 'textarea')[0], 'Private draft A')
+  await authorize(container)
+  await act(async () => byText(container, 'button', 'conversation-b').dispatchEvent(new E('click')))
+  assert.ok(byText(container, 'button', 'Stay'))
+  assert.equal(nodes(container, 'textarea')[0].value, 'Private draft A')
+  await act(async () => byText(container, 'button', 'Stay').dispatchEvent(new E('click')))
+  assert.equal(nodes(container, 'textarea')[0].value, 'Private draft A')
+  await act(async () => byText(container, 'button', 'conversation-b').dispatchEvent(new E('click')))
+  await act(async () => byText(container, 'button', 'Save to original and continue').dispatchEvent(new E('click')))
+  await flush()
+  assert.equal(saved.length, 1)
+  assert.equal(saved[0].conversation_id, 'conversation-a')
+  assert.deepEqual(Object.keys(saved[0].draft).sort(), ['artifact_type', 'language', 'priority', 'prompt', 'proposal_mode', 'work_item_title', 'work_item_type'].sort())
+  assert.equal(nodes(container, 'textarea')[0].value, '')
+  await act(async () => byText(container, 'button', 'conversation-a').dispatchEvent(new E('click')))
+  await flush()
+  assert.equal(nodes(container, 'textarea')[0].value, 'Private draft A')
+  const consent = nodes(container, 'input').find(node => node.parentNode?.textContent.includes('I confirm this message'))
+  assert.equal(consent.checked, false)
+  assert.match(container.textContent, /Unsent text restored/)
+})
+
+test('P9A router navigation stays blocked until the author saves to the original conversation', async t => {
+  const { container, ScopedDepartmentChat } = await setup(t)
+  const repo = repository([])
+  const saved = []
+  repo.saveUnsentDraft = async (_department, input) => { saved.push(input); return input.draft }
+  globalThis.__departmentChatTestRepository = repo
+  const root = createRoot(container)
+  t.after(() => { try { root.unmount() } catch {} })
+  const signal = new AbortController().signal
+  const base = props('a', signal)
+  const calls = []
+  const blocker = state => ({ state, proceed: () => calls.push('proceed'), reset: () => calls.push('reset') })
+  await act(async () => root.render(createElement(ScopedDepartmentChat, { ...base, navigationBlocker: blocker('unblocked') })))
+  await flush()
+  await value(nodes(container, 'textarea')[0], 'Hold this draft')
+  await act(async () => root.render(createElement(ScopedDepartmentChat, { ...base, navigationBlocker: blocker('blocked') })))
+  await flush()
+  assert.ok(byText(container, 'button', 'Stay'))
+  await act(async () => byText(container, 'button', 'Stay').dispatchEvent(new E('click')))
+  assert.deepEqual(calls, ['reset'])
+  assert.equal(nodes(container, 'textarea')[0].value, 'Hold this draft')
+  await act(async () => root.render(createElement(ScopedDepartmentChat, { ...base, navigationBlocker: blocker('unblocked') })))
+  await act(async () => root.render(createElement(ScopedDepartmentChat, { ...base, navigationBlocker: blocker('blocked') })))
+  await flush()
+  await act(async () => byText(container, 'button', 'Save to original and continue').dispatchEvent(new E('click')))
+  await flush()
+  assert.deepEqual(calls, ['reset', 'proceed'])
+  assert.equal(saved.length, 1)
+  assert.equal(saved[0].conversation_id, 'conversation-a')
+  assert.equal(nodes(container, 'textarea')[0].value, '')
 })

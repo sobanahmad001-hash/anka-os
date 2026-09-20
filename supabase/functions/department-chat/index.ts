@@ -680,6 +680,76 @@ async function requireConversationContext(
   return { ...data, access_role: data.owner_id === actorId ? 'owner' : 'recipient' }
 }
 
+function unsentDraftRpcScope(body: Json, actorId: string, organizationId: string) {
+  const scope = conversationInput(body)
+  if (!scope.conversationId || !scope.projectId || !scope.engagementId
+    || !SAVED_CONVERSATION_DEPARTMENTS.has(scope.departmentId)) {
+    throw Object.assign(new Error('Exact saved conversation context is required'), { status: 400 })
+  }
+  return {
+    p_conversation_id: scope.conversationId,
+    p_organization_id: organizationId,
+    p_project_id: scope.projectId,
+    p_engagement_id: scope.engagementId,
+    p_department_id: scope.departmentId,
+    p_actor_id: actorId,
+  }
+}
+
+export function validateUnsentDepartmentChatDraft(value: unknown, departmentId: string) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw Object.assign(new Error('Unsent draft fields are required'), { status: 400 })
+  }
+  const draft = value as Json
+  const field = (name: string, max: number) => {
+    const value = draft[name]
+    if (value === undefined || value === null) return ''
+    if (typeof value !== 'string' || value.length > max) {
+      throw Object.assign(new Error(`Unsent draft ${name} exceeds its supported length`), { status: 400 })
+    }
+    return value
+  }
+  const prompt = field('prompt', 8000)
+  if (!prompt.trim()) throw Object.assign(new Error('Unsent draft message is required'), { status: 400 })
+  const mode = field('proposal_mode', 20)
+  if (!['answer', 'artifact', 'work_item'].includes(mode)) {
+    throw Object.assign(new Error('Unsupported unsent draft task mode'), { status: 400 })
+  }
+  const profile = departmentChatProfile(departmentId)
+  const artifactType = mode === 'artifact' ? field('artifact_type', 80) : ''
+  const workItemType = mode === 'work_item' ? field('work_item_type', 80) : ''
+  if (mode === 'artifact' && !profile.artifactTypes.includes(artifactType)) {
+    throw Object.assign(new Error('Unsupported artifact draft type'), { status: 400 })
+  }
+  if (mode === 'work_item' && !profile.workItemTypes.includes(workItemType)) {
+    throw Object.assign(new Error('Unsupported work item draft type'), { status: 400 })
+  }
+  const priority = mode === 'work_item' ? field('priority', 10) : 'medium'
+  if (!WORK_ITEM_PRIORITIES.has(priority)) {
+    throw Object.assign(new Error('Unsupported unsent draft priority'), { status: 400 })
+  }
+  return {
+    p_prompt: prompt,
+    p_proposal_mode: mode,
+    p_artifact_type: artifactType,
+    p_work_item_title: mode === 'work_item' ? field('work_item_title', 240) : '',
+    p_work_item_type: workItemType,
+    p_priority: priority,
+    p_language: mode === 'artifact' ? field('language', 120) : '',
+  }
+}
+
+async function unsentDraftAction(admin: Client, body: Json, actorId: string, organizationId: string, action: string) {
+  const scope = unsentDraftRpcScope(body, actorId, organizationId)
+  const name = action === 'save_unsent_draft' ? 'save_department_chat_unsent_draft'
+    : action === 'get_unsent_draft' ? 'get_department_chat_unsent_draft'
+      : 'discard_department_chat_unsent_draft'
+  const args = action === 'save_unsent_draft'
+    ? { ...scope, ...validateUnsentDepartmentChatDraft(body.draft, scope.p_department_id) } : scope
+  const { data, error } = await admin.rpc(name, args)
+  if (error) throw error
+  return data
+}
 async function validateConversationEngagement(
   admin: Client,
   body: Json,
@@ -1866,8 +1936,14 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
     }
     const departmentId = text(body.department_id, 40)
     if (!ENABLED_DEPARTMENTS.has(departmentId)) throw Object.assign(new Error('Department policy denied'), { status: 403 })
+    if (action === 'discard_unsent_draft') {
+      return response({ data: await unsentDraftAction(admin, body, user.id, organizationId, action) })
+    }
     if (!hasDepartmentChatAuthority(membership, departmentId)) {
       throw Object.assign(new Error('Department policy denied'), { status: 403 })
+    }
+    if (action === 'save_unsent_draft' || action === 'get_unsent_draft') {
+      return response({ data: await unsentDraftAction(admin, body, user.id, organizationId, action) })
     }
     if (action === 'list_conversations') {
       return response({ data: await listConversations(admin, body, user.id, organizationId, dependencies.proposal || {}) })
