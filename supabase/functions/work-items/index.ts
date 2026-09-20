@@ -6,7 +6,7 @@ type Json = Record<string, unknown>
 const ACTIONS = new Set([
   'save', 'delete', 'add_dependency', 'remove_dependency',
   'acknowledge_automation_flag', 'generate_content_tasks', 'move',
-  'update_project_task', 'transition_task', 'set_timezone',
+  'update_project_task', 'transition_task', 'decide_project_task_change_proposal', 'set_timezone',
 ])
 const WORK_ITEM_TYPES = new Set(['task', 'bug', 'request'])
 const PRIORITIES = new Set(['low', 'medium', 'high', 'urgent'])
@@ -176,6 +176,20 @@ export async function handleRequest(request: Request) {
         p_organization_id: organizationId, p_task_id: taskId,
         p_expected_row_version: expectedVersion(body.expectedRowVersion), p_status: status,
         p_completion_evidence: text(body.completionEvidence), p_actor_id: user.id,
+      })
+      if (error) throw error
+      return response({ data })
+    }
+    if (action === 'decide_project_task_change_proposal') {
+      const projectId = optionalId(body.projectId)
+      const proposalId = optionalId(body.proposalId)
+      const decision = text(body.decision, 20)
+      if (!projectId || !proposalId || !['approve', 'reject'].includes(decision)) {
+        return response({ error: 'Project, proposal, and human decision are required' }, 400)
+      }
+      const { data, error } = await admin.rpc('decide_project_task_change_proposal', {
+        p_organization_id: organizationId, p_project_id: projectId,
+        p_proposal_id: proposalId, p_actor_id: user.id, p_decision: decision,
       })
       if (error) throw error
       return response({ data })

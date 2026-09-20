@@ -26,12 +26,15 @@ try {
     (Join-Path $PSScriptRoot 'n2_project_draft.fixture.sql'),
     (Join-Path $PSScriptRoot 'n3_project_discussion.fixture.sql'),
     (Join-Path $PSScriptRoot '../migrations/20260920020000_n3_project_discussion.sql'),
-    (Join-Path $PSScriptRoot 'n3_project_discussion.behavior.sql')
+    (Join-Path $PSScriptRoot 'n3_project_discussion.behavior.sql'),
+    (Join-Path $PSScriptRoot 'n3_task_proposal.fixture.sql'),
+    (Join-Path $PSScriptRoot '../migrations/20260920021000_n3_project_task_change_proposals.sql'),
+    (Join-Path $PSScriptRoot 'n3_task_proposal.behavior.sql')
   )) {
     & (Join-Path $PostgresBin 'psql.exe') -X -h 127.0.0.1 -p $Port -U postgres -d postgres -v ON_ERROR_STOP=1 -q -f $file | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "N3 local SQL verification failed: $file" }
   }
-  Write-Output 'N3 local project discussion authority and history checks passed.'
+  Write-Output 'N3 local discussion and task proposal checks passed.'
 } finally {
   if ($started) {
     & (Join-Path $PostgresBin 'pg_ctl.exe') -D $data -m fast -w stop
