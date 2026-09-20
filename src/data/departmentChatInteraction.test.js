@@ -84,6 +84,89 @@ async function setup(t) {
   return { ...env, ScopedDepartmentChat }
 }
 
+test('P9C narrow context panel expands for output and keeps official proposal controls keyboard reachable', async t => {
+  const { container, window, document, ScopedDepartmentChat } = await setup(t)
+  let wide = false
+  const listeners = []
+  const media = { get matches() { return wide }, addEventListener(_event, listener) { listeners.push(listener) }, removeEventListener(_event, listener) { const index = listeners.indexOf(listener); if (index >= 0) listeners.splice(index, 1) } }
+  window.matchMedia = () => media
+  const repo = repository([])
+  repo.proposeArtifact = async () => ({
+    proposal_id: 'proposal-p9c', preview: { title: 'P9C_PREVIEW' }, status: 'pending',
+    expires_at: new Date(Date.now() + 60_000).toISOString(), model: 'gpt-test',
+    connector_connection_id: 'connection-1',
+  })
+  globalThis.__departmentChatTestRepository = repo
+  const root = createRoot(container)
+  t.after(() => { try { root.unmount() } catch {} })
+  await act(async () => root.render(createElement(ScopedDepartmentChat, props('a', new AbortController().signal))))
+  await flush()
+  const toggle = byText(container, 'button', 'Context and output')
+  const panel = nodes(container, 'div').find(node => node.getAttribute('id') === toggle.getAttribute('aria-controls'))
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false')
+  assert.equal(panel.hasAttribute('hidden'), true)
+  await act(async () => toggle.dispatchEvent(new E('click')))
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true')
+  assert.equal(panel.hasAttribute('hidden'), false)
+  await act(async () => toggle.dispatchEvent(new E('click')))
+  const mode = nodes(container, 'select').find(select => select.options?.some(option => option.textContent === 'Artifact draft'))
+  await value(mode, 'artifact')
+  await start(container)
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true')
+  assert.match(panel.textContent, /P9C_PREVIEW/)
+  assert.ok(byText(panel, 'button', 'Confirm official draft'))
+  assert.match(document.activeElement.textContent, /Generated proposal preview/)
+  wide = true
+  await act(async () => listeners.forEach(listener => listener()))
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true')
+  wide = false
+  await act(async () => listeners.forEach(listener => listener()))
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false')
+  assert.equal(panel.hasAttribute('hidden'), true)
+  assert.equal(document.activeElement, toggle)
+  await act(async () => root.unmount())
+})
+
+test('P9C unsent-work dialog focuses Stay, traps Tab, and Escape preserves the original draft', async t => {
+  const { container, document, ScopedDepartmentChat } = await setup(t)
+  globalThis.__departmentChatTestRepository = repository([])
+  const root = createRoot(container)
+  t.after(() => { try { root.unmount() } catch {} })
+  await act(async () => root.render(createElement(ScopedDepartmentChat, props('a', new AbortController().signal))))
+  await flush()
+  await value(nodes(container, 'textarea')[0], 'Keep my original draft')
+  const invoker = byText(container, 'button', 'New')
+  invoker.focus()
+  await act(async () => invoker.dispatchEvent(new E('click')))
+  const dialog = nodes(container, 'div').find(node => node.getAttribute('role') === 'dialog')
+  const stay = byText(dialog, 'button', 'Stay')
+  const save = byText(dialog, 'button', 'Save to original and continue')
+  assert.equal(document.activeElement, stay)
+  const backward = new E('keydown'); backward.key = 'Tab'; backward.shiftKey = true
+  await act(async () => dialog.dispatchEvent(backward))
+  assert.equal(backward.defaultPrevented, true)
+  assert.equal(document.activeElement, save)
+  const forward = new E('keydown'); forward.key = 'Tab'; forward.shiftKey = false
+  await act(async () => dialog.dispatchEvent(forward))
+  assert.equal(document.activeElement, stay)
+  const escape = new E('keydown'); escape.key = 'Escape'
+  await act(async () => dialog.dispatchEvent(escape))
+  assert.equal(nodes(container, 'div').some(node => node.getAttribute('role') === 'dialog'), false)
+  assert.equal(document.activeElement, invoker)
+  assert.equal(nodes(container, 'textarea')[0].value, 'Keep my original draft')
+  await act(async () => invoker.dispatchEvent(new E('click')))
+  assert.equal(document.activeElement, byText(container, 'button', 'Stay'))
+  await act(async () => byText(container, 'button', 'Stay').dispatchEvent(new E('click')))
+  assert.equal(document.activeElement, invoker)
+  document.body.focus()
+  await act(async () => invoker.dispatchEvent(new E('click')))
+  const fallbackDialog = nodes(container, 'div').find(node => node.getAttribute('role') === 'dialog')
+  const fallbackEscape = new E('keydown'); fallbackEscape.key = 'Escape'
+  await act(async () => fallbackDialog.dispatchEvent(fallbackEscape))
+  assert.equal(document.activeElement, nodes(container, 'textarea')[0])
+  await act(async () => root.unmount())
+})
+
 test('P9B previews an exact permitted version before including it and clears selection across conversations', async t => {
   const { container, ScopedDepartmentChat } = await setup(t)
   const id = '11111111-1111-4111-8111-111111111111'
@@ -553,7 +636,7 @@ test('P9A search and archived filters restore the selected conversation draft on
 
 for (const action of ['Save to original and continue', 'Discard and continue']) {
   test('P9A ' + action + ' cannot navigate after scope abort and unmount', async t => {
-    const { container, ScopedDepartmentChat } = await setup(t)
+    const { container, document, ScopedDepartmentChat } = await setup(t)
     const repo = repository([])
     let release
     const pending = new Promise(resolve => { release = resolve })
@@ -575,6 +658,11 @@ for (const action of ['Save to original and continue', 'Discard and continue']) 
     await flush()
     await act(async () => byText(container, 'button', action).dispatchEvent(new E('click')))
     assert.equal(byText(container, 'button', 'Stay').disabled, true)
+    const dialog = nodes(container, 'div').find(node => node.getAttribute('role') === 'dialog')
+    assert.equal(document.activeElement, dialog)
+    const tab = new E('keydown'); tab.key = 'Tab'
+    await act(async () => dialog.dispatchEvent(tab))
+    assert.equal(tab.defaultPrevented, true)
     controller.abort()
     await act(async () => root.unmount())
     await act(async () => release({}))
