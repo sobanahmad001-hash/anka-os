@@ -4,7 +4,7 @@ import test from 'node:test'
 
 import {
   buildContentHandoffPreview, contentHandoffDestinations, contentHandoffReadiness,
-  contentHandoffTargetKey, contentHandoffWorkOptions, isCurrentContentHandoffPreview,
+  contentHandoffTargetKey, contentHandoffWorkOptions, contentHandoffWorkstreams, isCurrentContentHandoffPreview,
 } from './contentHandoffs.js'
 
 const artifact = { id: 'artifact-1', title: 'Launch copy', artifact_type: 'campaign_messaging' }
@@ -40,7 +40,8 @@ test('B07 offers only active existing work in the destination department and con
 
 test('B07 readiness fails closed for stale, mismatched, and inactive destination state', () => {
   assert.deepEqual(contentHandoffReadiness({ organizationId: 'org-1', artifact, version, destination }),
-    { previewReady: true, officialActionAvailable: false, missing: [] })
+    { previewReady: true, officialActionAvailable: false, missing: [],
+      officialMissing: ['approval for the selected exact version', 'active matching recipient workstream'] })
   assert.match(contentHandoffReadiness({ organizationId: 'org-1', artifact, version, destination, stale: true }).missing.join(' '), /fresh authorized/)
   assert.match(contentHandoffReadiness({ organizationId: 'org-1', artifact, version: { ...version, artifact_id: 'other' }, destination }).missing.join(' '), /selected exact/)
   assert.match(contentHandoffReadiness({ organizationId: 'org-1', artifact, version, destination: null }).missing.join(' '), /active Design or Marketing/)
@@ -79,23 +80,42 @@ test('B07 repeated preparation is deterministic and any exact target change inva
   assert.equal(isCurrentContentHandoffPreview(preview, contentHandoffTargetKey({ ...input, stale: true })), false)
 })
 
-test('B07 UI remains a read-only preview with no mutation or substitute-latest route', () => {
+test('C06 UI requires current preview and exact approval before canonical handoff', () => {
   const ui = readFileSync(new URL('../components/ContentHandoffPanel.jsx', import.meta.url), 'utf8')
   assert.match(ui, /Prepare handoff preview/)
   assert.match(ui, /Unapproved collaboration preview/)
-  assert.match(ui, /Confirm handoff unavailable/)
-  assert.match(ui, /disabled/)
-  assert.match(ui, /No handoff, task, work item, service activation, publication, or approval/)
+  assert.match(ui, /Confirm internal N3 handoff/)
+  assert.match(ui, /!currentPreview \|\| !readiness\.officialActionAvailable/)
   assert.match(ui, /approval, source access, or refresh state changed/)
-  assert.doesNotMatch(ui, /supabase|functions\.invoke|repository\.|approveArtifact|latest/i)
+  assert.match(ui, /p_request_id: operation\.current\.id/)
+  assert.doesNotMatch(ui, /functions\.invoke|approveArtifact/i)
   const parent = readFileSync(new URL('../components/ContentLibraryPanel.jsx', import.meta.url), 'utf8')
   assert.match(parent, /stale=\{loading \|\| Boolean\(error\) \|\| stale\}/)
 })
 
-test('B07 repository additions are organization-scoped reads and add no handoff writer', () => {
+test('C06 repository uses organization-scoped reads and one canonical handoff RPC', () => {
   const repository = readFileSync(new URL('./contentStudioRepository.js', import.meta.url), 'utf8')
   assert.match(repository, /from\('engagement_services'\)[\s\S]*eq\('organization_id', organizationId\)[\s\S]*in\('engagement_id', engagementIds\)/)
   assert.match(repository, /from\('tasks'\)[\s\S]*eq\('organization_id', organizationId\)[\s\S]*in\('project_id', projectIds\)/)
   assert.match(repository, /from\('work_items'\)[\s\S]*eq\('organization_id', organizationId\)[\s\S]*in\('engagement_id', engagementIds\)/)
-  assert.doesNotMatch(repository, /confirm_content_handoff|save_content_handoff|create_content_handoff/i)
+  assert.match(repository, /supabase\.rpc\('confirm_content_n3_handoff'/)
+  assert.match(repository, /from\('workstreams'\)[\s\S]*eq\('organization_id', organizationId\)/)
+})
+
+test('C06 official action requires approval, active workstream, and accessible source refs', () => {
+  const workstream = { id: 'ws-design', label: 'Design' }
+  const approval = { id: 'approval-1', artifact_version_id: version.id }
+  const input = { organizationId: 'org-1', artifact, version, approval, destination, workstream,
+    sourceReferences: [{ id: 'source-1', accessible: true }] }
+  assert.equal(contentHandoffReadiness(input).officialActionAvailable, true)
+  assert.equal(contentHandoffReadiness({ ...input, approval: null }).officialActionAvailable, false)
+  assert.equal(contentHandoffReadiness({ ...input, approval: { ...approval, artifact_version_id: 'other' } }).officialActionAvailable, false)
+  assert.equal(contentHandoffReadiness({ ...input, sourceReferences: [{ id: 'source-1', accessible: false }] }).officialActionAvailable, false)
+  assert.equal(contentHandoffReadiness({ ...input, workstream: null }).officialActionAvailable, false)
+  assert.equal(contentHandoffWorkstreams([
+    { id: 'ws-design', project_id: 'project-1', department_id: 'design', status: 'active', name: 'Design' },
+    { id: 'ws-other', project_id: 'project-2', department_id: 'design', status: 'active', name: 'Other' },
+  ], destination, 'project-1')[0].id, 'ws-design')
+  const preview = buildContentHandoffPreview(input)
+  assert.equal(isCurrentContentHandoffPreview(preview, contentHandoffTargetKey({ ...input, workstream: { id: 'different' } })), false)
 })

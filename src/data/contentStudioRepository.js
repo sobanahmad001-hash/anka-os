@@ -102,7 +102,7 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
       .order('created_at', { ascending: false }), options)
     if (!artifacts.length) return {
       artifacts: [], versions: [], approvals: [], approvalRequests: [], comments: [], profiles: [], sourceVersions: [],
-      downstreamServices: [], downstreamTasks: [], downstreamWorkItems: [],
+      downstreamServices: [], downstreamWorkstreams: [], downstreamTasks: [], downstreamWorkItems: [],
     }
     const artifactIds = artifacts.map(item => item.id)
     const engagementIds = [...new Set(artifacts.map(item => item.engagement_id).filter(Boolean))]
@@ -110,7 +110,7 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
       const engagement = Array.isArray(item.engagements) ? item.engagements[0] : item.engagements
       return engagement?.project_id
     }).filter(Boolean))]
-    const [versions, approvals, downstreamServices, downstreamTasks, downstreamWorkItems] = await Promise.all([
+    const [versions, approvals, downstreamServices, downstreamWorkstreams, downstreamTasks, downstreamWorkItems] = await Promise.all([
       dataOrThrow(supabase.from('artifact_versions').select('*').eq('organization_id', organizationId)
         .in('artifact_id', artifactIds).order('version_number', { ascending: false }), options),
       dataOrThrow(supabase.from('artifact_approvals').select('*').eq('organization_id', organizationId)
@@ -119,6 +119,10 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
         .select('id, organization_id, engagement_id, status, service_catalog!inner(id, name, department_id, is_active)')
         .eq('organization_id', organizationId).in('engagement_id', engagementIds).eq('status', 'active')
         .in('service_catalog.department_id', ['design', 'marketing']).eq('service_catalog.is_active', true), options) : [],
+      projectIds.length ? dataOrThrow(supabase.from('workstreams')
+        .select('id, organization_id, project_id, department_id, name, status')
+        .eq('organization_id', organizationId).in('project_id', projectIds)
+        .in('department_id', ['design', 'marketing']).eq('status', 'active').order('name'), options) : [],
       projectIds.length ? dataOrThrow(supabase.from('tasks')
         .select('id, organization_id, project_id, department_id, title, status, archived_at')
         .eq('organization_id', organizationId).in('project_id', projectIds)
@@ -128,7 +132,9 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
         .eq('organization_id', organizationId).in('engagement_id', engagementIds)
         .in('department_id', ['design', 'marketing']).is('deleted_at', null).order('updated_at', { ascending: false }), options) : [],
     ])
-    const downstreamScopeMismatch = downstreamServices.some(item => item.organization_id !== organizationId
+    const downstreamScopeMismatch = downstreamWorkstreams.some(item => item.organization_id !== organizationId
+        || !projectIds.includes(item.project_id))
+      || downstreamServices.some(item => item.organization_id !== organizationId
         || !engagementIds.includes(item.engagement_id))
       || downstreamTasks.some(item => item.organization_id !== organizationId || !projectIds.includes(item.project_id))
       || downstreamWorkItems.some(item => item.organization_id !== organizationId || !engagementIds.includes(item.engagement_id))
@@ -153,9 +159,16 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
       .select('id, organization_id, artifact_id, version_number, created_at, artifacts!inner(id, title, artifact_type, engagement_id)')
       .eq('organization_id', organizationId).in('id', sourceVersionIds), options) : []
     return { artifacts, versions, approvals, approvalRequests, comments, profiles, sourceVersions,
-      downstreamServices, downstreamTasks, downstreamWorkItems }
+      downstreamServices, downstreamWorkstreams, downstreamTasks, downstreamWorkItems }
   },
 
+  confirmContentHandoff: async input => {
+    const { data, error } = await supabase.rpc('confirm_content_n3_handoff', {
+      p_organization_id: organizationId, ...input,
+    })
+    if (error) throw Object.assign(new Error(error.message || 'Content handoff failed'), { status: error.status || error.code })
+    return data
+  },
   saveArtifact: input => invoke(organizationId, 'content-studio', 'save_artifact', input, options),
   copyContentWriterVersion: input => invoke(organizationId, 'content-studio', 'copy_content_writer_version', input, options),
   saveBrandBrief: input => invoke(organizationId, 'content-studio', 'save_brand_brief', input, options),

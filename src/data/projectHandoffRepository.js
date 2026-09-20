@@ -11,7 +11,7 @@ export function createProjectHandoffRepository(client) {
   return {
     async list(organizationId, projectId, { signal } = {}) {
       if (!validId(organizationId) || !validId(projectId)) throw new TypeError('Valid project required')
-      let query = client.from('requests').select('id,organization_id,project_id,requesting_workstream_id,receiving_workstream_id,title,requested_output,acceptance_criteria,priority,status,requested_by,required_by,source_project_comment_id,created_at')
+      let query = client.from('requests').select('id,organization_id,project_id,requesting_workstream_id,receiving_workstream_id,title,requested_output,acceptance_criteria,priority,status,requested_by,required_by,source_project_comment_id,created_at,content_n3_handoff_links(artifact_id,artifact_version_id,content_checksum,approval_id,receiving_service_id,work_kind,work_id)')
         .eq('organization_id', organizationId).eq('project_id', projectId)
         .eq('request_type', 'internal_handoff').eq('request_origin', 'team').eq('visibility', 'internal_only')
         .is('archived_at', null).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(100)
