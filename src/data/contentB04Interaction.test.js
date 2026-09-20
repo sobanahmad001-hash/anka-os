@@ -35,7 +35,14 @@ class TestNode {
 }
 
 class TestElement extends TestNode {
-  constructor(tagName, ownerDocument, namespaceURI = 'http://www.w3.org/1999/xhtml') { super(1, tagName.toUpperCase(), ownerDocument); this.tagName = this.nodeName; this.namespaceURI = namespaceURI; this.attributes = new Map(); this.style = { setProperty(name, value) { this[name] = value }, removeProperty(name) { delete this[name] } }; this._value = ''; this.checked = false; this.selected = false; this.disabled = false }
+  constructor(tagName, ownerDocument, namespaceURI = 'http://www.w3.org/1999/xhtml') { super(1, tagName.toUpperCase(), ownerDocument); this.tagName = this.nodeName; this.namespaceURI = namespaceURI; this.attributes = new Map(); this.style = { setProperty(name, value) { this[name] = value }, removeProperty(name) { delete this[name] } }; this._value = ''; this.checked = false; this._selected = false; this.disabled = false }
+  get selected() { return this._selected }
+  set selected(value) {
+    this._selected = Boolean(value)
+    if (this._selected && this.parentNode?.tagName === 'SELECT') {
+      for (const option of this.parentNode.options) if (option !== this) option._selected = false
+    }
+  }
   get options() { return this.tagName === 'SELECT' ? this.childNodes.filter(node => node.tagName === 'OPTION') : undefined }
   get value() { return this.tagName === 'SELECT' ? this.options.find(option => option.selected)?.value ?? this._value : this._value }
   set value(value) { this._value = String(value); if (this.tagName === 'SELECT') for (const option of this.options) option.selected = option.value === this._value }
@@ -633,4 +640,68 @@ test('mounted B06b comparison uses distinct exact versions and resets on artifac
   assert.match(environment.container.textContent, /B OLD/)
   assert.match(environment.container.textContent, /B NEW/)
   assert.doesNotMatch(environment.container.textContent, /OLD EXACT TEXT|NEW EXACT TEXT|last successfully authorized/)
+})
+
+test('mounted C01 writer keeps dirty edits through cancelled switches and a pending save', async t => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  t.after(() => vite.close())
+  const { default: ContentWriterEditor } = await vite.ssrLoadModule('/src/components/ContentWriterEditor.jsx')
+  const environment = mountedEnvironment()
+  const previous = {
+    document: globalThis.document, window: globalThis.window, Event: globalThis.Event,
+    Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT,
+    confirm: globalThis.confirm,
+  }
+  Object.assign(globalThis, {
+    document: environment.document, window: environment.window, Event: TestEvent, Node: TestNode,
+    HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true,
+  })
+  t.after(() => Object.assign(globalThis, previous))
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+  const content = {
+    schema_version: 2, output_type: 'blog_article', working_title: 'Saved article',
+    source_architecture_version_id: null, target_page_key: null, target_page_path: null,
+    destination: 'Launch blog', objective: 'Explain service', audience: 'Project leads',
+    language: 'English', tone: null, body: 'Original saved body', cta: null,
+    exclusions: [], variant_number: 1, quality_requirements: null, source_citations: [],
+  }
+  let finishSave
+  let submitted
+  const workspace = {
+    engagement: { id: 'engagement-a' },
+    artifacts: [{ id: 'writer-a', artifact_type: 'content', title: 'Saved article' }],
+    versions: [{ id: 'writer-v1', artifact_id: 'writer-a', version_number: 1, content }],
+    approvals: [],
+  }
+  const render = () => act(async () => root.render(createElement(ContentWriterEditor, {
+    workspace, studio: { saveArtifact(input) {
+      submitted = input
+      return new Promise(resolve => { finishSave = resolve })
+    } }, saving: false, act: callback => callback(), stageId: null, defaultLanguage: 'English',
+    onRefresh() {},
+  })))
+  const clickButton = text => act(async () => byText(environment.container, 'button', text).dispatchEvent(new TestEvent('click')))
+  const field = (name, tag) => elements(byText(environment.container, 'label', name), tag)[0]
+
+  await render()
+  await clickButton('Continue from exact v1')
+  assert.equal(field('Output type', 'select').value, 'blog_article')
+  await setValue(field('Output type', 'select'), 'custom_text')
+  globalThis.confirm = message => !message.startsWith('Discard')
+  await clickButton('Start a new draft instead')
+  assert.equal(field('Output type', 'select').value, 'custom_text')
+  await clickButton('Continue from exact v1')
+  assert.equal(field('Output type', 'select').value, 'custom_text')
+
+  globalThis.confirm = () => true
+  await clickButton('Continue from exact v1')
+  await act(async () => elements(environment.container, 'form')[0].dispatchEvent(new TestEvent('submit')))
+  await clickButton('Confirm unapproved draft')
+  assert.equal(submitted.artifact_id, 'writer-a')
+  assert.equal(submitted.expected_parent_version_id, 'writer-v1')
+  await setValue(field('Output type', 'select'), 'custom_text')
+  await act(async () => finishSave({ artifact_id: 'writer-a' }))
+  assert.equal(field('Output type', 'select').value, 'custom_text')
+  assert.match(environment.container.textContent, /Continuing exact version 1/)
 })

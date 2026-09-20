@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 import {
   CONTENT_WRITER_OUTPUT_TYPES,
@@ -30,6 +30,8 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
   const [checkReport, setCheckReport] = useState(null)
   const [qualityAttempted, setQualityAttempted] = useState(false)
   const [continuation, setContinuation] = useState(null)
+  const [dirty, setDirty] = useState(false)
+  const draftRevision = useRef(0)
   const versions = useMemo(() => architectureVersions(workspace), [workspace])
   const selectedVersion = versions.find(version => version.id === form.source_architecture_version_id)
   const issues = contentWriterIssues(form, versions)
@@ -39,7 +41,10 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
   const counts = contentCounts(form.body)
   const currentOutput = continuation && outputs.find(item => item.artifact.id === continuation.artifactId)
   const staleContinuation = continuation && currentOutput?.latest.id !== continuation.baseVersionId
-  function resetDraft() {
+  function resetDraft(force = false) {
+    if (!force && dirty && !globalThis.confirm('Discard unsaved writer edits and start a new draft?')) return
+    draftRevision.current += 1
+    setDirty(false)
     setContinuation(null)
     setForm(newContentWriterDraft({ language: defaultLanguage }))
     setPreview(null)
@@ -48,6 +53,9 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
     setQualityAttempted(false)
   }
   function continueOutput(artifact, latest) {
+    if (dirty && !globalThis.confirm('Discard unsaved writer edits and open this saved version?')) return
+    draftRevision.current += 1
+    setDirty(false)
     setContinuation({ artifactId: artifact.id, baseVersionId: latest.id, versionNumber: latest.version_number })
     setForm(contentWriterFormFromVersion(latest))
     setPreview(null)
@@ -57,6 +65,8 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
   }
 
   function setField(key, value) {
+    draftRevision.current += 1
+    setDirty(true)
     setPreview(null)
     setCheckReport(null)
     setQualityAttempted(false)
@@ -64,6 +74,8 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
   }
 
   function selectOutputType(value) {
+    draftRevision.current += 1
+    setDirty(true)
     setPreview(null)
     setCheckReport(null)
     setQualityAttempted(false)
@@ -98,6 +110,7 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
       return
     }
     if (!globalThis.confirm(`Confirm: ${continuation ? 'append one new unapproved immutable version' : 'create one unapproved immutable draft'} for ${current.destinationLabel}.`)) return
+    const submittedRevision = draftRevision.current
     const result = await act(() => studio.saveArtifact({
       engagement_id: workspace.engagement.id,
       engagement_stage_instance_id: stageId || null,
@@ -110,9 +123,7 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
       data_classification: 'internal',
       ai_use_allowed: false,
     }), 'Writer output saved as one unapproved immutable version. Earlier versions and approvals remain intact.')
-    if (result) {
-      resetDraft()
-    }
+    if (result && draftRevision.current === submittedRevision) resetDraft(true)
   }
 
   const error = key => attempted && issues[key]
@@ -125,14 +136,14 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
       {stale && <p role="alert" className="mt-4 text-sm text-amber-300">The saved output list could not be refreshed. Retry before saving a new version.</p>}
       {continuation && <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-950/20 p-4 text-sm text-amber-100">Continuing exact version {continuation.versionNumber}. Saving appends a new unapproved version; the earlier version and its approval remain unchanged.
         {staleContinuation && <p role="alert" className="mt-2 text-red-300">A newer version is available. Reopen the latest output before previewing or saving.</p>}
-        <button type="button" className="mt-3 block text-xs font-semibold underline" onClick={resetDraft}>Start a new draft instead</button>
+        <button type="button" className="mt-3 block text-xs font-semibold underline" onClick={() => resetDraft()}>Start a new draft instead</button>
       </div>}
       {attempted && Object.keys(issues).length > 0 && <div role="alert" className="mt-5 rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">Resolve the labelled fields before previewing this draft.</div>}
       <div className="mt-6 space-y-5">
         <Field label="Output type" error={error('output_type')}><select className={INPUT} value={form.output_type} onChange={event => selectOutputType(event.target.value)}>{CONTENT_WRITER_OUTPUT_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
         <Field label="Working title" error={error('working_title')}><input className={INPUT} maxLength="160" value={form.working_title} onChange={event => setField('working_title', event.target.value)} /></Field>
         {form.output_type === 'website_page_copy' ? <>
-          <Field label="Exact Website Architecture version" error={error('source_architecture_version_id')}><select className={INPUT} value={form.source_architecture_version_id} onChange={event => { setPreview(null); setCheckReport(null); setQualityAttempted(false); setForm(current => ({ ...current, source_architecture_version_id: event.target.value, target_page_key: '' })) }}><option value="">Choose exact version</option>{versions.map(version => <option key={version.id} value={version.id}>Version {version.version_number} · {version.id}</option>)}</select></Field>
+          <Field label="Exact Website Architecture version" error={error('source_architecture_version_id')}><select className={INPUT} value={form.source_architecture_version_id} onChange={event => { draftRevision.current += 1; setDirty(true); setPreview(null); setCheckReport(null); setQualityAttempted(false); setForm(current => ({ ...current, source_architecture_version_id: event.target.value, target_page_key: '' })) }}><option value="">Choose exact version</option>{versions.map(version => <option key={version.id} value={version.id}>Version {version.version_number} · {version.id}</option>)}</select></Field>
           <Field label="Target page" error={error('target_page_key')}><select className={INPUT} value={form.target_page_key} onChange={event => setField('target_page_key', event.target.value)}><option value="">Choose a page</option>{architecturePages(selectedVersion).map(page => <option key={page.page_key} value={page.page_key}>{page.title} · {page.slug}</option>)}</select></Field>
         </> : <Field label={writerDestinationLabel(form.output_type)} error={error('destination')}><input className={INPUT} value={form.destination} onChange={event => setField('destination', event.target.value)} /></Field>}
         <Field label="Objective" error={error('objective')}><textarea rows="3" className={INPUT} value={form.objective} onChange={event => setField('objective', event.target.value)} /></Field>
