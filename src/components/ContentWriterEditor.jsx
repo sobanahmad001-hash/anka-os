@@ -34,6 +34,9 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
   const [dirty, setDirty] = useState(false)
   const [rewrite, setRewrite] = useState(null)
   const [rewriteError, setRewriteError] = useState('')
+  const [copyPreview, setCopyPreview] = useState(null)
+  const [copiedResult, setCopiedResult] = useState(null)
+  const copyBusy = useRef(false)
   const bodyRef = useRef(null)
   const draftRevision = useRef(0)
   const versions = useMemo(() => architectureVersions(workspace), [workspace])
@@ -45,6 +48,10 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
   const counts = contentCounts(form.body)
   const currentOutput = continuation && outputs.find(item => item.artifact.id === continuation.artifactId)
   const staleContinuation = continuation && currentOutput?.latest.id !== continuation.baseVersionId
+  const copySourceCurrent = copyPreview && outputs.some(({ artifact, latest }) =>
+    artifact.id === copyPreview.artifactId && latest.id === copyPreview.sourceVersionId
+    && latest.content_checksum === copyPreview.sourceChecksum
+    && approvedVersionIds.has(latest.id) === copyPreview.sourceApproved)
   function resetDraft(force = false) {
     if (!force && dirty && !globalThis.confirm('Discard unsaved writer edits and start a new draft?')) return
     draftRevision.current += 1
@@ -70,6 +77,30 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
     setAttempted(false)
     setCheckReport(null)
     setQualityAttempted(false)
+  }
+
+  function previewCopy(artifact, version) {
+    setCopyPreview({ artifactId: artifact.id, sourceVersionId: version.id,
+      sourceChecksum: version.content_checksum, sourceApproved: approvedVersionIds.has(version.id),
+      title: version.content.working_title || artifact.title,
+      versionNumber: version.version_number, outputType: version.content.output_type,
+      operationKey: crypto.randomUUID() })
+  }
+
+  async function confirmCopy() {
+    if (!copyPreview || !copySourceCurrent || saving || stale || copyBusy.current) return
+    copyBusy.current = true
+    try {
+      const result = await act(() => studio.copyContentWriterVersion({
+        engagement_id: workspace.engagement.id,
+        source_artifact_version_id: copyPreview.sourceVersionId,
+        source_checksum: copyPreview.sourceChecksum,
+        operation_key: copyPreview.operationKey,
+      }), result => result?.replayed
+        ? 'The prior copy was found; no second draft was created.'
+        : 'One new unapproved writer output was copied from the exact source version.')
+      if (result) { setCopiedResult(result); setCopyPreview(null) }
+    } finally { copyBusy.current = false }
   }
 
   function setField(key, value) {
@@ -152,7 +183,7 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
       title: current.content.working_title,
       content: current.content,
       change_summary: continuation ? `Continued from exact version ${continuation.versionNumber} in the manual Content writer` : 'Created from the manual Content writer preview',
-      data_classification: 'internal',
+      data_classification: continuation ? currentOutput?.latest.data_classification || 'internal' : 'internal',
       ai_use_allowed: false,
     }), 'Writer output saved as one unapproved immutable version. Earlier versions and approvals remain intact.')
     if (result && draftRevision.current === submittedRevision) resetDraft(true)
@@ -220,7 +251,30 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
         <div className="mt-5 max-h-80 overflow-y-auto whitespace-pre-wrap rounded-xl border border-slate-800 bg-slate-950/70 p-4 text-sm leading-6 text-slate-200">{preview.content.body}</div>
         <button type="button" disabled={saving || stale || staleContinuation} onClick={confirmDraft} className={`${PRIMARY} mt-5 w-full`}>{saving ? 'Savingâ€¦' : 'Confirm unapproved draft'}</button>
       </article> : <div className="rounded-2xl border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500">Complete the required fields to preview the exact output and destination before anything is saved.</div>}
-      <article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="flex items-center justify-between gap-3"><h3 className="font-semibold">Saved writer outputs</h3><button type="button" className={SECONDARY} disabled={refreshing || saving} onClick={onRefresh}>{refreshing ? "Refreshingâ€¦" : "Refresh outputs"}</button></div><p className="mt-1 text-xs text-slate-500">These schema-v2 outputs remain visible here without replacing legacy page-content tracking.</p>{outputs.length ? <div className="mt-4 space-y-3">{outputs.map(({ artifact, latest }) => { const approved = approvedVersionIds.has(latest.id); return <div key={artifact.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3"><div className="flex justify-between gap-3"><p className="text-sm font-semibold text-white">{latest.content.working_title || artifact.title}</p><span className={`text-xs ${approved ? 'text-emerald-300' : 'text-amber-300'}`}>{approved ? 'Approved' : 'Unapproved'} v{latest.version_number}</span></div><p className="mt-1 text-xs text-slate-500">{latest.content.output_type.replaceAll('_', ' ')} Â· {latest.content.language}</p><button type="button" disabled={saving} onClick={() => continueOutput(artifact, latest)} className="mt-3 text-xs font-semibold text-amber-300 underline">Continue from exact v{latest.version_number}</button></div> })}</div> : <p className="mt-4 text-sm text-slate-500">No writer outputs saved yet.</p>}</article>
+      <article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+        <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">Saved writer outputs</h3><button type="button" className={SECONDARY} disabled={refreshing || saving} onClick={onRefresh}>{refreshing ? 'Refreshing…' : 'Refresh outputs'}</button></div>
+        <p className="mt-1 text-xs text-slate-500">Exact writer versions stay visible here without replacing legacy page-content tracking. Copy makes a new unapproved root; it never transfers approval or review comments.</p>
+        {copiedResult && <div className="mt-4 rounded-xl border border-emerald-700/50 bg-emerald-950/20 p-4 text-sm text-emerald-100"><p>The new unapproved copy is saved as its own writer output.</p><button type="button" className="mt-2 text-xs font-semibold underline disabled:opacity-50" disabled={saving || stale || !outputs.some(item => item.artifact.id === copiedResult.artifact_id && item.latest.id === copiedResult.version_id)} onClick={() => { const item = outputs.find(item => item.artifact.id === copiedResult.artifact_id && item.latest.id === copiedResult.version_id); if (item) continueOutput(item.artifact, item.latest) }}>Open copied draft in writer</button></div>}
+        {copyPreview && <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-950/20 p-4 text-sm text-amber-100">
+          <p className="font-semibold">Copy preview · {copyPreview.title}</p>
+          <p className="mt-2">Source: exact v{copyPreview.versionNumber} · {copyPreview.sourceVersionId}</p>
+          <p className="mt-1">Type: {copyPreview.outputType.replaceAll('_', ' ')}. Destination: a new unapproved Content writer output in this engagement. The source, its approval, and its comments remain unchanged.</p>
+          {!copySourceCurrent && <p role="alert" className="mt-2 text-red-300">Source version or approval state changed. Refresh and preview again.</p>}
+          <div className="mt-3 flex flex-wrap gap-2"><button type="button" className={SECONDARY} onClick={() => setCopyPreview(null)}>Cancel copy</button><button type="button" className={PRIMARY} disabled={saving || stale || !copySourceCurrent} onClick={confirmCopy}>Confirm new unapproved copy</button></div>
+        </div>}
+        {outputs.length ? <div className="mt-4 space-y-3">{outputs.map(({ artifact, latest }) => {
+          const approved = approvedVersionIds.has(latest.id)
+          const first = (workspace.versions || []).find(version => version.artifact_id === artifact.id && version.version_number === 1)
+          const copy = (workspace.copyRoots || []).find(item => item.copied_version_id === first?.id)
+          const source = copy && (workspace.versions || []).find(version => version.id === copy.source_version_id)
+          return <div key={artifact.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+            <div className="flex justify-between gap-3"><p className="text-sm font-semibold text-white">{latest.content.working_title || artifact.title}</p><span className={`text-xs ${approved ? 'text-emerald-300' : 'text-amber-300'}`}>{approved ? 'Approved' : 'Unapproved'} v{latest.version_number}</span></div>
+            <p className="mt-1 text-xs text-slate-500">{latest.content.output_type.replaceAll('_', ' ')} · {latest.content.language}</p>
+            {copy && <p className="mt-1 text-xs text-slate-400">Copied from exact {source ? `v${source.version_number}` : 'version'} · {copy.source_version_id}</p>}
+            <div className="mt-3 flex flex-wrap gap-4"><button type="button" disabled={saving} onClick={() => continueOutput(artifact, latest)} className="text-xs font-semibold text-amber-300 underline">Continue from exact v{latest.version_number}</button><button type="button" disabled={saving || stale} onClick={() => previewCopy(artifact, latest)} className="text-xs font-semibold text-amber-300 underline">Copy exact v{latest.version_number} into new draft</button></div>
+          </div>
+        })}</div> : <p className="mt-4 text-sm text-slate-500">No writer outputs saved yet.</p>}
+      </article>
     </section>
   </div>
 }

@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.14'
-import { blockedContentGenerationInput, brandBriefInput, compiledBrandStatement, contentStudioScope, customFieldDefinitionInput, handleRequest, hasContentAuthority, requireBrandBriefMutationToken,
+import { blockedContentGenerationInput, copyContentWriterVersionInput, brandBriefInput, compiledBrandStatement, contentStudioScope, customFieldDefinitionInput, handleRequest, hasContentAuthority, requireBrandBriefMutationToken,
   figmaHandoffUrl, validateContentRequestInput, validateQueueEntryInput } from './index.ts'
 
 import { assertWebsitePageIdentityTransition, CHAT_CONTENT_ARTIFACT_TYPE_SET, CONTENT_ARTIFACT_TYPES, contentArtifactResponseFormat, createContentArtifactVersion, MAX_KEYWORD_RECORDS, validateContentArtifact, withGeneratedSourceMetadata } from '../_shared/contentArtifacts.ts'
@@ -75,6 +75,7 @@ Deno.test('B02 mutable brief updates require the exact prior updated_at', () => 
 
 Deno.test('Content authority keeps exact-version approval manager-controlled', () => {
   assertEquals(hasContentAuthority({ role: 'contributor', department_id: 'content' }, 'save_artifact'), true)
+  assertEquals(hasContentAuthority({ member_kind: 'client', role: 'client_viewer', department_id: 'content' }, 'copy_content_writer_version'), false)
   assertEquals(hasContentAuthority({ role: 'contributor', department_id: 'content' }, 'approve_artifact'), false)
   assertEquals(hasContentAuthority({ role: 'department_manager', department_id: 'content' }, 'approve_artifact'), true)
   assertEquals(hasContentAuthority({ role: 'executive', department_id: null }, 'approve_artifact'), true)
@@ -1063,4 +1064,15 @@ Deno.test('C04 disabled generation requires bounded explicit inputs and exact re
   assertEquals(blockedContentGenerationInput({ ...request, request_kind: 'rewrite',
     input_snapshot: { ...snapshot, selected_text: 'Before', selection_start: 0, selection_end: 6 } })
     .snapshot.selected_text, 'Before')
+})
+Deno.test('C05 copy action binds exact engagement, version, checksum and operation identity', () => {
+  const id = '11111111-1111-4111-8111-111111111111'
+  const input = { action: 'copy_content_writer_version', engagement_id: id,
+    source_artifact_version_id: id, source_checksum: 'a'.repeat(64), operation_key: id }
+  assertEquals(copyContentWriterVersionInput(input).sourceChecksum, 'a'.repeat(64))
+  assertEquals(contentStudioScope(input).root, { kind: 'engagement', id })
+  assertThrows(() => copyContentWriterVersionInput({ ...input, source_checksum: '' }),
+    Error, 'exact engagement')
+  assertThrows(() => copyContentWriterVersionInput({ ...input, operation_key: 'retry' }),
+    Error, 'exact engagement')
 })
