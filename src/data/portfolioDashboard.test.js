@@ -6,6 +6,7 @@ import {
   buildPortfolioDashboard,
   filterAndSortPortfolioRows,
 } from './portfolioDashboard.js'
+import { createOperatingSpineRepository } from './operatingSpineRepository.js'
 
 const repository = readFileSync(new URL('./operatingSpineRepository.js', import.meta.url), 'utf8')
 const portfolioRepository = repository.slice(repository.indexOf('async getPortfolioSnapshot(organizationId'), repository.indexOf('async getEngagement('))
@@ -106,5 +107,52 @@ test('W7 uses W5 automation_flagged_at as the sole unacknowledged definition and
   assert.match(repository, /automation_flagged_at/)
   assert.match(model, /Boolean\(item\.automation_flagged_at\)/)
   assert.doesNotMatch(`${portfolioRepository}\n${model}`, /localStorage|sessionStorage|materialized|rollup_count/i)
-  assert.match(component, /Live read · no cached metrics/)
+  assert.match(component, /Read-only rows/)
+})
+
+test('N4 attention includes overdue targets and excludes cancelled engagements', () => {
+  const rows = [
+    { id: 'overdue', organization_id: 'org-a', status: 'active', target_date: '2026-09-01' },
+    { id: 'cancelled', organization_id: 'org-a', status: 'cancelled', target_date: '2026-09-01' },
+  ]
+  const dashboard = buildPortfolioDashboard({ engagements: rows }, new Date('2026-09-20T00:00:00Z'))
+  assert.equal(dashboard.rows[0].risks.targetDate, true)
+  assert.equal(dashboard.rows[1].risks.targetDate, false)
+  assert.match(component, /Target overdue/)
+  assert.match(component, /snapshot\.refreshedAt/)
+})
+
+test('N4 portfolio loads every page before reporting counts', async () => {
+  const source = {
+    engagements: Array.from({ length: 501 }, (_, index) => ({
+      id: `eng-${index}`, organization_id: 'org-a', name: `Engagement ${index}`,
+    })),
+    work_items: Array.from({ length: 501 }, (_, index) => ({
+      id: `work-${index}`, organization_id: 'org-a', engagement_id: 'eng-0', status: 'blocked',
+    })),
+    engagement_stage_instances: [],
+  }
+  const ranges = []
+  const client = {
+    rpc() {},
+    from(table) {
+      const query = {
+        select() { return this },
+        eq() { return this },
+        is() { return this },
+        order() { return this },
+        range(start, end) {
+          ranges.push([table, start, end])
+          return Promise.resolve({ data: source[table].slice(start, end + 1), error: null })
+        },
+      }
+      return query
+    },
+  }
+  const snapshot = await createOperatingSpineRepository(client).getPortfolioSnapshot('org-a')
+  assert.equal(snapshot.engagements.length, 501)
+  assert.equal(snapshot.workItems.length, 501)
+  assert.equal(buildPortfolioDashboard(snapshot).rows[0].blockedWorkItems, 501)
+  assert.deepEqual(ranges.filter(([table]) => table === 'work_items').map(([, start]) => start), [0, 500])
+  assert.ok(!Number.isNaN(Date.parse(snapshot.refreshedAt)))
 })

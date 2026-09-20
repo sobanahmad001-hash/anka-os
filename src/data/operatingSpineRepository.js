@@ -39,6 +39,16 @@ async function dataOrThrow(query, signal) {
   return data
 }
 
+async function allPages(buildQuery, signal) {
+  const pageSize = 500
+  const rows = []
+  for (let start = 0; ; start += pageSize) {
+    const page = await dataOrThrow(buildQuery().range(start, start + pageSize - 1), signal)
+    rows.push(...(page || []))
+    if (!page || page.length < pageSize) return rows
+  }
+}
+
 export function createOperatingSpineRepository(client) {
   if (!client?.from || !client?.rpc) {
     throw new TypeError('A Supabase-compatible client is required')
@@ -210,25 +220,24 @@ export function createOperatingSpineRepository(client) {
     async getPortfolioSnapshot(organizationId, { signal } = {}) {
       required(organizationId, 'organizationId')
       const queries = [
-        client.from('engagements')
+        () => client.from('engagements')
           .select('id, organization_id, client_id, brand_id, name, engagement_type, status, lead_owner_id, start_date, target_date, agency_clients(name), brands(name)')
           .eq('organization_id', organizationId)
           .order('target_date', { ascending: true, nullsFirst: false })
-          .order('name'),
-        client.from('work_items')
+          .order('name').order('id'),
+        () => client.from('work_items')
           .select('id, organization_id, engagement_id, status, automation_flagged_at, deleted_at')
           .eq('organization_id', organizationId)
-          .is('deleted_at', null),
-        client.from('engagement_stage_instances')
+          .is('deleted_at', null).order('id'),
+        () => client.from('engagement_stage_instances')
           .select('id, organization_id, engagement_id, status')
-          .eq('organization_id', organizationId),
+          .eq('organization_id', organizationId).order('id'),
       ]
       const [engagements, workItems, stages] = await Promise.all(
-        queries.map(query => dataOrThrow(query, signal))
+        queries.map(query => allPages(query, signal))
       )
-      return { engagements, workItems, stages }
+      return { engagements, workItems, stages, refreshedAt: new Date().toISOString() }
     },
-
     async getEngagement(engagementId, organizationId, { signal } = {}) {
       required(engagementId, 'engagementId')
       required(organizationId, 'organizationId')
