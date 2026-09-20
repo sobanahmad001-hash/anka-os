@@ -497,7 +497,7 @@ export async function approvedSourceVersions(
   if (selectedIds && !selectedIds.length) return []
   const profile = departmentChatProfile(departmentId)
   let query = reader.from('artifact_approvals')
-    .select(`artifact_id, artifact_version_id, approved_at, artifacts!inner(artifact_type, title, engagement_id), artifact_versions!inner(id, version_number, ${selectedIds ? 'content, ' : ''}ai_use_allowed, data_classification)`)
+    .select(`artifact_id, artifact_version_id, approved_at, artifacts!inner(artifact_type, title, engagement_id), artifact_versions!inner(id, version_number, ${selectedIds ? 'content, ' : ''}ai_use_allowed, data_classification)`, selectedIds ? undefined : { count: 'exact' })
     .eq('engagement_id', engagementId).eq('artifacts.engagement_id', engagementId)
     .eq('organization_id', organizationId)
     .in('artifacts.artifact_type', profile.contextArtifactTypes)
@@ -506,7 +506,7 @@ export async function approvedSourceVersions(
     query = query.in('artifact_version_id', selectedIds)
   }
   if (!selectedIds) query = query.limit(501)
-  const { data, error } = await query.order('approved_at', { ascending: false }).order('artifact_version_id')
+  const { data, error, count } = await query.order('approved_at', { ascending: false }).order('artifact_version_id')
   if (error) throw error
   const found = (data || []).map(sourceVersionDetails).filter(Boolean) as Json[]
   if (selectedIds) {
@@ -522,8 +522,8 @@ export async function approvedSourceVersions(
     }
     return selected
   }
-  if (found.length > 500) {
-    throw Object.assign(new Error('More than 500 permitted source versions exist. Narrow this engagement before selection; none were silently omitted.'), { status: 413 })
+  if (count === null || count > 500 || found.length !== count) {
+    throw Object.assign(new Error('The permitted source catalog exceeds 500 versions or was incomplete. Refresh after narrowing this engagement; none were silently omitted.'), { status: 413 })
   }
   return found
 }

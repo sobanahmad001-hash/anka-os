@@ -130,6 +130,33 @@ test('P9B previews an exact permitted version before including it and clears sel
   assert.match(container.textContent, /0 of 5 exact versions selected/)
 })
 
+test('P9B denied or late exact preview cannot enter a new scope', async t => {
+  const { container, ScopedDepartmentChat } = await setup(t)
+  const id = '11111111-1111-4111-8111-111111111111'
+  const repo = repository([])
+  repo.listSourceVersions = async () => [{ artifact_version_id: id, title: 'Private vision', artifact_type: 'vision', version_number: 1, approved_at: '2026-09-01T00:00:00Z' }]
+  const pending = []
+  repo.previewSourceVersion = () => new Promise((resolve, reject) => pending.push({ resolve, reject }))
+  globalThis.__departmentChatTestRepository = repo
+  const root = createRoot(container)
+  t.after(() => { try { root.unmount() } catch {} })
+  await act(async () => root.render(createElement(ScopedDepartmentChat, { ...props('a', new AbortController().signal), key: 'a' })))
+  await flush()
+  await act(async () => byText(container, 'button', 'Preview exact version').dispatchEvent(new E('click')))
+  await act(async () => pending[0].reject(new Error('Source permission revoked')))
+  await flush()
+  assert.match(container.textContent, /Source permission revoked/)
+  assert.equal(byText(container, 'button', 'Include this exact version'), undefined)
+  await act(async () => byText(container, 'button', 'Preview exact version').dispatchEvent(new E('click')))
+  await act(async () => root.render(createElement(ScopedDepartmentChat, { ...props('b', new AbortController().signal), key: 'b' })))
+  await flush()
+  await act(async () => pending[1].resolve({ artifact_version_id: id, title: 'Private vision',
+    artifact_type: 'vision', version_number: 1, content: { body: 'LATE_SECRET_PREVIEW' } }))
+  await flush()
+  assert.equal(count(container, 'LATE_SECRET_PREVIEW'), 0)
+  assert.equal(byText(container, 'button', 'Include this exact version'), undefined)
+})
+
 for (const outcome of ['success', 'failure']) test('attachment ' + outcome + ' keeps the original conversation while upload is in flight', async t => {
   const { container, ScopedDepartmentChat } = await setup(t)
   const repo = repository([])

@@ -44,14 +44,15 @@ Deno.test('P9B requires distinct exact version identities and rejects implicit o
 Deno.test('P9B source catalog omits content and exact selection rechecks every approved identity', async () => {
   const id = '11111111-1111-4111-8111-111111111111'
   const missing = '22222222-2222-4222-8222-222222222222'
-  const calls: Array<{ select?: string, filters: Array<[string, unknown]>, limit?: number }> = []
+  const calls: Array<{ select?: string, count?: string, filters: Array<[string, unknown]>, limit?: number }> = []
+  let catalogCount = 1
   const reader = {
     from(table: string) {
       assertEquals(table, 'artifact_approvals')
-      const call: { select?: string, filters: Array<[string, unknown]>, limit?: number } = { filters: [] }
+      const call: { select?: string, count?: string, filters: Array<[string, unknown]>, limit?: number } = { filters: [] }
       calls.push(call)
       const query: any = {
-        select(value: string) { call.select = value; return query },
+        select(value: string, options?: { count?: string }) { call.select = value; call.count = options?.count; return query },
         eq(key: string, value: unknown) { call.filters.push([key, value]); return query },
         in(key: string, value: unknown) { call.filters.push([key, value]); return query },
         neq(key: string, value: unknown) { call.filters.push([key, value]); return query },
@@ -62,7 +63,7 @@ Deno.test('P9B source catalog omits content and exact selection rechecks every a
             artifact_id: 'artifact', artifact_version_id: id, approved_at: '2026-09-01T00:00:00Z',
             artifacts: { artifact_type: 'vision', title: 'Brand vision' },
             artifact_versions: { id, version_number: 2, content: { body: 'Exact' } },
-          }], error: null }).then(resolve)
+          }], error: null, count: call.count ? catalogCount : null }).then(resolve)
         },
       }
       return query
@@ -72,12 +73,15 @@ Deno.test('P9B source catalog omits content and exact selection rechecks every a
   assertEquals(catalog.length, 1)
   assertEquals(calls[0].select?.includes('content'), false)
   assertEquals(calls[0].limit, 501)
+  assertEquals(calls[0].count, 'exact')
   assertEquals(calls[0].filters.some(([key, value]) => key === 'engagement_id' && value === 'engagement'), true)
   assertEquals(calls[0].filters.some(([key, value]) => key === 'artifact_versions.ai_use_allowed' && value === true), true)
   const selected = await approvedSourceVersions(reader as any, 'engagement', 'content', 'organization', [id])
   assertEquals(selected[0].content, { body: 'Exact' })
   assertEquals(calls[1].select?.includes('content'), true)
   await assertRejects(() => approvedSourceVersions(reader as any, 'engagement', 'content', 'organization', [id, missing]))
+  catalogCount = 2
+  await assertRejects(() => approvedSourceVersions(reader as any, 'engagement', 'content', 'organization'))
 })
 
 Deno.test('P9A preserves exact unsent text but never persists consent, model, or file selections', () => {
