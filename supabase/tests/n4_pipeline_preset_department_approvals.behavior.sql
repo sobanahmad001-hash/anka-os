@@ -16,6 +16,7 @@ declare
   version_one uuid;
   version_two uuid;
   single_version uuid;
+  visible_approvals integer;
 begin
   if not exists (select 1 from pg_class where oid='public.pipeline_template_department_approvals'::regclass and relrowsecurity) then
     raise exception 'Approval RLS disabled';
@@ -75,6 +76,16 @@ begin
   if (result->>'idempotent_replay')::boolean then raise exception 'First approval falsely replayed'; end if;
   select public.approve_pipeline_template_version_department(version_one,'design') into result;
   if not (result->>'idempotent_replay')::boolean then raise exception 'Approval replay created duplicate'; end if;
+  select count(*) into visible_approvals from public.pipeline_template_department_approvals
+    where pipeline_template_version_id=version_one;
+  if visible_approvals <> 1 then raise exception 'Active head cannot read exact approval history'; end if;
+  reset role;
+
+  perform set_config('request.jwt.claims',jsonb_build_object('sub',project_manager,'role','authenticated')::text,true);
+  set local role authenticated;
+  select count(*) into visible_approvals from public.pipeline_template_department_approvals
+    where pipeline_template_version_id=version_one;
+  if visible_approvals <> 0 then raise exception 'Project manager read head-only approval history'; end if;
   reset role;
 
   perform set_config('request.jwt.claims',jsonb_build_object('sub',owner_id,'role','authenticated')::text,true);
