@@ -1164,14 +1164,14 @@ async function retryImageGeneration(admin: ScopedClient, userClient: Client, bod
 
 async function loadPermittedContentRequest(userClient: Client, organizationId: string, contentRequestId: string) {
   const { data: request, error } = await userClient.from('content_requests')
-    .select('id, organization_id, engagement_id, brand_id, output_path, mode, brief')
+    .select('id, organization_id, engagement_id, brand_id, output_path, mode, format, brief')
     .eq('id', contentRequestId).eq('organization_id', organizationId).maybeSingle()
   if (error) throw error
   if (!request || request.mode !== 'project' || !request.engagement_id) {
     throw new Error('Project content request not found or not visible')
   }
-  if (request.output_path !== 'internal_engine') {
-    throw new Error('Only internal-engine requests can generate media')
+  if (request.output_path !== 'internal_engine' || request.format === 'article') {
+    throw new Error('Only visual internal-engine requests can generate media')
   }
   return request
 }

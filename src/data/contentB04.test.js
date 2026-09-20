@@ -133,12 +133,12 @@ test('B04 renders real keyword controls, warnings, and unavailable labels', asyn
   }
 })
 
-test('B04 keeps downstream behavior explicit and adds no schema', () => {
+test('C03 keeps downstream review explicit and article targets grounded in content requests', () => {
   const ui = read('src/apps/ContentStudio.jsx')
   const edge = read('supabase/functions/_shared/contentArtifacts.ts')
   assert.match(ui, /UTF-8 CSV import previews invalid rows/)
-  assert.match(ui, /standalone blog target remains unavailable until a blog or article content-request format is approved/)
-  assert.match(ui, /no draft is rewritten or retargeted automatically/)
+  assert.match(ui, /Article\/blog targets use existing article content requests/)
+  assert.match(ui, /No draft or tracking record is rewritten or retargeted automatically/)
   assert.match(edge, /target_content_request_id/)
   assert.match(edge, /source_architecture_version_id/)
   const repository = read('src/data/contentStudioRepository.js')

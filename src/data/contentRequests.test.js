@@ -15,6 +15,7 @@ const root = path.resolve(here, '../..')
 const read = relative => fs.readFileSync(path.join(root, relative), 'utf8')
 const coreMigration = read('supabase/migrations/20260831165601_cp1_content_request_core.sql')
 const mediaMigration = read('supabase/migrations/20260831165617_cp1_design_media_content_request_target.sql')
+const articleMigration = read('supabase/migrations/20260921025704_content_article_requests.sql')
 const contentEdge = read('supabase/functions/content-studio/index.ts')
 const designEdge = read('supabase/functions/design-workshop/index.ts')
 const repository = read('src/data/contentRequestsRepository.js')
@@ -23,9 +24,9 @@ const ui = read('src/components/ContentRequestPanel.jsx')
 test('CP1 format vocabulary matches the evidence-backed production shapes', () => {
   assert.deepEqual(CONTENT_REQUEST_FORMATS.map(([value]) => value), [
     'reel', 'carousel', 'single_image', 'stories',
-    'carousel_stories', 'reel_carousel', 'web_design_element',
+    'carousel_stories', 'reel_carousel', 'web_design_element', 'article',
   ])
-  for (const [format] of CONTENT_REQUEST_FORMATS) assert.match(coreMigration, new RegExp(`'${format}'`))
+  for (const [format] of CONTENT_REQUEST_FORMATS) assert.match(coreMigration + articleMigration, new RegExp(`'${format}'`))
 })
 
 test('project request serialization keeps event linking genuinely optional', () => {
@@ -98,4 +99,16 @@ test('CP1 leaves queue, general-mode UI, and Figma page generation out of scope'
   assert.doesNotMatch(coreMigration, /create table public\.content_(queue|calendar)/)
   assert.doesNotMatch(repository + contentEdge, /figma\.com\/api|create_figma|figma_file/i)
   assert.match(coreMigration, /Reserved nullable reference for CP4/)
+})
+
+test('C03 article requests are writing briefs with no media or Figma output', () => {
+  assert.match(articleMigration, /content_requests_article_output_check/)
+  assert.match(articleMigration, /format <> 'article' or output_path = 'internal_engine'/)
+  assert.match(articleMigration, /content_queue_entries_format_check/)
+  assert.match(articleMigration, /design_media_assets_reject_article_request/)
+  assert.match(articleMigration, /Article requests cannot have design media assets/)
+  assert.match(contentEdge, /Article requests do not support Figma handoff/)
+  assert.match(designEdge, /request\.format === 'article'/)
+  assert.match(ui, /form\.format === 'article'/)
+  assert.match(read('src/components/GeneralContentRequestsPanel.jsx'), /Article requests save a writing brief without media or Figma output/)
 })

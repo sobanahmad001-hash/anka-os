@@ -43,7 +43,6 @@ import {
   newContentRecord,
   keywordDuplicateWarnings,
   keywordStrategyIssues,
-  keywordTargetsChanged,
   resolveContentLanguage,
   serializeContentArtifact,
   websiteArchitecturePathErrors,
@@ -54,6 +53,7 @@ import { contentRequests } from '../data/contentRequestsRepository.js'
 import { contentQueue } from '../data/contentQueueRepository.js'
 import { contentCustomFields } from '../data/contentCustomFieldsRepository.js'
 import { blogLinksForMonth, relatedRecord } from '../data/contentDesignEventLinking.js'
+import { keywordDownstreamImpact } from '../data/contentKeywordImpact.js'
 import { contentArtifactForMode } from '../data/contentWriter.js'
 import { contentSelectionParams, resolveContentContext, resolveContentNavigationScope, selectableContentEngagements } from '../data/contentWorkshopContext.js'
 import { appendWorkshopNavigation, parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
@@ -453,8 +453,8 @@ function ArtifactForm({ studio, customFields, workspace, type, artifact, version
   const outlineFresh = currentOutline && outlinePreview?.signature === currentOutline.signature
     && !currentOutline.errors.length
   const outlineReady = outlineFresh && currentOutline.changed.length > 0
-  const targetAssignmentsChanged = type === 'keyword_strategy' && latest
-    ? keywordTargetsChanged(latest.content?.keywords || [], serializeContentArtifact(type, form).keywords) : false
+  const keywordImpact = type === 'keyword_strategy'
+    ? keywordDownstreamImpact(latest?.content || {}, serializeContentArtifact(type, form), latest, workspace) : null
 
   async function save(event) {
     event.preventDefault()
@@ -463,7 +463,8 @@ function ArtifactForm({ studio, customFields, workspace, type, artifact, version
       return
     }
     const versionNumber = latest ? latest.version_number + 1 : 1
-    if (!globalThis.confirm(`Confirm: create immutable ${definition.label} version ${versionNumber}. The mutable brand brief is not changed.`)) return
+    const impactMessage = keywordImpact ? ' Keyword targets or their source architecture changed; review linked page briefs and Marketing keyword references manually. Earlier versions remain intact.' : ''
+    if (!globalThis.confirm(`Confirm: create immutable ${definition.label} version ${versionNumber}. The mutable brand brief is not changed.${impactMessage}`)) return
     await act(async () => {
       const result = await studio.saveArtifact({
       engagement_id: workspace.engagement.id, artifact_id: artifact?.id || null,
@@ -499,11 +500,11 @@ function ArtifactForm({ studio, customFields, workspace, type, artifact, version
     {type === 'discovery' && <div className="mt-5 rounded-xl border border-amber-500/20 bg-amber-950/20 p-4 text-sm text-amber-100"><p className="font-semibold">{DEFAULT_DISCOVERY_TEMPLATE.label}</p><p className="mt-1 text-xs text-amber-200/70">All five canonical fields are required. “Unknown” is permitted only for Evidence and Constraints.</p></div>}
     {type === 'website_architecture' && <div className="mt-5 rounded-xl border border-amber-500/20 bg-amber-950/20 p-4 text-sm text-amber-100"><p className="font-semibold">Stable page identity</p><p className="mt-1 text-xs leading-5 text-amber-200/70">The page key is system managed and remains unchanged when a path is renamed. Paths are normalized on save; use the order controls to define deterministic sitemap order.</p></div>}
     {type === 'website_architecture' && <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950/50 p-4 text-sm text-slate-300">{form.schema_version === 2 ? <><p className="font-semibold text-white">Page brief schema v2</p><p className="mt-1 text-xs text-slate-500">Audience, sections, conversion choice, and exact source links are saved with each page. Unfilled choices remain undecided; generation is separate.</p></> : <><p>This historical v1 structure remains readable. Upgrade the draft to add page briefs; the saved earlier version stays intact.</p><button type="button" className={BUTTON + ' mt-3'} onClick={() => setForm(current => ({ ...current, schema_version: 2 }))}>Upgrade draft to page brief v2</button></>}</div>}
-    {type === 'keyword_strategy' && <div className="mt-5 rounded-xl border border-amber-500/20 bg-amber-950/20 p-4 text-sm text-amber-100"><p className="font-semibold">Evidence-aware keyword mapping</p><p className="mt-1 text-xs leading-5 text-amber-200/70">Unmeasured volume, difficulty, and observation date remain “Not available”. Suggestions are not measured opportunities. UTF-8 CSV import previews invalid rows and leaves targets for deliberate selection before save. A standalone blog target remains unavailable until a blog or article content-request format is approved.</p></div>}
+    {type === 'keyword_strategy' && <div className="mt-5 rounded-xl border border-amber-500/20 bg-amber-950/20 p-4 text-sm text-amber-100"><p className="font-semibold">Evidence-aware keyword mapping</p><p className="mt-1 text-xs leading-5 text-amber-200/70">Unmeasured volume, difficulty, and observation date remain “Not available”. Suggestions are not measured opportunities. UTF-8 CSV import previews invalid rows and leaves targets for deliberate selection before save. Article/blog targets use existing article content requests, and earlier keyword versions remain intact.</p></div>}
     {foundation && <label className="mt-5 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Working language<input required maxLength="120" placeholder="Select or enter a language" className={`${INPUT} mt-2 normal-case tracking-normal`} value={form.language || ''} onChange={event => setForm(current => ({ ...current, language: event.target.value }))} /><span className="mt-2 block font-normal normal-case tracking-normal text-slate-500">Precedence: explicit selection, approved Vision value, then organization default. No language is assumed.</span></label>}
     <div className="mt-6 space-y-5">{definition.fields.map(field => <div key={field.key}><ArtifactField field={field} value={form[field.key]} pageSlugs={(architectureVersions[0]?.content?.pages || []).map(page => page.slug)} architectureVersions={architectureVersions} selectedArchitectureVersion={selectedArchitectureVersion} contentRequests={workspace.contentRequests || []} recordErrors={field.recordType === 'website_page' ? pathErrors : keywordIssues} recordWarnings={field.recordType === 'keyword' ? keywordWarnings : new Map()} briefEnabled={form.schema_version === 2} briefVersions={briefVersions} briefArtifacts={briefArtifacts} onChange={value => setForm(current => field.key === 'source_architecture_version_id' ? { ...current, [field.key]: value, keywords: (current.keywords || []).map(keyword => keyword.target_kind === 'page' ? { ...keyword, target_id: '', target_page_slug: '' } : keyword) } : { ...current, [field.key]: value })} />{foundation && <SourceMetadataField field={field} value={form.source_metadata?.[field.key]} onChange={value => setForm(current => ({ ...current, source_metadata: { ...current.source_metadata, [field.key]: value } }))} />}</div>)}</div>
     <WebsiteArchitecturePathAlert hasErrors={pathErrors.size > 0} />
-    {targetAssignmentsChanged && <p role="status" className="mt-4 rounded-xl border border-amber-900/60 bg-amber-950/30 p-4 text-sm text-amber-200">Keyword target assignments changed. Review affected downstream drafts manually; no draft is rewritten or retargeted automatically.</p>}
+    {keywordImpact && <div role="status" className="mt-4 rounded-xl border border-amber-900/60 bg-amber-950/30 p-4 text-sm text-amber-200"><p className="font-semibold">Keyword targeting or its source architecture changed</p><p className="mt-1">Review saved Website page briefs linked to any version of this keyword strategy and Marketing tracked-keyword references, if any, manually. No draft or tracking record is rewritten or retargeted automatically.</p>{keywordImpact.linkedPages.length > 0 && <ul className="mt-2 list-inside list-disc">{keywordImpact.linkedPages.map(page => <li key={`${page.versionId}:${page.pageKey}`}>{page.title} · Website architecture version {page.versionNumber}</li>)}</ul>}{keywordImpact.linkedPages.length === 0 && <p className="mt-2 text-xs">No saved Website page brief in this workspace links to this keyword strategy root. Check Marketing references, if any, manually.</p>}</div>}
     {currentOutline && <section className="mt-5 rounded-xl border border-slate-700 bg-slate-950/50 p-4" aria-label="Sitemap draft preview">
       <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">Sitemap outline and impact preview</h3><p className="mt-1 text-xs text-slate-500">Review hierarchy, paths, purpose, page briefs, section order and exact references before saving. Generation is separate.</p></div><button type="button" className={BUTTON} disabled={saving || pathErrors.size > 0} onClick={() => setOutlinePreview(currentOutline)}>Preview sitemap changes</button></div>
       {outlinePreview && !outlineFresh && <p role="status" className="mt-3 text-xs text-amber-300">The page draft or source version changed. Refresh the preview before saving.</p>}
