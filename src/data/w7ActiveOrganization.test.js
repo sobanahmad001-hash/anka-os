@@ -20,6 +20,7 @@ function scopedClient(seed = {}) {
 
   function queryFor(table) {
     const filters = []
+    let pageStart = 0, pageEnd = Infinity
     const query = {
       select() { return query },
       insert(value) { calls.push({ table, operator: 'insert', value }); return query },
@@ -27,11 +28,12 @@ function scopedClient(seed = {}) {
       in(column, values) { calls.push({ table, operator: 'in', column, values }); return query },
       is(column, value) { calls.push({ table, operator: 'is', column, value }); return query },
       order() { return query },
+      range(start, end) { pageStart = start; pageEnd = end; return query },
       abortSignal(signal) { calls.push({ table, operator: 'abortSignal', signal }); return query },
       rows() {
         return (seed[table] || []).filter(row => filters.every(({ column, value }) => (
           column.includes('.') || row[column] === value
-        )))
+        ))).slice(pageStart, pageEnd + 1)
       },
       maybeSingle() { return Promise.resolve({ data: query.rows()[0] || null, error: null }) },
       single() { return Promise.resolve({ data: query.rows()[0] || null, error: null }) },

@@ -44,9 +44,8 @@ export function buildPortfolioDashboard(snapshot = {}, today = new Date()) {
     const blockedStages = stages.filter(stage => stage.status === 'blocked').length
     const targetDateRisk = Boolean(
       engagement.target_date
-      && engagement.target_date >= start
       && engagement.target_date <= sevenDays
-      && engagement.status !== 'completed'
+      && !['completed', 'cancelled'].includes(engagement.status)
     )
     return {
       ...engagement,
