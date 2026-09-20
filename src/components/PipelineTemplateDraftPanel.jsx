@@ -1,14 +1,15 @@
 import { useState } from 'react'
 
-import { canDraftPipelineTemplate, seedPipelineDraft } from '../data/pipelineTemplateDrafts.js'
+import { canApprovePipelineTemplateDepartment, canDraftPipelineTemplate, canPublishPipelineTemplate, pipelineVersionDepartments, seedPipelineDraft } from '../data/pipelineTemplateDrafts.js'
 
 const INPUT = 'w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:border-violet-500/60'
 
 
-export default function PipelineTemplateDraftPanel({ catalog, services, membership, onCreate, onRefresh, busy, loadError }) {
+export default function PipelineTemplateDraftPanel({ catalog, services, membership, onCreate, onApprove, onPublish, onRefresh, busy, loadError }) {
   const [templateId, setTemplateId] = useState('')
   const [form, setForm] = useState(() => seedPipelineDraft({}, ''))
   const canDraft = canDraftPipelineTemplate(membership)
+  const canPublish = canPublishPipelineTemplate(membership)
   const published = new Set((catalog.publications || []).map(row => row.pipeline_template_version_id))
   const templateById = new Map((catalog.templates || []).map(row => [row.id, row]))
   const unavailable = form.serviceIds.filter(id => !services.some(service => service.id === id))
@@ -41,13 +42,30 @@ export default function PipelineTemplateDraftPanel({ catalog, services, membersh
     {loadError && <p role="alert" className="mt-3 text-sm text-red-300">Presets could not be loaded: {loadError}</p>}
     {!loadError && <div className="mt-4 space-y-2">
       {(catalog.versions || []).length === 0 && <p className="text-sm text-slate-500">No visible preset versions yet.</p>}
-      {(catalog.versions || []).map(version => <div key={version.id} className="rounded-xl border border-white/[0.06] bg-white/[0.025] px-3 py-2 text-sm">
-        <span className="font-medium">{templateById.get(version.pipeline_template_id)?.slug || 'Pipeline'} · v{version.version_number} · {version.name}</span>
-        <span className="ml-2 text-xs text-slate-500">{published.has(version.id) ? 'Published' : 'Draft'}</span>
-      </div>)}
+      {(catalog.versions || []).map(version => {
+        const departments = pipelineVersionDepartments(catalog, version.id)
+        const crossDepartment = departments.length > 1
+        const recorded = new Set((catalog.approvals || [])
+          .filter(row => row.pipeline_template_version_id === version.id)
+          .map(row => row.department_id))
+        const isPublished = published.has(version.id)
+        const canApprove = crossDepartment && !isPublished
+          && canApprovePipelineTemplateDepartment(membership, membership?.departmentId)
+          && departments.includes(membership.departmentId)
+        return <div key={version.id} className="rounded-xl border border-white/[0.06] bg-white/[0.025] px-3 py-3 text-sm">
+          <span className="font-medium">{templateById.get(version.pipeline_template_id)?.slug || 'Pipeline'} · v{version.version_number} · {version.name}</span>
+          <span className="ml-2 text-xs text-slate-500">{isPublished ? 'Published' : 'Draft'}</span>
+          <p className="mt-1 text-xs text-slate-500">Departments: {departments.join(', ') || 'Selection unavailable'}</p>
+          {crossDepartment && <p className="mt-1 text-xs text-slate-400">Recorded head approvals: {departments.map(id => `${id} ${recorded.has(id) ? 'recorded' : 'pending'}`).join(' · ')}. Current head roles are rechecked at publication.</p>}
+          {!isPublished && (canApprove || canPublish) && <div className="mt-3 flex flex-wrap gap-2">
+            {canApprove && <button type="button" disabled={busy} onClick={() => onApprove(version.id, membership.departmentId)} className="rounded-lg border border-violet-500/40 px-3 py-1.5 text-xs font-semibold text-violet-200 disabled:opacity-40">Approve exact v{version.version_number} for {membership.departmentId}</button>}
+            {canPublish && <button type="button" disabled={busy} onClick={() => onPublish(version.id)} className="rounded-lg bg-violet-500 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">Publish exact v{version.version_number}</button>}
+          </div>}
+        </div>
+      })}
     </div>}
     {canDraft && !loadError && <form onSubmit={submit} className="mt-6 space-y-4 border-t border-white/[0.07] pt-5">
-      <div><h3 className="text-sm font-semibold">Create an immutable draft version</h3><p className="mt-1 text-xs text-slate-500">Choose a new preset or copy the latest visible version. Publishing is a separate governed step.</p></div>
+      <div><h3 className="text-sm font-semibold">Create an immutable draft version</h3><p className="mt-1 text-xs text-slate-500">Choose a new preset or copy the latest visible version. Department approval and publication are separate governed actions on each version.</p></div>
       <label className="block text-xs text-slate-400">Preset
         <select className={INPUT} value={templateId} onChange={event => selectTemplate(event.target.value)}>
           <option value="">New preset</option>

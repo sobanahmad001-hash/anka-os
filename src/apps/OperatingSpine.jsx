@@ -53,7 +53,7 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
   const [clientForm, setClientForm] = useState(INITIAL_CLIENT)
   const [brandForm, setBrandForm] = useState(INITIAL_BRAND)
   const [engagementForm, setEngagementForm] = useState(INITIAL_ENGAGEMENT)
-  const [templateCatalog, setTemplateCatalog] = useState({ templates: [], versions: [], selections: [], publications: [] })
+  const [templateCatalog, setTemplateCatalog] = useState({ templates: [], versions: [], selections: [], publications: [], approvals: [] })
   const [templateLoadError, setTemplateLoadError] = useState('')
   const [journeyPreview, setJourneyPreview] = useState(null)
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -114,7 +114,7 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
       setPortfolioSnapshot(portfolioRows || { engagements: [], workItems: [], stages: [] })
       setTemplateCatalog(templateResult.status === 'fulfilled' && templateResult.value
         ? templateResult.value
-        : { templates: [], versions: [], selections: [], publications: [] })
+        : { templates: [], versions: [], selections: [], publications: [], approvals: [] })
       setTemplateLoadError(templateResult.status === 'rejected' ? templateResult.reason?.message || 'Pipeline preset read failed' : '')
       if (templateResult.status === 'rejected') handleOrganizationAccessError(templateResult.reason)
     } catch (loadError) {
@@ -245,6 +245,30 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
       if (!requestSignal.aborted) setSaving(false)
     }
   }
+  async function approvePipelineDepartment(versionId, departmentId) {
+    setSaving(true); setError(''); setNotice('')
+    try {
+      await pipelineTemplates.approveDepartment(versionId, departmentId, { signal: requestSignal })
+      if (requestSignal.aborted) return
+      await loadAll()
+      if (!requestSignal.aborted) setNotice(`Department ${departmentId} approval recorded for the exact preset version.`)
+    } catch (actionError) {
+      if (!requestSignal.aborted) { handleOrganizationAccessError(actionError); setError(actionError.message) }
+    } finally { if (!requestSignal.aborted) setSaving(false) }
+  }
+
+  async function publishPipelineVersion(versionId) {
+    setSaving(true); setError(''); setNotice('')
+    try {
+      await pipelineTemplates.publishVersion(versionId, { signal: requestSignal })
+      if (requestSignal.aborted) return
+      await loadAll()
+      if (!requestSignal.aborted) setNotice('Exact preset version published.')
+    } catch (actionError) {
+      if (!requestSignal.aborted) { handleOrganizationAccessError(actionError); setError(actionError.message) }
+    } finally { if (!requestSignal.aborted) setSaving(false) }
+  }
+
   function chooseTemplate(versionId) {
     const selections = templateCatalog.selections
       .filter(item => item.pipeline_template_version_id === versionId)
@@ -331,7 +355,7 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
 
         {view === 'engagements' && <PortfolioDashboard snapshot={portfolioSnapshot} owners={ownerOptions} onOpen={openEngagement} onRefresh={() => loadAll()} supportNote="Partial journeys supported." />}
         {view === 'clients' && <ClientRegistry clients={clients} onNewBrand={clientId => { setBrandForm({ ...INITIAL_BRAND, clientId }); setModal('brand') }} />}
-        {view === 'services' && <><ServiceCatalogue services={services} /><PipelineTemplateDraftPanel catalog={templateCatalog} services={services} membership={activeMembership} onCreate={createPipelineDraft} onRefresh={() => loadAll()} busy={saving} loadError={templateLoadError} /></>}
+        {view === 'services' && <><ServiceCatalogue services={services} /><PipelineTemplateDraftPanel catalog={templateCatalog} services={services} membership={activeMembership} onCreate={createPipelineDraft} onApprove={approvePipelineDepartment} onPublish={publishPipelineVersion} onRefresh={() => loadAll()} busy={saving} loadError={templateLoadError} /></>}
       </div>
 
       {modal === 'client' && <Modal title="Create client and first brand" onClose={() => setModal('')}><ClientForm form={clientForm} setForm={setClientForm} onSubmit={createClient} saving={saving} /></Modal>}

@@ -92,22 +92,25 @@ test('PLN2 repository scopes every read to the selected organization', async () 
   for (const table of [
     'pipeline_templates', 'pipeline_template_versions',
     'pipeline_template_version_services', 'pipeline_template_publications',
+    'pipeline_template_department_approvals',
   ]) {
     assert.ok(calls.some(call => call.type === 'eq' && call.table === table
       && call.column === 'organization_id' && call.value === 'org-a'))
   }
 })
 
-test('PLN2 repository uses only the two role-checking database actions', async () => {
+test('N4 repository uses only role-checking database actions', async () => {
   const { client, calls } = mockClient()
   const repository = createPipelineTemplatesRepository(client)
   await repository.createVersion({
     pipelineTemplateId: 'template-a', slug: 'campaign', name: 'Campaign',
     serviceIds: ['service-a'], sourceVersionId: 'version-a', changeSummary: 'Narrower scope',
   }, 'org-a')
+  await repository.approveDepartment('00000000-0000-4000-8000-000000000001', 'design')
   await repository.publishVersion('version-b')
   assert.deepEqual(calls.filter(call => call.type === 'rpc').map(call => call.name), [
-    'create_pipeline_template_version', 'publish_pipeline_template_version',
+    'create_pipeline_template_version', 'approve_pipeline_template_version_department',
+    'publish_pipeline_template_version',
   ])
   assert.deepEqual(calls.find(call => call.name === 'create_pipeline_template_version').input, {
     p_organization_id: 'org-a', p_pipeline_template_id: 'template-a',

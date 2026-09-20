@@ -107,3 +107,7 @@ supabase/verify_20260903201500_pln2_versioned_pipeline_templates.sql
 ## Decision gate for PLN3
 
 PLN2 should be reviewed and merged before planner or UI integration begins. PLN3 must rebase after PLN2 and consume these reviewed catalog, publication, provenance, and idempotency contracts rather than duplicating them.
+
+## N4 publication authority decision (2026-09-20)
+
+For an immutable preset version spanning more than one service department, publication requires an approval from **one currently active canonical department head in each affected department**. Approval is tied to the exact version. The publisher remains an active System Owner or Operations Admin; an exact-project PM binding, multi-department affiliation, profile title, or Executive designation does not confer organization-wide preset approval or publication authority. A single-department version retains owner/admin publication without an extra head approval. Approval history is append-only; publication rechecks each approver's current organization membership, head role, and canonical department, so a revoked head's historical approval cannot satisfy the gate. Existing published versions remain immutable and replay-safe.

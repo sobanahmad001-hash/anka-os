@@ -132,7 +132,7 @@ export function createPipelineTemplatesRepository(supabase) {
   return Object.freeze({
     async list(organizationId, { signal } = {}) {
       const organization = required(organizationId, 'Organization')
-      const [templates, versions, selections, publications] = await Promise.all([
+      const [templates, versions, selections, publications, approvals] = await Promise.all([
         dataOrThrow(supabase.from('pipeline_templates').select('*')
           .eq('organization_id', organization).order('slug'), signal),
         dataOrThrow(supabase.from('pipeline_template_versions').select('*')
@@ -144,8 +144,10 @@ export function createPipelineTemplatesRepository(supabase) {
         dataOrThrow(supabase.from('pipeline_template_publications').select('*')
           .eq('organization_id', organization)
           .order('publication_number', { ascending: false }), signal),
+        dataOrThrow(supabase.from('pipeline_template_department_approvals').select('*')
+          .eq('organization_id', organization).order('approved_at', { ascending: false }), signal),
       ])
-      return { templates, versions, selections, publications }
+      return { templates, versions, selections, publications, approvals }
     },
 
     async createVersion(input, organizationId, { signal } = {}) {
@@ -160,6 +162,13 @@ export function createPipelineTemplatesRepository(supabase) {
         p_service_ids: version.serviceIds,
         p_source_version_id: version.sourceVersionId,
         p_change_summary: version.changeSummary,
+      }), signal)
+    },
+
+    async approveDepartment(versionId, departmentId, { signal } = {}) {
+      return dataOrThrow(supabase.rpc('approve_pipeline_template_version_department', {
+        p_pipeline_template_version_id: uuid(versionId, 'Pipeline template version'),
+        p_department_id: required(departmentId, 'Department'),
       }), signal)
     },
 
