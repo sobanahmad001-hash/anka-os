@@ -122,7 +122,11 @@ export default function Header() {
           <span className="sr-only">Active organization</span>
           <select aria-label="Active organization" value={activeOrganizationId || ''}
             disabled={organizationLoading || Boolean(organizationError) || memberships.length === 0}
-            onChange={(event) => selectOrganization(event.target.value)}
+            onChange={(event) => {
+              const organizationId = event.target.value
+              const change = new CustomEvent('anka:organization-change', { cancelable: true, detail: { organizationId } })
+              if (window.dispatchEvent(change)) selectOrganization(organizationId)
+            }}
             className="h-9 max-w-40 rounded-xl border border-white/[0.06] bg-white/[0.025] px-2.5 text-xs font-medium text-slate-300 outline-none focus:border-violet-500/60 disabled:text-slate-600 sm:max-w-52">
             {organizationLoading && <option value="">Loading organizations...</option>}
             {organizationError && <option value="">Organizations unavailable</option>}

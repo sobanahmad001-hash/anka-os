@@ -22,8 +22,28 @@ import {
   selectApprovedModelConfiguration,
   selectSingleOpenAiModel,
   safeAttemptReason,
+  validateUnsentDepartmentChatDraft,
 } from './index.ts'
 
+Deno.test('P9A preserves exact unsent text but never persists consent, model, or file selections', () => {
+  const draft = validateUnsentDepartmentChatDraft({
+    prompt: '  Write this exactly  ', proposal_mode: 'answer',
+    attachment_ids: ['untrusted-file'], model_configuration_id: 'stale-model', safe: true,
+  }, 'content')
+  assertEquals(draft.p_prompt, '  Write this exactly  ')
+  assertEquals(draft.p_proposal_mode, 'answer')
+  assertEquals(Object.hasOwn(draft, 'attachment_ids'), false)
+  assertEquals(Object.hasOwn(draft, 'model_configuration_id'), false)
+  assertEquals(Object.hasOwn(draft, 'safe'), false)
+})
+
+Deno.test('P9A rejects blank, oversized, and unsupported draft intent without truncation', () => {
+  assertThrows(() => validateUnsentDepartmentChatDraft({ prompt: '  ', proposal_mode: 'answer' }, 'content'))
+  assertThrows(() => validateUnsentDepartmentChatDraft({ prompt: 'x'.repeat(8001), proposal_mode: 'answer' }, 'content'))
+  assertThrows(() => validateUnsentDepartmentChatDraft({ prompt: 'text', proposal_mode: 'script' }, 'content'))
+  assertThrows(() => validateUnsentDepartmentChatDraft({ prompt: 'text', proposal_mode: 'artifact', artifact_type: 'development_code' }, 'content'))
+  assertThrows(() => validateUnsentDepartmentChatDraft({ prompt: 'text', proposal_mode: 'work_item', work_item_type: 'impossible', priority: 'medium' }, 'design'))
+})
 Deno.test('CHAT-3 download disposition is ASCII-safe and preserves UTF-8 without header injection', () => {
   assertEquals(
     attachmentContentDisposition('quote" slash\\ line\r\n résumé.txt'),
