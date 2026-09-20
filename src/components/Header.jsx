@@ -135,7 +135,7 @@ export default function Header() {
         {/* Notification bell */}
         <div className="relative" ref={notifRef}>
           <button
-            onClick={() => { setShowNotifications(!showNotifications); if (!showNotifications && unread > 0) markAllRead() }}
+            onClick={() => setShowNotifications(current => !current)}
             aria-label="Open notifications"
             className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.06] bg-white/[0.025] text-slate-400 transition-colors hover:border-white/10 hover:bg-white/[0.06] hover:text-white">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
