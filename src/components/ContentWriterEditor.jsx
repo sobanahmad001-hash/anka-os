@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 import {
   CONTENT_WRITER_OUTPUT_TYPES,
   architecturePages,
   architectureVersions,
   contentWriterIssues,
+  contentWriterFormFromVersion,
   contentWriterPreview,
   newContentWriterDraft,
   writerDestinationLabel,
@@ -22,12 +23,15 @@ const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-
 const PRIMARY = 'rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50'
 const SECONDARY = 'rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-50'
 
-export default function ContentWriterEditor({ workspace, studio, saving, act, stageId, defaultLanguage = '' }) {
+export default function ContentWriterEditor({ workspace, studio, saving, act, onRefresh, refreshing = false, stale = false, stageId, defaultLanguage = '' }) {
   const [form, setForm] = useState(() => newContentWriterDraft({ language: defaultLanguage }))
   const [preview, setPreview] = useState(null)
   const [attempted, setAttempted] = useState(false)
   const [checkReport, setCheckReport] = useState(null)
   const [qualityAttempted, setQualityAttempted] = useState(false)
+  const [continuation, setContinuation] = useState(null)
+  const [dirty, setDirty] = useState(false)
+  const draftRevision = useRef(0)
   const versions = useMemo(() => architectureVersions(workspace), [workspace])
   const selectedVersion = versions.find(version => version.id === form.source_architecture_version_id)
   const issues = contentWriterIssues(form, versions)
@@ -35,8 +39,34 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, st
   const approvedVersionIds = new Set((workspace.approvals || []).map(item => item.artifact_version_id))
   const qualityIssues = contentQualityConfigurationIssues(form)
   const counts = contentCounts(form.body)
+  const currentOutput = continuation && outputs.find(item => item.artifact.id === continuation.artifactId)
+  const staleContinuation = continuation && currentOutput?.latest.id !== continuation.baseVersionId
+  function resetDraft(force = false) {
+    if (!force && dirty && !globalThis.confirm('Discard unsaved writer edits and start a new draft?')) return
+    draftRevision.current += 1
+    setDirty(false)
+    setContinuation(null)
+    setForm(newContentWriterDraft({ language: defaultLanguage }))
+    setPreview(null)
+    setAttempted(false)
+    setCheckReport(null)
+    setQualityAttempted(false)
+  }
+  function continueOutput(artifact, latest) {
+    if (dirty && !globalThis.confirm('Discard unsaved writer edits and open this saved version?')) return
+    draftRevision.current += 1
+    setDirty(false)
+    setContinuation({ artifactId: artifact.id, baseVersionId: latest.id, versionNumber: latest.version_number })
+    setForm(contentWriterFormFromVersion(latest))
+    setPreview(null)
+    setAttempted(false)
+    setCheckReport(null)
+    setQualityAttempted(false)
+  }
 
   function setField(key, value) {
+    draftRevision.current += 1
+    setDirty(true)
     setPreview(null)
     setCheckReport(null)
     setQualityAttempted(false)
@@ -44,6 +74,8 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, st
   }
 
   function selectOutputType(value) {
+    draftRevision.current += 1
+    setDirty(true)
     setPreview(null)
     setCheckReport(null)
     setQualityAttempted(false)
@@ -55,7 +87,7 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, st
   function buildPreview(event) {
     event.preventDefault()
     setAttempted(true)
-    if (Object.keys(issues).length) return
+    if (staleContinuation || Object.keys(issues).length) return
     setPreview(contentWriterPreview(form, versions))
   }
 
@@ -67,30 +99,31 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, st
   }
 
   async function confirmDraft() {
+    if (stale || staleContinuation || Object.keys(issues).length) {
+      setAttempted(true)
+      setPreview(null)
+      return
+    }
     const current = contentWriterPreview(form, versions)
     if (!preview || preview.signature !== current.signature) {
       setPreview(null)
       return
     }
-    if (!globalThis.confirm(`Confirm: create one unapproved immutable ${form.output_type.replaceAll('_', ' ')} draft for ${current.destinationLabel}.`)) return
+    if (!globalThis.confirm(`Confirm: ${continuation ? 'append one new unapproved immutable version' : 'create one unapproved immutable draft'} for ${current.destinationLabel}.`)) return
+    const submittedRevision = draftRevision.current
     const result = await act(() => studio.saveArtifact({
       engagement_id: workspace.engagement.id,
       engagement_stage_instance_id: stageId || null,
-      artifact_id: null,
+      artifact_id: continuation?.artifactId || null,
+      expected_parent_version_id: continuation?.baseVersionId || null,
       artifact_type: 'content',
       title: current.content.working_title,
       content: current.content,
-      change_summary: 'Created from the manual Content writer preview',
+      change_summary: continuation ? `Continued from exact version ${continuation.versionNumber} in the manual Content writer` : 'Created from the manual Content writer preview',
       data_classification: 'internal',
       ai_use_allowed: false,
-    }), 'Writer output saved as one unapproved immutable draft. No review, release, or publication occurred.')
-    if (result) {
-      setForm(newContentWriterDraft({ language: defaultLanguage }))
-      setPreview(null)
-      setAttempted(false)
-      setCheckReport(null)
-      setQualityAttempted(false)
-    }
+    }), 'Writer output saved as one unapproved immutable version. Earlier versions and approvals remain intact.')
+    if (result && draftRevision.current === submittedRevision) resetDraft(true)
   }
 
   const error = key => attempted && issues[key]
@@ -100,12 +133,17 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, st
       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Content B05 · manual writer</p>
       <h2 className="mt-1 text-2xl font-semibold">Production writer</h2>
       <p className="mt-2 text-sm leading-6 text-slate-400">Prepare one text draft, inspect its exact destination, then confirm an unapproved immutable version. Generation jobs, multiple variants, selective rewrite, and publishing are not enabled in this slice.</p>
+      {stale && <p role="alert" className="mt-4 text-sm text-amber-300">The saved output list could not be refreshed. Retry before saving a new version.</p>}
+      {continuation && <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-950/20 p-4 text-sm text-amber-100">Continuing exact version {continuation.versionNumber}. Saving appends a new unapproved version; the earlier version and its approval remain unchanged.
+        {staleContinuation && <p role="alert" className="mt-2 text-red-300">A newer version is available. Reopen the latest output before previewing or saving.</p>}
+        <button type="button" className="mt-3 block text-xs font-semibold underline" onClick={() => resetDraft()}>Start a new draft instead</button>
+      </div>}
       {attempted && Object.keys(issues).length > 0 && <div role="alert" className="mt-5 rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">Resolve the labelled fields before previewing this draft.</div>}
       <div className="mt-6 space-y-5">
         <Field label="Output type" error={error('output_type')}><select className={INPUT} value={form.output_type} onChange={event => selectOutputType(event.target.value)}>{CONTENT_WRITER_OUTPUT_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
         <Field label="Working title" error={error('working_title')}><input className={INPUT} maxLength="160" value={form.working_title} onChange={event => setField('working_title', event.target.value)} /></Field>
         {form.output_type === 'website_page_copy' ? <>
-          <Field label="Exact Website Architecture version" error={error('source_architecture_version_id')}><select className={INPUT} value={form.source_architecture_version_id} onChange={event => { setPreview(null); setCheckReport(null); setQualityAttempted(false); setForm(current => ({ ...current, source_architecture_version_id: event.target.value, target_page_key: '' })) }}><option value="">Choose exact version</option>{versions.map(version => <option key={version.id} value={version.id}>Version {version.version_number} · {version.id}</option>)}</select></Field>
+          <Field label="Exact Website Architecture version" error={error('source_architecture_version_id')}><select className={INPUT} value={form.source_architecture_version_id} onChange={event => { draftRevision.current += 1; setDirty(true); setPreview(null); setCheckReport(null); setQualityAttempted(false); setForm(current => ({ ...current, source_architecture_version_id: event.target.value, target_page_key: '' })) }}><option value="">Choose exact version</option>{versions.map(version => <option key={version.id} value={version.id}>Version {version.version_number} · {version.id}</option>)}</select></Field>
           <Field label="Target page" error={error('target_page_key')}><select className={INPUT} value={form.target_page_key} onChange={event => setField('target_page_key', event.target.value)}><option value="">Choose a page</option>{architecturePages(selectedVersion).map(page => <option key={page.page_key} value={page.page_key}>{page.title} · {page.slug}</option>)}</select></Field>
         </> : <Field label={writerDestinationLabel(form.output_type)} error={error('destination')}><input className={INPUT} value={form.destination} onChange={event => setField('destination', event.target.value)} /></Field>}
         <Field label="Objective" error={error('objective')}><textarea rows="3" className={INPUT} value={form.objective} onChange={event => setField('objective', event.target.value)} /></Field>
@@ -134,7 +172,7 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, st
           </div>
         </section>
       </div>
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-slate-800 pt-5"><p className="text-xs text-slate-500">Variant 1 only · cost estimate unavailable because no provider job is being started.</p><div className="flex gap-2"><button type="button" onClick={runQualityChecks} className={SECONDARY}>Check content</button><button disabled={saving} className={PRIMARY}>{preview ? 'Refresh preview' : 'Preview draft'}</button></div></div>
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-slate-800 pt-5"><p className="text-xs text-slate-500">Variant 1 only · cost estimate unavailable because no provider job is being started.</p><div className="flex gap-2"><button type="button" onClick={runQualityChecks} className={SECONDARY}>Check content</button><button disabled={saving || stale || staleContinuation} className={PRIMARY}>{preview ? 'Refresh preview' : 'Preview draft'}</button></div></div>
     </form>
     <section className="space-y-5">
       {checkReport && <article className="rounded-2xl border border-slate-700 bg-slate-900/70 p-5">
@@ -145,11 +183,11 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, st
       {preview ? <article className="rounded-2xl border border-amber-500/30 bg-amber-950/20 p-6">
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">Exact save preview</p>
         <h3 className="mt-2 text-xl font-semibold">{preview.content.working_title}</h3>
-        <dl className="mt-5 grid gap-3 text-sm"><PreviewRow label="Type" value={preview.content.output_type.replaceAll('_', ' ')} /><PreviewRow label="Destination" value={preview.destinationLabel} /><PreviewRow label="Language" value={preview.content.language} /><PreviewRow label="Tone" value={preview.content.tone || 'No request override'} /><PreviewRow label="Effect" value="Create one unapproved immutable Content artifact version" /></dl>
+        <dl className="mt-5 grid gap-3 text-sm"><PreviewRow label="Type" value={preview.content.output_type.replaceAll('_', ' ')} /><PreviewRow label="Destination" value={preview.destinationLabel} /><PreviewRow label="Language" value={preview.content.language} /><PreviewRow label="Tone" value={preview.content.tone || 'No request override'} /><PreviewRow label="Effect" value={continuation ? `Append unapproved version after exact v${continuation.versionNumber}` : "Create one unapproved immutable Content artifact version"} /></dl>
         <div className="mt-5 max-h-80 overflow-y-auto whitespace-pre-wrap rounded-xl border border-slate-800 bg-slate-950/70 p-4 text-sm leading-6 text-slate-200">{preview.content.body}</div>
-        <button type="button" disabled={saving} onClick={confirmDraft} className={`${PRIMARY} mt-5 w-full`}>{saving ? 'Saving…' : 'Confirm unapproved draft'}</button>
+        <button type="button" disabled={saving || stale || staleContinuation} onClick={confirmDraft} className={`${PRIMARY} mt-5 w-full`}>{saving ? 'Saving…' : 'Confirm unapproved draft'}</button>
       </article> : <div className="rounded-2xl border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500">Complete the required fields to preview the exact output and destination before anything is saved.</div>}
-      <article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><h3 className="font-semibold">Saved writer outputs</h3><p className="mt-1 text-xs text-slate-500">These schema-v2 outputs remain visible here without replacing legacy page-content tracking.</p>{outputs.length ? <div className="mt-4 space-y-3">{outputs.map(({ artifact, latest }) => { const approved = approvedVersionIds.has(latest.id); return <div key={artifact.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3"><div className="flex justify-between gap-3"><p className="text-sm font-semibold text-white">{artifact.title}</p><span className={`text-xs ${approved ? 'text-emerald-300' : 'text-amber-300'}`}>{approved ? 'Approved' : 'Unapproved'} v{latest.version_number}</span></div><p className="mt-1 text-xs text-slate-500">{latest.content.output_type.replaceAll('_', ' ')} · {latest.content.language}</p></div> })}</div> : <p className="mt-4 text-sm text-slate-500">No writer outputs saved yet.</p>}</article>
+      <article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div className="flex items-center justify-between gap-3"><h3 className="font-semibold">Saved writer outputs</h3><button type="button" className={SECONDARY} disabled={refreshing || saving} onClick={onRefresh}>{refreshing ? "Refreshing…" : "Refresh outputs"}</button></div><p className="mt-1 text-xs text-slate-500">These schema-v2 outputs remain visible here without replacing legacy page-content tracking.</p>{outputs.length ? <div className="mt-4 space-y-3">{outputs.map(({ artifact, latest }) => { const approved = approvedVersionIds.has(latest.id); return <div key={artifact.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3"><div className="flex justify-between gap-3"><p className="text-sm font-semibold text-white">{latest.content.working_title || artifact.title}</p><span className={`text-xs ${approved ? 'text-emerald-300' : 'text-amber-300'}`}>{approved ? 'Approved' : 'Unapproved'} v{latest.version_number}</span></div><p className="mt-1 text-xs text-slate-500">{latest.content.output_type.replaceAll('_', ' ')} · {latest.content.language}</p><button type="button" disabled={saving} onClick={() => continueOutput(artifact, latest)} className="mt-3 text-xs font-semibold text-amber-300 underline">Continue from exact v{latest.version_number}</button></div> })}</div> : <p className="mt-4 text-sm text-slate-500">No writer outputs saved yet.</p>}</article>
     </section>
   </div>
 }

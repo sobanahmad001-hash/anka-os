@@ -595,6 +595,50 @@ Deno.test('B05a rejects stale website targets before output writes and saves iso
   assertEquals(isolated.writes.some(write => write.table === 'artifact_relations'), false)
 })
 
+Deno.test('C01 appends only after the exact latest writer version and leaves prior approval untouched', async () => {
+  const fixture = b04SaveFixture()
+  fixture.rows.artifacts.push({
+    id: 'writer-artifact', organization_id: fixture.organizationId,
+    engagement_id: fixture.engagementId, brand_id: fixture.brandId, artifact_type: 'content',
+  })
+  fixture.rows.artifact_versions.push({
+    id: 'writer-v1', organization_id: fixture.organizationId, artifact_id: 'writer-artifact',
+    version_number: 1, content: b05WriterContent(),
+  })
+  fixture.rows.artifact_approvals = [{ id: 'approval-v1', artifact_version_id: 'writer-v1' }]
+  const input = {
+    ...b05VersionInput(fixture, { ...b05WriterContent(), body: 'A continued draft.' }),
+    artifactId: 'writer-artifact', expectedParentVersionId: 'writer-v1',
+  }
+  const result = await createContentArtifactVersion(fixture.admin, input)
+  const appended = fixture.writes.find(write => write.table === 'artifact_versions')?.value
+  assertEquals(appended?.version_number, 2)
+  assertEquals(appended?.parent_version_id, 'writer-v1')
+  assertEquals((appended?.content as Record<string, unknown>).body, 'A continued draft.')
+  assertEquals(result.artifact_id, 'writer-artifact')
+  assertEquals(fixture.rows.artifact_approvals, [{ id: 'approval-v1', artifact_version_id: 'writer-v1' }])
+  assertEquals(fixture.rows.artifact_versions.find(version => version.id === 'writer-v1')?.content, b05WriterContent())
+  await assertRejects(() => createContentArtifactVersion(fixture.admin, input), Error, 'A newer version exists')
+  assertEquals(fixture.writes.filter(write => write.table === 'artifact_versions').length, 1)
+})
+
+Deno.test('C01 stale parent rejects before any artifact, version, event or relation write', async () => {
+  const fixture = b04SaveFixture()
+  fixture.rows.artifacts.push({
+    id: 'writer-artifact', organization_id: fixture.organizationId,
+    engagement_id: fixture.engagementId, brand_id: fixture.brandId, artifact_type: 'content',
+  })
+  fixture.rows.artifact_versions.push({
+    id: 'writer-v2', organization_id: fixture.organizationId, artifact_id: 'writer-artifact',
+    version_number: 2, content: b05WriterContent(),
+  })
+  await assertRejects(() => createContentArtifactVersion(fixture.admin, {
+    ...b05VersionInput(fixture, b05WriterContent()),
+    artifactId: 'writer-artifact', expectedParentVersionId: 'writer-v1',
+  }), Error, 'A newer version exists')
+  assertEquals(fixture.writes, [])
+})
+
 Deno.test('B03a normalizes paths, sorts deterministically and derives legacy keys', () => {
   const architecture = validateContentArtifact('website_architecture', { pages: [
     { page_key: 'page:child', slug: ' /Services//Web Design/ ', title: 'Web', parent_page_key: 'page:root', position: 2000, page_type: 'service', purpose: 'Explain' },

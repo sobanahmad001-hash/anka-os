@@ -23,6 +23,27 @@ export function newContentWriterDraft(defaults = {}) {
   }
 }
 
+export function contentWriterFormFromVersion(version) {
+  const content = version?.content
+  if (!isWriterContent(content)) throw new Error('This version cannot be continued in the Production writer.')
+  const quality = content.quality_requirements || {}
+  return {
+    output_type: content.output_type, working_title: content.working_title || '',
+    source_architecture_version_id: content.source_architecture_version_id || '',
+    target_page_key: content.target_page_key || '', destination: content.destination || '',
+    objective: content.objective || '', audience: content.audience || '',
+    language: content.language || '', tone: content.tone || '', body: content.body || '',
+    cta: content.cta || '', exclusions: (content.exclusions || []).join('\n'),
+    required_sections: (quality.required_sections || []).join('\n'),
+    length_unit: quality.length_unit || 'none',
+    min_length: quality.min_length == null ? '' : String(quality.min_length),
+    max_length: quality.max_length == null ? '' : String(quality.max_length),
+    required_terms: (quality.required_terms || []).join('\n'),
+    require_source_citations: quality.require_source_citations === true,
+    source_citations: (content.source_citations || []).join('\n'),
+  }
+}
+
 export function writerDestinationLabel(outputType) {
   return {
     blog_article: 'Topic or purpose', social_copy: 'Channel and placement',

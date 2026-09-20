@@ -385,9 +385,18 @@ async function saveArtifact(context: ServerOrganizationContext, body: Json, acto
   const stageId = await safeStage(context, engagement.id, body.engagement_stage_instance_id)
   const classification = text(body.data_classification, 30) || 'internal'
   if (!CLASSIFICATIONS.has(classification)) throw new Error('Unsupported data classification')
+  const artifactId = text(body.artifact_id, 80) || null
+  const writerContent = body.content && typeof body.content === 'object' && !Array.isArray(body.content)
+    ? body.content as Record<string, unknown> : null
+  const writerContinuation = artifactType === 'content' && writerContent?.schema_version === 2
+  const parentId = typeof body.expected_parent_version_id === 'string' ? body.expected_parent_version_id : null
+  if (writerContinuation && artifactId && (!parentId?.trim() || parentId.length > 80)) {
+    throw Object.assign(new Error('Reopen the latest writer version before saving.'), { status: 409 })
+  }
+  if (writerContinuation && !artifactId && parentId != null) throw new Error('A new writer draft cannot have a parent version')
   return createContentArtifactVersion(context.admin, {
     organizationId: context.organizationId, engagement, stageId,
-    artifactId: text(body.artifact_id, 80) || null, artifactType,
+    artifactId, expectedParentVersionId: writerContinuation && artifactId ? parentId?.trim() : undefined, artifactType,
     title: text(body.title, 240), content: body.content,
     changeSummary: text(body.change_summary, 1000), aiUseAllowed: body.ai_use_allowed === true,
     dataClassification: classification, actorId, source: 'manual', visibilityClient: context.userClient,
