@@ -32,10 +32,10 @@ do $$
 begin
  begin
   perform public.create_draft_project('00000000-0000-4000-8000-000000000001',
-   '50000000-0000-4000-8000-000000000009','Wrong brand','','project',
+   '50000000-0000-4000-8000-000000000009','Retired brand','','project',
    '20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000002',
    null,null,null,'','');
-  raise exception 'Wrong client brand unexpectedly accepted';
+  raise exception 'Retired brand unexpectedly accepted';
  exception when insufficient_privilege then null; end;
 end $$;
 select public.create_draft_project('00000000-0000-4000-8000-000000000001',

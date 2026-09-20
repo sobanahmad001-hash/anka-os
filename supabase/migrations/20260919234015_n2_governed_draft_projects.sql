@@ -186,7 +186,7 @@ begin
     select a.id into agency_id from public.agency_clients a
       join public.brands b on b.client_id=a.id and b.organization_id=a.organization_id
       where a.canonical_client_id=p_client_id and a.organization_id=p_organization_id
-        and b.id=p_brand_id for share of a,b;
+        and b.id=p_brand_id and b.status='active' for share of a,b;
     if not found then raise exception 'Same-organization client and brand required.' using errcode='42501'; end if;
   end if;
   if p_manager_id is not null then
