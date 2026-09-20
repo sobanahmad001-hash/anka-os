@@ -11,6 +11,7 @@ import {
   writerDestinationLabel,
   writerOutputs,
 } from '../data/contentWriter.js'
+import { captureWriterSelection, previewWriterReplacement } from '../data/contentWriterRewrite.js'
 import {
   CONTENT_LENGTH_UNITS,
   checkContentQuality,
@@ -31,6 +32,9 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
   const [qualityAttempted, setQualityAttempted] = useState(false)
   const [continuation, setContinuation] = useState(null)
   const [dirty, setDirty] = useState(false)
+  const [rewrite, setRewrite] = useState(null)
+  const [rewriteError, setRewriteError] = useState('')
+  const bodyRef = useRef(null)
   const draftRevision = useRef(0)
   const versions = useMemo(() => architectureVersions(workspace), [workspace])
   const selectedVersion = versions.find(version => version.id === form.source_architecture_version_id)
@@ -45,6 +49,8 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
     if (!force && dirty && !globalThis.confirm('Discard unsaved writer edits and start a new draft?')) return
     draftRevision.current += 1
     setDirty(false)
+    setRewrite(null)
+    setRewriteError('')
     setContinuation(null)
     setForm(newContentWriterDraft({ language: defaultLanguage }))
     setPreview(null)
@@ -56,6 +62,8 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
     if (dirty && !globalThis.confirm('Discard unsaved writer edits and open this saved version?')) return
     draftRevision.current += 1
     setDirty(false)
+    setRewrite(null)
+    setRewriteError('')
     setContinuation({ artifactId: artifact.id, baseVersionId: latest.id, versionNumber: latest.version_number })
     setForm(contentWriterFormFromVersion(latest))
     setPreview(null)
@@ -89,6 +97,30 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
     setAttempted(true)
     if (staleContinuation || Object.keys(issues).length) return
     setPreview(contentWriterPreview(form, versions))
+  }
+
+  function selectForRewrite() {
+    try {
+      const input = bodyRef.current
+      setRewrite({ selection: captureWriterSelection(form.body, input?.selectionStart, input?.selectionEnd), replacement: '' })
+      setRewriteError('')
+    } catch (reason) { setRewriteError(reason.message) }
+  }
+
+  let replacementPreview = null
+  let replacementIssue = ''
+  if (rewrite) {
+    try { replacementPreview = previewWriterReplacement(rewrite.selection, rewrite.replacement, form.body) }
+    catch (reason) { replacementIssue = reason.message }
+  }
+
+  function applyRewrite() {
+    try {
+      const result = previewWriterReplacement(rewrite?.selection, rewrite?.replacement, form.body)
+      setField('body', result.after)
+      setRewrite(null)
+      setRewriteError('')
+    } catch (reason) { setRewriteError(reason.message) }
   }
 
   function runQualityChecks() {
@@ -132,7 +164,7 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
     <form onSubmit={buildPreview} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Content B05 · manual writer</p>
       <h2 className="mt-1 text-2xl font-semibold">Production writer</h2>
-      <p className="mt-2 text-sm leading-6 text-slate-400">Prepare one text draft, inspect its exact destination, then confirm an unapproved immutable version. Generation jobs, multiple variants, selective rewrite, and publishing are not enabled in this slice.</p>
+      <p className="mt-2 text-sm leading-6 text-slate-400">Prepare one text draft, inspect its exact destination, then confirm an unapproved immutable version. Generation jobs, multiple variants, and publishing are not enabled in this slice. Manual selected-text replacement previews before it changes this working draft.</p>
       {stale && <p role="alert" className="mt-4 text-sm text-amber-300">The saved output list could not be refreshed. Retry before saving a new version.</p>}
       {continuation && <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-950/20 p-4 text-sm text-amber-100">Continuing exact version {continuation.versionNumber}. Saving appends a new unapproved version; the earlier version and its approval remain unchanged.
         {staleContinuation && <p role="alert" className="mt-2 text-red-300">A newer version is available. Reopen the latest output before previewing or saving.</p>}
@@ -152,7 +184,8 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
           <Field label="Language" error={error('language')}><input className={INPUT} value={form.language} onChange={event => setField('language', event.target.value)} /></Field>
           <Field label="Tone override (optional)"><input className={INPUT} value={form.tone} onChange={event => setField('tone', event.target.value)} /></Field>
         </div>
-        <Field label="Draft text" error={error('body')}><textarea rows="12" className={INPUT} value={form.body} onChange={event => setField('body', event.target.value)} /></Field>
+        <Field label="Draft text" error={error('body')}><textarea ref={bodyRef} rows="12" className={INPUT} value={form.body} onChange={event => setField('body', event.target.value)} /></Field>
+        <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4"><p className="text-sm font-semibold text-white">Rewrite selected text manually</p><p className="mt-1 text-xs text-slate-500">Select text in the draft above, then preview a replacement. Only that selection changes, and nothing is saved until you confirm a draft version.</p><button type="button" onClick={selectForRewrite} className={`${SECONDARY} mt-3`}>Use selected text</button>{rewriteError && <p role="alert" className="mt-2 text-xs text-red-300">{rewriteError}</p>}{rewrite && <div className="mt-4 space-y-3"><p className="whitespace-pre-wrap text-xs text-slate-400">Selected: {rewrite.selection.selectedText}</p><label className="block text-xs font-semibold text-slate-400">Replacement<textarea rows="4" className={`${INPUT} mt-2`} value={rewrite.replacement} onChange={event => { setRewrite(current => ({ ...current, replacement: event.target.value })); setRewriteError('') }} /></label>{replacementPreview && <div aria-label="Selected rewrite preview" className="rounded-lg border border-amber-900/50 bg-amber-950/20 p-3 text-xs text-slate-200"><p className="font-semibold text-amber-300">Preview of selected text only</p><p className="mt-2 whitespace-pre-wrap">Before: {replacementPreview.before}</p><p className="mt-2 whitespace-pre-wrap">After: {replacementPreview.replacement}</p></div>}{replacementIssue && <p className="text-xs text-amber-300">{replacementIssue}</p>}<div className="flex gap-2"><button type="button" className={SECONDARY} onClick={() => { setRewrite(null); setRewriteError('') }}>Discard replacement</button><button type="button" className={PRIMARY} disabled={!replacementPreview} onClick={applyRewrite}>Apply to working draft</button></div></div>}</div>
         <p className="text-xs text-slate-500" aria-live="polite">{counts.words} words · {counts.characters} characters. Counts are factual and do not imply quality or approval.</p>
         <Field label="Selected call to action (optional, checked against draft)"><textarea rows="2" className={INPUT} value={form.cta} onChange={event => setField('cta', event.target.value)} /></Field>
         <Field label="Excluded phrases (optional, one per line)"><textarea rows="3" className={INPUT} value={form.exclusions} onChange={event => setField('exclusions', event.target.value)} /></Field>

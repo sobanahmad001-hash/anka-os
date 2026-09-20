@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.14'
-import { brandBriefInput, compiledBrandStatement, contentStudioScope, customFieldDefinitionInput, handleRequest, hasContentAuthority, requireBrandBriefMutationToken,
+import { blockedContentGenerationInput, brandBriefInput, compiledBrandStatement, contentStudioScope, customFieldDefinitionInput, handleRequest, hasContentAuthority, requireBrandBriefMutationToken,
   figmaHandoffUrl, validateContentRequestInput, validateQueueEntryInput } from './index.ts'
 
 import { assertWebsitePageIdentityTransition, CHAT_CONTENT_ARTIFACT_TYPE_SET, CONTENT_ARTIFACT_TYPES, contentArtifactResponseFormat, createContentArtifactVersion, MAX_KEYWORD_RECORDS, validateContentArtifact, withGeneratedSourceMetadata } from '../_shared/contentArtifacts.ts'
@@ -1042,4 +1042,25 @@ Deno.test('C02a exact page source links reject hidden and foreign-scope versions
     }), Error, scenario.foreign ? 'selected type' : 'unavailable')
     assertEquals(fixture.writes, [])
   }
+})
+
+Deno.test('C04 disabled generation requires bounded explicit inputs and exact rewrite selection', () => {
+  const id = '11111111-1111-4111-8111-111111111111'
+  const snapshot = { output_type: 'blog_article', working_title: 'Article', objective: 'Explain',
+    audience: 'Readers', language: 'English', body: 'Before after' }
+  const request = { action: 'request_content_generation', engagement_id: id, request_id: id,
+    source_artifact_version_id: id, model_configuration_id: id, request_kind: 'draft',
+    variant_count: 1, input_snapshot: snapshot }
+  assertEquals(blockedContentGenerationInput(request).variantCount, 1)
+  assertEquals(contentStudioScope(request).root, { kind: 'engagement', id })
+  assertThrows(() => blockedContentGenerationInput({ ...request, variant_count: 4 }), Error, 'variant count')
+  assertThrows(() => blockedContentGenerationInput({ ...request, request_id: 'reused' }), Error, 'valid UUIDs')
+  assertThrows(() => blockedContentGenerationInput({ ...request,
+    input_snapshot: { ...snapshot, secret: 'never persist' } }), Error, 'Unsupported generation input field')
+  assertThrows(() => blockedContentGenerationInput({ ...request, request_kind: 'rewrite',
+    input_snapshot: { ...snapshot, selected_text: 'Before', selection_start: 1, selection_end: 7 } }),
+    Error, 'exact draft text')
+  assertEquals(blockedContentGenerationInput({ ...request, request_kind: 'rewrite',
+    input_snapshot: { ...snapshot, selected_text: 'Before', selection_start: 0, selection_end: 6 } })
+    .snapshot.selected_text, 'Before')
 })

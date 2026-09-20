@@ -146,6 +146,65 @@ export function validateContentRequestInput(body: Json) {
   }
 }
 
+const GENERATION_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const GENERATION_TYPES = new Set(['website_page_copy', 'blog_article', 'social_copy', 'campaign_copy', 'custom_text'])
+
+export function blockedContentGenerationInput(body: Json) {
+  const requestId = text(body.request_id, 80)
+  const sourceVersionId = text(body.source_artifact_version_id, 80)
+  const modelConfigurationId = text(body.model_configuration_id, 80)
+  const engagementId = text(body.engagement_id, 80)
+  const requestKind = text(body.request_kind, 20)
+  const variantCount = Number(body.variant_count)
+  const snapshot = body.input_snapshot
+  if (![requestId, sourceVersionId, modelConfigurationId, engagementId].every(value => GENERATION_UUID.test(value))) {
+    throw new Error('Generation request, engagement, source version, and model IDs must be valid UUIDs')
+  }
+  if (!['draft', 'rewrite'].includes(requestKind)) throw new Error('Unsupported generation request kind')
+  if (!Number.isInteger(variantCount) || variantCount < 1 || variantCount > 3) {
+    throw new Error('Generation variant count must be between 1 and 3')
+  }
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    throw new Error('Generation input snapshot is required')
+  }
+  const fields = snapshot as Json
+  const allowed = new Set(['output_type', 'working_title', 'objective', 'audience', 'language',
+    'destination', 'tone', 'body', 'selected_text', 'selection_start', 'selection_end'])
+  if (Object.keys(fields).some(key => !allowed.has(key))) throw new Error('Unsupported generation input field')
+  const normalized: Json = {}
+  for (const [key, max] of [['output_type', 40], ['working_title', 160], ['objective', 8000],
+    ['audience', 8000], ['language', 120], ['destination', 1000], ['tone', 1000],
+    ['body', 120000], ['selected_text', 120000]] as const) {
+    if (fields[key] !== undefined && typeof fields[key] !== 'string') throw new Error(`Generation ${key} must be text`)
+    const value = fields[key] as string | undefined
+    if (value && value.length > max) throw new Error(`Generation ${key} is too long`)
+    normalized[key] = value || ''
+  }
+  if (!GENERATION_TYPES.has(normalized.output_type as string)
+    || !String(normalized.working_title).trim() || !String(normalized.objective).trim()
+    || !String(normalized.audience).trim() || !String(normalized.language).trim()) {
+    throw new Error('Generation type, title, objective, audience, and language are required')
+  }
+  if (requestKind === 'rewrite') {
+    const start = fields.selection_start
+    const end = fields.selection_end
+    const bodyText = normalized.body as string
+    if (typeof start !== 'number' || typeof end !== 'number'
+      || !Number.isInteger(start) || !Number.isInteger(end) || start < 0
+      || end <= start || end > bodyText.length
+      || bodyText.slice(start, end) !== normalized.selected_text
+      || !String(normalized.selected_text).trim()) {
+      throw new Error('Rewrite selection must match the exact draft text')
+    }
+    normalized.selection_start = start
+    normalized.selection_end = end
+  } else if (fields.selection_start !== undefined || fields.selection_end !== undefined || normalized.selected_text) {
+    throw new Error('Draft generation cannot include a rewrite selection')
+  }
+  return { requestId, sourceVersionId, modelConfigurationId, engagementId, requestKind,
+    variantCount, snapshot: normalized }
+}
+
 export function validateQueueEntryInput(body: Json) {
   const brandId = text(body.brand_id, 80)
   const plannedDate = text(body.planned_date, 10)
@@ -206,6 +265,10 @@ export function contentStudioScope(body: Json): ServerOrganizationScope {
       ? { kind: 'artifact', id: artifactId }
       : { kind: 'engagement', id: requiredActionId(body.engagement_id, 'Engagement') },
     requestedOrganizationId }
+  }
+  if (action === 'request_content_generation') {
+    const input = blockedContentGenerationInput(body)
+    return { root: { kind: 'engagement', id: input.engagementId }, requestedOrganizationId }
   }
   if (action === 'create_content_request') {
     const input = validateContentRequestInput(body)
@@ -269,6 +332,75 @@ async function safeStage(context: ServerOrganizationContext, engagementId: strin
     throw new Error('Content stage does not match this engagement')
   }
   return stage.id
+}
+
+async function recordBlockedContentGeneration(context: ServerOrganizationContext, body: Json, actorId: string) {
+  const input = blockedContentGenerationInput(body)
+  const engagement = await requireContentEngagement(context, input.engagementId)
+  const projectId = text(engagement.project_id, 80)
+  if (!GENERATION_UUID.test(projectId)) throw Object.assign(new Error('Content engagement has no project'), { status: 409 })
+  const { data: version, error: versionError } = await context.admin.from('artifact_versions')
+    .select('id, artifact_id, content, content_checksum, ai_use_allowed, data_classification')
+    .eq('id', input.sourceVersionId).eq('organization_id', context.organizationId).maybeSingle()
+  if (versionError || !version) throw Object.assign(new Error('Generation source version is unavailable'), { status: 404 })
+  const { data: artifact, error: artifactError } = await context.admin.from('artifacts')
+    .select('id, engagement_id, artifact_type').eq('id', version.artifact_id)
+    .eq('organization_id', context.organizationId).maybeSingle()
+  if (artifactError || !artifact || artifact.engagement_id !== input.engagementId
+    || !CONTENT_ARTIFACT_TYPE_SET.has(artifact.artifact_type)
+    || version.ai_use_allowed !== true || version.data_classification === 'restricted') {
+    throw Object.assign(new Error('Generation source is not approved for AI context in this engagement'), { status: 403 })
+  }
+  const { data: approved, error: approvalError } = await context.admin.from('artifact_approvals')
+    .select('id').eq('organization_id', context.organizationId)
+    .eq('artifact_version_id', version.id).limit(1)
+  if (approvalError || !approved?.length) {
+    throw Object.assign(new Error('Generation requires an approved exact source version'), { status: 409 })
+  }
+  if (input.requestKind === 'rewrite' && (version.content as Json | null)?.body !== input.snapshot.body) {
+    throw Object.assign(new Error('Rewrite text no longer matches the exact source version'), { status: 409 })
+  }
+  const { data: model, error: modelError } = await context.admin.from('department_chat_model_configurations')
+    .select('id, connector_connection_id, model_id')
+    .eq('id', input.modelConfigurationId).eq('organization_id', context.organizationId)
+    .eq('department_id', 'content').is('revoked_at', null).maybeSingle()
+  if (modelError || !model) throw Object.assign(new Error('Content text model is unavailable'), { status: 409 })
+  const { data: connection, error: connectionError } = await context.admin.from('integration_connections')
+    .select('id, public_config').eq('id', model.connector_connection_id)
+    .eq('organization_id', context.organizationId).eq('provider', 'openai')
+    .eq('status', 'verified').is('archived_at', null).maybeSingle()
+  if (connectionError || !connection) throw Object.assign(new Error('Verified Content model connector is unavailable'), { status: 409 })
+  const publicConfig = connection.public_config && typeof connection.public_config === 'object'
+    ? connection.public_config as Json : {}
+  if (model.model_id !== publicConfig.model_id
+    && !(Array.isArray(publicConfig.verified_model_ids) && publicConfig.verified_model_ids.includes(model.model_id))) {
+    throw Object.assign(new Error('Content model is not in the connector verified set'), { status: 409 })
+  }
+  const { data: departmentMapping, error: departmentMappingError } = await context.admin
+    .from('integration_connection_departments').select('connection_id')
+    .eq('organization_id', context.organizationId).eq('connection_id', connection.id)
+    .eq('department_id', 'content').limit(1)
+  if (departmentMappingError || !departmentMapping?.length) {
+    throw Object.assign(new Error('Content model connector is not mapped to the department'), { status: 409 })
+  }
+  const { data: mapping, error: mappingError } = await context.admin.from('integration_connection_engagements')
+    .select('connection_id').eq('organization_id', context.organizationId)
+    .eq('connection_id', connection.id).eq('engagement_id', input.engagementId)
+    .eq('department_id', 'content').limit(1)
+  if (mappingError || !mapping?.length) throw Object.assign(new Error('Content model is not mapped to this engagement'), { status: 409 })
+  const serialized = JSON.stringify(input.snapshot)
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(serialized))
+  const checksum = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+  const { data: job, error } = await context.admin.rpc('record_blocked_content_generation_job', {
+    p_organization_id: context.organizationId, p_project_id: projectId,
+    p_engagement_id: input.engagementId, p_source_artifact_version_id: version.id,
+    p_model_configuration_id: model.id, p_actor_id: actorId, p_request_id: input.requestId,
+    p_request_kind: input.requestKind, p_variant_count: input.variantCount, p_input_checksum: checksum,
+    p_input_manifest: { source_version_id: version.id, source_checksum: version.content_checksum,
+      output_type: input.snapshot.output_type, input_characters: serialized.length },
+  })
+  if (error) throw error
+  return job
 }
 
 async function createContentRequest(context: ServerOrganizationContext, body: Json, actorId: string) {
@@ -544,6 +676,9 @@ export async function handleRequest(request: Request) {
         ? 'Content manager approval required' : 'Content department access required' }, 403)
     }
     if (action === 'save_artifact') return response({ data: await saveArtifact(context, body, context.user.id) })
+    if (action === 'request_content_generation') {
+      return response({ data: await recordBlockedContentGeneration(context, body, context.user.id) })
+    }
     if (action === 'create_content_request') {
       return response({ data: await createContentRequest(context, body, context.user.id) })
     }
