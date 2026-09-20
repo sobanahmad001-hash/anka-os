@@ -1,4 +1,5 @@
 import { CONTENT_ARTIFACT_FORMS, latestVersion } from './contentStudio.js'
+import { recordedSourceReferences } from './contentLibrary.js'
 
 export const CONTENT_HOME_GROUPS = Object.freeze([
   Object.freeze({ id: 'brief', label: 'Brief', artifactTypes: Object.freeze(['discovery']) }),
@@ -117,6 +118,27 @@ export function contentSourceReadiness(workspace = {}, artifactType, selection =
     versionId: currentVersion.id,
     usedVersionId,
   })
+}
+
+export function recordedContentSourceSelections(workspace = {}, selectedVersion = null) {
+  workspace = workspace || {}
+  const artifactById = new Map((workspace.artifacts || []).map(artifact => [artifact.id, artifact]))
+  const versionById = new Map((workspace.versions || []).map(version => [version.id, version]))
+  const selected = {}
+  const ambiguous = new Set()
+  for (const reference of recordedSourceReferences(selectedVersion?.content)) {
+    const sourceVersion = versionById.get(reference.id)
+    const sourceArtifact = artifactById.get(sourceVersion?.artifact_id)
+    if (!sourceArtifact) continue
+    const type = sourceArtifact.artifact_type
+    if (selected[type] && selected[type].usedVersionId !== reference.id) {
+      ambiguous.add(type)
+    } else {
+      selected[type] = { artifactId: sourceArtifact.id, usedVersionId: reference.id }
+    }
+  }
+  for (const type of ambiguous) delete selected[type]
+  return selected
 }
 
 function activeContentService(context) {

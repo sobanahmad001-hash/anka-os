@@ -7,6 +7,7 @@ import {
   contentActionReadiness,
   contentHomeAccessState,
   contentSourceReadiness,
+  recordedContentSourceSelections,
 } from './contentWorkshopHome.js'
 
 const context = Object.freeze({
@@ -189,4 +190,25 @@ test('CONTENT B01 source selection is independent of artifact ordering', () => {
       artifactId: 'discovery-old',
     }).status, 'available')
   }
+})
+
+test('C01 derives changed-since-use only from a saved exact source-version reference', () => {
+  const sources = {
+    artifacts: [
+      { id: 'architecture', artifact_type: 'website_architecture' },
+      { id: 'copy', artifact_type: 'content' },
+    ],
+    versions: [
+      { id: 'architecture-v1', artifact_id: 'architecture', version_number: 1 },
+      { id: 'architecture-v2', artifact_id: 'architecture', version_number: 2 },
+    ],
+  }
+  const saved = { id: 'copy-v1', content: { schema_version: 2, source_architecture_version_id: 'architecture-v1' } }
+  const selections = recordedContentSourceSelections(sources, saved)
+  assert.deepEqual(selections.website_architecture, {
+    artifactId: 'architecture', usedVersionId: 'architecture-v1',
+  })
+  assert.equal(contentSourceReadiness(sources, 'website_architecture', selections.website_architecture).status, 'changed_since_use')
+  assert.deepEqual(recordedContentSourceSelections(sources, { content: { body: 'No recorded version' } }), {})
+  assert.deepEqual(recordedContentSourceSelections(sources, { content: { source_architecture_version_id: 'hidden-id' } }), {})
 })

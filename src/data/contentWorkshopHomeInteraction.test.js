@@ -167,8 +167,8 @@ test('mounted B01 Home routes only exact compatible records to their real editor
   await render(writer)
   await click(byText(environment.container, 'button', 'Writer draft'))
   assert.equal(byText(environment.container, 'button', 'Continue in Content editor'), undefined)
-  assert.match(environment.container.textContent, /No compatible exact editor is available/)
-  assert.deepEqual(actions, [])
+  await click(byText(environment.container, 'button', 'Open Production writer to continue'))
+  assert.deepEqual(actions, ['writer-a:writer'])
 })
 
 test('mounted B01 Home resets exact selection on engagement switch and distinguishes stale, empty, denied, loading, and failed states', async t => {
@@ -219,6 +219,7 @@ test('B01 Home integration reuses released reads and does not adopt B07, chat, s
   assert.match(panel, /contentSourceReadiness/)
   assert.match(panel, /View exact source/)
   assert.ok(panel.includes('No compatible exact editor is available'))
-  assert.ok(panel.includes('durable used-version provenance is loaded'))
+  assert.ok(panel.includes('recordedContentSourceSelections'))
+  assert.ok(panel.includes('Open Production writer to continue'))
   assert.doesNotMatch(panel, /ContentLibraryPanel|contentStudioRepository|DepartmentChat|supabase|functions\.invoke|insert\(|update\(|delete\(/i)
 })

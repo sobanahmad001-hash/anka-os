@@ -672,6 +672,7 @@ export async function createContentArtifactVersion(admin: AdminClient, input: {
   engagement: { id: string; brand_id: string }
   stageId?: string | null
   artifactId?: string | null
+  expectedParentVersionId?: string
   artifactType: string
   title: string
   content: unknown
@@ -809,6 +810,9 @@ export async function createContentArtifactVersion(admin: AdminClient, input: {
     .select('id, version_number, content').eq('artifact_id', artifactId)
     .order('version_number', { ascending: false }).limit(1).maybeSingle()
   if (latestError) throw latestError
+  if (input.expectedParentVersionId && latest?.id !== input.expectedParentVersionId) {
+    throw Object.assign(new Error('A newer version exists. Reopen the latest writer version before saving.'), { status: 409 })
+  }
   if (input.artifactType === 'website_architecture' && latest?.content) {
     assertWebsitePageIdentityTransition(latest.content, content.pages)
   }
@@ -825,6 +829,9 @@ export async function createContentArtifactVersion(admin: AdminClient, input: {
   }).select('*').single()
   if (versionError) {
     if (createdArtifact) await admin.from('artifacts').delete().eq('id', artifactId)
+    if (input.expectedParentVersionId && versionError.code === '23505') {
+      throw Object.assign(new Error('A newer version exists. Reopen the latest writer version before saving.'), { status: 409 })
+    }
     throw versionError
   }
   const eventType = input.source === 'department_chat'

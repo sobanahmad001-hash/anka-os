@@ -8,6 +8,7 @@ import {
   CONTENT_WRITER_OUTPUT_TYPES,
   contentArtifactForMode,
   contentWriterIssues,
+  contentWriterFormFromVersion,
   contentWriterPreview,
   newContentWriterDraft,
   serializeContentWriter,
@@ -101,4 +102,22 @@ test('B05a UI requires preview and explicit unapproved confirmation without a se
   assert.match(ui, /cost estimate unavailable/)
   assert.match(studio, /Production writer/)
   assert.doesNotMatch(ui, /invoke\(['"]department-chat|generate_|localStorage|sessionStorage/)
+})
+
+test('C01 reopens exact saved writer content and preserves local rules without editing the source version', () => {
+  const original = serializeContentWriter({
+    ...validDraft('blog_article'), exclusions: 'guaranteed\nbest ever',
+    required_sections: 'Summary\nSources', length_unit: 'words', min_length: '100',
+    required_terms: 'Anka Sphere', require_source_citations: true,
+    source_citations: 'Client brief v2\nhttps://example.test/source',
+  }, [])
+  const snapshot = structuredClone(original)
+  const form = contentWriterFormFromVersion({ id: 'writer-v1', content: original })
+  assert.equal(form.min_length, '100')
+  assert.equal(form.source_citations, 'Client brief v2\nhttps://example.test/source')
+  assert.deepEqual(serializeContentWriter(form, []), original)
+  form.body = 'A revised article'
+  assert.deepEqual(original, snapshot)
+  assert.equal(serializeContentWriter(form, []).body, 'A revised article')
+  assert.throws(() => contentWriterFormFromVersion({ content: { content_strategy: 'legacy' } }), /cannot be continued/)
 })

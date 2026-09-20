@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import {
-  CONTENT_HOME_GROUPS, buildContentHomeIndex, contentHomeAccessState, contentSourceReadiness,
+  CONTENT_HOME_GROUPS, buildContentHomeIndex, contentHomeAccessState, contentSourceReadiness, recordedContentSourceSelections,
 } from '../data/contentWorkshopHome.js'
 import { CONTENT_ARTIFACT_FORMS } from '../data/contentStudio.js'
 import { isWriterContent } from '../data/contentWriter.js'
@@ -50,13 +50,13 @@ export default function ContentWorkshopHomePanel({
   const allItems = useMemo(() => groups.filter(group => group.id !== 'review').flatMap(group => group.items), [groups])
   const selectedItem = allItems.find(item => item.id === selectedItemId) || null
   const selectedVersion = (workspace?.versions || []).find(version => version.id === selectedItem?.currentVersionId) || null
+  const recordedSelections = recordedContentSourceSelections(workspace, selectedVersion)
   const access = contentHomeAccessState(context)
   const typeCounts = useMemo(() => new Map((workspace?.artifacts || []).map(item => item.artifact_type)
     .map((type, _index, types) => [type, types.filter(candidate => candidate === type).length])), [workspace])
-  const editorTarget = selectedItem && typeCounts.get(selectedItem.contentType) === 1 && CONTENT_ARTIFACT_FORMS[selectedItem.contentType]
-    && !(selectedItem.contentType === 'content' && isWriterContent(selectedVersion?.content))
-    ? 'artifacts'
-    : ''
+  const writerTarget = selectedItem?.contentType === 'content' && isWriterContent(selectedVersion?.content)
+  const editorTarget = writerTarget ? 'writer' : selectedItem && typeCounts.get(selectedItem.contentType) === 1
+    && CONTENT_ARTIFACT_FORMS[selectedItem.contentType] ? 'artifacts' : ''
 
   useEffect(() => {
     setSelectedItemId(''); setSourceSelections({})
@@ -110,7 +110,7 @@ export default function ContentWorkshopHomePanel({
             <div className="mt-5"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Exact saved payload</p><pre className="mt-2 max-h-[34rem] overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-4 text-xs leading-5 text-slate-300">{JSON.stringify(selectedVersion.content || {}, null, 2)}</pre></div>
           </> : <p className="mt-5 rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400">This artifact root has no saved version. No content has been inferred.</p>}
           <div className="mt-5 flex flex-wrap gap-2"><a className={BUTTON} href={`/sphere/artifacts/${encodeURIComponent(selectedItem.id)}`}>Open canonical artifact</a>
-            {editorTarget ? <button type="button" className={BUTTON} disabled={stale} onClick={() => onOpenEditor(selectedItem, editorTarget)}>Continue in Content editor</button>
+            {editorTarget ? <button type="button" className={BUTTON} disabled={stale} onClick={() => onOpenEditor(selectedItem, editorTarget)}>{writerTarget ? 'Open Production writer to continue' : 'Continue in Content editor'}</button>
               : <p className="basis-full text-xs text-amber-300">{typeCounts.get(selectedItem.contentType) === 1 ? `No compatible exact editor is available for this ${label(selectedItem.contentType)} record, so continuation is withheld.` : `Multiple ${label(selectedItem.contentType)} roots exist. The current editor cannot safely target this root, so no first item is selected.`}</p>}
           </div>
         </>}
@@ -119,14 +119,17 @@ export default function ContentWorkshopHomePanel({
       <aside aria-labelledby="content-source-readiness" className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
         <h3 id="content-source-readiness" className="font-semibold text-white">Source readiness</h3>
         <p className="mt-2 text-xs leading-5 text-slate-500">These indicators describe available inputs. Missing optional sources do not block unrelated content work.</p>
-        <p className="mt-2 text-[11px] leading-4 text-slate-600">Changed since use is shown only when durable used-version provenance is loaded. This workspace does not infer that provenance from a selection.</p>
+        <p className="mt-2 text-[11px] leading-4 text-slate-600">Changed since use is shown only when this selected saved version records an exact source version. A browsing choice alone is not provenance.</p>
         <div className="mt-4 space-y-3">{CONTENT_HOME_GROUPS.filter(group => group.artifactTypes.length).flatMap(group => group.artifactTypes.map(type => {
-          const readiness = contentSourceReadiness(workspace, type, sourceSelections[type])
+          const recorded = recordedSelections[type]
+          const selection = sourceSelections[type] || recorded
+          const readiness = contentSourceReadiness(workspace, type, selection)
           const candidates = (workspace.artifacts || []).filter(item => item.artifact_type === type)
           return <div key={type} className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
             <div className="flex items-start justify-between gap-3"><p className="text-xs font-semibold text-slate-300">{label(type)}</p><span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${STATUS[readiness.status] || STATUS.missing}`}>{readiness.label}</span></div>
             <p className="mt-2 text-[11px] leading-4 text-slate-500">{readinessEffect(readiness.status)}</p>
             {readiness.status === 'selection_required' && <div className="mt-3"><p className="text-[11px] leading-4 text-amber-300">Choose the intended artifact root; none is selected by default.</p><div className="mt-2 flex flex-wrap gap-2">{candidates.map(candidate => <button type="button" className={BUTTON} key={candidate.id} onClick={() => setSourceSelections(current => ({ ...current, [type]: { artifactId: candidate.id } }))}>{candidate.title || candidate.id}</button>)}</div></div>}
+            {recorded && <p className="mt-2 text-[11px] text-slate-500">Recorded used version: {recorded.usedVersionId}</p>}
             {sourceSelections[type]?.artifactId && <button type="button" className="mt-2 text-[11px] font-semibold text-slate-500 underline hover:text-slate-300" onClick={() => setSourceSelections(current => { const next = { ...current }; delete next[type]; return next })}>Clear explicit selection</button>}
             {readiness.artifactId && readiness.versionId && <button type="button" className="mt-2 ml-3 text-[11px] font-semibold text-amber-300 underline hover:text-amber-200" onClick={() => setSelectedItemId(readiness.artifactId)}>View exact source</button>}
             {readiness.status === 'changed_since_use' && <p className="mt-2 text-[11px] text-amber-300">The current version differs from the exact version previously used.</p>}
