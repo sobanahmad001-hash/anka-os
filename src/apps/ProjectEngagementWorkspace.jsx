@@ -157,7 +157,7 @@ export default function ProjectEngagementWorkspace() {
           {tab === 'overview' && <Overview workspace={workspace} />}
           {tab === 'services' && <ServicesAndScope workspace={workspace} />}
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
-          {tab === 'work' && <div className="space-y-5"><ProjectTasks rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" /><EngagementWork rows={workspace.engagementWorkItems} hasEngagement={identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" /></div>}
+          {tab === 'work' && <WorkViews workspace={workspace} navigate={navigate} searchParams={searchParams} setSearchParams={setSearchParams} />}
           {tab === 'project-tasks' && <ProjectTasks rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
           {tab === 'engagement-work' && <EngagementWork rows={workspace.engagementWorkItems} hasEngagement={identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
           {tab === 'planning' && <ProjectPlanningPanel workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} onRefresh={load} />}
@@ -223,8 +223,55 @@ function EngagementWork({ rows, hasEngagement, workshopLinks, navigate, originTa
   return <Panel title="Engagement Work Items" description="Delivery work attached to the engagement extension. These are not Project Tasks."><RecordList rows={rows} empty="No Engagement Work Items recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="engagement_work_item" context={label(item.department_id)} automation={Boolean(item.automation_flagged_at)} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'engagement_work_item', originTab)} navigate={navigate} />} /></Panel>
 }
 
-function WorkRecord({ item, kind, context, automation = false, workshopPath, navigate }) {
-  return <div id={`work-record-${kind}-${item.id}`} tabIndex={-1} className={`rounded-xl border p-4 outline-none focus:ring-2 focus:ring-violet-400 ${item.overdue || item.status === 'blocked' ? 'border-amber-500/20 bg-amber-500/[0.04]' : 'border-white/[0.07] bg-black/10'}`}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium text-white">{item.title}</p><p className="mt-1 text-xs text-slate-500">{context} · {item.owner.name} · Due {date(item.due_date)}</p></div><Status value={item.status} /></div>{item.description && <p className="mt-3 text-sm leading-6 text-slate-400">{item.description}</p>}<div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">{item.overdue && <Pill attention>Overdue</Pill>}{automation && <Pill attention>Automation flag</Pill>}<Pill>{label(item.priority)}</Pill>{workshopPath && <button type="button" onClick={() => navigate(workshopPath)} className="ml-auto rounded-lg border border-violet-500/25 px-2.5 py-1.5 font-semibold text-violet-200 hover:bg-violet-500/10 focus:outline-none focus:ring-2 focus:ring-violet-400">Open in Workshop</button>}</div></div>
+const WORK_VIEWS = ['list', 'board', 'calendar']
+const MONTH_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+function WorkViews({ workspace, navigate, searchParams, setSearchParams }) {
+  const view = WORK_VIEWS.includes(searchParams.get('workView')) ? searchParams.get('workView') : 'list'
+  const suppliedMonth = searchParams.get('workMonth')
+  const monthKey = /^\d{4}-(0[1-9]|1[0-2])$/.test(suppliedMonth || '')
+    ? suppliedMonth : new Date().toISOString().slice(0, 7)
+  const [year, monthNumber] = monthKey.split('-').map(Number)
+  const records = [
+    ...workspace.projectTasks.map(item => ({ kind: 'project_task', item, context: item.workstreamName })),
+    ...workspace.engagementWorkItems.map(item => ({ kind: 'engagement_work_item', item, context: label(item.department_id) })),
+  ]
+  const setWorkParam = (key, value) => {
+    const next = new URLSearchParams(searchParams)
+    next.set(key, value)
+    setSearchParams(next, { replace: true })
+  }
+  const card = ({ kind, item, context }) => <WorkRecord key={`${kind}-${item.id}`} item={item} kind={kind}
+    context={context} automation={kind === 'engagement_work_item' && Boolean(item.automation_flagged_at)}
+    workshopPath={recordWorkshopPath(workspace.workshopLinks.find(link => link.department === item.department_id), item, kind, 'work')}
+    navigate={navigate} showKind />
+  const monthStart = new Date(Date.UTC(year, monthNumber - 1, 1))
+  const monthEnd = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate()
+  const calendarDays = Array.from({ length: Math.ceil((monthStart.getUTCDay() + monthEnd) / 7) * 7 }, (_, index) => {
+    const day = index - monthStart.getUTCDay() + 1
+    return day >= 1 && day <= monthEnd ? `${monthKey}-${String(day).padStart(2, '0')}` : null
+  })
+  const shiftMonth = offset => {
+    const next = new Date(Date.UTC(year, monthNumber - 1 + offset, 1)).toISOString().slice(0, 7)
+    setWorkParam('workMonth', next)
+  }
+  const statuses = [...new Set(records.map(({ item }) => item.status || 'unknown'))].sort()
+  return <div className="space-y-5">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
+      <div><h2 className="font-semibold">Project work</h2><p className="mt-1 text-xs text-slate-500">List, board and calendar show the same {records.length} records. Statuses keep their source meaning; dates are task due dates.</p></div>
+      <div role="group" aria-label="Work view" className="flex gap-1 rounded-xl border border-white/10 p-1">
+        {WORK_VIEWS.map(option => <button type="button" key={option} aria-pressed={view === option} onClick={() => setWorkParam('workView', option)} className={`rounded-lg px-3 py-1.5 text-sm ${view === option ? 'bg-violet-500/20 text-violet-100' : 'text-slate-400 hover:text-white'}`}>{label(option)}</button>)}
+      </div>
+    </div>
+    {view === 'list' && <><ProjectTasks rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" /><EngagementWork rows={workspace.engagementWorkItems} hasEngagement={workspace.identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" /></>}
+    {view === 'board' && (records.length
+      ? <div className="flex gap-4 overflow-x-auto pb-3">{statuses.map(status => <section key={status} className="w-72 shrink-0 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3"><h3 className="mb-3 text-sm font-semibold">{label(status)} <span className="text-slate-500">({records.filter(({ item }) => (item.status || 'unknown') === status).length})</span></h3><div className="space-y-3">{records.filter(({ item }) => (item.status || 'unknown') === status).map(card)}</div></section>)}</div>
+      : <Empty title="No project work" note="No Project Tasks or Engagement Work Items have been recorded." />)}
+    {view === 'calendar' && <div className="space-y-4"><div className="flex items-center justify-between"><h3 className="font-semibold">{monthStart.toLocaleString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' })}</h3><div className="flex gap-2"><button type="button" aria-label="Previous month" onClick={() => shiftMonth(-1)} className="rounded-lg border border-white/10 px-3 py-1.5">←</button><button type="button" aria-label="Next month" onClick={() => shiftMonth(1)} className="rounded-lg border border-white/10 px-3 py-1.5">→</button></div></div><div className="overflow-x-auto"><div className="grid min-w-[840px] grid-cols-7 gap-2">{MONTH_DAYS.map(day => <div key={day} className="px-2 text-xs font-semibold text-slate-500">{day}</div>)}{calendarDays.map((day, index) => <div key={day || `blank-${index}`} aria-label={day || undefined} className="min-h-32 rounded-xl border border-white/[0.07] bg-white/[0.025] p-2"><p className="mb-2 text-xs text-slate-400">{day?.slice(-2) || ''}</p>{day && records.filter(({ item }) => item.due_date?.slice(0, 10) === day).map(({ kind, item }) => <div key={`${kind}-${item.id}`} className="mb-1 rounded-lg border border-violet-500/20 bg-violet-500/[0.06] p-2 text-xs"><p className="font-medium">{item.title}</p><p className="text-slate-500">{kind === 'project_task' ? 'Project Task' : 'Engagement Work Item'} · {label(item.status)}</p></div>)}</div>)}</div></div>{records.some(({ item }) => !item.due_date) && <Panel title="No due date" description="These records remain visible until a due date is set."><div className="grid gap-3 md:grid-cols-2">{records.filter(({ item }) => !item.due_date).map(card)}</div></Panel>}</div>}
+  </div>
+}
+
+function WorkRecord({ item, kind, context, automation = false, workshopPath, navigate, showKind = false }) {
+  return <div id={`work-record-${kind}-${item.id}`} tabIndex={-1} className={`rounded-xl border p-4 outline-none focus:ring-2 focus:ring-violet-400 ${item.overdue || item.status === 'blocked' ? 'border-amber-500/20 bg-amber-500/[0.04]' : 'border-white/[0.07] bg-black/10'}`}><div className="flex flex-wrap items-start justify-between gap-3"><div>{showKind && <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-violet-300">{kind === 'project_task' ? 'Project Task' : 'Engagement Work Item'}</p>}<p className="font-medium text-white">{item.title}</p><p className="mt-1 text-xs text-slate-500">{context} · {item.owner.name} · Due {date(item.due_date)}</p></div><Status value={item.status} /></div>{item.description && <p className="mt-3 text-sm leading-6 text-slate-400">{item.description}</p>}<div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">{item.overdue && <Pill attention>Overdue</Pill>}{automation && <Pill attention>Automation flag</Pill>}<Pill>{label(item.priority)}</Pill>{workshopPath && <button type="button" onClick={() => navigate(workshopPath)} className="ml-auto rounded-lg border border-violet-500/25 px-2.5 py-1.5 font-semibold text-violet-200 hover:bg-violet-500/10 focus:outline-none focus:ring-2 focus:ring-violet-400">Open in Workshop</button>}</div></div>
 }
 
 function Outputs({ workspace }) {
