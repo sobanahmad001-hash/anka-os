@@ -3,6 +3,8 @@ import { useOrganization } from '../context/OrganizationContext.jsx'
 import { useNavigate } from 'react-router-dom'
 import { filterPortfolioRows, PORTFOLIO_DUE_FILTERS } from '../data/portfolioWorkspaceModel'
 import { portfolioWorkspace } from '../data/portfolioWorkspace'
+import { canShowAuthorityAdministration } from '../data/authorityAdministration.js'
+import ProjectDraftSetupPanel from './ProjectDraftSetupPanel.jsx'
 
 const label = (value) => value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
 const metric = (title, value, note) => ({ title, value, note })
@@ -10,13 +12,14 @@ const metric = (title, value, note) => ({ title, value, note })
 export default function PortfolioWorkspace({ initialOwnerKind = 'all' }) {
   const navigate = useNavigate()
 
-  const { activeOrganizationId, selectionRequired, loading: organizationLoading, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
+  const { activeOrganizationId, activeMembership, selectionRequired, loading: organizationLoading, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
   const currentRequest = useRef(null)
   currentRequest.current = { organizationId: activeOrganizationId, revision: scopeRevision, recordId: null }
   const requestGeneration = useRef(0)
   const [snapshot, setSnapshot] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [showSetup, setShowSetup] = useState(false)
   const [filters, setFilters] = useState({ ownerKind: initialOwnerKind, status: 'all', due: 'all', owner: 'all', sort: 'due' })
 
   const load = useCallback(async () => {
@@ -44,6 +47,7 @@ export default function PortfolioWorkspace({ initialOwnerKind = 'all' }) {
 
   useEffect(() => {
     setSnapshot(null)
+    setShowSetup(false)
     setFilters({ ownerKind: initialOwnerKind, status: 'all', due: 'all', owner: 'all', sort: 'due' })
     setError('')
     setLoading(true)
@@ -77,10 +81,12 @@ export default function PortfolioWorkspace({ initialOwnerKind = 'all' }) {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">Coordination</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">Portfolio Workspace</h1>
-            <p className="mt-2 max-w-3xl text-sm text-slate-400">A read-only, project-root view of Client Work and Internal Work. Project Tasks and Engagement Work Items remain separate.</p>
+            <p className="mt-2 max-w-3xl text-sm text-slate-400">A project-root view of Client Work and Internal Work. Project Tasks and Engagement Work Items remain separate.</p>
           </div>
-          <button type="button" onClick={load} disabled={loading} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-slate-200 hover:bg-white/[0.08] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button>
+          <div className="flex gap-2">{canShowAuthorityAdministration(activeMembership) && <button type="button" onClick={() => setShowSetup(true)} disabled={showSetup} className="rounded-xl bg-violet-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">New draft project</button>}<button type="button" onClick={load} disabled={loading} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-slate-200 hover:bg-white/[0.08] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button></div>
         </div>
+
+        {showSetup && canShowAuthorityAdministration(activeMembership) && <ProjectDraftSetupPanel organizationId={activeOrganizationId} scopeRevision={scopeRevision} requestSignal={requestSignal} initialType="project" onCreated={(result) => navigate(`/sphere/workspace/projects/${result.project_id}`)} onCancel={() => setShowSetup(false)} onAccessError={handleOrganizationAccessError} />}
 
         {error && <div role="alert" className="mt-6 rounded-2xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>}
         {loading && !snapshot && <div className="mt-8 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-10 text-center text-sm text-slate-400">Loading live portfolio data…</div>}

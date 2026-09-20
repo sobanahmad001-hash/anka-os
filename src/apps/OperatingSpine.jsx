@@ -11,6 +11,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { OPERATING_DEPARTMENTS, pipelineDepartmentFlags } from '../data/operatingSpineRepository.js'
 import { operatingSpine } from '../data/operatingSpine.js'
+import { canShowAuthorityAdministration } from '../data/authorityAdministration.js'
 import { pipelineTemplates } from '../data/pipelineTemplates.js'
 
 const INPUT = 'w-full rounded-xl border border-white/10 bg-black/20 px-3.5 py-2.5 text-sm text-white outline-none transition focus:border-violet-500/60 focus:ring-2 focus:ring-violet-500/10'
@@ -33,7 +34,7 @@ export default function OperatingSpine(props) {
 
 function ScopedOperatingSpine({ initialView = 'engagements' }) {
   const { user } = useAuth()
-  const { activeOrganizationId, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
+  const { activeOrganizationId, activeMembership, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
   const [searchParams] = useSearchParams()
   const requestedEngagementId = searchParams.get('engagement') || ''
   const requestedWorkspaceTab = searchParams.get('tab') || 'overview'
@@ -288,11 +289,11 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-400">Operating Spine</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">Client → Brand → Engagement</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Build the commercial context once, activate only purchased services, and instantiate the smallest valid journey.</p>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Existing commercial context and journeys remain here. New projects begin as governed drafts in Projects.</p>
           </div>
           <div className="flex gap-2">
             <button onClick={() => setModal('client')} className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-slate-200 hover:bg-white/5">New client</button>
-            <button disabled={!clients.length} onClick={() => setModal('engagement')} className="rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40">New engagement</button>
+            {canShowAuthorityAdministration(activeMembership) && <Link to="/sphere/portfolio" className="rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white">New draft project</Link>}
           </div>
         </header>
 

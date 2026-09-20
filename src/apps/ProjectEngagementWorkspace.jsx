@@ -4,6 +4,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { projectEngagementWorkspace } from '../data/projectEngagementWorkspace'
 import RetainerPlanningPanel from '../components/RetainerPlanningPanel'
 import ProjectPlanningPanel from '../components/ProjectPlanningPanel.jsx'
+import ProjectDraftActivation from './ProjectDraftActivation.jsx'
 import { appendWorkshopNavigation, parseWorkshopNavigation } from '../data/workshopNavigation.js'
 
 const TABS = [
@@ -134,7 +135,7 @@ export default function ProjectEngagementWorkspace() {
             <p className="mt-2 text-sm text-slate-400">{[identity.clientName, identity.brandName].filter(Boolean).join(' · ') || (identity.workType === 'Internal Work' ? 'Internal project; no client identity is required.' : 'No client or brand identity is attached.')}</p>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">{project.description || project.scope_statement || 'No project description recorded.'}</p>
           </div>
-          <div className="flex items-center gap-2"><button type="button" onClick={load} disabled={loading} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm hover:bg-white/[0.08] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={project.status} /></div>
+          <div className="flex items-center gap-2"><button type="button" onClick={load} disabled={loading} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm hover:bg-white/[0.08] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={project.status} /><ProjectDraftActivation project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onActivated={load} onAccessError={handleOrganizationAccessError} /></div>
         </header>
 
         {error && <div role="alert" className="mt-5 rounded-xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100"><p className="font-medium">Refresh failed; showing previously loaded data.</p><p className="mt-1 text-xs text-amber-200/80">{error}{loadedAt ? ` · Loaded ${loadedAt.toLocaleTimeString()}` : ''}</p></div>}
