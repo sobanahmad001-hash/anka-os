@@ -34,9 +34,40 @@ test('project discussion post sends one exact scoped message and rejects a misma
   } })
   await repository.post({ organizationId: org, projectId: project, requestId: request,
     content: '  Project update  ', parentCommentId: actor })
-  assert.equal(calls[0].name, 'post_project_discussion_message')
+  assert.equal(calls[0].name, 'post_project_discussion_message_with_links')
   assert.equal(calls[0].args.p_content, 'Project update')
   assert.equal(calls[0].args.p_parent_comment_id, actor)
+  assert.deepEqual(calls[0].args.p_links, [])
   await assert.rejects(repository.post({ organizationId: org, projectId: actor,
     requestId: request, content: 'Project update' }), /did not match/)
+})
+
+test('discussion references are scoped in options, posts, and resolved pages', async () => {
+  const calls = []
+  const link = { kind: 'file', id: actor }
+  const repository = createProjectDiscussionRepository({ rpc(name, args) {
+    calls.push({ name, args })
+    if (name === 'get_project_discussion_reference_options') return Promise.resolve({
+      data: { organization_id: org, project_id: project,
+        options: [{ ...link, label: 'Source file.pdf' }] },
+    })
+    if (name === 'get_project_discussion') return Promise.resolve({
+      data: { organization_id: org, project_id: project, has_older: false, cursor: null,
+        messages: [{ id: request, author_id: actor, content: 'See file',
+          links: [{ ...link, available: false, label: null }] }] },
+    })
+    return Promise.resolve({ data: { organization_id: org, project_id: project,
+      request_id: request, comment_id: request, replayed: false } })
+  } })
+  assert.equal((await repository.referenceOptions(org, project))[0].label, 'Source file.pdf')
+  await repository.post({ organizationId: org, projectId: project,
+    requestId: request, content: 'See file', links: [link] })
+  assert.deepEqual(calls[1].args.p_links, [link])
+  assert.equal((await repository.page(org, project)).messages[0].links[0].available, false)
+  await assert.rejects(repository.post({ organizationId: org, projectId: project,
+    requestId: request, content: 'See file', links: [link, link] }), /Valid project message/)
+  const foreign = createProjectDiscussionRepository({ rpc: () => Promise.resolve({
+    data: { organization_id: actor, project_id: project, options: [] },
+  }) })
+  await assert.rejects(foreign.referenceOptions(org, project), /active project/)
 })

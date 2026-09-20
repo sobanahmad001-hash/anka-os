@@ -24,21 +24,46 @@ export function createProjectDiscussionRepository(client) {
       if (data?.organization_id !== organizationId || data.project_id !== projectId
         || !Array.isArray(data.messages) || typeof data.has_older !== 'boolean'
         || data.messages.some(row => !validId(row?.id) || !validId(row?.author_id)
-          || typeof row.content !== 'string' || (row.parent_comment_id && !validId(row.parent_comment_id)))
+          || typeof row.content !== 'string' || (row.parent_comment_id && !validId(row.parent_comment_id))
+          || (row.links && (!Array.isArray(row.links) || row.links.some(link =>
+            !['member', 'project_task', 'deliverable_version', 'file'].includes(link?.kind)
+            || !validId(link?.id) || typeof link.available !== 'boolean'
+            || (link.available && typeof link.label !== 'string')
+            || (!link.available && link.label !== null)))))
         || (data.cursor && (!validId(data.cursor.id) || typeof data.cursor.created_at !== 'string'))) {
         throw Object.assign(new Error('Discussion did not match the active project'), { status: 409 })
       }
       return data
     },
-    async post({ organizationId, projectId, requestId, content, parentCommentId = null }) {
+    async referenceOptions(organizationId, projectId, { signal } = {}) {
+      if (!validId(organizationId) || !validId(projectId)) throw new TypeError('Valid project required')
+      let query = client.rpc('get_project_discussion_reference_options', {
+        p_organization_id: organizationId, p_project_id: projectId,
+      })
+      if (signal && typeof query.abortSignal === 'function') query = query.abortSignal(signal)
+      const { data, error, status } = await query
+      if (error) throw failure(error, status, 'Unable to load project reference options')
+      if (data?.organization_id !== organizationId || data.project_id !== projectId
+        || !Array.isArray(data.options) || data.options.some(row =>
+          !['member', 'project_task', 'deliverable_version', 'file'].includes(row?.kind)
+          || !validId(row?.id) || typeof row.label !== 'string')) {
+        throw Object.assign(new Error('Reference options did not match the active project'), { status: 409 })
+      }
+      return data.options
+    },
+    async post({ organizationId, projectId, requestId, content, parentCommentId = null, links = [] }) {
       if (![organizationId, projectId, requestId].every(validId)
         || (parentCommentId && !validId(parentCommentId))
-        || typeof content !== 'string' || !content.trim() || content.trim().length > 8000) {
+        || typeof content !== 'string' || !content.trim() || content.trim().length > 8000
+        || !Array.isArray(links) || links.length > 10 || links.some(link =>
+          !['member', 'project_task', 'deliverable_version', 'file'].includes(link?.kind)
+          || !validId(link?.id))
+        || new Set(links.map(link => `${link.kind}:${link.id}`)).size !== links.length) {
         throw new TypeError('Valid project message required')
       }
-      const { data, error, status } = await client.rpc('post_project_discussion_message', {
+      const { data, error, status } = await client.rpc('post_project_discussion_message_with_links', {
         p_organization_id: organizationId, p_project_id: projectId, p_request_id: requestId,
-        p_content: content.trim(), p_parent_comment_id: parentCommentId,
+        p_content: content.trim(), p_parent_comment_id: parentCommentId, p_links: links,
       })
       if (error) throw failure(error, status, 'Unable to post project message')
       if (data?.organization_id !== organizationId || data.project_id !== projectId
