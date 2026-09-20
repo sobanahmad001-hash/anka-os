@@ -1,10 +1,11 @@
+import { websitePageBriefComplete } from '../data/contentStudio.js'
+
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white'
 const BUTTON = 'rounded-xl border border-slate-700 px-3 py-2 text-xs text-slate-200'
 
 export default function WebsitePageBriefEditor({ page, versions = [], artifacts = new Map(), onChange }) {
   const sections = page.sections || []
-  const briefComplete = Boolean(page.audience?.trim() && sections.length && page.conversion_action?.kind
-    && sections.every(section => section.heading?.trim() && section.purpose?.trim()))
+  const briefComplete = websitePageBriefComplete(page)
   const sourceVersions = versions.filter(version => artifacts.get(version.artifact_id)?.artifact_type !== 'keyword_strategy')
   const keywordVersions = versions.filter(version => artifacts.get(version.artifact_id)?.artifact_type === 'keyword_strategy')
   const label = version => [artifacts.get(version.artifact_id)?.artifact_type?.replaceAll('_', ' '), 'v' + version.version_number, version.id].join(' · ')

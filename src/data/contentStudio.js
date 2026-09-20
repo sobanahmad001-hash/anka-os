@@ -419,6 +419,15 @@ export function serializeContentArtifact(type, editor) {
   return content
 }
 
+export function websitePageBriefComplete(page) {
+  const sections = Array.isArray(page?.sections) ? page.sections : []
+  const action = page?.conversion_action
+  const conversionReady = action?.kind === 'none'
+    || (action?.kind === 'action' && Boolean(String(action.text || '').trim()))
+  return Boolean(String(page?.audience || '').trim() && sections.length && conversionReady
+    && sections.every(section => String(section.heading || '').trim() && String(section.purpose || '').trim()))
+}
+
 export function newContentRecord(field) {
   const record = Object.fromEntries(field.recordFields.map(([key]) => [key, '']))
   if (field.recordType === 'website_page') {

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { websiteSitemapPreview } from './contentArchitectureReview.js'
+import { websitePageBriefComplete } from './contentStudio.js'
 
 const priorPages = [
   { page_key: 'page:home', slug: 'home', title: 'Home', parent_page_key: null, position: 1000, page_type: 'hub', purpose: 'Orient' },
@@ -92,4 +93,12 @@ test('C02a v2 preserves section order, exact links, and invalidates preview for 
   assert.deepEqual(first.pages[0].source_version_ids, ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'])
   assert.ok(first.changed[0].fields.includes('sections'))
   assert.notEqual(first.signature, changed.signature)
+})
+
+test('C02a brief readiness requires real action text or an explicit none choice', () => {
+  const base = { audience: 'Operators', sections: [{ heading: 'Intro', purpose: 'Orient' }] }
+  assert.equal(websitePageBriefComplete({ ...base, conversion_action: { kind: 'action', text: ' ' } }), false)
+  assert.equal(websitePageBriefComplete({ ...base, conversion_action: { kind: 'action', text: 'Book a call' } }), true)
+  assert.equal(websitePageBriefComplete({ ...base, conversion_action: { kind: 'none', text: null } }), true)
+  assert.equal(websitePageBriefComplete({ ...base, conversion_action: null }), false)
 })
