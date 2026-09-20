@@ -1,0 +1,68 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import test from 'node:test'
+
+import { websiteSitemapPreview } from './contentArchitectureReview.js'
+
+const priorPages = [
+  { page_key: 'page:home', slug: 'home', title: 'Home', parent_page_key: null, position: 1000, page_type: 'hub', purpose: 'Orient' },
+  { page_key: 'page:service', slug: 'services', title: 'Services', parent_page_key: 'page:home', position: 2000, page_type: 'service', purpose: 'Explain services' },
+]
+const current = { id: 'architecture-v2', content: { pages: priorPages } }
+const workspace = {
+  artifacts: [
+    { id: 'copy-a', artifact_type: 'content' },
+    { id: 'keywords-a', artifact_type: 'keyword_strategy' },
+  ],
+  versions: [
+    { id: 'copy-v1', artifact_id: 'copy-a', version_number: 1, content: { source_architecture_version_id: 'architecture-v2', output_type: 'website_page_copy', target_page_key: 'page:service' } },
+    { id: 'keywords-v1', artifact_id: 'keywords-a', version_number: 1, content: { source_architecture_version_id: 'architecture-v2', keywords: [{ target_kind: 'page', target_page_key: 'page:service' }] } },
+  ],
+  contentTasks: [{ id: 'task-a', linked_page_key: 'page:service' }],
+}
+
+test('C02 preview keeps stable page identity and exposes removed-page downstream impact', () => {
+  const review = websiteSitemapPreview({ pages: [
+    { ...priorPages[0], title: 'Welcome', slug: 'welcome' },
+    { page_key: 'page:new', slug: 'about', title: 'About', parent_page_key: 'page:home', page_type: 'supporting', purpose: 'Context' },
+  ] }, current, workspace)
+  assert.deepEqual(review.changed.map(item => [item.key, item.kind]), [
+    ['page:home', 'changed'], ['page:new', 'added'], ['page:service', 'removed'],
+  ])
+  assert.deepEqual(review.affected.find(item => item.key === 'page:service').dependents.sort(), [
+    'content task', 'keyword target', 'saved page copy',
+  ])
+  assert.deepEqual(review.tree.map(item => [item.title, item.depth]), [['Welcome', 0], ['About', 1]])
+  assert.equal(review.errors.length, 0)
+  assert.equal(review.pages[0].page_key, 'page:home')
+  assert.equal(priorPages[0].slug, 'home')
+})
+
+test('C02 preview rejects orphan/cyclic draft hierarchies and never guesses a tree', () => {
+  const orphan = websiteSitemapPreview({ pages: [{ ...priorPages[0], parent_page_key: 'page:missing' }] }, current)
+  assert.match(orphan.errors[0], /Parent page is missing/)
+  assert.deepEqual(orphan.tree, [])
+  const cycle = websiteSitemapPreview({ pages: [
+    { ...priorPages[0], parent_page_key: 'page:service' },
+    { ...priorPages[1], parent_page_key: 'page:home' },
+  ] }, current)
+  assert.match(cycle.errors[0], /cycle/)
+  assert.deepEqual(cycle.tree, [])
+})
+
+test('C02 preview identity invalidates after page edits or a newer source version', () => {
+  const first = websiteSitemapPreview({ pages: priorPages }, current)
+  const edited = websiteSitemapPreview({ pages: [{ ...priorPages[0], purpose: 'Changed goal' }, priorPages[1]] }, current)
+  const newer = websiteSitemapPreview({ pages: priorPages }, { ...current, id: 'architecture-v3' })
+  assert.notEqual(first.signature, edited.signature)
+  assert.notEqual(first.signature, newer.signature)
+  assert.equal(first.changed.length, 0)
+})
+
+test('C02 save requires a fresh reviewed preview of the supported sitemap contract', () => {
+  const ui = readFileSync(new URL('../apps/ContentStudio.jsx', import.meta.url), 'utf8')
+  assert.match(ui, /outlinePreview\?\.signature === currentOutline.signature/)
+  assert.match(ui, /Apply reviewed structure draft/)
+  assert.match(ui, /Linked work needs manual source-change review/)
+  assert.match(ui, /Page briefs, sections and generation require the C02 data contract/)
+})
