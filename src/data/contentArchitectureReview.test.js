@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { websiteSitemapPreview } from './contentArchitectureReview.js'
+import { websitePageBriefComplete } from './contentStudio.js'
 
 const priorPages = [
   { page_key: 'page:home', slug: 'home', title: 'Home', parent_page_key: null, position: 1000, page_type: 'hub', purpose: 'Orient' },
@@ -78,5 +79,26 @@ test('C02 save requires a fresh reviewed preview of the supported sitemap contra
   assert.match(ui, /outlinePreview\?\.signature === currentOutline.signature/)
   assert.match(ui, /Apply reviewed structure draft/)
   assert.match(ui, /Linked work needs manual source-change review/)
-  assert.match(ui, /Page briefs, sections and generation require the C02 data contract/)
+  assert.match(ui, /Page brief schema v2/)
+})
+
+test('C02a v2 preserves section order, exact links, and invalidates preview for brief edits', () => {
+  const section = { section_key: 'section:11111111-1111-4111-8111-111111111111', heading: 'Proof', purpose: 'Build trust', cta: null }
+  const base = { schema_version: 2, pages: [{ ...priorPages[0], audience: 'Operators', sections: [section],
+    conversion_action: { kind: 'none', text: null }, source_version_ids: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
+    keyword_strategy_version_id: null }] }
+  const first = websiteSitemapPreview(base, current)
+  const changed = websiteSitemapPreview({ ...base, pages: [{ ...base.pages[0], sections: [{ ...section, heading: 'Evidence' }] }] }, current)
+  assert.equal(first.pages[0].sections[0].position, 1000)
+  assert.deepEqual(first.pages[0].source_version_ids, ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'])
+  assert.ok(first.changed[0].fields.includes('sections'))
+  assert.notEqual(first.signature, changed.signature)
+})
+
+test('C02a brief readiness requires real action text or an explicit none choice', () => {
+  const base = { audience: 'Operators', sections: [{ heading: 'Intro', purpose: 'Orient' }] }
+  assert.equal(websitePageBriefComplete({ ...base, conversion_action: { kind: 'action', text: ' ' } }), false)
+  assert.equal(websitePageBriefComplete({ ...base, conversion_action: { kind: 'action', text: 'Book a call' } }), true)
+  assert.equal(websitePageBriefComplete({ ...base, conversion_action: { kind: 'none', text: null } }), true)
+  assert.equal(websitePageBriefComplete({ ...base, conversion_action: null }), false)
 })

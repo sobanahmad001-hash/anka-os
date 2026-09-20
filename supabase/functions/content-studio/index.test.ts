@@ -292,6 +292,7 @@ Deno.test('B04 accepts 500 keyword rows and rejects 501 without silent truncatio
 function b04SaveFixture(options: {
   requests?: Array<Record<string, unknown>>
   visibleRequestIds?: string[]
+  visibleVersionIds?: string[]
   sourceVersionId?: string
   pages?: Array<Record<string, unknown>>
 } = {}) {
@@ -316,6 +317,7 @@ function b04SaveFixture(options: {
   }
   const writes: Array<{ table: string; value: Record<string, unknown> }> = []
   const visibleRequestIds = new Set(options.visibleRequestIds ?? (options.requests || []).map(request => String(request.id)))
+  const visibleVersionIds = options.visibleVersionIds ? new Set(options.visibleVersionIds) : null
 
   class Query {
     table: string
@@ -339,6 +341,7 @@ function b04SaveFixture(options: {
     matchingRows() {
       let result = [...(rows[this.table] || [])]
       if (this.role === 'user' && this.table === 'content_requests') result = result.filter(row => visibleRequestIds.has(String(row.id)))
+      if (this.role === 'user' && this.table === 'artifact_versions' && visibleVersionIds) result = result.filter(row => visibleVersionIds.has(String(row.id)))
       for (const filter of this.filters) {
         result = result.filter(row => filter.kind === 'eq'
           ? String(row[filter.key] ?? '') === String(filter.value ?? '')
@@ -978,5 +981,53 @@ Deno.test('UW4 Content saves website content with only its active service and no
     assertEquals(path.tables.includes('artifact_approvals'), false)
   } finally {
     path.restore()
+  }
+})
+
+Deno.test('C02a validates schema-v2 page briefs while retaining v1 reads', () => {
+  const page = { page_key: 'page:home', slug: 'home', title: 'Home', parent_page_key: null,
+    position: 1000, page_type: 'hub', purpose: 'Orient',
+    audience: 'Operators', sections: [
+      { section_key: 'section:22222222-2222-4222-8222-222222222222', position: 2000, heading: 'Proof', purpose: 'Build trust', cta: null },
+      { section_key: 'section:11111111-1111-4111-8111-111111111111', position: 1000, heading: 'Intro', purpose: 'Orient', cta: 'Learn more' },
+    ], conversion_action: { kind: 'none', text: null },
+    source_version_ids: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'], keyword_strategy_version_id: null }
+  const v2 = validateContentArtifact('website_architecture', { schema_version: 2, pages: [page] })
+  const normalized = (v2.pages as Array<Record<string, unknown>>)[0]
+  assertEquals(v2.schema_version, 2)
+  assertEquals((normalized.sections as Array<Record<string, unknown>>).map(section => section.heading), ['Intro', 'Proof'])
+  assertEquals(normalized.source_version_ids, page.source_version_ids)
+  const v1 = validateContentArtifact('website_architecture', { pages: [page] })
+  assertEquals(Object.hasOwn(v1, 'schema_version'), false)
+  assertEquals(Object.hasOwn((v1.pages as Array<Record<string, unknown>>)[0], 'sections'), false)
+  assertThrows(() => validateContentArtifact('website_architecture', { schema_version: 3, pages: [page] }), Error, 'Unsupported')
+  assertThrows(() => validateContentArtifact('website_architecture', { schema_version: 2,
+    pages: [{ ...page, conversion_action: { kind: 'action', text: '' } }] }), Error, 'text is required')
+  assertThrows(() => validateContentArtifact('website_architecture', { schema_version: 2,
+    pages: [{ ...page, source_version_ids: [...page.source_version_ids, ...page.source_version_ids] }] }), Error, 'unique')
+})
+
+Deno.test('C02a exact page source links reject hidden and foreign-scope versions before writes', async () => {
+  const sourceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const page = { page_key: 'page:home', slug: 'home', title: 'Home', parent_page_key: null,
+    position: 1000, page_type: 'hub', purpose: 'Orient', audience: null, sections: [],
+    conversion_action: null, source_version_ids: [sourceId], keyword_strategy_version_id: null }
+  for (const scenario of [
+    { visibleVersionIds: [] as string[], foreign: false },
+    { visibleVersionIds: [sourceId], foreign: true },
+  ]) {
+    const fixture = b04SaveFixture({ visibleVersionIds: scenario.visibleVersionIds })
+    fixture.rows.artifacts.push({ id: 'source-artifact', organization_id: scenario.foreign ? 'org-b' : fixture.organizationId,
+      engagement_id: fixture.engagementId, brand_id: fixture.brandId, artifact_type: 'discovery' })
+    fixture.rows.artifact_versions.push({ id: sourceId, artifact_id: 'source-artifact', organization_id: fixture.organizationId,
+      version_number: 1, content: {} })
+    await assertRejects(() => createContentArtifactVersion(fixture.admin, {
+      organizationId: fixture.organizationId, engagement: { id: fixture.engagementId, brand_id: fixture.brandId },
+      artifactId: 'architecture-artifact', artifactType: 'website_architecture', title: 'Architecture',
+      content: { schema_version: 2, pages: [page] }, changeSummary: 'Page brief',
+      aiUseAllowed: false, dataClassification: 'internal', actorId: 'actor-a',
+      source: 'manual' as const, visibilityClient: fixture.user,
+    }), Error, scenario.foreign ? 'selected type' : 'unavailable')
+    assertEquals(fixture.writes, [])
   }
 })

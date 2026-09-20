@@ -139,9 +139,61 @@ export function legacyWebsitePageKey(value: unknown) {
   return `legacy:${normalizeWebsitePath(value)}`
 }
 
+function websitePageBriefs(value: unknown, pages: ReturnType<typeof websitePages>) {
+  if (!Array.isArray(value) || value.length !== pages.length) throw new Error('Website page briefs are invalid')
+  return pages.map(page => {
+    const raw = (value as Json[]).find(candidate =>
+      (text(candidate.page_key, 1208) || legacyWebsitePageKey(candidate.slug)) === page.page_key) as Json
+    const audience = raw.audience === null ? null : text(raw.audience, 1200) || null
+    if (raw.audience !== null && typeof raw.audience !== 'string') throw new Error('Page audience is invalid')
+    if (!Array.isArray(raw.sections) || raw.sections.length > 40) throw new Error('Page sections must be an ordered list of at most 40')
+    const sections = raw.sections.map(item => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('Page section is invalid')
+      const section = item as Json
+      const sectionKey = requiredText(section, 'section_key', 120)
+      if (!/^section:[0-9a-f-]{36}$/i.test(sectionKey)) throw new Error('Page section key is invalid')
+      const position = Number(section.position)
+      if (!Number.isSafeInteger(position) || position < 1) throw new Error('Page section position is invalid')
+      const heading = requiredText(section, 'heading', 240)
+      const purpose = requiredText(section, 'purpose', 1200)
+      if (section.cta !== null && section.cta !== undefined && typeof section.cta !== 'string') throw new Error('Page section CTA is invalid')
+      return { section_key: sectionKey, position, heading, purpose, cta: text(section.cta, 500) || null }
+    })
+    if (new Set(sections.map(section => section.section_key)).size !== sections.length
+      || new Set(sections.map(section => section.position)).size !== sections.length) {
+      throw new Error('Page section keys and positions must be unique')
+    }
+    sections.sort((left, right) => left.position - right.position)
+    const action = raw.conversion_action
+    if (action !== null && (typeof action !== 'object' || Array.isArray(action))) throw new Error('Page conversion action is invalid')
+    let conversionAction: { kind: string; text: string | null } | null = null
+    if (action) {
+      const choice = action as Json
+      if (choice.kind !== 'action' && choice.kind !== 'none') throw new Error('Page conversion action kind is invalid')
+      const actionText = text(choice.text, 500)
+      if (choice.kind === 'action' && !actionText) throw new Error('Page conversion action text is required')
+      if (choice.kind === 'none' && choice.text !== null) throw new Error('No-action choice must have null text')
+      conversionAction = { kind: String(choice.kind), text: choice.kind === 'action' ? actionText : null }
+    }
+    if (!Array.isArray(raw.source_version_ids) || raw.source_version_ids.length > 30
+      || raw.source_version_ids.some(id => typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id))) {
+      throw new Error('Page source version references are invalid')
+    }
+    const sourceIds = raw.source_version_ids as string[]
+    if (new Set(sourceIds).size !== sourceIds.length) throw new Error('Page source version references must be unique')
+    const keywordId = raw.keyword_strategy_version_id
+    if (keywordId !== null && (typeof keywordId !== 'string' || !/^[0-9a-f-]{36}$/i.test(keywordId))) {
+      throw new Error('Page keyword strategy version reference is invalid')
+    }
+    return { ...page, audience, sections, conversion_action: conversionAction,
+      source_version_ids: sourceIds, keyword_strategy_version_id: keywordId as string | null }
+  })
+}
+
 function websitePages(value: unknown) {
   if (!Array.isArray(value) || !value.length) throw new Error('At least one website page is required')
-  const pages = value.slice(0, 200).map((item, index) => {
+  if (value.length > 200) throw new Error('Website architecture supports at most 200 pages')
+  const pages = value.map((item, index) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) {
       throw new Error(`Website page ${index + 1} is invalid`)
     }
@@ -546,7 +598,12 @@ export function validateContentArtifact(type: string, value: unknown): Json {
       source_manifest: sourceManifest as Json,
     }
   }
-  if (type === 'website_architecture') return { pages: websitePages(input.pages) }
+  if (type === 'website_architecture') {
+    const pages = websitePages(input.pages)
+    if (input.schema_version === 2) return { schema_version: 2, pages: websitePageBriefs(input.pages, pages) }
+    if (input.schema_version !== undefined && input.schema_version !== null) throw new Error('Unsupported Website architecture schema version')
+    return { pages }
+  }
   if (type === 'keyword_strategy') {
     if (input.schema_version === 2) return {
       schema_version: 2,
@@ -688,6 +745,36 @@ export async function createContentArtifactVersion(admin: AdminClient, input: {
   const warnings: string[] = []
   let architectureArtifactId: string | null = null
   let contentRequestTargetIds: string[] = []
+  if (input.artifactType === 'website_architecture' && content.schema_version === 2) {
+    const pages = content.pages as Json[]
+    const sourceIds = [...new Set(pages.flatMap(page => page.source_version_ids as string[]))]
+    const keywordIds = [...new Set(pages.map(page => page.keyword_strategy_version_id as string | null).filter(Boolean))] as string[]
+    const referenceIds = [...new Set([...sourceIds, ...keywordIds])]
+    if (referenceIds.length) {
+      const { data: visibleVersions, error: versionsError } = await input.visibilityClient.from('artifact_versions')
+        .select('id, artifact_id').in('id', referenceIds)
+      if (versionsError) throw versionsError
+      const visibleById = new Map<string, Json>((visibleVersions || []).map((version: Json): [string, Json] => [String(version.id), version]))
+      if (referenceIds.some(id => !visibleById.has(id))) throw new Error('One or more exact page source versions are unavailable')
+      const artifactIds = [...new Set((visibleVersions || []).map((version: Json) => String(version.artifact_id)))]
+      const { data: visibleArtifacts, error: artifactsError } = await input.visibilityClient.from('artifacts')
+        .select('id, organization_id, engagement_id, brand_id, artifact_type').in('id', artifactIds)
+      if (artifactsError) throw artifactsError
+      const byId = new Map<string, Json>((visibleArtifacts || []).map((artifact: Json): [string, Json] => [String(artifact.id), artifact]))
+      for (const id of referenceIds) {
+        const version = visibleById.get(id) as Json
+        const artifact = byId.get(String(version.artifact_id)) as Json | undefined
+        if (!artifact || artifact.organization_id !== input.organizationId
+          || artifact.engagement_id !== input.engagement.id || artifact.brand_id !== input.engagement.brand_id
+          || !CONTENT_ARTIFACT_TYPE_SET.has(String(artifact.artifact_type))
+          || artifact.artifact_type === 'website_architecture'
+          || (sourceIds.includes(id) && artifact.artifact_type === 'keyword_strategy')
+          || (keywordIds.includes(id) && artifact.artifact_type !== 'keyword_strategy')) {
+          throw new Error('Page source versions must be readable exact versions in this engagement with the selected type')
+        }
+      }
+    }
+  }
   if (input.artifactType === 'keyword_strategy') {
     const keywords = content.keywords as Json[]
     if (content.schema_version === 2) {
