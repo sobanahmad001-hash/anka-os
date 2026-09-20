@@ -1,3 +1,4 @@
+import KeywordCsvImportPanel from './KeywordCsvImportPanel.jsx'
 import { MAX_KEYWORD_RECORDS, websitePageKey } from '../data/contentStudio.js'
 
 const OPTIONAL_KINDS = new Set(['text_optional', 'number_optional', 'date_optional', 'textarea_optional'])
@@ -23,6 +24,7 @@ export default function KeywordStrategyEditor({
   inputClass,
   buttonClass,
   onAdd,
+  onImport,
   onChange,
   onRemove,
 }) {
@@ -38,6 +40,7 @@ export default function KeywordStrategyEditor({
 
   return <div>
     <div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{field.label} · {records.length}/{MAX_KEYWORD_RECORDS}</p><button type="button" className={buttonClass} disabled={records.length >= MAX_KEYWORD_RECORDS} onClick={onAdd}>{field.addLabel}</button></div>
+    {onImport && <KeywordCsvImportPanel records={records} onImport={onImport} buttonClass={buttonClass} />}
     {records.length >= MAX_KEYWORD_RECORDS && <p className="mt-2 text-xs text-slate-500">Maximum {MAX_KEYWORD_RECORDS} keyword rows reached.</p>}
     {issues.has('form') && <p role="alert" className="mt-3 text-xs text-red-300">{issues.get('form')}</p>}
     <div className="mt-3 space-y-4">{records.map((record, index) => <div key={index} className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
