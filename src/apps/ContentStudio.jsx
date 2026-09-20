@@ -7,6 +7,7 @@ import ContentRequestPanel from '../components/ContentRequestPanel.jsx'
 import GeneralContentRequestsPanel from '../components/GeneralContentRequestsPanel.jsx'
 import ContentQueuePanel from '../components/ContentQueuePanel.jsx'
 import ContentWriterEditor from '../components/ContentWriterEditor.jsx'
+import { websiteSitemapPreview } from '../data/contentArchitectureReview.js'
 import ContentLibraryPanel from '../components/ContentLibraryPanel.jsx'
 import ContentWorkshopHomePanel from '../components/ContentWorkshopHomePanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
@@ -436,6 +437,7 @@ function ArtifactForm({ studio, customFields, workspace, type, artifact, version
   const [summary, setSummary] = useState(latest ? `Revision from version ${latest.version_number}` : 'Initial Content Studio version')
   const [classification, setClassification] = useState(latest?.data_classification || 'internal')
   const [aiSafe, setAiSafe] = useState(latest?.ai_use_allowed || false)
+  const [outlinePreview, setOutlinePreview] = useState(null)
   const originLink = type === 'content' ? workspace.blogEventLinks?.find(link => link.id === originLinkId) : null
   const architectureArtifact = workspace.artifacts.find(item => item.artifact_type === 'website_architecture')
   const architectureVersions = workspace.versions.filter(version => version.artifact_id === architectureArtifact?.id)
@@ -446,11 +448,19 @@ function ArtifactForm({ studio, customFields, workspace, type, artifact, version
   const keywordIssues = type === 'keyword_strategy'
     ? keywordStrategyIssues(form, { pageTargetIds, contentRequestIds }) : new Map()
   const keywordWarnings = type === 'keyword_strategy' ? keywordDuplicateWarnings(form.keywords || []) : new Map()
+  const currentOutline = type === 'website_architecture' ? websiteSitemapPreview(form, latest, workspace) : null
+  const outlineFresh = currentOutline && outlinePreview?.signature === currentOutline.signature
+    && !currentOutline.errors.length
+  const outlineReady = outlineFresh && currentOutline.changed.length > 0
   const targetAssignmentsChanged = type === 'keyword_strategy' && latest
     ? keywordTargetsChanged(latest.content?.keywords || [], serializeContentArtifact(type, form).keywords) : false
 
   async function save(event) {
     event.preventDefault()
+    if (currentOutline && !outlineReady) {
+      setOutlinePreview(currentOutline)
+      return
+    }
     const versionNumber = latest ? latest.version_number + 1 : 1
     if (!globalThis.confirm(`Confirm: create immutable ${definition.label} version ${versionNumber}. The mutable brand brief is not changed.`)) return
     await act(async () => {
@@ -488,9 +498,19 @@ function ArtifactForm({ studio, customFields, workspace, type, artifact, version
     <div className="mt-6 space-y-5">{definition.fields.map(field => <div key={field.key}><ArtifactField field={field} value={form[field.key]} pageSlugs={(architectureVersions[0]?.content?.pages || []).map(page => page.slug)} architectureVersions={architectureVersions} selectedArchitectureVersion={selectedArchitectureVersion} contentRequests={workspace.contentRequests || []} recordErrors={field.recordType === 'website_page' ? pathErrors : keywordIssues} recordWarnings={field.recordType === 'keyword' ? keywordWarnings : new Map()} onChange={value => setForm(current => field.key === 'source_architecture_version_id' ? { ...current, [field.key]: value, keywords: (current.keywords || []).map(keyword => keyword.target_kind === 'page' ? { ...keyword, target_id: '', target_page_slug: '' } : keyword) } : { ...current, [field.key]: value })} />{foundation && <SourceMetadataField field={field} value={form.source_metadata?.[field.key]} onChange={value => setForm(current => ({ ...current, source_metadata: { ...current.source_metadata, [field.key]: value } }))} />}</div>)}</div>
     <WebsiteArchitecturePathAlert hasErrors={pathErrors.size > 0} />
     {targetAssignmentsChanged && <p role="status" className="mt-4 rounded-xl border border-amber-900/60 bg-amber-950/30 p-4 text-sm text-amber-200">Keyword target assignments changed. Review affected downstream drafts manually; no draft is rewritten or retargeted automatically.</p>}
+    {currentOutline && <section className="mt-5 rounded-xl border border-slate-700 bg-slate-950/50 p-4" aria-label="Sitemap draft preview">
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">Sitemap outline and impact preview</h3><p className="mt-1 text-xs text-slate-500">Current page hierarchy, paths, type and purpose only. Page briefs, sections and generation require the C02 data contract.</p></div><button type="button" className={BUTTON} disabled={saving || pathErrors.size > 0} onClick={() => setOutlinePreview(currentOutline)}>Preview sitemap changes</button></div>
+      {outlinePreview && !outlineFresh && <p role="status" className="mt-3 text-xs text-amber-300">The page draft or source version changed. Refresh the preview before saving.</p>}
+      {outlinePreview?.errors?.length > 0 && <div role="alert" className="mt-3 text-xs text-red-300">{outlinePreview.errors.map(message => <p key={message}>{message}</p>)}</div>}
+      {outlineFresh && <>
+        <ol className="mt-4 space-y-2">{outlinePreview.tree.map(page => <li key={page.key} style={{ paddingInlineStart: Math.min(page.depth, 8) * 18 }} className="text-sm text-slate-300"><span className="font-semibold text-white">{page.title}</span> · /{page.slug}<p className="text-xs text-slate-500">{page.purpose}</p></li>)}</ol>
+        <div className="mt-4 border-t border-slate-800 pt-4"><h4 className="text-sm font-semibold">Changes in this new version</h4>{outlinePreview.changed.length ? <ul className="mt-2 space-y-2">{outlinePreview.changed.map(item => <li key={item.key} className="text-xs text-slate-300">{item.kind}: {item.title || item.key} · /{item.slug}{item.fields.length ? ' · ' + item.fields.join(', ') : ''}</li>)}</ul> : <p className="mt-2 text-xs text-slate-500">No page changes. A new immutable version cannot be saved with identical page content; classification and AI settings on the existing version stay unchanged.</p>}</div>
+        {outlinePreview.affected.some(item => item.dependents.length) && <div role="status" className="mt-4 rounded-lg border border-amber-900/50 bg-amber-950/20 p-3 text-xs text-amber-200">Linked work needs manual source-change review: {outlinePreview.affected.filter(item => item.dependents.length).map(item => item.title + ' (' + item.dependents.join(', ') + ')').join('; ')}. Earlier versions and linked work stay intact.</div>}
+      </>}
+    </section>}
     <div className="mt-6 grid gap-4 md:grid-cols-2"><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Change summary<input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={summary} onChange={event => setSummary(event.target.value)} /></label><label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Data classification<select className={`${INPUT} mt-2 normal-case tracking-normal`} value={classification} onChange={event => setClassification(event.target.value)}><option>internal</option><option>confidential</option><option>public</option><option>restricted</option></select></label></div>
     <label className="mt-4 flex items-start gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm text-slate-300"><input type="checkbox" className="mt-1" checked={aiSafe} onChange={event => setAiSafe(event.target.checked)} /><span>Explicitly allow this exact version to be included in approved AI context. Restricted versions remain excluded.</span></label>
-    <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-800 pt-5"><button disabled={saving || blockingIssues} className={PRIMARY}>{saving ? 'Saving…' : latest ? 'Create new version' : 'Save first version'}</button></div>
+    <div className="mt-6 flex flex-wrap justify-end gap-3 border-t border-slate-800 pt-5"><button disabled={saving || blockingIssues || (currentOutline && !outlineReady)} className={PRIMARY}>{saving ? 'Saving…' : currentOutline ? 'Apply reviewed structure draft' : latest ? 'Create new version' : 'Save first version'}</button></div>
   </form><ArtifactApprovalPanel version={latest} approval={approval} theme="amber" singleApprovalLabel={`Use single-manager route for version ${latest?.version_number}`} onSingleApprove={() => act(async () => { const result = await studio.approveArtifact(latest.id); if (originLink) await studio.updateBlogEventLink(originLink, 'ready'); return result }, `${definition.label} exact version approved.${originLink ? ' The originating blog event is ready.' : ''}`)} onChanged={onRefresh} />{['website_architecture', 'content'].includes(type) && <ContentPageTrackingPanel studio={studio} workspace={workspace} saving={saving} act={act} />}<ContentCustomFieldsPanel repository={customFields} artifactType={type} versions={versions} initialVersionId={latest?.id} /><ArtifactRelationsPanel artifact={artifact} /><VersionProofingPanel targetKind="artifact" versions={versions} initialVersionId={latest?.id} department="content" theme="amber" regionsByVersion={regionsByVersion} /></div>
 }
 

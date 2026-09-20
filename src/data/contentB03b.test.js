@@ -69,7 +69,7 @@ test('B03b blocks blank and normalized duplicate paths before persistence', () =
   assert.match(errors.get('page:home'), /unique proposed path/)
   assert.match(errors.get('page:collision'), /unique proposed path/)
   assert.match(ui, /const blockingIssues = pathErrors\.size > 0 \|\| keywordIssues\.size > 0/)
-  assert.match(ui, /disabled=\{saving \|\| blockingIssues\}/)
+  assert.match(ui, /disabled=\{saving \|\| blockingIssues \|\| \(currentOutline && !outlineReady\)\}/)
 })
 
 test('B03b renders Add child, Duplicate, move state, and path conflict feedback', () => {
