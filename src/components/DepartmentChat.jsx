@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useBlocker } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
@@ -45,6 +45,14 @@ export function ScopedDepartmentChat({
   const answerObservation = useRef(null)
   const attachmentCompletion = useRef(null)
   const draftSwitchGeneration = useRef(0)
+  const dialogRef = useRef(null)
+  const stayButtonRef = useRef(null)
+  const discardButtonRef = useRef(null)
+  const saveButtonRef = useRef(null)
+  const outputHeadingRef = useRef(null)
+  const panelToggleRef = useRef(null)
+  const panelBodyRef = useRef(null)
+  const focusPreviewOnOpen = useRef(false)
   const sourceGeneration = useRef(0)
   const mounted = useRef(true)
   useLayoutEffect(() => {
@@ -64,6 +72,7 @@ export function ScopedDepartmentChat({
       guard.dispose()
     }
   }, [requestSignal])
+  const contextPanelId = useId()
   const profile = departmentChatProfile(departmentId)
   const resolvedDepartmentLabel = departmentLabel || profile.label
   const [artifactType, setArtifactType] = useState(profile.artifactTypes[0] || '')
@@ -110,10 +119,57 @@ export function ScopedDepartmentChat({
   const [sourceBusy, setSourceBusy] = useState(false)
   const [sourceError, setSourceError] = useState('')
   const [sourceRefresh, setSourceRefresh] = useState(0)
+  const [contextExpanded, setContextExpanded] = useState(() => !globalThis.window?.matchMedia || globalThis.window.matchMedia('(min-width: 1280px)').matches)
 
   const [pendingDraftSwitch, setPendingDraftSwitch] = useState(null)
   const [draftSaving, setDraftSaving] = useState(false)
   const [draftNotice, setDraftNotice] = useState('')
+  useEffect(() => {
+    const media = window.matchMedia?.('(min-width: 1280px)')
+    if (!media) return undefined
+    const resize = () => {
+      if (!media.matches && panelBodyRef.current?.contains(document.activeElement)) panelToggleRef.current?.focus()
+      setContextExpanded(media.matches)
+    }
+    resize()
+    media.addEventListener?.('change', resize)
+    return () => media.removeEventListener?.('change', resize)
+  }, [])
+  useEffect(() => {
+    if (result) { focusPreviewOnOpen.current = true; setContextExpanded(true) }
+  }, [result])
+  useEffect(() => {
+    if (result && contextExpanded && focusPreviewOnOpen.current) {
+      outputHeadingRef.current?.focus()
+      focusPreviewOnOpen.current = false
+    }
+  }, [result, contextExpanded])
+  useEffect(() => {
+    if (pendingDraftSwitch) (draftSaving ? dialogRef.current : stayButtonRef.current)?.focus()
+  }, [pendingDraftSwitch, draftSaving])
+  function closeDraftSwitch() {
+    draftSwitchGeneration.current += 1
+    setPendingDraftSwitch(null)
+    if (navigationBlocker?.state === 'blocked') navigationBlocker.reset()
+  }
+  function handleDraftDialogKey(event) {
+    if (event.key === 'Escape' && !draftSaving) {
+      event.preventDefault()
+      closeDraftSwitch()
+      return
+    }
+    if (event.key !== 'Tab') return
+    const choices = [stayButtonRef.current, discardButtonRef.current, saveButtonRef.current]
+      .filter(button => button && !button.disabled)
+    if (!choices.length) { event.preventDefault(); return }
+    if (event.shiftKey && document.activeElement === choices[0]) {
+      event.preventDefault()
+      choices.at(-1).focus()
+    } else if (!event.shiftKey && document.activeElement === choices.at(-1)) {
+      event.preventDefault()
+      choices[0].focus()
+    }
+  }
 
   function clearComposer() {
     setPrompt('')
@@ -901,11 +957,12 @@ export function ScopedDepartmentChat({
         {nextConversationCursor && <button type="button" disabled={busy || historyBusy} onClick={() => loadMoreConversations().catch(reason => setError(reason.message))} className="w-full rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 disabled:opacity-50">Load more</button>}
       </div>
     </aside>}
-    <form onSubmit={submit} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+    <form onSubmit={submit} className="min-w-0 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 sm:p-6">
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-400">Shared Department Chat · {departmentId}</p>
         <h2 className="mt-2 text-2xl font-semibold text-white">Ask, explore, or prepare a governed proposal</h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Ordinary answers stay conversational and create no official record. Artifact and work-item modes remain explicit governed proposals requiring separate confirmation.</p>
+        {supportsSavedConversations && <p className="mt-2 text-xs leading-5 text-slate-500">Work context: canonical client engagement. Saved conversations are creator-private until explicitly shared with eligible internal contributors. Standalone private-project and internal-project chat modes are unavailable here.</p>}
       </div>
       {error && <div className="mt-5 rounded-xl border border-red-900/60 bg-red-950/40 p-3 text-sm text-red-300">{error}</div>}
       {draftNotice && <div className="mt-5 rounded-xl border border-sky-900/60 bg-sky-950/30 p-3 text-sm text-sky-200">{draftNotice}</div>}
@@ -935,7 +992,6 @@ export function ScopedDepartmentChat({
         </div>}
       </div>}
       {supportsSavedConversations && <ConversationHistory messages={messages} userId={userId} busy={busy} onConfirm={proposal => decide('confirm', proposal)} onReject={proposal => decide('reject', proposal)} />}
-      {result && <ProposalPreview result={result} official={official} onOpenOfficial={openOfficial} busy={busy} onConfirm={() => decide('confirm')} onReject={() => decide('reject')} />}
       <div className="mt-6 space-y-5">
         {supportsSavedConversations && capabilities && <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Approved model
           <select
@@ -1098,7 +1154,17 @@ export function ScopedDepartmentChat({
         {busy && isAnswerMode && <button type="button" onClick={() => answerObservation.current?.stop()} className="w-full rounded-xl border border-amber-700 px-4 py-2.5 text-sm font-semibold text-amber-200">Stop watching locally</button>}
       </div>
     </form>
-    <aside className="space-y-4">
+    <aside className="min-w-0 rounded-2xl border border-slate-800 bg-slate-900/70 p-4" aria-label="Context and output panel">
+      <button ref={panelToggleRef} type="button" aria-expanded={contextExpanded} aria-controls={contextPanelId}
+        onClick={() => {
+          if (contextExpanded && panelBodyRef.current?.contains(document.activeElement)) panelToggleRef.current?.focus()
+          setContextExpanded(value => !value)
+        }}
+        className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-sky-500">
+        <span>Context and output</span><span className="text-xs text-sky-300">{contextExpanded ? 'Collapse' : 'Expand'}</span>
+      </button>
+      <div ref={panelBodyRef} id={contextPanelId} hidden={!contextExpanded} className="mt-3 space-y-4">
+      {result && <div><h3 ref={outputHeadingRef} tabIndex={-1} className="sr-only">Generated proposal preview</h3><ProposalPreview result={result} official={official} onOpenOfficial={openOfficial} busy={busy} onConfirm={() => decide('confirm')} onReject={() => decide('reject')} /></div>}
       <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Current context</p>
         <p className="mt-2 font-semibold text-white">{engagement.brands?.name || engagement.name}</p>
@@ -1114,9 +1180,10 @@ export function ScopedDepartmentChat({
         <p className="font-semibold text-white">Human control remains intact</p>
         <p className="mt-2">The human user is recorded as the timeline actor. The model run is separately traceable. Approval remains available only through the normal exact-version manager action.</p>
       </div>
+      </div>
     </aside>
   </div>
-  {pendingDraftSwitch && <div role="dialog" aria-modal="true" aria-label="Unsent chat draft" className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-5"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><h2 className="text-xl font-semibold text-white">Keep this unsent work?</h2><p className="mt-2 text-sm text-slate-300">Before you {pendingDraftSwitch.label}, stay here, save text to the original conversation, or discard it. Exact source and file selections, model choice, and AI-use consent are never saved.</p>{error && <p className="mt-3 text-sm text-red-300">{error}</p>}<div className="mt-6 flex flex-wrap justify-end gap-2"><button type="button" disabled={draftSaving} onClick={() => { draftSwitchGeneration.current += 1; setPendingDraftSwitch(null); navigationBlocker?.state === 'blocked' && navigationBlocker.reset() }}>Stay</button><button type="button" disabled={draftSaving} onClick={() => finishDraftSwitch(false)}>Discard and continue</button><button type="button" disabled={draftSaving || !conversationId || !prompt.trim()} onClick={() => finishDraftSwitch(true)} className={PRIMARY}>{draftSaving ? 'Saving…' : 'Save to original and continue'}</button></div>{!prompt.trim() && <p className="mt-3 text-xs text-amber-300">Add a message to save a draft; source selections alone cannot be saved.</p>}</section></div>}
+  {pendingDraftSwitch && <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Unsent chat draft" onKeyDown={handleDraftDialogKey} className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-5"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><h2 className="text-xl font-semibold text-white">Keep this unsent work?</h2><p className="mt-2 text-sm text-slate-300">Before you {pendingDraftSwitch.label}, stay here, save text to the original conversation, or discard it. Exact source and file selections, model choice, and AI-use consent are never saved.</p>{error && <p role="alert" className="mt-3 text-sm text-red-300">{error}</p>}<div className="mt-6 flex flex-wrap justify-end gap-2"><button ref={stayButtonRef} type="button" disabled={draftSaving} onClick={closeDraftSwitch}>Stay</button><button ref={discardButtonRef} type="button" disabled={draftSaving} onClick={() => finishDraftSwitch(false)}>Discard and continue</button><button ref={saveButtonRef} type="button" disabled={draftSaving || !conversationId || !prompt.trim()} onClick={() => finishDraftSwitch(true)} className={PRIMARY}>{draftSaving ? 'Saving…' : 'Save to original and continue'}</button></div>{!prompt.trim() && <p className="mt-3 text-xs text-amber-300">Add a message to save a draft; source selections alone cannot be saved.</p>}</section></div>}
   </>
 }
 
