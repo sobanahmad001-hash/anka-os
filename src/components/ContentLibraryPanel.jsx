@@ -160,6 +160,7 @@ export default function ContentLibraryPanel({ repository, initialArtifactId = ''
         <ContentHandoffPanel key={`handoff:${selectedEntry.artifact.id}:${selectedVersion.id}`}
           organizationId={repository.organizationId} artifact={selectedEntry.artifact} version={selectedVersion}
           approval={approval} sourceReferences={sourceReferences} services={data?.downstreamServices}
+          workstreams={data?.downstreamWorkstreams} onConfirm={repository.confirmContentHandoff} onChanged={load}
           tasks={data?.downstreamTasks} workItems={data?.downstreamWorkItems}
           projectId={selectedEntry.engagement?.project_id} engagementId={selectedEntry.artifact.engagement_id}
           stale={loading || Boolean(error) || stale} />

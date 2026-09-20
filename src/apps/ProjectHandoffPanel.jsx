@@ -75,6 +75,12 @@ export default function ProjectHandoffPanel({ organizationId, projectId, workstr
         <div className="flex flex-wrap justify-between gap-2"><strong>{item.title}</strong><span className="text-xs text-slate-400">{item.status.replaceAll('_', ' ')}</span></div>
         <p className="mt-2 text-slate-400">{name(item.requesting_workstream_id)} → {name(item.receiving_workstream_id, 'Unassigned workstream')} · {item.priority}</p>
         <p className="mt-2 text-slate-300">{item.requested_output}</p>
+        {(() => { const link = Array.isArray(item.content_n3_handoff_links)
+          ? item.content_n3_handoff_links[0] : item.content_n3_handoff_links
+          return link?.artifact_id && link?.artifact_version_id
+            ? <a className="mt-2 block text-xs font-semibold text-amber-300 underline"
+              href={`/sphere/content/studio?tab=library&artifact=${encodeURIComponent(link.artifact_id)}&version=${encodeURIComponent(link.artifact_version_id)}`}>Open exact approved Content version</a> : null
+        })()}
         {item.acceptance_criteria && <p className="mt-1 text-slate-400">Acceptance: {item.acceptance_criteria}</p>}
         {item.source_project_comment_id && <button type="button" onClick={() => showSource(item.source_project_comment_id)} className="mt-2 text-xs text-violet-300">Source discussion message · {item.source_project_comment_id}</button>}
       </article>)}
