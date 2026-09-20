@@ -24,8 +24,9 @@ try {
   $started = $true
   foreach ($file in @(
     (Join-Path $PSScriptRoot 'n2_project_draft.fixture.sql'),
-    (Join-Path $PSScriptRoot '../migrations/20260919234015_n2_governed_draft_projects.sql'),
-    (Join-Path $PSScriptRoot '../migrations/20260920004251_n2_service_scope.sql'),
+    (Join-Path $PSScriptRoot '../migrations/20260920012256_n2_governed_draft_projects.sql'),
+    (Join-Path $PSScriptRoot '../migrations/20260920012321_n2_service_scope.sql'),
+    (Join-Path $PSScriptRoot '../migrations/20260920012708_n2_scope_foreign_key_indexes.sql'),
     (Join-Path $PSScriptRoot 'n2_project_draft.behavior.sql'),
     (Join-Path $PSScriptRoot 'n2_project_draft.extended.sql'),
     (Join-Path $PSScriptRoot 'n2_project_request.behavior.sql'),
