@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { canDraftPipelineTemplate, seedPipelineDraft } from './pipelineTemplateDrafts.js'
+import { canApprovePipelineTemplateDepartment, canDraftPipelineTemplate, canPublishPipelineTemplate, pipelineVersionDepartments, seedPipelineDraft } from './pipelineTemplateDrafts.js'
 
 test('N4 draft copies the latest immutable version and preserves ordered service identity', () => {
   const catalog = {
@@ -39,4 +39,21 @@ test('N4 draft visibility follows the normalized active organization membership'
   assert.equal(canDraftPipelineTemplate({ ...membership, role: 'executive' }), false)
   assert.equal(canDraftPipelineTemplate({ ...membership, organization: { status: 'suspended' } }), false)
   assert.equal(canDraftPipelineTemplate(null), false)
+})
+test('N4 exact-version approval controls use canonical current head department', () => {
+  const membership = { organizationId: 'org-a', organization: { status: 'active' }, role: 'department_manager', departmentId: 'design' }
+  assert.equal(canApprovePipelineTemplateDepartment(membership, 'design'), true)
+  assert.equal(canApprovePipelineTemplateDepartment(membership, 'marketing'), false)
+  assert.equal(canApprovePipelineTemplateDepartment({ ...membership, role: 'project_owner' }, 'design'), false)
+  assert.equal(canPublishPipelineTemplate(membership), false)
+  assert.equal(canPublishPipelineTemplate({ ...membership, role: 'operations_admin' }), true)
+  assert.equal(canPublishPipelineTemplate({ ...membership, role: 'executive' }), false)
+  assert.equal(canApprovePipelineTemplateDepartment({ ...membership, organization: { status: 'suspended' } }, 'design'), false)
+  const catalog = { selections: [
+    { pipeline_template_version_id: 'v1', service_catalog: { department_id: 'marketing' } },
+    { pipeline_template_version_id: 'v2', service_catalog: { department_id: 'development' } },
+    { pipeline_template_version_id: 'v1', service_catalog: { department_id: 'design' } },
+    { pipeline_template_version_id: 'v1', service_catalog: { department_id: 'design' } },
+  ] }
+  assert.deepEqual(pipelineVersionDepartments(catalog, 'v1'), ['design', 'marketing'])
 })
