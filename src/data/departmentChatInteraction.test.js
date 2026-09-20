@@ -60,6 +60,8 @@ function repository(streams, savedBody = '', searches = []) {
     getCapabilities: async () => ({ model_id: 'gpt-test', approved_models: [{ configuration_id: 'configuration-1', model_id: 'gpt-test', display_name: 'Test', is_default: true }], attachments: { supported: false } }),
     getConversation: async (_d, input) => ({ conversation: conversation(input.conversation_id), messages: savedBody ? [{ id: 'assistant-1', role: 'assistant', status: 'completed', body: savedBody, proposal: null }] : [], sharing: { can_manage: false, recipients: [] } }),
     listAttachments: async () => [],
+    listSourceVersions: async () => [],
+    previewSourceVersion: async () => null,
     listConversationShareCandidates: async () => [],
     getUnsentDraft: async () => null,
     saveUnsentDraft: async () => ({}),
@@ -81,6 +83,79 @@ async function setup(t) {
   t.after(() => Object.assign(globalThis, { document: old.document, window: old.window, Event: old.Event, Node: old.Node, HTMLElement: old.HTMLElement, IS_REACT_ACT_ENVIRONMENT: old.act, __departmentChatTestRepository: old.repository }))
   return { ...env, ScopedDepartmentChat }
 }
+
+test('P9B previews an exact permitted version before including it and clears selection across conversations', async t => {
+  const { container, ScopedDepartmentChat } = await setup(t)
+  const id = '11111111-1111-4111-8111-111111111111'
+  const repo = repository([])
+  repo.searchConversations = async () => ({
+    items: [conversation('conversation-a'), conversation('conversation-b')], next_cursor: null,
+  })
+  const sourceCalls = []
+  repo.listSourceVersions = async (_department, input) => {
+    sourceCalls.push(input.conversation_id)
+    return [{ artifact_version_id: id, title: 'Brand vision', artifact_type: 'vision', version_number: 2, approved_at: '2026-09-01T00:00:00Z' }]
+  }
+  repo.previewSourceVersion = async (_department, input) => ({
+    artifact_version_id: input.artifact_version_id, title: 'Brand vision', artifact_type: 'vision',
+    version_number: 2, content: { body: 'EXACT_VERSION_CONTENT' },
+  })
+  const sent = []
+  repo.answer = async (_department, input) => { sent.push(input); return { type: 'completed' } }
+  globalThis.__departmentChatTestRepository = repo
+  const root = createRoot(container)
+  t.after(() => { try { root.unmount() } catch {} })
+  await act(async () => root.render(createElement(ScopedDepartmentChat, props('a', new AbortController().signal))))
+  await flush()
+  assert.deepEqual(sourceCalls, ['conversation-a'])
+  assert.equal(count(container, 'EXACT_VERSION_CONTENT'), 0)
+  await act(async () => byText(container, 'button', 'Preview exact version').dispatchEvent(new E('click')))
+  await flush()
+  assert.match(container.textContent, /EXACT_VERSION_CONTENT/)
+  await act(async () => byText(container, 'button', 'Include this exact version').dispatchEvent(new E('click')))
+  assert.match(container.textContent, /1 of 5 exact versions selected/)
+  await value(nodes(container, 'textarea')[0], 'Use the previewed version')
+  await authorize(container)
+  const form = nodes(container, 'form').find(item => nodes(item, 'textarea').length)
+  await act(async () => form.dispatchEvent(new E('submit')))
+  await flush()
+  assert.deepEqual(sent[0].selected_artifact_version_ids, [id])
+  assert.match(container.textContent, /0 of 5 exact versions selected/)
+  await act(async () => byText(container, 'button', 'Preview exact version').dispatchEvent(new E('click')))
+  await flush()
+  await act(async () => byText(container, 'button', 'conversation-b').dispatchEvent(new E('click')))
+  await flush()
+  assert.deepEqual(sourceCalls, ['conversation-a', 'conversation-b'])
+  assert.equal(count(container, 'EXACT_VERSION_CONTENT'), 0)
+  assert.match(container.textContent, /0 of 5 exact versions selected/)
+})
+
+test('P9B denied or late exact preview cannot enter a new scope', async t => {
+  const { container, ScopedDepartmentChat } = await setup(t)
+  const id = '11111111-1111-4111-8111-111111111111'
+  const repo = repository([])
+  repo.listSourceVersions = async () => [{ artifact_version_id: id, title: 'Private vision', artifact_type: 'vision', version_number: 1, approved_at: '2026-09-01T00:00:00Z' }]
+  const pending = []
+  repo.previewSourceVersion = () => new Promise((resolve, reject) => pending.push({ resolve, reject }))
+  globalThis.__departmentChatTestRepository = repo
+  const root = createRoot(container)
+  t.after(() => { try { root.unmount() } catch {} })
+  await act(async () => root.render(createElement(ScopedDepartmentChat, { ...props('a', new AbortController().signal), key: 'a' })))
+  await flush()
+  await act(async () => byText(container, 'button', 'Preview exact version').dispatchEvent(new E('click')))
+  await act(async () => pending[0].reject(new Error('Source permission revoked')))
+  await flush()
+  assert.match(container.textContent, /Source permission revoked/)
+  assert.equal(byText(container, 'button', 'Include this exact version'), undefined)
+  await act(async () => byText(container, 'button', 'Preview exact version').dispatchEvent(new E('click')))
+  await act(async () => root.render(createElement(ScopedDepartmentChat, { ...props('b', new AbortController().signal), key: 'b' })))
+  await flush()
+  await act(async () => pending[1].resolve({ artifact_version_id: id, title: 'Private vision',
+    artifact_type: 'vision', version_number: 1, content: { body: 'LATE_SECRET_PREVIEW' } }))
+  await flush()
+  assert.equal(count(container, 'LATE_SECRET_PREVIEW'), 0)
+  assert.equal(byText(container, 'button', 'Include this exact version'), undefined)
+})
 
 for (const outcome of ['success', 'failure']) test('attachment ' + outcome + ' keeps the original conversation while upload is in flight', async t => {
   const { container, ScopedDepartmentChat } = await setup(t)
