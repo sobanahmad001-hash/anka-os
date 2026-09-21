@@ -99,7 +99,7 @@ test('handoff controls appear only after release and reuse the Workshop read mod
 test('only a failed production handoff refreshes the Workshop after an action error', () => {
   assert.match(workshop, /async function act\(key, action, capability = 'createDraft'\)[\s\S]*catch \(reason\) \{ deferredContext\.current = null; capture\(reason\) \}/)
   assert.equal(workshop.match(/setWorkspace\(await studio\.load\(engagementId, navigationContext\)\)/g)?.length, 1)
-  assert.match(workshop, /async function prepareHandoff\(release\)[\s\S]*setWorkspace\(await studio\.load\(engagementId, navigationContext\)\)[\s\S]*Keep the packaging failure primary/)
+  assert.match(workshop, /async function prepareHandoff\(release, designPackageVersionId = null\)[\s\S]*setWorkspace\(await studio\.load\(engagementId, navigationContext\)\)[\s\S]*Keep the packaging failure primary/)
   assert.match(workshop, /onPrepareHandoff=\{prepareHandoff\}/)
 })
 

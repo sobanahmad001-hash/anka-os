@@ -165,7 +165,7 @@ export default function AnkaSpherePortal() {
   }
 
   const itemsByType = useMemo(() => {
-    const result = { deliverable: [], milestone: [], workstream: [], activity: [], report: [] }
+    const result = { deliverable: [], design_handoff: [], milestone: [], workstream: [], activity: [], report: [] }
     for (const item of portal?.items || []) (result[item.item_type] ||= []).push(item)
     return result
   }, [portal])
@@ -191,7 +191,7 @@ export default function AnkaSpherePortal() {
             <nav className="mt-5 flex gap-1 overflow-x-auto border-b border-slate-800">{TABS.map(([id, label]) => <button key={id} onClick={() => setActiveTab(id)} className={`border-b-2 px-4 py-3 text-sm ${activeTab === id ? 'border-purple-500 text-white' : 'border-transparent text-slate-500'}`}>{label}</button>)}</nav>
             <div className="pt-5">
               {activeTab === 'overview' && <ProgressView portal={portal} itemsByType={itemsByType} />}
-              {activeTab === 'deliverables' && <DeliverablesView items={itemsByType.deliverable} onOpen={openFile} onFeedback={item => { setFeedbackTarget(item); setFeedback({ reference: '', content: '' }) }} onRevision={item => { setRevisionTarget(item); setRevision({ title: `Revision request: ${item.title}`, requestedOutput: '', priority: 'medium' }) }} onApprove={item => { setApprovalTarget({ ...item, requestId: crypto.randomUUID() }); setApprovalRationale('') }} />}
+              {activeTab === 'deliverables' && <><div className="mb-6"><h3 className="mb-3 font-semibold">Design handoffs</h3>{itemsByType.design_handoff.length ? <div className="space-y-3">{itemsByType.design_handoff.map(item => <Record key={item.id} item={item} />)}</div> : <p className="text-sm text-slate-500">No Design handoff has been released for review.</p>}<p className="mt-2 text-xs text-slate-500">The team will share client-ready files separately. Internal production ZIPs are not available here.</p></div><DeliverablesView items={itemsByType.deliverable} onOpen={openFile} onFeedback={item => { setFeedbackTarget(item); setFeedback({ reference: '', content: '' }) }} onRevision={item => { setRevisionTarget(item); setRevision({ title: `Revision request: ${item.title}`, requestedOutput: '', priority: 'medium' }) }} onApprove={item => { setApprovalTarget({ ...item, requestId: crypto.randomUUID() }); setApprovalRationale('') }} /></>}
               {activeTab === 'requests' && <RequestsView requests={portal.requests} />}
               {activeTab === 'conversation' && <ConversationView comments={portal.comments} comment={comment} setComment={setComment} onSubmit={submitComment} saving={saving} />}
             </div>

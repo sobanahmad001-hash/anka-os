@@ -29,6 +29,17 @@ type Variant = {
   design_media_asset_id: string | null
 }
 
+type DesignPackageAsset = {
+  id: string
+  asset_id: string
+  position: number
+  storage_path: string
+  content_checksum: string | null
+}
+type DesignPackageSource = {
+  version: Json
+  assets: DesignPackageAsset[]
+}
 const MEDIA_BUCKET = 'design-generated-media'
 const SIGNED_URL_TTL_SECONDS = 300
 const MAX_PACKAGE_BYTES = 32 * 1024 * 1024
@@ -68,6 +79,7 @@ type HandoffRoot = {
   direction: Json
   session: Json
   packageRow?: Json
+  designPackageVersion?: Json
 }
 
 type HandoffPreflight = HandoffRoot & {
@@ -154,6 +166,7 @@ export async function buildProductionArchive(
     version: Json
     assets: Asset[]
     variants: Variant[]
+    designPackage?: DesignPackageSource
     createdAt: string
   },
   download: (storagePath: string) => Promise<Uint8Array>,
@@ -208,6 +221,30 @@ export async function buildProductionArchive(
     }
   }
 
+  const packageAssets = []
+  if (input.designPackage) {
+    for (const asset of input.designPackage.assets) {
+      const bytes = await download(asset.storage_path)
+      if (!isPng(bytes)) throw new Error(`Exact Design package asset ${asset.id} is not a valid PNG object`)
+      const digest = await crypto.subtle.digest('SHA-256', new Uint8Array(bytes))
+      const checksum = [...new Uint8Array(digest)].map(part => part.toString(16).padStart(2, '0')).join('')
+      if (asset.content_checksum && checksum !== asset.content_checksum) {
+        throw new Error(`Exact Design package asset ${asset.id} does not match its recorded checksum`)
+      }
+      sourceBytes += bytes.byteLength
+      if (sourceBytes > MAX_PACKAGE_BYTES) throw new Error('Production handoff sources exceed the 32 MiB package limit')
+      const archivePath = `design-package/assets/${asset.position}-${asset.id}.png`
+      files[archivePath] = bytes
+      packageAssets.push({ asset_id: asset.asset_id, asset_version_id: asset.id,
+        position: asset.position, checksum, archive_path: archivePath })
+    }
+    files['design-package/package-version.json'] = jsonFile({
+      id: input.designPackage.version.id,
+      version_number: input.designPackage.version.version_number,
+      content_checksum: input.designPackage.version.content_checksum,
+      content: input.designPackage.version.content,
+    })
+  }
   const manifest = {
     schema_version: 1,
     package_id: input.packageId,
@@ -234,6 +271,9 @@ export async function buildProductionArchive(
       design_media_asset_id: variant.design_media_asset_id,
     })),
     included_asset_ids: includedAssetIds,
+    design_delivery_package: input.designPackage ? {
+      artifact_version_id: input.designPackage.version.id, assets: packageAssets,
+    } : null,
   }
   files['manifest.json'] = jsonFile(manifest)
   files['direction/release.json'] = jsonFile({
@@ -325,6 +365,32 @@ async function callerPackageRoot(userClient: Client, packageId: string): Promise
   return { ...root, packageRow: packageRow as Json }
 }
 
+async function callerApprovedDesignPackage(userClient: Client, versionId: string,
+  organizationId: string, engagementId: string): Promise<Json> {
+  const { data: version, error: versionError } = await userClient.from('artifact_versions')
+    .select('id, organization_id, artifact_id, version_number, content_checksum')
+    .eq('id', versionId).eq('organization_id', organizationId).maybeSingle()
+  if (versionError || !version) throw httpError('Exact Design package version is not visible', 404)
+  const [{ data: artifact, error: artifactError }, { data: approval, error: approvalError },
+    { data: context, error: contextError }] = await Promise.all([
+    userClient.from('artifacts').select('id, organization_id, engagement_id, artifact_type')
+      .eq('id', version.artifact_id).eq('organization_id', organizationId).maybeSingle(),
+    userClient.from('artifact_approvals').select('id, organization_id, artifact_id, artifact_version_id, engagement_id, decision')
+      .eq('artifact_version_id', versionId).eq('organization_id', organizationId).maybeSingle(),
+    userClient.from('design_delivery_package_version_contexts')
+      .select('artifact_version_id, organization_id, artifact_id')
+      .eq('artifact_version_id', versionId).eq('organization_id', organizationId).maybeSingle(),
+  ])
+  if (artifactError || approvalError || contextError || !artifact || !approval || !context
+    || artifact.artifact_type !== 'design_delivery_package'
+    || artifact.engagement_id !== engagementId || artifact.id !== version.artifact_id
+    || approval.artifact_id !== artifact.id || approval.artifact_version_id !== versionId
+    || approval.engagement_id !== engagementId || approval.decision !== 'approved'
+    || context.artifact_id !== artifact.id) {
+    throw httpError('Exact approved Design package is unavailable in this engagement', 409)
+  }
+  return version as Json
+}
 export async function productionHandoffScope(userClient: Client, body: Json): Promise<HandoffRoot & {
   action: 'create_package' | 'sign_package'
   scope: ServerOrganizationScope
@@ -338,11 +404,18 @@ export async function productionHandoffScope(userClient: Client, body: Json): Pr
       requiredId(body.engagement_id, 'Engagement'),
     )
     : await callerPackageRoot(userClient, requiredId(body.package_id, 'Production handoff package'))
+  const designPackageVersionId = text(body.design_delivery_package_version_id, 80)
+  if (action === 'sign_package' && designPackageVersionId) {
+    throw httpError('A signed handoff is selected by its exact package ID', 400)
+  }
+  const designPackageVersion = designPackageVersionId
+    ? await callerApprovedDesignPackage(userClient, designPackageVersionId,
+      root.organizationId, root.engagementId) : undefined
   const requestedOrganizationId = text(body.organization_id, 80) || null
   if (requestedOrganizationId && requestedOrganizationId !== root.organizationId) {
     throw httpError('Requested organization does not match the root resource', 403)
   }
-  return { ...root, action, scope: { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId } }
+  return { ...root, designPackageVersion, action, scope: { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId } }
 }
 
 export async function preflightProductionHandoffRequest(userClient: Client, userId: string, body: Json): Promise<HandoffPreflight> {
@@ -388,6 +461,59 @@ export function validateHandoffRows(
   }
 }
 
+async function loadExactDesignPackage(admin: ScopedClient, source: HandoffPreflight): Promise<DesignPackageSource | null> {
+  const requested = source.designPackageVersion
+  if (!requested) return null
+  const versionId = String(requested.id)
+  const { data: version, error: versionError } = await admin.from('artifact_versions')
+    .select('id, organization_id, artifact_id, version_number, content_checksum, content')
+    .eq('id', versionId).eq('organization_id', admin.organizationId).maybeSingle()
+  const { data: artifact, error: artifactError } = await admin.from('artifacts')
+    .select('id, organization_id, engagement_id, artifact_type')
+    .eq('id', requested.artifact_id).eq('organization_id', admin.organizationId).maybeSingle()
+  if (versionError || artifactError || !version || !artifact
+    || version.artifact_id !== artifact.id || artifact.engagement_id !== source.engagementId
+    || artifact.artifact_type !== 'design_delivery_package') {
+    throw httpError('Approved Design package changed after caller validation', 409)
+  }
+  const [{ data: approval, error: approvalError }, { data: references, error: referenceError }] = await Promise.all([
+    admin.from('artifact_approvals').select('id, decision, artifact_id, engagement_id')
+      .eq('artifact_version_id', versionId).eq('organization_id', admin.organizationId).maybeSingle(),
+    admin.from('design_delivery_package_version_assets')
+      .select('design_asset_id, design_asset_version_id, position')
+      .eq('artifact_version_id', versionId).eq('organization_id', admin.organizationId)
+      .order('position'),
+  ])
+  if (approvalError || referenceError || approval?.decision !== 'approved'
+    || approval.artifact_id !== artifact.id || approval.engagement_id !== source.engagementId
+    || !references?.length) {
+    throw httpError('Exact approved Design package references are unavailable', 409)
+  }
+  const ids = references.map((item: Json) => item.design_asset_version_id)
+  const { data: versions, error: assetsError } = await admin.from('design_asset_versions')
+    .select('id, organization_id, asset_id, storage_bucket, storage_path, mime_type, content_checksum')
+    .eq('organization_id', admin.organizationId).in('id', ids)
+  if (assetsError || versions?.length !== ids.length) throw httpError('Exact package asset versions are unavailable', 409)
+  const roots = [...new Set(references.map((item: Json) => item.design_asset_id))]
+  const { data: assets, error: rootsError } = await admin.from('design_assets')
+    .select('id, organization_id, engagement_id, archived_at')
+    .eq('organization_id', admin.organizationId).in('id', roots)
+  if (rootsError || assets?.length !== roots.length) throw httpError('Exact package asset roots are unavailable', 409)
+  const byId = new Map((versions || []).map((item: Json) => [item.id, item]))
+  const rootById = new Map((assets || []).map((item: Json) => [item.id, item]))
+  const ordered: DesignPackageAsset[] = references.map((reference: Json) => {
+    const item = byId.get(reference.design_asset_version_id)
+    const root = rootById.get(reference.design_asset_id)
+    if (!item || !root || item.asset_id !== root.id || root.engagement_id !== source.engagementId
+      || root.archived_at || item.storage_bucket !== MEDIA_BUCKET || item.mime_type !== 'image/png'
+      || !String(item.storage_path || '').startsWith(`${admin.organizationId}/`)) {
+      throw httpError('An exact package asset has an invalid organization or engagement chain', 409)
+    }
+    return { id: item.id, asset_id: item.asset_id, position: reference.position,
+      storage_path: item.storage_path, content_checksum: item.content_checksum }
+  })
+  return { version, assets: ordered }
+}
 async function createPackage(admin: ScopedClient, userClient: Client, actorId: string, preflight: HandoffPreflight) {
   const source = await loadExactRelease(admin, preflight)
   const [{ data: assets, error: assetError }, { data: variants, error: variantError }] = await Promise.all([
@@ -409,12 +535,14 @@ async function createPackage(admin: ScopedClient, userClient: Client, actorId: s
   const scopedVariants = (variants || []) as Variant[]
   validateHandoffRows(admin.organizationId, String(source.version.id), scopedAssets, scopedVariants)
 
+  const designPackage = await loadExactDesignPackage(admin, preflight)
   const createdAt = new Date().toISOString()
   const { data: packageRow, error: packageError } = await admin
     .from('production_handoff_packages')
     .insert({
       organization_id: admin.organizationId,
       design_direction_release_id: source.release.id,
+      design_delivery_package_version_id: designPackage?.version.id || null,
       requested_by: actorId,
       created_at: createdAt,
     })
@@ -432,6 +560,7 @@ async function createPackage(admin: ScopedClient, userClient: Client, actorId: s
       version: source.version,
       assets: scopedAssets,
       variants: scopedVariants,
+      designPackage: designPackage || undefined,
       createdAt,
     }, async path => {
       const { data, error } = await admin.storage.from(MEDIA_BUCKET).download(path)

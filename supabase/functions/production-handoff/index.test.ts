@@ -122,6 +122,30 @@ Deno.test('DS6 archive contains exact release content, images, and DS2 variants'
   assert.equal(archive.manifest.variants[0].variant_format, 'square_1x1')
 })
 
+Deno.test('D04 packages an approved exact S07 version without changing the direction-only archive', async () => {
+  const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1])
+  const archive = await buildProductionArchive({
+    packageId: 'handoff-1', release, version, assets: [], variants: [],
+    createdAt: '2026-09-01T01:00:00Z',
+    designPackage: { version: { id: 'package-version-1', version_number: 2,
+      content_checksum: 'package-content-checksum', content: { usage_instructions: 'Homepage hero' } },
+      assets: [{ id: 'asset-version-1', asset_id: 'asset-root-1', position: 1,
+        storage_path: 'org-1/assets/asset-root-1/asset-version-1/file.png', content_checksum: null }] },
+  }, async () => png)
+  const files = unzipSync(archive.bytes)
+  assert(files['design-package/assets/1-asset-version-1.png'])
+  assert(files['design-package/package-version.json'])
+  assert.equal(archive.manifest.design_delivery_package?.artifact_version_id, 'package-version-1')
+  assert.equal(archive.manifest.design_delivery_package?.assets[0].asset_version_id, 'asset-version-1')
+  assert.equal(archive.manifest.included_asset_ids.length, 0)
+  await assert.rejects(() => buildProductionArchive({
+    packageId: 'handoff-2', release, version, assets: [], variants: [],
+    createdAt: '2026-09-01T01:00:00Z',
+    designPackage: { version: { id: 'package-version-1' }, assets: [{ id: 'asset-version-1',
+      asset_id: 'asset-root-1', position: 1, storage_path: 'org-1/assets/file.png',
+      content_checksum: '0'.repeat(64) }] },
+  }, async () => png), /does not match its recorded checksum/)
+})
 Deno.test('DS6 fails honestly when a required source object is missing', async () => {
   await assert.rejects(() => buildProductionArchive({
     packageId: 'package-2',
@@ -249,6 +273,29 @@ Deno.test('both handoff actions map caller-readable exact sources to the canonic
   assert.equal(sign.packageRow?.id, 'package-1')
 })
 
+Deno.test('D04 accepts only caller-readable approved package versions in the exact engagement', async () => {
+  const data = fixtures() as Record<string, FixtureJson[]>
+  data.artifact_versions = [{ id: 'package-v1', organization_id: 'org-1', artifact_id: 'artifact-1',
+    version_number: 1, content_checksum: 'a'.repeat(64) }]
+  data.artifacts = [{ id: 'artifact-1', organization_id: 'org-1', engagement_id: 'engagement-1',
+    artifact_type: 'design_delivery_package' }]
+  data.artifact_approvals = [{ id: 'approval-1', organization_id: 'org-1', artifact_id: 'artifact-1',
+    artifact_version_id: 'package-v1', engagement_id: 'engagement-1', decision: 'approved' }]
+  data.design_delivery_package_version_contexts = [{ artifact_version_id: 'package-v1',
+    organization_id: 'org-1', artifact_id: 'artifact-1' }]
+  const input = { action: 'create_package', design_direction_release_id: 'release-1',
+    engagement_id: 'engagement-1', design_delivery_package_version_id: 'package-v1' }
+  const root = await productionHandoffScope(new FixtureClient(data) as never, input)
+  assert.equal(root.designPackageVersion?.id, 'package-v1')
+  data.artifact_approvals = []
+  await assert.rejects(() => productionHandoffScope(new FixtureClient(data) as never, input),
+    /approved Design package is unavailable/)
+  data.artifact_approvals = [{ id: 'approval-1', organization_id: 'org-1', artifact_id: 'artifact-1',
+    artifact_version_id: 'package-v1', engagement_id: 'engagement-1', decision: 'approved' }]
+  data.artifacts = [{ ...data.artifacts[0], engagement_id: 'other-engagement' }]
+  await assert.rejects(() => productionHandoffScope(new FixtureClient(data) as never, input),
+    /approved Design package is unavailable/)
+})
 Deno.test('active team authority is required in the source-derived organization', async () => {
   assert.equal(hasProductionHandoffAuthority({ member_kind: 'team' }), true)
   assert.equal(hasProductionHandoffAuthority({ member_kind: 'client' }), false)

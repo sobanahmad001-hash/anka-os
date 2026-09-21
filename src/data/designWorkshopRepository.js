@@ -198,6 +198,7 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
         'id',
         'organization_id',
         'design_direction_release_id',
+        'design_delivery_package_version_id',
         'status',
         'included_asset_ids',
         'failure_reason',
@@ -206,6 +207,11 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
         'completed_at',
       ].join(','))
         .in('design_direction_release_id', releaseIds).order('created_at', { ascending: false }))
+      : []
+    const clientHandoffReleases = handoffPackages.length
+      ? await dataOrThrow(scopedFrom('design_handoff_client_releases')
+        .select('id, organization_id, handoff_package_id, design_package_version_id, released_by, released_at')
+        .in('handoff_package_id', handoffPackages.map(item => item.id)))
       : []
     const readyImageIds = mediaAssets.filter(item => item.media_type === 'image' && item.status === 'ready').map(item => item.id)
     const signedMedia = readyImageIds.length
@@ -240,7 +246,7 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
       deliveryPackageAssetReferences: packageAssetReferences,
       imageGenerationJobs,
       variants,
-      handoffPackages,
+      handoffPackages, clientHandoffReleases,
       mediaUrlExpiresIn: signedMedia?.expires_in || 300,
       pageDesigns,
       wordpressExportJobs,

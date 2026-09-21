@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { designAssetAccessState } from '../data/designAssetLibrary.js'
 import {
@@ -18,6 +18,10 @@ function statusTone(status) {
 export default function ProductionHandoffPanel({
   release,
   packages,
+  packageOptions = [],
+  clientReleases = [],
+  canReleaseClient = false,
+  onReleaseClient,
   directionVersions,
   mediaAssets,
   variants,
@@ -29,7 +33,9 @@ export default function ProductionHandoffPanel({
   onDownload,
   onRefresh,
 }) {
+  const releaseRequestIds = useRef(new Map())
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const [selectedPackageVersionId, setSelectedPackageVersionId] = useState('')
   const [clock, setClock] = useState(() => Date.now())
   const [localBusy, setLocalBusy] = useState('')
   const [actionError, setActionError] = useState('')
@@ -63,7 +69,7 @@ export default function ProductionHandoffPanel({
   async function prepare() {
     setLocalBusy('prepare'); setActionError(''); setMessage('')
     try {
-      await onPrepare(release)
+      await onPrepare(release, selectedPackageVersionId || null)
     } catch (reason) {
       setLocalCreateUncertain(true)
       setActionError(`${reason instanceof Error ? reason.message : String(reason)} The server may already hold a package. Refresh exact handoff status before preparing another.`)
@@ -72,6 +78,21 @@ export default function ProductionHandoffPanel({
     }
   }
 
+  async function releaseToClient(item) {
+    if (!window.confirm(`Release exact Design package ${item.design_delivery_package_version_id} from handoff ${item.id} to the client portal? The internal ZIP will remain team-only.`)) return
+    const requestId = releaseRequestIds.current.get(item.id) || crypto.randomUUID()
+    releaseRequestIds.current.set(item.id, requestId)
+    setLocalBusy(`client-release-${item.id}`); setActionError(''); setMessage('')
+    try {
+      await onReleaseClient(item.id, requestId, '')
+      releaseRequestIds.current.delete(item.id)
+      setMessage('Exact Design handoff released to the client portal for review. The internal ZIP was not shared.')
+    } catch (reason) {
+      setActionError(`${reason instanceof Error ? reason.message : String(reason)} Refresh release status before retrying with the same request.`)
+    } finally {
+      setLocalBusy('')
+    }
+  }
   async function download(item) {
     setLocalBusy(`download-${item.id}`); setActionError(''); setMessage('')
     try {
@@ -132,6 +153,13 @@ export default function ProductionHandoffPanel({
       </div>
     </div>
 
+    {!!packageOptions.length && <label className="mt-4 block max-w-xl text-xs font-semibold uppercase tracking-wider text-slate-400">Approved Design delivery package to include
+      <select value={selectedPackageVersionId} disabled={Boolean(submissionUncertain || packagePreparing || localBusy)} onChange={event => setSelectedPackageVersionId(event.target.value)} className="mt-2 block w-full rounded-xl border border-white/10 bg-slate-950 p-2.5 text-sm font-normal normal-case text-slate-100">
+        <option value="">Direction-only handoff (no S07 package)</option>
+        {packageOptions.map(item => <option key={item.id} value={item.id}>{item.title || 'Design package'} · v{item.version_number} · {item.id.slice(0, 8)}</option>)}
+      </select>
+    </label>}
+    {!!packageOptions.length && <p className="mt-2 text-xs text-slate-500">Only an already approved exact S07 version can be included. The internal ZIP remains team-only; this does not release anything to clients.</p>}
     <div className="mt-4 grid gap-3 text-xs sm:grid-cols-2 xl:grid-cols-4">
       <p className="rounded-lg bg-white/[0.03] p-3"><span className="block uppercase tracking-wider text-slate-500">Release</span><code className="mt-1 block break-all text-slate-300">{release.id}</code></p>
       <p className="rounded-lg bg-white/[0.03] p-3"><span className="block uppercase tracking-wider text-slate-500">Exact direction version</span><code className="mt-1 block break-all text-slate-300">{exactVersionLabel}</code></p>
@@ -168,17 +196,20 @@ export default function ProductionHandoffPanel({
     <div className="mt-5 space-y-3">
       {releasePackages.map(item => {
         const evidence = productionHandoffPackageEvidence(item, readiness.assets)
+        const clientRelease = clientReleases.find(row => row.handoff_package_id === item.id)
         return <article key={item.id} className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-sm font-semibold">Package <code>{item.id}</code></p>
-              <p className="mt-1 text-xs text-slate-500">{new Date(item.created_at).toLocaleString()} · {evidence.includedIds.length} packaged files · exact release {release.id.slice(0, 8)}</p>
+              <p className="mt-1 text-xs text-slate-500">{new Date(item.created_at).toLocaleString()} · {evidence.includedIds.length} packaged files · exact release {release.id.slice(0, 8)}{item.design_delivery_package_version_id ? ` · S07 version ${item.design_delivery_package_version_id.slice(0, 8)}` : ` · direction only`}</p>
             </div>
             <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase ${statusTone(item.status)}`}>{item.status}</span>
           </div>
           {item.status === 'preparing' && <p role="status" className="mt-3 rounded-lg bg-amber-500/10 p-3 text-xs leading-5 text-amber-200">Packaging is still in progress. Refresh status to read the server result; refreshing does not create another package.</p>}
           {item.status === 'failed' && <p className="mt-3 rounded-lg bg-red-500/10 p-3 text-xs leading-5 text-red-300">{item.failure_reason || 'Packaging failed before a complete archive could be created.'}</p>}
           {!!evidence.unavailableIds.length && <p className="mt-3 text-xs text-amber-200">{evidence.unavailableIds.length} packaged source record(s) are no longer visible in this snapshot. The ready archive remains immutable and can still be requested through the existing authorized download action.</p>}
+          {clientRelease && <p className="mt-3 rounded-lg bg-emerald-500/10 p-3 text-xs text-emerald-200">Released to the client portal for review · exact S07 version {clientRelease.design_package_version_id.slice(0, 8)} · {new Date(clientRelease.released_at).toLocaleString()}. The internal ZIP remains team-only.</p>}
+          {!clientRelease && item.status === 'ready' && item.design_delivery_package_version_id && canReleaseClient && <button type="button" className={`${BUTTON} mt-3`} disabled={localBusy !== '' || Boolean(busy)} onClick={() => releaseToClient(item)}>{localBusy === `client-release-${item.id}` ? 'Releasing…' : 'Release to client portal'}</button>}
           {evidence.canDownload && <button type="button" className={`${SECONDARY} mt-3`} disabled={localBusy !== '' || busy === `download-${item.id}`} onClick={() => download(item)}>
             {localBusy === `download-${item.id}` || busy === `download-${item.id}` ? 'Requesting temporary link…' : 'Download signed ZIP'}
           </button>}
