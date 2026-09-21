@@ -166,6 +166,10 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
       ? await dataOrThrow(scopedFrom('design_asset_versions').select('*')
         .in('asset_id', designAssets.map(item => item.id)).order('version_number', { ascending: false }))
       : []
+    const designAssetReviews = designAssetVersions.length
+      ? await dataOrThrow(scopedFrom('design_asset_review_events').select('*')
+        .in('asset_version_id', designAssetVersions.map(item => item.id)).order('created_at'))
+      : []
     const packageArtifacts = artifacts.filter(item => item.artifact_type === 'design_delivery_package')
     const packageVersions = versions.filter(item => packageArtifacts.some(artifact => artifact.id === item.artifact_id))
     const [packageContexts, packageAssetReferences] = packageVersions.length
@@ -225,7 +229,7 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
         engagementId: navigationRecord.engagement_id,
       } : null,
       mediaAssets: mediaAssets.map(item => ({ ...item, signed_url: signedMedia?.signed_urls?.[item.id] || null })),
-      designAssets,
+      designAssets, designAssetReviews,
       designAssetVersions: designAssetVersions.map(item => ({
         ...item,
         signed_url: signedAssetVersions?.signed_urls?.[item.id] || null,
@@ -280,6 +284,8 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
   }),
   uploadAssetVersion: input => invoke('upload_asset_version', input),
   archiveAsset: input => invoke('archive_asset', input),
+  submitAssetReview: input => invoke('submit_asset_review', { ...input, event_type: 'submitted' }),
+  decideAssetReview: input => invoke('decide_asset_review', input),
   previewDeliveryPackage: input => invoke('preview_delivery_package', input),
   saveDeliveryPackage: input => invoke('save_delivery_package', input),
   generateVariants: (sourceDirectionVersionId, modelRegistryId, variantFormats) => invoke('generate_variants', {

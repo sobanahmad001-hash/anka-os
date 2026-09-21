@@ -118,4 +118,5 @@ test('archive eligibility fails closed and permits only standalone upload-only d
   assert.equal(designAssetArchiveEligibility({ ...eligible, assetVersions: [{ ...eligible.assetVersions[0], source_direction_version_id: 'direction-version' }] }).eligible, false)
   assert.equal(designAssetArchiveEligibility({ ...eligible, assetVersions: [{ ...eligible.assetVersions[0], source_kind: 'generated', source_media_asset_id: 'media' }] }).eligible, false)
   assert.equal(designAssetArchiveEligibility({ ...eligible, assetVersions: [] }).eligible, false)
+  assert.equal(designAssetArchiveEligibility(eligible, [{ asset_id: 'asset-root', event_type: 'submitted' }]).eligible, false)
 })

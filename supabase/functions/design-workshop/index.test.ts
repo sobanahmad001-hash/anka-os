@@ -8,6 +8,7 @@ import { contentRequestMediaStoragePath, createSession, cropResizePng, designEve
 import { compileApprovedArtifactContext } from '../_shared/approvedArtifactContext.ts'
 import { normalizeCreativeBrief, saveCreativeBrief, validateCreativeBrief } from './creativeBriefs.ts'
 import { designAssetStoragePath, parseDesignAssetPng, uploadDesignAssetVersion } from './assetVersions.ts'
+import { recordAssetReview } from './assetReviews.ts'
 
 function assert(value: unknown, message = 'Expected value to be truthy') {
   if (!value) throw new Error(message)
@@ -878,4 +879,71 @@ Deno.test('D01 private promotion uses the atomic wrapper instead of ordinary ass
   assert.equal(wrapperArgs.p_source_job_id, 'private-job-1')
   assert.equal(wrapperArgs.p_target_service_id, 'service-1')
   assert.equal(wrapperArgs.p_promotion_checksum, 'a'.repeat(64))
+})
+
+Deno.test('D02 exact asset reviews require stored PNG proof and replay only one exact request', async () => {
+  const versionId = '550e8400-e29b-41d4-a716-446655440101'
+  const key = '550e8400-e29b-41d4-a716-446655440102'
+  const orgId = '550e8400-e29b-41d4-a716-446655440103'
+  const actorId = '550e8400-e29b-41d4-a716-446655440104'
+  const version = { id: versionId, organization_id: orgId, asset_id: 'asset-1',
+    storage_bucket: 'design-generated-media', storage_path: `${orgId}/assets/asset-1/file.png`,
+    content_checksum: null }
+  const events: Record<string, unknown>[] = []
+  let downloadable = false
+  const query = (table: string) => {
+    let selected = false
+    let inserted: Record<string, unknown> | null = null
+    const filters: Array<[string, unknown]> = []
+    return {
+      select() { selected = true; return this },
+      eq(column: string, value: unknown) { filters.push([column, value]); return this },
+      insert(value: Record<string, unknown>) { inserted = value; return this },
+      async maybeSingle() {
+        if (table === 'design_asset_versions') return { data: version, error: null }
+        const found = events.find(event => filters.every(([column, value]) => event[column] === value))
+        return { data: found || null, error: null }
+      },
+      async single() {
+        if (!inserted || !selected) throw new Error('Expected inserted review selection')
+        const old = events.find(item => item.actor_id === inserted?.actor_id
+          && item.operation_key === inserted?.operation_key)
+        if (old) return { data: null, error: { code: '23505', message: 'duplicate key' } }
+        const event = { id: 'event-1', ...inserted }
+        events.push(event)
+        return { data: event, error: null }
+      },
+    }
+  }
+  const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWP4z8DwHwAFAAH/e+m+7wAAAABJRU5ErkJggg=='), c => c.charCodeAt(0))
+  const admin = { organizationId: orgId, from: query,
+    storage: { from() { return { async download() {
+      return downloadable ? { data: new Blob([png]), error: null } : { data: null, error: { message: 'missing' } }
+    } } } } }
+  const userClient = { from: query }
+  const input = { action: 'submit_asset_review', asset_version_id: versionId,
+    event_type: 'submitted', operation_key: key, note: '' }
+  let unavailable = false
+  try { await recordAssetReview(admin as never, userClient as never, input, actorId) }
+  catch (error) { unavailable = error instanceof Error && error.message.includes('unavailable') }
+  assert(unavailable)
+  assert.equal(events.length, 0)
+  downloadable = true
+  const [first, second] = await Promise.all([
+    recordAssetReview(admin as never, userClient as never, input, actorId),
+    recordAssetReview(admin as never, userClient as never, input, actorId),
+  ])
+  assert.equal(first.event.id, second.event.id)
+  assert.equal(events.length, 1)
+  let changedKeyRejected = false
+  try { await recordAssetReview(admin as never, userClient as never, { ...input, note: 'changed' }, actorId) }
+  catch (error) { changedKeyRejected = error instanceof Error && error.message.includes('different exact action') }
+  assert(changedKeyRejected)
+})
+
+Deno.test('D02 review decisions use Design manager authority, not contributor authoring', () => {
+  assert(hasWorkshopAuthority({ member_kind: 'team', role: 'department_manager', department_id: 'design' }, 'decide_asset_review'))
+  assert(!hasWorkshopAuthority({ member_kind: 'team', role: 'specialist', department_id: 'design' }, 'decide_asset_review'))
+  assert(!hasWorkshopAuthority({ member_kind: 'team', role: 'department_manager', department_id: 'content' }, 'decide_asset_review'))
+  assert(!hasWorkshopAuthority({ member_kind: 'client', role: 'department_manager', department_id: 'design' }, 'decide_asset_review'))
 })

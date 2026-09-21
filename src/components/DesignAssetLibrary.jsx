@@ -3,6 +3,7 @@ import { buildDesignAssetRows, designAssetAccessState, designAssetArchiveEligibi
 import DesignAssetComparison from './DesignAssetComparison.jsx'
 import DesignAssetUpload from './DesignAssetUpload.jsx'
 import DesignAssetVersionBrowser from './DesignAssetVersionBrowser.jsx'
+import DesignAssetReviewPanel from './DesignAssetReviewPanel.jsx'
 
 const SELECT = 'rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 focus:border-violet-400 focus:outline-none'
 const SECONDARY = 'rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-200 hover:border-violet-400/50 focus:outline-none focus:ring-2 focus:ring-violet-400/50'
@@ -19,7 +20,7 @@ function exactId(value) {
   return value ? <code className="break-all text-[11px] text-slate-300">{value}</code> : <span className="text-slate-500">Unavailable / not recorded</span>
 }
 
-export default function DesignAssetLibrary({ workspace, contextKey, canUpload = false, canArchive = false, busy = false, onUpload, onArchive, onRefresh, onClose, onFocusSource }) {
+export default function DesignAssetLibrary({ workspace, contextKey, canUpload = false, canArchive = false, canSubmitReview = false, canDecideReview = false, currentUserId = '', busy = false, onUpload, onArchive, onReview, onRefresh, onClose, onFocusSource }) {
   const [state, dispatch] = useReducer(designAssetLibraryReducer, contextKey, initialDesignAssetLibraryState)
   const [clock, setClock] = useState(() => Date.now())
   const [comparisonOpen, setComparisonOpen] = useState(false)
@@ -51,7 +52,7 @@ export default function DesignAssetLibrary({ workspace, contextKey, canUpload = 
   }, [issuedAt, workspace.mediaUrlExpiresIn])
 
   const access = designAssetAccessState(selected, accessOptions)
-  const archive = designAssetArchiveEligibility(selected)
+  const archive = designAssetArchiveEligibility(selected, workspace.designAssetReviews)
 
   async function refreshSignedLinks() {
     if (!onRefresh || refreshingLinks) return
@@ -126,6 +127,7 @@ export default function DesignAssetLibrary({ workspace, contextKey, canUpload = 
       <p className={'mt-3 text-xs leading-5 ' + (archive.eligible ? 'text-amber-200' : 'text-slate-500')}>Archive eligibility: {archive.reason}</p>
       <p className={'mt-3 text-xs leading-5 ' + (access.canOpen ? 'text-slate-400' : 'text-amber-300')}>{access.message}</p>
       {!!selected.assetVersions?.length && <DesignAssetVersionBrowser row={selected} contextKey={contextKey} accessOptions={accessOptions} />}
+      {!!selected.assetVersions?.length && <DesignAssetReviewPanel row={selected} reviews={(workspace.designAssetReviews || []).filter(item => item.asset_id === selected.assetId)} contextKey={contextKey} currentUserId={currentUserId} canSubmit={canSubmitReview} canDecide={canDecideReview} onReview={onReview} onRefresh={onRefresh} />}
     </aside>}
   </section>
 }

@@ -127,9 +127,10 @@ export function latestDesignAssetVersion(versions = []) {
   return [...array(versions)].sort((left, right) => right.version_number - left.version_number)[0] || null
 }
 
-export function designAssetArchiveEligibility(row) {
+export function designAssetArchiveEligibility(row, reviews = []) {
   if (!row?.assetId || !array(row.assetVersions).length) return { eligible: false, reason: 'Only canonical versioned assets can be archived.' }
   if (row.archivedAt) return { eligible: false, reason: 'This asset is already archived.' }
+  if (array(reviews).some(review => review.asset_id === row.assetId)) return { eligible: false, reason: 'Submitted or reviewed asset versions must remain available.' }
   const blocked = row.assetVersions.some(version => clean(version.lifecycle_status) !== 'draft'
     || clean(version.source_kind) !== 'upload' || Boolean(version.source_media_asset_id)
     || Boolean(version.source_direction_version_id))
