@@ -31,6 +31,9 @@ function normalizedPendingSave(value) {
     artifactId: typeof value.artifactId === 'string' ? value.artifactId.slice(0, 80) : '',
     versionId: typeof value.versionId === 'string' ? value.versionId.slice(0, 80) : '',
     contentChecksum: value.contentChecksum,
+    payloadChecksum: /^[0-9a-f]{64}$/i.test(String(value.payloadChecksum || '')) ? value.payloadChecksum : null,
+    payload: value.payload && typeof value.payload === 'object' && !Array.isArray(value.payload) && value.payload.request_id === value.operationId
+      ? value.payload : null,
     knownVersionIds: Array.isArray(value.knownVersionIds)
       ? value.knownVersionIds.filter(item => typeof item === 'string').slice(0, 10000)
       : [],
@@ -110,6 +113,7 @@ export default function MarketingReports({ studio, workspace, saving, act, actor
   const [localError, setLocalError] = useState('')
   const [dirty, setDirty] = useState(false)
   const [pendingSave, setPendingSave] = useState(null)
+  const [retrying, setRetrying] = useState(false)
   const [recovery, setRecovery] = useState({ ready: false, storageKey: '', actorHash: '', error: '' })
   const loadedSelection = useRef('')
   const activeScope = useRef(scopeKey)
@@ -252,25 +256,30 @@ export default function MarketingReports({ studio, workspace, saving, act, actor
         currentTarget.artifactId === captured.artifactId && currentTarget.versionId === captured.versionId &&
         currentTarget.creating === captured.creating && currentTarget.draftRevision === captured.draftRevision
       if (!targetStillCurrent) return
+      const payload = {
+        engagement_id: workspace.engagement.id, artifact_id: captured.artifactId || null,
+        expected_latest_version_id: captured.versionId || null, request_id: operationId,
+        title: validated.title, content: validated.content,
+        change_summary: artifact ? `Report revision from exact version ${version.version_number}` : 'Initial Marketing report version',
+        ai_use_allowed: false,
+      }
       intent = {
         operationId, actorHash: recovery.actorHash,
         artifactId: captured.artifactId || '', versionId: captured.versionId || '', contentChecksum,
+        payloadChecksum: await marketingReportContentChecksum(payload), payload,
         knownVersionIds: records.flatMap(record => record.versions.map(item => item.id)),
       }
+      const beforePersist = activeTarget.current
+      if (inFlightSave.current !== operationId || activeScope.current !== captured.scopeKey ||
+        beforePersist?.scopeKey !== captured.scopeKey || beforePersist.actorId !== captured.actorId ||
+        beforePersist.artifactId !== captured.artifactId || beforePersist.versionId !== captured.versionId ||
+        beforePersist.creating !== captured.creating || beforePersist.draftRevision !== captured.draftRevision) return
       writePendingSave(recovery.storageKey, intent)
       persisted = true
       setPendingSave(intent)
       const result = await act(() => {
         attempted = true
-        return studio.saveArtifact({
-          engagement_id: workspace.engagement.id,
-          artifact_id: artifact?.id || null,
-          artifact_type: 'marketing_report',
-          title: validated.title,
-          content: validated.content,
-          change_summary: artifact ? `Report revision from exact version ${version.version_number}` : 'Initial Marketing report version',
-          ai_use_allowed: false,
-        })
+        return studio.saveMarketingReport(intent.payload)
       }, 'Marketing report saved as a new unapproved immutable version.', '', true)
       if (!attempted) {
         if (clearPendingSave(recovery.storageKey, operationId) && activeScope.current === captured.scopeKey) setPendingSave(null)
@@ -281,10 +290,11 @@ export default function MarketingReports({ studio, workspace, saving, act, actor
       const returnedChecksum = savedVersion?.content_checksum || (savedVersion?.content ? await marketingReportContentChecksum(savedVersion.content) : '')
       const resultMatchesIntent = savedArtifactId && savedVersion?.id &&
         savedVersion.organization_id === workspace.engagement.organization_id &&
+        savedVersion.request_id === intent.operationId &&
         (!intent.artifactId || savedArtifactId === intent.artifactId) &&
         !intent.knownVersionIds.includes(savedVersion.id) && returnedChecksum === intent.contentChecksum
       if (!resultMatchesIntent) {
-        if (activeScope.current === captured.scopeKey) setLocalError('The save outcome is unresolved. Do not save again; a separately reviewed authoritative recovery contract is required.')
+        if (activeScope.current === captured.scopeKey) setLocalError('The save outcome is unresolved. Retry the exact request to obtain its server receipt.')
         return
       }
       const cleared = clearPendingSave(recovery.storageKey, operationId)
@@ -295,13 +305,52 @@ export default function MarketingReports({ studio, workspace, saving, act, actor
       }
     } catch (error) {
       if (attempted && intent) {
-        if (activeScope.current === captured.scopeKey) setLocalError('The report save outcome is unresolved. Do not retry; a separately reviewed authoritative recovery contract is required.')
+        if (activeScope.current === captured.scopeKey) setLocalError('The report save outcome is unresolved. Retry the exact request; the server will return its receipt or make one atomic save.')
       } else {
         if (persisted && clearPendingSave(recovery.storageKey, operationId) && activeScope.current === captured.scopeKey) setPendingSave(null)
         if (activeScope.current === captured.scopeKey) setLocalError(error.message)
       }
     } finally {
       if (inFlightSave.current === operationId) inFlightSave.current = ''
+    }
+  }
+
+  async function retryPendingSave() {
+    const pending = pendingSave
+    if (!pending?.payload || !pending.payloadChecksum || saving || inFlightSave.current || !recovery.ready) return
+    const scope = activeScope.current
+    inFlightSave.current = pending.operationId
+    setRetrying(true)
+    try {
+      if (pending.payload.engagement_id !== workspace.engagement.id ||
+        pending.payload.artifact_id !== (pending.artifactId || null) ||
+        pending.payload.expected_latest_version_id !== (pending.versionId || null) ||
+        await marketingReportContentChecksum(pending.payload) !== pending.payloadChecksum ||
+        await marketingReportContentChecksum(pending.payload.content) !== pending.contentChecksum) {
+        throw new Error('The stored exact request changed; recovery remains locked.')
+      }
+      const result = await studio.saveMarketingReport(pending.payload)
+      const version = result?.version || result
+      if (version?.request_id !== pending.operationId || version?.organization_id !== workspace.engagement.organization_id ||
+        version?.artifact_id !== (pending.artifactId || version?.artifact_id) ||
+        version?.content_checksum !== pending.contentChecksum || !version?.id || !version?.artifact_id || pending.knownVersionIds.includes(version.id)) {
+        throw new Error('The server receipt does not match the locked report request.')
+      }
+      if (scope !== activeScope.current) return
+      if (!clearPendingSave(recovery.storageKey, pending.operationId)) throw new Error('The report recovery lock could not be cleared.')
+      setPendingSave(null); setLocalError(''); setDirty(false)
+      loadedSelection.current = ''
+      setCreating(false); setArtifactId(version.artifact_id); setVersionId(version.id)
+      await onRefresh?.()
+    } catch (error) {
+      if (scope === activeScope.current && Number(error?.status) === 412 && clearPendingSave(recovery.storageKey, pending.operationId)) {
+        setPendingSave(null)
+        setLocalError('The report changed before this request could save. Refresh the exact version, then start a new save.')
+        await onRefresh?.()
+      } else if (scope === activeScope.current) setLocalError(error.message || 'Exact report recovery failed; the lock remains.')
+    } finally {
+      if (inFlightSave.current === pending.operationId) inFlightSave.current = ''
+      setRetrying(false)
     }
   }
 
@@ -312,7 +361,7 @@ export default function MarketingReports({ studio, workspace, saving, act, actor
     </div>
 
     {recovery.error && <div role="alert" className="rounded-2xl border border-red-700/50 bg-red-950/30 p-4 text-sm leading-6 text-red-200">{recovery.error}</div>}
-    {pendingSave && <div role="alert" className="rounded-2xl border border-amber-600/50 bg-amber-950/30 p-4 text-sm leading-6 text-amber-100"><p className="font-semibold">Report save outcome is unresolved</p><p className="mt-1">Do not submit this report again. The earlier request may already have committed, and matching content alone cannot attribute a saved version to that operation. A separately reviewed authoritative recovery contract is required to clear this lock.</p><button type="button" disabled={saving || !onRefresh} onClick={() => onRefresh?.()} className={`${BUTTON} mt-3`}>{saving ? 'Refreshing authoritative workspace…' : 'Refresh authoritative workspace — lock remains'}</button></div>}
+    {pendingSave && <div role="alert" className="rounded-2xl border border-amber-600/50 bg-amber-950/30 p-4 text-sm leading-6 text-amber-100"><p className="font-semibold">Report save outcome is unresolved</p><p className="mt-1">The earlier request may have committed. Retry its exact saved request ID; the server will return the original version or make one atomic save. Matching content alone cannot clear this lock.</p><button type="button" disabled={saving || retrying || !pendingSave.payload || !pendingSave.payloadChecksum} onClick={retryPendingSave} className={`${BUTTON} mt-3`}>{retrying ? 'Reconciling exact request…' : 'Retry exact report request'}</button>{(!pendingSave.payload || !pendingSave.payloadChecksum) && <p className="mt-2 text-xs">This older lock has no exact payload and cannot be safely retried automatically.</p>}</div>}
 
     <div className="grid gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5 md:grid-cols-2">
       <Field label="Saved report"><select disabled={Boolean(pendingSave)} className={INPUT} value={creating ? '' : artifact?.id || ''} onChange={event => event.target.value ? chooseReport(event.target.value) : startReport()}><option value="">{!creating && !artifact ? 'Requested report unavailable — choose deliberately' : 'New unapproved report'}</option>{records.map(item => <option key={item.artifact.id} value={item.artifact.id}>{item.artifact.title}</option>)}</select></Field>
@@ -332,12 +381,12 @@ export default function MarketingReports({ studio, workspace, saving, act, actor
         <Field label="Executive summary"><textarea required rows="5" className={INPUT} value={form.executive_summary} onChange={event => updateForm({ executive_summary: event.target.value })} /></Field>
         <Field label="Insights" hint="One evidenced interpretation per line"><textarea required rows="5" className={INPUT} value={editorValue(form.insights)} onChange={event => updateForm({ insights: event.target.value })} /></Field>
         <Field label="Recommended actions" hint="One proposed action per line"><textarea required rows="5" className={INPUT} value={editorValue(form.recommended_actions)} onChange={event => updateForm({ recommended_actions: event.target.value })} /></Field>
-        <div className="flex justify-end border-t border-slate-800 pt-5"><button disabled={saving || !recovery.ready || Boolean(pendingSave) || (!creating && !version)} className={PRIMARY}>{pendingSave ? 'Save locked — recovery contract required' : !recovery.ready ? 'Save unavailable — recovery not ready' : saving ? 'Saving report...' : artifact ? 'Save new draft version' : 'Save first draft version'}</button></div>
+        <div className="flex justify-end border-t border-slate-800 pt-5"><button disabled={saving || !recovery.ready || Boolean(pendingSave) || (!creating && !version)} className={PRIMARY}>{pendingSave ? 'Save locked — retry exact request' : !recovery.ready ? 'Save unavailable — recovery not ready' : saving ? 'Saving report...' : artifact ? 'Save new draft version' : 'Save first draft version'}</button></div>
       </form>
 
       <div className="space-y-4">
         <article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Exact version preview</p><h3 className="mt-1 text-lg font-semibold">{version ? artifact.title : 'No saved version selected'}</h3></div>{version && <span className={`rounded-full px-3 py-1 text-xs font-semibold ${reviewState === 'approved' ? 'bg-emerald-950 text-emerald-300' : 'bg-amber-950 text-amber-200'}`}>{reviewState === 'approved' ? 'Approved exact version' : 'Draft - not approved'}</span>}</div>
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Exact version preview</p><h3 className="mt-1 text-lg font-semibold">{version ? (version.content?.report_title || artifact.title) : 'No saved version selected'}</h3></div>{version && <span className={`rounded-full px-3 py-1 text-xs font-semibold ${reviewState === 'approved' ? 'bg-emerald-950 text-emerald-300' : 'bg-amber-950 text-amber-200'}`}>{reviewState === 'approved' ? 'Approved exact version' : 'Draft - not approved'}</span>}</div>
           {!version ? <p className="mt-5 text-sm text-slate-500">Save a draft or choose an existing report to preview its persisted content.</p> : <div className="mt-5 space-y-5">
             <p className="text-sm text-slate-400">{version.content.period_start} to {version.content.period_end} · Version {version.version_number}</p>
             <div className="rounded-xl border border-amber-900/50 bg-amber-950/20 p-3 text-xs leading-5 text-amber-200">{evidenceState.message}</div>

@@ -21,7 +21,7 @@ export function emptyMarketingReportDraft() {
 export function marketingReportDraft(artifact = null, version = null) {
   const content = version?.content && typeof version.content === 'object' ? version.content : {}
   return {
-    ...emptyMarketingReportDraft(), title: clean(artifact?.title), period_start: clean(content.period_start),
+    ...emptyMarketingReportDraft(), title: clean(content.report_title) || clean(artifact?.title), period_start: clean(content.period_start),
     period_end: clean(content.period_end), sources: reportLines(content.sources),
     executive_summary: clean(content.executive_summary), insights: reportLines(content.insights),
     recommended_actions: reportLines(content.recommended_actions),
@@ -44,7 +44,7 @@ export function validateMarketingReportDraft(value = {}) {
   if (!executiveSummary) throw new Error('Executive summary is required by the current report contract')
   if (!insights.length) throw new Error('At least one insight is required by the current report contract')
   if (!recommendedActions.length) throw new Error('At least one recommended action is required by the current report contract')
-  return { title, content: { sources, period_start: periodStart, period_end: periodEnd, executive_summary: executiveSummary, insights, recommended_actions: recommendedActions } }
+  return { title, content: { report_title: title, sources, period_start: periodStart, period_end: periodEnd, executive_summary: executiveSummary, insights, recommended_actions: recommendedActions } }
 }
 
 export function marketingReportRecords(workspace = {}) {
@@ -115,6 +115,7 @@ export function buildMarketingReportExport({ artifact, version, approval = null,
   const list = values => values.length ? values.map(item => `- ${safe(item)}`).join('\n') : '- Unavailable'
   return [
     `# ${safe(draft.title || 'Marketing report')}`, '', status, '',
+    `Title provenance: ${version.content?.report_title ? 'Pinned in this exact version' : 'Legacy artifact label; not pinned to this version'}`,
     `Brand: ${safe(brandName)}`,
     `Reporting period: ${draft.period_start || 'Unavailable'} to ${draft.period_end || 'Unavailable'}`,
     `Exact artifact version: ${version.id}`,

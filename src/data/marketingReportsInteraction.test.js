@@ -91,7 +91,7 @@ test('mounted MB07 report lifecycle preserves drafts, exact identity, reconcilia
   async function mount(input, extra = {}) {
     const container = document.createElement('div')
     const root = createRoot(container)
-    const base = { studio: { saveArtifact: async () => ({}) }, saving: false, act: async callback => callback(), actorId: 'actor-test', onRefresh: async () => {}, ...extra }
+    const base = { studio: { saveMarketingReport: async () => ({}) }, saving: false, act: async callback => callback(), actorId: 'actor-test', onRefresh: async () => {}, ...extra }
     const view = props => createElement(StrictMode, null, createElement(MarketingReports, props))
     await act(async () => root.render(view({ ...base, workspace: input })))
     return { container, root, base, render: patch => act(async () => root.render(view({ ...base, workspace: input, ...patch }))), close: () => act(async () => root.unmount()) }
@@ -113,7 +113,15 @@ test('mounted MB07 report lifecycle preserves drafts, exact identity, reconcilia
   await t.test('same-tick writes are serialized and an ambiguous result stays locked despite a checksum match', async () => {
     const input = reportWorkspace('ambiguous')
     let calls = 0
-    const extra = { studio: { saveArtifact: async () => { calls += 1; throw new Error('Response lost') } }, act: async callback => { try { return await callback() } catch { return null } } }
+    let firstRequestId = ''
+    const extra = { studio: { saveMarketingReport: async payload => {
+      calls += 1
+      if (!firstRequestId) firstRequestId = payload.request_id
+      assert.equal(payload.request_id, firstRequestId)
+      if (calls === 1) throw new Error('Response lost')
+      return { ...input.v2, id: 'v3-ambiguous', version_number: 3, request_id: payload.request_id,
+        content: payload.content, content_checksum: await marketingReportContentChecksum(payload.content) }
+    } }, act: async callback => { try { return await callback() } catch { return null } } }
     let mounted = await mount(input.workspace, extra)
     const form = elements(mounted.container, 'form')[0]
     const submit = reactProps(form).onSubmit
@@ -133,16 +141,64 @@ test('mounted MB07 report lifecycle preserves drafts, exact identity, reconcilia
       const v3 = { ...input.v2, id: 'v3-ambiguous', version_number: 3, created_at: '2026-09-03', content, content_checksum: checksum }
       await mounted.render({ workspace: { ...input.workspace, versions: [v3, input.v2, input.v1] } })
       assert.match(mounted.container.textContent, /Save locked/)
-      assert.match(mounted.container.textContent, /matching content alone cannot attribute/i)
+      assert.match(mounted.container.textContent, /matching content alone cannot clear/i)
+      const retry = elements(mounted.container, 'button').find(button => button.textContent === 'Retry exact report request')
+      assert.ok(retry)
+      await act(async () => reactProps(retry).onClick())
+      assert.equal(calls, 2)
+      assert.doesNotMatch(mounted.container.textContent, /Save locked/)
     } finally { await mounted.close() }
   })
 
+  await t.test('service conflict keeps an uncertain report request locked', async () => {
+    const input = reportWorkspace('service-conflict')
+    let calls = 0
+    const mounted = await mount(input.workspace, {
+      studio: { saveMarketingReport: async () => {
+        calls += 1
+        if (calls === 1) throw new Error('Response lost')
+        throw Object.assign(new Error('Marketing service is paused'), { status: 409 })
+      } },
+      act: async callback => { try { return await callback() } catch { return null } },
+    })
+    try {
+      await act(async () => reactProps(elements(mounted.container, 'form')[0]).onSubmit({ preventDefault() {} }))
+      const retry = elements(mounted.container, 'button').find(button => button.textContent === 'Retry exact report request')
+      await act(async () => reactProps(retry).onClick())
+      assert.equal(calls, 2)
+      assert.match(mounted.container.textContent, /Save locked/)
+    } finally { await mounted.close() }
+  })
+  await t.test('authoritative stale rejection clears only the exact pending request', async () => {
+    const input = reportWorkspace('stale')
+    let calls = 0
+    let refreshes = 0
+    const mounted = await mount(input.workspace, {
+      studio: { saveMarketingReport: async () => {
+        calls += 1
+        if (calls === 1) throw new Error('Response lost')
+        throw Object.assign(new Error('Report changed'), { status: 412 })
+      } },
+      act: async callback => { try { return await callback() } catch { return null } },
+      onRefresh: async () => { refreshes += 1 },
+    })
+    try {
+      await act(async () => reactProps(elements(mounted.container, 'form')[0]).onSubmit({ preventDefault() {} }))
+      assert.match(mounted.container.textContent, /Save locked/)
+      const retry = elements(mounted.container, 'button').find(button => button.textContent === 'Retry exact report request')
+      await act(async () => reactProps(retry).onClick())
+      assert.equal(calls, 2)
+      assert.equal(refreshes, 1)
+      assert.doesNotMatch(mounted.container.textContent, /Save locked/)
+      assert.match(mounted.container.textContent, /changed before this request could save/)
+    } finally { await mounted.close() }
+  })
   await t.test('unavailable durable recovery storage prevents any report write', async () => {
     const input = reportWorkspace('storage-failure')
     let calls = 0
     const availableStorage = globalThis.sessionStorage
     globalThis.sessionStorage = { getItem() { throw new Error('Storage denied') }, setItem() { throw new Error('Storage denied') }, removeItem() {} }
-    const mounted = await mount(input.workspace, { studio: { saveArtifact: async () => { calls += 1 } } })
+    const mounted = await mount(input.workspace, { studio: { saveMarketingReport: async () => { calls += 1 } } })
     try {
       const form = elements(mounted.container, 'form')[0]
       await act(async () => reactProps(form).onSubmit({ preventDefault() {} }))
@@ -161,7 +217,8 @@ test('mounted MB07 report lifecycle preserves drafts, exact identity, reconcilia
     let refreshes = 0
     const nextWorkspace = { ...input.workspace, versions: [v3, input.v2, input.v1] }
     const extra = {
-      studio: { saveArtifact: async () => ({ artifact_id: input.artifact.id, version: v3 }) },
+      studio: { saveMarketingReport: async payload => ({ ...v3, request_id: payload.request_id,
+        content_checksum: await marketingReportContentChecksum(payload.content) }) },
       onRefresh: async () => { refreshes += 1 },
       act: async callback => { const result = await callback(); mounted.root.render(createElement(StrictMode, null, createElement(MarketingReports, { ...mounted.base, workspace: nextWorkspace }))); return result },
     }

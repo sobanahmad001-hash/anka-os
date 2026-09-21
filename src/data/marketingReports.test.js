@@ -26,6 +26,15 @@ test('report draft validates exact period and an explicit non-duplicate source s
   assert.deepEqual(result.content.sources, ['Meta account A', 'Saved SEO research v3'])
 })
 
+test('new report versions pin their title independently of the mutable artifact label', () => {
+  const draft = validateMarketingReportDraft({ ...marketingReportDraft(artifact, version), title: 'September report' })
+  assert.equal(draft.content.report_title, 'September report')
+  const pinned = { ...version, content: draft.content }
+  assert.equal(marketingReportDraft({ ...artifact, title: 'Later label' }, pinned).title, 'September report')
+  const exportText = buildMarketingReportExport({ artifact: { ...artifact, title: 'Later label' }, version: pinned })
+  assert.match(exportText, /^# September report/m)
+  assert.match(exportText, /Title provenance: Pinned in this exact version/)
+})
 test('report draft rejects missing sources, reversed dates, and missing deployed-contract narrative', () => {
   assert.throws(() => validateMarketingReportDraft({ ...marketingReportDraft(artifact, version), sources: [] }), /at least one report source/i)
   assert.throws(() => validateMarketingReportDraft({ ...marketingReportDraft(artifact, version), period_start: '2026-09-01', period_end: '2026-08-01' }), /cannot precede/i)
@@ -74,6 +83,7 @@ test('exact-version export is deterministic, escaped, visibly draft, and perform
   assert.equal(buildMarketingReportExport(input), first)
   assert.match(first, /DRAFT - NOT APPROVED OR RELEASED/)
   assert.match(first, /&lt;August report&gt;/)
+  assert.match(first, /Legacy artifact label; not pinned to this version/)
   assert.match(first, new RegExp(version.id))
   assert.match(first, /Metric snapshot: Unavailable/)
   assert.match(first, /does not approve, release, publish, refresh, or share/i)
@@ -99,8 +109,8 @@ test('Reports is a dedicated Marketing tab that reuses canonical artifacts and g
   assert.match(studio, /requestedOutput=\{contextValidation\.context\?\.output \|\| null\}/)
   assert.match(studio, /actorId=\{userId\}/)
   assert.match(reports, /label="Brand"[\s\S]*workspace\.engagement\.brands/)
-  assert.match(reports, /studio\.saveArtifact/)
-  assert.match(reports, /artifact_type: 'marketing_report'/)
+  assert.match(reports, /studio\.saveMarketingReport/)
+  assert.match(reports, /request_id: operationId/)
   assert.match(reports, /<ArtifactApprovalPanel[\s\S]*minimumApprovers=\{2\}/)
   assert.doesNotMatch(reports, /approveArtifact|onSingleApprove|releaseReport|publishReport|client_visibility/i)
 })
