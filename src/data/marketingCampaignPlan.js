@@ -11,7 +11,7 @@ function campaignPlanAccessError(message) {
   return Object.assign(new Error(message), { status: 403, membershipMismatch: true })
 }
 
-export function validateCampaignPlanSnapshot(snapshot, { organizationId, engagementId, campaignId }) {
+export function validateCampaignPlanSnapshot(snapshot, { organizationId, engagementId, campaignId, projectId = null }) {
   const versions = snapshot.versions || []
   const versionIds = new Set(versions.map(item => item.id))
   if (versions.some(item => item.organization_id !== organizationId || item.engagement_id !== engagementId || item.campaign_id !== campaignId)) {
@@ -33,6 +33,8 @@ export function validateCampaignPlanSnapshot(snapshot, { organizationId, engagem
   }
   const briefArtifactIds = new Set((snapshot.campaignBriefLinks || []).map(item => item.artifact_id))
   const briefVersionIds = new Set((snapshot.campaignBriefVersions || []).map(item => item.id))
+  const briefById = new Map((snapshot.campaignBriefVersions || []).map(item => [item.id, item]))
+  const approvalsById = new Map((snapshot.briefApprovals || []).map(item => [item.id, item]))
   if ((snapshot.campaignBriefLinks || []).some(item => item.organization_id !== organizationId || item.campaign_id !== campaignId || item.relation_type !== 'campaign_brief')) {
     throw campaignPlanAccessError('Campaign plan review destination mismatch')
   }
@@ -50,6 +52,29 @@ export function validateCampaignPlanSnapshot(snapshot, { organizationId, engagem
     return !submission || item.organization_id !== organizationId || item.artifact_version_id !== submission.artifact_version_id
   })) {
     throw campaignPlanAccessError('Campaign plan review request mismatch')
+  }
+
+  if ((snapshot.briefApprovals || []).some(item => item.organization_id !== organizationId
+    || item.engagement_id !== engagementId || !briefVersionIds.has(item.artifact_version_id)
+    || item.artifact_id !== briefById.get(item.artifact_version_id)?.artifact_id)) {
+    throw campaignPlanAccessError('Campaign plan brief approval context mismatch')
+  }
+  if ((snapshot.handoffs || []).some(item => item.organization_id !== organizationId
+    || item.engagement_id !== engagementId || item.campaign_id !== campaignId
+    || !versionIds.has(item.plan_version_id) || !briefVersionIds.has(item.brief_version_id)
+    || item.brief_checksum !== briefById.get(item.brief_version_id)?.content_checksum
+    || approvalsById.get(item.approval_id)?.artifact_version_id !== item.brief_version_id
+    || !(snapshot.reviewSubmissions || []).some(submission => submission.plan_version_id === item.plan_version_id
+      && submission.artifact_version_id === item.brief_version_id))) {
+    throw campaignPlanAccessError('Campaign handoff context mismatch')
+  }
+  if ((snapshot.recipientServices || []).some(item => item.organization_id !== organizationId
+    || item.engagement_id !== engagementId || !['content', 'design'].includes(item.service_catalog?.department_id))) {
+    throw campaignPlanAccessError('Campaign recipient service context mismatch')
+  }
+  if ((snapshot.recipientWorkstreams || []).some(item => item.organization_id !== organizationId
+    || (projectId && item.project_id !== projectId) || !['content', 'design'].includes(item.department_id))) {
+    throw campaignPlanAccessError('Campaign recipient workstream context mismatch')
   }
   return snapshot
 }
