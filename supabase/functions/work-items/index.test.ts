@@ -1,4 +1,4 @@
-import { normalizeWorkItemInput, projectTaskProposalDecisionArgs, requireGenerateContentScope, selectedOrganizationId, staleWrite } from './index.ts'
+import { normalizeWorkItemInput, marketingCalendarScheduleArgs, projectTaskProposalDecisionArgs, requireGenerateContentScope, selectedOrganizationId, staleWrite } from './index.ts'
 
 function equal(actual: unknown, expected: unknown) {
   if (actual !== expected) throw new Error(`Expected ${String(expected)}, received ${String(actual)}`)
@@ -116,4 +116,26 @@ Deno.test('proposal decision binds the selected organization and authenticated a
   equal(result?.p_decision, 'approve')
   equal(projectTaskProposalDecisionArgs({ projectId: 'project-a', proposalId: 'proposal-a', decision: 'publish' }, 'org-a', 'actor-a'), null)
   equal(projectTaskProposalDecisionArgs({ projectId: '', proposalId: 'proposal-a', decision: 'reject' }, 'org-a', 'actor-a'), null)
+})
+
+Deno.test('Marketing calendar schedule pins a verified actor and date-only typed inputs', () => {
+  const args = marketingCalendarScheduleArgs({
+    projectId: 'project-a', engagementId: 'engagement-a', requestId: 'request-a',
+    recordKind: 'engagement_work_item', recordId: 'work-a', expectedRowVersion: 7,
+    startDate: '2026-09-21', dueDate: '2026-09-22',
+    actorId: 'spoofed',
+  }, 'org-a', 'verified-actor')
+  equal(args.p_organization_id, 'org-a')
+  equal(args.p_actor_id, 'verified-actor')
+  equal(args.p_expected_row_version, 7)
+  equal(args.p_start_date, '2026-09-21')
+  equal(args.p_due_date, '2026-09-22')
+  throws(() => marketingCalendarScheduleArgs({ projectId: 'p', engagementId: 'e', requestId: 'r',
+    recordKind: 'project_task', recordId: 't', expectedRowVersion: 2,
+    startDate: '2026-09-21', dueDate: '2026-09-22' }, 'org', 'actor'), /date-only/)
+  throws(() => marketingCalendarScheduleArgs({ projectId: 'p', engagementId: 'e', requestId: 'r',
+    recordKind: 'engagement_work_item', recordId: 'w', expectedRowVersion: 2,
+    startDate: '2026-09-23', dueDate: '2026-09-22' }, 'org', 'actor'), /date-only/)
+  throws(() => marketingCalendarScheduleArgs({ projectId: 'p', engagementId: 'e', requestId: 'r',
+    recordKind: 'engagement_work_item', recordId: 'w', dueDate: '2026-09-22' }, 'org', 'actor'), /Expected row version/)
 })

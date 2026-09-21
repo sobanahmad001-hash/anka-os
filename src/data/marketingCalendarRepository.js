@@ -11,7 +11,18 @@ async function dataOrThrow(query, { signal } = {}) {
 export function createMarketingCalendarRepository(organizationId, { signal, client = supabase } = {}) {
   if (!organizationId) throw new TypeError('Active organization is required')
   const options = { signal }
-  return Object.freeze({ async load(engagement) {
+  return Object.freeze({
+    async schedule(input) {
+      const response = await client.functions.invoke('work-items', { body: { ...input, organizationId, action: 'schedule_marketing_calendar' }, signal })
+      if (response.error || response.data?.error || Number(response.status) >= 400) {
+        const detail = response.data?.error
+        throw Object.assign(new Error(typeof detail === 'string' ? detail : detail?.message || response.error?.message || 'Marketing schedule failed'), { status: response.status ?? response.error?.context?.status ?? response.error?.status, cause: response.error, detail })
+      }
+      const result = response.data?.data
+      if (result?.request_id !== input.requestId || result?.record_id !== input.recordId || result?.record_kind !== input.recordKind) throw new Error('Marketing schedule response identity changed')
+      return result
+    },
+    async load(engagement) {
     if (!engagement?.id || engagement.organization_id !== organizationId || !engagement.project_id) throw Object.assign(new Error('Marketing Calendar context mismatch'), { status: 403, membershipMismatch: true })
     const project = await dataOrThrow(client.from('projects').select('id, organization_id, client_id, engagement_type, planning_timezone').eq('organization_id', organizationId).eq('id', engagement.project_id).maybeSingle(), options)
     if (!project) throw Object.assign(new Error('Marketing Calendar project is unavailable'), { status: 403, membershipMismatch: true })

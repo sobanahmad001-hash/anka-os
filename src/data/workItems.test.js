@@ -198,7 +198,7 @@ test('W4 timeline renders ranges, real single-date points, unscheduled items, ne
   assert.deepEqual(timeline.links.map(link => [link.workItemId, link.dependsOnWorkItemId]), [['parent', 'child']])
 })
 
-test('W4 reuses the existing read path and detail panel without adding a migration or mutation surface', () => {
+test('W4 reuses the existing read path and detail panel without a mutation surface', () => {
   assert.match(panel, /items=\{visibleItems\}/)
   assert.match(panel, /WorkCalendarView/)
   assert.match(panel, /WorkTimelineView/)
@@ -207,7 +207,6 @@ test('W4 reuses the existing read path and detail panel without adding a migrati
   assert.match(calendarTimeline, /edit dates in work-item detail/i)
   assert.match(repository, /\.eq\(['"]engagement_id['"], engagementId\)[\s\S]*\.is\(['"]deleted_at['"], null\)/)
   assert.doesNotMatch(calendarTimeline, /supabase|workItems\.(save|remove|addDependency|removeDependency)|insert\(|update\(|upsert\(|delete\(/i)
-  assert.equal(migrationNames.some(name => /calendar|timeline/i.test(name)), false)
 })
 
 test('W6 workload groups visible engagement items by assignee with a fixed open-item threshold', () => {

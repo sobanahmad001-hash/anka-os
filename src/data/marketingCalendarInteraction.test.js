@@ -47,7 +47,7 @@ async function change(node, value) {
   await act(async () => { node.dispatchEvent(new TestEvent('input')); node.dispatchEvent(new TestEvent('change')) })
 }
 
-test('mounted MB05 calendar switches views and filters real rendered cards without scheduling writes', async t => {
+test('mounted M03 calendar filters, cancels a drag, and retries one exact date-only write', async t => {
   const routerStub = { name: 'mb05-router-stub', enforce: 'pre', transform(code, id) { if (id.endsWith('/src/components/MarketingCalendar.jsx')) return code.replace("import { Link } from 'react-router-dom'", "const Link = ({ to, children, ...props }) => <a href={to} {...props}>{children}</a>") } }
   const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [routerStub], define: { 'import.meta.env.VITE_SUPABASE_URL': JSON.stringify('https://example.supabase.co'), 'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify('test-key') } })
   t.after(() => server.close())
@@ -62,15 +62,16 @@ test('mounted MB05 calendar switches views and filters real rendered cards witho
   const snapshot = {
     timezone: 'Asia/Karachi', owners: [{ id: 'owner-a', label: 'Amina' }], channels: ['Email', 'Search'], statuses: ['cancelled', 'completed', 'draft', 'planned'],
     entries: [
-      { id: 'work:a', recordKind: 'engagement_work_item', recordId: 'a', title: 'Email work', calendarState: 'planned', plannedDate: '2026-09-10', endDate: '2026-09-10', engagementId: 'eng-a', channels: ['Email'], ownerId: 'owner-a', ownerLabel: 'Amina', campaignLabel: 'Launch', unresolvedDependencies: 1, unknownDependencies: 1, externallyPublished: false, href: '/sphere/workspace/items/engagement_work_item/a', plannerHref: '/sphere/workspace/projects/project-a?tab=retainer-planning' },
+      { id: 'work:a', recordKind: 'engagement_work_item', recordId: 'a', rowVersion: 4, title: 'Email work', calendarState: 'planned', plannedDate: '2026-09-10', endDate: '2026-09-10', engagementId: 'eng-a', channels: ['Email'], ownerId: 'owner-a', ownerLabel: 'Amina', campaignLabel: 'Launch', unresolvedDependencies: 1, unknownDependencies: 1, externallyPublished: false, href: '/sphere/workspace/items/engagement_work_item/a', plannerHref: '/sphere/workspace/projects/project-a?tab=retainer-planning' },
       { id: 'plan:b', recordKind: 'campaign_plan_draft', recordId: 'b', title: 'Search draft', calendarState: 'draft', plannedDate: '2026-09-11', endDate: '2026-09-12', engagementId: 'eng-a', channels: ['Search'], ownerId: 'owner-a', ownerLabel: 'Amina', campaignLabel: 'Launch', unresolvedDependencies: 0, externallyPublished: false, href: '/sphere/marketing/studio?tab=campaigns' },
       { id: 'task:c', recordKind: 'project_task', recordId: 'c', title: 'Finished task', calendarState: 'completed', plannedDate: '2026-09-13', endDate: '2026-09-13', engagementId: 'eng-a', channels: [], ownerId: '', ownerLabel: 'Unassigned', campaignLabel: '', unresolvedDependencies: 0, externallyPublished: false, href: '/sphere/workspace/items/project_task/c' },
       { id: 'task:e', recordKind: 'project_task', recordId: 'e', title: 'Cancelled task', calendarState: 'cancelled', plannedDate: '2026-09-14', endDate: '2026-09-14', engagementId: 'eng-a', channels: [], ownerId: '', ownerLabel: 'Unassigned', campaignLabel: '', unresolvedDependencies: 0, unknownDependencies: 0, externallyPublished: false, href: '/sphere/workspace/items/project_task/e' },
-      { id: 'task:d', recordKind: 'project_task', recordId: 'd', title: 'Needs a date', calendarState: 'planned', plannedDate: '', endDate: '', engagementId: 'eng-a', channels: [], ownerId: '', ownerLabel: 'Unassigned', campaignLabel: '', unresolvedDependencies: 0, externallyPublished: false, href: '/sphere/workspace/items/project_task/d' },
+      { id: 'task:d', recordKind: 'project_task', recordId: 'd', rowVersion: 2, title: 'Needs a date', calendarState: 'planned', plannedDate: '', endDate: '', engagementId: 'eng-a', channels: [], ownerId: '', ownerLabel: 'Unassigned', campaignLabel: '', unresolvedDependencies: 0, externallyPublished: false, href: '/sphere/workspace/items/project_task/d' },
     ],
   }
   let loads = 0
-  await act(async () => root.render(createElement(MarketingCalendar, { organizationId: 'org-a', scopeRevision: 1, engagement: { id: 'eng-a', name: 'Launch' }, repository: { load: async () => { loads += 1; return snapshot } }, onAccessError: () => {} })))
+  const scheduleCalls = []
+  await act(async () => root.render(createElement(MarketingCalendar, { organizationId: 'org-a', scopeRevision: 1, engagement: { id: 'eng-a', name: 'Launch', project_id: 'project-a' }, repository: { load: async () => { loads += 1; return snapshot }, schedule: async input => { scheduleCalls.push(input); if (scheduleCalls.length === 1) throw new Error('Response lost after commit'); return { request_id: input.requestId, record_id: input.recordId, record_kind: input.recordKind, replayed: true } } }, onAccessError: () => {} })))
   await change(byLabel(container, 'Marketing calendar month'), '2026-09')
   assert.match(container.textContent, /Email work/)
   assert.match(container.textContent, /Search draft/)
@@ -99,4 +100,24 @@ test('mounted MB05 calendar switches views and filters real rendered cards witho
   assert.doesNotMatch(container.textContent, /Finished task/)
   await act(async () => byText(container, 'button', 'Refresh').dispatchEvent(new TestEvent('click')))
   assert.equal(loads, 2)
+  await change(byLabel(container, 'Calendar status filter'), 'planned')
+  const unscheduledCard = byText(container, 'article', 'Needs a date')
+  await act(async () => { unscheduledCard.dispatchEvent(new TestEvent('dragstart')); unscheduledCard.dispatchEvent(new TestEvent('dragend')) })
+  assert.doesNotMatch(container.textContent, /Confirm date-only schedule/)
+  await act(async () => byText(unscheduledCard, 'button', 'Choose date').dispatchEvent(new TestEvent('click')))
+  await change(byLabel(container, 'Proposed due date'), '2026-09-20')
+  await act(async () => byText(container, 'button', 'Cancel').dispatchEvent(new TestEvent('click')))
+  assert.doesNotMatch(container.textContent, /Confirm date-only schedule/)
+  await act(async () => byText(unscheduledCard, 'button', 'Choose date').dispatchEvent(new TestEvent('click')))
+  await change(byLabel(container, 'Proposed due date'), '2026-09-20')
+  await act(async () => byText(container, 'button', 'Confirm schedule').dispatchEvent(new TestEvent('click')))
+  assert.match(container.textContent, /Inputs are locked/)
+  await act(async () => byText(container, 'button', 'Retry exact request').dispatchEvent(new TestEvent('click')))
+  assert.equal(scheduleCalls.length, 2)
+  assert.equal(scheduleCalls[0].requestId, scheduleCalls[1].requestId)
+  assert.equal(scheduleCalls[0].recordKind, 'project_task')
+  assert.equal(scheduleCalls[0].recordId, 'd')
+  assert.equal(scheduleCalls[0].expectedRowVersion, 2)
+  assert.equal(scheduleCalls[0].dueDate, '2026-09-20')
+  assert.doesNotMatch(container.textContent, /Confirm date-only schedule/)
 })

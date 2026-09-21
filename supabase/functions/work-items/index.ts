@@ -6,7 +6,7 @@ type Json = Record<string, unknown>
 const ACTIONS = new Set([
   'save', 'delete', 'add_dependency', 'remove_dependency',
   'acknowledge_automation_flag', 'generate_content_tasks', 'move',
-  'update_project_task', 'transition_task', 'decide_project_task_change_proposal', 'set_timezone',
+  'update_project_task', 'transition_task', 'decide_project_task_change_proposal', 'set_timezone', 'schedule_marketing_calendar',
 ])
 const WORK_ITEM_TYPES = new Set(['task', 'bug', 'request'])
 const PRIORITIES = new Set(['low', 'medium', 'high', 'urgent'])
@@ -44,6 +44,26 @@ export function projectTaskProposalDecisionArgs(body: Json, organizationId: stri
   }
 }
 
+export function marketingCalendarScheduleArgs(body: Json, organizationId: string, actorId: string) {
+  const projectId = optionalId(body.projectId)
+  const engagementId = optionalId(body.engagementId)
+  const requestId = optionalId(body.requestId)
+  const recordId = optionalId(body.recordId)
+  const recordKind = text(body.recordKind, 40)
+  const dueDate = optionalDate(body.dueDate)
+  const startDate = body.startDate == null || body.startDate === '' ? null : optionalDate(body.startDate)
+  if (!projectId || !engagementId || !requestId || !recordId || !dueDate
+    || !['project_task', 'engagement_work_item'].includes(recordKind)
+    || (body.startDate != null && body.startDate !== '' && !startDate)
+    || (recordKind === 'project_task' && startDate)
+    || (startDate && startDate > dueDate)) throw new Error('Complete date-only Marketing schedule required')
+  return {
+    p_organization_id: organizationId, p_project_id: projectId, p_engagement_id: engagementId,
+    p_request_id: requestId, p_record_kind: recordKind, p_record_id: recordId,
+    p_expected_row_version: expectedVersion(body.expectedRowVersion),
+    p_start_date: startDate, p_due_date: dueDate, p_actor_id: actorId,
+  }
+}
 export function selectedOrganizationId(input: Json) {
   const camelCase = optionalId(input.organizationId)
   const snakeCase = optionalId(input.organization_id)
@@ -164,6 +184,12 @@ export async function handleRequest(request: Request) {
     const { admin, user, userClient } = await requireContext(request)
     const organizationId = selectedOrganizationId(body)
     if (!organizationId) return response({ error: 'Active organization is required' }, 400)
+    if (action === 'schedule_marketing_calendar') {
+      const args = marketingCalendarScheduleArgs(body, organizationId, user.id)
+      const { data, error } = await admin.rpc('schedule_marketing_calendar_entry', args)
+      if (error) throw error
+      return response({ data })
+    }
     if (action === 'update_project_task') {
       const taskId = optionalId(body.taskId)
       if (!taskId) return response({ error: 'Project Task is required' }, 400)
