@@ -364,3 +364,64 @@ test('mounted archive confirmation cancels without a call, retries lost response
   await act(async () => byText(environment.container, 'button', 'Archive draft asset').dispatchEvent(new TestEvent('click', { bubbles: true })))
   assert.notEqual(calls[3][1], calls[2][1])
 })
+
+
+test('D01 brief keeps unsaved edits through refresh, blocks a newer saved version, and reuses retry identity', async t => {
+  const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  t.after(() => server.close())
+  const { default: DesignCreativeBriefWorkspace } = await server.ssrLoadModule('/src/components/DesignCreativeBriefWorkspace.jsx')
+  const environment = mountedEnvironment()
+  const previous = { document: globalThis.document, window: globalThis.window, Event: globalThis.Event,
+    Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT }
+  Object.assign(globalThis, { document: environment.document, window: environment.window, Event: TestEvent,
+    Node: TestNode, HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true })
+  t.after(() => Object.assign(globalThis, previous))
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+  const brief = { id: 'brief-1', organization_id: 'org-1', engagement_id: 'eng-1', engagement_service_id: 'service-1',
+    visibility: 'official', project_task_id: null, engagement_work_item_id: null, revision: 1 }
+  const version = { id: 'version-1', creative_brief_id: brief.id, version_number: 1,
+    content: { title: 'Saved title', output_type: 'image', purpose: '', audience: '', objective: '',
+      placement_destination: '', requested_outputs: [], rights_notes: '', instructions: '', exclusions_constraints: '' },
+    created_at: '2026-09-20T00:00:00Z' }
+  const workspace = { engagement: { id: 'eng-1', organization_id: 'org-1', brand_id: 'brand-1' },
+    creativeBriefs: [brief], creativeBriefVersions: [version], creativeBriefSources: [],
+    identitySystemVersions: [], versions: [] }
+  const calls = []
+  const ref = { current: null }
+  const props = { workspace, activeServiceId: 'service-1', workRecord: null, busy: '', canSave: true,
+    onSave: async input => { calls.push(input); return false }, onFreeze: () => {} }
+  await act(async () => root.render(createElement(DesignCreativeBriefWorkspace, { ...props, ref })))
+  const title = elements(environment.container, 'input')[0]
+  const reactProps = title[Object.keys(title).find(key => key.startsWith('__reactProps$'))]
+  await act(async () => reactProps.onChange({ target: { value: 'Unsaved revised title' } }))
+  assert.equal(ref.current.isDirty(), true)
+  assert.match(environment.container.textContent, /Unsaved brief edits/)
+  await act(async () => root.render(createElement(DesignCreativeBriefWorkspace, {
+    ...props, workspace: { ...workspace, creativeBriefSources: [] }, ref,
+  })))
+  assert.equal(elements(environment.container, 'input')[0].value, 'Unsaved revised title')
+  await act(async () => { await ref.current.save() })
+  await act(async () => { await ref.current.save() })
+  assert.equal(calls.length, 2)
+  assert.equal(calls[0].operation_key, calls[1].operation_key)
+  assert.equal(calls[0].content.title, 'Unsaved revised title')
+
+  const newer = { ...version, id: 'version-2', version_number: 2, content: { ...version.content, title: 'Other saved title' } }
+  await act(async () => root.render(createElement(DesignCreativeBriefWorkspace, {
+    ...props, workspace: { ...workspace, creativeBriefVersions: [version, newer] }, ref,
+  })))
+  assert.match(environment.container.textContent, /A newer saved brief version is available/)
+  assert.equal(elements(environment.container, 'input')[0].value, 'Unsaved revised title')
+  assert.equal(ref.current.canSave(), false)
+  await act(async () => byText(environment.container, 'button', 'Discard edits and reload saved version')
+    .dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.equal(ref.current.isDirty(), false)
+  assert.equal(elements(environment.container, 'input')[0].value, 'Other saved title')
+  await act(async () => root.render(createElement(DesignCreativeBriefWorkspace, {
+    ...props, workspace: { ...workspace, engagement: { id: 'eng-2', organization_id: 'org-2', brand_id: 'brand-2' },
+      creativeBriefs: [], creativeBriefVersions: [] }, ref,
+  })))
+  assert.equal(ref.current.isDirty(), false)
+  assert.equal(elements(environment.container, 'input')[0].value, '')
+})
