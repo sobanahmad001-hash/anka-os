@@ -7,6 +7,7 @@ const migration = readFileSync(new URL('../../supabase/migrations/20260921180000
 const reviewMigration = readFileSync(new URL('../../supabase/migrations/20260921183000_n6_run_intent_review.sql', import.meta.url), 'utf8')
 const planMigration = readFileSync(new URL('../../supabase/migrations/20260921190000_n6_linked_run_plan.sql', import.meta.url), 'utf8')
 const jobMigration = readFileSync(new URL('../../supabase/migrations/20260922020000_n6_blocked_execution_jobs.sql', import.meta.url), 'utf8')
+const stepsMigration = readFileSync(new URL('../../supabase/migrations/20260922050000_n6_execution_job_steps.sql', import.meta.url), 'utf8')
 const ID = '11111111-1111-4111-8111-111111111111'
 const OTHER = '22222222-2222-4222-8222-222222222222'
 
@@ -138,7 +139,7 @@ test('N6 request list attaches the blocked job to its matching intent', async ()
     pipeline_run_intents: [{ id: ID, input_sha256: 'a'.repeat(64) }],
     pipeline_run_intent_reviews: [],
     pipeline_run_plans: [{ id: OTHER, run_intent_id: ID, work_manifest: [], work_sha256: 'b'.repeat(64) }],
-    ai_execution_jobs: [{ id: ID, run_intent_id: ID, run_plan_id: OTHER, status: 'blocked_configuration', blocked_reason: 'Configuration required.' }],
+    ai_execution_jobs: [{ id: ID, run_intent_id: ID, run_plan_id: OTHER, status: 'blocked_configuration', blocked_reason: 'Configuration required.', steps: [{ ordinal: 1, work_item_id: OTHER }] }],
   }
   const client = {
     from(name) {
@@ -157,5 +158,19 @@ test('N6 request list attaches the blocked job to its matching intent', async ()
   const [row] = await createPipelineRunIntentsRepository(client).list(ID, OTHER)
   assert.equal(row.job.run_plan_id, row.plan.id)
   assert.equal(row.job.status, 'blocked_configuration')
+  assert.equal(row.job.steps[0].work_item_id, OTHER)
   assert.deepEqual(names, ['pipeline_run_intents', 'pipeline_run_intent_reviews', 'pipeline_run_plans', 'ai_execution_jobs'])
+})
+
+test('N6 job steps pin every ordered work item without provider or task writes', () => {
+  assert.match(stepsMigration, /unique \(job_id, ordinal\)/)
+  assert.match(stepsMigration, /unique \(job_id, work_item_id\)/)
+  assert.match(stepsMigration, /after insert on public\.ai_execution_jobs/)
+  assert.match(stepsMigration, /jsonb_array_length\(plan\.work_manifest\) not between 1 and 50/)
+  assert.match(stepsMigration, /foreign key \(work_item_id, organization_id\)/)
+  assert.match(stepsMigration, /job_input_sha256/)
+  assert.match(stepsMigration, /before update or delete/)
+  assert.match(stepsMigration, /grant select on public\.ai_execution_job_steps to authenticated, service_role/)
+  assert.doesNotMatch(stepsMigration, /grant (?:insert|update|delete|all) on public\.ai_execution_job_steps to authenticated/)
+  assert.doesNotMatch(stepsMigration, /update public\.work_items|insert into public\.ai_runs|https?:\/\//)
 })
