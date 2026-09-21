@@ -44,16 +44,14 @@ test('a delayed organization A response cannot become current after switching to
   assert.equal(isCurrentWorkItemsRequest({ ...requestA, organizationId: 'org-b', generation: 2 }, { organizationId: 'org-b', generation: 2 }), true)
 })
 
-test('all P5 mutation consumers reload typed stale writes while retaining intended actions', () => {
+test('active P5 mutation consumers reload typed stale writes while retaining intended actions', () => {
   const panel = readFileSync(new URL('../components/WorkItemsPanel.jsx', import.meta.url), 'utf8')
-  const canonical = readFileSync(new URL('../apps/CanonicalProjects.jsx', import.meta.url), 'utf8')
   const department = readFileSync(new URL('../apps/DepartmentWorkshop.jsx', import.meta.url), 'utf8')
   const myWork = readFileSync(new URL('../apps/MyWork.jsx', import.meta.url), 'utf8')
   for (const intent of ['automation acknowledgement', 'work-item edits', 'deletion', 'dependency addition', 'dependency removal']) assert.match(panel, new RegExp(intent))
   assert.match(panel, /recoverStaleWrite[\s\S]*await loadItems\(\{ preserveEditor: true \}\)/)
   assert.match(panel, /row_version: refreshed\.row_version/)
-  const canonicalTransition = canonical.slice(canonical.indexOf('async function transitionTask'), canonical.indexOf('async function createResearch'))
-  for (const source of [canonicalTransition, department, myWork]) {
+  for (const source of [department, myWork]) {
     assert.match(source, /status === 409/)
     assert.match(source, /Intended[\s\S]*Project Task status/)
     assert.match(source, /await (refreshWorkspace|loadWorkspace)\(\)/)

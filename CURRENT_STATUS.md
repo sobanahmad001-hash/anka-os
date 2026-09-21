@@ -1,3 +1,5 @@
+> Historical snapshot from 2026-08-25. The branch, deployment, test counts, and blockers below are preserved as an audit trail and must not be treated as current release status. Check the live migration catalog, release coordinator, and current deployment evidence for the latest gate. Signed-in acceptance remains deferred.
+
 # Anka Sphere OS - Current Status
 
 Last updated: 2026-08-25

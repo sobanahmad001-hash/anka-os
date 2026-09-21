@@ -1,3 +1,5 @@
+> Historical Phase 12 architecture map (retained for context). Its 32-app hierarchy and profile-role access claims do not describe the current organization membership model. See `docs/product/RELEASE_1_AUTHORITY.md` and the active routes in `src/App.jsx` for implementation authority.
+
 # Anka OS — Visual System Map
 
 ## 🏢 Organization Hierarchy
