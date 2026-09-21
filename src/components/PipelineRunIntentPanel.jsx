@@ -142,6 +142,7 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
         <p className="mt-1">Pinned preset {row.input_manifest?.pipeline?.version_id?.slice(0, 8)} · {row.input_manifest?.assets?.length || 0} assets · hash {row.input_sha256.slice(0, 12)}</p>
         {row.review?.reason && <p className="mt-1">Review reason: {row.review.reason}</p>}
         {row.plan && <p className="mt-2 text-emerald-300">Linked plan: {row.plan.work_manifest.length} work items pinned · hash {row.plan.work_sha256.slice(0, 12)}. No task status was changed.</p>}
+        {row.job && <p className="mt-1 text-amber-300">Execution job: {row.job.status.replaceAll('_', ' ')} · {row.job.blocked_reason} No provider request has been sent.</p>}
         {allowed && !row.review && row.requested_by !== user?.id && <div className="mt-2">
           {reviewingId === row.id ? <div className="space-y-2">
             <label className="block">Review reason (required to reject)

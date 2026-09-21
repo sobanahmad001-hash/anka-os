@@ -24,19 +24,24 @@ export function createPipelineRunIntentsRepository(supabase) {
         .order('requested_at', { ascending: false }).limit(20), signal)
       if (!rows?.length) return []
       const ids = rows.map(row => row.id)
-      const [reviews, plans] = await Promise.all([
+      const [reviews, plans, jobs] = await Promise.all([
         dataOrThrow(supabase.from('pipeline_run_intent_reviews')
           .select('id, run_intent_id, decision, reason, reviewed_by, reviewed_at')
           .eq('organization_id', organization).in('run_intent_id', ids), signal),
         dataOrThrow(supabase.from('pipeline_run_plans')
           .select('id, run_intent_id, work_manifest, work_sha256, planned_at, planned_by')
           .eq('organization_id', organization).in('run_intent_id', ids), signal),
+        dataOrThrow(supabase.from('ai_execution_jobs')
+          .select('id, run_intent_id, run_plan_id, status, blocked_reason, input_sha256, created_at')
+          .eq('organization_id', organization).in('run_intent_id', ids), signal),
       ])
       const reviewByIntent = new Map((reviews || []).map(review => [review.run_intent_id, review]))
       const planByIntent = new Map((plans || []).map(plan => [plan.run_intent_id, plan]))
+      const jobByIntent = new Map((jobs || []).map(job => [job.run_intent_id, job]))
       return rows.map(row => ({
         ...row, review: reviewByIntent.get(row.id) || null,
         plan: planByIntent.get(row.id) || null,
+        job: jobByIntent.get(row.id) || null,
       }))
     },
     start({ organizationId, engagementId, requestId, assetIds = [] }, { signal } = {}) {
