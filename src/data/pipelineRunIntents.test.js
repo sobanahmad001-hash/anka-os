@@ -6,6 +6,7 @@ import { createPipelineRunIntentsRepository } from './pipelineRunIntentsReposito
 const migration = readFileSync(new URL('../../supabase/migrations/20260921180000_n6_manual_pipeline_run_intents.sql', import.meta.url), 'utf8')
 const reviewMigration = readFileSync(new URL('../../supabase/migrations/20260921183000_n6_run_intent_review.sql', import.meta.url), 'utf8')
 const planMigration = readFileSync(new URL('../../supabase/migrations/20260921190000_n6_linked_run_plan.sql', import.meta.url), 'utf8')
+const jobMigration = readFileSync(new URL('../../supabase/migrations/20260922020000_n6_blocked_execution_jobs.sql', import.meta.url), 'utf8')
 const ID = '11111111-1111-4111-8111-111111111111'
 const OTHER = '22222222-2222-4222-8222-222222222222'
 
@@ -118,4 +119,43 @@ test('N6 linked plan client sends one bounded ordered selection', async () => {
     p_organization_id: ID, p_run_intent_id: OTHER, p_request_id: ID,
     p_work_item_ids: [OTHER],
   }])
+})
+
+test('N6 durable job is created once from the pinned plan and remains blocked', () => {
+  assert.match(jobMigration, /run_plan_id uuid not null unique references public\.pipeline_run_plans/)
+  assert.match(jobMigration, /unique \(run_intent_id\)/)
+  assert.match(jobMigration, /after insert on public\.pipeline_run_plans/)
+  assert.match(jobMigration, /before update or delete/)
+  assert.match(jobMigration, /status = 'blocked_configuration'/)
+  assert.match(jobMigration, /provider is null and model_id is null and provider_request_id is null/)
+  assert.match(jobMigration, /grant select on public\.ai_execution_jobs to authenticated, service_role/)
+  assert.doesNotMatch(jobMigration, /grant (?:insert|update|delete|all) on public\.ai_execution_jobs to authenticated/)
+})
+
+test('N6 request list attaches the blocked job to its matching intent', async () => {
+  const names = []
+  const fixtures = {
+    pipeline_run_intents: [{ id: ID, input_sha256: 'a'.repeat(64) }],
+    pipeline_run_intent_reviews: [],
+    pipeline_run_plans: [{ id: OTHER, run_intent_id: ID, work_manifest: [], work_sha256: 'b'.repeat(64) }],
+    ai_execution_jobs: [{ id: ID, run_intent_id: ID, run_plan_id: OTHER, status: 'blocked_configuration', blocked_reason: 'Configuration required.' }],
+  }
+  const client = {
+    from(name) {
+      names.push(name)
+      return {
+        select() { return this },
+        eq() { return this },
+        in() { return this },
+        order() { return this },
+        limit() { return this },
+        then(resolve, reject) { return Promise.resolve({ data: fixtures[name], error: null }).then(resolve, reject) },
+      }
+    },
+    rpc() { throw new Error('Unexpected write') },
+  }
+  const [row] = await createPipelineRunIntentsRepository(client).list(ID, OTHER)
+  assert.equal(row.job.run_plan_id, row.plan.id)
+  assert.equal(row.job.status, 'blocked_configuration')
+  assert.deepEqual(names, ['pipeline_run_intents', 'pipeline_run_intent_reviews', 'pipeline_run_plans', 'ai_execution_jobs'])
 })
