@@ -86,7 +86,7 @@ test('mounted SEO Research rejects a stale pending preview after the market chan
   const { createRoot } = await import('react-dom/client')
   const root = createRoot(env.container)
   t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
-  const first = deferred(); const saves = []; let previews = 0
+  const first = deferred(); const saves = []; const confirmations = []; let previews = 0
   const result = market => ({
     input: { research_type: 'page', target_url: 'https://example.test/page', market, language: null, device: null, seed_keywords: [], content_strategy_version_id: null },
     captured_at: '2026-09-12T00:00:00Z', preview_signature: 'a'.repeat(64), source_availability: [],
@@ -94,13 +94,16 @@ test('mounted SEO Research rejects a stale pending preview after the market chan
     interpretations: [], limitations: [],
   })
   const repository = {
-    loadAvailability: async () => ({ technicalSeoPages: 1, trackedKeywords: 0, contentStrategies: [], activeContentService: false }),
+    loadAvailability: async () => ({ technicalSeoPages: 1, trackedKeywords: 0, contentStrategies: [], activeContentService: true,
+      contentServices: [{ id: '4c141552-5951-4000-8000-000000000001', name: 'Content' }],
+      contentWorkstreams: [{ id: '4c141552-5951-4000-8000-000000000002', name: 'Content work' }] }),
     preview: async ({ research }) => ++previews === 1 ? first.promise : result(research.market),
-    save: async input => { saves.push(input); return { replayed: false } },
+    save: async input => { saves.push(input); return { id: '4c141552-5951-4000-8000-000000000003', content_checksum: 'a'.repeat(64), replayed: false } },
+    confirmContentRequest: async input => { confirmations.push(input); return confirmations.length === 1 ? null : { request_id: input.requestId, research_version_id: input.researchVersionId, replayed: true } },
   }
   await act(async () => root.render(createElement(MarketingSeoResearch, {
     organizationId: 'org-a', scopeRevision: 1, signal: new AbortController().signal,
-    engagement: { id: 'eng-a', brand_id: 'brand-a' }, repository,
+    engagement: { id: 'eng-a', brand_id: 'brand-a', project_id: 'project-a' }, repository,
     act: async callback => callback(), onAccessError: () => {},
   })))
   await setValue(field(env.container, 'Research type'), 'page')
@@ -122,4 +125,20 @@ test('mounted SEO Research rejects a stale pending preview after the market chan
   await act(async () => saveButton.dispatchEvent(new TestEvent('click')))
   assert.equal(saves.length, 1)
   assert.equal(saves[0].research.input.market, 'New market')
+  const previewRequestButton = elements(env.container, 'button').find(node => node.textContent === 'Preview Request Content')
+  await act(async () => previewRequestButton.dispatchEvent(new TestEvent('click')))
+  await setValue(field(env.container, 'Receiving Content service'), '4c141552-5951-4000-8000-000000000001')
+  await setValue(field(env.container, 'Receiving project workstream'), '4c141552-5951-4000-8000-000000000002')
+  const confirm = elements(env.container, 'button').find(node => node.textContent === 'Confirm internal Content request')
+  await act(async () => confirm.dispatchEvent(new TestEvent('click')))
+  assert.equal(confirmations.length, 1)
+  assert.match(env.container.textContent, /result is uncertain/)
+  const retry = elements(env.container, 'button').find(node => node.textContent === 'Confirm internal Content request')
+  await act(async () => retry.dispatchEvent(new TestEvent('click')))
+  assert.equal(confirmations.length, 2)
+  assert.equal(confirmations[1].requestId, confirmations[0].requestId)
+  assert.equal(confirmations[0].researchVersionId, '4c141552-5951-4000-8000-000000000003')
+  assert.equal(confirmations[0].researchChecksum, 'a'.repeat(64))
+  assert.equal(confirmations[0].projectId, 'project-a')
+  assert.match(env.container.textContent, /Confirmed project handoff/)
 })

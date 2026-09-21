@@ -42,7 +42,7 @@ test('source availability and response identity remain honest and context-bound'
   assert.equal(shouldApplySeoResearchResponse({ ...request, signal: { aborted: true } }, request, 3, 3), false)
 })
 
-test('production wiring uses server preview, replay-safe save, additive persistence, and a visibly blocked request confirmation', async () => {
+test('production wiring uses server preview, replay-safe save, and canonical N3 Content request confirmation', async () => {
   const [repository, component, studio, edge, migration, verifier, concurrency, relations, workItems, proofing] = await Promise.all([
     readFile(new URL('./marketingSeoResearchRepository.js', import.meta.url), 'utf8'),
     readFile(new URL('../components/MarketingSeoResearch.jsx', import.meta.url), 'utf8'),
@@ -58,8 +58,9 @@ test('production wiring uses server preview, replay-safe save, additive persiste
   assert.match(repository, /preview_seo_research/)
   assert.match(repository, /save_seo_research/)
   assert.match(repository, /service_catalog\.department_id', 'content'/)
-  assert.match(component, /Confirm request unavailable/)
-  assert.match(component, /generic Work Item save path is not replay-safe/)
+  assert.match(component, /Confirm internal Content request/)
+  assert.match(component, /savedVersion\.content_checksum/)
+  assert.match(repository, /confirm_marketing_seo_content_request/)
   assert.match(studio, /seo-research/)
   assert.match(edge, /safeResearchUrl/)
   assert.match(edge, /No remote URL was fetched/)
