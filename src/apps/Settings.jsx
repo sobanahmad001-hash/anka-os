@@ -11,6 +11,7 @@ import { runCurrentModelAllowlistRequest } from '../data/departmentChatModelSele
 import { integrations } from '../data/integrationRepository.js'
 import ContentCustomFieldSettings from '../components/ContentCustomFieldSettings.jsx'
 import DepartmentChatModelAllowlist from '../components/DepartmentChatModelAllowlist.jsx'
+import PipelineAiTextRouteSettings from '../components/PipelineAiTextRouteSettings.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20'
@@ -41,7 +42,7 @@ function Status({ value }) {
 }
 
 export default function Settings() {
-  const { activeOrganizationId, scopeRevision, requestSignal } = useOrganization()
+  const { activeOrganizationId, activeMembership, scopeRevision, requestSignal } = useOrganization()
   const currentModelScope = useRef({ organizationId: activeOrganizationId, revision: scopeRevision })
   currentModelScope.current = { organizationId: activeOrganizationId, revision: scopeRevision }
   const modelLoadGeneration = useRef(0)
@@ -332,6 +333,13 @@ export default function Settings() {
           connections={modelConnections}
           canManage={modelCanManage}
           onSaved={loadModelConnections}
+        />
+        <PipelineAiTextRouteSettings
+          key={`routes:${activeOrganizationId}:${scopeRevision}`}
+          organizationId={activeOrganizationId}
+          connections={modelConnections}
+          canManage={['system_owner', 'operations_admin'].includes(activeMembership?.role)}
+          requestSignal={requestSignal}
         />
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
