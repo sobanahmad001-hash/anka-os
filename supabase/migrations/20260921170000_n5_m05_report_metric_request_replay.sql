@@ -77,7 +77,9 @@ begin
   select * into prior from private.m05_report_save_requests where request_id=p_request_id;
   if found then
     if prior.organization_id is distinct from p_organization_id or prior.engagement_id is distinct from p_engagement_id
-      or prior.actor_id is distinct from p_actor_id or prior.payload_sha256 is distinct from payload_sha then
+      or prior.actor_id is distinct from p_actor_id
+      or (prior.request_payload_sha256 is not null and prior.request_payload_sha256 is distinct from request_payload_sha)
+      or (prior.request_payload_sha256 is null and prior.payload_sha256 is distinct from payload_sha) then
       raise exception 'Report request ID already used with different inputs' using errcode='23505';
     end if;
     select * into version from public.artifact_versions
