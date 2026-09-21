@@ -61,6 +61,7 @@ Marketing becomes:
 - environment identity is clear
 - AI prompts/behavior differ by environment
 - no generic chatbot behavior in environment-specific flows
+
 ## N5/N7 Design media alignment (2026-09-21)
 
 The existing Design Workshop and exact-version review/delivery contracts remain the foundation. Curated Higgsfield image/video integration and Google direct media capabilities are added scope, pending verified endpoints, available account access, resolution, audio and licensing. The current live image path and unavailable video action are not evidence of a completed video menu.

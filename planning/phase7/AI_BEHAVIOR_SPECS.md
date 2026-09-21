@@ -66,6 +66,7 @@ Campaign and content coordination helper
 
 ### Tone
 planning-aware, campaign-aware, concise
+
 ## Consolidated N1–N8 alignment (2026-09-21)
 
 This extends the current N-series build; released work is retained. OS management assistance and Workshop production are separate surfaces. They share effective authority, scoped context, an approved provider/model registry, durable jobs, cost controls, output lineage and audit. Deterministic server rules decide permissions, assignments, approvals and budgets. AI may propose; it cannot turn a proposal into an official change without the existing human confirmation path.
