@@ -5,6 +5,7 @@ import { createPipelineRunIntentsRepository } from './pipelineRunIntentsReposito
 
 const migration = readFileSync(new URL('../../supabase/migrations/20260921180000_n6_manual_pipeline_run_intents.sql', import.meta.url), 'utf8')
 const reviewMigration = readFileSync(new URL('../../supabase/migrations/20260921183000_n6_run_intent_review.sql', import.meta.url), 'utf8')
+const planMigration = readFileSync(new URL('../../supabase/migrations/20260921190000_n6_linked_run_plan.sql', import.meta.url), 'utf8')
 const ID = '11111111-1111-4111-8111-111111111111'
 const OTHER = '22222222-2222-4222-8222-222222222222'
 
@@ -79,5 +80,42 @@ test('N6 review client rejects invalid decisions and sends normalized exact requ
   assert.deepEqual(sent, ['review_pipeline_run_intent', {
     p_organization_id: ID, p_run_intent_id: OTHER, p_request_id: ID,
     p_decision: 'rejected', p_reason: 'Scope changed',
+  }])
+})
+
+test('N6 linked plan pins bounded same-engagement work without mutating tasks', () => {
+  assert.match(planMigration, /unique \(run_intent_id\)/)
+  assert.match(planMigration, /before update or delete/)
+  assert.match(planMigration, /not between 1 and 50/)
+  assert.match(planMigration, /review\.decision = 'accepted_for_planning'/)
+  assert.match(planMigration, /intent\.requested_by <> actor/)
+  assert.match(planMigration, /item\.engagement_id = intent\.engagement_id/)
+  assert.match(planMigration, /item\.row_version/)
+  assert.match(planMigration, /request_sha256 <> request_sha/)
+  assert.doesNotMatch(planMigration, /update public\.work_items|insert into public\.work_items/)
+})
+
+test('N6 linked plan client sends one bounded ordered selection', async () => {
+  let sent
+  const client = {
+    from() { throw new Error('Unexpected read') },
+    rpc(name, payload) {
+      sent = [name, payload]
+      return Promise.resolve({ data: { run_plan_id: ID }, error: null })
+    },
+  }
+  const repository = createPipelineRunIntentsRepository(client)
+  assert.throws(() => repository.plan({
+    organizationId: ID, runIntentId: OTHER, requestId: ID, workItemIds: [],
+  }), /1 to 50/)
+  assert.throws(() => repository.plan({
+    organizationId: ID, runIntentId: OTHER, requestId: ID, workItemIds: [OTHER, OTHER],
+  }), /unique/)
+  await repository.plan({
+    organizationId: ID, runIntentId: OTHER, requestId: ID, workItemIds: [OTHER],
+  })
+  assert.deepEqual(sent, ['plan_manual_pipeline_run', {
+    p_organization_id: ID, p_run_intent_id: OTHER, p_request_id: ID,
+    p_work_item_ids: [OTHER],
   }])
 })

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { pipelineRunIntents } from '../data/pipelineRunIntents.js'
 
-export default function PipelineRunIntentPanel({ organizationId, engagement, assets, membership, signal }) {
+export default function PipelineRunIntentPanel({ organizationId, engagement, assets, workItems = [], membership, signal }) {
   const { user } = useAuth()
   const [rows, setRows] = useState([])
   const [assetIds, setAssetIds] = useState([])
@@ -10,10 +10,13 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
   const [busy, setBusy] = useState(false)
   const [reviewingId, setReviewingId] = useState('')
   const [reason, setReason] = useState('')
+  const [planningId, setPlanningId] = useState('')
+  const [planWorkIds, setPlanWorkIds] = useState([])
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const startRequestId = useRef('')
   const reviewRequest = useRef(null)
+  const planRequest = useRef(null)
   const allowed = ['system_owner', 'operations_admin'].includes(membership?.role)
 
   async function refresh() {
@@ -84,9 +87,39 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
     }
   }
 
+  function toggleWork(id) {
+    planRequest.current = null
+    setPlanWorkIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id])
+  }
+
+  async function plan(runIntentId) {
+    const fingerprint = [runIntentId, ...planWorkIds].join(':')
+    if (planRequest.current?.fingerprint !== fingerprint) {
+      planRequest.current = { fingerprint, id: crypto.randomUUID() }
+    }
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const result = await pipelineRunIntents.plan({
+        organizationId, runIntentId, requestId: planRequest.current.id,
+        workItemIds: planWorkIds,
+      }, { signal })
+      setNotice(`Linked work plan ${result.idempotent_replay ? 'recovered' : 'recorded'}. Existing work items were not changed.`)
+      planRequest.current = null
+      setPlanningId('')
+      setPlanWorkIds([])
+      await refresh()
+    } catch (failure) {
+      if (!signal?.aborted) setError(failure.message)
+    } finally {
+      if (!signal?.aborted) setBusy(false)
+    }
+  }
+
   return <section className="rounded-2xl border border-white/[0.07] bg-[#0e111a]/80 p-5">
     <h2 className="font-semibold">Manual pipeline runs</h2>
-    <p className="mt-1 text-xs text-slate-500">Pin a published preset and selected engagement assets for review. Planning review cannot submit provider work or spend budget.</p>
+    <p className="mt-1 text-xs text-slate-500">Pin a published preset and selected engagement assets, get a separate planning review, then link existing work. This cannot submit provider work or spend budget.</p>
     {allowed && <div className="mt-4">
       <p className="text-xs font-medium text-slate-300">Pin assets (up to 20)</p>
       <div className="mt-2 space-y-2">{assets.map(asset => <label key={asset.id} className="flex gap-2 text-xs text-slate-400">
@@ -108,6 +141,7 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
         <span className="ml-2">{new Date(row.requested_at).toLocaleString()}</span>
         <p className="mt-1">Pinned preset {row.input_manifest?.pipeline?.version_id?.slice(0, 8)} · {row.input_manifest?.assets?.length || 0} assets · hash {row.input_sha256.slice(0, 12)}</p>
         {row.review?.reason && <p className="mt-1">Review reason: {row.review.reason}</p>}
+        {row.plan && <p className="mt-2 text-emerald-300">Linked plan: {row.plan.work_manifest.length} work items pinned · hash {row.plan.work_sha256.slice(0, 12)}. No task status was changed.</p>}
         {allowed && !row.review && row.requested_by !== user?.id && <div className="mt-2">
           {reviewingId === row.id ? <div className="space-y-2">
             <label className="block">Review reason (required to reject)
@@ -122,6 +156,20 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
           </div> : <button type="button" onClick={() => { setReviewingId(row.id); setReason('') }} className="font-semibold text-violet-300">Review request</button>}
         </div>}
         {!row.review && row.requested_by === user?.id && <p className="mt-1 text-amber-300">Another owner or operations admin must review this request.</p>}
+        {allowed && row.review?.decision === 'accepted_for_planning' && !row.plan && row.requested_by === user?.id && <div className="mt-2">
+          {planningId === row.id ? <div className="space-y-2">
+            <p>Choose 1 to 50 existing engagement work items, in run order.</p>
+            <div className="max-h-48 space-y-1 overflow-y-auto">
+              {workItems.map(item => <label key={item.id} className="flex gap-2">
+                <input type="checkbox" checked={planWorkIds.includes(item.id)} onChange={() => toggleWork(item.id)} />
+                <span>{item.title} · {item.status}</span>
+              </label>)}
+            </div>
+            <button type="button" disabled={busy || planWorkIds.length < 1 || planWorkIds.length > 50}
+              onClick={() => plan(row.id)} className="rounded-lg bg-violet-500 px-3 py-1.5 font-semibold text-white disabled:opacity-40">Pin linked work plan</button>
+            <button type="button" disabled={busy} onClick={() => { setPlanningId(''); setPlanWorkIds([]); planRequest.current = null }} className="ml-2 px-2">Cancel</button>
+          </div> : <button type="button" onClick={() => { setPlanningId(row.id); setPlanWorkIds([]); planRequest.current = null }} className="font-semibold text-violet-300">Link work items</button>}
+        </div>}
       </div>)}
     </div>
   </section>
