@@ -126,7 +126,7 @@ test('Engagement workspace renders a pipeline tab and read-only entry points', (
 assert.ok(operatingSpineView.includes('to={`/sphere/content/studio?engagement=${engagementId}`}'))
 assert.ok(operatingSpineView.includes('to={`/sphere/design/workshop?engagement=${engagementId}`}'))
 assert.ok(operatingSpineView.includes('to={`/sphere/engagements?engagement=${engagementId}&tab=work`}'))
-  assert.match(operatingSpineView, /function PipelineWorkspace\(\{ workspace \}\)/)
+  assert.match(operatingSpineView, /function PipelineWorkspace\(\{ workspace(?:, [^}]+)? \}\)/)
   const marketingStudioView = readFileSync(new URL('../apps/MarketingStudio.jsx', import.meta.url), 'utf8')
   assert.match(marketingStudioView, /useSearchParams/)
   assert.match(marketingStudioView, /navigationContext/)
