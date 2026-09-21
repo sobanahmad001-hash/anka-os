@@ -1,3 +1,5 @@
+> Historical Phase 12 schema inventory (retained for context). The 44-table count and single-role department model are not a current production inventory. Use applied migrations and the live schema for current database structure.
+
 # Anka OS — System Architecture & Department Structure
 
 ## 🏗️ Overall System Architecture

@@ -57,7 +57,7 @@ npm run build
 ## Product and ops docs
 
 - `docs/product/RELEASE_1_AUTHORITY.md` — product authority
-- `CURRENT_STATUS.md` — live status and blockers
+- `CURRENT_STATUS.md` — historical 2026-08-25 status snapshot
 - `docs/release/DEPLOYMENT_RUNBOOK.md` — deploy sequence
 - `docs/release/OPERATING_SPINE_REVIEW_GATE.md` — required review and explicit
   approval gates for the branch-only Operating Spine release
@@ -67,4 +67,4 @@ npm run build
 
 ## Current testing posture
 
-Client approvals, AI assistance, and integration tests are enabled in the app so the full Team OS + Client Portal path can be exercised. External publish/write operations remain blocked in the integration gateway. The linked database is current through migration `20260825130000`; any later branch migrations must pass their release gate and receive explicit deployment approval before every backend path is live.
+Client approvals, AI assistance, and integration tests are enabled in the app so the full Team OS + Client Portal path can be exercised. External publish/write operations remain blocked in the integration gateway. The linked database advances through gated migrations. Check the live migration catalog and current release gate before deploying branch changes; signed-in acceptance is deferred.
