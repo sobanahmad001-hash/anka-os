@@ -6,6 +6,7 @@ import OrganizationGate from '../components/OrganizationGate.jsx'
 import PipelineTemplateDraftPanel from '../components/PipelineTemplateDraftPanel.jsx'
 import PipelineExecutionDefinitionPanel from '../components/PipelineExecutionDefinitionPanel.jsx'
 import PipelineRunIntentPanel from '../components/PipelineRunIntentPanel.jsx'
+import ProjectPipelineConfigurationPanel from '../components/ProjectPipelineConfigurationPanel.jsx'
 import PipelineTemplateJourneyPreview from '../components/PipelineTemplateJourneyPreview.jsx'
 import PortfolioDashboard from '../components/PortfolioDashboard.jsx'
 import WorkItemsPanel from '../components/WorkItemsPanel.jsx'
@@ -430,6 +431,7 @@ function PipelineWorkspace({ workspace, organizationId, membership, signal }) {
         </div>
       </section>
       <div className="space-y-6">
+        <ProjectPipelineConfigurationPanel organizationId={organizationId} engagement={workspace.engagement} services={workspace.services} membership={membership} signal={signal} />
         <PipelineRunIntentPanel organizationId={organizationId} engagement={workspace.engagement} assets={workspace.assets} workItems={workItems} membership={membership} signal={signal} />
         <Panel title="Journey stage status">
           {workspace.stages.length
