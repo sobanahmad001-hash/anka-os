@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import DevelopmentTrackingPanel from '../components/DevelopmentTrackingPanel.jsx'
 import OrganizationGate from '../components/OrganizationGate.jsx'
 import PipelineTemplateDraftPanel from '../components/PipelineTemplateDraftPanel.jsx'
+import PipelineExecutionDefinitionPanel from '../components/PipelineExecutionDefinitionPanel.jsx'
 import PipelineRunIntentPanel from '../components/PipelineRunIntentPanel.jsx'
 import PipelineTemplateJourneyPreview from '../components/PipelineTemplateJourneyPreview.jsx'
 import PortfolioDashboard from '../components/PortfolioDashboard.jsx'
@@ -356,7 +357,7 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
 
         {view === 'engagements' && <PortfolioDashboard snapshot={portfolioSnapshot} owners={ownerOptions} onOpen={openEngagement} onRefresh={() => loadAll()} supportNote="Partial journeys supported." />}
         {view === 'clients' && <ClientRegistry clients={clients} onNewBrand={clientId => { setBrandForm({ ...INITIAL_BRAND, clientId }); setModal('brand') }} />}
-        {view === 'services' && <><ServiceCatalogue services={services} /><PipelineTemplateDraftPanel catalog={templateCatalog} services={services} membership={activeMembership} onCreate={createPipelineDraft} onApprove={approvePipelineDepartment} onPublish={publishPipelineVersion} onRefresh={() => loadAll()} busy={saving} loadError={templateLoadError} /></>}
+        {view === 'services' && <><ServiceCatalogue services={services} /><PipelineTemplateDraftPanel catalog={templateCatalog} services={services} membership={activeMembership} onCreate={createPipelineDraft} onApprove={approvePipelineDepartment} onPublish={publishPipelineVersion} onRefresh={() => loadAll()} busy={saving} loadError={templateLoadError} /><PipelineExecutionDefinitionPanel organizationId={activeOrganizationId} catalog={templateCatalog} services={services} membership={activeMembership} signal={requestSignal} /></>}
       </div>
 
       {modal === 'client' && <Modal title="Create client and first brand" onClose={() => setModal('')}><ClientForm form={clientForm} setForm={setClientForm} onSubmit={createClient} saving={saving} /></Modal>}
