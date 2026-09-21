@@ -1,6 +1,6 @@
 import { contentRequestMediaStoragePath, createSession, cropResizePng, designEventLink, designWorkshopScope, directionSchema,
   canRetryImageGenerationJob, ConfirmedProviderFailure, directionGenerationPrompt, directionsAreDistinct,
-  durableProviderFailureState, generateOpenAiImage, hasWorkshopAuthority,
+  durableProviderFailureState, generateOpenAiImage, hasWorkshopAuthority, reservePrivateImageJob,
   IMAGE_CANCELLATION_UNSUPPORTED_MESSAGE, imageGenerationRequestChecksum, isStoryboardSession, mediaPrompt, mediaStoragePath,
   mediaTargetColumns, outputFamilyForService, pngDimensions, requireActiveDesignService,
   requireReleasedVariantSource, reserveImageGenerationJob, runIndependentVariantJobs, sha256, similarity, variantFormatSpec, variantPrompt,
@@ -795,4 +795,87 @@ Deno.test('unknown actions and missing roots stop before privileged context crea
   })
   assert.equal(result.status, 400)
   assert.equal(privilegedCalls, 0)
+})
+
+Deno.test('D01 private actions remain organization-scoped and promotion resolves the real target engagement', async () => {
+  const actor = { member_kind: 'team', role: 'member', department_id: 'design' }
+  assert.equal(hasWorkshopAuthority(actor, 'generate_private_image'), true)
+  assert.equal(hasWorkshopAuthority({ ...actor, department_id: 'content' }, 'generate_private_image'), false)
+  assert.equal(hasWorkshopAuthority({ ...actor, member_kind: 'client' }, 'promote_private_image'), false)
+  const privateScope = await designWorkshopScope({} as never, {
+    action: 'generate_private_image', organization_id: 'org-1', creative_brief_version_id: 'version-1',
+  })
+  assert.equal(privateScope.root, null)
+  assert.equal(privateScope.requestedOrganizationId, 'org-1')
+  const promotionScope = await designWorkshopScope({} as never, {
+    action: 'promote_private_image', organization_id: 'org-1', target_engagement_id: 'eng-1',
+  })
+  assert.equal(promotionScope.root?.kind, 'engagement')
+  assert.equal(promotionScope.root?.id, 'eng-1')
+})
+
+Deno.test('D01 private duplicate requests reserve one identity and reject model, size, or prompt changes', async () => {
+  const rows: Array<Record<string, unknown>> = []
+  class Query {
+    private inserted: Record<string, unknown> | null = null
+    private equals: Array<[string, unknown]> = []
+    insert(value: Record<string, unknown>) { this.inserted = value; return this }
+    select() { return this }
+    eq(column: string, value: unknown) { this.equals.push([column, value]); return this }
+    async single() {
+      const existing = rows.find(row => row.organization_id === this.inserted?.organization_id
+        && row.owner_id === this.inserted?.owner_id && row.operation_key === this.inserted?.operation_key)
+      if (existing) return { data: null, error: { code: '23505', message: 'duplicate' } }
+      const row = { id: 'private-job-1', status: 'queued', ...this.inserted }
+      rows.push(row)
+      return { data: row, error: null }
+    }
+    async maybeSingle() {
+      const row = rows.find(candidate => this.equals.every(([column, value]) => candidate[column] === value))
+      return { data: row || null, error: null }
+    }
+  }
+  const admin = { organizationId: 'org-1', from: () => new Query() }
+  const input = { ownerId: 'owner-1', versionId: 'version-1', modelId: 'model-1',
+    connectionId: 'connection-1', requestKey: '550e8400-e29b-41d4-a716-446655440000',
+    checksum: 'a'.repeat(64), prompt: 'Exact prompt', providerSize: '1024x1024' }
+  const [first, replay] = await Promise.all([
+    reservePrivateImageJob(admin as never, input), reservePrivateImageJob(admin as never, input),
+  ])
+  assert.equal(first.id, replay.id)
+  assert.equal(rows.length, 1)
+  for (const changed of [
+    { ...input, prompt: 'Changed prompt' }, { ...input, modelId: 'model-2' },
+    { ...input, providerSize: '1024x1536' }, { ...input, connectionId: 'connection-2' },
+  ]) {
+    let rejected = false
+    try { await reservePrivateImageJob(admin as never, changed) }
+    catch (error) { rejected = error instanceof Error && error.message.includes('different private image request') }
+    assert(rejected, 'Reused key with changed private request must fail')
+  }
+})
+
+Deno.test('D01 private promotion uses the atomic wrapper instead of ordinary asset registration', async () => {
+  const encoded = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWP4z8DwHwAFAAH/e+m+7wAAAABJRU5ErkJggg=='
+  let called = ''
+  let wrapperArgs: Record<string, unknown> = {}
+  const query = { select() { return this }, eq() { return this }, async maybeSingle() { return { data: null, error: null } } }
+  const admin = { organizationId: '00000000-0000-4000-8000-000000000001',
+    from() { return query },
+    storage: { from() { return { async upload() { return { error: null } }, async remove() { return { error: null } } } } },
+    async rpc(name: string, args: Record<string, unknown>) {
+      called = name; wrapperArgs = args
+      const upload = args.p_upload as Record<string, unknown>
+      return { data: { asset: { id: 'asset-1' }, version: { id: upload.p_version_id, storage_path: upload.p_storage_path }, idempotent_replay: false }, error: null }
+    },
+  }
+  await uploadDesignAssetVersion(admin as never, { engagement_id: 'eng-1', brand_id: 'brand-1',
+    operation_key: '550e8400-e29b-41d4-a716-446655440001', name: 'Private promotion',
+    original_filename: 'private-experiment.png', mime_type: 'image/png', file_base64: encoded,
+    private_promotion_job_id: 'private-job-1', private_promotion_service_id: 'service-1',
+    private_promotion_checksum: 'a'.repeat(64) }, 'owner-1')
+  assert.equal(called, 'register_design_private_promotion')
+  assert.equal(wrapperArgs.p_source_job_id, 'private-job-1')
+  assert.equal(wrapperArgs.p_target_service_id, 'service-1')
+  assert.equal(wrapperArgs.p_promotion_checksum, 'a'.repeat(64))
 })

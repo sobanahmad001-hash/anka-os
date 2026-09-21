@@ -43,6 +43,39 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
       .order('updated_at', { ascending: false }))
   },
 
+  async loadPrivateBriefs(userId) {
+    if (!userId) throw new Error('A signed-in private owner is required')
+    const briefs = await dataOrThrow(scopedFrom('design_creative_briefs').select('*')
+      .eq('visibility', 'private').eq('created_by', userId).order('updated_at', { ascending: false }))
+    const versions = briefs.length
+      ? await dataOrThrow(scopedFrom('design_creative_brief_versions').select('*')
+        .in('creative_brief_id', briefs.map(item => item.id)).order('version_number'))
+      : []
+    const sources = versions.length
+      ? await dataOrThrow(scopedFrom('design_creative_brief_version_sources').select('*')
+        .in('creative_brief_version_id', versions.map(item => item.id)))
+      : []
+    const sourceIds = [...new Set(sources.map(item => item.artifact_version_id))]
+    const sourceVersions = sourceIds.length
+      ? await dataOrThrow(scopedFrom('artifact_versions').select('*').in('id', sourceIds))
+      : []
+    const [jobs, promotions, models, connections, engagementMappings] = await Promise.all([
+      dataOrThrow(scopedFrom('design_private_experiment_jobs').select('*')
+        .eq('owner_id', userId).order('created_at', { ascending: false })),
+      dataOrThrow(scopedFrom('design_private_experiment_promotions').select('*')
+        .eq('owner_id', userId).order('created_at', { ascending: false })),
+      dataOrThrow(scopedFrom('design_model_registry').select('id, organization_id, display_name, supported_output_types, provider, is_active')
+        .eq('is_active', true).order('display_name')),
+      dataOrThrow(scopedFrom('integration_connections')
+        .select('id, organization_id, display_name, provider, status, integration_connection_departments!inner(department_id)')
+        .eq('provider', 'openai').eq('status', 'verified').is('archived_at', null)
+        .eq('integration_connection_departments.department_id', 'design').order('display_name')),
+      dataOrThrow(scopedFrom('integration_connection_engagements').select('connection_id')),
+    ])
+    const mappedIds = new Set(engagementMappings.map(item => item.connection_id))
+    return { briefs, versions, sources, sourceVersions, jobs, promotions, models,
+      connections: connections.filter(item => !mappedIds.has(item.id)) }
+  },
   async load(engagementId, navigation = {}) {
     const recordQuery = navigation.workRecord?.kind === 'project_task'
       ? dataOrThrow(scopedFrom('tasks').select('id, organization_id, project_id').eq('id', navigation.workRecord.id).is('archived_at', null).maybeSingle())
@@ -235,6 +268,12 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
     direction_version_id: directionVersionId, model_registry_id: modelRegistryId, prompt,
     operation_key: operationKey,
   }),
+  generatePrivateImage: input => invoke('generate_private_image', input),
+  getPrivateImageJob: jobId => invoke('get_private_image_job', { job_id: jobId }),
+  reconcilePrivateImageRequest: operationKey => invoke('reconcile_private_image_request', { operation_key: operationKey }),
+  signPrivateImageJob: jobId => invoke('sign_private_image_job', { job_id: jobId }),
+  previewPrivatePromotion: input => invoke('preview_private_promotion', input),
+  promotePrivateImage: input => invoke('promote_private_image', input),
   getImageGenerationJob: jobId => invoke('get_image_generation_job', { job_id: jobId }),
   retryImageGeneration: (jobId, operationKey) => invoke('retry_image_generation', {
     job_id: jobId, operation_key: operationKey,

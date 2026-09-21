@@ -181,7 +181,7 @@ test('B01 screen uses the shared P9 consumer and keeps organization-scoped reque
   assert.match(ui, /parseWorkshopNavigation/)
   assert.match(ui, /validateWorkshopNavigation/)
   assert.match(ui, /<WorkshopContextShell/)
-  assert.match(ui, />Back to work<\/Link>/)
+  assert.match(ui, />Back to work<\/button>/)
   assert.match(ui, /Choose work/)
   assert.match(ui, /Private experiment/)
   assert.match(ui, /Change work/)
