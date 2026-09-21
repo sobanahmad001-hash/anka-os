@@ -87,7 +87,7 @@ test('MB06A keeps same-provider accounts separate and exposes no combined total'
   const dashboard = buildPerformanceDashboard({
     brand, period, now: new Date('2026-09-01T12:00:00Z'),
     googleDashboard: { brand_id: brand.id, reports: [
-      { provider: 'google_analytics', connection_id: 'ga-a', connection_name: 'GA property A', totals: { sessions: 11 }, rows: [] },
+      { provider: 'google_analytics', connection_id: 'ga-a', connection_name: 'GA property A', account_id: '123456', account_access: 'provider_read', retrieved_at: '2026-09-01T11:30:00Z', totals: { sessions: 11 }, rows: [] },
       { provider: 'google_analytics', connection_id: 'ga-b', connection_name: 'GA property B', totals: { sessions: 22 }, rows: [] },
     ] },
     adCampaigns: [
@@ -103,6 +103,12 @@ test('MB06A keeps same-provider accounts separate and exposes no combined total'
   const ads = dashboard.sources.filter(source => source.provider === 'google_ads')
   assert.deepEqual(analytics.map(source => source.connectionId), ['ga-a', 'ga-b'])
   assert.deepEqual(analytics.map(source => source.metrics.find(metric => metric.key === 'sessions').value), [11, 22])
+  assert.equal(analytics[0].accountId, '123456')
+  assert.equal(analytics[0].accountAccess, 'provider_read')
+  assert.equal(analytics[1].accountAccess, null)
+  assert.equal(analytics[0].retrievedAt, '2026-09-01T11:30:00Z')
+  assert.equal(analytics[0].freshness.status, 'current')
+  assert.equal(analytics[1].freshness.status, 'unknown')
   assert.deepEqual(ads.map(source => source.id), ['google_ads:ads-a:111', 'google_ads:ads-b:222'])
   assert.deepEqual(ads.map(source => source.metrics.find(metric => metric.key === 'spend').value), [10, 20])
   assert.equal(dashboard.comparison_enabled, false)

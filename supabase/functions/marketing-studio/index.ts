@@ -1027,10 +1027,18 @@ export async function fetchReadOnlyGoogleReport(
   })
   const data = await result.json()
   if (!result.ok) throw Object.assign(new Error(`${provider} reporting request failed`), { code: `HTTP_${result.status}` })
+  if (!data || typeof data !== 'object' || ('error' in data) ||
+    (provider === 'google_ads' ? !Array.isArray(data) : Array.isArray(data) || (data.rows != null && !Array.isArray(data.rows)))) {
+    throw new Error(`${provider} returned an invalid reporting response`)
+  }
+  // A successful provider response proves access to this exact configured resource.
+  const accountId = provider === 'google_analytics' ? text(config.property_id, 24)
+    : provider === 'google_search_console' ? text(config.site_url, 500) : text(config.customer_id, 24)
+  const provenance = { account_id: accountId, retrieved_at: new Date().toISOString(), account_access: 'provider_read' }
   if (provider === 'google_analytics') {
     const rows = Array.isArray(data.rows) ? data.rows : []
     return {
-      provider, period, totals: rows.reduce((sum: Json, row: any) => ({
+      provider, period, ...provenance, totals: rows.reduce((sum: Json, row: any) => ({
         active_users: normalizedMetric(sum.active_users) + normalizedMetric(row.metricValues?.[0]?.value),
         sessions: normalizedMetric(sum.sessions) + normalizedMetric(row.metricValues?.[1]?.value),
         events: normalizedMetric(sum.events) + normalizedMetric(row.metricValues?.[2]?.value),
@@ -1041,7 +1049,7 @@ export async function fetchReadOnlyGoogleReport(
   if (provider === 'google_search_console') {
     const rows = Array.isArray(data.rows) ? data.rows : []
     return {
-      provider, period, totals: rows.reduce((sum: Json, row: any) => ({
+      provider, period, ...provenance, totals: rows.reduce((sum: Json, row: any) => ({
         clicks: normalizedMetric(sum.clicks) + normalizedMetric(row.clicks),
         impressions: normalizedMetric(sum.impressions) + normalizedMetric(row.impressions),
       }), { clicks: 0, impressions: 0 }),
@@ -1051,7 +1059,7 @@ export async function fetchReadOnlyGoogleReport(
   const batches = Array.isArray(data) ? data : []
   const rows = batches.flatMap((batch: any) => Array.isArray(batch.results) ? batch.results : [])
   return {
-    provider, period, totals: rows.reduce((sum: Json, row: any) => ({
+    provider, period, ...provenance, totals: rows.reduce((sum: Json, row: any) => ({
       impressions: normalizedMetric(sum.impressions) + normalizedMetric(row.metrics?.impressions),
       clicks: normalizedMetric(sum.clicks) + normalizedMetric(row.metrics?.clicks),
       cost: normalizedMetric(sum.cost) + normalizedMetric(row.metrics?.costMicros) / 1_000_000,
