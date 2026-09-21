@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useBlocker, useNavigate, useSearchParams } from 'react-router-dom'
 import { OUTPUT_FAMILIES, latestByVersion } from '../data/designWorkshop.js'
 import { canRequestDesignExperimentPromotion, designAllowedActions, designCapabilities, designSelectionParams, loadDesignEngagements, privateDesignParams, resolveDesignContext, resolveDesignNavigationScope, selectableDesignEngagements } from '../data/designWorkshopContext.js'
 import { designWorkshop } from '../data/designWorkshopRepository.js'
@@ -14,6 +14,7 @@ import VersionProofingPanel from '../components/VersionProofingPanel.jsx'
 import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import ProductionHandoffPanel from '../components/ProductionHandoffPanel.jsx'
 import DesignCreativeBriefWorkspace from '../components/DesignCreativeBriefWorkspace.jsx'
+import DesignPrivateImagePanel from '../components/DesignPrivateImagePanel.jsx'
 import DesignAssetLibrary from '../components/DesignAssetLibrary.jsx'
 import DesignConnectionsPanel from '../components/DesignConnectionsPanel.jsx'
 import DesignDeliveryPackagePanel from '../components/DesignDeliveryPackagePanel.jsx'
@@ -206,10 +207,10 @@ export default function DesignWorkshop() {
     return refreshed
   }
 
+  if (context.mode === 'private') return <Shell><PrivateDesk draft={navigationContext.draft} returnTarget={workspaceReturnTarget(navigationContext)} onChoose={() => setSearchParams({})} studio={studio} engagements={selectableEngagements} organizationId={activeOrganizationId} userId={user?.id} canSave={capabilities.createDraft} canGenerate={capabilities.executeGeneration} onAccessError={handleOrganizationAccessError} /></Shell>
   if (engagementLoadState === 'error') return <Shell><div role="alert" className="mx-auto max-w-xl rounded-2xl border border-red-500/20 bg-red-500/10 p-6 text-center"><h1 className="text-xl font-semibold text-red-100">Design work could not be loaded</h1><p className="mt-2 text-sm text-red-200">The active organization could not be checked. No work has been selected.</p><button type="button" onClick={() => setEngagementRetry(value => value + 1)} className={`${BUTTON} mt-5`}>Retry</button></div></Shell>
   if (busy === 'load' && !engagements.length) return <Shell><Empty title="Loading Design work" text="Checking authorized engagements in the active organization." /></Shell>
   if (context.mode === 'choose') return <Shell parentPath={parentWorkshopPath}><ChooseWork engagements={selectableEngagements} filter={filter} setFilter={setFilter} onSelect={item => setSearchParams(designSelectionParams(navigationContext, item, activeOrganizationId))} onPrivate={() => setSearchParams(privateDesignParams(navigationContext, activeOrganizationId))} /></Shell>
-  if (context.mode === 'private') return <Shell><PrivateDesk draft={navigationContext.draft} returnTarget={workspaceReturnTarget(navigationContext)} onChoose={() => setSearchParams({})} /></Shell>
   if (context.mode === 'denied') {
     return <_DesignDeniedState activeOrganizationId={activeOrganizationId} onChoose={() => setSearchParams({})} />
   }
@@ -251,8 +252,77 @@ function ChooseWork({ engagements, filter, setFilter, onSelect, onPrivate }) {
   return <div className="mx-auto max-w-5xl"><p className="text-xs font-semibold uppercase tracking-[.24em] text-violet-400">Design S01</p><h1 className="mt-2 text-3xl font-semibold">Choose work</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Select an authorized project engagement or deliberately enter a Private experiment. Design never opens the last client automatically.</p><div className="mt-6 grid gap-5 lg:grid-cols-[1.4fr_.8fr]"><Panel><Field label="Search authorized work"><input className={INPUT} value={filter} onChange={event => setFilter(event.target.value)} placeholder="Project, client, brand, or engagement" /></Field><div className="mt-4 space-y-3">{visible.map(item => <button type="button" key={item.id} onClick={() => onSelect(item)} className="w-full rounded-xl border border-white/10 bg-white/[0.025] p-4 text-left hover:border-violet-500/40"><span className="font-semibold text-white">{item.name}</span><span className="mt-1 block text-xs text-slate-400">{[item.agency_clients?.name, item.brands?.name].filter(Boolean).join(' · ') || 'Authorized Design engagement'}</span></button>)}{!visible.length && <Empty compact title="No authorized work matches" text="Clear the search or ask an administrator to verify the project and active Design service." />}</div></Panel><div className="space-y-5"><Panel><h2 className="font-semibold">Private experiment</h2><p className="mt-2 text-sm leading-6 text-slate-400">Explore without creating an official deliverable. Promotion remains a separate authorized action.</p><button type="button" onClick={onPrivate} className={`${BUTTON} mt-4 w-full`}>Enter Private experiment</button></Panel><Panel><h2 className="font-semibold">Available without a target</h2><div className="mt-3 flex flex-col gap-2"><Link to="/sphere/design/systems" className="text-sm font-semibold text-violet-300">Browse Design systems</Link><span className="text-sm text-slate-400">Video not configured</span><span className="text-xs text-slate-500">Official save and submission remain blocked until valid work is selected.</span></div></Panel></div></div></div>
 }
 
-function PrivateDesk({ draft, returnTarget, onChoose }) {
-  return <div className="mx-auto max-w-5xl"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[.24em] text-amber-300">Private experiment</p><h1 className="mt-2 text-3xl font-semibold">Design desk</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">This isolated space is not an official client, brand, engagement, task, or work item.</p></div><div className="flex gap-2"><Link to={returnTarget} className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold">Back to work</Link><button type="button" onClick={onChoose} className={BUTTON}>Choose work</button></div></div><div className="mt-6 grid gap-5 md:grid-cols-3"><Panel><h2 className="font-semibold">Brief</h2><p className="mt-2 text-sm text-slate-400">{draft ? `Durable P9 draft pointer ${draft.id} is preserved; unsaved text is never inferred.` : 'A durable draft is restored only from an explicit P9 pointer.'}</p></Panel><Panel><h2 className="font-semibold">Chat and tools</h2><p className="mt-2 text-sm text-slate-400">Browse permitted references without creating official output.</p></Panel><Panel><h2 className="font-semibold">Outputs</h2><p className="mt-2 text-sm text-slate-400">Nothing has been generated or promoted.</p></Panel></div><p className="mt-5 text-sm font-semibold text-slate-400">Video not configured</p></div>
+function PrivateDesk({ draft, returnTarget, onChoose, studio, engagements, organizationId, userId, canSave, canGenerate, onAccessError }) {
+  const navigate = useNavigate()
+  const briefRef = useRef(null)
+  const allowNavigation = useRef(false)
+  const [records, setRecords] = useState({ briefs: [], versions: [], sources: [], sourceVersions: [], jobs: [], promotions: [], models: [], connections: [] })
+  const [selectedId, setSelectedId] = useState('')
+  const [loadState, setLoadState] = useState('loading')
+  const [error, setError] = useState('')
+  const [dirty, setDirty] = useState(false)
+  const [pending, setPending] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const blocker = useBlocker(() => dirty && !allowNavigation.current)
+  useEffect(() => { if (blocker.state === 'blocked') setPending({ kind: 'router' }) }, [blocker.state])
+  useEffect(() => {
+    if (!dirty) return undefined
+    const warn = event => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [dirty])
+  useEffect(() => {
+    let current = true
+    setRecords({ briefs: [], versions: [], sources: [], sourceVersions: [], jobs: [], promotions: [], models: [], connections: [] }); setSelectedId(''); setDirty(false); setLoadState('loading'); setError('')
+    if (!studio || !userId) { setLoadState('error'); setError('A signed-in private owner is required.'); return undefined }
+    studio.loadPrivateBriefs(userId).then(result => { if (current) { setRecords(result); setLoadState('ready') } })
+      .catch(reason => { if (current) { onAccessError(reason, { membershipMismatch: reason?.membershipMismatch }); setError(reason.message); setLoadState('error') } })
+    return () => { current = false }
+  }, [studio, userId, onAccessError])
+  async function saveBrief(input) {
+    try {
+      setSaving(true); setError('')
+      const result = await studio.saveCreativeBrief(input)
+      const next = await studio.loadPrivateBriefs(userId)
+      setRecords(next)
+      if (result?.brief?.id) setSelectedId(result.brief.id)
+      return result
+    } catch (reason) { setError(reason.message || 'Private brief save failed'); return false }
+    finally { setSaving(false) }
+  }
+  async function freezeBrief(input) {
+    try { setSaving(true); setError(''); await studio.freezeCreativeBrief(input); setRecords(await studio.loadPrivateBriefs(userId)) }
+    catch (reason) { setError(reason.message || 'Private brief freeze failed') }
+    finally { setSaving(false) }
+  }
+  function requestChange(next) {
+    if (briefRef.current?.isDirty()) setPending(next)
+    else change(next)
+  }
+  function change(next) {
+    setPending(null); setDirty(false)
+    if (next.kind === 'brief') setSelectedId(next.id)
+    else if (next.kind === 'router') blocker.proceed()
+    else { allowNavigation.current = true; if (next.kind === 'choose') onChoose(); else navigate(returnTarget) }
+  }
+  async function saveAndChange() {
+    if (!briefRef.current?.canSave()) return
+    setSaving(true)
+    try { if (await briefRef.current.save()) change(pending) }
+    finally { setSaving(false) }
+  }
+  async function reloadPrivateRecords() { setRecords(await studio.loadPrivateBriefs(userId)) }
+  const selectedBrief = records.briefs.find(item => item.id === selectedId) || null
+  const workspace = { engagement: { id: '', organization_id: organizationId, brand_id: null },
+    creativeBriefs: records.briefs, creativeBriefVersions: records.versions, creativeBriefSources: records.sources,
+    identitySystemVersions: [], versions: records.sourceVersions }
+  return <div className="mx-auto max-w-5xl"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[.24em] text-amber-300">Private experiment</p><h1 className="mt-2 text-3xl font-semibold">Design desk</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Owner-private drafts remain outside any client, engagement, task, or official output.</p></div><div className="flex gap-2"><button type="button" onClick={() => requestChange({ kind: 'back' })} className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold">Back to work</button><button type="button" onClick={() => requestChange({ kind: 'choose' })} className={BUTTON}>Choose work</button></div></div>
+    {draft && <p className="mt-4 text-xs text-slate-500">Durable P9 draft pointer {draft.id} is preserved; unsaved text is never inferred.</p>}
+    {error && <p role="alert" className="mt-4 text-sm text-red-300">{error}</p>}
+    {loadState === 'loading' ? <p className="mt-6 text-sm text-slate-400">Loading private briefs…</p> : loadState === 'error' ? (studio && userId ? <button type="button" className={`${BUTTON} mt-4`} onClick={() => studio.loadPrivateBriefs(userId).then(result => { setRecords(result); setLoadState('ready'); setError('') }).catch(reason => setError(reason.message))}>Retry private briefs</button> : null) : <><div className="mt-6 flex flex-wrap gap-2"><button type="button" onClick={() => requestChange({ kind: 'brief', id: '' })} className="rounded-lg border border-white/10 px-3 py-2 text-sm">New private brief</button>{records.briefs.map(brief => { const version = records.versions.find(item => item.id === brief.current_version_id); return <button type="button" key={brief.id} onClick={() => requestChange({ kind: 'brief', id: brief.id })} className={`rounded-lg border px-3 py-2 text-sm ${selectedId === brief.id ? 'border-violet-400' : 'border-white/10'}`}>{version?.content?.title || `Brief ${brief.id.slice(0, 8)}`}</button> })}</div><div className="mt-5"><DesignCreativeBriefWorkspace ref={briefRef} workspace={workspace} visibility="private" selectedPrivateBriefId={selectedId} activeServiceId="" workRecord={null} busy={saving ? 'save-brief' : ''} canSave={canSave && !saving} onDirtyChange={setDirty} onSave={saveBrief} onFreeze={freezeBrief} /></div><DesignPrivateImagePanel key={`${organizationId}:${userId}:${selectedId}`} brief={selectedBrief} records={records} engagements={engagements} studio={studio} canGenerate={canGenerate} onReload={reloadPrivateRecords} /><p className="mt-5 text-sm text-slate-400">Saving or generating privately creates no official result. Promotion requires a separate exact target review.</p></>}
+    {pending && <ContextSwitchDialog canSave={canSave && !saving && dirty && Boolean(briefRef.current?.canSave())} saving={saving} onStay={() => { if (blocker.state === 'blocked') blocker.reset(); setPending(null) }} onSave={saveAndChange} onDiscard={() => change(pending)} />}
+    <p className="mt-5 text-sm font-semibold text-slate-400">Video not configured</p>
+  </div>
 }
 
 function ContextStrip({ context, navigation, organizationName, unsaved, capabilities, officialReady }) {

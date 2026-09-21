@@ -124,7 +124,7 @@ export async function uploadDesignAssetVersion(admin: AssetAdmin, body: Json, ac
     uploadedHere = true
   }
 
-  const { data, error } = await admin.rpc('register_design_asset_upload', {
+  const uploadArgs = {
     p_organization_id: admin.organizationId,
     p_engagement_id: engagementId,
     p_brand_id: brandId,
@@ -147,7 +147,15 @@ export async function uploadDesignAssetVersion(admin: AssetAdmin, body: Json, ac
     p_operation_key: operationKey,
     p_request_checksum: requestChecksum,
     p_actor_id: actorId,
-  })
+  }
+  const privateJobId = text(body.private_promotion_job_id, 80)
+  const { data, error } = privateJobId
+    ? await admin.rpc('register_design_private_promotion', {
+      p_organization_id: admin.organizationId, p_owner_id: actorId,
+      p_source_job_id: privateJobId, p_target_service_id: text(body.private_promotion_service_id, 80),
+      p_promotion_checksum: text(body.private_promotion_checksum, 64), p_upload: uploadArgs,
+    })
+    : await admin.rpc('register_design_asset_upload', uploadArgs)
   if (!error && data) {
     const savedVersion = data.version as Json | undefined
     if (uploadedHere && data.idempotent_replay === true && savedVersion?.storage_path !== storagePath) {

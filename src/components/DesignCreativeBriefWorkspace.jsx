@@ -20,13 +20,17 @@ function hasEdits(draft) {
 
 const DesignCreativeBriefWorkspace = forwardRef(function DesignCreativeBriefWorkspace({
   workspace, activeServiceId, workRecord, busy, canSave, onSave, onFreeze, onDirtyChange,
+  visibility = 'official', selectedPrivateBriefId = '',
 }, ref) {
-  const brief = creativeBriefForContext(
-    workspace.creativeBriefs || [], workspace.engagement.organization_id,
-    workspace.engagement.id, activeServiceId, workRecord,
-  )
+  const brief = visibility === 'private'
+    ? (workspace.creativeBriefs || []).find(item => item.visibility === 'private'
+      && item.organization_id === workspace.engagement.organization_id && item.id === selectedPrivateBriefId) || null
+    : creativeBriefForContext(
+      workspace.creativeBriefs || [], workspace.engagement.organization_id,
+      workspace.engagement.id, activeServiceId, workRecord,
+    )
   const latest = latestBriefVersion(brief, workspace.creativeBriefVersions || [])
-  const scopeKey = [workspace.engagement.organization_id, workspace.engagement.id, activeServiceId,
+  const scopeKey = [workspace.engagement.organization_id, visibility, selectedPrivateBriefId, workspace.engagement.id, activeServiceId,
     workRecord?.kind || '', workRecord?.id || ''].join(':')
   const [storedDraft, setDraft] = useState(() => snapshot(brief, latest, workspace.creativeBriefSources, scopeKey))
   const operation = useRef(null)
@@ -40,6 +44,7 @@ const DesignCreativeBriefWorkspace = forwardRef(function DesignCreativeBriefWork
   const identityOptions = useMemo(() => approvedDesignSystemReferences(workspace), [workspace])
   const identityVersionIds = useMemo(() => new Set((workspace.identitySystemVersions || []).map(item => item.id)), [workspace.identitySystemVersions])
   const otherSourceVersions = useMemo(() => (workspace.versions || []).filter(version => !identityVersionIds.has(version.id)), [identityVersionIds, workspace.versions])
+  const unavailableSourceIds = sourceIds.filter(id => !identityVersionIds.has(id) && !otherSourceVersions.some(version => version.id === id))
   useEffect(() => {
     operation.current = null
     setSaveError('')
@@ -63,9 +68,10 @@ const DesignCreativeBriefWorkspace = forwardRef(function DesignCreativeBriefWork
     if (operation.current?.fingerprint !== fingerprint) operation.current = { fingerprint, key: nextOperationKey() }
     setSaveError('')
     const result = await onSave({
-      creative_brief_id: brief?.id || null, visibility: 'official',
-      engagement_id: workspace.engagement.id, brand_id: workspace.engagement.brand_id,
-      engagement_service_id: activeServiceId,
+      creative_brief_id: brief?.id || null, visibility,
+      engagement_id: visibility === 'private' ? null : workspace.engagement.id,
+      brand_id: visibility === 'private' ? null : workspace.engagement.brand_id,
+      engagement_service_id: visibility === 'private' ? null : activeServiceId,
       project_task_id: workRecord?.kind === 'project_task' ? workRecord.id : null,
       engagement_work_item_id: workRecord?.kind === 'engagement_work_item' ? workRecord.id : null,
       expected_revision: brief?.revision || 0, operation_key: operation.current.key,
@@ -90,7 +96,7 @@ const DesignCreativeBriefWorkspace = forwardRef(function DesignCreativeBriefWork
       <Field label="Instructions"><textarea rows="4" className={INPUT} value={content.instructions} onChange={event => set('instructions', event.target.value)} /></Field>
       <Field label="Exclusions and constraints"><textarea rows="4" className={INPUT} value={content.exclusions_constraints} onChange={event => set('exclusions_constraints', event.target.value)} /></Field>
       <fieldset className="lg:col-span-2"><legend className="text-xs font-semibold uppercase tracking-wider text-violet-300">Approved identity system references</legend><p className="mt-2 text-sm leading-6 text-slate-400">Choose an exact released DS5 version. A newer release is never adopted automatically; changing this selection and saving creates a new immutable brief version.</p><div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{identityOptions.map(({ artifact, version }) => <label key={version.id} className="flex gap-3 rounded-xl border border-violet-500/20 bg-violet-500/5 p-3 text-sm"><input type="checkbox" checked={sourceIds.includes(version.id)} onChange={() => toggleSource(version.id)} /><span><span className="block font-semibold">{artifact.title} · v{version.version_number}</span><span className="mt-1 block text-xs text-slate-500">Exact version {version.id.slice(0, 8)}</span></span></label>)}{!identityOptions.length && <p className="text-sm text-amber-300">No approved Design System version is visible for this brand.</p>}</div></fieldset>
-      <fieldset className="lg:col-span-2"><legend className="text-xs font-semibold uppercase tracking-wider text-slate-400">Other pinned exact source versions</legend><div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{otherSourceVersions.map(version => <label key={version.id} className="flex gap-3 rounded-xl border border-white/10 p-3 text-sm"><input type="checkbox" checked={sourceIds.includes(version.id)} onChange={() => toggleSource(version.id)} /><span>Version {version.version_number} · {version.id.slice(0, 8)}</span></label>)}</div></fieldset>
+      <fieldset className="lg:col-span-2"><legend className="text-xs font-semibold uppercase tracking-wider text-slate-400">Other pinned exact source versions</legend><div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{otherSourceVersions.map(version => <label key={version.id} className="flex gap-3 rounded-xl border border-white/10 p-3 text-sm"><input type="checkbox" checked={sourceIds.includes(version.id)} onChange={() => toggleSource(version.id)} /><span>Version {version.version_number} · {version.id.slice(0, 8)}</span></label>)}{unavailableSourceIds.map(id => <label key={id} className="flex gap-3 rounded-xl border border-amber-400/30 p-3 text-sm text-amber-200"><input type="checkbox" checked onChange={() => toggleSource(id)} /><span>Unavailable pinned version {id.slice(0, 8)} · uncheck to remove</span></label>)}</div></fieldset>
       {conflict && <p role="alert" className="lg:col-span-2 text-sm text-amber-300">A newer saved brief version is available. Your edits remain here; reload it only after you choose to discard these edits.</p>}
       {saveError && <p role="alert" className="lg:col-span-2 text-sm text-red-300">{saveError}</p>}
       {!validation.valid && <p role="status" className="lg:col-span-2 text-sm text-amber-300">Still needed for {content.output_type.replaceAll('_', ' ')}: {validation.missing.join(', ')}.</p>}

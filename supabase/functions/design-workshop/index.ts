@@ -282,6 +282,12 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
     await callerContentRequestRoot(userClient, requestId)
     return { root: { kind: 'content_request', id: requestId }, requestedOrganizationId }
   }
+  if (action === 'preview_private_promotion' || action === 'promote_private_image') {
+    return { root: { kind: 'engagement', id: requiredActionId(body.target_engagement_id, 'Target engagement') }, requestedOrganizationId }
+  }
+  if (['generate_private_image', 'get_private_image_job', 'reconcile_private_image_request', 'sign_private_image_job'].includes(action)) {
+    return { root: null, requestedOrganizationId: requestedOrganizationId || '' }
+  }
   if (action === 'list_experiment_reviewers') {
     return { root: null, requestedOrganizationId: requestedOrganizationId || '' }
   }
@@ -1121,6 +1127,233 @@ async function executeImageGenerationJob(admin: ScopedClient, userClient: Client
   }
 }
 
+async function privateImageJob(userClient: Client, organizationId: string, jobId: string, actorId: string) {
+  const { data, error } = await userClient.from('design_private_experiment_jobs').select('*')
+    .eq('id', jobId).eq('organization_id', organizationId).eq('owner_id', actorId).maybeSingle()
+  if (error) throw error
+  if (!data) throw Object.assign(new Error('Private image request not found'), { status: 404 })
+  return data
+}
+
+async function reconcilePrivateImageRequest(userClient: Client, organizationId: string, actorId: string, key: string) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)) {
+    throw new Error('A stable UUID operation key is required')
+  }
+  const { data, error } = await userClient.from('design_private_experiment_jobs').select('*')
+    .eq('organization_id', organizationId).eq('owner_id', actorId).eq('operation_key', key).maybeSingle()
+  if (error) throw error
+  return data || { status: 'not_submitted', operation_key: key }
+}
+
+async function privateImageConnection(admin: ScopedClient, connectionId: string) {
+  const { data, error } = await admin.from('integration_connections')
+    .select('id, provider, status, secret_name, integration_connection_departments!inner(department_id)')
+    .eq('id', connectionId).eq('organization_id', admin.organizationId)
+    .eq('provider', 'openai').eq('status', 'verified').is('archived_at', null)
+    .eq('integration_connection_departments.department_id', 'design').maybeSingle()
+  if (error) throw error
+  const credential = data?.secret_name ? Deno.env.get(String(data.secret_name)) : null
+  const { count, error: mappingError } = await admin.from('integration_connection_engagements')
+    .select('connection_id', { count: 'exact', head: true })
+    .eq('organization_id', admin.organizationId).eq('connection_id', connectionId)
+  if (mappingError) throw mappingError
+  if (!data || !credential || count !== 0) throw new Error('A separate verified organization-level Design OpenAI connection is required')
+  return { connection: data, credential }
+}
+
+export async function reservePrivateImageJob(admin: ScopedClient, input: {
+  ownerId: string, versionId: string, modelId: string, connectionId: string,
+  requestKey: string, checksum: string, prompt: string, providerSize: string,
+}) {
+  const identity = { organization_id: admin.organizationId, owner_id: input.ownerId,
+    creative_brief_version_id: input.versionId, model_registry_id: input.modelId,
+    connection_id: input.connectionId, operation_key: input.requestKey,
+    request_checksum: input.checksum, prompt: input.prompt, provider_size: input.providerSize }
+  const { data: inserted, error: insertError } = await admin.from('design_private_experiment_jobs')
+    .insert(identity).select('*').single()
+  if (!insertError && inserted) return inserted
+  if (insertError?.code !== '23505') throw insertError || new Error('Private image request was not reserved')
+  const { data: existing, error } = await admin.from('design_private_experiment_jobs').select('*')
+    .eq('organization_id', admin.organizationId).eq('owner_id', input.ownerId)
+    .eq('operation_key', input.requestKey).maybeSingle()
+  if (error) throw error
+  if (!existing) throw insertError
+  if (existing.request_checksum !== input.checksum || existing.creative_brief_version_id !== input.versionId
+    || existing.model_registry_id !== input.modelId || existing.connection_id !== input.connectionId
+    || existing.prompt !== input.prompt || existing.provider_size !== input.providerSize) {
+    throw Object.assign(new Error('Operation key belongs to a different private image request'), { status: 409 })
+  }
+  return existing
+}
+
+async function generatePrivateImage(admin: ScopedClient, userClient: Client, body: Json, actorId: string) {
+  const versionId = requiredActionId(body.creative_brief_version_id, 'Private brief version')
+  const modelId = requiredActionId(body.model_registry_id, 'Image model')
+  const connectionId = requiredActionId(body.connection_id, 'Design connection')
+  const prompt = text(body.prompt, 6000)
+  if (!prompt) throw new Error('Add a private image prompt')
+  const providerSize = text(body.provider_size, 20)
+  if (!['1024x1024', '1024x1536', '1536x1024'].includes(providerSize)) {
+    throw new Error('Choose an explicitly supported image size')
+  }
+  const requestKey = text(body.operation_key, 80)
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestKey)) {
+    throw new Error('A stable UUID operation key is required')
+  }
+  const { data: version, error: versionError } = await userClient.from('design_creative_brief_versions')
+    .select('id, organization_id, creative_brief_id, design_creative_briefs!inner(id, visibility, created_by, frozen_version_id)')
+    .eq('id', versionId).eq('organization_id', admin.organizationId).maybeSingle()
+  if (versionError) throw versionError
+  const brief = Array.isArray(version?.design_creative_briefs)
+    ? version.design_creative_briefs[0] : version?.design_creative_briefs
+  if (!version || !brief || brief.visibility !== 'private' || brief.created_by !== actorId
+    || brief.frozen_version_id !== version.id) {
+    throw Object.assign(new Error('Only the owner can generate from the exact frozen private brief version'), { status: 403 })
+  }
+  const { data: model, error: modelError } = await admin.from('design_model_registry').select('id, model_id, provider, supported_output_types, is_active')
+    .eq('id', modelId).eq('organization_id', admin.organizationId).eq('is_active', true).maybeSingle()
+  if (modelError) throw modelError
+  if (!model || model.provider !== 'openai' || !supportsOutput(model, 'image')) {
+    throw new Error('Select an active image-capable Design model')
+  }
+  const { credential } = await privateImageConnection(admin, connectionId)
+  const checksum = await sha256(stableJson({ version_id: versionId, model_id: modelId, connection_id: connectionId, prompt, provider_size: providerSize }))
+  const job = await reservePrivateImageJob(admin, {
+    ownerId: actorId, versionId, modelId, connectionId, requestKey,
+    checksum, prompt, providerSize,
+  })
+  if (!job || job.status !== 'queued') return job
+  const { data: claimed, error: claimError } = await admin.from('design_private_experiment_jobs')
+    .update({ status: 'running', started_at: new Date().toISOString() })
+    .eq('id', job.id).eq('organization_id', admin.organizationId).eq('status', 'queued').select('*').maybeSingle()
+  if (claimError) throw claimError
+  if (!claimed) return privateImageJob(userClient, admin.organizationId, String(job.id), actorId)
+  let phase: 'provider' | 'storage' | 'registration' = 'provider'
+  const storagePath = `${admin.organizationId}/private/${actorId}/${claimed.id}.png`
+  let uploaded = false
+  try {
+    const bytes = await generateOpenAiImage(credential, String(model.model_id), prompt, providerSize)
+    pngDimensions(bytes)
+    phase = 'storage'
+    const { error: uploadError } = await admin.storage.from(MEDIA_BUCKET).upload(storagePath, bytes, {
+      contentType: 'image/png', upsert: false,
+    })
+    if (uploadError) throw uploadError
+    uploaded = true
+    phase = 'registration'
+    const { data: completed, error: completeError } = await admin.from('design_private_experiment_jobs')
+      .update({ status: 'succeeded', storage_path: storagePath, completed_at: new Date().toISOString() })
+      .eq('id', claimed.id).eq('organization_id', admin.organizationId).eq('status', 'running').select('*').single()
+    if (completeError) throw completeError
+    return completed
+  } catch (error) {
+    if (uploaded) {
+      const { error: cleanupError } = await admin.storage.from(MEDIA_BUCKET).remove([storagePath])
+      if (cleanupError) throw new Error(`Private image registration and cleanup failed: ${cleanupError.message}`)
+    }
+    const unknown = phase === 'provider' && !(error instanceof ConfirmedProviderFailure)
+    const { data: failed, error: failError } = await admin.from('design_private_experiment_jobs')
+      .update({ status: unknown ? 'outcome_unknown' : 'failed', failure_phase: phase,
+        failure_reason: (error instanceof Error ? error.message : 'Private image generation failed').slice(0, 2000),
+        completed_at: new Date().toISOString() })
+      .eq('id', claimed.id).eq('organization_id', admin.organizationId).eq('status', 'running').select('*').single()
+    if (failError) throw failError
+    return failed
+  }
+}
+
+async function signPrivateImageJob(admin: ScopedClient, userClient: Client, body: Json, actorId: string) {
+  const job = await privateImageJob(userClient, admin.organizationId, requiredActionId(body.job_id, 'Private image request'), actorId)
+  if (job.status !== 'succeeded' || job.storage_path !== `${admin.organizationId}/private/${actorId}/${job.id}.png`) {
+    throw new Error('Private image is not ready')
+  }
+  const { data, error } = await admin.storage.from(MEDIA_BUCKET).createSignedUrl(job.storage_path, 300)
+  if (error || !data?.signedUrl) throw error || new Error('Private image could not be opened')
+  return { job_id: job.id, signed_url: data.signedUrl, expires_in: 300 }
+}
+
+async function privatePromotionPreview(admin: ScopedClient, userClient: Client, body: Json, actorId: string) {
+  const job = await privateImageJob(userClient, admin.organizationId, requiredActionId(body.job_id, 'Private image request'), actorId)
+  if (job.status !== 'succeeded' || job.storage_path !== `${admin.organizationId}/private/${actorId}/${job.id}.png`) {
+    throw new Error('Only a stored successful private image can be promoted')
+  }
+  const engagementId = requiredActionId(body.target_engagement_id, 'Target engagement')
+  const serviceId = requiredActionId(body.target_service_id, 'Target Design service')
+  const { data: engagement, error: engagementError } = await userClient.from('engagements')
+    .select('id, organization_id, brand_id, name').eq('id', engagementId)
+    .eq('organization_id', admin.organizationId).maybeSingle()
+  if (engagementError) throw engagementError
+  const { data: service, error: serviceError } = await userClient.from('engagement_services')
+    .select('id, organization_id, engagement_id, status, service_catalog!inner(department_id, is_active)')
+    .eq('id', serviceId).eq('organization_id', admin.organizationId)
+    .eq('engagement_id', engagementId).eq('status', 'active')
+    .eq('service_catalog.department_id', 'design').eq('service_catalog.is_active', true).maybeSingle()
+  if (serviceError) throw serviceError
+  if (!engagement?.brand_id || !service) throw new Error('Choose an accessible engagement with an active Design service')
+  const { data: version, error: versionError } = await userClient.from('design_creative_brief_versions')
+    .select('id, content').eq('id', job.creative_brief_version_id)
+    .eq('organization_id', admin.organizationId).maybeSingle()
+  if (versionError) throw versionError
+  if (!version) throw new Error('Private source brief version is unavailable')
+  const content = version.content as Json
+  const name = text(content.title, 180) || `Private image ${String(job.id).slice(0, 8)}`
+  const placement = text(content.placement_destination, 500)
+  const rightsNotes = text(content.rights_notes, 2000)
+  const checksum = await sha256(stableJson({ source_job_id: job.id, storage_path: job.storage_path,
+    brief_version_id: version.id, target_engagement_id: engagementId,
+    target_brand_id: engagement.brand_id, target_service_id: serviceId, name, placement, rights_notes: rightsNotes }))
+  return { job, engagement, service, version, name, placement, rightsNotes, checksum }
+}
+
+async function promotePrivateImage(admin: ScopedClient, userClient: Client, body: Json, actorId: string) {
+  const requestKey = text(body.operation_key, 80)
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestKey)) {
+    throw new Error('A stable UUID promotion key is required')
+  }
+  const expectedChecksum = text(body.expected_preview_checksum, 64)
+  const sourceJobId = requiredActionId(body.job_id, 'Private image request')
+  const targetEngagementId = requiredActionId(body.target_engagement_id, 'Target engagement')
+  const targetServiceId = requiredActionId(body.target_service_id, 'Target Design service')
+  const { data: existing, error: existingError } = await admin.from('design_private_experiment_promotions').select('*')
+    .eq('organization_id', admin.organizationId).eq('owner_id', actorId)
+    .eq('operation_key', requestKey).maybeSingle()
+  if (existingError) throw existingError
+  if (existing) {
+    if (existing.request_checksum !== expectedChecksum || existing.source_job_id !== sourceJobId
+      || existing.target_engagement_id !== targetEngagementId || existing.target_service_id !== targetServiceId) {
+      throw Object.assign(new Error('Promotion key belongs to a different exact source or target'), { status: 409 })
+    }
+    return { promotion: existing, idempotent_replay: true }
+  }
+  const preview = await privatePromotionPreview(admin, userClient, body, actorId)
+  if (expectedChecksum !== preview.checksum) {
+    throw Object.assign(new Error('Private promotion preview is stale; review the exact target again'), { status: 409 })
+  }
+  const { data: object, error: downloadError } = await admin.storage.from(MEDIA_BUCKET).download(String(preview.job.storage_path))
+  if (downloadError || !object) throw downloadError || new Error('Private source image is unavailable')
+  const bytes = new Uint8Array(await object.arrayBuffer())
+  pngDimensions(bytes)
+  const result = await uploadDesignAssetVersion(admin, {
+    engagement_id: preview.engagement.id, brand_id: preview.engagement.brand_id,
+    operation_key: requestKey, name: preview.name, placement: preview.placement,
+    rights_notes: preview.rightsNotes, change_summary: 'Promoted from an owner-private Design experiment.',
+    original_filename: 'private-experiment.png', mime_type: 'image/png',
+    file_base64: Buffer.from(bytes).toString('base64'),
+    private_promotion_job_id: preview.job.id,
+    private_promotion_service_id: preview.service.id,
+    private_promotion_checksum: preview.checksum,
+  }, actorId)
+  const { data: linked, error: linkError } = await admin.from('design_private_experiment_promotions').select('*')
+    .eq('organization_id', admin.organizationId).eq('owner_id', actorId)
+    .eq('operation_key', requestKey).maybeSingle()
+  if (linkError) throw linkError
+  if (!linked || linked.asset_version_id !== result.version.id || linked.request_checksum !== preview.checksum) {
+    throw new Error('Private promotion registration is incomplete; retry the same operation key')
+  }
+  return { promotion: linked, asset: result.asset, version: result.version,
+    idempotent_replay: result.idempotent_replay }
+}
+
 async function generateImage(admin: ScopedClient, userClient: Client, body: Json, actorId: string) {
   const directionVersionId = text(body.direction_version_id, 80)
   const modelRegistryId = text(body.model_registry_id, 80)
@@ -1496,6 +1729,12 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       promote_direction_experiment: () => promoteDirectionExperiment(admin, body, user.id),
       select_direction: () => selectDirection(admin, body, user.id),
       release_direction: () => releaseDirection(admin, body, user.id),
+      generate_private_image: () => generatePrivateImage(admin, userClient, body, user.id),
+      get_private_image_job: () => privateImageJob(userClient, admin.organizationId, requiredActionId(body.job_id, 'Private image request'), user.id),
+      reconcile_private_image_request: () => reconcilePrivateImageRequest(userClient, admin.organizationId, user.id, requiredActionId(body.operation_key, 'Operation key')),
+      sign_private_image_job: () => signPrivateImageJob(admin, userClient, body, user.id),
+      preview_private_promotion: () => privatePromotionPreview(admin, userClient, body, user.id),
+      promote_private_image: () => promotePrivateImage(admin, userClient, body, user.id),
       generate_image: () => generateImage(admin, userClient, body, user.id),
       get_image_generation_job: () => getImageGenerationJob(admin, body),
       retry_image_generation: () => retryImageGeneration(admin, userClient, body, user.id),
