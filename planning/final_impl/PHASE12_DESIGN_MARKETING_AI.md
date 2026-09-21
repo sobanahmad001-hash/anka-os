@@ -61,4 +61,12 @@ Marketing becomes:
 - environment identity is clear
 - AI prompts/behavior differ by environment
 - no generic chatbot behavior in environment-specific flows
+## N5/N7 Design media alignment (2026-09-21)
 
+The existing Design Workshop and exact-version review/delivery contracts remain the foundation. Curated Higgsfield image/video integration and Google direct media capabilities are added scope, pending verified endpoints, available account access, resolution, audio and licensing. The current live image path and unavailable video action are not evidence of a completed video menu.
+
+Explore mode uses economical short jobs within a bounded spend. Production offers explicit compatible model and 720p/1080p choices, with 1080p recommended for final output. Any fallback must meet the selected output requirements or require a new explicit choice. Technical menus are not final until real capabilities are verified.
+
+Reuse permitted current assets and motion templates before generation. Video assembly should keep footage separate from exact text, logo, date and caption layers so a small correction changes only the affected layer. Preserve original footage, version lineage and approval state. Private experiments require explicit Use in project promotion to a project draft and cannot auto-approve or publish.
+
+The N6 execution contract must be shared with N7 OS assistance: scoped input manifests, ordered eligible routes, idempotent durable jobs, atomic budget reservation, uncertain-provider reconciliation, actual cost and immutable output lineage. Existing Department Chat controls are reused where suitable. This added scope does not close the original Design/Marketing acceptance cases or authorize provider spending.
