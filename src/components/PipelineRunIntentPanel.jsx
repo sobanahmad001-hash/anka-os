@@ -143,7 +143,7 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
 
   return <section className="rounded-2xl border border-white/[0.07] bg-[#0e111a]/80 p-5">
     <h2 className="font-semibold">Manual pipeline runs</h2>
-    <p className="mt-1 text-xs text-slate-500">Pin a published preset and selected engagement assets, get a separate planning review, then link existing work. This cannot submit provider work or spend budget.</p>
+    <p className="mt-1 text-xs text-slate-500">Pin the current project activation, published preset and selected assets, then request separate planning review. Unconfigured requests remain blocked. This cannot submit provider work or spend budget.</p>
     {allowed && <div className="mt-4">
       <p className="text-xs font-medium text-slate-300">Pin assets (up to 20)</p>
       <div className="mt-2 space-y-2">{assets.map(asset => <label key={asset.id} className="flex gap-2 text-xs text-slate-400">
@@ -164,6 +164,7 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
         <span className="font-medium text-slate-200">{row.review ? row.review.decision.replaceAll('_', ' ') : row.status.replaceAll('_', ' ')}</span>
         <span className="ml-2">{new Date(row.requested_at).toLocaleString()}</span>
         <p className="mt-1">Pinned preset {row.input_manifest?.pipeline?.version_id?.slice(0, 8)} · {row.input_manifest?.assets?.length || 0} assets · hash {row.input_sha256.slice(0, 12)}</p>
+        <p className="mt-1">{row.project_activation_id ? `Project activation ${row.project_activation_id.slice(0, 8)} · steps hash ${row.selected_steps_sha256.slice(0, 12)}` : 'Unconfigured or historical request · provider execution blocked'}</p>
         {row.review?.reason && <p className="mt-1">Review reason: {row.review.reason}</p>}
         {row.plan && <p className="mt-2 text-emerald-300">Linked plan: {row.plan.work_manifest.length} work items pinned · hash {row.plan.work_sha256.slice(0, 12)}. No task status was changed.</p>}
         {row.job && <p className="mt-1 text-amber-300">Execution job: {row.job.steps?.length ?? 0} pinned work steps · {row.job.status.replaceAll('_', ' ')} · {row.job.blocked_reason} No provider request has been sent.</p>}
