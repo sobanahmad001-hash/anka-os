@@ -8,6 +8,7 @@ const reviewMigration = readFileSync(new URL('../../supabase/migrations/20260921
 const planMigration = readFileSync(new URL('../../supabase/migrations/20260921190000_n6_linked_run_plan.sql', import.meta.url), 'utf8')
 const jobMigration = readFileSync(new URL('../../supabase/migrations/20260922020000_n6_blocked_execution_jobs.sql', import.meta.url), 'utf8')
 const stepsMigration = readFileSync(new URL('../../supabase/migrations/20260922050000_n6_execution_job_steps.sql', import.meta.url), 'utf8')
+const inputApprovalMigration = readFileSync(new URL('../../supabase/migrations/20260922060000_n6_input_approval.sql', import.meta.url), 'utf8')
 const ID = '11111111-1111-4111-8111-111111111111'
 const OTHER = '22222222-2222-4222-8222-222222222222'
 
@@ -173,4 +174,34 @@ test('N6 job steps pin every ordered work item without provider or task writes',
   assert.match(stepsMigration, /grant select on public\.ai_execution_job_steps to authenticated, service_role/)
   assert.doesNotMatch(stepsMigration, /grant (?:insert|update|delete|all) on public\.ai_execution_job_steps to authenticated/)
   assert.doesNotMatch(stepsMigration, /update public\.work_items|insert into public\.ai_runs|https?:\/\//)
+})
+test('N6 text input acknowledgement requires independent review and unchanged, asset-free scope', () => {
+  assert.match(inputApprovalMigration, /unique \(job_id\)/)
+  assert.match(inputApprovalMigration, /review\.decision <> 'accepted_for_planning' or review\.reviewed_by = actor/)
+  assert.match(inputApprovalMigration, /Selected assets need separate AI-use classification/)
+  assert.match(inputApprovalMigration, /item\.row_version <> step\.source_row_version/)
+  assert.match(inputApprovalMigration, /job\.input_manifest ->> 'work_sha256' is distinct from plan\.work_sha256/)
+  assert.match(inputApprovalMigration, /request_sha256 <> request_sha/)
+  assert.match(inputApprovalMigration, /before update or delete/)
+  assert.doesNotMatch(inputApprovalMigration, /insert into public\.ai_runs|reserve_pipeline_ai_budget|https?:\/\//)
+})
+
+test('N6 input acknowledgement sends one exact job and stable request', async () => {
+  let sent
+  const repository = createPipelineRunIntentsRepository({
+    from() { throw new Error('Unexpected read') },
+    rpc(name, payload) {
+      sent = [name, payload]
+      return Promise.resolve({ data: { approval_id: ID }, error: null })
+    },
+  })
+  assert.throws(() => repository.approveInputs({
+    organizationId: ID, jobId: OTHER, requestId: ID, acknowledged: false,
+  }), /acknowledgement/)
+  await repository.approveInputs({
+    organizationId: ID, jobId: OTHER, requestId: ID, acknowledged: true,
+  })
+  assert.deepEqual(sent, ['approve_pipeline_ai_job_inputs', {
+    p_organization_id: ID, p_job_id: OTHER, p_request_id: ID, p_acknowledged: true,
+  }])
 })
