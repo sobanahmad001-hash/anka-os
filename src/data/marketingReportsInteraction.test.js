@@ -245,6 +245,47 @@ test('mounted MB07 report lifecycle preserves drafts, exact identity, reconcilia
     } finally { await mounted.close() }
   })
 
+  await t.test('lost response with metric pins reuses one raw request and accepts its pinned receipt', async () => {
+    const input = reportWorkspace('metric-retry')
+    const snapshotId = '55555555-5555-4555-8555-555555555555'
+    const requests = []
+    const mounted = await mount(input.workspace, {
+      studio: {
+        listReportMetricSources: async () => ({
+          adCampaigns: [{ id: 'campaign-a', campaign_name: 'Search campaign' }],
+          adSnapshots: [{ id: snapshotId, ad_campaign_id: 'campaign-a', snapshot_date: '2026-08-15' }],
+          trackedKeywords: [], rankSnapshots: [], metaConnections: [], metaSnapshots: [],
+        }),
+        saveMarketingReport: async payload => {
+          requests.push(payload)
+          if (requests.length === 1) throw new Error('Response lost')
+          const content = { ...payload.content, metric_snapshots: [{
+            source: 'google_ads', source_record_id: snapshotId, snapshot_date: '2026-08-15',
+            retrieved_at: '2026-08-16T10:00:00Z', pinned_at: '2026-09-21T12:00:00Z',
+            account_id: '123', label: 'Search campaign', metrics: { impressions: 120 },
+            definitions: { currency: null },
+          }] }
+          return { ...input.v2, id: 'v3-metric-retry', request_id: payload.request_id,
+            content, content_checksum: await marketingReportContentChecksum(content) }
+        },
+      },
+      act: async callback => { try { return await callback() } catch { return null } },
+    })
+    try {
+      await act(async () => {})
+      const checkbox = elements(mounted.container, 'input').find(node => reactProps(node)?.type === 'checkbox')
+      await act(async () => reactProps(checkbox).onChange({ target: { checked: true } }))
+      await act(async () => reactProps(elements(mounted.container, 'form')[0]).onSubmit({ preventDefault() {} }))
+      assert.match(mounted.container.textContent, /Save locked/)
+      const retry = elements(mounted.container, 'button').find(button => button.textContent === 'Retry exact report request')
+      await act(async () => reactProps(retry).onClick())
+      assert.equal(requests.length, 2)
+      assert.equal(requests[0].request_id, requests[1].request_id)
+      assert.deepEqual(requests[0].content.metric_snapshot_refs, requests[1].content.metric_snapshot_refs)
+      assert.doesNotMatch(mounted.container.textContent, /Save locked/)
+    } finally { await mounted.close() }
+  })
+
   await t.test('successful save selects returned exact version and late prior-version review callbacks are ignored', async () => {
     const input = reportWorkspace('success')
     const v3 = { ...input.v2, id: 'v3-success', version_number: 3, created_at: '2026-09-03', content: reportContent('Revision') }
