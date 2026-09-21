@@ -32,7 +32,7 @@ export function createPipelineRunIntentsRepository(supabase) {
           .select('id, run_intent_id, work_manifest, work_sha256, planned_at, planned_by')
           .eq('organization_id', organization).in('run_intent_id', ids), signal),
         dataOrThrow(supabase.from('ai_execution_jobs')
-          .select('id, run_intent_id, run_plan_id, status, blocked_reason, input_sha256, created_at')
+          .select('id, run_intent_id, run_plan_id, status, blocked_reason, input_sha256, created_at, steps:ai_execution_job_steps(id, ordinal, work_item_id, department_id, status, input_sha256)')
           .eq('organization_id', organization).in('run_intent_id', ids), signal),
       ])
       const reviewByIntent = new Map((reviews || []).map(review => [review.run_intent_id, review]))
