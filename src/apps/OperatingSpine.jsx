@@ -429,7 +429,7 @@ function PipelineWorkspace({ workspace, organizationId, membership, signal }) {
         </div>
       </section>
       <div className="space-y-6">
-        <PipelineRunIntentPanel organizationId={organizationId} engagement={workspace.engagement} assets={workspace.assets} membership={membership} signal={signal} />
+        <PipelineRunIntentPanel organizationId={organizationId} engagement={workspace.engagement} assets={workspace.assets} workItems={workItems} membership={membership} signal={signal} />
         <Panel title="Journey stage status">
           {workspace.stages.length
             ? workspace.stages.map(stage => <Record key={stage.id} title={stage.name} note={`${labelize(stage.accountable_department_id)} · ${labelize(stage.status)}`} to={`/sphere/engagements?engagement=${engagementId}&tab=work`} />)

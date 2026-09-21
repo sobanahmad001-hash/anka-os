@@ -23,12 +23,21 @@ export function createPipelineRunIntentsRepository(supabase) {
         .eq('engagement_id', requiredId(engagementId, 'Engagement'))
         .order('requested_at', { ascending: false }).limit(20), signal)
       if (!rows?.length) return []
-      const reviews = await dataOrThrow(supabase.from('pipeline_run_intent_reviews')
-        .select('id, run_intent_id, decision, reason, reviewed_by, reviewed_at')
-        .eq('organization_id', organization)
-        .in('run_intent_id', rows.map(row => row.id)), signal)
+      const ids = rows.map(row => row.id)
+      const [reviews, plans] = await Promise.all([
+        dataOrThrow(supabase.from('pipeline_run_intent_reviews')
+          .select('id, run_intent_id, decision, reason, reviewed_by, reviewed_at')
+          .eq('organization_id', organization).in('run_intent_id', ids), signal),
+        dataOrThrow(supabase.from('pipeline_run_plans')
+          .select('id, run_intent_id, work_manifest, work_sha256, planned_at, planned_by')
+          .eq('organization_id', organization).in('run_intent_id', ids), signal),
+      ])
       const reviewByIntent = new Map((reviews || []).map(review => [review.run_intent_id, review]))
-      return rows.map(row => ({ ...row, review: reviewByIntent.get(row.id) || null }))
+      const planByIntent = new Map((plans || []).map(plan => [plan.run_intent_id, plan]))
+      return rows.map(row => ({
+        ...row, review: reviewByIntent.get(row.id) || null,
+        plan: planByIntent.get(row.id) || null,
+      }))
     },
     start({ organizationId, engagementId, requestId, assetIds = [] }, { signal } = {}) {
       if (!Array.isArray(assetIds) || assetIds.length > 20 || new Set(assetIds).size !== assetIds.length) {
@@ -55,6 +64,18 @@ export function createPipelineRunIntentsRepository(supabase) {
         p_request_id: requiredId(requestId, 'Request'),
         p_decision: decision,
         p_reason: normalizedReason,
+      }), signal)
+    },
+    plan({ organizationId, runIntentId, requestId, workItemIds }, { signal } = {}) {
+      if (!Array.isArray(workItemIds) || workItemIds.length < 1 || workItemIds.length > 50
+        || new Set(workItemIds).size !== workItemIds.length) {
+        throw new TypeError('Choose 1 to 50 unique work items')
+      }
+      return dataOrThrow(supabase.rpc('plan_manual_pipeline_run', {
+        p_organization_id: requiredId(organizationId, 'Organization'),
+        p_run_intent_id: requiredId(runIntentId, 'Run request'),
+        p_request_id: requiredId(requestId, 'Request'),
+        p_work_item_ids: workItemIds.map(id => requiredId(id, 'Work item')),
       }), signal)
     },
   })
