@@ -433,8 +433,11 @@ Deno.test('Google reporting adapter calls only the approved read-report endpoint
     calls.push({ url: String(url), init })
     return new Response(JSON.stringify({ rows: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
   }) as typeof fetch
-  await fetchReadOnlyGoogleReport('google_analytics', 'token', { property_id: '123456' }, { start: '2026-08-01', end: '2026-08-27' }, fetcher)
-  await fetchReadOnlyGoogleReport('google_search_console', 'token', { site_url: 'sc-domain:example.com' }, { start: '2026-08-01', end: '2026-08-27' }, fetcher)
+  const analytics = await fetchReadOnlyGoogleReport('google_analytics', 'token', { property_id: '123456' }, { start: '2026-08-01', end: '2026-08-27' }, fetcher)
+  const search = await fetchReadOnlyGoogleReport('google_search_console', 'token', { site_url: 'sc-domain:example.com' }, { start: '2026-08-01', end: '2026-08-27' }, fetcher)
+  assertEquals([analytics.account_id, search.account_id], ['123456', 'sc-domain:example.com'])
+  assertEquals([analytics.account_access, search.account_access], ['provider_read', 'provider_read'])
+  assertEquals([analytics.retrieved_at, search.retrieved_at].every(value => !Number.isNaN(Date.parse(value))), true)
   assertEquals(calls.map(call => call.url), [
     'https://analyticsdata.googleapis.com/v1beta/properties/123456:runReport',
     'https://www.googleapis.com/webmasters/v3/sites/sc-domain%3Aexample.com/searchAnalytics/query',
@@ -446,6 +449,13 @@ Deno.test('Google reporting adapter calls only the approved read-report endpoint
   assertEquals(searchConsoleBody.rowLimit, 366)
 })
 
+Deno.test('M04 does not certify access from a malformed successful provider payload', async () => {
+  const fetcher = (async () => new Response(JSON.stringify({ rows: 'invalid' }), { status: 200 })) as typeof fetch
+  await assertRejects(() => fetchReadOnlyGoogleReport(
+    'google_analytics', 'token', { property_id: '123456' },
+    { start: '2026-08-01', end: '2026-08-27' }, fetcher,
+  ))
+})
 Deno.test('Google Ads reporting never falls back to a mutating endpoint', async () => {
   let called = ''
   const fetcher = (async (url: string | URL | Request) => {

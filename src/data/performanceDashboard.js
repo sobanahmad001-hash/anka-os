@@ -51,7 +51,7 @@ export function collectionAgeState(retrievedAt, now = new Date(), thresholdHours
 
 function sourceAccount({
   id, provider, connectionId = null, accountId = null, accountLabel, brand, period,
-  reportingTimezone = null, retrievedAt = null, dataThrough = null,
+  reportingTimezone = null, retrievedAt = null, dataThrough = null, accountAccess = null,
   currencyCode = null, metrics = [], trend: sourceTrend = null,
   notes = [], error = null, now, thresholdHours,
 }) {
@@ -60,7 +60,7 @@ function sourceAccount({
     accountId, accountLabel,
     brandId: brand.id, organizationId: brand.organization_id,
     periodStart: period.start, periodEnd: period.end,
-    reportingTimezone, retrievedAt,
+    reportingTimezone, retrievedAt, accountAccess,
     dataThrough, currencyCode,
     freshness: collectionAgeState(retrievedAt, now, thresholdHours),
     metrics, trend: sourceTrend, notes, error, available: !error && metrics.length > 0,
@@ -74,7 +74,7 @@ function googleSource(report, brand, period, now, thresholdHours) {
     accountId: report.account_id || null,
     accountLabel: report.connection_name || report.account_id || 'Unnamed connection',
     brand, period, reportingTimezone: report.reporting_timezone || null,
-    retrievedAt: report.retrieved_at || null,
+    retrievedAt: report.retrieved_at || null, accountAccess: report.account_access === 'provider_read' ? 'provider_read' : null,
     dataThrough: report.data_through || latestValue(report.rows || [], 'date'),
     currencyCode: report.currency_code || null,
     notes: report.notes || [], error: report.error || null, now, thresholdHours,
