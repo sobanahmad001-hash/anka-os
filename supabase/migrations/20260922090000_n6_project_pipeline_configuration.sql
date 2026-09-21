@@ -123,8 +123,8 @@ begin
   end if;
   select * into engagement from public.engagements
     where id = p_engagement_id and organization_id = p_organization_id for update;
-  if not found or engagement.status not in ('planning', 'active') then
-    raise exception 'Current project engagement is required.' using errcode = '42501';
+  if not found then
+    raise exception 'Project engagement is unavailable.' using errcode = '42501';
   end if;
   if not private.n6_project_configuration_authorized(p_organization_id, engagement.project_id, actor) then
     raise exception 'Current exact-project manager authority is required.' using errcode = '42501';
@@ -143,6 +143,9 @@ begin
     end if;
     return jsonb_build_object('configuration_id', existing.id,
       'revision', existing.revision, 'idempotent_replay', true);
+  end if;
+  if engagement.status not in ('planning', 'active') then
+    raise exception 'Current project engagement is required.' using errcode = '42501';
   end if;
   select * into origin from public.engagement_pipeline_origins
     where engagement_id = engagement.id and organization_id = p_organization_id;

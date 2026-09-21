@@ -129,8 +129,7 @@ begin
   select * into engagement from public.engagements
     where id = configuration.engagement_id and organization_id = p_organization_id
     for update;
-  if not found or engagement.status not in ('planning', 'active')
-    or engagement.project_id <> configuration.project_id then
+  if not found or engagement.project_id <> configuration.project_id then
     raise exception 'Project context has changed.' using errcode = '55000';
   end if;
   if not private.n6_project_configuration_authorized(
@@ -149,6 +148,9 @@ begin
     end if;
     return jsonb_build_object('activation_id', existing.id,
       'activation_number', existing.activation_number, 'idempotent_replay', true);
+  end if;
+  if engagement.status not in ('planning', 'active') then
+    raise exception 'Project is not current for a new activation.' using errcode = '55000';
   end if;
   if encode(extensions.digest(convert_to(configuration.selected_steps::text, 'UTF8'), 'sha256'), 'hex')
        <> configuration.selected_steps_sha256 then
