@@ -309,6 +309,54 @@ Deno.test('M05 report save binds the exact request and actor to one service-only
   assertEquals((stale as Error & { status: number }).status, 412)
 })
 
+Deno.test('M05b pins stored metric rows after receipt lookup and replay skips source reread', async () => {
+  const organizationId = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
+  const engagementId = '11111111-1111-4111-8111-111111111111'
+  const requestId = '22222222-2222-4222-8222-222222222222'
+  const actorId = '33333333-3333-4333-8333-333333333333'
+  const snapshotId = '44444444-4444-4444-8444-444444444444'
+  const brandId = 'brand-a'
+  const calls: string[] = []
+  let committed = false
+  const saved = { id: 'version-a', request_id: requestId }
+  const admin = {
+    from(table: string) {
+      calls.push(table)
+      const builder: any = { select: () => builder, eq: () => builder,
+        in: async () => ({ data: table === 'ad_campaign_performance_snapshots'
+          ? [{ id: snapshotId, organization_id: organizationId, ad_campaign_id: 'campaign-a',
+            snapshot_date: '2026-08-15', impressions: 120, clicks: 12, cost: 8.5, conversions: 2,
+            provider_connection_id: 'connection-a', created_at: '2026-08-16T10:00:00Z' }]
+          : [{ id: 'campaign-a', organization_id: organizationId, brand_id: brandId,
+            campaign_name: 'Campaign A', external_account_id: '123' }], error: null }),
+        maybeSingle: async () => ({ data: table === 'engagements'
+          ? { id: engagementId, organization_id: organizationId, brand_id: brandId } : null, error: null }),
+        limit: async () => ({ data: table === 'engagement_services' ? [{ id: 'service-id' }] : [], error: null }),
+      }
+      return builder
+    },
+    async rpc(name: string, args: Record<string, unknown>) {
+      calls.push(name)
+      if (name === 'replay_marketing_report_request') return { data: committed ? saved : null, error: null }
+      committed = true
+      const content = args.p_content as Record<string, unknown>
+      assertEquals((content.metric_snapshots as Array<Record<string, unknown>>)[0].metrics,
+        { impressions: 120, clicks: 12, cost: 8.5, conversions: 2 })
+      return { data: saved, error: null }
+    },
+  }
+  const body = { engagement_id: engagementId, request_id: requestId, title: 'August report',
+    content: { sources: ['Stored Ads row'], period_start: '2026-08-01', period_end: '2026-08-31',
+      executive_summary: 'Demand improved.', insights: ['Clicks increased.'], recommended_actions: ['Review.'],
+      metric_snapshot_refs: [{ source: 'google_ads', snapshot_id: snapshotId }] } }
+  await saveMarketingReport({ admin, organizationId } as never, body, actorId)
+  assertEquals(calls[0], 'replay_marketing_report_request')
+  assertEquals(calls.at(-1), 'save_marketing_report_version')
+  calls.length = 0
+  assertEquals((await saveMarketingReport({ admin, organizationId } as never, body, actorId)).request_id, requestId)
+  assertEquals(calls, ['replay_marketing_report_request'])
+})
+
 Deno.test('marketing report preserves source, period, insight, and recommended action', () => {
   const report = validateMarketingArtifact('marketing_report', {
     sources: ['GA4 · Primary'], period_start: '2026-08-01', period_end: '2026-08-27',

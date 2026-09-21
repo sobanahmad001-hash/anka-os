@@ -1,5 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { googleAccessToken, namedKey, sha256 } from '../_shared/googleOAuthTokens.ts'
+import { pinMarketingReportMetrics, validateMarketingReportMetricRefs } from './reportMetricPins.ts'
 
 type Client = ReturnType<typeof createClient<any>>
 type Json = Record<string, unknown>
@@ -815,21 +816,41 @@ async function saveArtifact(context: MarketingRequestContext, body: Json, actorI
 
 export async function saveMarketingReport(context: MarketingRequestContext, body: Json, actorId: string) {
   const engagementId = text(body.engagement_id, 80)
-  await requireMarketingEngagement(context, engagementId)
   const requestId = uuid(body.request_id, 'Report request ID')
   const artifactId = body.artifact_id ? uuid(body.artifact_id, 'Report artifact ID') : null
   const expectedLatestVersionId = body.expected_latest_version_id
     ? uuid(body.expected_latest_version_id, 'Expected report version ID') : null
   const title = text(body.title, 240)
   if (!title) throw new Error('Report title is required')
-  const content = { ...validateMarketingArtifact('marketing_report', body.content), report_title: title }
-  const contentChecksum = await sha256(stableJson(content))
-  const { data, error } = await context.admin.rpc('save_marketing_report_version', {
+  const metricRefs = validateMarketingReportMetricRefs((body.content as Json | null)?.metric_snapshot_refs)
+  const rawContent: Json = { ...validateMarketingArtifact('marketing_report', body.content), report_title: title,
+    ...(metricRefs.length ? { metric_snapshot_refs: metricRefs } : {}) }
+  const changeSummary = text(body.change_summary, 1000)
+  const aiUseAllowed = body.ai_use_allowed === true
+  const rawArgs = {
     p_organization_id: context.organizationId, p_engagement_id: engagementId,
     p_artifact_id: artifactId, p_expected_latest_version_id: expectedLatestVersionId,
-    p_title: title, p_content: content, p_content_checksum: contentChecksum,
-    p_change_summary: text(body.change_summary, 1000), p_ai_use_allowed: body.ai_use_allowed === true,
-    p_request_id: requestId, p_actor_id: actorId,
+    p_title: title, p_content: rawContent, p_change_summary: changeSummary,
+    p_ai_use_allowed: aiUseAllowed, p_request_id: requestId, p_actor_id: actorId,
+  }
+  // A committed request is attributed before rereading its source rows: those rows may have changed or vanished.
+  if (metricRefs.length) {
+    const { data: prior, error: replayError } = await context.admin.rpc('replay_marketing_report_request', rawArgs)
+    if (replayError) throw replayError
+    if (prior) return prior
+  }
+  const engagement = await requireMarketingEngagement(context, engagementId)
+  const content = metricRefs.length
+    ? { ...rawContent, metric_snapshots: await pinMarketingReportMetrics(
+      context.admin as unknown as Parameters<typeof pinMarketingReportMetrics>[0],
+      context.organizationId, engagement.brand_id,
+      { start: String(rawContent.period_start), end: String(rawContent.period_end) },
+      metricRefs, new Date().toISOString(),
+    ) }
+    : rawContent
+  const contentChecksum = await sha256(stableJson(content))
+  const { data, error } = await context.admin.rpc('save_marketing_report_version', {
+    ...rawArgs, p_content: content, p_content_checksum: contentChecksum,
   })
   if (error?.code === '40001') throw Object.assign(new Error(error.message), { status: 412 })
   if (error) throw error

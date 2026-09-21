@@ -210,6 +210,41 @@ test('mounted MB07 report lifecycle preserves drafts, exact identity, reconcilia
     }
   })
 
+  await t.test('selected stored metric row is pinned in the exact saved version and receipt', async () => {
+    const input = reportWorkspace('metric-pin')
+    const snapshotId = '44444444-4444-4444-8444-444444444444'
+    let savedInput = null
+    const mounted = await mount(input.workspace, {
+      studio: {
+        listReportMetricSources: async () => ({
+          adCampaigns: [{ id: 'campaign-a', campaign_name: 'Search campaign' }],
+          adSnapshots: [{ id: snapshotId, ad_campaign_id: 'campaign-a', snapshot_date: '2026-08-15' }],
+          trackedKeywords: [], rankSnapshots: [], metaConnections: [], metaSnapshots: [],
+        }),
+        saveMarketingReport: async payload => {
+          savedInput = payload
+          const content = { ...payload.content, metric_snapshots: [{
+            source: 'google_ads', source_record_id: snapshotId, snapshot_date: '2026-08-15',
+            retrieved_at: '2026-08-16T10:00:00Z', pinned_at: '2026-09-21T12:00:00Z',
+            account_id: '123', label: 'Search campaign', metrics: { impressions: 120 },
+            definitions: { currency: null, reporting_timezone: null },
+          }] }
+          return { ...input.v2, id: 'v3-metric-pin', version_number: 3,
+            request_id: payload.request_id, content, content_checksum: await marketingReportContentChecksum(content) }
+        },
+      },
+    })
+    try {
+      await act(async () => {})
+      const checkbox = elements(mounted.container, 'input').find(node => reactProps(node)?.type === 'checkbox')
+      assert.ok(checkbox)
+      await act(async () => reactProps(checkbox).onChange({ target: { checked: true } }))
+      await act(async () => reactProps(elements(mounted.container, 'form')[0]).onSubmit({ preventDefault() {} }))
+      assert.deepEqual(savedInput.content.metric_snapshot_refs, [{ source: 'google_ads', snapshot_id: snapshotId }])
+      assert.doesNotMatch(mounted.container.textContent, /Save locked/)
+    } finally { await mounted.close() }
+  })
+
   await t.test('successful save selects returned exact version and late prior-version review callbacks are ignored', async () => {
     const input = reportWorkspace('success')
     const v3 = { ...input.v2, id: 'v3-success', version_number: 3, created_at: '2026-09-03', content: reportContent('Revision') }
@@ -217,7 +252,7 @@ test('mounted MB07 report lifecycle preserves drafts, exact identity, reconcilia
     let refreshes = 0
     const nextWorkspace = { ...input.workspace, versions: [v3, input.v2, input.v1] }
     const extra = {
-      studio: { saveMarketingReport: async payload => ({ ...v3, request_id: payload.request_id,
+      studio: { saveMarketingReport: async payload => ({ ...v3, content: payload.content, request_id: payload.request_id,
         content_checksum: await marketingReportContentChecksum(payload.content) }) },
       onRefresh: async () => { refreshes += 1 },
       act: async callback => { const result = await callback(); mounted.root.render(createElement(StrictMode, null, createElement(MarketingReports, { ...mounted.base, workspace: nextWorkspace }))); return result },

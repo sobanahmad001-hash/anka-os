@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { buildMarketingReportExport, marketingReportContentChecksum, marketingReportDraft, marketingReportEvidenceState, marketingReportRecords, marketingReportReviewState, marketingReportVersion, reconcileMarketingReportSave, validateMarketingReportDraft } from './marketingReports.js'
+import { buildMarketingReportExport, marketingReportContentChecksum, marketingReportDraft, marketingReportEvidenceState, marketingReportMetricCandidates, marketingReportMetricFreshness, marketingReportRecords, marketingReportReviewState, marketingReportVersion, reconcileMarketingReportSave, validateMarketingReportDraft } from './marketingReports.js'
 
 const organizationId = 'org-a'
 const root = fileURLToPath(new URL('../../', import.meta.url))
@@ -42,6 +42,20 @@ test('report draft rejects missing sources, reversed dates, and missing deployed
   assert.throws(() => validateMarketingReportDraft({ ...marketingReportDraft(artifact, version), executive_summary: '' }), /current report contract/i)
 })
 
+test('report metric candidates keep exact stored row identity and preserve validated references', () => {
+  const snapshotId = '44444444-4444-4444-8444-444444444444'
+  const candidates = marketingReportMetricCandidates({
+    adCampaigns: [{ id: 'campaign-1', campaign_name: 'Search A' }],
+    adSnapshots: [{ id: snapshotId, ad_campaign_id: 'campaign-1', snapshot_date: '2026-08-15' }],
+  })
+  assert.deepEqual(candidates, [{ source: 'google_ads', snapshot_id: snapshotId, date: '2026-08-15', label: 'Search A' }])
+  const draft = { ...marketingReportDraft(artifact, version),
+    metric_snapshot_refs: [{ source: 'google_ads', snapshot_id: snapshotId }] }
+  assert.deepEqual(validateMarketingReportDraft(draft).content.metric_snapshot_refs, draft.metric_snapshot_refs)
+  assert.throws(() => validateMarketingReportDraft({ ...draft,
+    metric_snapshot_refs: [...draft.metric_snapshot_refs, ...draft.metric_snapshot_refs] }), /distinct exact metric/)
+})
+
 test('saved report selection remains tenant, engagement, brand, artifact, and exact-version scoped', () => {
   const records = marketingReportRecords({
     engagement,
@@ -73,7 +87,7 @@ test('review state is tied to the exact immutable version', () => {
 
 test('current contract reports missing metric pins instead of inventing freshness or values', () => {
   assert.equal(marketingReportEvidenceState(version).status, 'unverified')
-  assert.match(marketingReportEvidenceState(version).message, /does not pin metric rows/i)
+  assert.match(marketingReportEvidenceState(version).message, /no pinned metric snapshots/i)
   assert.equal(marketingReportEvidenceState(null).status, 'missing')
 })
 
@@ -85,8 +99,31 @@ test('exact-version export is deterministic, escaped, visibly draft, and perform
   assert.match(first, /&lt;August report&gt;/)
   assert.match(first, /Legacy artifact label; not pinned to this version/)
   assert.match(first, new RegExp(version.id))
-  assert.match(first, /Metric snapshot: Unavailable/)
+  assert.match(first, /No metric snapshots pinned to this exact version/)
   assert.match(first, /does not approve, release, publish, refresh, or share/i)
+})
+
+test('pinned metric rows preserve exact values, collection time, and unavailable definitions in export', () => {
+  const pinned = { ...version, content: { ...version.content, metric_snapshots: [{
+    source: 'google_ads', source_record_id: 'snapshot-1', source_parent_id: 'campaign-a',
+    source_filter: { brand_id: 'brand-a', parent_id: 'campaign-a', period_start: '2026-08-01', period_end: '2026-08-31' },
+    snapshot_date: '2026-08-15',
+    retrieved_at: '2026-08-16T10:00:00Z', pinned_at: '2026-09-21T12:00:00Z',
+    account_id: '123', label: 'Campaign', metrics: { impressions: 120, cost: 8.5 },
+    definitions: { metric_units: { impressions: 'count', cost: 'currency amount' },
+      reporting_timezone: null, currency: null, provider_finality: null },
+  }] } }
+  assert.equal(marketingReportEvidenceState(pinned).status, 'pinned')
+  assert.equal(marketingReportMetricFreshness(pinned.content.metric_snapshots[0]).status, 'stale_at_pin')
+  assert.equal(marketingReportMetricFreshness({ retrieved_at: null, pinned_at: null }).status, 'unknown')
+  const exported = buildMarketingReportExport({ artifact, version: pinned })
+  assert.match(exported, /row snapshot-1/)
+  assert.match(exported, /impressions=120, cost=8.5/)
+  assert.match(exported, /collected 2026-08-16T10:00:00Z/)
+  assert.match(exported, /age at pin .*over 24h/)
+  assert.match(exported, /filter brand_id=brand-a, parent_id=campaign-a/)
+  assert.match(exported, /units impressions=count, cost=currency amount/)
+  assert.match(exported, /unavailable definitions: reporting_timezone, currency, provider_finality/)
 })
 
 test('approved export remains bound to the selected version only', () => {
@@ -123,5 +160,5 @@ test('MB07 local slice adds no provider refresh, schema, or parallel report stor
     assert.doesNotMatch(source, /create table|create policy|alter table/i)
   }
   assert.match(reports, /does not refresh providers or invent missing metrics/i)
-  assert.match(model, /Metric snapshot: Unavailable|does not pin metric rows/i)
+  assert.match(model, /No metric snapshots pinned to this exact version/i)
 })

@@ -52,15 +52,15 @@ function requireAnalyticsEnvelope(googleDashboard, engagementId, brandId) {
   return googleDashboard
 }
 
-async function loadStoredPerformanceSources(client, { organizationId, brand, period, signal }) {
+export async function loadStoredPerformanceSources(client, { organizationId, brand, period, signal, includePageHealth = true }) {
   const options = { signal }
   const [pageHealth, trackedKeywords, adCampaigns, metaConnections] = await Promise.all([
-    paginatedRows(() => client.from('tracked_page_current_health')
+    includePageHealth ? paginatedRows(() => client.from('tracked_page_current_health')
       .select('tracked_page_id, organization_id, brand_id, page_url, audit_date, index_status, schema_valid, open_issue_count, needs_attention')
       .eq('organization_id', organizationId)
       .eq('brand_id', brand.id)
       .order('page_url')
-      .order('tracked_page_id'), options),
+      .order('tracked_page_id'), options) : Promise.resolve([]),
     paginatedRows(() => client.from('tracked_keywords')
       .select('id, organization_id, brand_id, tracked_page_id, keyword, target_rank_tier, active')
       .eq('organization_id', organizationId)
