@@ -8,6 +8,8 @@ import {
   marketingReportContentChecksum,
   marketingReportDraft,
   marketingReportEvidenceState,
+  marketingReportMetricCandidates,
+  marketingReportMetricFreshness,
   marketingReportRecords,
   marketingReportReviewState,
   marketingReportVersion,
@@ -38,6 +40,15 @@ function normalizedPendingSave(value) {
       ? value.knownVersionIds.filter(item => typeof item === 'string').slice(0, 10000)
       : [],
   }
+}
+
+async function receiptContentMatches(version, inputChecksum) {
+  if (!version?.content || !version.content_checksum) return false
+  const savedChecksum = await marketingReportContentChecksum(version.content)
+  if (savedChecksum !== version.content_checksum) return false
+  const rawContent = { ...version.content }
+  delete rawContent.metric_snapshots
+  return await marketingReportContentChecksum(rawContent) === inputChecksum
 }
 
 function readPendingSave(storageKey, actorHash) {
@@ -95,7 +106,7 @@ function downloadExactVersion(artifact, version, approval, brandName) {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
-  anchor.download = `${String(artifact.title || 'marketing-report').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'marketing-report'}-v${version.version_number}.txt`
+  anchor.download = `${String(version.content?.report_title || artifact.title || 'marketing-report').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'marketing-report'}-v${version.version_number}.txt`
   anchor.click()
   URL.revokeObjectURL(url)
 }
@@ -114,6 +125,9 @@ export default function MarketingReports({ studio, workspace, saving, act, actor
   const [dirty, setDirty] = useState(false)
   const [pendingSave, setPendingSave] = useState(null)
   const [retrying, setRetrying] = useState(false)
+  const [metricCandidates, setMetricCandidates] = useState([])
+  const [metricLoading, setMetricLoading] = useState(false)
+  const [metricError, setMetricError] = useState('')
   const [recovery, setRecovery] = useState({ ready: false, storageKey: '', actorHash: '', error: '' })
   const loadedSelection = useRef('')
   const activeScope = useRef(scopeKey)
@@ -169,6 +183,24 @@ export default function MarketingReports({ studio, workspace, saving, act, actor
   }, [actorId, scopeKey, storageScope])
 
   useEffect(() => {
+    if (!studio.listReportMetricSources || !/^\d{4}-\d{2}-\d{2}$/.test(form.period_start) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(form.period_end) || form.period_start > form.period_end) {
+      setMetricCandidates([]); setMetricError(''); setMetricLoading(false)
+      return
+    }
+    let current = true
+    setMetricLoading(true); setMetricError('')
+    const brand = { id: workspace.engagement.brand_id, organization_id: workspace.engagement.organization_id,
+      name: workspace.engagement.brands?.name || 'Brand' }
+    studio.listReportMetricSources(brand, { start: form.period_start, end: form.period_end })
+      .then(rows => { if (current && activeScope.current === scopeKey) setMetricCandidates(marketingReportMetricCandidates(rows)) })
+      .catch(error => { if (current && activeScope.current === scopeKey) { setMetricCandidates([]); setMetricError(error.message || 'Stored metrics unavailable') } })
+      .finally(() => { if (current && activeScope.current === scopeKey) setMetricLoading(false) })
+    return () => { current = false }
+  }, [studio, scopeKey, workspace.engagement.brand_id, workspace.engagement.organization_id,
+    workspace.engagement.brands?.name, form.period_start, form.period_end])
+
+  useEffect(() => {
     onDirtyChange?.(dirty)
     return () => onDirtyChange?.(false)
   }, [dirty, onDirtyChange])
@@ -202,7 +234,9 @@ export default function MarketingReports({ studio, workspace, saving, act, actor
 
   function updateForm(patch) {
     invalidateDraftSnapshot()
-    setForm(current => ({ ...current, ...patch })); setDirty(true); setLocalError('')
+    setForm(current => ({ ...current, ...patch,
+      ...('period_start' in patch || 'period_end' in patch ? { metric_snapshot_refs: [] } : {}) }))
+    setDirty(true); setLocalError('')
   }
 
   function chooseReport(nextArtifactId) {
@@ -287,12 +321,12 @@ export default function MarketingReports({ studio, workspace, saving, act, actor
       }
       const savedVersion = result?.version || result
       const savedArtifactId = savedVersion?.artifact_id || result?.artifact_id || ''
-      const returnedChecksum = savedVersion?.content_checksum || (savedVersion?.content ? await marketingReportContentChecksum(savedVersion.content) : '')
       const resultMatchesIntent = savedArtifactId && savedVersion?.id &&
         savedVersion.organization_id === workspace.engagement.organization_id &&
         savedVersion.request_id === intent.operationId &&
         (!intent.artifactId || savedArtifactId === intent.artifactId) &&
-        !intent.knownVersionIds.includes(savedVersion.id) && returnedChecksum === intent.contentChecksum
+        !intent.knownVersionIds.includes(savedVersion.id) &&
+        await receiptContentMatches(savedVersion, intent.contentChecksum)
       if (!resultMatchesIntent) {
         if (activeScope.current === captured.scopeKey) setLocalError('The save outcome is unresolved. Retry the exact request to obtain its server receipt.')
         return
@@ -333,7 +367,8 @@ export default function MarketingReports({ studio, workspace, saving, act, actor
       const version = result?.version || result
       if (version?.request_id !== pending.operationId || version?.organization_id !== workspace.engagement.organization_id ||
         version?.artifact_id !== (pending.artifactId || version?.artifact_id) ||
-        version?.content_checksum !== pending.contentChecksum || !version?.id || !version?.artifact_id || pending.knownVersionIds.includes(version.id)) {
+        !version?.id || !version?.artifact_id || pending.knownVersionIds.includes(version.id) ||
+        !await receiptContentMatches(version, pending.contentChecksum)) {
         throw new Error('The server receipt does not match the locked report request.')
       }
       if (scope !== activeScope.current) return
@@ -378,6 +413,27 @@ export default function MarketingReports({ studio, workspace, saving, act, actor
         <Field label="Brand" hint="Fixed by the active engagement"><input readOnly className={INPUT} value={workspace.engagement.brands?.name || 'Current engagement brand'} /></Field>
         <div className="grid gap-4 sm:grid-cols-2"><Field label="Period start"><input required type="date" className={INPUT} value={form.period_start} onChange={event => updateForm({ period_start: event.target.value })} /></Field><Field label="Period end"><input required type="date" className={INPUT} value={form.period_end} onChange={event => updateForm({ period_end: event.target.value })} /></Field></div>
         <Field label="Selected source notes" hint="One explicit source or exact saved evidence version per line"><textarea required rows="4" className={INPUT} value={editorValue(form.sources)} onChange={event => updateForm({ sources: event.target.value })} /></Field>
+        <div className="rounded-xl border border-slate-700 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Pin stored metric snapshots</p>
+          <p className="mt-2 text-xs leading-5 text-slate-500">Select exact dated rows from this brand and period. Values and collection times are copied into the saved report version. No provider refresh occurs.</p>
+          {metricLoading && <p className="mt-3 text-xs text-slate-400">Loading stored rows…</p>}
+          {metricError && <p role="alert" className="mt-3 text-xs text-red-300">{metricError}</p>}
+          <div className="mt-3 max-h-56 space-y-2 overflow-y-auto">
+            {metricCandidates.slice(0, 200).map(item => {
+              const checked = form.metric_snapshot_refs.some(ref => ref.source === item.source && ref.snapshot_id === item.snapshot_id)
+              return <label key={`${item.source}:${item.snapshot_id}`} className="flex gap-2 text-xs text-slate-300">
+                <input type="checkbox" checked={checked} disabled={Boolean(pendingSave) || (!checked && form.metric_snapshot_refs.length >= 30)}
+                  onChange={() => updateForm({ metric_snapshot_refs: checked
+                    ? form.metric_snapshot_refs.filter(ref => ref.source !== item.source || ref.snapshot_id !== item.snapshot_id)
+                    : [...form.metric_snapshot_refs, { source: item.source, snapshot_id: item.snapshot_id }] })} />
+                <span>{item.date} · {item.source.replaceAll('_', ' ')} · {item.label}</span>
+              </label>
+            })}
+          </div>
+          {!metricLoading && !metricError && metricCandidates.length === 0 && <p className="mt-3 text-xs text-slate-500">No stored metric rows for this brand and period. The report can still preserve source notes, but its metrics will be unpinned.</p>}
+          {metricCandidates.length > 200 && <p className="mt-2 text-xs text-amber-200">Showing the latest 200 rows. Narrow the report period to select older rows.</p>}
+          <p className="mt-2 text-xs text-slate-500">{form.metric_snapshot_refs.length} selected · maximum 30. Currency, timezone, and provider finality remain unknown where the stored source does not supply them.</p>
+        </div>
         <Field label="Executive summary"><textarea required rows="5" className={INPUT} value={form.executive_summary} onChange={event => updateForm({ executive_summary: event.target.value })} /></Field>
         <Field label="Insights" hint="One evidenced interpretation per line"><textarea required rows="5" className={INPUT} value={editorValue(form.insights)} onChange={event => updateForm({ insights: event.target.value })} /></Field>
         <Field label="Recommended actions" hint="One proposed action per line"><textarea required rows="5" className={INPUT} value={editorValue(form.recommended_actions)} onChange={event => updateForm({ recommended_actions: event.target.value })} /></Field>
@@ -391,6 +447,12 @@ export default function MarketingReports({ studio, workspace, saving, act, actor
             <p className="text-sm text-slate-400">{version.content.period_start} to {version.content.period_end} · Version {version.version_number}</p>
             <div className="rounded-xl border border-amber-900/50 bg-amber-950/20 p-3 text-xs leading-5 text-amber-200">{evidenceState.message}</div>
             <div><h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Selected source notes</h4>{list(version.content.sources)}</div>
+            <div><h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Pinned metric snapshots</h4>
+              {Array.isArray(version.content.metric_snapshots) && version.content.metric_snapshots.length
+                ? <ul className="mt-2 space-y-2 text-xs text-slate-300">{version.content.metric_snapshots.map(pin =>
+                  <li key={`${pin.source}:${pin.source_record_id}`} className="rounded-lg border border-slate-800 p-2">{pin.snapshot_date} · {pin.source?.replaceAll('_', ' ')} · {pin.label} · collected {pin.retrieved_at || 'unknown'} · age at pin {marketingReportMetricFreshness(pin).age_hours === null ? 'unknown' : `${marketingReportMetricFreshness(pin).age_hours}h`} · {Object.entries(pin.metrics || {}).map(([key, value]) => `${key}: ${value ?? 'unknown'}`).join(' · ')}</li>)}</ul>
+                : <p className="mt-2 text-xs text-slate-500">No metric rows pinned in this version.</p>}
+            </div>
             <div><h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Executive summary</h4><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">{version.content.executive_summary || 'Unavailable'}</p></div>
             <div><h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Insights</h4>{list(version.content.insights)}</div>
             <div><h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Recommended actions</h4>{list(version.content.recommended_actions)}</div>
