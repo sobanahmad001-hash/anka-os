@@ -18,7 +18,7 @@ export function createPipelineRunIntentsRepository(supabase) {
     async list(organizationId, engagementId, { signal } = {}) {
       const organization = requiredId(organizationId, 'Organization')
       const rows = await dataOrThrow(supabase.from('pipeline_run_intents')
-        .select('id, request_id, status, input_sha256, input_manifest, requested_at, requested_by')
+        .select('id, request_id, status, input_sha256, input_manifest, requested_at, requested_by, project_activation_id, selected_steps_sha256')
         .eq('organization_id', organization)
         .eq('engagement_id', requiredId(engagementId, 'Engagement'))
         .order('requested_at', { ascending: false }).limit(20), signal)
