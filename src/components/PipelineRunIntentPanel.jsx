@@ -167,7 +167,7 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
         <p className="mt-1">{row.project_activation_id ? `Project activation ${row.project_activation_id.slice(0, 8)} · steps hash ${row.selected_steps_sha256.slice(0, 12)}` : 'Unconfigured or historical request · provider execution blocked'}</p>
         {row.review?.reason && <p className="mt-1">Review reason: {row.review.reason}</p>}
         {row.plan && <p className="mt-2 text-emerald-300">Linked plan: {row.plan.work_manifest.length} work items pinned · hash {row.plan.work_sha256.slice(0, 12)}. No task status was changed.</p>}
-        {row.job && <p className="mt-1 text-amber-300">Execution job: {row.job.steps?.length ?? 0} pinned work steps · {row.job.status.replaceAll('_', ' ')} · {row.job.blocked_reason} No provider request has been sent.</p>}
+        {row.job && <p className="mt-1 text-amber-300">Execution job: {row.job.steps?.length ?? 0} pinned work items · {row.job.configured_steps?.length ?? 0} configured step instances · {row.job.status.replaceAll('_', ' ')} · {row.job.blocked_reason} No provider request has been sent.</p>}
         {row.job?.input_approval && <p className="mt-1 text-emerald-300">Exact text inputs acknowledged by the requester. Provider execution remains blocked.</p>}
         {allowed && row.requested_by === user?.id && row.plan && row.job && !row.job.input_approval
           && row.review?.decision === 'accepted_for_planning' && <div className="mt-2">
