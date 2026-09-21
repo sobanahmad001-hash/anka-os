@@ -3,6 +3,7 @@ import { buildDesignAssetRows, designAssetAccessState, designAssetArchiveEligibi
 import DesignAssetComparison from './DesignAssetComparison.jsx'
 import DesignAssetUpload from './DesignAssetUpload.jsx'
 import DesignAssetVersionBrowser from './DesignAssetVersionBrowser.jsx'
+import DesignAssetReviewPanel from './DesignAssetReviewPanel.jsx'
 
 const SELECT = 'rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-slate-100 focus:border-violet-400 focus:outline-none'
 const SECONDARY = 'rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-slate-200 hover:border-violet-400/50 focus:outline-none focus:ring-2 focus:ring-violet-400/50'
@@ -19,12 +20,14 @@ function exactId(value) {
   return value ? <code className="break-all text-[11px] text-slate-300">{value}</code> : <span className="text-slate-500">Unavailable / not recorded</span>
 }
 
-export default function DesignAssetLibrary({ workspace, contextKey, canUpload = false, canArchive = false, busy = false, onUpload, onArchive, onClose, onFocusSource }) {
+export default function DesignAssetLibrary({ workspace, contextKey, canUpload = false, canArchive = false, canSubmitReview = false, canDecideReview = false, currentUserId = '', busy = false, onUpload, onArchive, onReview, onRefresh, onClose, onFocusSource }) {
   const [state, dispatch] = useReducer(designAssetLibraryReducer, contextKey, initialDesignAssetLibraryState)
   const [clock, setClock] = useState(() => Date.now())
   const [comparisonOpen, setComparisonOpen] = useState(false)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [archiveIntent, setArchiveIntent] = useState(null)
+  const [refreshingLinks, setRefreshingLinks] = useState(false)
+  const [refreshError, setRefreshError] = useState('')
   const rows = useMemo(() => buildDesignAssetRows(workspace), [workspace])
   const issuedAt = Number(workspace.mediaUrlsRequestedAt)
   const effectiveNow = Math.max(clock, Date.now())
@@ -49,7 +52,16 @@ export default function DesignAssetLibrary({ workspace, contextKey, canUpload = 
   }, [issuedAt, workspace.mediaUrlExpiresIn])
 
   const access = designAssetAccessState(selected, accessOptions)
-  const archive = designAssetArchiveEligibility(selected)
+  const archive = designAssetArchiveEligibility(selected, workspace.designAssetReviews)
+
+  async function refreshSignedLinks() {
+    if (!onRefresh || refreshingLinks) return
+    setRefreshingLinks(true); setRefreshError('')
+    try {
+      if (!await onRefresh()) setRefreshError('Exact links could not be refreshed. Your selected asset remains unchanged.')
+    } catch (reason) { setRefreshError(reason?.message || 'Exact links could not be refreshed.') }
+    finally { setRefreshingLinks(false) }
+  }
 
   async function confirmArchive() {
     if (!canArchive || !archive.eligible) return
@@ -107,12 +119,15 @@ export default function DesignAssetLibrary({ workspace, contextKey, canUpload = 
       {selected.prompt && <div className="mt-4 rounded-xl bg-white/[0.03] p-3"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Recorded prompt</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-300">{selected.prompt}</p></div>}
       <div className="mt-4 flex flex-wrap items-center gap-3">
         {access.canOpen ? <a href={access.url} target="_blank" rel="noreferrer" className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-300">Open or save signed image</a> : <span className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-slate-500">Image link unavailable</span>}
+        <button type="button" disabled={!onRefresh || refreshingLinks} onClick={refreshSignedLinks} className={SECONDARY + ' disabled:opacity-40'}>{refreshingLinks ? 'Refreshing links…' : 'Refresh exact download links'}</button>
         <button type="button" disabled={!designAssetSourceFocus(selected)} onClick={() => onFocusSource(selected)} className={SECONDARY + ' disabled:cursor-not-allowed disabled:opacity-40'}>Open source in Design desk</button>
         {canArchive && archive.eligible && <button type="button" disabled={busy} onClick={confirmArchive} className="rounded-xl border border-amber-400/30 px-4 py-2.5 text-sm font-semibold text-amber-200 disabled:opacity-40">{busy ? 'Archiving…' : 'Archive draft asset'}</button>}
       </div>
+      {refreshError && <p role="alert" className="mt-3 text-xs text-amber-300">{refreshError}</p>}
       <p className={'mt-3 text-xs leading-5 ' + (archive.eligible ? 'text-amber-200' : 'text-slate-500')}>Archive eligibility: {archive.reason}</p>
       <p className={'mt-3 text-xs leading-5 ' + (access.canOpen ? 'text-slate-400' : 'text-amber-300')}>{access.message}</p>
       {!!selected.assetVersions?.length && <DesignAssetVersionBrowser row={selected} contextKey={contextKey} accessOptions={accessOptions} />}
+      {!!selected.assetVersions?.length && <DesignAssetReviewPanel row={selected} reviews={(workspace.designAssetReviews || []).filter(item => item.asset_id === selected.assetId)} contextKey={contextKey} currentUserId={currentUserId} canSubmit={canSubmitReview} canDecide={canDecideReview} onReview={onReview} onRefresh={onRefresh} />}
     </aside>}
   </section>
 }

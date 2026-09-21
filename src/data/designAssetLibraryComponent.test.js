@@ -180,7 +180,8 @@ test('mounted library selects, filters, clears, focuses source, resets context a
   Date.now = () => clock
   t.after(() => { Date.now = originalNow })
   const focused = []
-  const props = { workspace: workspace(requestedAt), contextKey: 'context-a', onClose: () => {}, onFocusSource: row => focused.push(row.id) }
+  let refreshes = 0
+  const props = { workspace: workspace(requestedAt), contextKey: 'context-a', onClose: () => {}, onFocusSource: row => focused.push(row.id), onRefresh: async () => { refreshes += 1; return true } }
   const root = createRoot(environment.container)
   t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
 
@@ -211,6 +212,9 @@ test('mounted library selects, filters, clears, focuses source, resets context a
   await act(async () => byText(environment.container, 'button', 'View detail').dispatchEvent(new TestEvent('click', { bubbles: true })))
   assert.equal(byText(environment.container, 'a', 'Open or save signed image'), undefined)
   assert.match(environment.container.textContent, /signed image link has expired/)
+  await act(async () => byText(environment.container, 'button', 'Refresh exact download links').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.equal(refreshes, 1)
+  assert.equal(elements(environment.container, 'aside').length, 1)
 
   const prefixedPathWorkspace = workspace(clock)
   prefixedPathWorkspace.mediaAssets[0].signed_url = 'https://project.supabase.co/prefix/storage/v1/object/sign/design/a.png?token=signed'
@@ -424,4 +428,30 @@ test('D01 brief keeps unsaved edits through refresh, blocks a newer saved versio
   })))
   assert.equal(ref.current.isDirty(), false)
   assert.equal(elements(environment.container, 'input')[0].value, '')
+})
+
+test('D02 exact review preserves request key and approval when a later draft appears', async t => {
+  const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  t.after(() => server.close())
+  const { default: DesignAssetReviewPanel } = await server.ssrLoadModule('/src/components/DesignAssetReviewPanel.jsx')
+  const environment = mountedEnvironment()
+  const previous = { document: globalThis.document, window: globalThis.window, Event: globalThis.Event, Node: globalThis.Node, HTMLElement: globalThis.HTMLElement, act: globalThis.IS_REACT_ACT_ENVIRONMENT }
+  Object.assign(globalThis, { document: environment.document, window: environment.window, Event: TestEvent, Node: TestNode, HTMLElement: TestElement, IS_REACT_ACT_ENVIRONMENT: true })
+  t.after(() => Object.assign(globalThis, previous))
+  const root = createRoot(environment.container)
+  t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
+  const versions = [{ id: 'draft-v2', version_number: 2, source_kind: 'upload' }, { id: 'approved-v1', version_number: 1, source_kind: 'upload' }]
+  const reviews = [{ id: 'submitted-v1', asset_id: 'asset-1', asset_version_id: 'approved-v1', event_type: 'submitted', actor_id: 'author', created_at: '2026-09-21T00:00:00Z' }, { id: 'decision-v1', asset_id: 'asset-1', asset_version_id: 'approved-v1', event_type: 'approved', actor_id: 'reviewer', created_at: '2026-09-21T00:01:00Z' }]
+  const calls = []
+  const props = { row: { assetId: 'asset-1', assetVersions: versions }, reviews, contextKey: 'context-a', currentUserId: 'author', canSubmit: true, canDecide: false, onReview: async request => { calls.push(request); return false }, onRefresh: async () => true }
+  await act(async () => root.render(createElement(DesignAssetReviewPanel, props)))
+  assert.match(environment.container.textContent, /Working version: v2\. Approved original: v1/)
+  await act(async () => byText(environment.container, 'button', 'Submit this exact version').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].asset_version_id, 'draft-v2')
+  await act(async () => byText(environment.container, 'button', 'Refresh exact review status').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  await act(async () => byText(environment.container, 'button', 'Retry same request').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.equal(calls.length, 2)
+  assert.equal(calls[0].operation_key, calls[1].operation_key)
+  assert.match(environment.container.textContent, /Approved original: v1/)
 })

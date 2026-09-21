@@ -11,6 +11,7 @@ import {
   freezeCreativeBrief, saveCreativeBrief, setWorkingDirection, validateCreativeBrief,
 } from './creativeBriefs.ts'
 import { archiveDesignAsset, DESIGN_ASSET_BUCKET, uploadDesignAssetVersion } from './assetVersions.ts'
+import { recordAssetReview } from './assetReviews.ts'
 import { previewDeliveryPackage, saveDeliveryPackage } from './packageDelivery.ts'
 
 type Client = ReturnType<typeof createClient<any>>
@@ -299,6 +300,10 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
     }
     return { root: { kind: 'engagement', id: requiredActionId(body.engagement_id, 'Engagement') }, requestedOrganizationId }
   }
+  if (action === 'submit_asset_review' || action === 'decide_asset_review') {
+    const root = await callerAssetVersionRoot(userClient, [requiredActionId(body.asset_version_id, 'Asset version')])
+    return { root: { kind: 'engagement', id: root!.engagementId }, requestedOrganizationId }
+  }
   if (action === 'archive_asset') {
     const root = await callerDesignAssetRoot(userClient, requiredActionId(body.asset_id, 'Asset'))
     return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
@@ -449,7 +454,7 @@ export function hasWorkshopAuthority(membership: Json, action: string) {
   if (membership.member_kind !== 'team') return false
   const role = String(membership.role || ''); const department = String(membership.department_id || '')
   if (LEADER_ROLES.has(role)) return true
-  if (action === 'release_direction') return department === 'design' && role === 'department_manager'
+  if (action === 'release_direction' || action === 'decide_asset_review') return department === 'design' && role === 'department_manager'
   if (action === 'generate_content_request_image' || action === 'create_content_request_video_placeholder') {
     return department === 'content'
   }
@@ -1745,6 +1750,8 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       sign_media_assets: () => signMediaAssets(admin, userClient, body),
       upload_asset_version: () => uploadDesignAssetVersion(admin, body, user.id),
       archive_asset: () => archiveDesignAsset(admin, body, user.id),
+      submit_asset_review: () => recordAssetReview(admin, userClient, body, user.id),
+      decide_asset_review: () => recordAssetReview(admin, userClient, body, user.id),
       sign_asset_versions: () => signAssetVersions(admin, userClient, body),
       preview_delivery_package: () => previewDeliveryPackage(admin, userClient, body),
       save_delivery_package: () => saveDeliveryPackage(admin, userClient, body, user.id),
