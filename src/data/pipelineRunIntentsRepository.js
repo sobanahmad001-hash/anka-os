@@ -32,7 +32,7 @@ export function createPipelineRunIntentsRepository(supabase) {
           .select('id, run_intent_id, work_manifest, work_sha256, planned_at, planned_by')
           .eq('organization_id', organization).in('run_intent_id', ids), signal),
         dataOrThrow(supabase.from('ai_execution_jobs')
-          .select('id, run_intent_id, run_plan_id, status, blocked_reason, input_sha256, created_at, steps:ai_execution_job_steps(id, ordinal, work_item_id, department_id, status, input_sha256)')
+          .select('id, run_intent_id, run_plan_id, status, blocked_reason, input_sha256, created_at, steps:ai_execution_job_steps(id, ordinal, work_item_id, department_id, status, input_sha256), input_approval:ai_execution_input_approvals(id, approved_by, approved_at)')
           .eq('organization_id', organization).in('run_intent_id', ids), signal),
       ])
       const reviewByIntent = new Map((reviews || []).map(review => [review.run_intent_id, review]))
@@ -43,6 +43,15 @@ export function createPipelineRunIntentsRepository(supabase) {
         plan: planByIntent.get(row.id) || null,
         job: jobByIntent.get(row.id) || null,
       }))
+    },
+    approveInputs({ organizationId, jobId, requestId, acknowledged }, { signal } = {}) {
+      if (acknowledged !== true) throw new TypeError('Explicit AI-use acknowledgement is required')
+      return dataOrThrow(supabase.rpc('approve_pipeline_ai_job_inputs', {
+        p_organization_id: requiredId(organizationId, 'Organization'),
+        p_job_id: requiredId(jobId, 'Execution job'),
+        p_request_id: requiredId(requestId, 'Request'),
+        p_acknowledged: true,
+      }), signal)
     },
     start({ organizationId, engagementId, requestId, assetIds = [] }, { signal } = {}) {
       if (!Array.isArray(assetIds) || assetIds.length > 20 || new Set(assetIds).size !== assetIds.length) {

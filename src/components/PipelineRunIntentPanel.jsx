@@ -12,11 +12,13 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
   const [reason, setReason] = useState('')
   const [planningId, setPlanningId] = useState('')
   const [planWorkIds, setPlanWorkIds] = useState([])
+  const [acknowledgedJobId, setAcknowledgedJobId] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const startRequestId = useRef('')
   const reviewRequest = useRef(null)
   const planRequest = useRef(null)
+  const inputApprovalRequest = useRef(null)
   const allowed = ['system_owner', 'operations_admin'].includes(membership?.role)
 
   async function refresh() {
@@ -87,6 +89,28 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
     }
   }
 
+  async function approveInputs(jobId) {
+    if (acknowledgedJobId !== jobId) return
+    if (inputApprovalRequest.current?.jobId !== jobId) {
+      inputApprovalRequest.current = { jobId, id: crypto.randomUUID() }
+    }
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const result = await pipelineRunIntents.approveInputs({
+        organizationId, jobId, requestId: inputApprovalRequest.current.id, acknowledged: true,
+      }, { signal })
+      setNotice(`Exact text inputs ${result.idempotent_replay ? 'recovered' : 'acknowledged'}. The job remains blocked from provider execution and spend.`)
+      inputApprovalRequest.current = null
+      setAcknowledgedJobId('')
+      await refresh()
+    } catch (failure) {
+      if (!signal?.aborted) setError(failure.message)
+    } finally {
+      if (!signal?.aborted) setBusy(false)
+    }
+  }
   function toggleWork(id) {
     planRequest.current = null
     setPlanWorkIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id])
@@ -143,6 +167,22 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
         {row.review?.reason && <p className="mt-1">Review reason: {row.review.reason}</p>}
         {row.plan && <p className="mt-2 text-emerald-300">Linked plan: {row.plan.work_manifest.length} work items pinned · hash {row.plan.work_sha256.slice(0, 12)}. No task status was changed.</p>}
         {row.job && <p className="mt-1 text-amber-300">Execution job: {row.job.steps?.length ?? 0} pinned work steps · {row.job.status.replaceAll('_', ' ')} · {row.job.blocked_reason} No provider request has been sent.</p>}
+        {row.job?.input_approval && <p className="mt-1 text-emerald-300">Exact text inputs acknowledged by the requester. Provider execution remains blocked.</p>}
+        {allowed && row.requested_by === user?.id && row.plan && row.job && !row.job.input_approval
+          && row.review?.decision === 'accepted_for_planning' && <div className="mt-2">
+            {(row.input_manifest?.assets?.length || 0) > 0
+              ? <p className="text-amber-300">Selected assets need separate AI-use classification before this job can be acknowledged.</p>
+              : <><label className="flex items-start gap-2 text-slate-300">
+                <input type="checkbox" checked={acknowledgedJobId === row.job.id}
+                  onChange={event => setAcknowledgedJobId(event.target.checked ? row.job.id : '')} />
+                <span>I confirm this exact engagement and work context may be sent to the organization-approved text AI model. No assets are selected.</span>
+              </label>
+              <button type="button" disabled={busy || acknowledgedJobId !== row.job.id}
+                onClick={() => approveInputs(row.job.id)}
+                className="mt-2 rounded-lg border border-violet-500 px-3 py-1.5 font-semibold text-violet-200 disabled:opacity-40">
+                Acknowledge exact inputs
+              </button></>}
+          </div>}
         {allowed && !row.review && row.requested_by !== user?.id && <div className="mt-2">
           {reviewingId === row.id ? <div className="space-y-2">
             <label className="block">Review reason (required to reject)
