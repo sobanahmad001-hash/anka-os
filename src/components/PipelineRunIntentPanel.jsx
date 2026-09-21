@@ -169,6 +169,7 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
         {row.plan && <p className="mt-2 text-emerald-300">Linked plan: {row.plan.work_manifest.length} work items pinned Â· hash {row.plan.work_sha256.slice(0, 12)}. No task status was changed.</p>}
         {row.job && <p className="mt-1 text-amber-300">Execution job: {row.job.steps?.length ?? 0} pinned work items Â· {row.job.configured_steps?.length ?? 0} configured step instances Â· {row.job.status.replaceAll('_', ' ')} Â· {row.job.blocked_reason} No provider request has been sent.</p>}
         {row.job?.input_approval && <p className="mt-1 text-emerald-300">Exact text inputs acknowledged by the requester. Provider execution remains blocked.</p>}
+        <RunCardDetails row={row} />
         {allowed && row.requested_by === user?.id && row.plan && row.job && !row.job.input_approval
           && row.review?.decision === 'accepted_for_planning' && <div className="mt-2">
             {(row.input_manifest?.assets?.length || 0) > 0
@@ -215,4 +216,29 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
       </div>)}
     </div>
   </section>
+}
+
+function RunCardDetails({ row }) {
+  const work = row.plan?.work_manifest || []
+  const configured = [...(row.job?.configured_steps || [])].sort((a, b) => a.ordinal - b.ordinal)
+  const phase = row.review?.decision === 'rejected' ? 'Rejected'
+    : !row.review ? 'Awaiting review'
+      : !row.plan ? 'Awaiting linked work'
+        : 'Waiting for configuration'
+  return <details className="mt-3 rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
+    <summary className="cursor-pointer font-semibold text-slate-200">Run card · {phase}</summary>
+    <p className="mt-2">Exact request {row.id.slice(0, 8)} · {row.project_activation_id ? 'project activation ' + row.project_activation_id.slice(0, 8) : 'no project activation'}</p>
+    <p className="mt-1">Provider spend recorded for this job: none. Execution and output release remain blocked.</p>
+    <h4 className="mt-3 font-semibold text-slate-300">Configured execution steps ({configured.length})</h4>
+    {configured.length ? <ol className="mt-1 max-h-64 list-decimal space-y-1 overflow-y-auto pl-5">
+      {configured.map(step => <li key={step.id}>
+        {step.definition_step?.label || step.step_key} · instance {step.instance_number} · {step.definition_step?.kind?.replaceAll('_', ' ')} · {step.status.replaceAll('_', ' ')}
+        {step.definition_step?.depends_on?.length ? ' · after ' + step.definition_step.depends_on.join(', ') : ''}
+      </li>)}
+    </ol> : <p className="mt-1 text-slate-500">No configured step instances are linked to this request.</p>}
+    <h4 className="mt-3 font-semibold text-slate-300">Linked ordinary work items ({work.length})</h4>
+    {work.length ? <ol className="mt-1 max-h-64 list-decimal space-y-1 overflow-y-auto pl-5">
+      {work.map(item => <li key={item.id}>{item.title} · {item.department_id || 'unassigned'} · version {item.row_version}</li>)}
+    </ol> : <p className="mt-1 text-slate-500">No work plan has been linked.</p>}
+  </details>
 }
