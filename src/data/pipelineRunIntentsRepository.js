@@ -15,12 +15,20 @@ async function dataOrThrow(query, signal) {
 export function createPipelineRunIntentsRepository(supabase) {
   if (!supabase?.from || !supabase?.rpc) throw new TypeError('A Supabase-compatible client is required')
   return Object.freeze({
-    list(organizationId, engagementId, { signal } = {}) {
-      return dataOrThrow(supabase.from('pipeline_run_intents')
+    async list(organizationId, engagementId, { signal } = {}) {
+      const organization = requiredId(organizationId, 'Organization')
+      const rows = await dataOrThrow(supabase.from('pipeline_run_intents')
         .select('id, request_id, status, input_sha256, input_manifest, requested_at, requested_by')
-        .eq('organization_id', requiredId(organizationId, 'Organization'))
+        .eq('organization_id', organization)
         .eq('engagement_id', requiredId(engagementId, 'Engagement'))
         .order('requested_at', { ascending: false }).limit(20), signal)
+      if (!rows?.length) return []
+      const reviews = await dataOrThrow(supabase.from('pipeline_run_intent_reviews')
+        .select('id, run_intent_id, decision, reason, reviewed_by, reviewed_at')
+        .eq('organization_id', organization)
+        .in('run_intent_id', rows.map(row => row.id)), signal)
+      const reviewByIntent = new Map((reviews || []).map(review => [review.run_intent_id, review]))
+      return rows.map(row => ({ ...row, review: reviewByIntent.get(row.id) || null }))
     },
     start({ organizationId, engagementId, requestId, assetIds = [] }, { signal } = {}) {
       if (!Array.isArray(assetIds) || assetIds.length > 20 || new Set(assetIds).size !== assetIds.length) {
@@ -31,6 +39,22 @@ export function createPipelineRunIntentsRepository(supabase) {
         p_engagement_id: requiredId(engagementId, 'Engagement'),
         p_request_id: requiredId(requestId, 'Request'),
         p_asset_ids: assetIds.map(id => requiredId(id, 'Asset')),
+      }), signal)
+    },
+    review({ organizationId, runIntentId, requestId, decision, reason = '' }, { signal } = {}) {
+      if (!['accepted_for_planning', 'rejected'].includes(decision)) {
+        throw new TypeError('A valid review decision is required')
+      }
+      const normalizedReason = String(reason).trim()
+      if (normalizedReason.length > 1000 || (decision === 'rejected' && !normalizedReason)) {
+        throw new TypeError('A rejection reason of at most 1000 characters is required')
+      }
+      return dataOrThrow(supabase.rpc('review_pipeline_run_intent', {
+        p_organization_id: requiredId(organizationId, 'Organization'),
+        p_run_intent_id: requiredId(runIntentId, 'Run request'),
+        p_request_id: requiredId(requestId, 'Request'),
+        p_decision: decision,
+        p_reason: normalizedReason,
       }), signal)
     },
   })

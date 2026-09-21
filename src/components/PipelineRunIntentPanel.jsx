@@ -1,14 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
+import { useAuth } from '../context/AuthContext.jsx'
 import { pipelineRunIntents } from '../data/pipelineRunIntents.js'
 
 export default function PipelineRunIntentPanel({ organizationId, engagement, assets, membership, signal }) {
+  const { user } = useAuth()
   const [rows, setRows] = useState([])
   const [assetIds, setAssetIds] = useState([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [reviewingId, setReviewingId] = useState('')
+  const [reason, setReason] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
-  const requestId = useRef('')
+  const startRequestId = useRef('')
+  const reviewRequest = useRef(null)
   const allowed = ['system_owner', 'operations_admin'].includes(membership?.role)
 
   async function refresh() {
@@ -30,7 +35,7 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
   }, [organizationId, engagement.id, signal])
 
   function toggleAsset(id) {
-    requestId.current = ''
+    startRequestId.current = ''
     setAssetIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id])
   }
 
@@ -39,12 +44,38 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
     setError('')
     setNotice('')
     try {
-      if (!requestId.current) requestId.current = crypto.randomUUID()
+      if (!startRequestId.current) startRequestId.current = crypto.randomUUID()
       const result = await pipelineRunIntents.start({
-        organizationId, engagementId: engagement.id, requestId: requestId.current, assetIds,
+        organizationId, engagementId: engagement.id, requestId: startRequestId.current, assetIds,
       }, { signal })
       setNotice(`Run request ${result.idempotent_replay ? 'recovered' : 'recorded'} for review. No provider job or spend started.`)
-      requestId.current = ''
+      startRequestId.current = ''
+      await refresh()
+    } catch (failure) {
+      if (!signal?.aborted) setError(failure.message)
+    } finally {
+      if (!signal?.aborted) setBusy(false)
+    }
+  }
+
+  async function decide(runIntentId, decision) {
+    const normalizedReason = reason.trim()
+    const fingerprint = [runIntentId, decision, normalizedReason].join(':')
+    if (reviewRequest.current?.fingerprint !== fingerprint) {
+      reviewRequest.current = { fingerprint, id: crypto.randomUUID() }
+    }
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const result = await pipelineRunIntents.review({
+        organizationId, runIntentId, requestId: reviewRequest.current.id,
+        decision, reason: normalizedReason,
+      }, { signal })
+      setNotice(`Review ${result.idempotent_replay ? 'recovered' : 'recorded'}. This permits planning only; execution and spend remain blocked.`)
+      reviewRequest.current = null
+      setReviewingId('')
+      setReason('')
       await refresh()
     } catch (failure) {
       if (!signal?.aborted) setError(failure.message)
@@ -55,7 +86,7 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
 
   return <section className="rounded-2xl border border-white/[0.07] bg-[#0e111a]/80 p-5">
     <h2 className="font-semibold">Manual pipeline runs</h2>
-    <p className="mt-1 text-xs text-slate-500">Pin a published preset and selected engagement assets for review. Execution, approvals, and provider spend are not active yet.</p>
+    <p className="mt-1 text-xs text-slate-500">Pin a published preset and selected engagement assets for review. Planning review cannot submit provider work or spend budget.</p>
     {allowed && <div className="mt-4">
       <p className="text-xs font-medium text-slate-300">Pin assets (up to 20)</p>
       <div className="mt-2 space-y-2">{assets.map(asset => <label key={asset.id} className="flex gap-2 text-xs text-slate-400">
@@ -73,9 +104,24 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
       {loading && <p className="text-xs text-slate-500">Loading run requests…</p>}
       {!loading && rows.length === 0 && <p className="text-xs text-slate-500">No manual run requests yet.</p>}
       {rows.map(row => <div key={row.id} className="rounded-lg border border-white/[0.06] p-3 text-xs text-slate-400">
-        <span className="font-medium text-slate-200">{row.status.replaceAll('_', ' ')}</span>
+        <span className="font-medium text-slate-200">{row.review ? row.review.decision.replaceAll('_', ' ') : row.status.replaceAll('_', ' ')}</span>
         <span className="ml-2">{new Date(row.requested_at).toLocaleString()}</span>
         <p className="mt-1">Pinned preset {row.input_manifest?.pipeline?.version_id?.slice(0, 8)} · {row.input_manifest?.assets?.length || 0} assets · hash {row.input_sha256.slice(0, 12)}</p>
+        {row.review?.reason && <p className="mt-1">Review reason: {row.review.reason}</p>}
+        {allowed && !row.review && row.requested_by !== user?.id && <div className="mt-2">
+          {reviewingId === row.id ? <div className="space-y-2">
+            <label className="block">Review reason (required to reject)
+              <textarea maxLength={1000} value={reason} onChange={event => setReason(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/20 p-2 text-white" />
+            </label>
+            <div className="flex gap-2">
+              <button type="button" disabled={busy} onClick={() => decide(row.id, 'accepted_for_planning')} className="rounded-lg bg-violet-500 px-3 py-1.5 font-semibold text-white disabled:opacity-40">Accept for planning</button>
+              <button type="button" disabled={busy || !reason.trim()} onClick={() => decide(row.id, 'rejected')} className="rounded-lg border border-red-400/40 px-3 py-1.5 font-semibold text-red-300 disabled:opacity-40">Reject</button>
+              <button type="button" disabled={busy} onClick={() => { setReviewingId(''); setReason('') }} className="px-2">Cancel</button>
+            </div>
+          </div> : <button type="button" onClick={() => { setReviewingId(row.id); setReason('') }} className="font-semibold text-violet-300">Review request</button>}
+        </div>}
+        {!row.review && row.requested_by === user?.id && <p className="mt-1 text-amber-300">Another owner or operations admin must review this request.</p>}
       </div>)}
     </div>
   </section>
