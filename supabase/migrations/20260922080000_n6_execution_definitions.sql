@@ -213,7 +213,6 @@ declare
   actor uuid := (select auth.uid());
   definition public.pipeline_execution_definitions;
   approval_id uuid;
-  inserted boolean := false;
 begin
   if actor is null or p_definition_id is null or p_department_id is null then
     raise exception 'Authenticated definition and department are required.' using errcode = '22023';
@@ -240,6 +239,12 @@ begin
   ) then
     raise exception 'Department has no step in this definition.' using errcode = '22023';
   end if;
+  select id into approval_id from public.pipeline_execution_definition_approvals
+    where definition_id = definition.id and department_id = p_department_id
+      and approved_by = actor;
+  if found then
+    return jsonb_build_object('approval_id', approval_id, 'idempotent_replay', true);
+  end if;
   if exists (select 1 from public.pipeline_execution_publications
     where definition_id = definition.id) then
     raise exception 'Published definition cannot receive another approval.' using errcode = '55000';
@@ -247,16 +252,9 @@ begin
   insert into public.pipeline_execution_definition_approvals(
     organization_id, definition_id, department_id, approved_by
   ) values (definition.organization_id, definition.id, p_department_id, actor)
-  on conflict (definition_id, department_id, approved_by) do nothing
   returning id into approval_id;
-  inserted := found;
-  if not inserted then
-    select id into approval_id from public.pipeline_execution_definition_approvals
-      where definition_id = definition.id and department_id = p_department_id
-        and approved_by = actor;
-  end if;
   return jsonb_build_object('approval_id', approval_id,
-    'idempotent_replay', not inserted);
+    'idempotent_replay', false);
 end;
 $$;
 revoke all on function public.approve_pipeline_execution_definition(uuid, text)
