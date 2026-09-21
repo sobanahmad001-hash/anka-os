@@ -6,6 +6,7 @@ import {
   hasMarketingAuthority,
   requestedGoogleProviders,
   safeDateRange,
+  saveMarketingReport,
   validateBacklinkTarget,
   validateAdCampaign,
   validateAdGroup,
@@ -262,6 +263,50 @@ Deno.test('authenticated legacy save_artifact rejects campaign_brief before ever
   assertEquals(response.status, 409)
   assertEquals((await response.json()).error, 'Campaign briefs must be saved through the governed campaign brief workflow')
   assertEquals(sideEffects, [])
+})
+
+Deno.test('M05 report save binds the exact request and actor to one service-only RPC', async () => {
+  const organizationId = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
+  const engagementId = '11111111-1111-4111-8111-111111111111'
+  const requestId = '22222222-2222-4222-8222-222222222222'
+  const actorId = '33333333-3333-4333-8333-333333333333'
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+  const admin = {
+    from(table: string) {
+      const builder: any = { select: () => builder, eq: () => builder,
+        maybeSingle: async () => ({ data: table === 'engagements' ? { id: engagementId, organization_id: organizationId, brand_id: 'brand-id' } : null, error: null }),
+        limit: async () => ({ data: table === 'engagement_services' ? [{ id: 'service-id' }] : [], error: null }),
+      }
+      return builder
+    },
+    async rpc(name: string, args: Record<string, unknown>) {
+      calls.push({ name, args })
+      return { data: { id: 'saved-version', request_id: requestId }, error: null }
+    },
+  }
+  const content = { sources: ['Evidence v1'], period_start: '2026-08-01', period_end: '2026-08-31',
+    executive_summary: 'Demand improved.', insights: ['Sessions increased.'], recommended_actions: ['Review.'] }
+  const result = await saveMarketingReport({ admin, organizationId } as never, {
+    engagement_id: engagementId, request_id: requestId, artifact_id: null,
+    expected_latest_version_id: null, title: 'August report', content,
+  }, actorId)
+  assertEquals(result.request_id, requestId)
+  assertEquals(calls.length, 1)
+  assertEquals(calls[0].name, 'save_marketing_report_version')
+  assertEquals(calls[0].args.p_request_id, requestId)
+  assertEquals((calls[0].args.p_content as Record<string, unknown>).report_title, 'August report')
+  assertEquals(calls[0].args.p_actor_id, actorId)
+  assertEquals(calls[0].args.p_organization_id, organizationId)
+  assertEquals(calls[0].args.p_content_checksum?.toString().length, 64)
+  await assertRejects(() => saveMarketingReport({ admin, organizationId } as never, {
+    engagement_id: engagementId, request_id: 'invalid', title: 'August report', content,
+  }, actorId))
+  assertEquals(calls.length, 1)
+  const staleAdmin = { ...admin, rpc: async () => ({ data: null, error: { code: '40001', message: 'Report changed' } }) }
+  const stale = await assertRejects(() => saveMarketingReport({ admin: staleAdmin, organizationId } as never, {
+    engagement_id: engagementId, request_id: requestId, title: 'August report', content,
+  }, actorId))
+  assertEquals((stale as Error & { status: number }).status, 412)
 })
 
 Deno.test('marketing report preserves source, period, insight, and recommended action', () => {

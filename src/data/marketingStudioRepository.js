@@ -126,6 +126,7 @@ export function createMarketingStudioScope(organizationId, { signal, functionCli
   deleteAdKeyword: (engagementId, keywordId) => invoke(organizationId, 'delete_ad_keyword', { engagement_id: engagementId, keyword_id: keywordId }, options),
   importAdPerformance: (engagementId, adCampaignId, snapshotDate) => invoke(organizationId, 'import_ad_campaign_performance', { engagement_id: engagementId, ad_campaign_id: adCampaignId, snapshot_date: snapshotDate }, options),
   saveArtifact: input => invoke(organizationId, 'save_artifact', input, options),
+  saveMarketingReport: input => invoke(organizationId, 'save_marketing_report', input, options),
   saveCampaignBrief: input => invoke(organizationId, 'save_campaign_brief', input, options),
   proposeArtifact: proposals.proposeArtifact,
   proposeWorkItem: proposals.proposeWorkItem,

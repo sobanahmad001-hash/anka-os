@@ -759,6 +759,9 @@ async function saveArtifact(context: MarketingRequestContext, body: Json, actorI
   const engagementId = text(body.engagement_id, 80)
   const campaignId = text(body.campaign_id, 80)
   const artifactType = text(body.artifact_type, 60)
+  if (artifactType === 'marketing_report') {
+    throw Object.assign(new Error('Reports must use the replay-safe report workflow'), { status: 409 })
+  }
   if (artifactType === 'campaign_brief') {
     throw Object.assign(new Error('Campaign briefs must be saved through the governed campaign brief workflow'), { status: 409 })
   }
@@ -810,6 +813,28 @@ async function saveArtifact(context: MarketingRequestContext, body: Json, actorI
   return version
 }
 
+export async function saveMarketingReport(context: MarketingRequestContext, body: Json, actorId: string) {
+  const engagementId = text(body.engagement_id, 80)
+  await requireMarketingEngagement(context, engagementId)
+  const requestId = uuid(body.request_id, 'Report request ID')
+  const artifactId = body.artifact_id ? uuid(body.artifact_id, 'Report artifact ID') : null
+  const expectedLatestVersionId = body.expected_latest_version_id
+    ? uuid(body.expected_latest_version_id, 'Expected report version ID') : null
+  const title = text(body.title, 240)
+  if (!title) throw new Error('Report title is required')
+  const content = { ...validateMarketingArtifact('marketing_report', body.content), report_title: title }
+  const contentChecksum = await sha256(stableJson(content))
+  const { data, error } = await context.admin.rpc('save_marketing_report_version', {
+    p_organization_id: context.organizationId, p_engagement_id: engagementId,
+    p_artifact_id: artifactId, p_expected_latest_version_id: expectedLatestVersionId,
+    p_title: title, p_content: content, p_content_checksum: contentChecksum,
+    p_change_summary: text(body.change_summary, 1000), p_ai_use_allowed: body.ai_use_allowed === true,
+    p_request_id: requestId, p_actor_id: actorId,
+  })
+  if (error?.code === '40001') throw Object.assign(new Error(error.message), { status: 412 })
+  if (error) throw error
+  return data
+}
 async function saveCampaignBrief(context: MarketingRequestContext, body: Json, actorId: string) {
   const engagementId = text(body.engagement_id, 80)
   const campaignId = text(body.campaign_id, 80)
@@ -1338,6 +1363,7 @@ export async function handleRequest(
     if (action === 'delete_ad_keyword') return response({ data: await deleteAdKeyword(context, body) })
     if (action === 'import_ad_campaign_performance') return response({ data: await importAdCampaignPerformance(context, body, user.id) })
     if (action === 'save_artifact') return response({ data: await saveArtifact(context, body, user.id) })
+    if (action === 'save_marketing_report') return response({ data: await saveMarketingReport(context, body, user.id) })
     if (action === 'save_campaign_brief') return response({ data: await saveCampaignBrief(context, body, user.id) })
     if (action === 'save_campaign_plan') return response({ data: await saveCampaignPlan(context, body, user.id) })
     if (action === 'duplicate_campaign_plan') return response({ data: await duplicateCampaignPlan(context, body, user.id) })
