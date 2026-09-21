@@ -453,3 +453,48 @@ test('mounted review confirmation pins latest plan, official destination, review
   assert.match(environment.container.textContent, /campaign brief v3/)
   assert.match(environment.container.textContent, /pending/i)
 })
+
+test('approved campaign brief handoff requires exact recipient and retries one N3 request ID', async t => {
+  const { MarketingCampaignPlan, environment, root } = await mountedComponent(t)
+  const version = { id: 'plan-v1', organization_id: 'org-a', engagement_id: 'eng-a', campaign_id: 'campaign-a', brand_id: 'brand-a',
+    version_number: 1, lifecycle_status: 'draft', title: 'Campaign A', objective: 'Create reviewed assets', channels: ['Email'] }
+  const snapshot = { ...emptySnapshot(), versions: [version], requirements: [],
+    reviewSubmissions: [{ id: 'submission-a', organization_id: 'org-a', campaign_id: 'campaign-a', plan_version_id: version.id,
+      artifact_id: 'brief-a', artifact_version_id: 'brief-v1', approval_request_id: 'review-a' }],
+    reviewRequests: [{ id: 'review-a', campaign_plan_submission_id: 'submission-a', artifact_version_id: 'brief-v1', status: 'completed' }],
+    campaignBriefLinks: [{ organization_id: 'org-a', campaign_id: 'campaign-a', artifact_id: 'brief-a', relation_type: 'campaign_brief' }],
+    campaignBriefVersions: [{ id: 'brief-v1', organization_id: 'org-a', artifact_id: 'brief-a', content_checksum: 'a'.repeat(64), version_number: 1 }],
+    briefApprovals: [{ id: 'approval-a', organization_id: 'org-a', engagement_id: 'eng-a', artifact_id: 'brief-a', artifact_version_id: 'brief-v1' }],
+    recipientServices: [{ id: 'content-service', organization_id: 'org-a', engagement_id: 'eng-a', status: 'active',
+      service_catalog: { name: 'Content', department_id: 'content', is_active: true } }],
+    recipientWorkstreams: [{ id: 'content-workstream', organization_id: 'org-a', project_id: 'project-a', name: 'Content team', department_id: 'content', status: 'active' }],
+    handoffs: [] }
+  const calls = []
+  const repository = {
+    load: async () => snapshot, loadReviewApprovers: async () => [],
+    confirmHandoff: async input => { calls.push(input); if (calls.length === 1) throw new Error('Response lost after commit'); return { request_id: input.requestId, brief_version_id: input.briefVersionId, replayed: true } },
+    getHandoff: async () => null,
+  }
+  await act(async () => root.render(createElement(MarketingCampaignPlan, {
+    organizationId: 'org-a', engagement: { id: 'eng-a', name: 'Engagement A', project_id: 'project-a' },
+    campaign: { id: 'campaign-a', name: 'Campaign A' }, repository, canEdit: true,
+  })))
+  const send = () => byText(environment.container, 'button', 'Send internal N3 request')
+  assert.equal(send().disabled, true)
+  await setValue(byLabel(environment.container, 'Campaign handoff service'), 'content-service')
+  await setValue(byLabel(environment.container, 'Campaign handoff workstream'), 'content-workstream')
+  assert.equal(send().disabled, true)
+  await act(async () => byText(environment.container, 'button', 'Preview request').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.equal(send().disabled, false)
+  await act(async () => send().dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.match(environment.container.textContent, /outcome is uncertain/)
+  await act(async () => send().dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.equal(calls.length, 2)
+  assert.equal(calls[0].requestId, calls[1].requestId)
+  assert.equal(calls[0].planVersionId, 'plan-v1')
+  assert.equal(calls[0].briefVersionId, 'brief-v1')
+  assert.equal(calls[0].briefChecksum, 'a'.repeat(64))
+  assert.equal(calls[0].approvalId, 'approval-a')
+  assert.equal(calls[0].receivingWorkstreamId, 'content-workstream')
+  assert.match(environment.container.textContent, /Confirmed N3 request/)
+})

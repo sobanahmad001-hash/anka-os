@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import MarketingCampaignHandoffPanel from './MarketingCampaignHandoffPanel.jsx'
 import {
   acceptCampaignPlanSave, campaignPlanContextKey, campaignPlanDraft,
   campaignPlanDuplicatePreview, campaignPlanReviewPreview, campaignPlanSourceOptions,
@@ -47,7 +48,7 @@ export default function MarketingCampaignPlan({ organizationId, engagement, camp
       setLoading(false)
       return () => { live = false }
     }
-    Promise.all([repository.load(engagement.id, campaign.id), repository.loadReviewApprovers?.(engagement.id).catch(() => []) || []]).then(([next, availableApprovers]) => {
+    Promise.all([repository.load(engagement.id, campaign.id, engagement.project_id), repository.loadReviewApprovers?.(engagement.id).catch(() => []) || []]).then(([next, availableApprovers]) => {
       if (!live || activeKey.current !== contextKey) return
       setSnapshot(next)
       setApprovers(availableApprovers)
@@ -67,7 +68,7 @@ export default function MarketingCampaignPlan({ organizationId, engagement, camp
     })
     return () => { live = false }
   }, [
-    organizationId, engagement?.id, campaign?.id, campaign?.name, campaign?.objective,
+    organizationId, engagement?.id, engagement?.project_id, campaign?.id, campaign?.name, campaign?.objective,
     campaign?.planned_channels, campaign?.starts_on, campaign?.ends_on,
     repository, contextKey, onAccessError,
   ])
@@ -89,7 +90,7 @@ export default function MarketingCampaignPlan({ organizationId, engagement, camp
         expected_latest_version_id: latest?.id || null, source_plan_version_id: null, plan,
       })
       if (!acceptCampaignPlanSave(saved, requestedKey, activeKey.current)) return
-      const next = await repository.load(engagement.id, campaign.id)
+      const next = await repository.load(engagement.id, campaign.id, engagement.project_id)
       if (activeKey.current !== requestedKey) return
       setSnapshot(next); setViewingId(saved.id); setDraft(campaignPlanDraft(saved, next.requirements))
       setMessage(`Saved unapproved plan version ${saved.version_number}.`)
@@ -143,14 +144,14 @@ export default function MarketingCampaignPlan({ organizationId, engagement, camp
       if (confirmation.kind === 'duplicate') {
         const saved = await repository.duplicateDraft({ ...confirmation.request, idempotency_key: confirmation.idempotencyKey })
         if (!acceptCampaignPlanSave(saved, requestedKey, activeKey.current)) return
-        const next = await repository.load(engagement.id, campaign.id)
+        const next = await repository.load(engagement.id, campaign.id, engagement.project_id)
         if (activeKey.current !== requestedKey) return
         setSnapshot(next); setViewingId(saved.id); setDraft(campaignPlanDraft(saved, next.requirements))
         setMessage(`Duplicated plan version ${confirmation.preview.sourceVersionNumber} as unapproved version ${saved.version_number}; the exact source link was retained.`)
       } else {
         const result = await repository.submitReview({ ...confirmation.request, idempotency_key: confirmation.idempotencyKey })
         if (!acceptCampaignPlanSave(result, requestedKey, activeKey.current)) return
-        const next = await repository.load(engagement.id, campaign.id)
+        const next = await repository.load(engagement.id, campaign.id, engagement.project_id)
         if (activeKey.current !== requestedKey) return
         setSnapshot(next)
         setMessage(`Submitted exact plan version ${confirmation.preview.sourceVersionNumber} for campaign brief review. No approval or release was applied.`)
@@ -237,6 +238,7 @@ export default function MarketingCampaignPlan({ organizationId, engagement, camp
         <ol className="mt-3 space-y-3">{(snapshot.reviewSubmissions || []).map(submission => { const plan = snapshot.versions.find(item => item.id === submission.plan_version_id); const request = (snapshot.reviewRequests || []).find(item => item.id === submission.approval_request_id); return <li key={submission.id} className="rounded-lg border border-slate-800 p-3 text-xs leading-5 text-slate-400"><strong className="text-white">Plan v{plan?.version_number || '?'}</strong> → campaign brief v{submission.artifact_version_number}<br />{request?.status || 'Submitted'} · {submission.submitted_at}<br />{plan?.change_summary || 'No change summary'}<br /><span className="font-mono text-[10px]">{submission.plan_version_id}</span></li> })}</ol>
       </aside>
       </div>
+      {viewing && <MarketingCampaignHandoffPanel organizationId={organizationId} engagement={engagement} campaign={campaign} plan={viewing} snapshot={snapshot} repository={repository} canEdit={canEdit} onAccessError={onAccessError} />}
       {confirmation && <section role="dialog" aria-modal="true" aria-label={confirmation.kind === 'duplicate' ? 'Confirm campaign plan duplicate' : 'Confirm campaign plan review submission'} className="mt-6 rounded-2xl border border-amber-800/60 bg-amber-950/20 p-5">
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">Confirm exact destination and effect</p>
         <h3 className="mt-2 font-semibold text-white">{confirmation.kind === 'duplicate' ? 'Duplicate as draft' : 'Submit for campaign brief review'}</h3>
