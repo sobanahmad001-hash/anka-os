@@ -180,7 +180,8 @@ test('mounted library selects, filters, clears, focuses source, resets context a
   Date.now = () => clock
   t.after(() => { Date.now = originalNow })
   const focused = []
-  const props = { workspace: workspace(requestedAt), contextKey: 'context-a', onClose: () => {}, onFocusSource: row => focused.push(row.id) }
+  let refreshes = 0
+  const props = { workspace: workspace(requestedAt), contextKey: 'context-a', onClose: () => {}, onFocusSource: row => focused.push(row.id), onRefresh: async () => { refreshes += 1; return true } }
   const root = createRoot(environment.container)
   t.after(() => { try { root.unmount() } catch { /* already unmounted */ } })
 
@@ -211,6 +212,9 @@ test('mounted library selects, filters, clears, focuses source, resets context a
   await act(async () => byText(environment.container, 'button', 'View detail').dispatchEvent(new TestEvent('click', { bubbles: true })))
   assert.equal(byText(environment.container, 'a', 'Open or save signed image'), undefined)
   assert.match(environment.container.textContent, /signed image link has expired/)
+  await act(async () => byText(environment.container, 'button', 'Refresh exact download links').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.equal(refreshes, 1)
+  assert.equal(elements(environment.container, 'aside').length, 1)
 
   const prefixedPathWorkspace = workspace(clock)
   prefixedPathWorkspace.mediaAssets[0].signed_url = 'https://project.supabase.co/prefix/storage/v1/object/sign/design/a.png?token=signed'
