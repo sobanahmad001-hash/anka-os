@@ -30,6 +30,6 @@ jobs:
       - run: deno test --frozen supabase/functions/integration-gateway/index.test.ts
       - run: deno check --frozen supabase/functions/integration-gateway/index.ts supabase/functions/integration-gateway/index.test.ts
       - run: deno check --frozen supabase/functions/invite-user/index.ts supabase/functions/invite-client-contact/index.ts supabase/functions/portal-file-url/index.ts
-      - run: deno test --frozen supabase/functions/pipeline-ai-runner/index.test.ts supabase/functions/_shared/n6PipelineCost.test.mjs
-      - run: deno check --frozen supabase/functions/pipeline-ai-runner/index.ts supabase/functions/pipeline-ai-runner/index.test.ts supabase/functions/_shared/n6PipelineCost.ts
+      - run: deno test --frozen supabase/functions/pipeline-ai-runner/index.test.ts supabase/functions/_shared/n6PipelineCost.test.mjs supabase/functions/_shared/n6PipelineFallback.test.mjs
+      - run: deno check --frozen supabase/functions/pipeline-ai-runner/index.ts supabase/functions/pipeline-ai-runner/index.test.ts supabase/functions/_shared/n6PipelineCost.ts supabase/functions/_shared/n6PipelineFallback.ts
       - run: npm run build
