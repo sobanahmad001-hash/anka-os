@@ -30,6 +30,7 @@ export function ScopedDepartmentChat({
   departmentLabel,
   engagement,
   artifactDefinitions = {},
+  allowArtifactDraft = true,
   artifactForType = () => null,
   stageForType = () => null,
   onCreated,
@@ -217,7 +218,7 @@ export function ScopedDepartmentChat({
     clearComposer()
     if (!saved) return
     setPrompt(saved.prompt || '')
-    setProposalMode(saved.proposal_mode || 'answer')
+    setProposalMode(!allowArtifactDraft && saved.proposal_mode === 'artifact' ? 'answer' : saved.proposal_mode || 'answer')
     if (profile.artifactTypes.includes(saved.artifact_type)) setArtifactType(saved.artifact_type)
     if (profile.workItemTypes.includes(saved.work_item_type)) setWorkItemType(saved.work_item_type)
     setTitle(saved.work_item_title || '')
@@ -800,6 +801,7 @@ export function ScopedDepartmentChat({
   async function submit(event) {
     event.preventDefault()
     if (busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim()) return
+    if (!allowArtifactDraft && proposalMode === 'artifact') { setError('Open the specialist Studio to draft an artifact.'); return }
     const isCurrent = completion.current.begin()
     if (!isCurrent()) return
     const targetConversationId = conversationId
@@ -1030,7 +1032,7 @@ export function ScopedDepartmentChat({
         <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Task mode
           <select disabled={busy || historyBusy} className={`${INPUT} mt-2 normal-case tracking-normal`} value={proposalMode} onChange={event => setProposalMode(event.target.value)}>
             {supportsSavedConversations && <option value="answer">Conversational answer</option>}
-            <option value="artifact">Artifact draft</option>
+            {allowArtifactDraft && <option value="artifact">Artifact draft</option>}
             <option value="work_item">Work item draft</option>
           </select>
         </label>

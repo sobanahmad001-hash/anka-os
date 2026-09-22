@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { WORKSHOP_TABS } from '../data/workshopTabs.js'
 
-export default function WorkshopTabs({ departmentId, activeTab, onChange }) {
+export default function WorkshopTabs({ departmentId, activeTab, onChange, tabs = WORKSHOP_TABS }) {
   const tabListRef = useRef(null)
   const tabRefs = useRef(new Map())
 
@@ -13,14 +13,14 @@ export default function WorkshopTabs({ departmentId, activeTab, onChange }) {
 
   function handleKeyDown(event, currentIndex) {
     let nextIndex
-    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % WORKSHOP_TABS.length
-    else if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + WORKSHOP_TABS.length) % WORKSHOP_TABS.length
+    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length
+    else if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
     else if (event.key === 'Home') nextIndex = 0
-    else if (event.key === 'End') nextIndex = WORKSHOP_TABS.length - 1
+    else if (event.key === 'End') nextIndex = tabs.length - 1
     else return
 
     event.preventDefault()
-    const nextId = WORKSHOP_TABS[nextIndex][0]
+    const nextId = tabs[nextIndex][0]
     tabRefs.current.get(nextId)?.focus()
     onChange(nextId)
   }
@@ -33,7 +33,7 @@ export default function WorkshopTabs({ departmentId, activeTab, onChange }) {
       role="tablist"
       className="mt-6 flex gap-1 overflow-x-auto border-b border-slate-800"
     >
-      {WORKSHOP_TABS.map(([id, label], index) => {
+      {tabs.map(([id, label], index) => {
         const selected = activeTab === id
         return (
           <button
