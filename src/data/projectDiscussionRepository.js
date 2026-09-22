@@ -51,7 +51,7 @@ export function createProjectDiscussionRepository(client) {
       }
       return data.options
     },
-    async post({ organizationId, projectId, requestId, content, parentCommentId = null, links = [] }) {
+    async post({ organizationId, projectId, requestId, content, parentCommentId = null, links = [] }, { signal } = {}) {
       if (![organizationId, projectId, requestId].every(validId)
         || (parentCommentId && !validId(parentCommentId))
         || typeof content !== 'string' || !content.trim() || content.trim().length > 8000
@@ -61,10 +61,13 @@ export function createProjectDiscussionRepository(client) {
         || new Set(links.map(link => `${link.kind}:${link.id}`)).size !== links.length) {
         throw new TypeError('Valid project message required')
       }
-      const { data, error, status } = await client.rpc('post_project_discussion_message_with_links', {
+      signal?.throwIfAborted()
+      let query = client.rpc('post_project_discussion_message_with_links', {
         p_organization_id: organizationId, p_project_id: projectId, p_request_id: requestId,
         p_content: content.trim(), p_parent_comment_id: parentCommentId, p_links: links,
       })
+      if (signal && typeof query.abortSignal === 'function') query = query.abortSignal(signal)
+      const { data, error, status } = await query
       if (error) throw failure(error, status, 'Unable to post project message')
       if (data?.organization_id !== organizationId || data.project_id !== projectId
         || data.request_id !== requestId || data.comment_id !== requestId) {

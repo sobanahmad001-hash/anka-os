@@ -42,6 +42,25 @@ test('project discussion post sends one exact scoped message and rejects a misma
     requestId: request, content: 'Project update' }), /did not match/)
 })
 
+test('project discussion post uses the current scope signal and stops before dispatch when aborted', async () => {
+  const controller = new AbortController()
+  let seenSignal
+  let calls = 0
+  const query = {
+    abortSignal(signal) { seenSignal = signal; return this },
+    then(resolve) { return Promise.resolve({ data: { organization_id: org, project_id: project,
+      request_id: request, comment_id: request } }).then(resolve) },
+  }
+  const repository = createProjectDiscussionRepository({ rpc() { calls += 1; return query } })
+  const input = { organizationId: org, projectId: project, requestId: request, content: 'A scoped update' }
+  await repository.post(input, { signal: controller.signal })
+  assert.equal(seenSignal, controller.signal)
+  assert.equal(calls, 1)
+  controller.abort()
+  await assert.rejects(repository.post(input, { signal: controller.signal }), error => error.name === 'AbortError')
+  assert.equal(calls, 1)
+})
+
 test('discussion references are scoped in options, posts, and resolved pages', async () => {
   const calls = []
   const link = { kind: 'file', id: actor }
