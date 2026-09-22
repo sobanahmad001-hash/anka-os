@@ -315,7 +315,7 @@ export async function handleRequest(req: Request, dependencies: {
         .select('id, connector_connection_id, model_id, revoked_at, verified_at')
         .eq('organization_id', selectedOrganizationId).is('revoked_at', null)
       if (contextConfigurationError) throw contextConfigurationError
-      const engagementChecks = await Promise.all((data || []).map(async connection => {
+      const engagementChecks = await Promise.all((data || []).map(async (connection: { id: string }) => {
         const { data: mapping, error: mappingError } = await adminClient
           .from('integration_connection_engagements').select('connection_id')
           .eq('organization_id', selectedOrganizationId).eq('connection_id', connection.id)
@@ -484,7 +484,7 @@ export async function handleRequest(req: Request, dependencies: {
         return json({ error: 'Choose up to 20 verified models' }, 400)
       }
       const verified = new Set(verifiedModelIds(connection))
-      const modelIds = [...new Set(body.model_ids.map((value: unknown) => text(value, 120)))]
+      const modelIds = [...new Set((body.model_ids as unknown[]).map((value: unknown): string => text(value, 120)))]
       if (modelIds.some((modelId: string) => !modelId || !verified.has(modelId))) {
         return json({ error: 'Model selection contains an unverified model' }, 400)
       }
