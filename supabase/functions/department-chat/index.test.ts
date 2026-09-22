@@ -385,6 +385,35 @@ function selectedOrganizationFixture() {
   }
 }
 
+Deno.test('new context conversations stay owner-private and selected-organization scoped', async () => {
+  const fixture = selectedOrganizationFixture()
+  const conversationId = 'a0000000-0000-4000-8000-000000000001'
+  fixture.rows.department_chat_conversations.push({
+    id: conversationId, organization_id: 'B', context_kind: 'organization',
+    project_id: null, engagement_id: null, department_id: null,
+    owner_id: 'actor', title: 'OS conversation', state: 'active', next_sequence: 1,
+  })
+  const allowed = await fixture.request({
+    action: 'get_context_conversation', organization_id: 'B', conversation_id: conversationId,
+  })
+  assertEquals(allowed.status, 200, await allowed.clone().text())
+  const denied = await fixture.request({
+    action: 'get_context_conversation', organization_id: 'A', conversation_id: conversationId,
+  })
+  assertEquals(denied.status, 404)
+  fixture.rows.department_chat_conversations.push({
+    id: 'a0000000-0000-4000-8000-000000000002', organization_id: 'B',
+    context_kind: 'department_private', project_id: null, engagement_id: null,
+    department_id: 'design', owner_id: 'actor', title: 'Private Design', state: 'active',
+  })
+  const wrongDepartment = await fixture.request({
+    action: 'get_context_conversation', organization_id: 'B',
+    conversation_id: 'a0000000-0000-4000-8000-000000000002',
+  })
+  assertEquals(wrongDepartment.status, 403)
+  assertEquals(fixture.providerCalls(), 0)
+})
+
 Deno.test('P9 model selection accepts only an approved verified configuration identity', () => {
   const configurations = [
     { id: 'configuration-default', model_id: 'verified-default', display_name: 'Default', is_default: true },
