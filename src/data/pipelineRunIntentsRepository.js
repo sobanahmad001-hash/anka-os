@@ -59,6 +59,16 @@ export function createPipelineRunIntentsRepository(supabase) {
         p_job_id: requiredId(jobId, 'Execution job'),
       }), signal)
     },
+    releaseConfirmedRefusal({ organizationId, attemptId, requestId, evidence }, { signal } = {}) {
+      const value = String(evidence ?? '').trim()
+      if (!value || value.length > 1000) throw new TypeError('Release evidence of at most 1000 characters is required')
+      return dataOrThrow(supabase.rpc('release_pipeline_ai_confirmed_refusal', {
+        p_organization_id: requiredId(organizationId, 'Organization'),
+        p_attempt_id: requiredId(attemptId, 'AI attempt'),
+        p_request_id: requiredId(requestId, 'Request'),
+        p_evidence: value,
+      }), signal)
+    },
     getOutputForReview({ organizationId, outputId }, { signal } = {}) {
       return dataOrThrow(supabase.rpc('get_pipeline_ai_step_output_for_review', {
         p_organization_id: requiredId(organizationId, 'Organization'),

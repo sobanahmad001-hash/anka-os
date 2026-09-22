@@ -17,6 +17,7 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
   const [outputDraft, setOutputDraft] = useState(null)
   const [executionStatus, setExecutionStatus] = useState({})
   const [statusBusyId, setStatusBusyId] = useState('')
+  const [releaseDraft, setReleaseDraft] = useState(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const startRequestId = useRef('')
@@ -25,6 +26,7 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
   const inputApprovalRequest = useRef(null)
   const manualActionRequest = useRef(null)
   const outputReviewRequest = useRef(null)
+  const releaseRequest = useRef(null)
   const allowed = ['system_owner', 'operations_admin'].includes(membership?.role)
   const manualEligible = ['system_owner', 'operations_admin', 'department_manager', 'project_manager', 'project_owner'].includes(membership?.role)
   const reviewEligible = ['system_owner', 'operations_admin', 'executive', 'department_manager'].includes(membership?.role)
@@ -56,6 +58,32 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
       if (!signal?.aborted) setError(failure.message)
     } finally {
       if (!signal?.aborted) setStatusBusyId('')
+    }
+  }
+
+  async function releaseConfirmedRefusal(jobId, item) {
+    if (releaseDraft?.attemptId !== item.attempt_id || !releaseDraft.evidence.trim()) return
+    const evidence = releaseDraft.evidence.trim()
+    const fingerprint = item.attempt_id + ':' + evidence
+    if (releaseRequest.current?.fingerprint !== fingerprint) {
+      releaseRequest.current = { fingerprint, id: crypto.randomUUID() }
+    }
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const result = await pipelineRunIntents.releaseConfirmedRefusal({
+        organizationId, attemptId: item.attempt_id,
+        requestId: releaseRequest.current.id, evidence,
+      }, { signal })
+      setNotice(`Confirmed refusal ${result.idempotent_replay ? 'recovered' : 'reviewed'}; held budget released.`)
+      releaseRequest.current = null
+      setReleaseDraft(null)
+      await readExecutionStatus(jobId)
+    } catch (failure) {
+      if (!signal?.aborted) setError(failure.message)
+    } finally {
+      if (!signal?.aborted) setBusy(false)
     }
   }
 
@@ -273,6 +301,23 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
               <li key={item.step_id}>{item.step_key}: {executionStepState(item)}
                 {item.reserved_max_microusd != null ? ` · reserved ceiling ${item.reserved_max_microusd} µUSD` : ''}
                 {item.accounted_cost_microusd != null ? ` · accounted token cost ${item.accounted_cost_microusd} µUSD` : ''}
+                {item.attempt_id && row.requested_by !== user?.id
+                  && ['reserved', 'uncertain'].includes(item.reservation_status)
+                  && item.claimed_routes > 0 && item.claimed_routes === item.confirmed_rejections
+                  && <div className="mt-2">
+                    {releaseDraft?.attemptId === item.attempt_id ? <>
+                      <textarea maxLength={1000} value={releaseDraft.evidence}
+                        onChange={event => setReleaseDraft({ attemptId: item.attempt_id, evidence: event.target.value })}
+                        placeholder="Evidence that every claimed route refused without charge"
+                        className="w-full rounded-lg border border-white/10 bg-black/20 p-2 text-white" />
+                      <button type="button" disabled={busy || !releaseDraft.evidence.trim()}
+                        onClick={() => releaseConfirmedRefusal(row.job.id, item)}
+                        className="font-semibold text-emerald-300 disabled:opacity-40">Release held budget</button>
+                      <button type="button" onClick={() => setReleaseDraft(null)} className="ml-3 text-slate-400">Cancel</button>
+                    </> : <button type="button" disabled={busy}
+                      onClick={() => setReleaseDraft({ attemptId: item.attempt_id, evidence: '' })}
+                      className="font-semibold text-violet-300 disabled:opacity-40">Review confirmed refusal</button>}
+                  </div>}
               </li>)}</ul>
           </div>}
         </div>}
