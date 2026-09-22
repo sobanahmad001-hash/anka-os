@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { projectDiscussionRepository } from '../data/projectDiscussionRepository.js'
 import _ProjectTaskProposalPanel from './ProjectTaskProposalPanel.jsx'
 import _ProjectHandoffPanel from './ProjectHandoffPanel.jsx'
+import _ProjectMemoryPanel from './ProjectMemoryPanel.jsx'
 
 export default function ProjectDiscussionPanel({ organizationId, projectId, tasks, workstreams, scopeRevision, requestSignal, onAccessError, onApplied }) {
   const [page, setPage] = useState(null)
@@ -97,7 +98,7 @@ export default function ProjectDiscussionPanel({ organizationId, projectId, task
           <span key={`${link.kind}:${link.id}`} className="rounded-lg border border-white/10 px-2 py-1 text-xs text-slate-300">
             {link.available ? `${link.kind === 'member' ? '@' : ''}${link.label}` : 'Reference unavailable'}
           </span>)}</div>}
-        <div className="mt-3 flex gap-4">{!item.parent_comment_id && <button type="button" onClick={() => { setReplyTo(item); requestId.current = null }} className="text-xs text-violet-300 hover:text-violet-200">Reply</button>}<button type="button" onClick={() => { setSourceCommentId(item.id); globalThis.document?.getElementById('project-task-proposals')?.scrollIntoView?.({ behavior: 'smooth' }) }} className="text-xs text-violet-300 hover:text-violet-200">Propose task change</button><button type="button" onClick={() => { setSourceCommentId(item.id); globalThis.document?.getElementById('project-handoffs')?.scrollIntoView?.({ behavior: 'smooth' }) }} className="text-xs text-violet-300 hover:text-violet-200">Create handoff</button></div>
+        <div className="mt-3 flex gap-4">{!item.parent_comment_id && <button type="button" onClick={() => { setReplyTo(item); requestId.current = null }} className="text-xs text-violet-300 hover:text-violet-200">Reply</button>}<button type="button" onClick={() => { setSourceCommentId(item.id); globalThis.document?.getElementById('project-task-proposals')?.scrollIntoView?.({ behavior: 'smooth' }) }} className="text-xs text-violet-300 hover:text-violet-200">Propose task change</button><button type="button" onClick={() => { setSourceCommentId(item.id); globalThis.document?.getElementById('project-handoffs')?.scrollIntoView?.({ behavior: 'smooth' }) }} className="text-xs text-violet-300 hover:text-violet-200">Create handoff</button><button type="button" onClick={() => { setSourceCommentId(item.id); globalThis.document?.getElementById('project-memory-proposal')?.scrollIntoView?.({ behavior: 'smooth' }) }} className="text-xs text-violet-300 hover:text-violet-200">Propose lesson</button></div>
       </article>) : <p className="text-sm text-slate-500">No project messages yet.</p>}</div>}
     </div>
     {page && <form onSubmit={post} className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5">
@@ -132,6 +133,7 @@ export default function ProjectDiscussionPanel({ organizationId, projectId, task
       })}</div>}
       <button type="submit" disabled={saving || !message.trim()} className="mt-3 rounded-lg bg-violet-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{saving ? 'Posting…' : 'Post message'}</button>
     </form>}
+    <_ProjectMemoryPanel organizationId={organizationId} projectId={projectId} sourceCommentId={sourceCommentId} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={onAccessError} />
     <div id="project-task-proposals"><_ProjectTaskProposalPanel organizationId={organizationId} projectId={projectId} tasks={tasks} sourceCommentId={sourceCommentId} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={onAccessError} onApplied={onApplied} /></div>
     <div id="project-handoffs"><_ProjectHandoffPanel organizationId={organizationId} projectId={projectId} workstreams={workstreams} sourceCommentId={sourceCommentId} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={onAccessError} /></div>
   </section>
