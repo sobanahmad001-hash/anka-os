@@ -32,7 +32,7 @@ export function createPipelineRunIntentsRepository(supabase) {
           .select('id, run_intent_id, work_manifest, work_sha256, planned_at, planned_by')
           .eq('organization_id', organization).in('run_intent_id', ids), signal),
         dataOrThrow(supabase.from('ai_execution_jobs')
-          .select('id, run_intent_id, run_plan_id, status, blocked_reason, input_sha256, created_at, steps:ai_execution_job_steps(id, ordinal, work_item_id, department_id, status, input_sha256), configured_steps:ai_execution_configured_steps(id, ordinal, step_key, instance_number, definition_step, status, input_sha256), input_approval:ai_execution_input_approvals(id, approved_by, approved_at)')
+          .select('id, run_intent_id, run_plan_id, status, blocked_reason, input_sha256, created_at, steps:ai_execution_job_steps(id, ordinal, work_item_id, department_id, status, input_sha256), configured_steps:ai_execution_configured_steps(id, ordinal, step_key, instance_number, definition_step, status, input_sha256, progress:ai_execution_step_progress(status, state_version, started_by, completed_by)), input_approval:ai_execution_input_approvals(id, approved_by, approved_at)')
           .eq('organization_id', organization).in('run_intent_id', ids), signal),
       ])
       const reviewByIntent = new Map((reviews || []).map(review => [review.run_intent_id, review]))
@@ -51,6 +51,27 @@ export function createPipelineRunIntentsRepository(supabase) {
         p_job_id: requiredId(jobId, 'Execution job'),
         p_request_id: requiredId(requestId, 'Request'),
         p_acknowledged: true,
+      }), signal)
+    },
+    advanceManualStep({ organizationId, jobId, stepId, requestId, expectedVersion, action, evidence = '' }, { signal } = {}) {
+      if (!['start', 'complete', 'approve', 'pause', 'resume'].includes(action)) {
+        throw new TypeError('Choose a valid manual step action')
+      }
+      if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) {
+        throw new TypeError('A current step version is required')
+      }
+      const normalizedEvidence = String(evidence).trim()
+      if (normalizedEvidence.length > 1000 || (['complete', 'approve'].includes(action) && !normalizedEvidence)) {
+        throw new TypeError('Completion or approval requires evidence of at most 1000 characters')
+      }
+      return dataOrThrow(supabase.rpc('advance_pipeline_manual_step', {
+        p_organization_id: requiredId(organizationId, 'Organization'),
+        p_job_id: requiredId(jobId, 'Execution job'),
+        p_step_id: requiredId(stepId, 'Configured step'),
+        p_request_id: requiredId(requestId, 'Request'),
+        p_expected_version: expectedVersion,
+        p_action: action,
+        p_evidence: normalizedEvidence,
       }), signal)
     },
     start({ organizationId, engagementId, requestId, assetIds = [] }, { signal } = {}) {

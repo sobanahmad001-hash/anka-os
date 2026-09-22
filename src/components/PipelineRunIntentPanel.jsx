@@ -13,13 +13,16 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
   const [planningId, setPlanningId] = useState('')
   const [planWorkIds, setPlanWorkIds] = useState([])
   const [acknowledgedJobId, setAcknowledgedJobId] = useState('')
+  const [manualDraft, setManualDraft] = useState(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const startRequestId = useRef('')
   const reviewRequest = useRef(null)
   const planRequest = useRef(null)
   const inputApprovalRequest = useRef(null)
+  const manualActionRequest = useRef(null)
   const allowed = ['system_owner', 'operations_admin'].includes(membership?.role)
+  const manualEligible = ['system_owner', 'operations_admin', 'department_manager', 'project_manager', 'project_owner'].includes(membership?.role)
 
   async function refresh() {
     try {
@@ -111,6 +114,32 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
       if (!signal?.aborted) setBusy(false)
     }
   }
+  async function advanceManualStep(row, step, action, evidence = '') {
+    const normalizedEvidence = String(evidence).trim()
+    const version = step.progress?.state_version || 1
+    const fingerprint = [row.job.id, step.id, version, action, normalizedEvidence].join(':')
+    if (manualActionRequest.current?.fingerprint !== fingerprint) {
+      manualActionRequest.current = { fingerprint, id: crypto.randomUUID() }
+    }
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const result = await pipelineRunIntents.advanceManualStep({
+        organizationId, jobId: row.job.id, stepId: step.id,
+        requestId: manualActionRequest.current.id, expectedVersion: version,
+        action, evidence: normalizedEvidence,
+      }, { signal })
+      setNotice(`Manual step ${result.idempotent_replay ? 'recovered' : 'recorded'}: ${result.status.replaceAll('_', ' ')}. Provider execution remains blocked.`)
+      manualActionRequest.current = null
+      setManualDraft(null)
+      await refresh()
+    } catch (failure) {
+      if (!signal?.aborted) setError(failure.message)
+    } finally {
+      if (!signal?.aborted) setBusy(false)
+    }
+  }
   function toggleWork(id) {
     planRequest.current = null
     setPlanWorkIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id])
@@ -169,7 +198,9 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
         {row.plan && <p className="mt-2 text-emerald-300">Linked plan: {row.plan.work_manifest.length} work items pinned Â· hash {row.plan.work_sha256.slice(0, 12)}. No task status was changed.</p>}
         {row.job && <p className="mt-1 text-amber-300">Execution job: {row.job.steps?.length ?? 0} pinned work items Â· {row.job.configured_steps?.length ?? 0} configured step instances Â· {row.job.status.replaceAll('_', ' ')} Â· {row.job.blocked_reason} No provider request has been sent.</p>}
         {row.job?.input_approval && <p className="mt-1 text-emerald-300">Exact text inputs acknowledged by the requester. Provider execution remains blocked.</p>}
-        <RunCardDetails row={row} />
+        <RunCardDetails row={row} userId={user?.id} manualEligible={manualEligible}
+          manualDraft={manualDraft} setManualDraft={setManualDraft} busy={busy}
+          onManualAction={advanceManualStep} />
         {allowed && row.requested_by === user?.id && row.plan && row.job && !row.job.input_approval
           && row.review?.decision === 'accepted_for_planning' && <div className="mt-2">
             {(row.input_manifest?.assets?.length || 0) > 0
@@ -218,27 +249,59 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
   </section>
 }
 
-function RunCardDetails({ row }) {
+function RunCardDetails({ row, userId, manualEligible, manualDraft, setManualDraft, busy, onManualAction }) {
   const work = row.plan?.work_manifest || []
   const configured = [...(row.job?.configured_steps || [])].sort((a, b) => a.ordinal - b.ordinal)
+  const anyManualProgress = configured.some(step => step.progress?.status && step.progress.status !== 'waiting')
   const phase = row.review?.decision === 'rejected' ? 'Rejected'
     : !row.review ? 'Awaiting review'
       : !row.plan ? 'Awaiting linked work'
-        : 'Waiting for configuration'
+        : anyManualProgress ? 'Manual steps in progress; AI blocked' : 'Waiting for configuration'
   return <details className="mt-3 rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
-    <summary className="cursor-pointer font-semibold text-slate-200">Run card · {phase}</summary>
-    <p className="mt-2">Exact request {row.id.slice(0, 8)} · {row.project_activation_id ? 'project activation ' + row.project_activation_id.slice(0, 8) : 'no project activation'}</p>
-    <p className="mt-1">Provider spend recorded for this job: none. Execution and output release remain blocked.</p>
+    <summary className="cursor-pointer font-semibold text-slate-200">Run card Â· {phase}</summary>
+    <p className="mt-2">Exact request {row.id.slice(0, 8)} Â· {row.project_activation_id ? 'project activation ' + row.project_activation_id.slice(0, 8) : 'no project activation'}</p>
+    <p className="mt-1">Provider spend recorded for this job: none. AI execution and output release remain blocked.</p>
     <h4 className="mt-3 font-semibold text-slate-300">Configured execution steps ({configured.length})</h4>
-    {configured.length ? <ol className="mt-1 max-h-64 list-decimal space-y-1 overflow-y-auto pl-5">
-      {configured.map(step => <li key={step.id}>
-        {step.definition_step?.label || step.step_key} · instance {step.instance_number} · {step.definition_step?.kind?.replaceAll('_', ' ')} · {step.status.replaceAll('_', ' ')}
-        {step.definition_step?.depends_on?.length ? ' · after ' + step.definition_step.depends_on.join(', ') : ''}
-      </li>)}
+    {configured.length ? <ol className="mt-1 max-h-64 list-decimal space-y-2 overflow-y-auto pl-5">
+      {configured.map(step => {
+        const kind = step.definition_step?.kind
+        const status = step.progress?.status || step.status
+        const dependenciesReady = (step.definition_step?.depends_on || []).every(key =>
+          configured.filter(other => other.step_key === key).every(other => other.progress?.status === 'completed'))
+        const canAct = manualEligible && row.job?.input_approval && dependenciesReady
+        const draftOpen = manualDraft?.stepId === step.id
+        const evidenceAction = kind === 'approval_gate' ? 'approve' : 'complete'
+        return <li key={step.id}>
+          {step.definition_step?.label || step.step_key} Â· instance {step.instance_number} Â· {kind?.replaceAll('_', ' ')} Â· {status?.replaceAll('_', ' ')}
+          {step.definition_step?.depends_on?.length ? ' Â· after ' + step.definition_step.depends_on.join(', ') : ''}
+          {canAct && kind === 'human' && status === 'waiting' && <button type="button" disabled={busy}
+            onClick={() => onManualAction(row, step, 'start')} className="ml-2 font-semibold text-violet-300 disabled:opacity-40">Start</button>}
+          {canAct && kind === 'human' && status === 'in_progress' && <button type="button" disabled={busy}
+            onClick={() => onManualAction(row, step, 'pause')} className="ml-2 font-semibold text-violet-300 disabled:opacity-40">Pause</button>}
+          {canAct && kind === 'human' && status === 'paused' && <button type="button" disabled={busy}
+            onClick={() => onManualAction(row, step, 'resume')} className="ml-2 font-semibold text-violet-300 disabled:opacity-40">Resume</button>}
+          {canAct && ((kind === 'human' && status === 'in_progress')
+            || (kind === 'approval_gate' && status === 'waiting' && userId !== row.requested_by))
+            && <div className="mt-1">
+              {draftOpen && manualDraft.action === evidenceAction ? <>
+                <textarea maxLength={1000} value={manualDraft.evidence}
+                  onChange={event => setManualDraft({ ...manualDraft, evidence: event.target.value })}
+                  placeholder="Record the completed work or approval evidence"
+                  className="w-full rounded-lg border border-white/10 bg-black/20 p-2 text-white" />
+                <button type="button" disabled={busy || !manualDraft.evidence.trim()}
+                  onClick={() => onManualAction(row, step, evidenceAction, manualDraft.evidence)}
+                  className="font-semibold text-violet-300 disabled:opacity-40">Confirm {evidenceAction}</button>
+                <button type="button" onClick={() => setManualDraft(null)} className="ml-3 text-slate-400">Cancel</button>
+              </> : <button type="button" disabled={busy}
+                onClick={() => setManualDraft({ stepId: step.id, action: evidenceAction, evidence: '' })}
+                className="font-semibold text-violet-300 disabled:opacity-40">{evidenceAction === 'approve' ? 'Review gate' : 'Record completion'}</button>}
+            </div>}
+        </li>
+      })}
     </ol> : <p className="mt-1 text-slate-500">No configured step instances are linked to this request.</p>}
     <h4 className="mt-3 font-semibold text-slate-300">Linked ordinary work items ({work.length})</h4>
     {work.length ? <ol className="mt-1 max-h-64 list-decimal space-y-1 overflow-y-auto pl-5">
-      {work.map(item => <li key={item.id}>{item.title} · {item.department_id || 'unassigned'} · version {item.row_version}</li>)}
+      {work.map(item => <li key={item.id}>{item.title} Â· {item.department_id || 'unassigned'} Â· version {item.row_version}</li>)}
     </ol> : <p className="mt-1 text-slate-500">No work plan has been linked.</p>}
   </details>
 }
