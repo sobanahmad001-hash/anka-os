@@ -103,7 +103,6 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   }, [conversationId, requestScope, signal, showError])
 
   useEffect(() => {
-    if (contextKind !== 'organization') return
     let current = true
     integrations.listModelAllowlist(organizationId, { signal })
       .then(result => {
@@ -173,7 +172,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   }
 
   async function askAi(message, recoverOnly = false) {
-    if (contextKind !== 'organization' || aiBusyMessageId || busy) return
+    if (aiBusyMessageId || busy) return
     if (!recoverOnly && !selectedModelId) return
     const targetId = conversationId
     const savedRequest = dispatchRequests.current.get(message.id)
@@ -223,10 +222,10 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
 
   const selected = conversations.find(row => row.id === conversationId)
   const description = contextKind === 'department_private'
-    ? 'Only you can see these conversations. Save ideas without choosing a client engagement.'
+    ? 'Only you can see these conversations. AI replies require an approved model, a budget, and enabled paid execution.'
     : contextKind === 'organization'
       ? 'Only you can see this organization conversation. AI replies require an approved model, a budget, and enabled paid execution.'
-      : 'Only you can see these conversations for this project.'
+      : 'Only you can see these conversations for this project. AI replies require an approved model, a budget, and enabled paid execution.'
   return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5" aria-label={label}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 className="text-lg font-semibold text-white">{label}</h2>
@@ -254,15 +253,15 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
       <div className="min-h-64 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
         {!selected ? <p className="text-sm text-slate-500">Choose or create a conversation.</p> : <>
           <h3 className="font-semibold text-white">{selected.title}</h3>
-          {contextKind === 'organization' && <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
-            <label htmlFor="organization-conversation-model" className="block text-xs font-semibold uppercase tracking-wide text-slate-400">Approved organization AI model</label>
+          <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+            <label htmlFor="organization-conversation-model" className="block text-xs font-semibold uppercase tracking-wide text-slate-400">Approved private conversation AI model</label>
             <select id="organization-conversation-model" className={`${INPUT} mt-2`} value={selectedModelId}
               onChange={event => setSelectedModelId(event.target.value)} disabled={Boolean(aiBusyMessageId) || !modelOptions.length}>
               {!modelOptions.length && <option value="">No approved model available</option>}
               {modelOptions.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
             </select>
-            <p className="mt-2 text-xs text-slate-400">AI replies use a paid provider and count against the organization AI budget. The service will refuse execution until all controls are enabled.</p>
-          </div>}
+            <p className="mt-2 text-xs text-slate-400">AI replies use the approved organization-level provider connection and count against the organization AI budget. The service will refuse execution until all controls are enabled.</p>
+          </div>
           {hasOlder && <button type="button" disabled={olderBusy} onClick={loadOlder}
             className="mt-3 text-xs font-semibold text-violet-300 disabled:opacity-50">Load older messages</button>}
           <div className="mt-4 space-y-3" aria-live="polite">
@@ -270,7 +269,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
             {messages.map(message => <div key={message.id} className="rounded-xl border border-slate-800 bg-slate-900 p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-violet-300">{message.role === 'assistant' ? 'Anka AI' : 'You'}</p>
               <p className="mt-2 whitespace-pre-wrap text-sm text-slate-200">{message.body}</p>
-              {contextKind === 'organization' && message.role === 'user'
+              {message.role === 'user'
                 && !messages.some(reply => reply.in_reply_to_message_id === message.id) && <div className="mt-3 flex flex-wrap gap-3">
                   <button type="button" className="text-xs font-semibold text-violet-300 disabled:opacity-40"
                     disabled={!selectedModelId || Boolean(aiBusyMessageId) || busy}
