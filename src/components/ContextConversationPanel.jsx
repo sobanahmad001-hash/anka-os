@@ -198,7 +198,9 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
       setAiNotice('Audited reply saved in this private conversation.')
     } catch (reason) {
       if (signal.aborted || activeConversation.current !== targetId) return
-      if (reason.outcome === 'not_settled') {
+      if (reason.outcome === 'charged_without_reply') {
+        setAiNotice('Provider billing was confirmed but no reply was saved. Start a new message for another attempt.')
+      } else if (reason.outcome === 'not_settled') {
         setAiNotice('No saved AI reply is available for this message yet.')
       } else if (reason.mustNotSubmit) {
         setAiNotice('No second provider request will be sent. Check again later or ask an operator to review the uncertain outcome.')

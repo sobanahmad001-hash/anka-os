@@ -48,6 +48,12 @@ begin
       where claim.organization_id = p_organization_id
         and reservation.status in ('reserved', 'uncertain')
         and reservation.ai_run_id is null
+        and not exists (
+          select 1 from public.ai_runs run
+          where run.organization_id = claim.organization_id
+            and run.context_chat_message_id = claim.message_id
+            and run.capability = 'context_chat_answer'
+        )
         and not exists (select 1 from private.context_chat_confirmed_release_reviews review
           where review.claim_id = claim.id)
       order by claim.claimed_at desc, claim.id desc

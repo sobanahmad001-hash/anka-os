@@ -135,6 +135,23 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
     } catch {
       // No settled reply is available; continue through the current authorization checks.
     }
+    const savedRun = object(await rpc(admin, 'recover_context_chat_completed_run', {
+      p_organization_id: organizationId, p_message_id: messageId, p_actor_id: user.id,
+    }))
+    if (savedRun.status === 'settled') {
+      try {
+        const recovered = await rpc(admin, 'append_context_chat_audited_reply', {
+          p_organization_id: organizationId, p_message_id: messageId, p_actor_id: user.id,
+        })
+        return reply({ status: 'completed', message: recovered, must_not_submit: true })
+      } catch {
+        return reply({ status: 'pending_append', must_not_submit: true }, 503)
+      }
+    }
+    if (savedRun.status === 'charged_without_reply') {
+      return reply({ status: 'charged_without_reply', must_not_submit: true }, 409)
+    }
+    if (savedRun.status !== 'no_run') throw fail('Private reply recovery is unresolved')
     if (body.recover_only === true) {
       return reply({ status: 'not_settled', must_not_submit: true }, 409)
     }
