@@ -269,3 +269,20 @@ test('N6 status reads only an exact scoped job', async () => {
     p_organization_id: ID, p_job_id: OTHER,
   }]])
 })
+test('N6 confirmed refusal release sends exact attempt and evidence', async () => {
+  const calls = []
+  const repository = createPipelineRunIntentsRepository({
+    from() { throw new Error('Unexpected direct read') },
+    rpc(name, payload) {
+      calls.push([name, payload])
+      return Promise.resolve({ data: { status: 'released' }, error: null })
+    },
+  })
+  const base = { organizationId: ID, attemptId: OTHER, requestId: ID, evidence: ' All routes refused ' }
+  assert.throws(() => repository.releaseConfirmedRefusal({ ...base, evidence: ' ' }), /evidence/)
+  await repository.releaseConfirmedRefusal(base)
+  assert.deepEqual(calls, [['release_pipeline_ai_confirmed_refusal', {
+    p_organization_id: ID, p_attempt_id: OTHER, p_request_id: ID,
+    p_evidence: 'All routes refused',
+  }]])
+})
