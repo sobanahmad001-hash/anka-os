@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   environmentNav,
+  getEnvironmentFromPath,
   isNavigationItemActive,
   visibleEnvironmentItems,
 } from '../config/environmentNav.js'
@@ -16,7 +17,7 @@ const activeLabels = (pathname) => links
 test('primary navigation has one Workshop entry per production department', () => {
   assert.deepEqual(
     sphere.items.filter((item) => item.isHeader).map((item) => item.label),
-    ['Workspace', 'Workshops', 'Delivery & Support'],
+    ['Workspace', 'Workshops', 'Delivery & Support', 'Tools'],
   )
   assert.deepEqual(
     links.filter((item) => item.path.startsWith('/sphere/content')).map((item) => item.label),
@@ -44,39 +45,39 @@ test('specialist URLs highlight exactly their parent Workshop', () => {
     assert.deepEqual(activeLabels(pathname), [label], pathname)
   }
   assert.deepEqual(activeLabels('/sphere/workspace'), ['Home'])
+  assert.equal(getEnvironmentFromPath('/assistant'), 'sphere')
   assert.deepEqual(activeLabels('/sphere/portfolio'), ['Projects'])
   assert.deepEqual(activeLabels('/sphere/workspace/projects/project-1'), ['Projects'])
   assert.deepEqual(activeLabels('/sphere/workspace/items/project_task/task-1'), ['My Work'])
 })
 
-test('desktop and mobile share unchanged department and admin visibility rules', () => {
-  const signedOut = visibleEnvironmentItems(sphere, {}).filter((item) => item.path).map((item) => item.label)
-  assert.ok(signedOut.includes('Home'))
-  assert.ok(!signedOut.some((label) => label.endsWith('Workshop') || label === 'Development'))
+test('desktop and mobile use effective organization membership for navigation', () => {
+  const paths = (environment, access) => visibleEnvironmentItems(environment, access)
+    .filter(item => item.path).map(item => item.path)
+  const content = { organizationId: 'org-a', role: 'contributor', departmentId: 'content',
+    department_memberships: [{ department_id: 'design', status: 'active' }],
+    contributor_designations: [{ designation: 'executive', status: 'active' }] }
+  const contentPaths = paths(sphere, { activeMembership: content, aiAssistance: true })
+  assert.ok(contentPaths.includes('/sphere/content'))
+  assert.ok(contentPaths.includes('/assistant'))
+  assert.ok(!contentPaths.includes('/sphere/design'))
+  assert.ok(!contentPaths.includes('/users'))
+  assert.deepEqual(paths(sphere, {}), [])
 
-  const contentMember = visibleEnvironmentItems(sphere, {
-    role: 'member',
-    department: 'content',
-    aiAssistance: false,
-  }).filter((item) => item.path).map((item) => item.label)
-  assert.ok(contentMember.includes('Content Workshop'))
-  assert.ok(contentMember.includes('Sphere Events'))
-  assert.ok(!contentMember.includes('Design Workshop'))
-  assert.ok(!contentMember.includes('Marketing Workshop'))
-  assert.ok(!contentMember.includes('Development'))
+  const leader = { organizationId: 'org-a', role: 'system_owner', departmentId: null }
+  const leaderPaths = paths(sphere, { activeMembership: leader })
+  for (const path of ['/sphere/content', '/sphere/design', '/sphere/marketing',
+    '/sphere/delivery', '/users', '/settings']) assert.ok(leaderPaths.includes(path))
+  assert.ok(!paths(sphere, { activeMembership: leader, aiAssistance: false }).includes('/assistant'))
 
-  const admin = visibleEnvironmentItems(sphere, {
-    role: 'admin',
-    department: null,
-    aiAssistance: false,
-  }).filter((item) => item.path).map((item) => item.label)
-  for (const label of ['Content Workshop', 'Design Workshop', 'Marketing Workshop', 'Development']) {
-    assert.ok(admin.includes(label))
-  }
-
-  const adminEnvironment = environmentNav.find((environment) => environment.key === 'admin')
-  assert.equal(visibleEnvironmentItems(adminEnvironment, { role: 'member' }).length, 0)
-  assert.ok(visibleEnvironmentItems(adminEnvironment, { role: 'admin' }).length > 0)
+  const adminEnvironment = environmentNav.find(environment => environment.key === 'admin')
+  assert.deepEqual(paths(adminEnvironment, { activeMembership: content }), [])
+  assert.deepEqual(paths(adminEnvironment, { activeMembership: leader }), ['/users', '/settings'])
+  assert.ok(paths(adminEnvironment, { activeMembership: content, profileRole: 'admin' })
+    .includes('/admin/living-product-document'))
+  assert.ok(!paths(adminEnvironment, { activeMembership: content, profileRole: 'admin' }).includes('/settings'))
+  assert.ok(!paths(adminEnvironment, { activeMembership: content, profileRole: 'member' })
+    .includes('/admin/living-product-document'))
 })
 
 test('specialist tools remain routed inside their parent Workshops with safe return links', () => {
@@ -105,6 +106,8 @@ test('specialist tools remain routed inside their parent Workshops with safe ret
   assert.match(sidebar, /isNavigationItemActive/)
   assert.match(mobile, /visibleEnvironmentItems/)
   assert.match(mobile, /isNavigationItemActive/)
+  assert.match(sidebar, /activeMembership/)
+  assert.match(mobile, /activeMembership/)
 
   for (const file of ['ContentStudio', 'DesignWorkshop', 'DesignSystems', 'MarketingStudio', 'TechnicalSeoTracking']) {
     const source = readFileSync(new URL('../apps/' + file + '.jsx', import.meta.url), 'utf8')
