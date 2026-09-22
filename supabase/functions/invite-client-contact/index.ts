@@ -38,23 +38,30 @@ serve(async request => {
     }
 
     const body = await request.json()
+    const organizationId = typeof body.organizationId === 'string' ? body.organizationId : ''
     const clientId = typeof body.clientId === 'string' ? body.clientId : ''
     const fullName = typeof body.fullName === 'string' ? body.fullName.trim() : ''
     const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
     const portalRole = typeof body.portalRole === 'string' ? body.portalRole : 'collaborator'
     const projectIds = Array.isArray(body.projectIds) ? [...new Set(body.projectIds.filter((id: unknown) => typeof id === 'string'))] : []
+    if (organizationId !== ORGANIZATION_ID) return json({ error: 'Active organization mismatch' }, 403)
     if (!clientId || !fullName || !email.includes('@')) return json({ error: 'Client, full name, and a valid email are required' }, 400)
     if (!PORTAL_ROLES.has(portalRole)) return json({ error: 'Invalid portal role' }, 400)
     if (!projectIds.length) return json({ error: 'Select at least one project' }, 400)
 
+    const { data: clientRecord, error: clientError } = await adminClient.from('clients')
+      .select('id').eq('id', clientId).eq('organization_id', ORGANIZATION_ID).maybeSingle()
+    if (clientError || !clientRecord) return json({ error: 'Client is unavailable in this organization' }, 404)
+
     const { data: projects, error: projectError } = await adminClient.from('projects')
-      .select('id').eq('client_id', clientId).in('id', projectIds).is('archived_at', null)
+      .select('id').eq('organization_id', ORGANIZATION_ID).eq('client_id', clientId).in('id', projectIds).is('archived_at', null)
     if (projectError || projects?.length !== projectIds.length) return json({ error: 'One or more projects do not belong to this client' }, 400)
 
-    const origin = request.headers.get('origin')
+    const appUrl = new URL(Deno.env.get('ANKA_APP_URL') || 'https://anka-os.vercel.app')
+    if (!['https:', 'http:'].includes(appUrl.protocol) || appUrl.username || appUrl.password || appUrl.search || appUrl.hash) throw new Error('Invalid ANKA_APP_URL')
     const { data: invited, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(email, {
       data: { full_name: fullName, account_kind: 'client' },
-      redirectTo: origin ? `${origin}/auth/callback` : undefined,
+      redirectTo: new URL('/auth/callback', appUrl).toString(),
     })
     if (inviteError || !invited.user) throw inviteError ?? new Error('Client invite did not create a user')
 

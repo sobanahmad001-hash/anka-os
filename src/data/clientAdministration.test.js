@@ -22,7 +22,11 @@ test('active client intake uses agency client and brand records', () => {
 test('client invitation is server-authorized and project-scoped', () => {
   assert.match(inviteFunction, /from\('organization_memberships'\)/)
   assert.match(inviteFunction, /auth\.admin\.inviteUserByEmail/)
-  assert.match(inviteFunction, /\.eq\('client_id', clientId\)\.in\('id', projectIds\)/)
+  assert.match(inviteFunction, /\.eq\('organization_id', ORGANIZATION_ID\)\.eq\('client_id', clientId\)\.in\('id', projectIds\)/)
+  assert.match(inviteFunction, /from\('clients'\)/)
+  assert.match(inviteFunction, /organizationId !== ORGANIZATION_ID/)
+  assert.match(inviteFunction, /new URL\('\/auth\/callback', appUrl\)/)
+  assert.doesNotMatch(inviteFunction, /request\.headers\.get\('origin'\)/)
   assert.match(inviteFunction, /from\('client_contacts'\)\.insert/)
   assert.match(inviteFunction, /from\('project_client_access'\)\.insert/)
 })
