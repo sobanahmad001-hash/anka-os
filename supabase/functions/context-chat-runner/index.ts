@@ -41,7 +41,24 @@ async function rpc(admin: Client, name: string, args: Json) {
   if (error) throw fail(name + ' rejected this request: ' + error.message)
   return data
 }
-export function buildPrivateConversationPrompt(rows: Json[], messageId: string) {
+export function privateConversationScope(context: Json) {
+  if (context.context_kind === 'organization'
+    && context.project_id == null && context.department_id == null) {
+    return { scope: 'owner_private_organization_conversation' }
+  }
+  if (context.context_kind === 'project_team' && context.department_id == null) {
+    return { scope: 'owner_private_project_conversation',
+      project_id: requiredId(context.project_id, 'project') }
+  }
+  if (context.context_kind === 'department_private'
+    && context.project_id == null
+    && ['content', 'design', 'marketing'].includes(context.department_id)) {
+    return { scope: 'owner_private_department_conversation', department_id: context.department_id }
+  }
+  throw fail('Exact private conversation context is required')
+}
+export function buildPrivateConversationPrompt(rows: Json[], messageId: string, context: Json) {
+  const boundScope = privateConversationScope(context)
   if (!Array.isArray(rows) || rows.length < 1 || rows.length > 12
     || rows[rows.length - 1]?.id !== messageId
     || rows[rows.length - 1]?.role !== 'user') throw fail('Current human turn is unavailable')
@@ -54,12 +71,10 @@ export function buildPrivateConversationPrompt(rows: Json[], messageId: string) 
     }
     return { role: row.role, text: row.body.slice(-8000) }
   })
-  let prompt = JSON.stringify({ scope: 'owner_private_organization_conversation',
-    source_message_id: messageId, turns })
+  let prompt = JSON.stringify({ ...boundScope, source_message_id: messageId, turns })
   while (turns.length > 1 && new TextEncoder().encode(prompt).length > 24000) {
     turns.shift()
-    prompt = JSON.stringify({ scope: 'owner_private_organization_conversation',
-      source_message_id: messageId, turns })
+    prompt = JSON.stringify({ ...boundScope, source_message_id: messageId, turns })
   }
   if (new TextEncoder().encode(prompt).length > 24000) throw fail('Conversation context exceeds the model bound')
   return prompt
@@ -121,7 +136,7 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
       throw fail('Completed owner message is required', 403)
     }
     const conversation = await one(admin.from('department_chat_conversations')
-      .select('id,organization_id,owner_id,context_kind,state')
+      .select('id,organization_id,owner_id,context_kind,project_id,department_id,state')
       .eq('id', source.conversation_id).eq('organization_id', organizationId)
       .eq('owner_id', user.id).maybeSingle(), 'Private conversation')
     if (conversation.context_kind !== 'organization') {
@@ -183,7 +198,7 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
       .eq('status', 'completed').lte('sequence', source.sequence)
       .order('sequence', { ascending: false }).limit(12)
     if (historyError) throw fail('Conversation context is unavailable')
-    const prompt = buildPrivateConversationPrompt((history || []).reverse(), messageId)
+    const prompt = buildPrivateConversationPrompt((history || []).reverse(), messageId, conversation)
     const price = selectFreshPipelineRate(env.get(pricingEnv[provider]), configuration.model_id,
       new Date(), provider)
     const maxCost = conservativePipelineCeiling(prompt, price)
