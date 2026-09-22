@@ -360,7 +360,7 @@ export async function handleRequest(req: Request, dependencies: {
         return {
           ...publicConnection,
           department_ids: mappings.map((mapping) => mapping.department_id),
-          secret_configured: Boolean(connection.secret_name && Deno.env.get(connection.secret_name)),
+          secret_configured: Boolean(connection.secret_name && environment(connection.secret_name)),
         }
       }).filter((connection: Record<string, any>) => !departmentId || connection.department_ids.includes(departmentId))
       const connectionIds: string[] = visibleConnections.map((connection: Record<string, any>) => String(connection.id))
@@ -409,7 +409,7 @@ export async function handleRequest(req: Request, dependencies: {
         base_url: provider === 'wordpress' ? safeHttpsBaseUrl(body.base_url) : null,
         public_config: safePublicConfig(provider, body.public_config),
         secret_name: secretName,
-        status: secretName && Deno.env.get(secretName) ? 'configured' : 'disconnected',
+        status: secretName && environment(secretName) ? 'configured' : 'disconnected',
         created_by: user.id,
         archived_at: null,
       }
@@ -442,7 +442,7 @@ export async function handleRequest(req: Request, dependencies: {
         provider,
         metadata: { display_name: displayName, department_ids: departmentIds, organization_only: organizationOnly },
       })
-      return json({ connection: { ...connection, department_ids: departmentIds, secret_configured: Boolean(secretName && Deno.env.get(secretName)) } })
+      return json({ connection: { ...connection, department_ids: departmentIds, secret_configured: Boolean(secretName && environment(secretName)) } })
     }
 
     const connectionId = text(body.connection_id, 80)
@@ -545,7 +545,7 @@ export async function handleRequest(req: Request, dependencies: {
     }
 
     if (action === 'test') {
-      const providerSecret = connection.secret_name ? Deno.env.get(connection.secret_name) : null
+      const providerSecret = connection.secret_name ? environment(connection.secret_name) : null
       if (!providerSecret) {
         await adminClient.from('integration_connections').update({
           status: 'disconnected', last_checked_at: new Date().toISOString(), last_check_status: 'not_configured',
