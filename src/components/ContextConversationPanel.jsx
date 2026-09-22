@@ -165,7 +165,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   const description = contextKind === 'department_private'
     ? 'Only you can see these conversations. Save ideas without choosing a client engagement.'
     : contextKind === 'organization'
-      ? 'Only you can see these conversations for the selected organization.'
+      ? 'Only you can see these notes for the selected organization. AI replies are not active in this space yet.'
       : 'Only you can see these conversations for this project.'
   return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5" aria-label={label}>
     <div className="flex flex-wrap items-start justify-between gap-3">
