@@ -15,6 +15,8 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
   const [acknowledgedJobId, setAcknowledgedJobId] = useState('')
   const [manualDraft, setManualDraft] = useState(null)
   const [outputDraft, setOutputDraft] = useState(null)
+  const [executionStatus, setExecutionStatus] = useState({})
+  const [statusBusyId, setStatusBusyId] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const startRequestId = useRef('')
@@ -30,12 +32,30 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
   async function refresh() {
     try {
       const result = await pipelineRunIntents.list(organizationId, engagement.id, { signal })
-      if (!signal?.aborted) setRows(result || [])
+      if (!signal?.aborted) {
+        setRows(result || [])
+        setExecutionStatus({})
+      }
       if (!signal?.aborted) setError('')
     } catch (failure) {
       if (!signal?.aborted) setError(failure.message)
     } finally {
       if (!signal?.aborted) setLoading(false)
+    }
+  }
+
+  async function readExecutionStatus(jobId) {
+    setStatusBusyId(jobId)
+    setError('')
+    try {
+      const result = await pipelineRunIntents.getExecutionStatus({
+        organizationId, jobId,
+      }, { signal })
+      if (!signal?.aborted) setExecutionStatus(current => ({ ...current, [jobId]: result }))
+    } catch (failure) {
+      if (!signal?.aborted) setError(failure.message)
+    } finally {
+      if (!signal?.aborted) setStatusBusyId('')
     }
   }
 
@@ -239,8 +259,23 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
         <p className="mt-1">{row.project_activation_id ? `Project activation ${row.project_activation_id.slice(0, 8)} · steps hash ${row.selected_steps_sha256.slice(0, 12)}` : 'Unconfigured or historical request · provider execution blocked'}</p>
         {row.review?.reason && <p className="mt-1">Review reason: {row.review.reason}</p>}
         {row.plan && <p className="mt-2 text-emerald-300">Linked plan: {row.plan.work_manifest.length} work items pinned · hash {row.plan.work_sha256.slice(0, 12)}. No task status was changed.</p>}
-        {row.job && <p className="mt-1 text-amber-300">Execution job: {row.job.steps?.length ?? 0} pinned work items · {row.job.configured_steps?.length ?? 0} configured step instances · {row.job.status.replaceAll('_', ' ')} · {row.job.blocked_reason} No provider request has been sent.</p>}
-        {row.job?.input_approval && <p className="mt-1 text-emerald-300">Exact text inputs acknowledged by the requester. Provider execution remains blocked.</p>}
+        {row.job && <p className="mt-1 text-amber-300">Execution job: {row.job.steps?.length ?? 0} pinned work items · {row.job.configured_steps?.length ?? 0} configured step instances. Read execution status for current provider and budget state.</p>}
+        {row.job?.input_approval && <p className="mt-1 text-emerald-300">Exact text inputs acknowledged by the requester. Provider dispatch still requires current routing, budget and paid-execution settings.</p>}
+        {allowed && row.job && <div className="mt-2">
+          <button type="button" disabled={Boolean(statusBusyId)}
+            onClick={() => readExecutionStatus(row.job.id)}
+            className="font-semibold text-violet-300 disabled:opacity-40">
+            {statusBusyId === row.job.id ? 'Reading execution status…' : 'Read execution status'}
+          </button>
+          {executionStatus[row.job.id] && <div className="mt-2 rounded-lg border border-white/10 bg-black/20 p-2">
+            <p>Prepared attempts, claims and budget come from the current audit. An uncertain result must not be retried.</p>
+            <ul className="mt-1 space-y-1">{(executionStatus[row.job.id].steps || []).map(item =>
+              <li key={item.step_id}>{item.step_key}: {executionStepState(item)}
+                {item.reserved_max_microusd != null ? ` · reserved ceiling ${item.reserved_max_microusd} µUSD` : ''}
+                {item.accounted_cost_microusd != null ? ` · accounted token cost ${item.accounted_cost_microusd} µUSD` : ''}
+              </li>)}</ul>
+          </div>}
+        </div>}
         <RunCardDetails row={row} userId={user?.id} manualEligible={manualEligible}
           reviewEligible={reviewEligible} outputDraft={outputDraft} setOutputDraft={setOutputDraft}
           onOpenOutput={openOutput} onReviewOutput={reviewOutput}
@@ -302,11 +337,11 @@ function RunCardDetails({ row, userId, manualEligible, reviewEligible, outputDra
   const phase = row.review?.decision === 'rejected' ? 'Rejected'
     : !row.review ? 'Awaiting review'
       : !row.plan ? 'Awaiting linked work'
-        : anyManualProgress ? 'Manual steps in progress; AI blocked' : 'Waiting for configuration'
+        : anyManualProgress ? 'Manual steps in progress' : 'Awaiting configured steps'
   return <details className="mt-3 rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
     <summary className="cursor-pointer font-semibold text-slate-200">Run card · {phase}</summary>
     <p className="mt-2">Exact request {row.id.slice(0, 8)} · {row.project_activation_id ? 'project activation ' + row.project_activation_id.slice(0, 8) : 'no project activation'}</p>
-    <p className="mt-1">Provider spend recorded for this job: none. AI execution and output release remain blocked.</p>
+    <p className="mt-1">Only reconciled output costs appear here; claimed or uncertain provider outcomes may still hold budget. Outputs are never published automatically.</p>
     <h4 className="mt-3 font-semibold text-slate-300">Configured execution steps ({configured.length})</h4>
     {configured.length ? <ol className="mt-1 max-h-64 list-decimal space-y-2 overflow-y-auto pl-5">
       {configured.map(step => {
@@ -322,7 +357,7 @@ function RunCardDetails({ row, userId, manualEligible, reviewEligible, outputDra
           {step.definition_step?.depends_on?.length ? ' · after ' + step.definition_step.depends_on.join(', ') : ''}
           {step.output && <p className="mt-1 text-emerald-300">
             AI output {step.output.id.slice(0, 8)} · {step.output.provider} / {step.output.model_id}
-            · measured {step.output.measured_cost_microusd} µUSD · {step.output.review?.decision || 'pending human review'}.
+            · reconciled {step.output.measured_cost_microusd} µUSD · {step.output.review?.decision || 'pending human review'}.
             This output is not published.
           </p>}
           {reviewEligible && step.output && !step.output.review && userId !== row.requested_by && <div className="mt-1">
@@ -374,4 +409,14 @@ function RunCardDetails({ row, userId, manualEligible, reviewEligible, outputDra
       {work.map(item => <li key={item.id}>{item.title} · {item.department_id || 'unassigned'} · version {item.row_version}</li>)}
     </ol> : <p className="mt-1 text-slate-500">No work plan has been linked.</p>}
   </details>
+}
+
+function executionStepState(item) {
+  if (!item.attempt_id) return 'no AI attempt prepared'
+  if (!item.initial_claimed_at) return 'budget reserved; provider submission not claimed'
+  if (item.reservation_status === 'uncertain') return 'provider outcome unknown; do not retry'
+  if (item.reservation_status === 'released') return 'confirmed refusal; budget released'
+  if (item.reservation_status === 'settled') return 'output reconciled for human review'
+  if (item.claimed_routes > item.confirmed_rejections) return 'provider submission claimed; reconciliation pending'
+  return 'all claimed routes refused; budget recovery pending'
 }

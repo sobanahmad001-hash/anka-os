@@ -69,6 +69,9 @@ try {
   if ($LASTEXITCODE -ne 0 -or $claimCount -ne '1') { throw 'Concurrent claim persisted more than once.' }
   if ($WithFallback) {
     Invoke-LocalSql (Join-Path $PSScriptRoot 'n6-fallback-post-race-behavior.sql')
+    Invoke-LocalSql (Join-Path $PSScriptRoot 'n6-status-fixture.sql')
+    Invoke-LocalSql (Join-Path $PSScriptRoot '..\migrations\20260922220000_n6_execution_status_read.sql')
+    Invoke-LocalSql (Join-Path $PSScriptRoot 'n6-status-behavior.sql')
   }
   Write-Output "N6 isolated dispatch-claim checks passed. Cluster: $cluster"
 }
