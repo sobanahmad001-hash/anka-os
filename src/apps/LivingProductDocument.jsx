@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Navigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import OrganizationGate from '../components/OrganizationGate.jsx'
+import { useOrganization } from '../context/OrganizationContext.jsx'
 import { useLivingProductDocument } from '../hooks/useLivingProductDocument.js'
 import LPDTabs from '../components/LPDTabs'
 
@@ -18,7 +18,11 @@ function formatDate(iso) {
 }
 
 export default function LivingProductDocument() {
-  const { profile } = useAuth()
+  return <OrganizationGate><ScopedLivingProductDocument /></OrganizationGate>
+}
+
+function ScopedLivingProductDocument() {
+  const { activeMembership } = useOrganization()
   const { document, changelog, loading, saving, error, isAdmin, updateDocument } = useLivingProductDocument()
 
   const [activeTab, setActiveTab] = useState('document')
@@ -27,8 +31,9 @@ export default function LivingProductDocument() {
   const [changeNote, setChangeNote] = useState('')
   const [saveError, setSaveError] = useState(null)
 
-  if (!profile) return null
-  if (profile.role !== 'admin') return <Navigate to="/admin" replace />
+  if (!['system_owner', 'operations_admin', 'executive'].includes(activeMembership?.role)) {
+    return <div className="p-6 text-sm text-slate-300">Organization leadership access is required to read this document.</div>
+  }
 
   function handleEditStart() {
     setEditContent(document?.content || '')
@@ -59,7 +64,7 @@ export default function LivingProductDocument() {
         <div>
           <h1 className="text-2xl font-bold text-white">Living Product Document</h1>
           <p className="text-gray-400 text-sm mt-1">
-            Single source of truth for product vision, architecture, and decisions.
+            Product vision, architecture, and decisions for the selected organization.
           </p>
           {document?.updated_at && (
             <p className="text-gray-500 text-xs mt-1">
