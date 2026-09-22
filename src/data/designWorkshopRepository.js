@@ -36,7 +36,7 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
   return Object.freeze({
   async listEngagements() {
     return dataOrThrow(scopedFrom('engagements')
-      .select('id, organization_id, project_id, name, brand_id, status, agency_clients(name), brands(name), projects(client_id), engagement_services!inner(id, status, service_catalog!inner(name, department_id, is_active))')
+      .select('id, organization_id, project_id, name, brand_id, status, agency_clients(name), brands(name), projects!engagements_project_organization_fkey(client_id), engagement_services!inner(id, status, service_catalog!inner(name, department_id, is_active))')
       .eq('engagement_services.status', 'active')
       .eq('engagement_services.service_catalog.department_id', 'design')
       .eq('engagement_services.service_catalog.is_active', true)
@@ -83,7 +83,7 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
         ? dataOrThrow(scopedFrom('work_items').select('id, organization_id, project_id, engagement_id').eq('id', navigation.workRecord.id).is('deleted_at', null).maybeSingle())
         : Promise.resolve(null)
     const [engagement, stages, artifacts, versions, approvals, models, designServices, deliveryServices, sessions, pageFlows, experimentReviewers, navigationRecord] = await Promise.all([
-      dataOrThrow(scopedFrom('engagements').select('*, agency_clients(name), brands(name), projects(client_id)').eq('id', engagementId).single()),
+      dataOrThrow(scopedFrom('engagements').select('*, agency_clients(name), brands(name), projects!engagements_project_organization_fkey(client_id)').eq('id', engagementId).single()),
       dataOrThrow(scopedFrom('engagement_stage_instances').select('*').eq('engagement_id', engagementId).order('position')),
       dataOrThrow(scopedFrom('artifacts').select('*').eq('engagement_id', engagementId).order('created_at')),
       dataOrThrow(scopedFrom('artifact_versions').select('*, artifacts!inner(engagement_id)').eq('artifacts.engagement_id', engagementId).order('version_number')),

@@ -46,7 +46,7 @@ export const quickTasks = Object.freeze({
       dataOrThrow(supabase.from('engagement_services').select('engagement_id, status, service_catalog(department_id, is_active)').eq('organization_id', organizationId).eq('status', 'active')),
       dataOrThrow(supabase.from('artifacts').select('id, title, artifact_type, engagement_id, project_id, brand_id').eq('organization_id', organizationId).order('title')),
       dataOrThrow(supabase.from('organization_memberships').select('user_id, department_id, role').eq('organization_id', organizationId).eq('member_kind', 'team').eq('status', 'active')),
-      dataOrThrow(supabase.from('profiles').select('id, full_name, email')),
+      dataOrThrow(supabase.from('profiles').select('id, full_name')),
     ])
     const profileById = new Map((profiles || []).map(profile => [profile.id, profile]))
     const departmentsByEngagement = new Map()

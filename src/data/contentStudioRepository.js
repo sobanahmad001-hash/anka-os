@@ -39,7 +39,7 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
   organizationId,
   async listEngagements() {
     return dataOrThrow(supabase.from('engagements')
-      .select('id, organization_id, project_id, name, brand_id, status, agency_clients(name), brands(name), projects(client_id), engagement_services!inner(id, status, service_catalog!inner(id, name, department_id, is_active))')
+      .select('id, organization_id, project_id, name, brand_id, status, agency_clients(name), brands(name), projects!engagements_project_organization_fkey(client_id), engagement_services!inner(id, status, service_catalog!inner(id, name, department_id, is_active))')
       .eq('organization_id', organizationId).eq('engagement_services.status', 'active')
       .eq('engagement_services.service_catalog.department_id', 'content')
       .eq('engagement_services.service_catalog.is_active', true)
@@ -53,7 +53,7 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
         ? dataOrThrow(supabase.from('work_items').select('id, organization_id, project_id, engagement_id').eq('organization_id', organizationId).eq('id', navigation.workRecord.id).is('deleted_at', null).maybeSingle(), options)
         : Promise.resolve(null)
     const [engagement, stages, artifacts, versions, approvals, contentTasks, contentServices, navigationRecord, organization, copyRoots] = await Promise.all([
-      dataOrThrow(supabase.from('engagements').select('*, agency_clients(name), brands(name), projects(client_id)').eq('organization_id', organizationId).eq('id', engagementId).single(), options),
+      dataOrThrow(supabase.from('engagements').select('*, agency_clients(name), brands(name), projects!engagements_project_organization_fkey(client_id)').eq('organization_id', organizationId).eq('id', engagementId).single(), options),
       dataOrThrow(supabase.from('engagement_stage_instances').select('*').eq('organization_id', organizationId).eq('engagement_id', engagementId).order('position'), options),
       dataOrThrow(supabase.from('artifacts').select('*').eq('organization_id', organizationId).eq('engagement_id', engagementId).in('artifact_type', CONTENT_WORKSPACE_TYPES).order('created_at'), options),
       dataOrThrow(supabase.from('artifact_versions').select('*, artifacts!inner(engagement_id, artifact_type)').eq('organization_id', organizationId).eq('artifacts.engagement_id', engagementId).in('artifacts.artifact_type', CONTENT_WORKSPACE_TYPES).order('version_number'), options),
@@ -97,7 +97,7 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
 
   async loadLibrary() {
     const artifacts = await dataOrThrow(supabase.from('artifacts')
-      .select('id, organization_id, brand_id, engagement_id, engagement_stage_instance_id, artifact_type, title, created_by, created_at, engagements!inner(id, name, project_id, organization_id, projects(id, name))')
+      .select('id, organization_id, brand_id, engagement_id, engagement_stage_instance_id, artifact_type, title, created_by, created_at, engagements!artifacts_engagement_project_organization_fkey!inner(id, name, project_id, organization_id, projects!engagements_project_organization_fkey(id, name))')
       .eq('organization_id', organizationId).in('artifact_type', CONTENT_WORKSPACE_TYPES)
       .order('created_at', { ascending: false }), options)
     if (!artifacts.length) return {
@@ -153,7 +153,7 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
       ...approvals.flatMap(item => [item.approved_by]), ...comments.flatMap(item => [item.author_id, item.resolved_by]),
     ].filter(Boolean))]
     const profiles = userIds.length ? await dataOrThrow(supabase.from('profiles')
-      .select('id, full_name, email').in('id', userIds), options) : []
+      .select('id, full_name').in('id', userIds), options) : []
     const sourceVersionIds = recordedSourceVersionIds(versions).filter(id => !versionIds.includes(id))
     const sourceVersions = sourceVersionIds.length ? await dataOrThrow(supabase.from('artifact_versions')
       .select('id, organization_id, artifact_id, version_number, created_at, artifacts!inner(id, title, artifact_type, engagement_id)')

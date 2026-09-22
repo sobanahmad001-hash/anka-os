@@ -221,6 +221,20 @@ test('My Work scopes every tenant root and keeps organization A and B isolated',
   }
 })
 
+test('My Work keeps the engagement project label after explicit FK embedding', async () => {
+  const client = createFakeClient({
+    work_items: { data: [{
+      id: 'item-1', organization_id: 'org-a', engagement_id: 'engagement-1',
+      engagements: { id: 'engagement-1', name: 'Launch', projects: { id: 'project-1', name: 'Client site' } },
+    }], error: null },
+  })
+  const workspace = await createDeliveryRepository(client).getMyWork('user-1', 'org-a')
+  assert.equal(workspace.workItems[0].projects?.name, 'Client site')
+  const workItemSelect = client.calls.find(([table, operation]) => table === 'work_items' && operation === 'select')?.[2]
+  assert.match(workItemSelect, /engagements!work_items_engagement_project_organization_fkey/)
+  assert.doesNotMatch(workItemSelect, /\*, projects\(/)
+})
+
 test('WKS5 issues zero tenant queries without a selected organization and rejects foreign results', async () => {
   const emptyClient = createFakeClient()
   const repository = createDeliveryRepository(emptyClient)

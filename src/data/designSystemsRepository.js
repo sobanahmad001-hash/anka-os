@@ -40,7 +40,7 @@ export const designSystems = Object.freeze({
         .eq('service_catalog.department_id', 'design').eq('service_catalog.is_active', true)
         .order('activated_at')),
       dataOrThrow(supabase.from('artifacts')
-        .select('*, engagements(name, status), brands(name)')
+        .select('*, engagements!artifacts_engagement_project_organization_fkey(name, status), brands(name)')
         .eq('artifact_type', 'design_system').order('created_at', { ascending: false })),
       dataOrThrow(supabase.from('artifact_versions')
         .select('*, artifacts!inner(artifact_type)').eq('artifacts.artifact_type', 'design_system')

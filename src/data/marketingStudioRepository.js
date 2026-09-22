@@ -47,7 +47,7 @@ export function createMarketingStudioScope(organizationId, { signal, functionCli
 
   async listEngagements() {
     const rows = await dataOrThrow(supabase.from('engagements')
-      .select('id, organization_id, project_id, name, brand_id, status, agency_clients(name), brands(name), projects(client_id), engagement_services!inner(id, status, service_catalog!inner(id, name, department_id, is_active))')
+      .select('id, organization_id, project_id, name, brand_id, status, agency_clients(name), brands(name), projects!engagements_project_organization_fkey(client_id), engagement_services!inner(id, status, service_catalog!inner(id, name, department_id, is_active))')
       .eq('organization_id', organizationId)
       .eq('engagement_services.status', 'active')
       .eq('engagement_services.service_catalog.department_id', 'marketing')
@@ -62,7 +62,7 @@ export function createMarketingStudioScope(organizationId, { signal, functionCli
       : navigation.workRecord?.kind === 'engagement_work_item'
         ? dataOrThrow(supabase.from('work_items').select('id, organization_id, project_id, engagement_id').eq('organization_id', organizationId).eq('id', navigation.workRecord.id).is('deleted_at', null).maybeSingle(), options)
         : Promise.resolve(null)
-    const engagement = await dataOrThrow(supabase.from('engagements').select('*, agency_clients(name), brands(name), projects(client_id)')
+    const engagement = await dataOrThrow(supabase.from('engagements').select('*, agency_clients(name), brands(name), projects!engagements_project_organization_fkey(client_id)')
       .eq('organization_id', organizationId).eq('id', engagementId).single(), options)
     const outputQuery = navigation.output?.kind === 'artifact'
       ? dataOrThrow(supabase.from('artifact_versions').select('id, organization_id, artifact_id, artifacts!inner(id, engagement_id)').eq('organization_id', organizationId).eq('id', navigation.output.versionId).eq('artifact_id', navigation.output.id).eq('artifacts.engagement_id', engagementId).maybeSingle(), options)

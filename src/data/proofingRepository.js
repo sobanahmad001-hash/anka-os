@@ -28,7 +28,7 @@ export const proofing = Object.freeze({
       .select('*').eq(targetColumn, versionId).order('created_at'))
     const userIds = [...new Set(comments.flatMap(item => [item.author_id, item.resolved_by]).filter(Boolean))]
     const profiles = userIds.length
-      ? await dataOrThrow(supabase.from('profiles').select('id, full_name, email').in('id', userIds))
+      ? await dataOrThrow(supabase.from('profiles').select('id, full_name').in('id', userIds))
       : []
     const byUser = new Map(profiles.map(profile => [profile.id, profile]))
     return comments.map(comment => ({

@@ -159,7 +159,7 @@ export function createOperatingSpineRepository(client) {
       const userIds = [...new Set((memberships || []).map(item => item.user_id).filter(Boolean))]
       if (!userIds.length) return []
       const profiles = await dataOrThrow(
-        client.from('profiles').select('id, full_name, email, department, role').in('id', userIds),
+        client.from('profiles').select('id, full_name, department, role').in('id', userIds),
         signal
       )
       const profileById = new Map((profiles || []).map(profile => [profile.id, profile]))
