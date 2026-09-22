@@ -9,7 +9,7 @@ const repository = createPipelineAiTextRouteSettingsRepository(supabase)
 
 function availableModels(connections, departmentId) {
   return connections.flatMap(connection => {
-    if (connection.provider !== 'openai' || connection.status !== 'verified'
+    if (!['openai', 'anthropic', 'google_gemini'].includes(connection.provider) || connection.status !== 'verified'
       || !(connection.department_ids || []).includes(departmentId)) return []
     const verified = new Set(connection.verified_model_ids || [])
     return (connection.model_configurations || [])
@@ -17,7 +17,7 @@ function availableModels(connections, departmentId) {
         && !configuration.revoked_at && verified.has(configuration.model_id))
       .map(configuration => ({
         id: configuration.id,
-        label: `${configuration.model_id} · ${connection.display_name}`,
+        label: `${connection.provider} / ${configuration.model_id} · ${connection.display_name}`,
       }))
   })
 }

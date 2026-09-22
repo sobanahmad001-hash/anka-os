@@ -103,8 +103,11 @@ export function normalizeN7TextResult(provider: N7TextProvider, raw: unknown): N
     cached = usage.cachedContentTokenCount ?? 0
     outputTokens = usage.candidatesTokenCount
     const thoughts = usage.thoughtsTokenCount ?? 0
-    if (!token(thoughts)) throw new Error('Incomplete provider usage')
+    const toolUse = usage.toolUsePromptTokenCount ?? 0
+    if (!token(thoughts) || !token(toolUse) || toolUse !== 0) throw new Error('Incomplete provider usage')
     outputTokens += thoughts
+    if (!token(usage.totalTokenCount) || usage.totalTokenCount !== input + outputTokens)
+      throw new Error('Unreconciled provider usage')
   } else throw new Error('Unsupported text provider')
 
   if (!bounded(responseId, 160) || !bounded(model, 120) || !bounded(output, 40000)

@@ -12,6 +12,7 @@ function fixture(options: {
   role?: string
   membershipOrganizationId?: string
   connectionStatus?: string
+  provider?: string
   mappedDepartments?: string[]
   verifiedModelIds?: string[]
   history?: Array<Record<string, unknown>>
@@ -24,7 +25,7 @@ function fixture(options: {
   const connection = {
     id: '44444444-4444-4444-8444-444444444444',
     organization_id: ORG_B,
-    provider: 'openai',
+    provider: options.provider || 'openai',
     status: options.connectionStatus || 'verified',
     archived_at: null,
     display_name: 'Organization B OpenAI',
@@ -342,3 +343,24 @@ Deno.test('N7 Gemini verification rejects a model without text generation suppor
   }
   assertEquals(rejected, true)
 })
+
+for (const provider of ['anthropic', 'google_gemini']) {
+  Deno.test('N7 gateway lists and approves a verified ' + provider + ' text model', async () => {
+    const fixtureForProvider = fixture({ provider })
+    const list = await fixtureForProvider.request({
+      action: 'list_model_allowlist', organization_id: ORG_B,
+    })
+    const listed = await list.json()
+    assertEquals(list.status, 200)
+    assertEquals(listed.connections[0].provider, provider)
+    const save = await fixtureForProvider.request({
+      action: 'configure_model_allowlist', organization_id: ORG_B,
+      connection_id: fixtureForProvider.connection.id,
+      department_model_ids: { content: ['gpt-default'] },
+    })
+    assertEquals(save.status, 200)
+    assertEquals(fixtureForProvider.rpcCalls.at(-1)?.name,
+      'configure_department_chat_model_allowlist')
+    assertEquals(fixtureForProvider.providerCalls(), 0)
+  })
+}

@@ -2,7 +2,8 @@ import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { namedKey, sha256 } from '../_shared/googleOAuthTokens.ts'
 import { conservativePipelineCeiling, measuredPipelineTokenCost, selectFreshPipelineRate } from '../_shared/n6PipelineCost.ts'
 import { runConfirmedPipelineFallback } from '../_shared/n6PipelineFallback.ts'
-import { buildN7TextRequest } from '../_shared/n7TextProvider.ts'
+import { buildN7TextRequest, normalizeN7TextResult } from '../_shared/n7TextProvider.ts'
+import type { N7TextProvider, N7TextResult } from '../_shared/n7TextProvider.ts'
 import type { PinnedRoute, PipelineFallbackContext } from '../_shared/n6PipelineFallback.ts'
 
 const cors = {
@@ -11,6 +12,14 @@ const cors = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const PRICING_ENV: Record<N7TextProvider, string> = {
+  openai: 'N6_OPENAI_MODEL_PRICING_JSON',
+  anthropic: 'N7_ANTHROPIC_MODEL_PRICING_JSON',
+  google_gemini: 'N7_GEMINI_MODEL_PRICING_JSON',
+}
+const SECRET_PREFIX: Record<N7TextProvider, string> = {
+  openai: 'ANKA_OPENAI_', anthropic: 'ANKA_ANTHROPIC_', google_gemini: 'ANKA_GEMINI_',
+}
 type Json = Record<string, any>
 type Client = ReturnType<typeof createClient<any>>
 const asObject = (value: unknown): Json => value && typeof value === 'object' && !Array.isArray(value) ? value as Json : {}
@@ -151,25 +160,29 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
       p_department_id: step.definition_step.department_id, p_actor_id: user.id,
     })
     if (!Array.isArray(routes) || routes.length < 1 || routes.length > 3) {
-      throw failure('Ordered verified OpenAI routes are unavailable')
+      throw failure('Ordered verified text routes are unavailable')
     }
     const routeContexts: PipelineFallbackContext[] = []
     let requiredReserve = 0
     for (let index = 0; index < routes.length; index += 1) {
       const candidate = asObject(routes[index])
-      if (candidate.priority !== index + 1 || candidate.provider !== 'openai'
+      if (candidate.priority !== index + 1 || !['openai', 'anthropic', 'google_gemini'].includes(candidate.provider)
         || !uuid.test(candidate.connection_id || '')
-        || typeof candidate.model_id !== 'string' || !candidate.model_id) {
-        throw failure('Ordered verified OpenAI route is unavailable')
+        || !uuid.test(candidate.model_configuration_id || '')
+        || typeof candidate.model_id !== 'string' || !/^[A-Za-z0-9._-]{1,120}$/.test(candidate.model_id)) {
+        throw failure('Ordered verified text route is unavailable')
       }
-      const rate = selectFreshPipelineRate(Deno.env.get('N6_OPENAI_MODEL_PRICING_JSON'), candidate.model_id)
+      const provider = candidate.provider as N7TextProvider
+      const rate = selectFreshPipelineRate(Deno.env.get(PRICING_ENV[provider]),
+        candidate.model_id, new Date(), provider)
       requiredReserve = Math.max(requiredReserve, conservativePipelineCeiling(prompt, rate))
       const connection = await one(admin.from('integration_connections')
         .select('id,organization_id,provider,status,archived_at,secret_name')
         .eq('id', candidate.connection_id).eq('organization_id', organizationId)
         .maybeSingle(), 'Verified route connection')
-      if (connection.provider !== 'openai' || connection.status !== 'verified'
-        || connection.archived_at || !connection.secret_name) {
+      if (connection.provider !== provider || connection.status !== 'verified'
+        || connection.archived_at || typeof connection.secret_name !== 'string'
+        || !connection.secret_name.startsWith(SECRET_PREFIX[provider])) {
         throw failure('Verified route connection is unavailable')
       }
       const key = Deno.env.get(connection.secret_name)
@@ -206,7 +219,7 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
       routeContexts, claimId,
       async (context, routeClaimId) => {
         const providerRequest = buildN7TextRequest(
-          { provider: 'openai', model_id: context.route.model_id },
+          { provider: context.route.provider as N7TextProvider, model_id: context.route.model_id },
           context.credential, prompt, routeClaimId, await sha256(user.id),
         )
         const providerResponse = await fetcher(providerRequest.url, {
@@ -255,42 +268,43 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
     claimId = requiredUuid(submission.routeClaimId, 'route claim')
     const providerRequestId = submission.providerRequestId
     const result = submission.result
-    const output = outputText(result)
+    let normalized: N7TextResult
     let measuredCost: number
     try {
-      if (result.status !== 'completed' || result.model !== route.model_id || !output
-        || output.length > 40000 || !result.usage) throw new Error('Incomplete response')
-      measuredCost = measuredPipelineTokenCost(result.usage, price)
+      normalized = normalizeN7TextResult(route.provider as N7TextProvider, result)
+      if (normalized.actual_model_id !== route.model_id) throw new Error('Provider model differs from pinned route')
+      measuredCost = measuredPipelineTokenCost(normalized.usage, price)
       if (measuredCost > maxCost) throw new Error('Response exceeded reservation')
     } catch {
       await markUncertain(admin, organizationId, attemptId,
-        `provider response needs reconciliation; claim=${claimId}; response=${String(result.id || providerRequestId).slice(0,120)}`)
+        `provider response needs reconciliation; claim=${claimId}; response=${String(result.id || result.responseId || providerRequestId).slice(0,120)}`)
       return reply({ status: 'outcome_unknown', attempt_id: attemptId, must_not_submit: true }, 503)
     }
+    const output = normalized.output_text
     const manifest = {
       source_kind: 'pipeline_step', attempt_id: attemptId,
       claim_id: initialClaimId, route_claim_id: claimId, job_id: jobId, configured_step_id: stepId,
       job_input_sha256: job.input_sha256,
       connector_connection_id: route.connection_id,
       model_configuration_id: route.model_configuration_id,
-      prompt_sha256: promptSha, provider_response_id: result.id || null,
+      prompt_sha256: promptSha, provider_response_id: normalized.provider_response_id,
       provider_request_id: providerRequestId || null,
       pricing: price, pricing_basis: 'provider_tokens_times_verified_model_rate',
-      usage_details: result.usage.input_tokens_details || {},
+      usage_details: normalized.usage.input_tokens_details,
     }
     const { data: run, error: runError } = await admin.from('ai_runs').insert({
       organization_id: organizationId, project_id: engagement.project_id,
       engagement_id: intent.engagement_id, user_id: user.id,
       capability: 'writing_support', status: 'completed',
-      provider: 'openai', model: route.model_id,
+      provider: route.provider, model: route.model_id,
       input_text: prompt, output_text: output,
       context_manifest: manifest, latency_ms: Date.now() - startedAt,
-      input_tokens: result.usage.input_tokens, output_tokens: result.usage.output_tokens,
+      input_tokens: normalized.usage.input_tokens, output_tokens: normalized.usage.output_tokens,
       estimated_cost_microusd: measuredCost, human_decision: 'pending',
     }).select('id').single()
     if (runError || !run?.id) {
       await markUncertain(admin, organizationId, attemptId,
-        `provider output audit failed; claim=${claimId}; response=${String(result.id || providerRequestId).slice(0,120)}`)
+        `provider output audit failed; claim=${claimId}; response=${String(result.id || result.responseId || providerRequestId).slice(0,120)}`)
       return reply({ status: 'outcome_unknown', attempt_id: attemptId, must_not_submit: true }, 503)
     }
     try {
@@ -298,7 +312,7 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
         p_organization_id: organizationId, p_attempt_id: attemptId,
         p_outcome: 'settled', p_measured_cost_microusd: measuredCost,
         p_ai_run_id: run.id,
-        p_evidence: `OpenAI response ${String(result.id || providerRequestId).slice(0,120)}; verified token-rate snapshot`,
+        p_evidence: `Provider response ${String(result.id || result.responseId || providerRequestId).slice(0,120)}; verified token-rate snapshot`,
       })
     } catch {
       await markUncertain(admin, organizationId, attemptId,
@@ -306,7 +320,7 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
       return reply({ status: 'outcome_unknown', attempt_id: attemptId, must_not_submit: true }, 503)
     }
     return reply({ status: 'pending_review', attempt_id: attemptId, ai_run_id: run.id,
-      measured_token_cost_microusd: measuredCost, provider: 'openai', model_id: route.model_id })
+      measured_token_cost_microusd: measuredCost, provider: route.provider, model_id: route.model_id })
   } catch (error) {
     const status = typeof (error as { status?: unknown })?.status === 'number'
       ? (error as { status: number }).status : 503
