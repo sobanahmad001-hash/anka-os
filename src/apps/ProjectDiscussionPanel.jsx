@@ -71,7 +71,7 @@ export default function ProjectDiscussionPanel({ organizationId, projectId, task
     setSaving(true); setError('')
     try {
       await projectDiscussionRepository.post({ organizationId, projectId, requestId: id,
-        content: message, parentCommentId: replyTo?.id || null, links })
+        content: message, parentCommentId: replyTo?.id || null, links }, { signal: requestSignal })
       const latest = await projectDiscussionRepository.page(organizationId, projectId, null, { signal: requestSignal })
       if (current === generation.current && !requestSignal?.aborted) {
         setPage(latest); setMessage(''); setReplyTo(null); setLinks([]); setSelectedReference(''); requestId.current = null
