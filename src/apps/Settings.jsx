@@ -25,6 +25,7 @@ function initialForm(provider = 'openai') {
     base_url: '',
     secret_name: `${connector.secretPrefix || ''}PRIMARY`,
     department_ids: [...connector.departments],
+    organization_only: false,
     owner: '', repo: '', file_key: '', username: '',
     model_id: provider === 'openai' ? 'gpt-5.6-terra' : '',
     property_id: '', site_url: '', customer_id: '', login_customer_id: '',
@@ -147,7 +148,7 @@ export default function Settings() {
   async function saveConnection(event) {
     event.preventDefault()
     if (!CONFIGURABLE_CONNECTOR_IDS.includes(form.provider)) return
-    if (!form.department_ids.length) return setError('Select at least one department for this connector.')
+    if (!form.organization_only && !form.department_ids.length) return setError('Select at least one department for this connector.')
     setSaving(true)
     setMessage('')
     setError('')
@@ -159,7 +160,10 @@ export default function Settings() {
           : form.provider === 'wordpress'
             ? { username: form.username }
             : { model_id: form.model_id }
-      await integrations.save({
+      const saveTextConnection = form.organization_only
+        ? connection => integrations.saveOrganizationTextConnection(activeOrganizationId, connection)
+        : integrations.save
+      await saveTextConnection({
         provider: form.provider,
         display_name: form.display_name,
         base_url: form.base_url,
@@ -170,6 +174,7 @@ export default function Settings() {
       setMessage('Connector metadata saved. Configure the named Supabase secret before testing.')
       setForm(initialForm(form.provider))
       await loadConnections()
+      if (form.organization_only) await loadModelConnections()
     } catch (saveError) {
       setError(saveError.message)
     } finally {
@@ -409,7 +414,8 @@ export default function Settings() {
                 {form.provider === 'figma' && <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">File key<input required value={form.file_key} onChange={(event) => setForm({ ...form, file_key: event.target.value })} className={`${INPUT} mt-2 normal-case tracking-normal`} placeholder="From the Figma file URL" /></label>}
                 {form.provider === 'wordpress' && <><label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Site URL<input required type="url" value={form.base_url} onChange={(event) => setForm({ ...form, base_url: event.target.value })} className={`${INPUT} mt-2 normal-case tracking-normal`} placeholder="https://example.com" /></label><label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">WordPress username<input required value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} className={`${INPUT} mt-2 normal-case tracking-normal`} /></label></>}
 
-                <fieldset><legend className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Department access</legend><div className="mt-2 grid grid-cols-2 gap-2">{Object.entries(DEPARTMENT_LABELS).map(([departmentId, label]) => <label key={departmentId} className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-300"><input type="checkbox" checked={form.department_ids.includes(departmentId)} onChange={() => toggleDepartment(departmentId)} />{label}</label>)}</div></fieldset>
+                {['openai', 'anthropic', 'google_gemini'].includes(form.provider) && <label className="flex items-start gap-2 rounded-xl border border-purple-900/60 bg-purple-950/20 p-3 text-xs text-purple-100"><input type="checkbox" checked={form.organization_only} onChange={event => setForm(current => ({ ...current, organization_only: event.target.checked, department_ids: event.target.checked ? [] : [...selected.departments] }))} /><span>Organization-only private conversation connection. Keep it separate from department and client engagement connections.</span></label>}
+                {!form.organization_only && <fieldset><legend className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Department access</legend><div className="mt-2 grid grid-cols-2 gap-2">{Object.entries(DEPARTMENT_LABELS).map(([departmentId, label]) => <label key={departmentId} className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-300"><input type="checkbox" checked={form.department_ids.includes(departmentId)} onChange={() => toggleDepartment(departmentId)} />{label}</label>)}</div></fieldset>}
 
                 <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Supabase secret name<input required value={form.secret_name} onChange={(event) => setForm({ ...form, secret_name: event.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_') })} className={`${INPUT} mt-2 font-mono normal-case tracking-normal`} /><span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-slate-500">Enter the environment variable name only. Never paste the credential into Anka OS.</span></label>
                 <button disabled={saving} className="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-purple-500 disabled:opacity-50">{saving ? 'Saving…' : 'Save connector metadata'}</button>

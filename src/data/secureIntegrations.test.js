@@ -41,7 +41,8 @@ test('integration gateway requires team and leadership authorization', () => {
   assert.match(gateway, /from\('organization_memberships'\)/)
   assert.match(gateway, /member_kind !== 'team'/)
   assert.match(gateway, /LEADER_ROLES/)
-  assert.match(gateway, /Deno\.env\.get\(connection\.secret_name\)/)
+  assert.match(gateway, /const environment = dependencies\.env \|\| \(\(name: string\) => Deno\.env\.get\(name\)\)/)
+  assert.match(gateway, /environment\(connection\.secret_name\)/)
   assert.doesNotMatch(settings, /password|access token|api key/i)
 })
 
