@@ -16,6 +16,8 @@ function fixture(options: {
   mappedDepartments?: string[]
   verifiedModelIds?: string[]
   history?: Array<Record<string, unknown>>
+  contextModels?: Array<Record<string, unknown>>
+  engagementMappings?: Array<Record<string, unknown>>
   connections?: Array<Record<string, unknown>>
   events?: Array<Record<string, unknown>>
 } = {}) {
@@ -54,6 +56,10 @@ function fixture(options: {
       connector_connection_id: connection.id,
       ...row,
     })),
+    context_chat_organization_models: (options.contextModels || []).map(row => ({
+      organization_id: ORG_B, connector_connection_id: connection.id, ...row,
+    })),
+    integration_connection_engagements: options.engagementMappings || [],
     integration_events: options.events || [],
   }
 
@@ -128,6 +134,54 @@ function fixture(options: {
   })
   return { request, adminClient, connection, calls, rpcCalls, providerCalls: () => providerCalls }
 }
+
+Deno.test('organization-only text connection creates no department mapping or provider request', async () => {
+  const test = fixture()
+  const response = await test.request({ action: 'save', organization_id: ORG_B, organization_only: true,
+    provider: 'openai', display_name: 'Private Assistant', secret_name: 'ANKA_OPENAI_PRIMARY',
+    public_config: { model_id: 'gpt-default' }, department_ids: [],
+  })
+  assertEquals(response.status, 200)
+  assertEquals(test.calls.some(call => call.table === 'integration_connection_departments' && call.operation === 'insert'), false)
+  assertEquals(test.calls.some(call => call.table === 'integration_connections' && call.operation === 'insert'), true)
+  assertEquals(test.providerCalls(), 0)
+})
+
+Deno.test('organization-private model access lists only engagement-free connectors and does not call a provider', async () => {
+  const test = fixture({ mappedDepartments: [], contextModels: [{ id: '55555555-5555-4555-8555-555555555555',
+    model_id: 'gpt-default', revoked_at: null }] })
+  const response = await test.request({ action: 'list_model_allowlist', organization_id: ORG_B })
+  const body = await response.json()
+  assertEquals(response.status, 200)
+  assertEquals(body.connections[0].organization_level, true)
+  assertEquals(body.connections[0].context_model_configurations.length, 1)
+  assertEquals(test.providerCalls(), 0)
+  const linked = fixture({ mappedDepartments: [], engagementMappings: [{ organization_id: ORG_B, connection_id: test.connection.id }] })
+  const linkedResponse = await linked.request({ action: 'list_model_allowlist', organization_id: ORG_B })
+  assertEquals((await linkedResponse.json()).connections[0].organization_level, false)
+  const department = fixture()
+  const departmentResponse = await department.request({ action: 'list_model_allowlist', organization_id: ORG_B })
+  assertEquals((await departmentResponse.json()).connections[0].organization_level, false)
+})
+
+Deno.test('organization-private model approval is leadership-only, verified, and provider-free', async () => {
+  const denied = fixture({ role: 'contributor' })
+  assertEquals((await denied.request({ action: 'configure_context_organization_models',
+    organization_id: ORG_B, connection_id: denied.connection.id, model_ids: ['gpt-default'],
+  })).status, 403)
+  const test = fixture()
+  const unknown = await test.request({ action: 'configure_context_organization_models',
+    organization_id: ORG_B, connection_id: test.connection.id, model_ids: ['unknown'],
+  })
+  assertEquals(unknown.status, 400)
+  const approved = await test.request({ action: 'configure_context_organization_models',
+    organization_id: ORG_B, connection_id: test.connection.id, model_ids: ['gpt-other'],
+  })
+  assertEquals(approved.status, 200)
+  assertEquals(test.rpcCalls.at(-1)?.name, 'configure_context_chat_organization_models')
+  assertEquals(test.rpcCalls.at(-1)?.args.p_model_ids, ['gpt-other'])
+  assertEquals(test.providerCalls(), 0)
+})
 
 Deno.test('P9 gateway lists model access only for the selected active organization', async () => {
   const test = fixture({ history: [{

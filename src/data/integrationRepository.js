@@ -35,11 +35,18 @@ export const integrations = Object.freeze({
     action: 'list_model_allowlist', organization_id: organizationId,
   }, options),
   save: (connection) => invoke({ action: 'save', ...connection }),
+  saveOrganizationTextConnection: (organizationId, connection) => invoke({
+    action: 'save', organization_id: organizationId, organization_only: true, ...connection,
+  }),
   test: (connectionId) => invoke({ action: 'test', connection_id: connectionId }),
   testForOrganization: (organizationId, connectionId, options = {}) => invoke({
     action: 'test', organization_id: organizationId, connection_id: connectionId,
   }, options),
   disable: (connectionId) => invoke({ action: 'disable', connection_id: connectionId }),
+  configureContextOrganizationModels: (organizationId, connectionId, modelIds, options = {}) => invoke({
+    action: 'configure_context_organization_models',
+    organization_id: organizationId, connection_id: connectionId, model_ids: modelIds,
+  }, options),
   configureModelAllowlist: (organizationId, connectionId, departmentModelIds, options = {}) => invoke({
     action: 'configure_model_allowlist',
     organization_id: organizationId,

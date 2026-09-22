@@ -277,6 +277,8 @@ export async function handleRequest(req: Request, dependencies: {
     const body = await req.json()
     const action = text(body.action, 40)
     const modelScopedAction = action === 'list_model_allowlist' || action === 'configure_model_allowlist'
+      || action === 'configure_context_organization_models'
+      || (action === 'save' && body.organization_only === true)
     const designScopedAction = (action === 'list' || action === 'test') && body.organization_id !== undefined
     const organizationScopedAction = modelScopedAction || designScopedAction
     const selectedOrganizationId = organizationScopedAction ? text(body.organization_id, 80) : ORGANIZATION_ID
@@ -308,6 +310,21 @@ export async function handleRequest(req: Request, dependencies: {
         .eq('organization_id', selectedOrganizationId)
         .order('created_at', { ascending: true })
       if (modelConfigurationError) throw modelConfigurationError
+      const { data: contextConfigurations, error: contextConfigurationError } = await userClient
+        .from('context_chat_organization_models')
+        .select('id, connector_connection_id, model_id, revoked_at, verified_at')
+        .eq('organization_id', selectedOrganizationId).is('revoked_at', null)
+      if (contextConfigurationError) throw contextConfigurationError
+      const engagementChecks = await Promise.all((data || []).map(async connection => {
+        const { data: mapping, error: mappingError } = await adminClient
+          .from('integration_connection_engagements').select('connection_id')
+          .eq('organization_id', selectedOrganizationId).eq('connection_id', connection.id)
+          .limit(1).maybeSingle()
+        if (mappingError) throw mappingError
+        return { connectionId: connection.id, hasEngagement: Boolean(mapping) }
+      }))
+      const engagementConnectionIds = new Set(engagementChecks.filter(check => check.hasEngagement)
+        .map(check => check.connectionId))
       const connections = (data || []).map((connection: Record<string, any>) => {
         const mappings = Array.isArray(connection.integration_connection_departments)
           ? connection.integration_connection_departments as Array<{ department_id: string }>
@@ -316,6 +333,9 @@ export async function handleRequest(req: Request, dependencies: {
         return {
           ...publicConnection,
           department_ids: mappings.map(mapping => mapping.department_id),
+          organization_level: !engagementConnectionIds.has(connection.id) && mappings.length === 0,
+          context_model_configurations: (contextConfigurations || []).filter((configuration: Record<string, unknown>) =>
+            configuration.connector_connection_id === connection.id && !configuration.revoked_at),
           verified_model_ids: connection.status === 'verified' ? verifiedModelIds(connection) : [],
           model_configurations: (modelConfigurations || []).filter((configuration: Record<string, unknown>) =>
             configuration.connector_connection_id === connection.id && !configuration.revoked_at),
@@ -374,9 +394,16 @@ export async function handleRequest(req: Request, dependencies: {
       const displayName = text(body.display_name, 120)
       if (!displayName) return json({ error: 'Connection name is required' }, 400)
       const secretName = validateSecretName(provider, body.secret_name)
-      const departmentIds = safeDepartmentIds(body.department_ids)
+      const organizationOnly = body.organization_only === true
+      if (organizationOnly && !['openai', 'anthropic', 'google_gemini'].includes(provider)) {
+        return json({ error: 'Organization-only connections require a text-model provider' }, 400)
+      }
+      if (organizationOnly && text(body.connection_id, 80)) {
+        return json({ error: 'Create a separate organization-only connection' }, 400)
+      }
+      const departmentIds = organizationOnly ? [] : safeDepartmentIds(body.department_ids)
       const payload = {
-        organization_id: ORGANIZATION_ID,
+        organization_id: selectedOrganizationId,
         provider,
         display_name: displayName,
         base_url: provider === 'wordpress' ? safeHttpsBaseUrl(body.base_url) : null,
@@ -388,37 +415,39 @@ export async function handleRequest(req: Request, dependencies: {
       }
       const connectionId = text(body.connection_id, 80)
       const query = connectionId
-        ? adminClient.from('integration_connections').update(payload).eq('id', connectionId).eq('organization_id', ORGANIZATION_ID)
+        ? adminClient.from('integration_connections').update(payload).eq('id', connectionId).eq('organization_id', selectedOrganizationId)
         : adminClient.from('integration_connections').insert(payload)
       const { data: connection, error } = await query.select().single()
       if (error) throw error
       const { error: deleteMappingError } = await adminClient.from('integration_connection_departments')
-        .delete().eq('connection_id', connection.id).eq('organization_id', ORGANIZATION_ID)
+        .delete().eq('connection_id', connection.id).eq('organization_id', selectedOrganizationId)
       if (deleteMappingError) throw deleteMappingError
-      const { error: insertMappingError } = await adminClient.from('integration_connection_departments').insert(
-        departmentIds.map((departmentId) => ({
-          connection_id: connection.id,
-          organization_id: ORGANIZATION_ID,
-          department_id: departmentId,
-          created_by: user.id,
-        })),
-      )
-      if (insertMappingError) throw insertMappingError
+      if (departmentIds.length) {
+        const { error: insertMappingError } = await adminClient.from('integration_connection_departments').insert(
+          departmentIds.map((departmentId) => ({
+            connection_id: connection.id,
+            organization_id: selectedOrganizationId,
+            department_id: departmentId,
+            created_by: user.id,
+          })),
+        )
+        if (insertMappingError) throw insertMappingError
+      }
       await adminClient.from('integration_events').insert({
-        organization_id: ORGANIZATION_ID,
+        organization_id: selectedOrganizationId,
         connection_id: connection.id,
         actor_id: user.id,
         operation: connectionId ? 'updated' : 'created',
         outcome: 'succeeded',
         provider,
-        metadata: { display_name: displayName, department_ids: departmentIds },
+        metadata: { display_name: displayName, department_ids: departmentIds, organization_only: organizationOnly },
       })
       return json({ connection: { ...connection, department_ids: departmentIds, secret_configured: Boolean(secretName && Deno.env.get(secretName)) } })
     }
 
     const connectionId = text(body.connection_id, 80)
     if (!connectionId) return json({ error: 'Connection ID is required' }, 400)
-    const connectionOrganizationId = action === 'configure_model_allowlist' || designScopedAction
+    const connectionOrganizationId = modelScopedAction || designScopedAction
       ? selectedOrganizationId
       : ORGANIZATION_ID
     const { data: connection, error: connectionError } = await adminClient
@@ -443,6 +472,29 @@ export async function handleRequest(req: Request, dependencies: {
         provider: connection.provider,
         metadata: { display_name: connection.display_name },
       })
+      return json({ success: true })
+    }
+
+    if (action === 'configure_context_organization_models') {
+      if (!['openai', 'anthropic', 'google_gemini'].includes(String(connection.provider))
+        || connection.status !== 'verified') {
+        return json({ error: 'A verified text-model connector is required' }, 409)
+      }
+      if (!Array.isArray(body.model_ids) || body.model_ids.length > 20) {
+        return json({ error: 'Choose up to 20 verified models' }, 400)
+      }
+      const verified = new Set(verifiedModelIds(connection))
+      const modelIds = [...new Set(body.model_ids.map((value: unknown) => text(value, 120)))]
+      if (modelIds.some((modelId: string) => !modelId || !verified.has(modelId))) {
+        return json({ error: 'Model selection contains an unverified model' }, 400)
+      }
+      const { error: configureError } = await adminClient.rpc('configure_context_chat_organization_models', {
+        p_organization_id: selectedOrganizationId,
+        p_connector_connection_id: connection.id,
+        p_actor_id: user.id,
+        p_model_ids: modelIds,
+      })
+      if (configureError) throw configureError
       return json({ success: true })
     }
 
