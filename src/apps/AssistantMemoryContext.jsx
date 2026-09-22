@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { projectMemoryRepository } from '../data/projectMemoryRepository.js'
 import { clientBrandMemoryRepository } from '../data/clientBrandMemoryRepository.js'
 import { departmentMemoryRepository } from '../data/departmentMemoryRepository.js'
+import { organizationPolicyRepository } from '../data/organizationPolicyRepository.js'
 
 const projectLink = (projectId, commentId) =>
   '/sphere/workspace/projects/' + encodeURIComponent(projectId)
@@ -15,10 +16,10 @@ function _MemoryRows({ label, rows, statement }) {
       <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-slate-500">
         {row.scope_kind && <span>{row.scope_kind === 'brand' ? 'Brand' : 'Client'}</span>}
         <span>Reviewed {row.reviewed_at ? new Date(row.reviewed_at).toLocaleDateString() : 'date unavailable'}</span>
-        <a className="text-violet-300" href={projectLink(row.project_id, row.source_comment_id)}>Source discussion</a>
+        {row.project_id && row.source_comment_id ? <a className="text-violet-300" href={projectLink(row.project_id, row.source_comment_id)}>Source discussion</a> : row.source_note && <span>Source basis: {row.source_note}</span>}
       </div>
     </article>)}
-    {rows.length > 10 && <p className="mt-2 text-[11px] text-slate-500">Showing 10 of {rows.length}; open the project discussion for the full set.</p>}
+    {rows.length > 10 && <p className="mt-2 text-[11px] text-slate-500">Showing 10 of {rows.length}; open the relevant memory screen for the full set.</p>}
   </div>
 }
 
@@ -38,9 +39,10 @@ export default function AssistantMemoryContext({
       projectMemoryRepository.list(organizationId, projectId),
       clientBrandMemoryRepository.list(organizationId, projectId),
       departmentMemoryRepository.list(organizationId, departmentId),
+      organizationPolicyRepository.list(organizationId),
     ]).then(results => {
       if (current !== generation.current) return
-      const [project, clientBrand, department] = results
+      const [project, clientBrand, department, policy] = results
       if (project.status === 'rejected') {
         onAccessError?.(project.reason, { membershipMismatch: project.reason?.status === 403 })
         setError(project.reason?.message || 'Project memory unavailable.')
@@ -54,7 +56,12 @@ export default function AssistantMemoryContext({
         setError(department.reason?.message || 'Department memory unavailable.')
         return
       }
+      if (policy.status === 'rejected') {
+        setError(policy.reason?.message || 'Organization policy unavailable.')
+        return
+      }
       setContext({
+        policy: policy.value.confirmed,
         project: project.value.confirmed.map(row => ({ ...row, project_id: projectId })),
         clientBrand: clientBrand.status === 'fulfilled' ? clientBrand.value.confirmed : [],
         department: department.status === 'fulfilled' ? department.value.confirmed : [],
@@ -72,6 +79,7 @@ export default function AssistantMemoryContext({
     {error && <p role="alert" className="mt-3 text-xs text-rose-300">{error}</p>}
     {!context && !error && <p className="mt-3 text-xs text-slate-500">Checking current sources…</p>}
     {context && <div className="mt-4 space-y-4">
+      <_MemoryRows label="Organization policies" rows={context.policy} statement="statement" />
       <_MemoryRows label="Project lessons" rows={context.project} statement="statement" />
       <_MemoryRows label="Client and brand requirements" rows={context.clientBrand} statement="statement" />
       {context.clientBrandUnavailable && <p className="text-xs text-slate-500">No active client and brand scope is available for this project.</p>}
