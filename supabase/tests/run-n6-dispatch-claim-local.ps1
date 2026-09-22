@@ -1,7 +1,8 @@
 param(
   [Parameter(Mandatory = $true)][string]$PostgresBin,
   [int]$Port = 55924,
-  [string]$ClusterParent = [System.IO.Path]::GetTempPath()
+  [string]$ClusterParent = [System.IO.Path]::GetTempPath(),
+  [switch]$WithFallback
 )
 $ErrorActionPreference = 'Stop'
 if ($Port -lt 1024 -or $Port -gt 65535) { throw 'Choose an unprivileged local test port.' }
@@ -31,11 +32,16 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Local PostgreSQL start failed.' }
   $started = $true
   Invoke-LocalSql (Join-Path $PSScriptRoot 'n6-ai-attempt-fixture.sql')
+  if ($WithFallback) { Invoke-LocalSql (Join-Path $PSScriptRoot 'n6-fallback-routes-fixture.sql') }
   Invoke-LocalSql (Join-Path $PSScriptRoot '..\migrations\20260922150000_n6_step_budget_reservations.sql')
   Invoke-LocalSql (Join-Path $PSScriptRoot '..\migrations\20260922170000_n6_ai_attempt_handoff.sql')
   Invoke-LocalSql (Join-Path $PSScriptRoot 'n6-ai-attempt-behavior.sql')
   Invoke-LocalSql (Join-Path $PSScriptRoot '..\migrations\20260922200000_n6_single_use_dispatch_claim.sql')
   Invoke-LocalSql (Join-Path $PSScriptRoot 'n6-dispatch-claim-behavior.sql')
+  if ($WithFallback) {
+    Invoke-LocalSql (Join-Path $PSScriptRoot '..\migrations\20260922210000_n6_ordered_failover.sql')
+    Invoke-LocalSql (Join-Path $PSScriptRoot 'n6-fallback-behavior.sql')
+  }
   # Two sessions race for the other prepared step. The first transaction holds
   # the progress row lock while the second reaches the claim.
   & $psql -X -h 127.0.0.1 -p $Port -U postgres -d postgres -v ON_ERROR_STOP=1 -q -c "update public.ai_execution_step_progress set status='waiting' where configured_step_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'"
@@ -60,7 +66,11 @@ try {
   }
   Remove-Job $first,$second
   $claimCount = & $psql -X -h 127.0.0.1 -p $Port -U postgres -d postgres -v ON_ERROR_STOP=1 -At -c "select count(*) from private.ai_execution_dispatch_claims where dispatch_request_id='07070707-0707-4707-8707-070707070707'"
-  if ($LASTEXITCODE -ne 0 -or $claimCount -ne '1') { throw 'Concurrent claim persisted more than once.' }  Write-Output "N6 isolated dispatch-claim checks passed. Cluster: $cluster"
+  if ($LASTEXITCODE -ne 0 -or $claimCount -ne '1') { throw 'Concurrent claim persisted more than once.' }
+  if ($WithFallback) {
+    Invoke-LocalSql (Join-Path $PSScriptRoot 'n6-fallback-post-race-behavior.sql')
+  }
+  Write-Output "N6 isolated dispatch-claim checks passed. Cluster: $cluster"
 }
 finally {
   if ($started) {
