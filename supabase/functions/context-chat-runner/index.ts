@@ -107,8 +107,6 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
     try { body = object(JSON.parse(raw)) } catch { throw fail('Valid JSON is required', 400) }
     organizationId = requiredId(body.organization_id, 'organization')
     messageId = requiredId(body.message_id, 'message')
-    const modelConfigurationId = requiredId(body.model_configuration_id, 'model selection')
-    const dispatchRequestId = requiredId(body.dispatch_request_id, 'dispatch request')
     const membership = await one(admin.from('organization_memberships')
       .select('status,member_kind').eq('organization_id', organizationId)
       .eq('user_id', user.id).maybeSingle(), 'Current team membership')
@@ -137,10 +135,15 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
     } catch {
       // No settled reply is available; continue through the current authorization checks.
     }
+    if (body.recover_only === true) {
+      return reply({ status: 'not_settled', must_not_submit: true }, 409)
+    }
     if (conversation.state !== 'active') {
       throw fail('Active private organization conversation is required', 403)
     }
     requirePrivateChatPaidExecution(env)
+    const modelConfigurationId = requiredId(body.model_configuration_id, 'model selection')
+    const dispatchRequestId = requiredId(body.dispatch_request_id, 'dispatch request')
     const configuration = await one(admin.from('context_chat_organization_models')
       .select('id,organization_id,connector_connection_id,model_id,revoked_at')
       .eq('id', modelConfigurationId).eq('organization_id', organizationId)
