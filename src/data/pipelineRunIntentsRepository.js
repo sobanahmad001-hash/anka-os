@@ -53,6 +53,12 @@ export function createPipelineRunIntentsRepository(supabase) {
         p_acknowledged: true,
       }), signal)
     },
+    getExecutionStatus({ organizationId, jobId }, { signal } = {}) {
+      return dataOrThrow(supabase.rpc('get_pipeline_ai_job_status', {
+        p_organization_id: requiredId(organizationId, 'Organization'),
+        p_job_id: requiredId(jobId, 'Execution job'),
+      }), signal)
+    },
     getOutputForReview({ organizationId, outputId }, { signal } = {}) {
       return dataOrThrow(supabase.rpc('get_pipeline_ai_step_output_for_review', {
         p_organization_id: requiredId(organizationId, 'Organization'),

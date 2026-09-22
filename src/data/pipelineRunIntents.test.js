@@ -252,3 +252,20 @@ test('N6 AI output review retrieves one exact output and requires evidence', asy
     p_expected_progress_version: 1, p_decision: 'accepted', p_evidence: 'Exact review',
   }])
 })
+
+test('N6 status reads only an exact scoped job', async () => {
+  const calls = []
+  const repository = createPipelineRunIntentsRepository({
+    from() { throw new Error('Unexpected direct read') },
+    rpc(name, payload) {
+      calls.push([name, payload])
+      return Promise.resolve({ data: { job_id: OTHER, steps: [] }, error: null })
+    },
+  })
+  assert.throws(() => repository.getExecutionStatus({ organizationId: ID, jobId: 'invalid' }), /UUID/)
+  const result = await repository.getExecutionStatus({ organizationId: ID, jobId: OTHER })
+  assert.deepEqual(result, { job_id: OTHER, steps: [] })
+  assert.deepEqual(calls, [['get_pipeline_ai_job_status', {
+    p_organization_id: ID, p_job_id: OTHER,
+  }]])
+})
