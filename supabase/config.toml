@@ -133,3 +133,8 @@ entrypoint = "./functions/meta-oauth/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/quick-tasks/index.ts"
+
+[functions.pipeline-ai-runner]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/pipeline-ai-runner/index.ts"
