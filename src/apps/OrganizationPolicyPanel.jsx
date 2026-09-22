@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { organizationPolicyRepository } from '../data/organizationPolicyRepository.js'
+import _OrganizationPolicyPurgePanel from './OrganizationPolicyPurgePanel.jsx'
 
 export default function OrganizationPolicyPanel({ organizationId, scopeRevision, onAccessError }) {
   const [policies, setPolicies] = useState(null)
@@ -116,6 +117,7 @@ export default function OrganizationPolicyPanel({ organizationId, scopeRevision,
         <div className="mt-3 flex gap-3"><button type="submit" disabled={busy || !evidence.trim()} className="rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold disabled:opacity-40">Record decision</button><button type="button" onClick={() => { setReview(null); requestId.current = null }} className="text-xs text-slate-400">Cancel</button></div>
       </form>}
       {policies.history.length > 0 && <details className="rounded-xl border border-slate-700 p-4"><summary className="cursor-pointer text-sm">Protected policy history · {policies.history.length}</summary><div className="mt-3 space-y-2">{policies.history.map(item => <p key={item.id} className="text-xs text-slate-400">{item.status} · {item.statement} · {item.id}</p>)}</div></details>}
+      <_OrganizationPolicyPurgePanel organizationId={organizationId} policies={policies} onPurged={() => reload(generation.current)} />
     </>}
   </section>
 }

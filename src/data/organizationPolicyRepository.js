@@ -60,6 +60,45 @@ export function createOrganizationPolicyRepository(client) {
       }
       return data
     },
+    async previewPurge(organizationId, policyId) {
+      if (![organizationId, policyId].every(validId)) throw new TypeError('Exact policy required')
+      const { data, error } = await client.rpc('preview_organization_ai_policy_purge', {
+        p_organization_id: organizationId, p_policy_id: policyId,
+      })
+      if (error) throw failure(error, 'Unable to preview policy purge')
+      if (data?.organization_id !== organizationId
+        || !Array.isArray(data.policy_ids) || !Array.isArray(data.records)
+        || !data.policy_ids.length || data.policy_ids.length > 100
+        || !data.policy_ids.every(validId) || !data.policy_ids.includes(policyId)
+        || new Set(data.policy_ids).size !== data.policy_ids.length
+        || data.records.length !== data.policy_ids.length
+        || data.records.some(row => !data.policy_ids.includes(row?.id)
+          || typeof row?.statement !== 'string' || typeof row?.source_note !== 'string')) {
+        throw Object.assign(new Error('Policy purge preview did not match'), { status: 409 })
+      }
+      return data
+    },
+    async purge({ organizationId, policyId, requestId, policyIds, confirmation, reason }) {
+      if (![organizationId, policyId, requestId].every(validId)
+        || !Array.isArray(policyIds) || !policyIds.length || policyIds.length > 100
+        || !policyIds.every(validId) || !policyIds.includes(policyId)
+        || new Set(policyIds).size !== policyIds.length
+        || confirmation !== 'PURGE'
+        || typeof reason !== 'string' || reason.trim().length < 10
+        || reason.trim().length > 1000) throw new TypeError('Exact policy purge required')
+      const { data, error } = await client.rpc('purge_organization_ai_policy', {
+        p_organization_id: organizationId, p_policy_id: policyId,
+        p_request_id: requestId, p_expected_policy_ids: policyIds,
+        p_confirmation: confirmation, p_reason: reason.trim(),
+      })
+      if (error) throw failure(error, 'Unable to purge organization policy')
+      if (!Array.isArray(data?.purged_policy_ids)
+        || data.purged_policy_ids.length !== policyIds.length
+        || !policyIds.every(id => data.purged_policy_ids.includes(id))) {
+        throw Object.assign(new Error('Policy purge receipt did not match'), { status: 409 })
+      }
+      return data
+    },
   }
 }
 

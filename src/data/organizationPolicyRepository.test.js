@@ -51,3 +51,27 @@ test('organization policy refuses another organization receipt', async () => {
   })
   await assert.rejects(repository.list(org), /active organization/)
 })
+
+test('organization policy purge requires exact chain preview and matching receipt', async () => {
+  const calls = []
+  const repository = createOrganizationPolicyRepository({
+    rpc(name, args) {
+      calls.push({ name, args })
+      if (name === 'preview_organization_ai_policy_purge') return Promise.resolve({ data: {
+        organization_id: org, policy_ids: [policy, review],
+        records: [{ id: policy, statement: 'Old', source_note: 'Prior approved basis' },
+          { id: review, statement: 'New', source_note: 'Corrected approved basis' }],
+      } })
+      return Promise.resolve({ data: { purged_policy_ids: [policy, review] } })
+    },
+  })
+  const preview = await repository.previewPurge(org, policy)
+  assert.deepEqual(preview.policy_ids, [policy, review])
+  await repository.purge({ organizationId: org, policyId: policy, requestId: review,
+    policyIds: preview.policy_ids, confirmation: 'PURGE',
+    reason: 'Owner authorized exact chain purge' })
+  assert.deepEqual(calls[1].args.p_expected_policy_ids, [policy, review])
+  await assert.rejects(repository.purge({ organizationId: org, policyId: policy,
+    requestId: review, policyIds: [policy], confirmation: 'DELETE',
+    reason: 'Owner authorized exact chain purge' }), TypeError)
+})
