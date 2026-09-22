@@ -39,6 +39,9 @@ try {
   Invoke-LocalSql (Join-Path $PSScriptRoot 'n7-department-memory-fixture.sql')
   Invoke-LocalSql (Join-Path $PSScriptRoot '..\migrations\20260923020000_n7_department_memory_promotion.sql')
   Invoke-LocalSql (Join-Path $PSScriptRoot 'n7-department-memory-behavior.sql')
+  Invoke-LocalSql (Join-Path $PSScriptRoot 'n7-private-memory-fixture.sql')
+  Invoke-LocalSql (Join-Path $PSScriptRoot '..\migrations\20260923030000_n7_owner_private_memory.sql')
+  Invoke-LocalSql (Join-Path $PSScriptRoot 'n7-private-memory-behavior.sql')
   Write-Output "N7 isolated project-memory checks passed. Cluster: $cluster"
 }
 finally {
