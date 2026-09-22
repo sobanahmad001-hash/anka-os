@@ -77,7 +77,7 @@ test('owner-private conversation actions use the selected organization and prese
     } },
   })
   const identity = { organization_id: 'A', context_kind: 'department_private', department_id: 'design' }
-  await repo.listContextConversations(identity, scope)
+  await repo.listContextConversations({ ...identity, offset: 50 }, scope)
   await repo.createContextConversation({ ...identity, title: 'Private direction' }, scope)
   await repo.getContextConversation({ organization_id: 'A', conversation_id: 'thread-B', before_sequence: 101 }, scope)
   await repo.appendContextHumanMessage({ organization_id: 'A', conversation_id: 'thread-B', client_request_id: 'request-B', message: 'Save this idea' }, scope)
@@ -90,6 +90,7 @@ test('owner-private conversation actions use the selected organization and prese
     assert.equal(call.signal, controller.signal)
   }
   assert.equal(calls[0].body.department_id, 'design')
+  assert.equal(calls[0].body.offset, 50)
   assert.equal(calls[2].body.before_sequence, 101)
   assert.equal(calls[3].body.client_request_id, 'request-B')
 })
