@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { DEPARTMENT_LABELS } from '../config/connectorCatalog.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
+import OrganizationGate from '../components/OrganizationGate.jsx'
 import _PrivateMemoryPanel from './PrivateMemoryPanel.jsx'
 import _AssistantMemoryContext from './AssistantMemoryContext.jsx'
 import _OrganizationPolicyPanel from './OrganizationPolicyPanel.jsx'
@@ -24,8 +25,12 @@ const labelize = value => String(value || '').replaceAll('_', ' ').replace(/\b\w
 const dateTime = value => new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
 
 export default function AnkaAssistant() {
+  return <OrganizationGate><ScopedAnkaAssistant /></OrganizationGate>
+}
+
+function ScopedAnkaAssistant() {
   const { user, profile } = useAuth()
-  const { activeOrganizationId, scopeRevision, handleOrganizationAccessError } = useOrganization()
+  const { activeOrganizationId, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
   const [searchParams] = useSearchParams()
   const requestedDepartment = searchParams.get('department')
   const [projects, setProjects] = useState([])
@@ -50,56 +55,73 @@ export default function AnkaAssistant() {
     [engagements, projectId],
   )
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    let current = true
+    setLoading(true)
+    setError('')
+    Promise.all([
+      delivery.listProjects(activeOrganizationId, { signal: requestSignal }),
+      operatingSpine.listEngagements(activeOrganizationId, { signal: requestSignal }),
+      aiRepository.listRuns(activeOrganizationId, { signal: requestSignal }),
+    ]).then(([projectRows, engagementRows, runRows]) => {
+      if (!current || requestSignal.aborted) return
+      setProjects(projectRows)
+      setEngagements(engagementRows)
+      setRuns(runRows)
+      setProjectId(engagementRows[0]?.project_id || projectRows[0]?.id || '')
+    }).catch((cause) => {
+      if (!current || requestSignal.aborted || cause?.name === 'AbortError') return
+      handleOrganizationAccessError(cause, { membershipMismatch: cause.membershipMismatch })
+      setError(cause.message)
+    }).finally(() => { if (current && !requestSignal.aborted) setLoading(false) })
+    return () => { current = false }
+  }, [activeOrganizationId, handleOrganizationAccessError, requestSignal, scopeRevision])
   useEffect(() => {
     if (!departmentId && DEPARTMENT_LABELS[profile?.department]) setDepartmentId(profile.department)
   }, [departmentId, profile?.department])
   useEffect(() => {
-    if (!projectId) return setWorkspace(null)
     setWorkspace(null)
-    delivery.getProjectWorkspace(projectId).then((nextWorkspace) => {
+    if (!projectId) return undefined
+    let current = true
+    delivery.getProjectWorkspace(projectId, activeOrganizationId, { signal: requestSignal }).then((nextWorkspace) => {
+      if (!current || requestSignal.aborted) return
       setWorkspace(nextWorkspace)
       const availableDepartments = [...new Set(nextWorkspace.workstreams.map(item => item.department_id).filter(id => DEPARTMENT_LABELS[id]))]
-      setDepartmentId(current => availableDepartments.includes(current) ? current : availableDepartments[0] || '')
-    }).catch(loadError => setError(loadError.message))
-  }, [projectId])
+      setDepartmentId(value => availableDepartments.includes(value) ? value : availableDepartments[0] || '')
+    }).catch((cause) => {
+      if (!current || requestSignal.aborted || cause?.name === 'AbortError') return
+      handleOrganizationAccessError(cause, { membershipMismatch: cause.membershipMismatch })
+      setError(cause.message)
+    })
+    return () => { current = false }
+  }, [activeOrganizationId, handleOrganizationAccessError, projectId, requestSignal, scopeRevision])
   useEffect(() => {
-    if (!engagementId) return setEngagementWorkspace(null)
     setEngagementWorkspace(null)
-    operatingSpine.getEngagement(engagementId).then((nextWorkspace) => {
+    if (!engagementId) return undefined
+    let current = true
+    operatingSpine.getEngagement(engagementId, activeOrganizationId, { signal: requestSignal }).then((nextWorkspace) => {
+      if (!current || requestSignal.aborted) return
       setEngagementWorkspace(nextWorkspace)
       const availableDepartments = [...new Set(nextWorkspace.services.map(item => item.service_catalog?.department_id).filter(id => DEPARTMENT_LABELS[id]))]
-      setDepartmentId(current => availableDepartments.includes(current) ? current : availableDepartments[0] || '')
-    }).catch(loadError => setError(loadError.message))
-  }, [engagementId])
-
-  async function load() {
-    setLoading(true)
-    setError('')
-    try {
-      const [projectRows, engagementRows, runRows] = await Promise.all([
-        delivery.listProjects(), operatingSpine.listEngagements(), aiRepository.listRuns(),
-      ])
-      setProjects(projectRows)
-      setEngagements(engagementRows)
-      setRuns(runRows)
-      setProjectId(current => current || engagementRows[0]?.project_id || projectRows[0]?.id || '')
-    } catch (loadError) {
-      setError(loadError.message)
-    } finally {
-      setLoading(false)
-    }
-  }
+      setDepartmentId(value => availableDepartments.includes(value) ? value : availableDepartments[0] || '')
+    }).catch((cause) => {
+      if (!current || requestSignal.aborted || cause?.name === 'AbortError') return
+      handleOrganizationAccessError(cause, { membershipMismatch: cause.membershipMismatch })
+      setError(cause.message)
+    })
+    return () => { current = false }
+  }, [activeOrganizationId, engagementId, handleOrganizationAccessError, requestSignal, scopeRevision])
 
   async function runAssistant(event) {
     event.preventDefault()
     if (!projectId && capability !== 'daily_brief') return setError('Select a project for this capability.')
+    if (projectId && workspace?.project?.organization_id !== activeOrganizationId) return setError('Selected project is unavailable in the active organization.')
     setRunning(true)
     setError('')
     setResult(null)
     try {
       if (!departmentId) return setError('Select an operating department.')
-      const response = await aiRepository.run({ capability, projectId: projectId || null, engagementId: engagementId || null, departmentId, input })
+      const response = await aiRepository.run({ organizationId: activeOrganizationId, capability, projectId: projectId || null, engagementId: engagementId || null, departmentId, input })
       setResult(response)
       setRuns(current => [{
         id: response.run_id, project_id: projectId || null, engagement_id: engagementId || null, capability,
@@ -133,7 +155,7 @@ export default function AnkaAssistant() {
 
   async function confirmProposal() {
     const action = result?.proposed_action
-    if (!action || !user?.id || !workspace) return
+    if (!action || !user?.id || workspace?.project?.organization_id !== activeOrganizationId) return
     setDecisionSaving(true)
     setError('')
     try {
@@ -166,7 +188,7 @@ export default function AnkaAssistant() {
       }
       await aiRepository.recordDecision(result.run_id, 'accepted', `Created ${action.type} record ${created.id}`)
       setResult(current => ({ ...current, decision: 'accepted', createdRecordId: created.id }))
-      setWorkspace(await delivery.getProjectWorkspace(projectId))
+      setWorkspace(await delivery.getProjectWorkspace(projectId, activeOrganizationId, { signal: requestSignal }))
       await refreshRuns()
     } catch (decisionError) {
       setError(decisionError.message)
@@ -175,7 +197,11 @@ export default function AnkaAssistant() {
     }
   }
 
-  async function refreshRuns() { setRuns(await aiRepository.listRuns()) }
+  async function refreshRuns() {
+    if (requestSignal.aborted) return
+    const nextRuns = await aiRepository.listRuns(activeOrganizationId, { signal: requestSignal })
+    if (!requestSignal.aborted) setRuns(nextRuns)
+  }
 
   const selectedCapability = CAPABILITIES.find(item => item[0] === capability)
   const departmentOptions = useMemo(() => {

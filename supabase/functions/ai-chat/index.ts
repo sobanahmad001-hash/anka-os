@@ -397,6 +397,7 @@ export async function handleRequest(request: Request) {
       return json({ success: true, decision })
     }
 
+    if (body.organizationId !== ORGANIZATION_ID) return json({ error: 'Active organization mismatch' }, 403)
     capability = typeof body.capability === 'string' ? body.capability : ''
     projectId = typeof body.projectId === 'string' && body.projectId ? body.projectId : null
     engagementId = typeof body.engagementId === 'string' && body.engagementId ? body.engagementId : null

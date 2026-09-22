@@ -42,7 +42,7 @@ test('department AI resolves verified connector mappings on the server', () => {
   assert.match(edge, /manifest\.connector_connection_id/)
   assert.match(edge, /manifest\.credential_source/)
   assert.match(repository, /departmentId/)
-  assert.match(repository, /body: \{ capability, projectId, engagementId, departmentId, input \}/)
+  assert.match(repository, /body: \{ organizationId, capability, projectId, engagementId, departmentId, input \}/)
 })
 
 test('assistant requires a valid operating department and canonical project scope', () => {
