@@ -2,13 +2,13 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useOrganization } from '../context/OrganizationContext.jsx'
-import { environmentNav, isNavigationItemActive, visibleEnvironmentItems } from '../config/environmentNav'
+import { environmentNav, getEnvironmentFromPath, isNavigationItemActive, visibleEnvironmentItems } from '../config/environmentNav'
 import { featureFlags } from '../config/featureFlags'
 import { useNotifications } from '../hooks/useNotifications'
 
 export default function Header() {
   const { profile, signOut } = useAuth()
-  const { memberships, activeOrganizationId, selectionRequired, loading: organizationLoading, error: organizationError, selectOrganization } = useOrganization()
+  const { activeMembership, memberships, activeOrganizationId, selectionRequired, loading: organizationLoading, error: organizationError, selectOrganization } = useOrganization()
   const navigate = useNavigate()
   const location = useLocation()
   const [showNotifications, setShowNotifications] = useState(false)
@@ -16,13 +16,10 @@ export default function Header() {
   const notifRef = useRef(null)
   const { notifications, unread, markRead, markAllRead } = useNotifications()
 
-  const activeEnv = environmentNav.find(e =>
-    location.pathname.startsWith(e.basePath?.split('/').slice(0, 2).join('/') || '__') ||
-    (e.key === 'admin' && (location.pathname.startsWith('/admin') || location.pathname === '/users' || location.pathname === '/settings'))
-  )
+  const activeEnv = environmentNav.find(e => e.key === getEnvironmentFromPath(location.pathname))
   const mobileItems = visibleEnvironmentItems(activeEnv, {
-    role: profile?.role,
-    department: profile?.department,
+    activeMembership,
+    profileRole: profile?.role,
     aiAssistance: featureFlags.aiAssistance,
   })
 

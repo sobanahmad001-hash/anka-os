@@ -1,7 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useOrganization } from '../context/OrganizationContext'
-import { canShowAuthorityAdministration } from '../data/authorityAdministration'
 import { environmentNav, getEnvironmentFromPath, isNavigationItemActive, visibleEnvironmentItems } from '../config/environmentNav'
 import { featureFlags } from '../config/featureFlags'
 
@@ -12,16 +11,15 @@ export default function Sidebar() {
   const activeEnvKey = getEnvironmentFromPath(location.pathname)
   const activeEnv = environmentNav.find((environment) => environment.key === activeEnvKey)
     || environmentNav.find((environment) => environment.key === 'sphere')
-  const userDept = profile?.department
+  const userDept = activeMembership?.departmentId
+  const allDepartments = ['system_owner', 'operations_admin', 'executive'].includes(activeMembership?.role)
 
   const visibleItems = visibleEnvironmentItems(activeEnv, {
-    role: profile?.role,
-    department: userDept,
+    activeMembership,
+    profileRole: profile?.role,
     aiAssistance: featureFlags.aiAssistance,
   })
-  if (canShowAuthorityAdministration(activeMembership) && !visibleItems.some(item => item.path === '/users')) {
-    visibleItems.push({ label: 'Compatibility administration', path: '/users' })
-  }
+
   const departmentBadgeColors = {
     content: 'bg-amber-900/50 text-amber-300',
     design: 'bg-pink-900/50 text-pink-300',
@@ -44,14 +42,14 @@ export default function Sidebar() {
             <div className="mt-0.5 text-[11px] text-slate-500">{activeEnv.description}</div>
           </div>
         </div>
-        {activeEnv.key === 'sphere' && userDept && profile?.role !== 'admin' && (
+        {activeEnv.key === 'sphere' && userDept && !allDepartments && (
           <div className="mt-4">
             <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${departmentBadgeColors[userDept] || 'bg-gray-700 text-gray-300'}`}>
               {userDept} department
             </span>
           </div>
         )}
-        {activeEnv.key === 'sphere' && profile?.role === 'admin' && (
+        {activeEnv.key === 'sphere' && allDepartments && (
           <div className="mt-4">
             <span className="inline-flex rounded-full border border-violet-500/20 bg-violet-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-violet-300">
               All departments

@@ -1,3 +1,6 @@
+const ORGANIZATION_ADMIN_ROLES = new Set(['system_owner', 'operations_admin'])
+const ALL_DEPARTMENT_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
+
 export const environmentNav = [
   {
     key: 'admin',
@@ -5,11 +8,10 @@ export const environmentNav = [
     basePath: '/admin',
     description: 'Central hub',
     items: [
-      { label: 'Overview', path: '/admin' },
-      { label: 'Users', path: '/users' },
-      { label: 'Connectors', path: '/settings' },
-      { label: 'Product Document', path: '/admin/living-product-document' },
-      { label: 'Assistant', path: '/assistant' },
+      { label: 'Overview', path: '/admin', legacyAdmin: true },
+      { label: 'Users', path: '/users', organizationAdmin: true, legacyAdminFallback: true },
+      { label: 'Connectors', path: '/settings', organizationAdmin: true },
+      { label: 'Product Document', path: '/admin/living-product-document', legacyAdmin: true },
     ],
   },
   {
@@ -18,23 +20,28 @@ export const environmentNav = [
     basePath: '/sphere/workspace',
     description: 'Client delivery',
     items: [
-      { label: 'Workspace', path: null, dept: null, isHeader: true },
-      { label: 'Home', path: '/sphere/workspace', dept: null },
-      { label: 'Projects', path: '/sphere/portfolio', dept: null, activePrefixes: ['/sphere/workspace/projects'] },
-      { label: 'Clients', path: '/sphere/clients', dept: null, activePrefixes: ['/sphere/clients'] },
-      { label: 'Internal Work', path: '/sphere/internal', dept: null },
-      { label: 'My Work', path: '/sphere/my-work', dept: null, activePrefixes: ['/sphere/workspace/items'] },
+      { label: 'Workspace', path: null, isHeader: true },
+      { label: 'Home', path: '/sphere/workspace' },
+      { label: 'Projects', path: '/sphere/portfolio', activePrefixes: ['/sphere/workspace/projects'] },
+      { label: 'Clients', path: '/sphere/clients', activePrefixes: ['/sphere/clients'] },
+      { label: 'Internal Work', path: '/sphere/internal' },
+      { label: 'My Work', path: '/sphere/my-work', activePrefixes: ['/sphere/workspace/items'] },
 
-      { label: 'Workshops', path: null, dept: null, isHeader: true },
+      { label: 'Workshops', path: null, isHeader: true },
       { label: 'Content Workshop', path: '/sphere/content', dept: 'content', activePrefixes: ['/sphere/content'] },
       { label: 'Design Workshop', path: '/sphere/design', dept: 'design', activePrefixes: ['/sphere/design'] },
       { label: 'Marketing Workshop', path: '/sphere/marketing', dept: 'marketing', activePrefixes: ['/sphere/marketing'] },
 
-      { label: 'Delivery & Support', path: null, dept: null, isHeader: true },
+      { label: 'Delivery & Support', path: null, isHeader: true },
       { label: 'Development', path: '/sphere/delivery', dept: 'development', activePrefixes: ['/sphere/delivery'] },
       { label: 'Sphere Events', path: '/sphere/events', dept: null },
-      { label: 'Client Portal', path: '/sphere/portal', dept: null },
-      { label: 'Reports & Records', path: '/sphere/reports', dept: null },
+      { label: 'Client Portal', path: '/sphere/portal' },
+      { label: 'Reports & Records', path: '/sphere/reports' },
+
+      { label: 'Tools', path: null, isHeader: true },
+      { label: 'Assistant', path: '/assistant' },
+      { label: 'Users', path: '/users', organizationAdmin: true, legacyAdminFallback: true },
+      { label: 'Connectors', path: '/settings', organizationAdmin: true },
     ],
   },
 ]
@@ -42,7 +49,6 @@ export const environmentNav = [
 export function getEnvironmentFromPath(pathname) {
   if (!pathname) return 'sphere'
   if (pathname.startsWith('/admin') || pathname === '/users' || pathname === '/settings') return 'admin'
-  if (pathname.startsWith('/sphere')) return 'sphere'
   return 'sphere'
 }
 
@@ -61,16 +67,33 @@ export function isNavigationItemActive(item, pathname) {
   })
 }
 
-export function isNavigationItemVisible(item, { environmentKey, role, department, aiAssistance = true } = {}) {
+export function isNavigationItemVisible(item, {
+  environmentKey, activeMembership, profileRole, aiAssistance = true,
+} = {}) {
+  if (!activeMembership?.organizationId) return false
   if (item.path === '/assistant' && !aiAssistance) return false
-  if (environmentKey === 'admin') return role === 'admin'
+  if (item.legacyAdmin) return profileRole === 'admin'
+  if (item.organizationAdmin) {
+    return ORGANIZATION_ADMIN_ROLES.has(activeMembership.role)
+      || (item.legacyAdminFallback && profileRole === 'admin')
+  }
   if (environmentKey !== 'sphere') return false
-  return item.dept == null || role === 'admin' || department === item.dept
+  if (item.dept) {
+    return ALL_DEPARTMENT_ROLES.has(activeMembership.role)
+      || activeMembership.departmentId === item.dept
+  }
+  return true
 }
 
 export function visibleEnvironmentItems(environment, access = {}) {
-  return (environment?.items || []).filter((item) => isNavigationItemVisible(item, {
-    ...access,
-    environmentKey: environment?.key,
+  const items = (environment?.items || []).filter(item => isNavigationItemVisible(item, {
+    ...access, environmentKey: environment?.key,
   }))
+  return items.filter((item, index) => {
+    if (!item.isHeader) return true
+    const following = items.slice(index + 1)
+    const nextHeader = following.findIndex(next => next.isHeader)
+    const section = nextHeader < 0 ? following : following.slice(0, nextHeader)
+    return section.some(next => Boolean(next.path))
+  })
 }
