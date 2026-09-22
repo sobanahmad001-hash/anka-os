@@ -28,6 +28,33 @@ import {
   approvedSourceVersions,
 } from './index.ts'
 
+import { contextChatAction } from './contextChatActions.ts'
+
+Deno.test('owner-private conversation list pages by stable activity order within exact owner and organization', async () => {
+  const calls: Array<[string, unknown, unknown?]> = []
+  const organizationId = 'a0000000-0000-4000-8000-000000000001'
+  const actorId = 'b0000000-0000-4000-8000-000000000001'
+  const query: any = {
+    select() { return query },
+    eq(key: string, value: unknown) { calls.push(['eq', key, value]); return query },
+    is(key: string, value: unknown) { calls.push(['is', key, value]); return query },
+    order(key: string, options: { ascending: boolean }) { calls.push(['order', key, options.ascending]); return query },
+    range(from: number, through: number) {
+      calls.push(['range', from, through])
+      return Promise.resolve({ data: Array.from({ length: 51 }, (_, i) => ({ id: String(i) })), error: null })
+    },
+  }
+  const admin = { from(table: string) { calls.push(['from', table]); return query } }
+  const rows = await contextChatAction('list_context_conversations', admin as any,
+    { context_kind: 'organization', offset: 50 }, actorId, organizationId, { role: 'contributor' })
+  assertEquals((rows as Array<unknown>).length, 51)
+  assertEquals(calls.some(call => call[0] === 'range' && call[1] === 50 && call[2] === 100), true)
+  assertEquals(calls.some(call => call[0] === 'eq' && call[1] === 'organization_id' && call[2] === organizationId), true)
+  assertEquals(calls.some(call => call[0] === 'eq' && call[1] === 'owner_id' && call[2] === actorId), true)
+  assertEquals(calls.filter(call => call[0] === 'order').map(call => call[1]),
+    ['last_activity_at', 'id'])
+})
+
 Deno.test('P9B requires distinct exact version identities and rejects implicit or truncated source input', () => {
   const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222']
   assertEquals(selectedDepartmentChatSourceIds(undefined), [])

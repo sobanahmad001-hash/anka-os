@@ -1,5 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
-import { isContextChatUuid, validateContextChatMessage, validateContextChatScope } from './contextChatScope.mjs'
+import { isContextChatUuid, validateContextChatListOffset, validateContextChatMessage, validateContextChatScope } from './contextChatScope.mjs'
 
 type Client = ReturnType<typeof createClient<any>>
 type Json = Record<string, unknown>
@@ -47,13 +47,15 @@ export async function contextChatAction(
     const scope = validateContextChatScope(body)
     await requireScopeAccess(admin, organizationId, activeMembership, scope)
     if (action === 'list_context_conversations') {
+      const offset = validateContextChatListOffset(body.offset)
       let query = admin.from('department_chat_conversations')
         .select('id, context_kind, project_id, department_id, owner_id, title, state, last_activity_at, created_at')
         .eq('organization_id', organizationId).eq('owner_id', actorId)
         .eq('context_kind', scope.context_kind)
       query = scope.project_id ? query.eq('project_id', scope.project_id) : query.is('project_id', null)
       query = scope.department_id ? query.eq('department_id', scope.department_id) : query.is('department_id', null)
-      const { data, error } = await query.order('last_activity_at', { ascending: false }).limit(50)
+      const { data, error } = await query.order('last_activity_at', { ascending: false })
+        .order('id', { ascending: false }).range(offset, offset + 50)
       if (error) throw error
       return data || []
     }

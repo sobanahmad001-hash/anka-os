@@ -37,3 +37,11 @@ export function validateContextChatMessage(value) {
 export function isContextChatUuid(value) {
   return UUID.test(value)
 }
+
+export function validateContextChatListOffset(value) {
+  const offset = value ?? 0
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1000000) {
+    throw new Error('Conversation page offset is invalid')
+  }
+  return offset
+}

@@ -5,6 +5,7 @@ import { departmentChat } from '../data/departmentChatRepository.js'
 
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-violet-500'
 const BUTTON = 'rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50'
+const PAGE_SIZE = 50
 
 export default function ContextConversationPanel({ contextKind, departmentId = '', projectId = '', label = 'Conversation' }) {
   const { user } = useAuth()
@@ -21,6 +22,9 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
     ...(projectId ? { project_id: projectId } : {}) }), [contextKind, departmentId, projectId])
   const requestScope = useMemo(() => ({ organizationId, signal }), [organizationId, signal])
   const [conversations, setConversations] = useState([])
+  const [hasMoreConversations, setHasMoreConversations] = useState(false)
+  const [nextOffset, setNextOffset] = useState(0)
+  const [listBusy, setListBusy] = useState(false)
   const [conversationId, setConversationId] = useState('')
   const [messages, setMessages] = useState([])
   const [hasOlder, setHasOlder] = useState(false)
@@ -33,6 +37,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   const pendingRequests = useRef(new Map())
   const drafts = useRef(new Map())
   const activeConversation = useRef(conversationId)
+  const listRevision = useRef(0)
   activeConversation.current = conversationId
 
   const showError = useCallback((reason) => {
@@ -42,24 +47,32 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   }, [onAccessError, signal])
 
   const refresh = useCallback(async (preferredId = '') => {
+    const revision = ++listRevision.current
     const rows = await departmentChat.listContextConversations(scope, requestScope)
-    if (signal.aborted) return
-    setConversations(rows || [])
+    if (signal.aborted || revision !== listRevision.current) return
+    const page = (rows || []).slice(0, PAGE_SIZE)
+    setConversations(page)
+    setHasMoreConversations((rows || []).length > PAGE_SIZE)
+    setNextOffset(page.length)
     setConversationId(current => {
       if (preferredId) return preferredId
-      return (rows || []).some(row => row.id === current) ? current : rows?.[0]?.id || ''
+      return page.some(row => row.id === current) ? current : page[0]?.id || ''
     })
   }, [scope, requestScope, signal])
 
   useEffect(() => {
     let current = true
+    const revision = ++listRevision.current
     setLoading(true)
     setError('')
     departmentChat.listContextConversations(scope, requestScope)
       .then(rows => {
-        if (!current || signal.aborted) return
-        setConversations(rows || [])
-        setConversationId(rows?.[0]?.id || '')
+        if (!current || signal.aborted || revision !== listRevision.current) return
+        const page = (rows || []).slice(0, PAGE_SIZE)
+        setConversations(page)
+        setHasMoreConversations((rows || []).length > PAGE_SIZE)
+        setNextOffset(page.length)
+        setConversationId(page[0]?.id || '')
       })
       .catch(reason => { if (current) showError(reason) })
       .finally(() => { if (current && !signal.aborted) setLoading(false) })
@@ -81,6 +94,22 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
       .catch(reason => { if (current) showError(reason) })
     return () => { current = false }
   }, [conversationId, requestScope, signal, showError])
+
+  async function loadMoreConversations() {
+    if (!hasMoreConversations || listBusy) return
+    const revision = listRevision.current
+    const offset = nextOffset
+    setListBusy(true); setError('')
+    try {
+      const rows = await departmentChat.listContextConversations({ ...scope, offset }, requestScope)
+      if (signal.aborted || revision !== listRevision.current) return
+      const page = (rows || []).slice(0, PAGE_SIZE)
+      setConversations(current => [...current, ...page.filter(row => !current.some(item => item.id === row.id))])
+      setHasMoreConversations((rows || []).length > PAGE_SIZE)
+      setNextOffset(offset + page.length)
+    } catch (reason) { if (revision === listRevision.current) showError(reason) }
+    finally { if (!signal.aborted) setListBusy(false) }
+  }
 
   async function createConversation(event) {
     event.preventDefault()
@@ -156,6 +185,10 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
         {conversations.map(row => <button key={row.id} type="button" onClick={() => { drafts.current.set(conversationId, draft); setConversationId(row.id) }}
           className={`w-full rounded-xl border p-3 text-left text-sm ${row.id === conversationId ? 'border-violet-500 bg-violet-950/30 text-white' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}>
           {row.title}</button>)}
+        {hasMoreConversations && <button type="button" onClick={loadMoreConversations} disabled={listBusy || busy}
+          className="w-full rounded-xl border border-slate-700 px-3 py-2 text-xs font-semibold text-violet-300 disabled:opacity-50">
+          {listBusy ? 'Loading…' : 'Load older conversations'}
+        </button>}
       </div>
       <div className="min-h-64 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
         {!selected ? <p className="text-sm text-slate-500">Choose or create a conversation.</p> : <>

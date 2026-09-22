@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { validateContextChatScope, validateContextChatMessage, isContextChatUuid } from '../../supabase/functions/department-chat/contextChatScope.mjs'
+import { validateContextChatScope, validateContextChatListOffset, validateContextChatMessage, isContextChatUuid } from '../../supabase/functions/department-chat/contextChatScope.mjs'
 
 const projectId = 'a0000000-0000-4000-8000-000000000001'
 
@@ -29,4 +29,12 @@ test('human turns require bounded text and valid request identity', () => {
   for (const value of ['', '   ', 'x'.repeat(8001), null]) assert.throws(() => validateContextChatMessage(value))
   assert.equal(isContextChatUuid(projectId), true)
   assert.equal(isContextChatUuid('not-a-uuid'), false)
+})
+
+test('conversation list paging accepts only bounded whole-number offsets', () => {
+  assert.equal(validateContextChatListOffset(undefined), 0)
+  assert.equal(validateContextChatListOffset(50), 50)
+  for (const value of [-1, 1.5, '50', Number.NaN, 1000001]) {
+    assert.throws(() => validateContextChatListOffset(value))
+  }
 })
