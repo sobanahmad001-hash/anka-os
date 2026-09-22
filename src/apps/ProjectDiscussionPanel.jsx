@@ -133,7 +133,7 @@ export default function ProjectDiscussionPanel({ organizationId, projectId, task
       })}</div>}
       <button type="submit" disabled={saving || !message.trim()} className="mt-3 rounded-lg bg-violet-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{saving ? 'Posting…' : 'Post message'}</button>
     </form>}
-    <_ProjectMemoryPanel organizationId={organizationId} projectId={projectId} sourceCommentId={sourceCommentId} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={onAccessError} />
+    <_ProjectMemoryPanel organizationId={organizationId} projectId={projectId} sourceCommentId={sourceCommentId} workstreams={workstreams} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={onAccessError} />
     <div id="project-task-proposals"><_ProjectTaskProposalPanel organizationId={organizationId} projectId={projectId} tasks={tasks} sourceCommentId={sourceCommentId} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={onAccessError} onApplied={onApplied} /></div>
     <div id="project-handoffs"><_ProjectHandoffPanel organizationId={organizationId} projectId={projectId} workstreams={workstreams} sourceCommentId={sourceCommentId} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={onAccessError} /></div>
   </section>
