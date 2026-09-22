@@ -100,3 +100,23 @@ test('replayed or mismatched backup claim never submits provider work', async ()
     assert.equal(caseRun.events.filter(event => event[0] === 'send').length, 1)
   }
 })
+
+test('N7 provider refusals distinguish temporary limits from spending and ambiguous outcomes', () => {
+  assert.equal(confirmedRetryableRejection(429,
+    { error: { type: 'rate_limit_error' } }, 'anthropic', '2'), 'rate_limit_error')
+  assert.equal(confirmedRetryableRejection(429,
+    { error: { type: 'rate_limit_error' } }, 'anthropic'), null)
+  assert.equal(confirmedRetryableRejection(429, { error: {
+    type: 'rate_limit_error', details: { error_code: 'enforced_spend_limit_reached' },
+  } }, 'anthropic', '2'), null)
+  assert.equal(confirmedRetryableRejection(529,
+    { error: { type: 'overloaded_error' } }, 'anthropic'), 'overloaded_error')
+  assert.equal(confirmedRetryableRejection(503,
+    { error: { status: 'UNAVAILABLE' } }, 'google_gemini'), 'service_unavailable')
+  assert.equal(confirmedRetryableRejection(429,
+    { error: { status: 'RESOURCE_EXHAUSTED', code: 429 } }, 'google_gemini'), null)
+  assert.equal(confirmedRetryableRejection(429,
+    { error: { code: 'rate_limit_exceeded' } }, 'google_gemini'), 'rate_limit_exceeded')
+  assert.equal(confirmedRetryableRejection(503,
+    { error: { code: 'server_is_overloaded' } }, 'unknown'), null)
+})

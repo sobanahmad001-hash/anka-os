@@ -214,7 +214,8 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
         })
         return { ok: providerResponse.ok, status: providerResponse.status,
           body: asObject(await providerResponse.json()),
-          requestId: providerResponse.headers.get('x-request-id') || '' }
+          requestId: providerResponse.headers.get('x-request-id') || '',
+          retryAfter: providerResponse.headers.get('retry-after') || '' }
       },
       async (priority, status, code, requestId) => {
         const rejection = asObject(await rpc(serviceClient, 'record_pipeline_ai_retryable_rejection', {

@@ -1,4 +1,7 @@
+export type PipelinePricingProvider = 'openai' | 'anthropic' | 'google_gemini'
+
 export type PipelineModelRate = {
+  provider?: PipelinePricingProvider
   model_id: string
   verified_at: string
   source_url: string
@@ -26,7 +29,15 @@ function rate(value: unknown): value is number {
     && value > 0 && value <= 1000
 }
 
-export function selectFreshPipelineRate(raw: string | undefined, modelId: string, now = new Date()): PipelineModelRate {
+function verifiedPricingSource(provider: PipelinePricingProvider, sourceUrl: string): boolean {
+  if (provider === 'openai') return /^https:\/\/developers\.openai\.com\/api\/docs\/(pricing|models\/[^/?#]+)$/.test(sourceUrl)
+  if (provider === 'anthropic') return sourceUrl === 'https://platform.claude.com/docs/en/about-claude/pricing'
+  if (provider === 'google_gemini') return sourceUrl === 'https://ai.google.dev/gemini-api/docs/pricing'
+  return false
+}
+
+export function selectFreshPipelineRate(raw: string | undefined, modelId: string,
+  now = new Date(), provider: PipelinePricingProvider = 'openai'): PipelineModelRate {
   if (!raw) throw new Error('N6 model pricing is not configured')
   let catalog: unknown
   try { catalog = JSON.parse(raw) } catch { throw new Error('N6 model pricing is invalid') }
@@ -40,7 +51,8 @@ export function selectFreshPipelineRate(raw: string | undefined, modelId: string
   const checkedAt = Date.parse(item.verified_at)
   if (!Number.isFinite(checkedAt) || checkedAt > now.getTime()
     || now.getTime() - checkedAt > 30 * 24 * 60 * 60 * 1000
-    || !/^https:\/\/developers\.openai\.com\/api\/docs\/(pricing|models\/[^/?#]+)$/.test(item.source_url)) {
+    || !verifiedPricingSource(provider, item.source_url)
+    || (provider === 'openai' ? item.provider && item.provider !== 'openai' : item.provider !== provider)) {
     throw new Error('N6 model price evidence is stale or unverified')
   }
   if (![item.input_usd_per_million, item.cached_input_usd_per_million,
