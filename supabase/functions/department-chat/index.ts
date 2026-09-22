@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
+import { contextChatAction } from './contextChatActions.ts'
 import {
   contentArtifactResponseFormat,
   validateContentArtifact,
@@ -2030,6 +2031,9 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
     }
     if (action === 'reject_proposal') {
       return response({ data: await rejectProposal(admin, text(body.proposal_id, 80), user.id, membership) })
+    }
+    if (['create_context_conversation', 'list_context_conversations', 'get_context_conversation', 'append_context_human_message'].includes(action)) {
+      return response({ data: await contextChatAction(action, admin, body, user.id, organizationId, membership) })
     }
     const departmentId = text(body.department_id, 40)
     if (!ENABLED_DEPARTMENTS.has(departmentId)) throw Object.assign(new Error('Department policy denied'), { status: 403 })
