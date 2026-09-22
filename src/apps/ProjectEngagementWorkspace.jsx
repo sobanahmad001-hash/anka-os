@@ -8,6 +8,7 @@ import ProjectDraftActivation from './ProjectDraftActivation.jsx'
 import ProjectServiceScopePanel from './ProjectServiceScopePanel.jsx'
 import ProjectManagerAssignment from './ProjectManagerAssignment.jsx'
 import ProjectDiscussionPanel from './ProjectDiscussionPanel.jsx'
+import ContextConversationPanel from '../components/ContextConversationPanel.jsx'
 import _ProjectReviewEvidencePanel from './ProjectReviewEvidencePanel.jsx'
 import { appendWorkshopNavigation, parseWorkshopNavigation } from '../data/workshopNavigation.js'
 
@@ -165,7 +166,10 @@ export default function ProjectEngagementWorkspace() {
           {tab === 'services' && <ServicesAndScope workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={load} onAccessError={handleOrganizationAccessError} />}
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
           {tab === 'work' && <WorkViews workspace={workspace} navigate={navigate} searchParams={searchParams} setSearchParams={setSearchParams} />}
-          {tab === 'discussion' && <ProjectDiscussionPanel organizationId={activeOrganizationId} projectId={project.id} tasks={workspace.projectTasks} workstreams={workspace.workstreams} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={handleOrganizationAccessError} onApplied={load} />}
+          {tab === 'discussion' && <div className="space-y-6">
+            <ProjectDiscussionPanel organizationId={activeOrganizationId} projectId={project.id} tasks={workspace.projectTasks} workstreams={workspace.workstreams} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={handleOrganizationAccessError} onApplied={load} />
+            <ContextConversationPanel contextKind="project_team" projectId={project.id} label="My private project conversations" />
+          </div>}
           {tab === 'project-tasks' && <ProjectTasks rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
           {tab === 'engagement-work' && <EngagementWork rows={workspace.engagementWorkItems} hasEngagement={identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
           {tab === 'planning' && <ProjectPlanningPanel workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} onRefresh={load} />}
