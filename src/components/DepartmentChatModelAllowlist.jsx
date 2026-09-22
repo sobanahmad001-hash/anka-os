@@ -17,13 +17,13 @@ function initialDraft(connection) {
 }
 
 export default function DepartmentChatModelAllowlist({ organizationId, connections, canManage, onSaved, requestSignal }) {
-  const openAiConnections = connections.filter(connection => connection.provider === 'openai')
+  const textConnections = connections.filter(connection => ['openai', 'anthropic', 'google_gemini'].includes(connection.provider))
   const [drafts, setDrafts] = useState({})
   const [savingId, setSavingId] = useState('')
   const [message, setMessage] = useState('')
 
   useEffect(() => {
-    setDrafts(Object.fromEntries(openAiConnections.map(connection => [connection.id, initialDraft(connection)])))
+    setDrafts(Object.fromEntries(textConnections.map(connection => [connection.id, initialDraft(connection)])))
   }, [connections])
 
   async function save(connection) {
@@ -36,7 +36,7 @@ export default function DepartmentChatModelAllowlist({ organizationId, connectio
         CHAT_DEPARTMENTS.filter(departmentId => mapped.has(departmentId))
           .map(departmentId => [departmentId, draft[departmentId] || []]),
       ), { signal: requestSignal })
-      setMessage('Department Chat model access saved. New requests use only the active selections.')
+      setMessage('Department text-model access saved. New requests use only the active selections.')
       await onSaved?.()
     } catch (error) {
       if (error?.name !== 'AbortError' && error?.cause?.name !== 'AbortError') setMessage(error.message || 'Model access could not be saved.')
@@ -45,14 +45,14 @@ export default function DepartmentChatModelAllowlist({ organizationId, connectio
     }
   }
 
-  if (!openAiConnections.length) return null
+  if (!textConnections.length) return null
   return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-purple-400">Shared Department Chat models</p>
+    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-purple-400">Approved department text models</p>
     <h2 className="mt-2 text-lg font-semibold text-white">Administrator-approved access</h2>
-    <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Only models already verified through each connector can be approved. Disabling a choice blocks new dispatches and confirmations without changing historical run records.</p>
+    <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Only models already verified through each connector can be approved. Disabling a choice blocks new pipeline dispatches without changing historical run records. Shared Chat currently uses OpenAI models.</p>
     {message && <p className="mt-3 text-sm text-slate-300">{message}</p>}
     <div className="mt-4 space-y-4">
-      {openAiConnections.map(connection => {
+      {textConnections.map(connection => {
         const verifiedModels = connection.status === 'verified' ? (connection.verified_model_ids || []) : []
         const mapped = new Set(connection.department_ids || [])
         const draft = drafts[connection.id] || {}

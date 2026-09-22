@@ -299,7 +299,7 @@ export async function handleRequest(req: Request, dependencies: {
       const { data, error } = await userClient.from('integration_connections')
         .select('*, integration_connection_departments(department_id)')
         .eq('organization_id', selectedOrganizationId)
-        .eq('provider', 'openai')
+        .in('provider', ['openai', 'anthropic', 'google_gemini'])
         .is('archived_at', null).order('display_name')
       if (error) throw error
       const { data: modelConfigurations, error: modelConfigurationError } = await userClient
@@ -447,8 +447,9 @@ export async function handleRequest(req: Request, dependencies: {
     }
 
     if (action === 'configure_model_allowlist') {
-      if (connection.provider !== 'openai' || connection.status !== 'verified') {
-        return json({ error: 'A verified OpenAI connector is required' }, 409)
+      if (!['openai', 'anthropic', 'google_gemini'].includes(String(connection.provider))
+        || connection.status !== 'verified') {
+        return json({ error: 'A verified text-model connector is required' }, 409)
       }
       const requested = body.department_model_ids && typeof body.department_model_ids === 'object'
         ? body.department_model_ids as Record<string, unknown> : {}
@@ -485,7 +486,7 @@ export async function handleRequest(req: Request, dependencies: {
       if (configureError) throw configureError
       await adminClient.from('integration_events').insert({
         organization_id: selectedOrganizationId, connection_id: connection.id, actor_id: user.id,
-        operation: 'updated', outcome: 'succeeded', provider: 'openai',
+        operation: 'updated', outcome: 'succeeded', provider: connection.provider,
         metadata: { change: 'department_chat_model_allowlist', departments: [...mappedDepartments] },
       })
       return json({ success: true })

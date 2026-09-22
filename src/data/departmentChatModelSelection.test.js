@@ -134,7 +134,7 @@ test('P9 admin allowlist reuses existing leadership and verified connector facts
   assert.match(gateway, /action === 'configure_model_allowlist'/)
   assert.match(gateway, /selectedOrganizationId/)
   assert.match(gateway, /\.eq\('organization_id', selectedOrganizationId\)/)
-  assert.match(gateway, /connection\.provider !== 'openai' \|\| connection\.status !== 'verified'/)
+  assert.ok(gateway.includes("['openai', 'anthropic', 'google_gemini'].includes"))
   assert.match(gateway, /Model allowlist contains an unverified model/)
   assert.match(gateway, /verifiedModelIds\(connection\)/)
   assert.match(repository, /list_model_allowlist[\s\S]*organization_id: organizationId/)

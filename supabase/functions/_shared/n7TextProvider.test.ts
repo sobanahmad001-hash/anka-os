@@ -37,7 +37,7 @@ Deno.test('N7 normalizes complete OpenAI, Claude and Gemini text usage without l
     responseId: 'gem-1', modelVersion: 'verified-model',
     candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'Draft' }] } }],
     usageMetadata: { promptTokenCount: 100, cachedContentTokenCount: 30,
-      candidatesTokenCount: 20, thoughtsTokenCount: 5 },
+      candidatesTokenCount: 20, thoughtsTokenCount: 5, totalTokenCount: 125 },
   }).usage, { input_tokens: 100, output_tokens: 25,
     input_tokens_details: { cached_tokens: 30, cache_write_tokens: 0 } })
 })
@@ -59,5 +59,20 @@ Deno.test('N7 refuses incomplete, blocked, tool, or unmetered outcomes', () => {
   assertThrows(() => normalizeN7TextResult('google_gemini', {
     responseId: 'gem-1', modelVersion: 'verified-model',
     candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'Draft' }] } }],
+  }))
+})
+
+Deno.test('N7 rejects Gemini token totals or hidden tool-use usage that cannot be settled', () => {
+  const response = {
+    responseId: 'gem-2', modelVersion: 'verified-model',
+    candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'Draft' }] } }],
+    usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 20, totalTokenCount: 120 },
+  }
+  assertEquals(normalizeN7TextResult('google_gemini', response).usage.output_tokens, 20)
+  assertThrows(() => normalizeN7TextResult('google_gemini', {
+    ...response, usageMetadata: { ...response.usageMetadata, totalTokenCount: 121 },
+  }))
+  assertThrows(() => normalizeN7TextResult('google_gemini', {
+    ...response, usageMetadata: { ...response.usageMetadata, toolUsePromptTokenCount: 1 },
   }))
 })
