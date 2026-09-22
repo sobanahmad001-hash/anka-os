@@ -47,6 +47,8 @@ try {
   Invoke-LocalSql (Join-Path $PSScriptRoot 'n7-client-brand-memory-behavior.sql')
   Invoke-LocalSql (Join-Path $PSScriptRoot '..\migrations\20260923050000_n7_organization_policy_memory.sql')
   Invoke-LocalSql (Join-Path $PSScriptRoot 'n7-organization-policy-behavior.sql')
+  Invoke-LocalSql (Join-Path $PSScriptRoot '..\migrations\20260923060000_n7_organization_policy_purge.sql')
+  Invoke-LocalSql (Join-Path $PSScriptRoot 'n7-organization-policy-purge-behavior.sql')
   Write-Output "N7 isolated project-memory checks passed. Cluster: $cluster"
 }
 finally {
