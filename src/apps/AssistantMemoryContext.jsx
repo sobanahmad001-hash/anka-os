@@ -75,7 +75,7 @@ export default function AssistantMemoryContext({
   if (!projectId || !departmentId) return null
   return <section aria-label="Reviewed memory preview" className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
     <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-semibold">Reviewed memory for this selection</h3><button type="button" onClick={() => setRefreshRevision(value => value + 1)} className="text-xs text-violet-300">Refresh sources</button></div>
-    <p className="mt-1 text-xs leading-5 text-slate-500">This is a read-only preview. These lessons are not added to an AI request from this screen. Each source is checked when loaded; refresh before relying on a changed project.</p>
+    <p className="mt-1 text-xs leading-5 text-slate-500">This is a read-only preview. For a project-scoped Assistant run using a verified connection, the server rechecks and sends up to 20 confirmed project lessons to the AI provider. Other memory scopes shown here are not sent. Refresh before relying on a changed project.</p>
     {error && <p role="alert" className="mt-3 text-xs text-rose-300">{error}</p>}
     {!context && !error && <p className="mt-3 text-xs text-slate-500">Checking current sources…</p>}
     {context && <div className="mt-4 space-y-4">
