@@ -203,10 +203,11 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
     const response = await fetcher(providerRequest.url, {
       ...providerRequest.init, signal: AbortSignal.timeout(120000),
     })
-    const providerRequestId = response.headers.get('x-request-id') || ''
+    const providerRequestId = (response.headers.get('x-request-id')
+      || response.headers.get('request-id') || response.headers.get('x-goog-request-id') || '').slice(0, 160)
     if (!response.ok) {
       await markUncertain(admin, organizationId, messageId,
-        'Provider response ' + response.status + '; claim=' + claimId)
+        'Provider response ' + response.status + '; claim=' + claimId + '; provider_request=' + providerRequestId)
       return reply({ status: 'outcome_unknown', must_not_submit: true }, 503)
     }
     let normalized
@@ -218,7 +219,7 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
       if (measuredCost > maxCost) throw new Error('Measured cost exceeds reservation')
     } catch {
       await markUncertain(admin, organizationId, messageId,
-        'Provider output needs reconciliation; claim=' + claimId)
+        'Provider output needs reconciliation; claim=' + claimId + '; provider_request=' + providerRequestId)
       return reply({ status: 'outcome_unknown', must_not_submit: true }, 503)
     }
     const manifest = {
@@ -245,7 +246,7 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
     }).select('id').single()
     if (runError || !run?.id) {
       await markUncertain(admin, organizationId, messageId,
-        'Provider output audit failed; claim=' + claimId)
+        'Provider output audit failed; claim=' + claimId + '; provider_request=' + providerRequestId)
       return reply({ status: 'outcome_unknown', must_not_submit: true }, 503)
     }
     try {
