@@ -68,13 +68,18 @@ export async function contextChatAction(
   const conversation = await ownedConversation(admin, organizationId, actorId, string(body.conversation_id))
   await requireScopeAccess(admin, organizationId, activeMembership, conversation)
   if (action === 'get_context_conversation') {
-    const { data, error } = await admin.from('department_chat_messages')
+    const before = body.before_sequence
+    if (before !== undefined && (!Number.isSafeInteger(before) || Number(before) < 2)) {
+      throw fail('Conversation page cursor is invalid')
+    }
+    let query = admin.from('department_chat_messages')
       .select('id, author_id, role, body, status, client_request_id, sequence, created_at, finished_at')
       .eq('organization_id', organizationId).eq('conversation_id', conversation.id)
-      .order('sequence', { ascending: false }).limit(100)
+    if (before !== undefined) query = query.lt('sequence', before)
+    const { data, error } = await query.order('sequence', { ascending: false }).limit(101)
     if (error) throw error
-    const messages = (data || []).reverse()
-    return { conversation, messages, has_older: messages.length === 100 && messages[0].sequence > 1 }
+    const rows = data || []
+    return { conversation, messages: rows.slice(0, 100).reverse(), has_older: rows.length > 100 }
   }
   if (action === 'append_context_human_message') {
     const requestId = string(body.client_request_id)
