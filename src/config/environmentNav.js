@@ -34,7 +34,7 @@ export const environmentNav = [
 
       { label: 'Delivery & Support', path: null, isHeader: true },
       { label: 'Development', path: '/sphere/delivery', dept: 'development', activePrefixes: ['/sphere/delivery'] },
-      { label: 'Sphere Events', path: '/sphere/events' },
+      { label: 'Sphere Events', path: '/sphere/events', dept: null },
       { label: 'Client Portal', path: '/sphere/portal' },
       { label: 'Reports & Records', path: '/sphere/reports' },
 
