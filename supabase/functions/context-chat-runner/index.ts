@@ -3,6 +3,7 @@ import { namedKey, sha256 } from '../_shared/googleOAuthTokens.ts'
 import { conservativePipelineCeiling, measuredPipelineTokenCost, selectFreshPipelineRate } from '../_shared/n6PipelineCost.ts'
 import { buildN7TextRequest, normalizeN7TextResult } from '../_shared/n7TextProvider.ts'
 import type { N7TextProvider } from '../_shared/n7TextProvider.ts'
+import { buildPrivateConversationPrompt } from '../_shared/contextChatPrompt.js'
 
 type Json = Record<string, any>
 type Client = ReturnType<typeof createClient<any>>
@@ -40,44 +41,6 @@ async function rpc(admin: Client, name: string, args: Json) {
   const { data, error } = await admin.rpc(name, args)
   if (error) throw fail(name + ' rejected this request: ' + error.message)
   return data
-}
-export function privateConversationScope(context: Json) {
-  if (context.context_kind === 'organization'
-    && context.project_id == null && context.department_id == null) {
-    return { scope: 'owner_private_organization_conversation' }
-  }
-  if (context.context_kind === 'project_team' && context.department_id == null) {
-    return { scope: 'owner_private_project_conversation',
-      project_id: requiredId(context.project_id, 'project') }
-  }
-  if (context.context_kind === 'department_private'
-    && context.project_id == null
-    && ['content', 'design', 'marketing'].includes(context.department_id)) {
-    return { scope: 'owner_private_department_conversation', department_id: context.department_id }
-  }
-  throw fail('Exact private conversation context is required')
-}
-export function buildPrivateConversationPrompt(rows: Json[], messageId: string, context: Json) {
-  const boundScope = privateConversationScope(context)
-  if (!Array.isArray(rows) || rows.length < 1 || rows.length > 12
-    || rows[rows.length - 1]?.id !== messageId
-    || rows[rows.length - 1]?.role !== 'user') throw fail('Current human turn is unavailable')
-  const turns = rows.map(row => {
-    if (!uuid.test(row.id || '') || !['user', 'assistant'].includes(row.role)
-      || row.status !== 'completed' || typeof row.body !== 'string'
-      || row.body.trim().length < 1 || row.body.length > 40000
-      || (row.role === 'user' && row.body.length > 8000)) {
-      throw fail('Conversation history is not ready')
-    }
-    return { role: row.role, text: row.body.slice(-8000) }
-  })
-  let prompt = JSON.stringify({ ...boundScope, source_message_id: messageId, turns })
-  while (turns.length > 1 && new TextEncoder().encode(prompt).length > 24000) {
-    turns.shift()
-    prompt = JSON.stringify({ ...boundScope, source_message_id: messageId, turns })
-  }
-  if (new TextEncoder().encode(prompt).length > 24000) throw fail('Conversation context exceeds the model bound')
-  return prompt
 }
 async function markUncertain(admin: Client, organizationId: string, messageId: string, evidence: string) {
   try {
