@@ -3,6 +3,7 @@ import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.1
 import {
   actionResponseFormat,
   loadReviewedProjectMemory,
+  verifiedProjectMemoryScope,
   outputText,
   parseAction,
   resolveCanonicalCommercialContext,
@@ -152,4 +153,13 @@ Deno.test('project memory accepts only the selected scope and caps confirmed row
     })),
     Error, 'record was invalid',
   )
+})
+
+Deno.test('reviewed project memory requires the selected engagement verified connector', () => {
+  const project = '22222222-2222-4222-8222-222222222222'
+  const engagement = '33333333-3333-4333-8333-333333333333'
+  assertEquals(verifiedProjectMemoryScope(project, engagement, 'connector'), project)
+  assertEquals(verifiedProjectMemoryScope(project, null, 'connector'), null)
+  assertEquals(verifiedProjectMemoryScope(project, engagement, 'legacy'), null)
+  assertEquals(verifiedProjectMemoryScope(null, engagement, 'connector'), null)
 })

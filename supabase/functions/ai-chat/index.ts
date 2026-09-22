@@ -42,6 +42,13 @@ export function withAiCommercialContext<T extends Record<string, unknown>>(
   return { ...payload, ...commercialContext }
 }
 
+export function verifiedProjectMemoryScope(
+  projectId: string | null,
+  engagementId: string | null,
+  credentialSource: string,
+): string | null {
+  return projectId && engagementId && credentialSource === 'connector' ? projectId : null
+}
 type ReviewedProjectMemory = {
   id: string
   statement: string
@@ -548,8 +555,9 @@ export async function handleRequest(request: Request) {
       action_proposal: `Return JSON only: {"summary":"...","action":{"type":"create_task|create_research_record","params":{...}}}. The action must use project_id ${projectId || 'null'}, an accessible workstream_id when relevant, and must not claim execution.`,
     }
     const providerConfig = await resolveAiProvider(adminClient, departmentId, engagementId)
+    const memoryProjectId = verifiedProjectMemoryScope(projectId, engagementId, providerConfig.credentialSource)
     const reviewedProjectMemory = await loadReviewedProjectMemory(
-      ORGANIZATION_ID, providerConfig.credentialSource === 'connector' ? projectId : null, async (organizationId, selectedProjectId) => {
+      ORGANIZATION_ID, memoryProjectId, async (organizationId, selectedProjectId) => {
         const { data, error } = await userClient.rpc('get_project_ai_memory', {
           p_organization_id: organizationId, p_project_id: selectedProjectId,
         })
@@ -558,7 +566,7 @@ export async function handleRequest(request: Request) {
       },
     )
     manifest.project_memory_status = !projectId ? 'not_applicable_unscoped'
-      : providerConfig.credentialSource === 'connector' ? 'verified_connection' : 'not_sent_legacy_credential'
+      : memoryProjectId ? 'verified_engagement_connection' : 'not_sent_unmapped_connection'
     manifest.project_memory = reviewedProjectMemory.map(row => ({
       id: row.id, source_comment_id: row.source_comment_id,
       source_sha256: row.source_sha256, reviewed_at: row.reviewed_at,
