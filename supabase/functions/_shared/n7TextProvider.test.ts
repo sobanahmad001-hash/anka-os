@@ -19,6 +19,18 @@ Deno.test('N7 text requests use fixed provider hosts and the pinned model withou
     'secret', 'Pinned prompt', 'claim-1', 'safe-id'))
 })
 
+Deno.test('private chat can supply a bounded no-action system instruction', () => {
+  const instruction = 'Answer the private conversation without taking actions.'
+  for (const provider of ['openai', 'anthropic', 'google_gemini'] as const) {
+    const request = buildN7TextRequest(route(provider), 'secret', 'Owner prompt', 'claim-1', 'safe-id', instruction)
+    const body = JSON.parse(String(request.init.body))
+    assertEquals(provider === 'openai' ? body.instructions
+      : provider === 'anthropic' ? body.system
+      : body.systemInstruction.parts[0].text, instruction)
+  }
+  assertThrows(() => buildN7TextRequest(route('openai'), 'secret', 'Owner prompt',
+    'claim-1', 'safe-id', 'x'.repeat(2001)))
+})
 Deno.test('N7 normalizes complete OpenAI, Claude and Gemini text usage without losing cache costs', () => {
   assertEquals(normalizeN7TextResult('openai', {
     id: 'resp-1', model: 'verified-model', status: 'completed',

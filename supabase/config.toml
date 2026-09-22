@@ -138,3 +138,8 @@ entrypoint = "./functions/quick-tasks/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/pipeline-ai-runner/index.ts"
+
+[functions.context-chat-runner]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/context-chat-runner/index.ts"

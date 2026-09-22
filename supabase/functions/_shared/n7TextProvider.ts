@@ -16,18 +16,19 @@ const record = (value: unknown): Record<string, any> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}
 
 export function buildN7TextRequest(route: N7TextRoute, credential: string, prompt: string,
-  claimId: string, safetyIdentifier: string): { url: string; init: RequestInit } {
+  claimId: string, safetyIdentifier: string, instruction = INSTRUCTION): { url: string; init: RequestInit } {
   if (!['openai', 'anthropic', 'google_gemini'].includes(route.provider)
     || !bounded(route.model_id, 120) || !/^[A-Za-z0-9._-]+$/.test(route.model_id)
     || !bounded(credential, 4096) || !bounded(prompt, 24000)
-    || !bounded(claimId, 80) || !bounded(safetyIdentifier, 128)) {
+    || !bounded(claimId, 80) || !bounded(safetyIdentifier, 128)
+    || !bounded(instruction, 2000)) {
     throw new Error('Pinned N7 text route is incomplete')
   }
   if (route.provider === 'openai') return {
     url: 'https://api.openai.com/v1/responses',
     init: { method: 'POST', headers: { 'Content-Type': 'application/json',
       Authorization: 'Bearer ' + credential },
-      body: JSON.stringify({ model: route.model_id, instructions: INSTRUCTION,
+      body: JSON.stringify({ model: route.model_id, instructions: instruction,
         input: prompt, max_output_tokens: 1024, store: false, tools: [],
         safety_identifier: safetyIdentifier, metadata: { anka_claim_id: claimId } }) },
   }
@@ -36,14 +37,14 @@ export function buildN7TextRequest(route: N7TextRoute, credential: string, promp
     init: { method: 'POST', headers: { 'Content-Type': 'application/json',
       'x-api-key': credential, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({ model: route.model_id, max_tokens: 1024,
-        system: INSTRUCTION, messages: [{ role: 'user', content: prompt }] }) },
+        system: instruction, messages: [{ role: 'user', content: prompt }] }) },
   }
   return {
     url: 'https://generativelanguage.googleapis.com/v1beta/models/'
       + encodeURIComponent(route.model_id) + ':generateContent',
     init: { method: 'POST', headers: { 'Content-Type': 'application/json',
       'x-goog-api-key': credential },
-      body: JSON.stringify({ systemInstruction: { parts: [{ text: INSTRUCTION }] },
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: instruction }] },
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: { maxOutputTokens: 1024, candidateCount: 1 }, store: false }) },
   }
