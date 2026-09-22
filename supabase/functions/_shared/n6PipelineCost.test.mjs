@@ -40,3 +40,21 @@ test('token cost uses provider usage and refuses incomplete counters', () => {
     input_tokens_details: { cached_tokens: 11 },
   }, entry), /incomplete/)
 })
+
+test('N7 pricing evidence is provider-specific and fresh', () => {
+  for (const [provider, source_url] of [
+    ['anthropic', 'https://platform.claude.com/docs/en/about-claude/pricing'],
+    ['google_gemini', 'https://ai.google.dev/gemini-api/docs/pricing'],
+  ]) {
+    const providerRate = { ...entry, provider, source_url }
+    assert.deepEqual(selectFreshPipelineRate(JSON.stringify([providerRate]),
+      entry.model_id, now, provider), providerRate)
+    assert.throws(() => selectFreshPipelineRate(JSON.stringify([providerRate]),
+      entry.model_id, now, 'openai'), /unverified/)
+    assert.throws(() => selectFreshPipelineRate(JSON.stringify([{ ...providerRate, provider: 'openai' }]),
+      entry.model_id, now, provider), /unverified/)
+  }
+  assert.throws(() => selectFreshPipelineRate(JSON.stringify([{
+    ...entry, provider: 'anthropic', source_url: 'https://platform.claude.com.evil.test/docs/en/about-claude/pricing',
+  }]), entry.model_id, now, 'anthropic'), /unverified/)
+})
