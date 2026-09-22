@@ -34,6 +34,8 @@ try {
   Invoke-LocalSql (Join-Path $PSScriptRoot 'n7-project-memory-fixture.sql')
   Invoke-LocalSql (Join-Path $PSScriptRoot '..\migrations\20260923000000_n7_project_sourced_memory.sql')
   Invoke-LocalSql (Join-Path $PSScriptRoot 'n7-project-memory-behavior.sql')
+  Invoke-LocalSql (Join-Path $PSScriptRoot '..\migrations\20260923010000_n7_explicit_memory_purge.sql')
+  Invoke-LocalSql (Join-Path $PSScriptRoot 'n7-memory-purge-behavior.sql')
   Write-Output "N7 isolated project-memory checks passed. Cluster: $cluster"
 }
 finally {
