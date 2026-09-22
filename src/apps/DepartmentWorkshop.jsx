@@ -9,11 +9,14 @@ import _WorkshopTabs from '../components/WorkshopTabs.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { delivery } from '../data/delivery.js'
+import { createDepartmentAccessRepository } from '../data/departmentAccess.js'
 import { TASK_TRANSITIONS } from '../data/deliveryRepository.js'
 import { WORKSHOP_TABS } from '../data/workshopTabs.js'
+import { supabase } from '../lib/supabase.js'
 import { appendWorkshopNavigation, parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
 
 const ALL_DEPARTMENT_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
+const departmentAccess = createDepartmentAccessRepository(supabase)
 const CHAT_WORKSHOP_TABS = Object.freeze([...WORKSHOP_TABS, ['chat', 'Shared Chat'], ['private', 'Private Conversations']])
 const canViewDepartment = (membership, departmentId) => Boolean(
   membership && (ALL_DEPARTMENT_ROLES.has(membership.role) || membership.departmentId === departmentId)
@@ -119,7 +122,24 @@ export default function DepartmentWorkshop({ departmentId }) {
   const currentScope = useRef(null)
   currentScope.current = { organizationId: activeOrganizationId, revision: scopeRevision }
   const config = DEPARTMENT_CONFIG[departmentId]
-  const departmentAllowed = canViewDepartment(activeMembership, departmentId)
+  const legacyDepartmentAllowed = canViewDepartment(activeMembership, departmentId)
+  const accessKey = [user?.id, activeOrganizationId, scopeRevision, departmentId].join(':')
+  const needsDepartmentLookup = Boolean(user?.id && activeOrganizationId && !legacyDepartmentAllowed && config)
+  const [departmentAccessState, setDepartmentAccessState] = useState({ key: '', allowed: false })
+  const departmentAllowed = legacyDepartmentAllowed || (departmentAccessState.key === accessKey && departmentAccessState.allowed)
+  const departmentAccessLoading = needsDepartmentLookup && departmentAccessState.key !== accessKey
+  useEffect(() => {
+    if (!needsDepartmentLookup) return undefined
+    let current = true
+    departmentAccess.hasActiveMembership(activeOrganizationId, user.id, departmentId, { signal: requestSignal })
+      .then(allowed => { if (current && !requestSignal.aborted) setDepartmentAccessState({ key: accessKey, allowed }) })
+      .catch(reason => {
+        if (!current || requestSignal.aborted) return
+        handleOrganizationAccessError(reason)
+        setDepartmentAccessState({ key: accessKey, allowed: false })
+      })
+    return () => { current = false }
+  }, [accessKey, activeOrganizationId, departmentId, handleOrganizationAccessError, needsDepartmentLookup, requestSignal, user?.id])
   const [workspace, setWorkspace] = useState(null)
   const availableTabs = departmentId === 'development' ? WORKSHOP_TABS : CHAT_WORKSHOP_TABS
   const initialTab = availableTabs.some(([id]) => id === navigationContext.workshopTab) ? navigationContext.workshopTab : 'tasks'
@@ -278,7 +298,7 @@ export default function DepartmentWorkshop({ departmentId }) {
 
   if (!config) return null
 
-  if (organizationLoading || loading) {
+  if (organizationLoading || departmentAccessLoading || loading) {
     return <div className="flex h-full items-center justify-center bg-slate-950"><div className="h-9 w-9 animate-spin rounded-full border-2 border-slate-700 border-t-purple-500" /></div>
   }
 
