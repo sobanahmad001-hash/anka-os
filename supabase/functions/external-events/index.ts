@@ -119,6 +119,7 @@ async function saveEvent(userClient: Client, admin: Client, actorId: string, bod
   const existing = update ? await readableEvent(userClient, requiredId(body.eventId, 'Event')) : null
   const brand = await readableBrand(userClient, update ? existing!.brand_id : requiredId(body.brandId, 'Brand'))
   if (existing && existing.organization_id !== brand.organization_id) throw new Error('Event organization mismatch')
+  if (requiredId(body.organizationId, 'Organization') !== brand.organization_id) throw Object.assign(new Error('Selected organization does not match brand'), { status: 403 })
   await requireWriter(admin, brand.organization_id, actorId)
   const payload = validateEventInput(body)
   const query = update
@@ -138,6 +139,9 @@ async function saveLink(userClient: Client, admin: Client, actorId: string, body
     existing = data
   }
   const event = await readableEvent(userClient, update ? String(existing!.external_event_id) : requiredId(body.eventId, 'Event'))
+  if (requiredId(body.organizationId, 'Organization') !== event.organization_id || (existing && existing.organization_id !== event.organization_id)) {
+    throw Object.assign(new Error('Selected organization does not match event'), { status: 403 })
+  }
   await requireWriter(admin, event.organization_id, actorId)
   const contentType = text(body.contentType, 40)
   const status = text(body.status, 40) || 'planned'
