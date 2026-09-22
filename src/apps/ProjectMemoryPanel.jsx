@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { projectMemoryRepository } from '../data/projectMemoryRepository.js'
 import _ProjectMemoryPurgePanel from './ProjectMemoryPurgePanel.jsx'
+import _DepartmentMemoryPanel from './DepartmentMemoryPanel.jsx'
 
-export default function ProjectMemoryPanel({ organizationId, projectId, sourceCommentId, scopeRevision, requestSignal, onAccessError }) {
+export default function ProjectMemoryPanel({ organizationId, projectId, sourceCommentId, workstreams, scopeRevision, requestSignal, onAccessError }) {
   const [memory, setMemory] = useState(null)
   const [statement, setStatement] = useState('')
   const [supersedesId, setSupersedesId] = useState('')
@@ -95,6 +96,7 @@ export default function ProjectMemoryPanel({ organizationId, projectId, sourceCo
         <button type="submit" disabled={busy || !sourceCommentId || !statement.trim()} className="mt-3 rounded-lg bg-violet-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Propose for review</button>
       </form>
       {review && <form onSubmit={decide} className="mt-4 rounded-xl border border-violet-400/20 p-4"><h4 className="text-sm font-medium">{review.decision === 'confirm' ? 'Confirm' : review.decision === 'reject' ? 'Reject' : 'Retire'} this exact lesson</h4><p className="mt-1 text-xs text-slate-400">The server checks current project authority and source before confirmation. Your decision is recorded with evidence.</p><label className="mt-3 block text-xs text-slate-400">Decision evidence<textarea required rows={2} maxLength={1000} value={evidence} onChange={event => { setEvidence(event.target.value); requestId.current = null }} className="mt-1 w-full rounded-xl border border-white/10 bg-[#111622] px-3 py-2 text-sm text-white" /></label><div className="mt-3 flex gap-3"><button type="submit" disabled={busy || !evidence.trim()} className="rounded-lg bg-violet-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Record decision</button><button type="button" onClick={() => { setReview(null); requestId.current = null }} className="text-xs text-slate-400">Cancel</button></div></form>}
+      <_DepartmentMemoryPanel organizationId={organizationId} projectId={projectId} workstreams={workstreams} projectLessons={memory.confirmed} scopeRevision={scopeRevision} onAccessError={onAccessError} />
       <_ProjectMemoryPurgePanel organizationId={organizationId} projectId={projectId} scopeRevision={scopeRevision} onAccessError={onAccessError} onPurged={() => load()} />
     </>}
   </section>
