@@ -75,7 +75,7 @@ export async function contextChatAction(
       throw fail('Conversation page cursor is invalid')
     }
     let query = admin.from('department_chat_messages')
-      .select('id, author_id, role, body, status, client_request_id, sequence, created_at, finished_at')
+      .select('id, author_id, role, body, status, client_request_id, sequence, created_at, finished_at, in_reply_to_message_id')
       .eq('organization_id', organizationId).eq('conversation_id', conversation.id)
     if (before !== undefined) query = query.lt('sequence', before)
     const { data, error } = await query.order('sequence', { ascending: false }).limit(101)
