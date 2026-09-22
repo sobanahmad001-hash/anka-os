@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 
 import DepartmentConnectors from '../components/DepartmentConnectors.jsx'
 import DepartmentChat from '../components/DepartmentChat.jsx'
+import ContextConversationPanel from '../components/ContextConversationPanel.jsx'
 import WorkshopContextShell from '../components/WorkshopContextShell.jsx'
 import _WorkshopTabs from '../components/WorkshopTabs.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -13,7 +14,7 @@ import { WORKSHOP_TABS } from '../data/workshopTabs.js'
 import { appendWorkshopNavigation, parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
 
 const ALL_DEPARTMENT_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
-const CHAT_WORKSHOP_TABS = Object.freeze([...WORKSHOP_TABS, ['chat', 'Shared Chat']])
+const CHAT_WORKSHOP_TABS = Object.freeze([...WORKSHOP_TABS, ['chat', 'Shared Chat'], ['private', 'Private Conversations']])
 const canViewDepartment = (membership, departmentId) => Boolean(
   membership && (ALL_DEPARTMENT_ROLES.has(membership.role) || membership.departmentId === departmentId)
 )
@@ -370,7 +371,9 @@ export default function DepartmentWorkshop({ departmentId }) {
         <_WorkshopTabs departmentId={departmentId} activeTab={activeTab} onChange={setActiveTab} tabs={availableTabs} />
 
         <div id={`${departmentId}-${activeTab}-panel`} role="tabpanel" aria-labelledby={`${departmentId}-${activeTab}-tab`}>
-        {activeTab === 'chat' ? (
+        {activeTab === 'private' ? (
+          <div className="mt-6"><ContextConversationPanel contextKind="department_private" departmentId={departmentId} label={`${config.shortName} private conversations`} /></div>
+        ) : activeTab === 'chat' ? (
           <section className="mt-6 space-y-5" aria-label={`${config.shortName} shared chat`}>
             <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
               <h2 className="text-lg font-semibold">Shared Department Chat</h2>

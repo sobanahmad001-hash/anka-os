@@ -66,6 +66,34 @@ test('saved conversation actions keep exact caller context and cannot override s
   assert.equal(calls[1].body.limit, 25)
 })
 
+test('owner-private conversation actions use the selected organization and preserve the request signal', async () => {
+  const calls = []
+  const controller = new AbortController()
+  const scope = { organizationId: 'B', signal: controller.signal }
+  const repo = createDepartmentChatRepository({
+    functions: { invoke: async (name, options) => {
+      calls.push({ name, ...options })
+      return { data: { data: {} } }
+    } },
+  })
+  const identity = { organization_id: 'A', context_kind: 'department_private', department_id: 'design' }
+  await repo.listContextConversations(identity, scope)
+  await repo.createContextConversation({ ...identity, title: 'Private direction' }, scope)
+  await repo.getContextConversation({ organization_id: 'A', conversation_id: 'thread-B', before_sequence: 101 }, scope)
+  await repo.appendContextHumanMessage({ organization_id: 'A', conversation_id: 'thread-B', client_request_id: 'request-B', message: 'Save this idea' }, scope)
+  assert.deepEqual(calls.map(call => call.body.action), [
+    'list_context_conversations', 'create_context_conversation', 'get_context_conversation', 'append_context_human_message',
+  ])
+  for (const call of calls) {
+    assert.equal(call.name, 'department-chat')
+    assert.equal(call.body.organization_id, 'B')
+    assert.equal(call.signal, controller.signal)
+  }
+  assert.equal(calls[0].body.department_id, 'design')
+  assert.equal(calls[2].body.before_sequence, 101)
+  assert.equal(calls[3].body.client_request_id, 'request-B')
+})
+
 test('official read narrows to selected organization and forwards cancellation', async () => {
   const filters = []
   const controller = new AbortController()
