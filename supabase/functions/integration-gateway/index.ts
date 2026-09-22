@@ -2,7 +2,7 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.99.1'
 
 const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
-const PROVIDERS = new Set(['github', 'figma', 'wordpress', 'openai'])
+const PROVIDERS = new Set(['github', 'figma', 'wordpress', 'openai', 'anthropic', 'google_gemini'])
 const DEPARTMENTS = new Set(['content', 'design', 'development', 'marketing'])
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 const SECRET_PREFIX = {
@@ -10,6 +10,8 @@ const SECRET_PREFIX = {
   figma: 'ANKA_FIGMA_',
   wordpress: 'ANKA_WORDPRESS_',
   openai: 'ANKA_OPENAI_',
+  anthropic: 'ANKA_ANTHROPIC_',
+  google_gemini: 'ANKA_GEMINI_',
 } as const
 
 const corsHeaders = {
@@ -70,8 +72,8 @@ function safePublicConfig(provider: string, value: unknown) {
   if (provider === 'figma') {
     return { file_key: text(input.file_key, 160) }
   }
-  if (provider === 'openai') {
-    return { model_id: text(input.model_id, 120) || 'gpt-5.6-terra' }
+  if (provider === 'openai' || provider === 'anthropic' || provider === 'google_gemini') {
+    return { model_id: text(input.model_id, 120) || (provider === 'openai' ? 'gpt-5.6-terra' : '') }
   }
   return { username: text(input.username, 160) }
 }
@@ -153,7 +155,7 @@ function safeHttpsBaseUrl(value: unknown) {
   return url.toString().replace(/\/$/, '')
 }
 
-async function testConnection(connection: Record<string, unknown>, secret: string, fetcher: typeof fetch = fetch) {
+export async function testConnection(connection: Record<string, unknown>, secret: string, fetcher: typeof fetch = fetch) {
   const provider = String(connection.provider)
   const config = connection.public_config as Record<string, string>
   const startedAt = Date.now()
@@ -195,7 +197,7 @@ async function testConnection(connection: Record<string, unknown>, secret: strin
       const data = await response.json()
       summary = { site: new URL(baseUrl).hostname, user_name: data.name, user_id: data.id }
     }
-  } else {
+  } else if (provider === 'openai') {
     if (!config.model_id) throw new Error('OpenAI model ID is required')
     response = await fetcher(`https://api.openai.com/v1/models/${encodeURIComponent(config.model_id)}`, {
       headers: { Authorization: `Bearer ${secret}` },
@@ -205,6 +207,35 @@ async function testConnection(connection: Record<string, unknown>, secret: strin
       const data = await response.json()
       summary = { model_id: data.id, owned_by: data.owned_by }
     }
+  } else if (provider === 'anthropic') {
+    if (!config.model_id) throw new Error('Anthropic model ID is required')
+    response = await fetcher(`https://api.anthropic.com/v1/models/${encodeURIComponent(config.model_id)}`, {
+      headers: { 'x-api-key': secret, 'anthropic-version': '2023-06-01' },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (response.ok) {
+      const data = await response.json()
+      if (!data?.id) throw new Error('Anthropic model verification returned no model ID')
+      summary = { model_id: data.id }
+    }
+  } else if (provider === 'google_gemini') {
+    if (!config.model_id || !/^[a-zA-Z0-9._-]+$/.test(config.model_id)) {
+      throw new Error('Google Gemini model ID is required')
+    }
+    response = await fetcher(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.model_id)}`, {
+      headers: { 'x-goog-api-key': secret },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (response.ok) {
+      const data = await response.json()
+      if (data?.name !== `models/${config.model_id}` ||
+        !data.supportedGenerationMethods?.includes('generateContent')) {
+        throw new Error('Google Gemini model cannot generate content')
+      }
+      summary = { model_id: config.model_id }
+    }
+  } else {
+    throw new Error('Unsupported provider')
   }
 
   if (!response.ok) {

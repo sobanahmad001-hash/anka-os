@@ -1,7 +1,7 @@
 import { assertEquals } from 'jsr:@std/assert@1.0.14'
 import {
   currentConnectionHealthObservation, handleRequest, safeConnectionHealthObservations,
-  syncInitialDepartmentChatModel,
+  syncInitialDepartmentChatModel, testConnection,
 } from './index.ts'
 
 const ORG_A = '11111111-1111-4111-8111-111111111111'
@@ -295,4 +295,50 @@ Deno.test('B05 latest lookup stays deterministic beyond a provider row cap', asy
   assertEquals(body.connections[0].health_observation, {
     outcome: 'succeeded', error_code: null, observed_at: '2026-09-12T12:00:00Z',
   })
+})
+Deno.test('N7 read-only provider verification uses fixed model endpoints and never generates content', async () => {
+  for (const scenario of [
+    {
+      provider: 'anthropic',
+      model: 'claude-test',
+      url: 'https://api.anthropic.com/v1/models/claude-test',
+      body: { id: 'claude-test' },
+      header: 'x-api-key',
+    },
+    {
+      provider: 'google_gemini',
+      model: 'gemini-test',
+      url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-test',
+      body: { name: 'models/gemini-test', supportedGenerationMethods: ['generateContent'] },
+      header: 'x-goog-api-key',
+    },
+  ]) {
+    let calls = 0
+    const result = await testConnection({
+      provider: scenario.provider,
+      public_config: { model_id: scenario.model },
+    }, 'fixture-secret', async (url, options) => {
+      calls++
+      assertEquals(String(url), scenario.url)
+      assertEquals(options?.method, undefined)
+      assertEquals(new Headers(options?.headers).get(scenario.header), 'fixture-secret')
+      return Response.json(scenario.body)
+    })
+    assertEquals(calls, 1)
+    assertEquals(result.summary.model_id, scenario.model)
+    assertEquals(JSON.stringify(result).includes('fixture-secret'), false)
+  }
+})
+
+Deno.test('N7 Gemini verification rejects a model without text generation support', async () => {
+  let rejected = false
+  try {
+    await testConnection({ provider: 'google_gemini', public_config: { model_id: 'model-without-text' } },
+      'fixture-secret', async () => Response.json({
+        name: 'models/model-without-text', supportedGenerationMethods: ['embedContent'],
+      }))
+  } catch {
+    rejected = true
+  }
+  assertEquals(rejected, true)
 })
