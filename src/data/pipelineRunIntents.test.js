@@ -227,3 +227,28 @@ test('N6 manual controls require exact version and evidence before one scoped ac
     p_expected_version: 2, p_action: 'complete', p_evidence: 'Versioned human output',
   }])
 })
+test('N6 AI output review retrieves one exact output and requires evidence', async () => {
+  const calls = []
+  const repository = createPipelineRunIntentsRepository({
+    from() { throw new Error('Unexpected read') },
+    rpc(name, payload) {
+      calls.push([name, payload])
+      return Promise.resolve({ data: { output_id: OTHER, decision: payload.p_decision }, error: null })
+    },
+  })
+  await repository.getOutputForReview({ organizationId: ID, outputId: OTHER })
+  assert.deepEqual(calls[0], ['get_pipeline_ai_step_output_for_review', {
+    p_organization_id: ID, p_output_id: OTHER,
+  }])
+  const base = {
+    organizationId: ID, outputId: OTHER, requestId: ID,
+    expectedVersion: 1, decision: 'accepted', evidence: ' Exact review ',
+  }
+  assert.throws(() => repository.reviewOutput({ ...base, decision: 'published' }), /review decision/)
+  assert.throws(() => repository.reviewOutput({ ...base, evidence: ' ' }), /review evidence/)
+  await repository.reviewOutput(base)
+  assert.deepEqual(calls[1], ['review_pipeline_ai_step_output', {
+    p_organization_id: ID, p_output_id: OTHER, p_request_id: ID,
+    p_expected_progress_version: 1, p_decision: 'accepted', p_evidence: 'Exact review',
+  }])
+})

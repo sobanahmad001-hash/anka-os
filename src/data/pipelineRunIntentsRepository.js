@@ -32,7 +32,7 @@ export function createPipelineRunIntentsRepository(supabase) {
           .select('id, run_intent_id, work_manifest, work_sha256, planned_at, planned_by')
           .eq('organization_id', organization).in('run_intent_id', ids), signal),
         dataOrThrow(supabase.from('ai_execution_jobs')
-          .select('id, run_intent_id, run_plan_id, status, blocked_reason, input_sha256, created_at, steps:ai_execution_job_steps(id, ordinal, work_item_id, department_id, status, input_sha256), configured_steps:ai_execution_configured_steps(id, ordinal, step_key, instance_number, definition_step, status, input_sha256, progress:ai_execution_step_progress(status, state_version, started_by, completed_by)), input_approval:ai_execution_input_approvals(id, approved_by, approved_at)')
+          .select('id, run_intent_id, run_plan_id, status, blocked_reason, input_sha256, created_at, steps:ai_execution_job_steps(id, ordinal, work_item_id, department_id, status, input_sha256), configured_steps:ai_execution_configured_steps(id, ordinal, step_key, instance_number, definition_step, status, input_sha256, progress:ai_execution_step_progress(status, state_version, started_by, completed_by), output:ai_execution_step_outputs(id, output_sha256, provider, model_id, measured_cost_microusd, review:ai_execution_step_output_reviews(id, decision, reviewed_by, evidence))), input_approval:ai_execution_input_approvals(id, approved_by, approved_at)')
           .eq('organization_id', organization).in('run_intent_id', ids), signal),
       ])
       const reviewByIntent = new Map((reviews || []).map(review => [review.run_intent_id, review]))
@@ -51,6 +51,30 @@ export function createPipelineRunIntentsRepository(supabase) {
         p_job_id: requiredId(jobId, 'Execution job'),
         p_request_id: requiredId(requestId, 'Request'),
         p_acknowledged: true,
+      }), signal)
+    },
+    getOutputForReview({ organizationId, outputId }, { signal } = {}) {
+      return dataOrThrow(supabase.rpc('get_pipeline_ai_step_output_for_review', {
+        p_organization_id: requiredId(organizationId, 'Organization'),
+        p_output_id: requiredId(outputId, 'AI output'),
+      }), signal)
+    },
+    reviewOutput({ organizationId, outputId, requestId, expectedVersion, decision, evidence }, { signal } = {}) {
+      if (!['accepted', 'rejected'].includes(decision)) throw new TypeError('Choose an output review decision')
+      if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) {
+        throw new TypeError('A current output step version is required')
+      }
+      const normalizedEvidence = String(evidence ?? '').trim()
+      if (!normalizedEvidence || normalizedEvidence.length > 1000) {
+        throw new TypeError('Output review evidence of at most 1000 characters is required')
+      }
+      return dataOrThrow(supabase.rpc('review_pipeline_ai_step_output', {
+        p_organization_id: requiredId(organizationId, 'Organization'),
+        p_output_id: requiredId(outputId, 'AI output'),
+        p_request_id: requiredId(requestId, 'Request'),
+        p_expected_progress_version: expectedVersion,
+        p_decision: decision,
+        p_evidence: normalizedEvidence,
       }), signal)
     },
     advanceManualStep({ organizationId, jobId, stepId, requestId, expectedVersion, action, evidence = '' }, { signal } = {}) {

@@ -14,6 +14,7 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
   const [planWorkIds, setPlanWorkIds] = useState([])
   const [acknowledgedJobId, setAcknowledgedJobId] = useState('')
   const [manualDraft, setManualDraft] = useState(null)
+  const [outputDraft, setOutputDraft] = useState(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const startRequestId = useRef('')
@@ -21,8 +22,10 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
   const planRequest = useRef(null)
   const inputApprovalRequest = useRef(null)
   const manualActionRequest = useRef(null)
+  const outputReviewRequest = useRef(null)
   const allowed = ['system_owner', 'operations_admin'].includes(membership?.role)
   const manualEligible = ['system_owner', 'operations_admin', 'department_manager', 'project_manager', 'project_owner'].includes(membership?.role)
+  const reviewEligible = ['system_owner', 'operations_admin', 'executive', 'department_manager'].includes(membership?.role)
 
   async function refresh() {
     try {
@@ -140,6 +143,46 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
       if (!signal?.aborted) setBusy(false)
     }
   }
+  async function openOutput(outputId) {
+    setBusy(true)
+    setError('')
+    try {
+      const result = await pipelineRunIntents.getOutputForReview({ organizationId, outputId }, { signal })
+      if (!signal?.aborted) setOutputDraft({ outputId, content: result.content, evidence: '' })
+    } catch (failure) {
+      if (!signal?.aborted) setError(failure.message)
+    } finally {
+      if (!signal?.aborted) setBusy(false)
+    }
+  }
+
+  async function reviewOutput(step, decision) {
+    const outputId = step.output?.id
+    if (!outputId || outputDraft?.outputId !== outputId) return
+    const evidence = outputDraft.evidence.trim()
+    const expectedVersion = step.progress?.state_version || 1
+    const fingerprint = [outputId, expectedVersion, decision, evidence].join(':')
+    if (outputReviewRequest.current?.fingerprint !== fingerprint) {
+      outputReviewRequest.current = { fingerprint, id: crypto.randomUUID() }
+    }
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const result = await pipelineRunIntents.reviewOutput({
+        organizationId, outputId, requestId: outputReviewRequest.current.id,
+        expectedVersion, decision, evidence,
+      }, { signal })
+      setNotice(`AI output ${result.idempotent_replay ? 'review recovered' : result.decision}. No publication occurred.`)
+      outputReviewRequest.current = null
+      setOutputDraft(null)
+      await refresh()
+    } catch (failure) {
+      if (!signal?.aborted) setError(failure.message)
+    } finally {
+      if (!signal?.aborted) setBusy(false)
+    }
+  }
   function toggleWork(id) {
     planRequest.current = null
     setPlanWorkIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id])
@@ -199,6 +242,8 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
         {row.job && <p className="mt-1 text-amber-300">Execution job: {row.job.steps?.length ?? 0} pinned work items · {row.job.configured_steps?.length ?? 0} configured step instances · {row.job.status.replaceAll('_', ' ')} · {row.job.blocked_reason} No provider request has been sent.</p>}
         {row.job?.input_approval && <p className="mt-1 text-emerald-300">Exact text inputs acknowledged by the requester. Provider execution remains blocked.</p>}
         <RunCardDetails row={row} userId={user?.id} manualEligible={manualEligible}
+          reviewEligible={reviewEligible} outputDraft={outputDraft} setOutputDraft={setOutputDraft}
+          onOpenOutput={openOutput} onReviewOutput={reviewOutput}
           manualDraft={manualDraft} setManualDraft={setManualDraft} busy={busy}
           onManualAction={advanceManualStep} />
         {allowed && row.requested_by === user?.id && row.plan && row.job && !row.job.input_approval
@@ -249,7 +294,8 @@ export default function PipelineRunIntentPanel({ organizationId, engagement, ass
   </section>
 }
 
-function RunCardDetails({ row, userId, manualEligible, manualDraft, setManualDraft, busy, onManualAction }) {
+function RunCardDetails({ row, userId, manualEligible, reviewEligible, outputDraft, setOutputDraft,
+  onOpenOutput, onReviewOutput, manualDraft, setManualDraft, busy, onManualAction }) {
   const work = row.plan?.work_manifest || []
   const configured = [...(row.job?.configured_steps || [])].sort((a, b) => a.ordinal - b.ordinal)
   const anyManualProgress = configured.some(step => step.progress?.status && step.progress.status !== 'waiting')
@@ -274,6 +320,30 @@ function RunCardDetails({ row, userId, manualEligible, manualDraft, setManualDra
         return <li key={step.id}>
           {step.definition_step?.label || step.step_key} · instance {step.instance_number} · {kind?.replaceAll('_', ' ')} · {status?.replaceAll('_', ' ')}
           {step.definition_step?.depends_on?.length ? ' · after ' + step.definition_step.depends_on.join(', ') : ''}
+          {step.output && <p className="mt-1 text-emerald-300">
+            AI output {step.output.id.slice(0, 8)} · {step.output.provider} / {step.output.model_id}
+            · measured {step.output.measured_cost_microusd} µUSD · {step.output.review?.decision || 'pending human review'}.
+            This output is not published.
+          </p>}
+          {reviewEligible && step.output && !step.output.review && userId !== row.requested_by && <div className="mt-1">
+            <button type="button" disabled={busy} onClick={() => onOpenOutput(step.output.id)}
+              className="font-semibold text-violet-300 disabled:opacity-40">Inspect exact AI output</button>
+            {outputDraft?.outputId === step.output.id && <div className="mt-2 rounded-lg border border-white/10 bg-black/20 p-3">
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap font-sans text-slate-200">{outputDraft.content}</pre>
+              <textarea maxLength={1000} value={outputDraft.evidence}
+                onChange={event => setOutputDraft({ ...outputDraft, evidence: event.target.value })}
+                placeholder="Record review evidence" className="mt-2 w-full rounded-lg border border-white/10 bg-black/20 p-2 text-white" />
+              <div className="mt-2 flex gap-3">
+                <button type="button" disabled={busy || !outputDraft.evidence.trim()}
+                  onClick={() => onReviewOutput(step, 'accepted')}
+                  className="font-semibold text-emerald-300 disabled:opacity-40">Accept output</button>
+                <button type="button" disabled={busy || !outputDraft.evidence.trim()}
+                  onClick={() => onReviewOutput(step, 'rejected')}
+                  className="font-semibold text-red-300 disabled:opacity-40">Reject output</button>
+                <button type="button" onClick={() => setOutputDraft(null)} className="text-slate-400">Close</button>
+              </div>
+            </div>}
+          </div>}
           {canAct && kind === 'human' && status === 'waiting' && <button type="button" disabled={busy}
             onClick={() => onManualAction(row, step, 'start')} className="ml-2 font-semibold text-violet-300 disabled:opacity-40">Start</button>}
           {canAct && kind === 'human' && status === 'in_progress' && <button type="button" disabled={busy}
