@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import DepartmentConnectors from '../components/DepartmentConnectors.jsx'
+import DepartmentChat from '../components/DepartmentChat.jsx'
 import WorkshopContextShell from '../components/WorkshopContextShell.jsx'
 import _WorkshopTabs from '../components/WorkshopTabs.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -12,6 +13,7 @@ import { WORKSHOP_TABS } from '../data/workshopTabs.js'
 import { appendWorkshopNavigation, parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
 
 const ALL_DEPARTMENT_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
+const CHAT_WORKSHOP_TABS = Object.freeze([...WORKSHOP_TABS, ['chat', 'Shared Chat']])
 const canViewDepartment = (membership, departmentId) => Boolean(
   membership && (ALL_DEPARTMENT_ROLES.has(membership.role) || membership.departmentId === departmentId)
 )
@@ -118,9 +120,11 @@ export default function DepartmentWorkshop({ departmentId }) {
   const config = DEPARTMENT_CONFIG[departmentId]
   const departmentAllowed = canViewDepartment(activeMembership, departmentId)
   const [workspace, setWorkspace] = useState(null)
-  const initialTab = WORKSHOP_TABS.some(([id]) => id === navigationContext.workshopTab) ? navigationContext.workshopTab : 'tasks'
+  const availableTabs = departmentId === 'development' ? WORKSHOP_TABS : CHAT_WORKSHOP_TABS
+  const initialTab = availableTabs.some(([id]) => id === navigationContext.workshopTab) ? navigationContext.workshopTab : 'tasks'
   const [activeTab, setActiveTab] = useState(initialTab)
   const [selectedWorkstreamId, setSelectedWorkstreamId] = useState('')
+  const [selectedChatEngagementId, setSelectedChatEngagementId] = useState(navigationContext.engagementId || '')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -162,16 +166,24 @@ export default function DepartmentWorkshop({ departmentId }) {
   }, [activeOrganizationId, departmentAllowed, departmentId, handleOrganizationAccessError, navigationContext.engagementId, navigationContext.projectId, organizationLoading, requestSignal, scopeRevision, selectionRequired])
 
   useEffect(() => {
-    setWorkspace(null); setActiveTab('tasks'); setSelectedWorkstreamId(''); setLoading(true); setSaving(false); setError('')
+    setWorkspace(null); setActiveTab('tasks'); setSelectedWorkstreamId(''); setSelectedChatEngagementId(navigationContext.engagementId || ''); setLoading(true); setSaving(false); setError('')
     if (initialTab !== 'tasks') setActiveTab(initialTab)
     setTaskForm(initialTask); setResearchForm(initialResearch); setDeliverableForm(initialDeliverable); setRequestForm(initialRequest)
     if (!organizationLoading && !selectionRequired && activeOrganizationId && departmentAllowed) loadWorkspace()
     else if (!organizationLoading) setLoading(false)
-  }, [activeOrganizationId, departmentAllowed, departmentId, initialTab, loadWorkspace, organizationLoading, scopeRevision, selectionRequired])
+  }, [activeOrganizationId, departmentAllowed, departmentId, initialTab, loadWorkspace, navigationContext.engagementId, organizationLoading, scopeRevision, selectionRequired])
 
   const selectedWorkstream = workspace?.workstreams.find((workstream) => workstream.id === selectedWorkstreamId)
   const projectId = selectedWorkstream?.project_id
   const projectName = selectedWorkstream?.projects?.name || 'Project'
+  const chatEngagements = selectedWorkstream && departmentId !== 'development'
+    ? (workspace?.engagements || []).filter(engagement =>
+      engagement.organization_id === activeOrganizationId && engagement.project_id === projectId
+      && workspace.services.some(service => service.engagement_id === engagement.id
+        && ['planned', 'active'].includes(service.status)))
+    : []
+  const chatEngagement = chatEngagements.find(engagement => engagement.id === selectedChatEngagementId)
+    || (chatEngagements.length === 1 ? chatEngagements[0] : null)
 
   const visibleData = useMemo(() => {
     if (!workspace) return { tasks: [], workItems: [], services: [], stages: [], research: [], deliverables: [], requests: [], milestones: [] }
@@ -355,10 +367,29 @@ export default function DepartmentWorkshop({ departmentId }) {
           <Stat label="Incoming requests" value={incoming} note="Cross-department handoffs" />
         </div>
 
-        <_WorkshopTabs departmentId={departmentId} activeTab={activeTab} onChange={setActiveTab} />
+        <_WorkshopTabs departmentId={departmentId} activeTab={activeTab} onChange={setActiveTab} tabs={availableTabs} />
 
         <div id={`${departmentId}-${activeTab}-panel`} role="tabpanel" aria-labelledby={`${departmentId}-${activeTab}-tab`}>
-        {activeTab === 'connectors' ? (
+        {activeTab === 'chat' ? (
+          <section className="mt-6 space-y-5" aria-label={`${config.shortName} shared chat`}>
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+              <h2 className="text-lg font-semibold">Shared Department Chat</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-400">Choose a client engagement with an active or planned {config.shortName} service. Conversations stay attached to that exact engagement; an administrator-approved model connection is required before sending.</p>
+              {workspace.workstreams.length > 0 && <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.13em] text-slate-400">Current workstream
+                <select className={`${INPUT_CLASS} mt-2 normal-case tracking-normal`} value={selectedWorkstreamId} onChange={event => { setSelectedWorkstreamId(event.target.value); setSelectedChatEngagementId('') }}>
+                  {workspace.workstreams.map(workstream => <option key={workstream.id} value={workstream.id}>{workstream.projects?.name || workstream.name} · {workstream.name}</option>)}
+                </select>
+              </label>}
+              {chatEngagements.length > 0 ? <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.13em] text-slate-400">Client engagement
+                <select className={`${INPUT_CLASS} mt-2 normal-case tracking-normal`} value={chatEngagement?.id || ''} onChange={event => setSelectedChatEngagementId(event.target.value)}>
+                  <option value="">Choose an engagement</option>
+                  {chatEngagements.map(engagement => <option key={engagement.id} value={engagement.id}>{engagement.name}</option>)}
+                </select>
+              </label> : <p className="mt-4 text-sm text-amber-300">No eligible engagement is available in this workstream. Select an active workstream and activate this department's service on its engagement.</p>}
+            </div>
+            {chatEngagement && <DepartmentChat departmentId={departmentId} engagement={chatEngagement} allowArtifactDraft={false} />}
+          </section>
+        ) : activeTab === 'connectors' ? (
           <div className="mt-6"><DepartmentConnectors departmentId={departmentId} departmentName={config.shortName} /></div>
         ) : activeTab === 'specialists' ? (
           <div className="mt-6"><SpecialistQueues config={config} navigationContext={navigationContext.status === 'empty' ? navigationContext : contextValidation.context} /></div>
