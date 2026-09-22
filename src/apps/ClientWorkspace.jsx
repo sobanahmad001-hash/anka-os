@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { clientWorkspace } from '../data/clientWorkspace'
+import ClientPeopleAccess from './ClientPeopleAccess.jsx'
 
+const INVITATION_ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
 const TABS = [['overview', 'Overview'], ['projects', 'Projects'], ['people', 'People & Access'], ['due', 'Dated Work'], ['requests', 'Requests'], ['delivery', 'Deliverables & Releases']]
 const label = (value) => value ? value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) : 'Unknown'
 const date = (value) => value ? new Date(`${value.slice(0, 10)}T00:00:00Z`).toLocaleDateString() : 'No date'
@@ -11,7 +13,7 @@ export default function ClientWorkspace() {
   const { clientId } = useParams()
   const navigate = useNavigate()
 
-  const { activeOrganizationId, selectionRequired, loading: organizationLoading, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
+  const { activeOrganizationId, activeMembership, selectionRequired, loading: organizationLoading, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
   const currentRequest = useRef(null)
   currentRequest.current = { organizationId: activeOrganizationId, revision: scopeRevision, recordId: clientId }
   const requestGeneration = useRef(0)
@@ -61,7 +63,7 @@ export default function ClientWorkspace() {
     {error && <div role="alert" className="mt-5 rounded-xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>}
     <section aria-label="Client workspace summary" className="mt-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-7"><Metric title="Active projects" value={summary.activeProjects} /><Metric title="One-time" value={summary.oneTimeProjects} /><Metric title="Retainers" value={summary.retainers} /><Metric title="Project Tasks" value={summary.openProjectTasks} /><Metric title="Engagement Work Items" value={summary.openEngagementWorkItems} /><Metric title="Open requests" value={summary.openRequests} /><Metric title="Releases" value={summary.releases} /></section>
     <nav aria-label="Client workspace sections" className="mt-7 flex gap-1 overflow-x-auto border-b border-white/[0.08]">{TABS.map(([id, title]) => <button type="button" key={id} onClick={() => setTab(id)} className={`whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium ${tab === id ? 'border-violet-400 text-white' : 'border-transparent text-slate-500 hover:text-slate-200'}`}>{title}</button>)}</nav>
-    <div className="mt-6">{tab === 'overview' && <Overview workspace={workspace} navigate={navigate} />}{tab === 'projects' && <Projects rows={workspace.projects} navigate={navigate} />}{tab === 'people' && <People rows={workspace.people} />}{tab === 'due' && <DueWork rows={workspace.dueWork} />}{tab === 'requests' && <Requests projects={workspace.projects} />}{tab === 'delivery' && <Delivery workspace={workspace} />}</div>
+    <div className="mt-6">{tab === 'overview' && <Overview workspace={workspace} navigate={navigate} />}{tab === 'projects' && <Projects rows={workspace.projects} navigate={navigate} />}{tab === 'people' && <ClientPeopleAccess key={clientId + ':' + activeOrganizationId} rows={workspace.people} projects={workspace.projects} clientId={clientId} organizationId={activeOrganizationId} canInvite={activeOrganizationId === INVITATION_ORGANIZATION_ID && ['system_owner', 'operations_admin', 'executive', 'project_owner'].includes(activeMembership?.role)} onInvited={load} />}{tab === 'due' && <DueWork rows={workspace.dueWork} />}{tab === 'requests' && <Requests projects={workspace.projects} />}{tab === 'delivery' && <Delivery workspace={workspace} />}</div>
   </div></main>
 }
 
@@ -71,10 +73,6 @@ function Overview({ workspace, navigate }) {
 
 function Projects({ rows, navigate }) {
   return <Panel title="Projects and retainers" description="One-time projects and retainers share the canonical project model. No recurring commitment schedule is inferred here."><RecordList rows={rows} empty="No projects belong to this client." render={(project) => <button type="button" key={project.id} onClick={() => navigate(`/sphere/workspace/projects/${project.id}`)} className="w-full text-left"><Record title={project.name} note={`${label(project.engagement_type)} · ${project.brandName || 'No brand'} · ${project.counts.openProjectTasks} Project Tasks · ${project.counts.openEngagementWorkItems} Engagement Work Items`} status={project.status} /></button>} /></Panel>
-}
-
-function People({ rows }) {
-  return <Panel title="People & project access" description="Read-only visibility of existing contact and project-access records."><RecordList rows={rows} empty="No client contacts recorded." render={(contact) => <div key={contact.id} className="rounded-xl border border-white/[0.07] bg-black/10 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-medium">{contact.full_name}</p><p className="mt-1 text-xs text-slate-500">{contact.email || 'No email'} · {label(contact.portal_role)}</p></div><Status value={contact.status} /></div><div className="mt-3 flex flex-wrap gap-2">{contact.access.length ? contact.access.map((grant) => <Pill key={grant.id}>{grant.projectName} · {label(grant.access_role)} · {label(grant.status)}</Pill>) : <span className="text-xs text-slate-600">No project access grants.</span>}</div></div>} /></Panel>
 }
 
 function DueWork({ rows }) {
