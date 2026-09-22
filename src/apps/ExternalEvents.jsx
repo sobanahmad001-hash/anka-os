@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import OrganizationGate from '../components/OrganizationGate.jsx'
+import { useOrganization } from '../context/OrganizationContext.jsx'
 
 import { externalEvents } from '../data/externalEventsRepository.js'
 import { workItems } from '../data/workItemsRepository.js'
@@ -20,6 +22,12 @@ function Panel({ title, description, children }) {
 }
 
 export default function ExternalEvents() {
+  return <OrganizationGate><ScopedExternalEvents /></OrganizationGate>
+}
+
+function ScopedExternalEvents() {
+  const { activeOrganizationId, requestSignal, scopeRevision, handleOrganizationAccessError } = useOrganization()
+  const loadRevision = useRef(0)
   const [brands, setBrands] = useState([])
   const [brandId, setBrandId] = useState('')
   const [events, setEvents] = useState([])
@@ -36,38 +44,54 @@ export default function ExternalEvents() {
   const [message, setMessage] = useState('')
 
   useEffect(() => {
-    externalEvents.listBrands().then(rows => {
+    let current = true
+    setError('')
+    externalEvents.listBrands(activeOrganizationId).then(rows => {
+      if (!current || requestSignal.aborted) return
       setBrands(rows || [])
       setBrandId(rows?.[0]?.id || '')
-    }).catch(loadError => setError(loadError.message))
-  }, [])
+    }).catch(loadError => {
+      if (!current || requestSignal.aborted) return
+      handleOrganizationAccessError(loadError)
+      setError(loadError.message)
+    })
+    return () => { current = false }
+  }, [activeOrganizationId, handleOrganizationAccessError, requestSignal, scopeRevision])
 
   async function loadBrand(nextBrandId, preferredEventId = '') {
-    if (!nextBrandId) return
+    if (!nextBrandId || !brands.some(brand => brand.id === nextBrandId && brand.organization_id === activeOrganizationId)) return
+    const revision = ++loadRevision.current
     const [eventRows, dueRows, engagementRows, workItemRows] = await Promise.all([
-      externalEvents.list(nextBrandId), externalEvents.listDue(nextBrandId),
-      externalEvents.listEngagements(nextBrandId), externalEvents.listWorkItems(nextBrandId),
+      externalEvents.list(nextBrandId, activeOrganizationId), externalEvents.listDue(nextBrandId, activeOrganizationId),
+      externalEvents.listEngagements(nextBrandId, activeOrganizationId), externalEvents.listWorkItems(nextBrandId, activeOrganizationId),
     ])
+    if (requestSignal.aborted || revision !== loadRevision.current) return
     setEvents(eventRows || []); setDue(dueRows || []); setEngagements(engagementRows || []); setAvailableWorkItems(workItemRows || [])
     setEventId(preferredEventId || eventRows?.[0]?.id || '')
   }
 
   useEffect(() => {
-    loadBrand(brandId).catch(loadError => setError(loadError.message))
-  }, [brandId])
+    if (!brandId) { loadRevision.current++; setEvents([]); setDue([]); setEngagements([]); setAvailableWorkItems([]); setEventId(''); return }
+    let current = true
+    loadBrand(brandId).catch(loadError => { if (current && !requestSignal.aborted) setError(loadError.message) })
+    return () => { current = false }
+  }, [brandId, activeOrganizationId, requestSignal])
 
   useEffect(() => {
     if (!eventId) { setLinks([]); return }
-    externalEvents.listLinks(eventId).then(setLinks).catch(loadError => setError(loadError.message))
-  }, [eventId])
+    let current = true
+    externalEvents.listLinks(eventId, activeOrganizationId).then(rows => { if (current && !requestSignal.aborted) setLinks(rows) }).catch(loadError => { if (current && !requestSignal.aborted) setError(loadError.message) })
+    return () => { current = false }
+  }, [eventId, activeOrganizationId, requestSignal])
 
-  const selectedEvent = events.find(item => item.id === eventId)
-  const monthEvents = useMemo(() => calendarMonth(events, month), [events, month])
+  const selectedEvent = events.find(item => item.id === eventId && item.brand_id === brandId && item.organization_id === activeOrganizationId)
+  const monthEvents = useMemo(() => calendarMonth(events.filter(item => item.brand_id === brandId && item.organization_id === activeOrganizationId), month), [events, month, brandId, activeOrganizationId])
 
   async function createEvent(event) {
     event.preventDefault(); setBusy(true); setError(''); setMessage('')
     try {
-      const saved = await externalEvents.saveEvent({ ...eventDraft, brandId })
+      if (!brands.some(brand => brand.id === brandId && brand.organization_id === activeOrganizationId)) throw new Error('Select a brand in the active organization')
+      const saved = await externalEvents.saveEvent({ ...eventDraft, brandId, organizationId: activeOrganizationId })
       setEventDraft(EMPTY_EVENT); await loadBrand(brandId, saved.id); setMessage('Event added to the shared Sphere calendar.')
     } catch (saveError) { setError(saveError.message) } finally { setBusy(false) }
   }
@@ -75,6 +99,7 @@ export default function ExternalEvents() {
   async function createLink(event) {
     event.preventDefault(); setBusy(true); setError(''); setMessage('')
     try {
+      if (!selectedEvent) throw new Error('Select an event in the active organization')
       let linkedWorkItemId = linkDraft.linkedWorkItemId || null
       if (linkDraft.createWorkItem) {
         if (!linkDraft.engagementId || !linkDraft.workItemTitle.trim()) throw new Error('Engagement and work item title are required')
@@ -87,9 +112,9 @@ export default function ExternalEvents() {
         })
         linkedWorkItemId = item.id
       }
-      await externalEvents.saveLink({ ...linkDraft, eventId, linkedWorkItemId })
+      await externalEvents.saveLink({ ...linkDraft, eventId, linkedWorkItemId, organizationId: activeOrganizationId })
       setLinkDraft(EMPTY_LINK)
-      const [nextLinks] = await Promise.all([externalEvents.listLinks(eventId), loadBrand(brandId, eventId)])
+      const [nextLinks] = await Promise.all([externalEvents.listLinks(eventId, activeOrganizationId), loadBrand(brandId, eventId)])
       setLinks(nextLinks || []); setMessage('Content plan linked to this event.')
     } catch (saveError) { setError(saveError.message) } finally { setBusy(false) }
   }
@@ -97,18 +122,19 @@ export default function ExternalEvents() {
   async function updateLinkStatus(link, status) {
     setBusy(true); setError(''); setMessage('')
     try {
+      if (!selectedEvent || link.organization_id !== activeOrganizationId || link.external_event_id !== selectedEvent.id) throw new Error('Select an event in the active organization')
       await externalEvents.saveLink({
-        linkId: link.id, contentType: link.content_type, leadTimeDays: link.lead_time_days,
+        organizationId: activeOrganizationId, linkId: link.id, contentType: link.content_type, leadTimeDays: link.lead_time_days,
         linkedWorkItemId: link.linked_work_item_id, status,
       })
-      setLinks(await externalEvents.listLinks(eventId) || [])
-      setDue(await externalEvents.listDue(brandId) || [])
+      setLinks(await externalEvents.listLinks(eventId, activeOrganizationId) || [])
+      setDue(await externalEvents.listDue(brandId, activeOrganizationId) || [])
       setMessage('Content plan status updated.')
     } catch (saveError) { setError(saveError.message) } finally { setBusy(false) }
   }
 
   return <div className="h-full overflow-y-auto bg-slate-950 text-white">
-    <header className="border-b border-slate-800 px-6 py-5"><div className="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-400">Shared planning</p><h1 className="mt-1 text-2xl font-semibold">Sphere Events</h1><p className="mt-2 text-sm text-slate-400">Plan timely Content, Marketing, and Design work around real-world moments.</p></div><label className="min-w-64 text-xs font-semibold uppercase tracking-wide text-slate-400">Brand<select className={`${INPUT} mt-2 normal-case`} value={brandId} onChange={event => setBrandId(event.target.value)}>{brands.map(brand => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select></label></div></header>
+    <header className="border-b border-slate-800 px-6 py-5"><div className="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-400">Shared planning</p><h1 className="mt-1 text-2xl font-semibold">Sphere Events</h1><p className="mt-2 text-sm text-slate-400">Plan timely Content, Marketing, and Design work around real-world moments.</p></div><label className="min-w-64 text-xs font-semibold uppercase tracking-wide text-slate-400">Brand<select className={`${INPUT} mt-2 normal-case`} value={brandId} onChange={event => { loadRevision.current++; setEvents([]); setEventId(''); setLinks([]); setBrandId(event.target.value) }}>{brands.map(brand => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select></label></div></header>
     <main className="mx-auto max-w-7xl space-y-5 p-6">
       {error && <div className="rounded-xl border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">{error}</div>}
       {message && <div className="rounded-xl border border-emerald-900 bg-emerald-950/50 px-4 py-3 text-sm text-emerald-300">{message}</div>}

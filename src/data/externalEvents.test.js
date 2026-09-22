@@ -53,6 +53,17 @@ test('Sphere Events is shared and supports every required planning flow', () => 
   assert.match(screen, /Multiple items of the same type are supported/)
 })
 
+test('Sphere Events honors the selected organization through reads and writes', () => {
+  assert.match(screen, /<OrganizationGate><ScopedExternalEvents \/><\/OrganizationGate>/)
+  assert.match(screen, /externalEvents\.listBrands\(activeOrganizationId\)/)
+  for (const method of ['list', 'listDue', 'listEngagements', 'listWorkItems', 'listLinks']) {
+    assert.match(screen, new RegExp('externalEvents\\.' + method + '\\([^\\n]*activeOrganizationId'))
+  }
+  assert.match(repository, /\.eq\('organization_id', organizationId\)/)
+  assert.match(edge, /Selected organization does not match brand/)
+  assert.match(edge, /Selected organization does not match event/)
+})
+
 test('calendar and work-item display helpers preserve historical context', () => {
   assert.equal(calendarMonth([{ start_date: '2026-09-01' }, { start_date: '2026-10-01' }], '2026-09').length, 1)
   assert.equal(displayWorkItem({ work_items: { title: 'Launch page', deleted_at: null } }), 'Launch page')
