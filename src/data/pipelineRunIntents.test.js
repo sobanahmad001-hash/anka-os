@@ -205,3 +205,25 @@ test('N6 input acknowledgement sends one exact job and stable request', async ()
     p_organization_id: ID, p_job_id: OTHER, p_request_id: ID, p_acknowledged: true,
   }])
 })
+test('N6 manual controls require exact version and evidence before one scoped action', async () => {
+  let sent
+  const repository = createPipelineRunIntentsRepository({
+    from() { throw new Error('Unexpected read') },
+    rpc(name, payload) {
+      sent = [name, payload]
+      return Promise.resolve({ data: { status: 'completed' }, error: null })
+    },
+  })
+  const base = {
+    organizationId: ID, jobId: OTHER, stepId: ID, requestId: OTHER,
+    expectedVersion: 2, action: 'complete', evidence: ' Versioned human output ',
+  }
+  assert.throws(() => repository.advanceManualStep({ ...base, action: 'dispatch' }), /valid manual step action/)
+  assert.throws(() => repository.advanceManualStep({ ...base, expectedVersion: 0 }), /current step version/)
+  assert.throws(() => repository.advanceManualStep({ ...base, evidence: ' ' }), /requires evidence/)
+  await repository.advanceManualStep(base)
+  assert.deepEqual(sent, ['advance_pipeline_manual_step', {
+    p_organization_id: ID, p_job_id: OTHER, p_step_id: ID, p_request_id: OTHER,
+    p_expected_version: 2, p_action: 'complete', p_evidence: 'Versioned human output',
+  }])
+})
