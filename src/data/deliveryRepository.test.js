@@ -66,7 +66,7 @@ test('project workspace reads only canonical delivery tables', async () => {
   })
   const repository = createDeliveryRepository(client)
 
-  await repository.getProjectWorkspace('project-1')
+  await repository.getProjectWorkspace('project-1', 'org-a')
 
   const tables = client.calls
     .filter(([, operation]) => operation === 'from')
@@ -87,6 +87,24 @@ test('project workspace reads only canonical delivery tables', async () => {
     'client_portal_items',
   ])
   assert.equal(tables.some((table) => table.startsWith('as_')), false)
+})
+
+test('Assistant project reads require and preserve the selected organization', async () => {
+  const client = createFakeClient({
+    projects: { data: { id: 'project-1', organization_id: 'org-a' }, error: null },
+    living_project_documents: { data: { project_id: 'project-1', organization_id: 'org-a' }, error: null },
+  })
+  const repository = createDeliveryRepository(client)
+  await assert.rejects(repository.listProjects(), /organizationId is required/)
+  await assert.rejects(repository.getProjectWorkspace('project-1'), /organizationId is required/)
+  assert.equal(client.calls.length, 0)
+  const signal = new AbortController().signal
+  await repository.getProjectWorkspace('project-1', 'org-a', { signal })
+  for (const chain of queryChains(client.calls)) {
+    const table = chain[0][0]
+    assert.ok(chain.some(([, op, field, value]) => op === 'eq' && field === 'organization_id' && value === 'org-a'), table + ' must be organization scoped')
+    assert.ok(chain.some(([, op, value]) => op === 'abortSignal' && value === signal), table + ' must receive the current abort signal')
+  }
 })
 
 test('new tasks are internal and use the canonical lifecycle', async () => {
@@ -376,5 +394,5 @@ test('repository converts Supabase errors into thrown failures', async () => {
   })
   const repository = createDeliveryRepository(client)
 
-  await assert.rejects(repository.listProjects(), /RLS denied/)
+  await assert.rejects(repository.listProjects('org-a'), /RLS denied/)
 })

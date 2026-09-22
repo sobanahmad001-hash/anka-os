@@ -5,9 +5,9 @@ function failure(error, fallback) {
 }
 
 export const aiRepository = Object.freeze({
-  async run({ capability, projectId = null, engagementId = null, departmentId, input = '' }) {
+  async run({ organizationId, capability, projectId = null, engagementId = null, departmentId, input = '' }) {
     const { data, error } = await supabase.functions.invoke('ai-chat', {
-      body: { capability, projectId, engagementId, departmentId, input },
+      body: { organizationId, capability, projectId, engagementId, departmentId, input },
     })
     if (error) throw failure(error, 'AI request failed')
     if (data?.error) throw new Error(data.error)
@@ -23,9 +23,13 @@ export const aiRepository = Object.freeze({
     return data
   },
 
-  async listRuns(limit = 40) {
-    const { data, error } = await supabase.from('ai_runs').select('*')
-      .is('redacted_at', null).order('created_at', { ascending: false }).limit(limit)
+  async listRuns(organizationId, { limit = 40, signal } = {}) {
+    if (!organizationId) throw new TypeError('organizationId is required')
+    let query = supabase.from('ai_runs').select('*')
+      .eq('organization_id', organizationId).is('redacted_at', null)
+      .order('created_at', { ascending: false }).limit(limit)
+    if (signal) query = query.abortSignal(signal)
+    const { data, error } = await query
     if (error) throw failure(error, 'AI audit history failed')
     return data || []
   },

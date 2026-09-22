@@ -140,14 +140,16 @@ export function createDeliveryRepository(client) {
       return data
     },
 
-    async listProjects() {
-      return dataOrThrow(
+    async listProjects(activeOrganizationId, { signal } = {}) {
+      const organizationId = requireOrganizationId(activeOrganizationId)
+      return dataOrThrow(withRequestSignal(
         client
           .from('projects')
           .select('id, organization_id, client_id, name, description, engagement_type, status, priority, health, owner_id, start_date, due_date, portal_visible, created_at, updated_at')
+          .eq('organization_id', organizationId)
           .is('archived_at', null)
-          .order('updated_at', { ascending: false })
-      )
+          .order('updated_at', { ascending: false }), signal
+      ))
     },
 
     async getAgencyCommandCenter() {
@@ -199,24 +201,27 @@ export function createDeliveryRepository(client) {
       )
     },
 
-    async getProjectWorkspace(projectId) {
+    async getProjectWorkspace(projectId, activeOrganizationId, { signal } = {}) {
       assertIdentifier(projectId, 'projectId')
+      const organizationId = requireOrganizationId(activeOrganizationId)
+      const load = (query) => dataOrThrow(withRequestSignal(query.eq('organization_id', organizationId), signal))
 
       const [project, workstreams, milestones, tasks, dependencies, research, deliverables, requests, livingRecord, snapshots, activities, portalItems] = await Promise.all([
-        dataOrThrow(client.from('projects').select('*').eq('id', projectId).single()),
-        dataOrThrow(client.from('workstreams').select('*').eq('project_id', projectId).order('created_at')),
-        dataOrThrow(client.from('milestones').select('*').eq('project_id', projectId).is('archived_at', null).order('position')),
-        dataOrThrow(client.from('tasks').select('*').eq('project_id', projectId).is('archived_at', null).order('created_at')),
-        dataOrThrow(client.from('task_dependencies').select('*').eq('project_id', projectId).order('created_at')),
-        dataOrThrow(client.from('research_records').select('*').eq('project_id', projectId).is('archived_at', null).order('updated_at', { ascending: false })),
-        dataOrThrow(client.from('deliverables').select('*, deliverable_versions!deliverable_versions_deliverable_id_fkey(*)').eq('project_id', projectId).is('archived_at', null).order('updated_at', { ascending: false })),
-        dataOrThrow(client.from('requests').select('*').eq('project_id', projectId).is('archived_at', null).order('updated_at', { ascending: false })),
-        dataOrThrow(client.from('living_project_documents').select('*').eq('project_id', projectId).single()),
-        dataOrThrow(client.from('living_project_document_snapshots').select('*').eq('project_id', projectId).order('generated_at', { ascending: false })),
-        dataOrThrow(client.from('activity_events').select('*').eq('project_id', projectId).order('occurred_at', { ascending: false }).limit(100)),
-        dataOrThrow(client.from('client_portal_items').select('*').eq('project_id', projectId).is('withdrawn_at', null).order('released_at', { ascending: false })),
+        load(client.from('projects').select('*').eq('id', projectId).single()),
+        load(client.from('workstreams').select('*').eq('project_id', projectId).order('created_at')),
+        load(client.from('milestones').select('*').eq('project_id', projectId).is('archived_at', null).order('position')),
+        load(client.from('tasks').select('*').eq('project_id', projectId).is('archived_at', null).order('created_at')),
+        load(client.from('task_dependencies').select('*').eq('project_id', projectId).order('created_at')),
+        load(client.from('research_records').select('*').eq('project_id', projectId).is('archived_at', null).order('updated_at', { ascending: false })),
+        load(client.from('deliverables').select('*, deliverable_versions!deliverable_versions_deliverable_id_fkey(*)').eq('project_id', projectId).is('archived_at', null).order('updated_at', { ascending: false })),
+        load(client.from('requests').select('*').eq('project_id', projectId).is('archived_at', null).order('updated_at', { ascending: false })),
+        load(client.from('living_project_documents').select('*').eq('project_id', projectId).single()),
+        load(client.from('living_project_document_snapshots').select('*').eq('project_id', projectId).order('generated_at', { ascending: false })),
+        load(client.from('activity_events').select('*').eq('project_id', projectId).order('occurred_at', { ascending: false }).limit(100)),
+        load(client.from('client_portal_items').select('*').eq('project_id', projectId).is('withdrawn_at', null).order('released_at', { ascending: false })),
       ])
 
+      assertOrganizationRecords(organizationId, project, workstreams, milestones, tasks, dependencies, research, deliverables, requests, livingRecord, snapshots, activities, portalItems)
       return {
         project,
         workstreams,
