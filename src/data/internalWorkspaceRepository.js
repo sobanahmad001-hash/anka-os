@@ -70,7 +70,7 @@ export function createInternalWorkspaceRepository(client) {
       })
       const memberIds = [...new Set(memberships.map((row) => row.user_id).filter(Boolean))].sort()
       const profiles = memberIds.length ? await collectDirectoryPages((from, to) => ordered(
-        client.from('profiles').select('id, full_name, email').in('id', memberIds), ORDER.profiles
+        client.from('profiles').select('id, full_name').in('id', memberIds), ORDER.profiles
       ).range(from, to).abortSignal(signal), {
         name: 'Internal Work profiles', signal, validate: (row) => memberIds.includes(row.id),
       }) : []

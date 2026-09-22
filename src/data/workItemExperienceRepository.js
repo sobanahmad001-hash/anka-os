@@ -37,7 +37,7 @@ export function createWorkItemExperienceRepository(client) {
     ), 'Owner membership could not be loaded')
     if (!membership) return null
     const profile = await dataOrThrow(withSignal(
-      client.from('profiles').select('id, full_name, email, department, role').eq('id', ownerId).maybeSingle(), signal
+      client.from('profiles').select('id, full_name, department, role').eq('id', ownerId).maybeSingle(), signal
     ), 'Owner profile could not be loaded')
     return profile ? { ...membership, profile } : { ...membership, profile: null }
   }

@@ -19,5 +19,5 @@ export async function loadMarketingOverviewWork({ organizationId, engagement, si
     dataOrThrow(client.from('marketing_campaign_artifacts').select('organization_id, campaign_id, artifact_id, marketing_campaigns!inner(engagement_id)').eq('organization_id', organizationId).eq('marketing_campaigns.engagement_id', engagement.id), options),
   ]
   const settled = await Promise.allSettled(requests)
-  return composeMarketingOverviewFamilies(settled, userIds => dataOrThrow(client.from('profiles').select('id, full_name, email').in('id', userIds), options))
+  return composeMarketingOverviewFamilies(settled, userIds => dataOrThrow(client.from('profiles').select('id, full_name').in('id', userIds), options))
 }

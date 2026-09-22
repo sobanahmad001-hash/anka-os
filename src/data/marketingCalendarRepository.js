@@ -40,7 +40,7 @@ export function createMarketingCalendarRepository(organizationId, { signal, clie
     const [taskDependencies, workItemDependencies, profiles] = await Promise.all([
       taskIds.length ? dataOrThrow(client.from('task_dependencies').select('id, organization_id, project_id, task_id, depends_on_task_id').eq('organization_id', organizationId).eq('project_id', project.id).in('task_id', taskIds), options) : [],
       workItemIds.length ? dataOrThrow(client.from('work_item_dependencies').select('organization_id, work_item_id, depends_on_work_item_id').eq('organization_id', organizationId).in('work_item_id', workItemIds), options) : [],
-      memberships.length ? dataOrThrow(client.from('profiles').select('id, full_name, email').in('id', memberships.map(item => item.user_id)), options) : [],
+      memberships.length ? dataOrThrow(client.from('profiles').select('id, full_name').in('id', memberships.map(item => item.user_id)), options) : [],
     ])
     const dependencyTaskIds = [...new Set(taskDependencies.map(item => item.depends_on_task_id).filter(Boolean))]
     const dependencyWorkItemIds = [...new Set(workItemDependencies.map(item => item.depends_on_work_item_id).filter(Boolean))]

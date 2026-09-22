@@ -27,7 +27,7 @@ const queries = {
   milestones: () => supabase.from('milestones').select('id, organization_id, project_id, status, target_date, archived_at').eq('organization_id', organizationId).abortSignal(signal).is('archived_at', null),
   versions: () => supabase.from('deliverable_versions').select('id, organization_id, project_id, review_status, withdrawn_at').eq('organization_id', organizationId).abortSignal(signal).is('withdrawn_at', null).in('review_status', ['ready_for_internal_review', 'ready_for_client_review']),
   memberships: () => supabase.from('organization_memberships').select('organization_id, user_id').eq('organization_id', organizationId).abortSignal(signal).eq('member_kind', 'team').eq('status', 'active'),
-  profiles: () => supabase.from('profiles').select('id, full_name, email').abortSignal(signal),
+  profiles: () => supabase.from('profiles').select('id, full_name').abortSignal(signal),
 }
 
 const names = Object.keys(queries)

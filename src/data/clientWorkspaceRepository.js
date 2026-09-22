@@ -35,7 +35,7 @@ required(clientId, 'Client id')
     supabase.from('projects').select('id, organization_id, client_id, name, description, engagement_type, status, priority, health, owner_id, start_date, due_date, progress, portal_visible, client_summary, archived_at').eq('organization_id', organizationId).abortSignal(signal).eq('client_id', clientId).eq('organization_id', organizationId).is('archived_at', null).order('updated_at', { ascending: false }),
     supabase.from('client_contacts').select('id, organization_id, client_id, full_name, email, portal_role, status, created_at').eq('organization_id', organizationId).abortSignal(signal).eq('client_id', clientId).eq('organization_id', organizationId).order('created_at'),
     supabase.from('organization_memberships').select('organization_id, user_id').eq('organization_id', organizationId).abortSignal(signal).eq('organization_id', organizationId).eq('member_kind', 'team').eq('status', 'active'),
-    supabase.from('profiles').select('id, full_name, email').abortSignal(signal),
+    supabase.from('profiles').select('id, full_name').abortSignal(signal),
   ])
   const agencyClient = row(agencyClientResult, 'agency-client extension')
   const projects = rows(projectsResult, 'projects')

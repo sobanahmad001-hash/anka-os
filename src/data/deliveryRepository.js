@@ -154,13 +154,13 @@ export function createDeliveryRepository(client) {
       const [projects, clients, tasks, requests, milestones, reviewVersions, activities, memberships, profiles] = await Promise.all([
         dataOrThrow(client.from('projects').select('*').is('archived_at', null).order('updated_at', { ascending: false })),
         dataOrThrow(client.from('clients').select('id, name, company, status').order('name')),
-        dataOrThrow(client.from('tasks').select('*, projects(id, name)').is('archived_at', null).not('status', 'in', '(done,cancelled)').order('due_date')),
+        dataOrThrow(client.from('tasks').select('*, projects!tasks_project_organization_fkey(id, name)').is('archived_at', null).not('status', 'in', '(done,cancelled)').order('due_date')),
         dataOrThrow(client.from('requests').select('*, projects(id, name)').is('archived_at', null).not('status', 'in', '(completed,declined,withdrawn)').order('required_by')),
         dataOrThrow(client.from('milestones').select('*, projects(id, name)').is('archived_at', null).not('status', 'in', '(completed,cancelled)').order('target_date')),
-        dataOrThrow(client.from('deliverable_versions').select('*, deliverables(id, title), projects(id, name)').in('review_status', ['ready_for_internal_review', 'ready_for_client_review']).order('created_at')),
+        dataOrThrow(client.from('deliverable_versions').select('*, deliverables!deliverable_versions_deliverable_id_fkey(id, title), projects(id, name)').in('review_status', ['ready_for_internal_review', 'ready_for_client_review']).order('created_at')),
         dataOrThrow(client.from('activity_events').select('*').order('occurred_at', { ascending: false }).limit(60)),
         dataOrThrow(client.from('organization_memberships').select('*').eq('member_kind', 'team').eq('status', 'active')),
-        dataOrThrow(client.from('profiles').select('id, full_name, email, department, role')),
+        dataOrThrow(client.from('profiles').select('id, full_name, department, role')),
       ])
 
       const profileById = new Map((profiles || []).map(profile => [profile.id, profile]))
@@ -209,7 +209,7 @@ export function createDeliveryRepository(client) {
         dataOrThrow(client.from('tasks').select('*').eq('project_id', projectId).is('archived_at', null).order('created_at')),
         dataOrThrow(client.from('task_dependencies').select('*').eq('project_id', projectId).order('created_at')),
         dataOrThrow(client.from('research_records').select('*').eq('project_id', projectId).is('archived_at', null).order('updated_at', { ascending: false })),
-        dataOrThrow(client.from('deliverables').select('*, deliverable_versions(*)').eq('project_id', projectId).is('archived_at', null).order('updated_at', { ascending: false })),
+        dataOrThrow(client.from('deliverables').select('*, deliverable_versions!deliverable_versions_deliverable_id_fkey(*)').eq('project_id', projectId).is('archived_at', null).order('updated_at', { ascending: false })),
         dataOrThrow(client.from('requests').select('*').eq('project_id', projectId).is('archived_at', null).order('updated_at', { ascending: false })),
         dataOrThrow(client.from('living_project_documents').select('*').eq('project_id', projectId).single()),
         dataOrThrow(client.from('living_project_document_snapshots').select('*').eq('project_id', projectId).order('generated_at', { ascending: false })),
@@ -299,7 +299,7 @@ export function createDeliveryRepository(client) {
         engagementIds.length ? load(
           client
             .from('work_items')
-            .select('*, projects(id, name), engagements(id, name)')
+            .select('*, engagements!work_items_engagement_project_organization_fkey(id, name, projects!engagements_project_organization_fkey(id, name))')
             .eq('organization_id', organizationId)
             .eq('department_id', departmentId)
             .in('engagement_id', engagementIds)
@@ -346,7 +346,7 @@ export function createDeliveryRepository(client) {
         load(
           client
             .from('deliverables')
-            .select('*, deliverable_versions(id, version_number, review_status, created_at)')
+            .select('*, deliverable_versions!deliverable_versions_deliverable_id_fkey(id, version_number, review_status, created_at)')
             .eq('organization_id', organizationId)
             .in('workstream_id', workstreamIds)
             .is('archived_at', null)
@@ -378,7 +378,7 @@ export function createDeliveryRepository(client) {
         relatedWorkstreams: relatedWorkstreams || [],
         engagements,
         tasks: tasks || [],
-        workItems: workItems || [],
+        workItems: (workItems || []).map(item => ({ ...item, projects: item.engagements?.projects || null })),
         services: services || [],
         stages: stages || [],
         research: relevantResearch,
@@ -396,7 +396,7 @@ export function createDeliveryRepository(client) {
       const [tasks, workItems, requests, deliverables, reviewVersions, releaseVersions] = await Promise.all([
         load(
           client.from('tasks')
-            .select('*, projects(id, name), workstreams(id, name, department_id)')
+            .select('*, projects!tasks_project_organization_fkey(id, name), workstreams(id, name, department_id)')
             .eq('organization_id', organizationId)
             .eq('assigned_to', userId)
             .is('archived_at', null)
@@ -404,7 +404,7 @@ export function createDeliveryRepository(client) {
         ),
         load(
           client.from('work_items')
-            .select('*, projects(id, name), engagements(id, name)')
+            .select('*, engagements!work_items_engagement_project_organization_fkey(id, name, projects!engagements_project_organization_fkey(id, name))')
             .eq('organization_id', organizationId)
             .eq('assignee_id', userId)
             .is('deleted_at', null)
@@ -420,7 +420,7 @@ export function createDeliveryRepository(client) {
         ),
         load(
           client.from('deliverables')
-            .select('*, projects(id, name), workstreams(id, name, department_id), deliverable_versions(id, organization_id, version_number, review_status, state_version, client_approval_required, created_at)')
+            .select('*, projects(id, name), workstreams(id, name, department_id), deliverable_versions!deliverable_versions_deliverable_id_fkey(id, organization_id, version_number, review_status, state_version, client_approval_required, created_at)')
             .eq('organization_id', organizationId)
             .eq('owner_id', userId)
             .is('archived_at', null)
@@ -428,14 +428,14 @@ export function createDeliveryRepository(client) {
         ),
         load(
           client.from('deliverable_versions')
-            .select('*, deliverables(id, title, deliverable_type, owner_id), projects(id, name)')
+            .select('*, deliverables!deliverable_versions_deliverable_id_fkey(id, title, deliverable_type, owner_id), projects(id, name)')
             .eq('organization_id', organizationId)
             .eq('review_status', 'ready_for_internal_review')
             .order('created_at')
         ),
         load(
           client.from('deliverable_versions')
-            .select('*, deliverables(id, title, deliverable_type, owner_id), projects(id, name, client_id)')
+            .select('*, deliverables!deliverable_versions_deliverable_id_fkey(id, title, deliverable_type, owner_id), projects(id, name, client_id)')
             .eq('organization_id', organizationId)
             .eq('review_status', 'ready_for_client_review')
             .order('internal_reviewed_at')
@@ -458,7 +458,7 @@ export function createDeliveryRepository(client) {
 
       return {
         tasks: tasks || [],
-        workItems: workItems || [],
+        workItems: (workItems || []).map(item => ({ ...item, projects: item.engagements?.projects || null })),
         requests: requests || [],
         deliverables: governedDeliverables,
         reviewVersions: governedReviewVersions,
