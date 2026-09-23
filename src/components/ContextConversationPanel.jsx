@@ -37,6 +37,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   const [olderBusy, setOlderBusy] = useState(false)
   const [modelOptions, setModelOptions] = useState([])
   const [selectedModelId, setSelectedModelId] = useState('')
+  const [aiUseConfirmed, setAiUseConfirmed] = useState(false)
   const [aiBusyMessageId, setAiBusyMessageId] = useState('')
   const [aiNotice, setAiNotice] = useState('')
   const [error, setError] = useState('')
@@ -88,6 +89,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
 
   useEffect(() => {
     setDraft(drafts.current.get(conversationId) || '')
+    setAiUseConfirmed(false)
     if (!conversationId) { setMessages([]); setHasOlder(false); return }
     let current = true
     setMessages([])
@@ -167,17 +169,21 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
       if (activeConversation.current !== targetId) return
       setMessages(current => current.some(message => message.id === saved.id) ? current : [...current, saved])
       setDraft('')
+      setAiUseConfirmed(false)
       await refresh(targetId)
     } catch (reason) { showError(reason) } finally { if (!signal.aborted) setBusy(false) }
   }
 
   async function askAi(message, recoverOnly = false) {
     if (aiBusyMessageId || busy) return
-    if (!recoverOnly && !selectedModelId) return
+    if (!recoverOnly && (!selectedModelId || !aiUseConfirmed)) return
     const targetId = conversationId
     const savedRequest = dispatchRequests.current.get(message.id)
     const request = savedRequest || { id: crypto.randomUUID(), modelId: selectedModelId }
-    if (!recoverOnly) dispatchRequests.current.set(message.id, request)
+    if (!recoverOnly) {
+      dispatchRequests.current.set(message.id, request)
+      setAiUseConfirmed(false)
+    }
     setAiBusyMessageId(message.id); setAiNotice(''); setError('')
     try {
       const result = recoverOnly
@@ -195,6 +201,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
       setHasOlder(Boolean(latest.has_older))
       dispatchRequests.current.delete(message.id)
       setAiNotice('Audited reply saved in this private conversation.')
+      setAiUseConfirmed(false)
     } catch (reason) {
       if (signal.aborted || activeConversation.current !== targetId) return
       if (reason.outcome === 'charged_without_reply') {
@@ -256,11 +263,17 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
           <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
             <label htmlFor="organization-conversation-model" className="block text-xs font-semibold uppercase tracking-wide text-slate-400">Approved private conversation AI model</label>
             <select id="organization-conversation-model" className={`${INPUT} mt-2`} value={selectedModelId}
-              onChange={event => setSelectedModelId(event.target.value)} disabled={Boolean(aiBusyMessageId) || !modelOptions.length}>
+              onChange={event => { setSelectedModelId(event.target.value); setAiUseConfirmed(false) }} disabled={Boolean(aiBusyMessageId) || !modelOptions.length}>
               {!modelOptions.length && <option value="">No approved model available</option>}
               {modelOptions.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
             </select>
             <p className="mt-2 text-xs text-slate-400">AI replies use the approved organization-level provider connection and count against the organization AI budget. The service will refuse execution until all controls are enabled.</p>
+            <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-300">
+              <input type="checkbox" className="mt-1" checked={aiUseConfirmed}
+                onChange={event => setAiUseConfirmed(event.target.checked)}
+                disabled={Boolean(aiBusyMessageId) || !selectedModelId} />
+              <span>I confirm that this conversation's recent messages, including the message I selected, are safe to send to the selected provider for an AI reply. Project and Workshop records are not added unless I wrote them in these messages.</span>
+            </label>
           </div>
           {hasOlder && <button type="button" disabled={olderBusy} onClick={loadOlder}
             className="mt-3 text-xs font-semibold text-violet-300 disabled:opacity-50">Load older messages</button>}
@@ -272,7 +285,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
               {message.role === 'user'
                 && !messages.some(reply => reply.in_reply_to_message_id === message.id) && <div className="mt-3 flex flex-wrap gap-3">
                   <button type="button" className="text-xs font-semibold text-violet-300 disabled:opacity-40"
-                    disabled={!selectedModelId || Boolean(aiBusyMessageId) || busy}
+                    disabled={!selectedModelId || !aiUseConfirmed || Boolean(aiBusyMessageId) || busy}
                     onClick={() => askAi(message)}>{aiBusyMessageId === message.id ? 'Checking…' : 'Ask Anka AI'}</button>
                   <button type="button" className="text-xs text-slate-400 hover:text-slate-200 disabled:opacity-40"
                     disabled={Boolean(aiBusyMessageId) || busy} onClick={() => askAi(message, true)}>Check for saved reply</button>
