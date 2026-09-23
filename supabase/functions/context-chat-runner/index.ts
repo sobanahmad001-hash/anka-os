@@ -37,6 +37,25 @@ async function one(query: PromiseLike<{ data: any; error: any }>, label: string)
   if (error || !data) throw fail(label + ' is unavailable')
   return data
 }
+export async function requirePrivateConversationAccess(
+  admin: Client, conversation: Json, membership: Json,
+  organizationId: string, userId: string,
+) {
+  privateConversationScope(conversation)
+  if (conversation.context_kind === 'project_team') {
+    await one(admin.from('projects').select('id')
+      .eq('id', conversation.project_id).eq('organization_id', organizationId)
+      .is('archived_at', null).maybeSingle(), 'Active project access')
+  }
+  if (conversation.context_kind === 'department_private'
+    && !['system_owner', 'operations_admin', 'executive'].includes(membership.role)
+    && membership.department_id !== conversation.department_id) {
+    await one(admin.from('organization_department_memberships').select('id')
+      .eq('organization_id', organizationId).eq('user_id', userId)
+      .eq('department_id', conversation.department_id).eq('status', 'active')
+      .maybeSingle(), 'Private Workshop department access')
+  }
+}
 async function rpc(admin: Client, name: string, args: Json) {
   const { data, error } = await admin.rpc(name, args)
   if (error) throw fail(name + ' rejected this request: ' + error.message)
@@ -102,20 +121,7 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
       .select('id,organization_id,owner_id,context_kind,project_id,department_id,state')
       .eq('id', source.conversation_id).eq('organization_id', organizationId)
       .eq('owner_id', user.id).maybeSingle(), 'Private conversation')
-    privateConversationScope(conversation)
-    if (conversation.context_kind === 'project_team') {
-      await one(admin.from('projects').select('id')
-        .eq('id', conversation.project_id).eq('organization_id', organizationId)
-        .is('archived_at', null).maybeSingle(), 'Active project access')
-    }
-    if (conversation.context_kind === 'department_private'
-      && !['system_owner', 'operations_admin', 'executive'].includes(membership.role)
-      && membership.department_id !== conversation.department_id) {
-      await one(admin.from('organization_department_memberships').select('id')
-        .eq('organization_id', organizationId).eq('user_id', user.id)
-        .eq('department_id', conversation.department_id).eq('status', 'active')
-        .maybeSingle(), 'Private Workshop department access')
-    }
+    await requirePrivateConversationAccess(admin, conversation, membership, organizationId, user.id)
     try {
       const recovered = await rpc(admin, 'append_context_chat_audited_reply', {
         p_organization_id: organizationId, p_message_id: messageId, p_actor_id: user.id,

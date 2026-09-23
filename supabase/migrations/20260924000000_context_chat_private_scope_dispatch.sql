@@ -17,7 +17,8 @@ declare
 begin
   select * into membership from public.organization_memberships
     where organization_id = p_organization_id and user_id = p_actor_id
-      and member_kind = 'team' and status = 'active';
+      and member_kind = 'team' and status = 'active'
+    for share;
   if not found then
     raise exception 'Current team membership is required.' using errcode = '42501';
   end if;
@@ -28,25 +29,28 @@ begin
     or conversation.context_kind not in ('organization', 'project_team', 'department_private') then
     raise exception 'Owned private conversation is required.' using errcode = '42501';
   end if;
-  if conversation.context_kind = 'project_team' and not exists (
-    select 1 from public.projects project
+  if conversation.context_kind = 'project_team' then
+    perform 1 from public.projects project
       where project.id = conversation.project_id
         and project.organization_id = p_organization_id
         and project.archived_at is null
-  ) then
-    raise exception 'Active project access is required.' using errcode = '42501';
+      for share;
+    if not found then
+      raise exception 'Active project access is required.' using errcode = '42501';
+    end if;
   end if;
   if conversation.context_kind = 'department_private'
     and membership.role not in ('system_owner', 'operations_admin', 'executive')
-    and membership.department_id is distinct from conversation.department_id
-    and not exists (
-      select 1 from public.organization_department_memberships department
-        where department.organization_id = p_organization_id
-          and department.user_id = p_actor_id
-          and department.department_id = conversation.department_id
-          and department.status = 'active'
-    ) then
-    raise exception 'Private Workshop department access is required.' using errcode = '42501';
+    and membership.department_id is distinct from conversation.department_id then
+    perform 1 from public.organization_department_memberships department
+      where department.organization_id = p_organization_id
+        and department.user_id = p_actor_id
+        and department.department_id = conversation.department_id
+        and department.status = 'active'
+      for share;
+    if not found then
+      raise exception 'Private Workshop department access is required.' using errcode = '42501';
+    end if;
   end if;
 end;
 $$;
