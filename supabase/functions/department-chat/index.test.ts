@@ -19,6 +19,7 @@ import {
   rejectProposal,
   requireDepartmentEngagement,
   resolveSingleOpenAiModel,
+  resolveApprovedWorkshopModel,
   selectApprovedModelConfiguration,
   selectSingleOpenAiModel,
   safeAttemptReason,
@@ -237,6 +238,20 @@ function selectedOrganizationFixture() {
         return { data: null, error: modelDispatchError }
       }
       if (name === 'begin_department_chat_turn_with_attachments' && beginError) return { data: null, error: beginError }
+      if (name === 'reserve_workshop_chat_budget') return { data: { status: 'reserved', reservation_id: 'reservation-B' }, error: null }
+      if (name === 'claim_workshop_chat_dispatch') return { data: {
+        status: 'claimed', must_not_submit: false, claim_id: 'claim-B',
+        provider: 'openai', connector_connection_id: 'connector-B',
+        model_configuration_id: 'model-configuration-B-content', model_id: 'offline',
+      }, error: null }
+      if (name === 'complete_workshop_chat_answer_with_budget') return { data: {
+        conversation_id: args.p_conversation_id, user_message_id: args.p_message_id,
+        assistant_message_id: 'assistant-B', ai_run_id: 'run-answer-B',
+        model_configuration_id: args.p_model_configuration_id, replayed: false,
+      }, error: null }
+      if (name === 'mark_workshop_chat_outcome_unknown') return { data: {
+        message_id: args.p_message_id, status: 'unknown', must_not_submit: true,
+      }, error: null }
       if (name === 'can_access_department_chat_conversation') {
         const conversation = (rows.department_chat_conversations || []).find(row =>
           row.id === args.p_conversation_id && row.organization_id === args.p_organization_id
@@ -367,9 +382,16 @@ function selectedOrganizationFixture() {
       providerRequests.push(init || {})
       events.push('provider')
       if (providerFailure === 'network') throw new TypeError('connection reset after dispatch')
+      if (providerFailure === 'stream-drop') throw new TypeError('connection reset after dispatch')
+      if (providerFailure === 'stream-failed') return new Response('{}', { status: 503 })
       if (providerFailure === '408' || providerFailure === '504') return new Response(JSON.stringify({ error: { message: 'gateway timeout' } }), { status: Number(providerFailure) })
       if (providerFailure === '400') return new Response(JSON.stringify({ error: { message: 'rejected' } }), { status: 400 })
       const requestBody = JSON.parse(String(init?.body || '{}'))
+      if (requestBody.metadata?.anka_claim_id) return new Response(JSON.stringify({
+        id: 'response-B', status: 'completed', model: 'offline',
+        output: [{ type: 'message', content: [{ type: 'output_text', text: 'Offline answer' }] }],
+        usage: { input_tokens: 7, output_tokens: 2 },
+      }))
       if (requestBody.stream === true) {
         const events = providerFailure === 'stream-drop'
           ? ['data: {"type":"response.output_text.delta","delta":"Partial"}\n\n']
@@ -399,8 +421,23 @@ function selectedOrganizationFixture() {
       }))
     }) as typeof fetch,
     waitUntil: promise => { backgroundTasks.push(promise) },
-    proposal: { estimatedCost: () => 0, resolveSingleOpenAiModel: (client, engagement, department, organization, _credential, selected) =>
-      resolveSingleOpenAiModel(client, engagement, department, organization, () => 'synthetic-key', selected) },
+    proposal: { estimatedCost: () => 0,
+      resolveSingleOpenAiModel: (client, engagement, department, organization, _credential, selected) =>
+        resolveSingleOpenAiModel(client, engagement, department, organization, () => 'synthetic-key', selected),
+      resolveApprovedWorkshopModel: async (_client, _engagement, _department, _organization, _credential, selected) => {
+        if (selected && selected !== 'model-configuration-B-content') throw new Error('Selected Workshop model is stale')
+        return { provider: 'openai', connectorId: 'connector-B', configurationId: 'model-configuration-B-content',
+          model: 'offline', credential: 'synthetic-key', displayName: 'Offline fixture',
+          approvedModels: [{ configuration_id: 'model-configuration-B-content', model_id: 'offline', is_default: true }] }
+      },
+      workshopEnv: { get: name => name === 'WORKSHOP_CHAT_PAID_EXECUTION_ENABLED' ? 'true'
+        : name === 'N6_OPENAI_MODEL_PRICING_JSON' ? JSON.stringify([{
+          model_id: 'offline', verified_at: new Date().toISOString(),
+          source_url: 'https://developers.openai.com/api/docs/pricing',
+          input_usd_per_million: 1, cached_input_usd_per_million: 1,
+          cache_write_usd_per_million: 1, output_usd_per_million: 1,
+        }]) : undefined },
+    },
   })
   return {
     rows, queries, rpcCalls, request, events, admin, providerRequests, backgroundTasks,
@@ -460,6 +497,41 @@ Deno.test('P9 model selection accepts only an approved verified configuration id
     [{ id: 'configuration-fabricated', model_id: 'browser-invented' }],
     ['verified-default'], 'content', 'configuration-fabricated',
   ), Error, 'No administrator-approved model')
+})
+
+Deno.test('Workshop selects only an exact verified provider model and rejects stale selections', async () => {
+  const records: Record<string, Record<string, unknown>[]> = {
+    integration_connections: [
+      { id: 'openai-connector', provider: 'openai', secret_name: 'ANKA_OPENAI_TEST',
+        public_config: { model_id: 'openai-verified' } },
+      { id: 'anthropic-connector', provider: 'anthropic', secret_name: 'ANKA_ANTHROPIC_TEST',
+        public_config: { verified_model_ids: ['claude-verified'] } },
+    ],
+    department_chat_model_configurations: [
+      { id: 'openai-selection', connector_connection_id: 'openai-connector',
+        model_id: 'openai-verified', is_default: true },
+      { id: 'claude-selection', connector_connection_id: 'anthropic-connector',
+        model_id: 'claude-verified', is_default: false },
+      { id: 'unverified-selection', connector_connection_id: 'anthropic-connector',
+        model_id: 'browser-invented', is_default: false },
+    ],
+  }
+  const admin = { from(table: string) {
+    const query = {
+      select() { return query }, eq() { return query }, in() { return query },
+      is() { return query }, order() { return query },
+      then(resolve: (value: unknown) => void) { return Promise.resolve({ data: records[table], error: null }).then(resolve) },
+    }
+    return query
+  } }
+  const credential = (name: string) => name.endsWith('_TEST') ? 'synthetic-key' : undefined
+  const selected = await resolveApprovedWorkshopModel(admin as any, 'engagement', 'content',
+    'organization', credential, 'claude-selection')
+  assertEquals(selected.provider, 'anthropic')
+  assertEquals(selected.model, 'claude-verified')
+  assertEquals(selected.approvedModels.length, 2)
+  await assertRejects(() => resolveApprovedWorkshopModel(admin as any, 'engagement', 'content',
+    'organization', credential, 'unverified-selection'), Error, 'stale or unavailable')
 })
 
 Deno.test('P9 stale model dispatch is rejected before provider call with no fallback', async () => {
@@ -1485,7 +1557,7 @@ const answerRequest = {
   model_configuration_id: 'model-configuration-B-content', attachment_ids: [],
 }
 
-Deno.test('P9 ordinary answer streams genuine deltas then atomically saves a no-proposal durable result', async () => {
+Deno.test('Workshop answer reserves and claims before provider call then atomically settles a no-proposal result', async () => {
   const fixture = selectedOrganizationFixture()
   enableSavedAnswerFixture(fixture)
   fixture.rows.department_chat_messages = [
@@ -1497,25 +1569,50 @@ Deno.test('P9 ordinary answer streams genuine deltas then atomically saves a no-
   assertEquals(response.headers.get('content-type')?.startsWith('text/event-stream'), true)
   const streamText = await response.text()
   await Promise.all(fixture.backgroundTasks)
-  assertEquals(streamText.includes('"type":"delta"'), true)
+  assertEquals(streamText.includes('"type":"delta"'), false)
   assertEquals(streamText.includes('"type":"completed"'), true)
-  const completed = fixture.rpcCalls.find(call => call.name === 'complete_department_chat_answer')!
+  const completed = fixture.rpcCalls.find(call => call.name === 'complete_workshop_chat_answer_with_budget')!
   assertEquals(completed.args.p_model_configuration_id, 'model-configuration-B-content')
   assertEquals(completed.args.p_output_text, 'Offline answer')
   assertEquals(completed.args.p_context_manifest.model_configuration_id, 'model-configuration-B-content')
   assertEquals(completed.args.p_context_manifest.selected_model_id, 'offline')
-  assertEquals(completed.args.p_context_manifest.actual_model_id, 'offline-actual')
-  assertEquals(completed.args.p_context_manifest.requested_tools, [])
-  assertEquals(completed.args.p_context_manifest.executed_tools, [])
+  assertEquals(completed.args.p_context_manifest.actual_model_id, 'offline')
+  assertEquals(completed.args.p_context_manifest.dispatch_claim_id, 'claim-B')
+  assertEquals(completed.args.p_actual_cost_microusd >= 0, true)
   assertEquals(fixture.rpcCalls.some(call => call.name.startsWith('save_department_chat_')), false)
   const providerBody = JSON.parse(String(fixture.providerRequests[0].body))
-  assertEquals(providerBody.stream, true)
+  assertEquals(providerBody.stream, undefined)
   assertEquals(providerBody.store, false)
-  assertEquals(providerBody.tools, undefined)
-  assertEquals(providerBody.input.map((item: any) => item.content), [
-    'Earlier question', 'Earlier answer', answerRequest.prompt,
-  ])
-  assertEquals(fixture.events.indexOf('rpc:mark_department_chat_turn_dispatched') < fixture.events.indexOf('provider'), true)
+  assertEquals(providerBody.tools, [])
+  assertEquals(String(providerBody.input).includes(answerRequest.prompt), true)
+  assertEquals(fixture.events.indexOf('rpc:reserve_workshop_chat_budget') < fixture.events.indexOf('rpc:claim_workshop_chat_dispatch'), true)
+  assertEquals(fixture.events.indexOf('rpc:claim_workshop_chat_dispatch') < fixture.events.indexOf('provider'), true)
+})
+
+Deno.test('Workshop oversized exact history is rejected before budget or provider dispatch', async () => {
+  const fixture = selectedOrganizationFixture()
+  enableSavedAnswerFixture(fixture)
+  fixture.rows.department_chat_messages = [{
+    organization_id: 'B', conversation_id: 'conversation-B', role: 'user',
+    body: 'x'.repeat(23900), status: 'completed', sequence: 1,
+  }]
+  const response = await fixture.request(answerRequest)
+  assertEquals(response.status, 413)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'reserve_workshop_chat_budget'), false)
+  assertEquals(fixture.providerCalls(), 0)
+})
+
+Deno.test('Workshop multibyte context obeys the provider byte limit before budget reservation', async () => {
+  const fixture = selectedOrganizationFixture()
+  enableSavedAnswerFixture(fixture)
+  fixture.rows.department_chat_messages = [{
+    organization_id: 'B', conversation_id: 'conversation-B', role: 'user',
+    body: '漢'.repeat(7900), status: 'completed', sequence: 1,
+  }]
+  const response = await fixture.request(answerRequest)
+  assertEquals(response.status, 413)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'reserve_workshop_chat_budget'), false)
+  assertEquals(fixture.providerCalls(), 0)
 })
 
 Deno.test('P9 ordinary answer exact replay exits before fresh model validation or provider dispatch', async () => {
@@ -1538,20 +1635,17 @@ Deno.test('P9 ordinary answer rejects stale selected configuration before provid
   assertEquals(fixture.rpcCalls.some(call => call.name === 'fail_department_chat_turn'), true)
 })
 
-Deno.test('P9 streamed disconnect becomes unknown while a definite provider failure becomes failed', async () => {
-  for (const [failure, terminalRpc, terminalEvent] of [
-    ['stream-drop', 'mark_department_chat_turn_unknown', '"type":"unknown"'],
-    ['stream-failed', 'fail_department_chat_turn', '"type":"failed"'],
-  ]) {
+Deno.test('claimed Workshop answer treats connection loss and provider failure as uncertain with no retry', async () => {
+  for (const failure of ['stream-drop', 'stream-failed']) {
     const fixture = selectedOrganizationFixture()
     enableSavedAnswerFixture(fixture)
     fixture.setProviderFailure(failure)
     const response = await fixture.request({ ...answerRequest, client_request_id: crypto.randomUUID() })
     const streamText = await response.text()
     await Promise.all(fixture.backgroundTasks)
-    assertEquals(streamText.includes(terminalEvent), true)
-    assertEquals(fixture.rpcCalls.some(call => call.name === terminalRpc), true)
-    assertEquals(fixture.rpcCalls.some(call => call.name === 'complete_department_chat_answer'), false)
+    assertEquals(streamText.includes('"type":"unknown"'), true)
+    assertEquals(fixture.rpcCalls.some(call => call.name === 'mark_workshop_chat_outcome_unknown'), true)
+    assertEquals(fixture.rpcCalls.some(call => call.name === 'complete_workshop_chat_answer_with_budget'), false)
   }
 })
 
@@ -1565,7 +1659,7 @@ Deno.test('P9 deliberately shared contributor answer retains actual author and n
   await response.text()
   await Promise.all(fixture.backgroundTasks)
   const begin = fixture.rpcCalls.find(call => call.name === 'begin_department_chat_turn_with_attachments')!
-  const complete = fixture.rpcCalls.find(call => call.name === 'complete_department_chat_answer')!
+  const complete = fixture.rpcCalls.find(call => call.name === 'complete_workshop_chat_answer_with_budget')!
   assertEquals(begin.args.p_actor_id, 'actor')
   assertEquals(complete.args.p_actor_id, 'actor')
   assertEquals(fixture.rpcCalls.some(call => call.name === 'confirm_department_chat_proposal'), false)

@@ -19,7 +19,8 @@ import {
 } from '../_shared/departmentChatProfiles.ts'
 import { stableJson } from '../_shared/approvedArtifactContext.ts'
 import { validateMarketingArtifact } from '../marketing-studio/index.ts'
-import { createDurableDepartmentChatAnswerStream } from '../_shared/departmentChatResponseStream.ts'
+import { dispatchWorkshopAnswer } from './workshopAnswerTransport.ts'
+import type { WorkshopAnswerRoute } from './workshopAnswerTransport.ts'
 import { namedKey, sha256 } from '../_shared/googleOAuthTokens.ts'
 import {
   ATTACHMENT_LIMITS,
@@ -104,41 +105,6 @@ async function callDepartmentChatProvider(
   return result
 }
 
-async function callDepartmentChatProviderStream(
-  admin: Client,
-  body: Json,
-  actorId: string,
-  fetcher: typeof fetch,
-  init: RequestInit,
-) {
-  const conversationId = text(body.conversation_id, 80)
-  const messageId = text(body.message_id, 80)
-  if (!conversationId || !messageId) throw new Error('Saved answer dispatch identity is incomplete')
-  const { error } = await admin.rpc('mark_department_chat_turn_dispatched', {
-    p_message_id: messageId,
-    p_conversation_id: conversationId,
-    p_organization_id: text(body.organization_id, 80),
-    p_project_id: text(body.project_id, 80),
-    p_engagement_id: text(body.engagement_id, 80),
-    p_department_id: text(body.department_id, 40),
-    p_actor_id: actorId,
-  })
-  if (error) throw error
-  let providerResponse: Response
-  try { providerResponse = await fetcher(OPENAI_RESPONSES_URL, init) } catch (cause) {
-    throw unknownProviderOutcome(cause)
-  }
-  if (!providerResponse.ok) {
-    if (providerResponse.status === 408 || providerResponse.status >= 500) throw unknownProviderOutcome()
-    throw Object.assign(new Error('The configured provider rejected the request.'), {
-      status: 502, providerRejected: true,
-    })
-  }
-  if (!providerResponse.body || !String(providerResponse.headers.get('Content-Type') || '').toLowerCase().startsWith('text/event-stream')) {
-    throw unknownProviderOutcome(new Error('The configured provider did not return the verified SSE protocol'))
-  }
-  return providerResponse
-}
 function text(value: unknown, max = 8000) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
 }
@@ -386,6 +352,67 @@ export async function resolveSingleOpenAiModel(
   }
 }
 
+export async function resolveApprovedWorkshopModel(
+  admin: Client, engagementId: string, departmentId: string, organizationId: string,
+  credentialFor: (name: string) => string | undefined = name => Deno.env.get(name),
+  selectedConfigurationId?: string,
+): Promise<WorkshopAnswerRoute & { approvedModels: Json[]; displayName: string }> {
+  const { data: connections, error } = await admin.from('integration_connections')
+    .select('id, provider, public_config, secret_name, integration_connection_departments!inner(department_id), integration_connection_engagements!inner(engagement_id, department_id)')
+    .eq('organization_id', organizationId).in('provider', ['openai', 'anthropic', 'google_gemini'])
+    .eq('status', 'verified').is('archived_at', null)
+    .eq('integration_connection_departments.department_id', departmentId)
+    .eq('integration_connection_engagements.engagement_id', engagementId)
+    .eq('integration_connection_engagements.department_id', departmentId)
+    .order('updated_at', { ascending: false })
+  if (error) throw error
+  const ids = (connections || []).map(connection => text(connection.id, 80)).filter(Boolean)
+  if (!ids.length) throw new Error('No verified text connector is mapped to this Workshop engagement')
+  const { data: configurations, error: configurationError } = await admin
+    .from('department_chat_model_configurations')
+    .select('id, connector_connection_id, model_id, display_name, is_default, verified_at')
+    .eq('organization_id', organizationId).eq('department_id', departmentId)
+    .in('connector_connection_id', ids).is('revoked_at', null)
+    .order('is_default', { ascending: false }).order('created_at', { ascending: true })
+  if (configurationError) throw configurationError
+  const prefixes: Record<string, string> = {
+    openai: 'ANKA_OPENAI_', anthropic: 'ANKA_ANTHROPIC_', google_gemini: 'ANKA_GEMINI_',
+  }
+  const available = (configurations || []).flatMap(configuration => {
+    const connection = (connections || []).find(item => item.id === configuration.connector_connection_id)
+    if (!connection || !['openai', 'anthropic', 'google_gemini'].includes(connection.provider)) return []
+    const config = connection.public_config && typeof connection.public_config === 'object'
+      ? connection.public_config as Json : {}
+    const model = text(configuration.model_id, 120)
+    if (!/^[A-Za-z0-9._-]{1,120}$/.test(model)
+      || !(text(config.model_id, 120) === model
+        || (Array.isArray(config.verified_model_ids) && config.verified_model_ids.includes(model)))) return []
+    const secretName = text(connection.secret_name, 200)
+    if (!secretName.startsWith(prefixes[connection.provider])) return []
+    const credential = credentialFor(secretName)
+    if (!credential) return []
+    return [{ configuration, connection, credential, model }]
+  })
+  const selectedId = text(selectedConfigurationId, 80)
+  const selected = selectedId
+    ? available.find(item => item.configuration.id === selectedId)
+    : available.find(item => item.configuration.is_default) || available[0]
+  if (!selected) throw Object.assign(new Error('Selected Workshop model is stale or unavailable. Refresh before retrying.'), { status: 409 })
+  return {
+    provider: selected.connection.provider as WorkshopAnswerRoute['provider'],
+    connectorId: selected.connection.id, configurationId: selected.configuration.id,
+    model: selected.model, credential: selected.credential,
+    displayName: text(selected.configuration.display_name, 120) || selected.model,
+    approvedModels: available.map(item => ({
+      configuration_id: item.configuration.id,
+      connector_connection_id: item.connection.id,
+      provider: item.connection.provider, model_id: item.model,
+      display_name: text(item.configuration.display_name, 120) || item.model,
+      is_default: item.configuration.is_default === true,
+    })),
+  }
+}
+
 export function selectSingleOpenAiModel(
   connections: Json[],
   departmentId: string,
@@ -593,6 +620,8 @@ type ProposalDependencies = {
   safeStage?: typeof safeStage
   approvedSafeContext?: typeof approvedSafeContext
   resolveSingleOpenAiModel?: typeof resolveSingleOpenAiModel
+  resolveApprovedWorkshopModel?: typeof resolveApprovedWorkshopModel
+  workshopEnv?: { get: (name: string) => string | undefined }
   estimatedCost?: typeof estimatedCost
 }
 
@@ -686,6 +715,7 @@ async function loadDepartmentChatContext(
   selectedConfigurationId?: string,
   selectedSourceIds?: string[],
   sourceReader?: Client,
+  workshopAnswer = false,
 ) {
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
   const { count: recentRuns, error: rateError } = await admin.from('ai_runs')
@@ -715,10 +745,11 @@ async function loadDepartmentChatContext(
   const context = selectedSourceIds === undefined
     ? await (dependencies.approvedSafeContext || approvedSafeContext)(admin, engagement.id, departmentId, organizationId)
     : await approvedSourceVersions(sourceReader || admin, engagement.id, departmentId, organizationId, selectedSourceIds)
-  const provider = await (dependencies.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(
-    admin, engagement.id, departmentId, organizationId, undefined,
-    selectedConfigurationId,
-  )
+  const provider = workshopAnswer
+    ? await (dependencies.resolveApprovedWorkshopModel || resolveApprovedWorkshopModel)(
+      admin, engagement.id, departmentId, organizationId, undefined, selectedConfigurationId)
+    : await (dependencies.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(
+      admin, engagement.id, departmentId, organizationId, undefined, selectedConfigurationId)
   return { engagement, services, commercialContext, context, provider, organizationSettings: (organization?.settings || {}) as Json }
 }
 
@@ -1457,11 +1488,14 @@ async function getCapabilities(
   dependencies: ProposalDependencies,
 ) {
   const scope = await validateConversationEngagement(admin, body, organizationId, dependencies)
-  const provider = await (dependencies.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(
-    admin, scope.engagementId, scope.departmentId, organizationId,
-  )
+  const savedAnswer = SAVED_CONVERSATION_DEPARTMENTS.has(scope.departmentId)
+  const provider = savedAnswer
+    ? await (dependencies.resolveApprovedWorkshopModel || resolveApprovedWorkshopModel)(
+      admin, scope.engagementId, scope.departmentId, organizationId)
+    : await (dependencies.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(
+      admin, scope.engagementId, scope.departmentId, organizationId)
   return {
-    provider: 'openai',
+    provider: savedAnswer ? (provider as WorkshopAnswerRoute).provider : 'openai',
     connector_connection_id: provider.connectorId,
     model_configuration_id: provider.configurationId,
     model_id: provider.model,
@@ -1470,8 +1504,8 @@ async function getCapabilities(
       || provider.configurationId,
     default_model_id: provider.model,
     text: { supported: true, max_prompt_characters: 8000 },
-    answers: { supported: true, durable: true, creates_official_records: false },
-    streaming: { supported: true, protocol: 'openai-responses-sse', genuine_partials: true },
+    answers: { supported: savedAnswer, durable: savedAnswer, creates_official_records: false },
+    streaming: { supported: false, protocol: 'durable-terminal-sse', genuine_partials: false },
     cancellation: { local_observation: true, upstream_verified: false, safe_retry_guaranteed: false },
     attachments: {
       supported: true, max_files_per_turn: ATTACHMENT_LIMITS.filesPerTurn,
@@ -1623,6 +1657,7 @@ export async function answerConversation(
     text(body.model_configuration_id, 80),
     text(body.conversation_id, 80) ? selectedDepartmentChatSourceIds(body.selected_artifact_version_ids) : undefined,
     sourceReader,
+    true,
   )
   if (!provider.configurationId) throw Object.assign(new Error('An approved model configuration is required'), { status: 409 })
   const attachments = await attachmentContext(admin, body)
@@ -1643,67 +1678,25 @@ export async function answerConversation(
     boundedDepartmentChatContext(contextFreeze.frozen),
   ].join('\n')
   await assertModelDispatch(admin, body, actorId, provider)
-  const upstream = await callDepartmentChatProviderStream(admin, body, actorId, fetcher, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + provider.credential },
-    body: JSON.stringify({
-      model: provider.model,
-      instructions: systemPrompt,
-      input: [...history, { role: 'user', content: prompt + attachments.providerText }],
-      max_output_tokens: 3000,
-      store: false,
-      stream: true,
-      safety_identifier: await sha256(actorId),
-    }),
-    signal: AbortSignal.timeout(60_000),
+  const frozenPrompt = stableJson({
+    context: systemPrompt,
+    turns: [...history, { role: 'user', content: prompt + attachments.providerText }],
   })
-  const turnParameters = {
-    p_message_id: messageId,
-    p_conversation_id: conversationId,
-    p_organization_id: organizationId,
-    p_project_id: text((commercialContext.project as Json)?.id, 80),
-    p_engagement_id: engagement.id,
-    p_department_id: departmentId,
-    p_actor_id: actorId,
+  if (new TextEncoder().encode(frozenPrompt).length > 24000) {
+    throw Object.assign(new Error(
+      'This conversation and selected context exceed the model limit. Start a new conversation or reduce selected sources; no text was sent.'
+    ), { status: 413 })
   }
-  const streamed = createDurableDepartmentChatAnswerStream(upstream, {
-    complete: async (providerResult, answer) => {
-      const usage = providerResult.usage && typeof providerResult.usage === 'object'
-        ? providerResult.usage as Json : {}
-      const inputTokens = Number.isInteger(usage.input_tokens) ? Number(usage.input_tokens) : null
-      const outputTokens = Number.isInteger(usage.output_tokens) ? Number(usage.output_tokens) : null
-      const { data, error } = await admin.rpc('complete_department_chat_answer', {
-        ...turnParameters,
-        p_model_configuration_id: provider.configurationId,
-        p_connector_connection_id: provider.connectorId,
-        p_model_id: provider.model,
-        p_context_manifest: {
-          ...contextFreeze.manifest,
-          ...departmentChatExecutionMetadata(providerResult),
-          selected_model_id: provider.model,
-        },
-        p_output_text: answer,
-        p_latency_ms: Date.now() - startedAt,
-        p_input_tokens: inputTokens,
-        p_output_tokens: outputTokens,
-        p_estimated_cost_microusd: (dependencies.estimatedCost || estimatedCost)(inputTokens, outputTokens),
-      })
-      if (error) throw error
-      return data as Json
-    },
-    fail: async code => {
-      const { error } = await admin.rpc('fail_department_chat_turn', { ...turnParameters, p_error_code: code })
-      if (error) throw error
-    },
-    unknown: async () => {
-      const { error } = await admin.rpc('mark_department_chat_turn_unknown', turnParameters)
-      if (error) throw error
-    },
-    waitUntil,
-  })
-  const headers = new Headers(streamed.headers)
-  for (const [key, value] of Object.entries(cors)) headers.set(key, value)
-  return new Response(streamed.body, { status: streamed.status, headers })
+  return dispatchWorkshopAnswer(admin, {
+    organizationId, conversationId, messageId,
+    projectId: text((commercialContext.project as Json)?.id, 80),
+    engagementId: engagement.id, departmentId, actorId,
+    dispatchRequestId: text(body.client_request_id, 80),
+    route: provider as WorkshopAnswerRoute,
+    prompt: frozenPrompt,
+    contextManifest: contextFreeze.manifest,
+    startedAt,
+  }, fetcher, dependencies.workshopEnv, waitUntil)
 }
 export async function proposeArtifact(userClient: Client, admin: Client, body: Json, actorId: string, organizationId: string, fetcher: typeof fetch = fetch, dependencies: ProposalDependencies = {}) {
   const startedAt = Date.now()
@@ -2139,7 +2132,9 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
         messageId: text(turn?.message?.id, 80),
       }
       if (!turnContext.messageId) throw new Error('Department Chat turn reservation failed')
-      const reservationProvider = await (dependencies.proposal?.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(
+      const reservationProvider = await (action === 'answer'
+        ? dependencies.proposal?.resolveApprovedWorkshopModel || resolveApprovedWorkshopModel
+        : dependencies.proposal?.resolveSingleOpenAiModel || resolveSingleOpenAiModel)(
         admin, conversation.engagement_id, conversation.department_id, organizationId, undefined,
         text(body.model_configuration_id, 80),
       )

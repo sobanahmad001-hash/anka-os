@@ -13,6 +13,7 @@ import { departmentChat } from '../data/departmentChatRepository.js'
 
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20'
 const PRIMARY = 'rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50'
+const MODEL_PROVIDER_LABELS = { openai: 'OpenAI', anthropic: 'Claude', google_gemini: 'Gemini' }
 
 export default function DepartmentChat(props) {
   const { user } = useAuth()
@@ -802,6 +803,10 @@ export function ScopedDepartmentChat({
     event.preventDefault()
     if (busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim()) return
     if (!allowArtifactDraft && proposalMode === 'artifact') { setError('Open the specialist Studio to draft an artifact.'); return }
+    if (supportsSavedConversations && proposalMode !== 'answer' && selectedProvider !== 'openai') {
+      setError('Artifact and work-item previews currently require an approved OpenAI model. Choose one or switch to a conversational answer.')
+      return
+    }
     const isCurrent = completion.current.begin()
     if (!isCurrent()) return
     const targetConversationId = conversationId
@@ -926,6 +931,9 @@ export function ScopedDepartmentChat({
 
   const isAnswerMode = proposalMode === 'answer'
   const isWorkItemMode = proposalMode === 'work_item'
+  const selectedModel = (capabilities?.approved_models || []).find(model => model.configuration_id === modelConfigurationId)
+  const selectedProvider = selectedModel?.provider || capabilities?.provider
+  const proposalModelUnavailable = supportsSavedConversations && !isAnswerMode && selectedProvider !== 'openai'
   const requiresContentLanguage = departmentId === 'content' && ['discovery', 'vision', 'audience'].includes(artifactType)
   const currentConversation = conversations.find(item => item.id === conversationId) || null
   const isConversationOwner = currentConversation?.owner_id === userId
@@ -1025,7 +1033,7 @@ export function ScopedDepartmentChat({
               setObservationNotice('')
             }}
           >
-            {(capabilities.approved_models || []).map(model => <option key={model.configuration_id} value={model.configuration_id}>{model.display_name || model.model_id}{model.is_default ? ' · default' : ''}</option>)}
+            {(capabilities.approved_models || []).map(model => <option key={model.configuration_id} value={model.configuration_id}>{MODEL_PROVIDER_LABELS[model.provider || capabilities.provider] || 'Provider unavailable'} · {model.display_name || model.model_id}{model.is_default ? ' · default' : ''}</option>)}
           </select>
           <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-slate-500">Only administrator-approved models verified through this engagement's connector are available. A revoked or stale choice is rejected before dispatch without fallback.</span>
         </label>}
@@ -1036,6 +1044,7 @@ export function ScopedDepartmentChat({
             <option value="work_item">Work item draft</option>
           </select>
         </label>
+        {proposalModelUnavailable && <p className="text-xs text-amber-300">Artifact and work-item previews currently require an approved OpenAI model. Choose one above or switch to a conversational answer.</p>}
 
         {isAnswerMode ? null : isWorkItemMode ? (
           <>
@@ -1165,10 +1174,10 @@ export function ScopedDepartmentChat({
 
         {supportsSavedConversations && currentConversation && <button type="button" disabled={busy || historyBusy || attachmentBusy || draftSaving || !prompt.trim()} onClick={saveUnsentDraft} className="w-full rounded-xl border border-sky-700 px-4 py-2.5 text-sm font-semibold text-sky-200 disabled:opacity-50">{draftSaving ? 'Saving draft…' : 'Save draft to this conversation'}</button>}
         <button
-          disabled={busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim() || !safe || (supportsSavedConversations && (!currentConversation || currentConversation.state !== 'active' || !modelConfigurationId)) || (isWorkItemMode && !title.trim()) || (!isAnswerMode && !isWorkItemMode && !artifactType)}
+          disabled={busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim() || !safe || proposalModelUnavailable || (supportsSavedConversations && (!currentConversation || currentConversation.state !== 'active' || !modelConfigurationId)) || (isWorkItemMode && !title.trim()) || (!isAnswerMode && !isWorkItemMode && !artifactType)}
           className={`${PRIMARY} w-full`}
         >
-          {busy ? (isAnswerMode ? 'Receiving genuine response…' : 'Generating safe preview…') : isAnswerMode ? 'Ask configured AI' : isWorkItemMode ? 'Preview draft work item' : 'Preview draft artifact'}
+          {busy ? (isAnswerMode ? 'Processing answer…' : 'Generating safe preview…') : isAnswerMode ? 'Ask configured AI' : isWorkItemMode ? 'Preview draft work item' : 'Preview draft artifact'}
         </button>
         {busy && isAnswerMode && <button type="button" onClick={() => answerObservation.current?.stop()} className="w-full rounded-xl border border-amber-700 px-4 py-2.5 text-sm font-semibold text-amber-200">Stop watching locally</button>}
       </div>
@@ -1192,8 +1201,8 @@ export function ScopedDepartmentChat({
       {supportsSavedConversations && <VersionHistoryPanel messages={messages} engagement={engagement} />}
       {supportsSavedConversations && <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-sm leading-6 text-slate-400">
         <p className="font-semibold text-white">Configured AI</p>
-        {capabilities ? <><p className="mt-2">OpenAI · <span className="text-slate-200">{(capabilities.approved_models || []).find(model => model.configuration_id === modelConfigurationId)?.model_id || capabilities.model_id}</span></p><p className="mt-1 text-xs text-slate-500">Selection is limited to verified, administrator-approved configurations for this engagement.</p></> : <p className="mt-2">{historyBusy ? 'Checking configuration…' : 'Configuration unavailable.'}</p>}
-        <p className="mt-3 text-xs text-amber-300">Private files: TXT/Markdown/DOCX validated text; PNG/JPEG reference-only. PDF, OCR, and vision input remain unavailable.</p><p className="mt-2 text-xs text-slate-500">Answers use genuine provider SSE. “Stop watching” closes only this view; upstream cancellation and cost stopping are not verified.</p>
+        {capabilities ? <><p className="mt-2">{MODEL_PROVIDER_LABELS[selectedProvider] || 'Provider unavailable'} · <span className="text-slate-200">{selectedModel?.model_id || capabilities.model_id}</span></p><p className="mt-1 text-xs text-slate-500">Selection is limited to verified, administrator-approved configurations for this engagement.</p></> : <p className="mt-2">{historyBusy ? 'Checking configuration…' : 'Configuration unavailable.'}</p>}
+        <p className="mt-3 text-xs text-amber-300">Private files: TXT/Markdown/DOCX validated text; PNG/JPEG reference-only. PDF, OCR, and vision input remain unavailable.</p><p className="mt-2 text-xs text-slate-500">Answers appear after the provider response is saved. “Stop watching” closes this view; the request may continue and incur cost. Reopen the conversation to check the saved result.</p>
       </div>}
       <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-sm leading-6 text-slate-400">
         <p className="font-semibold text-white">Human control remains intact</p>
