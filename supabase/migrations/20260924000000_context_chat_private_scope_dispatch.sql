@@ -57,6 +57,65 @@ $$;
 revoke all on function private.assert_context_chat_owner_scope(uuid, uuid, uuid)
   from public, anon, authenticated, service_role;
 
+-- Serialize connector/model revocation with claim in connector-before-model order.
+create or replace function public.assert_context_chat_organization_model(
+  p_configuration_id uuid, p_organization_id uuid, p_actor_id uuid
+) returns void language plpgsql security invoker set search_path = '' as $$
+declare
+  selected_model public.context_chat_organization_models;
+  selected_connection public.integration_connections;
+begin
+  perform 1 from public.organizations organization
+    where organization.id = p_organization_id and organization.status = 'active'
+    for share;
+  if not found then
+    raise exception 'Organization conversation authority changed.' using errcode = '42501';
+  end if;
+  perform 1 from public.organization_memberships member
+    where member.organization_id = p_organization_id and member.user_id = p_actor_id
+      and member.status = 'active' and member.member_kind = 'team'
+    for share;
+  if not found then
+    raise exception 'Organization conversation authority changed.' using errcode = '42501';
+  end if;
+  -- Model identity is immutable. Locate its connector, lock that first, then
+  -- recheck the model after any concurrent revocation.
+  select * into selected_model from public.context_chat_organization_models model
+    where model.id = p_configuration_id and model.organization_id = p_organization_id;
+  if not found then
+    raise exception 'Selected organization conversation model is stale or unavailable.' using errcode = '23514';
+  end if;
+  select * into selected_connection from public.integration_connections connection
+    where connection.id = selected_model.connector_connection_id
+      and connection.organization_id = p_organization_id
+      and connection.provider in ('openai', 'anthropic', 'google_gemini')
+      and connection.status = 'verified' and connection.archived_at is null
+      and connection.secret_name is not null
+    for update;
+  if not found then
+    raise exception 'Selected organization conversation model is stale or unavailable.' using errcode = '23514';
+  end if;
+  select * into selected_model from public.context_chat_organization_models model
+    where model.id = p_configuration_id and model.organization_id = p_organization_id
+      and model.connector_connection_id = selected_connection.id
+      and model.revoked_at is null
+    for share;
+  if not found or not (
+    selected_connection.public_config ->> 'model_id' = selected_model.model_id
+    or coalesce(selected_connection.public_config -> 'verified_model_ids', '[]'::jsonb) ? selected_model.model_id
+  ) then
+    raise exception 'Selected organization conversation model is stale or unavailable.' using errcode = '23514';
+  end if;
+  if exists (select 1 from public.integration_connection_engagements engagement
+    where engagement.connection_id = selected_connection.id
+      and engagement.organization_id = p_organization_id)
+    or exists (select 1 from public.integration_connection_departments department
+    where department.connection_id = selected_connection.id
+      and department.organization_id = p_organization_id) then
+    raise exception 'Selected organization conversation model is stale or unavailable.' using errcode = '23514';
+  end if;
+end;
+$$;
 create or replace function private.assert_context_chat_ai_run_scope()
 returns trigger language plpgsql security invoker set search_path = '' as $$
 begin
