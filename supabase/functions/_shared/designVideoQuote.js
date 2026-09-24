@@ -20,7 +20,8 @@ export function requireFreshVideoQuote(input, quote, now = new Date()) {
     || quote.max_charge_microusd < 1
     || quote.max_charge_microusd > MAX_VIDEO_COST_MICROUSD
     || typeof quote.source_url !== 'string'
-    || !quote.source_url.startsWith('https://')
+    || !quote.source_url.startsWith(
+      'https://open.higgsfield.ai/models/bytedance/seedance-2.5/text-to-video')
     || !Number.isFinite(Date.parse(quote.verified_at))
     || !Number.isFinite(Date.parse(quote.valid_until))
     || Date.parse(quote.verified_at) > now.getTime()

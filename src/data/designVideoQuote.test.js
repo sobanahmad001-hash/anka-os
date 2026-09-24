@@ -8,7 +8,8 @@ const quote = {
   provider: 'higgsfield', model_id: 'bytedance/seedance-2.5/text-to-video',
   duration_seconds: 5, resolution: '720p', generate_audio: false,
   aspect_ratio: '16:9', output_format: 'mp4', currency: 'USD',
-  max_charge_microusd: 1_800_000, source_url: 'https://example.com/price',
+  max_charge_microusd: 1_800_000,
+  source_url: 'https://open.higgsfield.ai/models/bytedance/seedance-2.5/text-to-video',
   verified_at: '2026-09-24T09:00:00Z', valid_until: '2026-09-24T18:00:00Z',
 }
 const now = new Date('2026-09-24T10:00:00Z')
@@ -22,7 +23,7 @@ test('only an exact fresh server quote below the user cap can reserve', () => {
     { max_charge_microusd: null },
     { valid_until: '2026-09-24T09:59:59Z' },
     { valid_until: '2026-09-26T09:00:00Z' },
-    { source_url: 'http://example.com/price' },
+    { source_url: 'https://example.com/price' },
     { resolution: '480p' },
     { generate_audio: true },
     { duration_seconds: 6 },
