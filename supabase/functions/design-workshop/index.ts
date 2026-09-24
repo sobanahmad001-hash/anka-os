@@ -290,6 +290,9 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
   if (['generate_private_image', 'get_private_image_job', 'reconcile_private_image_request', 'sign_private_image_job'].includes(action)) {
     return { root: null, requestedOrganizationId: requestedOrganizationId || '' }
   }
+  if (action === 'get_video_job') {
+    return { root: null, requestedOrganizationId: requestedOrganizationId || '' }
+  }
   if (action === 'list_experiment_reviewers') {
     return { root: null, requestedOrganizationId: requestedOrganizationId || '' }
   }
@@ -1748,6 +1751,27 @@ export async function getDesignVideoQuote(admin: ScopedClient, body: Json, actor
   }
 }
 
+export async function getDesignVideoJob(admin: ScopedClient, body: Json, actorId: string) {
+  const { data, error } = await admin.rpc('get_design_video_job', {
+    p_organization_id: admin.organizationId,
+    p_job_id: requiredActionId(body.job_id, 'Video job'),
+    p_actor_id: actorId,
+  })
+  if (error || !data || typeof data !== 'object') {
+    throw Object.assign(new Error('Video job is unavailable'), { status: 404 })
+  }
+  const job = data as Json
+  return {
+    id: job.id, direction_version_id: job.direction_version_id,
+    status: job.status, mode: job.mode,
+    duration_seconds: job.duration_seconds, resolution: job.resolution,
+    aspect_ratio: job.aspect_ratio, output_format: job.output_format,
+    generate_audio: job.generate_audio,
+    failure_reason: job.failure_reason,
+    created_at: job.created_at, updated_at: job.updated_at,
+  }
+}
+
 async function handler(req: Request, dependencies: HandlerDependencies = {}) {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
@@ -1787,6 +1811,7 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       generate_variants: () => generateVariants(admin, userClient, body, user.id),
       create_video_placeholder: () => createVideoPlaceholder(admin, userClient, body, user.id),
       get_video_quote: () => getDesignVideoQuote(admin, body, user.id),
+      get_video_job: () => getDesignVideoJob(admin, body, user.id),
       generate_content_request_image: () => generateContentRequestImage(admin, userClient, body, user.id),
       create_content_request_video_placeholder: () => createContentRequestVideoPlaceholder(admin, userClient, body, user.id),
       sign_media_assets: () => signMediaAssets(admin, userClient, body),

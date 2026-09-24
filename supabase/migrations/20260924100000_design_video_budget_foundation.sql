@@ -339,6 +339,49 @@ grant execute on function public.create_design_video_job(
   uuid,uuid,uuid,uuid,uuid,text,text,text,integer,text,text,text,boolean)
   to service_role;
 
+create function public.get_design_video_job(
+  p_organization_id uuid, p_job_id uuid, p_actor_id uuid
+) returns jsonb language plpgsql security definer set search_path='' as $$
+declare
+  job private.design_video_generation_jobs;
+begin
+  perform 1 from public.organizations org
+    join public.organization_memberships member on member.organization_id=org.id
+    where org.id=p_organization_id and org.status='active'
+      and member.user_id=p_actor_id and member.status='active'
+      and member.member_kind='team';
+  if not found then
+    raise exception 'Current team membership is required' using errcode='42501';
+  end if;
+  select * into job from private.design_video_generation_jobs
+    where id=p_job_id and organization_id=p_organization_id
+      and requested_by=p_actor_id;
+  if not found then
+    raise exception 'Actor-owned video job is unavailable' using errcode='42501';
+  end if;
+  return jsonb_build_object(
+    'id',job.id,'organization_id',job.organization_id,
+    'direction_version_id',job.direction_version_id,
+    'requested_by',job.requested_by,
+    'connector_connection_id',job.connector_connection_id,
+    'quote_id',job.quote_id,'request_checksum',job.request_checksum,
+    'prompt',job.prompt,'mode',job.mode,
+    'duration_seconds',job.duration_seconds,'resolution',job.resolution,
+    'aspect_ratio',job.aspect_ratio,'output_format',job.output_format,
+    'generate_audio',job.generate_audio,'status',job.status,
+    'dispatch_claim_id',job.dispatch_claim_id,
+    'provider_request_id',job.provider_request_id,
+    'provider_status_url',job.provider_status_url,
+    'output_storage_path',job.output_storage_path,
+    'failure_reason',job.failure_reason,'created_at',job.created_at,
+    'updated_at',job.updated_at);
+end;
+$$;
+revoke all on function public.get_design_video_job(uuid,uuid,uuid)
+  from public,anon,authenticated,service_role;
+grant execute on function public.get_design_video_job(uuid,uuid,uuid)
+  to service_role;
+
 create function public.reserve_design_video_budget(
   p_organization_id uuid, p_job_id uuid, p_actor_id uuid
 ) returns jsonb language plpgsql security definer set search_path = '' as $$
@@ -576,7 +619,8 @@ begin
     or (p_provider_request_id is not null
       and p_provider_request_id !~ '^[A-Za-z0-9_-]{1,128}$')
     or (target<>'outcome_unknown' and p_provider_request_id is null)
-    or ((p_provider_request_id is null) <> (p_provider_status_url is null))
+    or (target='provider_pending' and p_provider_status_url is null)
+    or (p_provider_status_url is not null and p_provider_request_id is null)
     or (p_provider_status_url is not null and
       p_provider_status_url <> 'https://api.higgsfield.ai/requests/'
         || p_provider_request_id || '/status') then
