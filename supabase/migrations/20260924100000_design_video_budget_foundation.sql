@@ -87,6 +87,7 @@ create table private.design_video_generation_jobs (
   dispatch_request_id uuid unique,
   provider_request_id text unique check (
     provider_request_id is null or provider_request_id ~ '^[A-Za-z0-9_-]{1,128}$'),
+  provider_status_url text,
   output_storage_path text,
   failure_reason text check (failure_reason is null or length(failure_reason) <= 1000),
   claimed_at timestamptz,
@@ -110,6 +111,10 @@ create table private.design_video_generation_jobs (
       and dispatch_request_id is not null and claimed_at is not null)),
   check (status <> 'ready' or
     (output_storage_path is not null and provider_request_id is not null and completed_at is not null)),
+  check (provider_status_url is null or
+    (provider_request_id is not null and
+      provider_status_url = 'https://api.higgsfield.ai/requests/'
+        || provider_request_id || '/status')),
   check (output_storage_path is null or
     output_storage_path like organization_id::text || '/' || direction_version_id::text || '/%')
 );
@@ -136,6 +141,7 @@ begin
       or (old.dispatch_claim_id is not null and new.dispatch_claim_id is distinct from old.dispatch_claim_id)
       or (old.dispatch_request_id is not null and new.dispatch_request_id is distinct from old.dispatch_request_id)
       or (old.provider_request_id is not null and new.provider_request_id is distinct from old.provider_request_id)
+      or (old.provider_status_url is not null and new.provider_status_url is distinct from old.provider_status_url)
       or (old.output_storage_path is not null and new.output_storage_path is distinct from old.output_storage_path) then
       raise exception 'Video job identity and receipts are immutable';
     end if;
@@ -491,7 +497,8 @@ begin
   end if;
   if job.dispatch_claim_id is not null then
     return jsonb_build_object('status',job.status,'must_not_submit',true,
-      'claim_id',job.dispatch_claim_id,'provider_request_id',job.provider_request_id);
+      'claim_id',job.dispatch_claim_id,'provider_request_id',job.provider_request_id,
+      'provider_status_url',job.provider_status_url);
   end if;
   perform 1 from public.organizations org
     join public.organization_memberships member on member.organization_id=org.id
@@ -551,7 +558,7 @@ grant execute on function public.claim_design_video_dispatch(uuid,uuid,uuid,uuid
 create function public.record_design_video_provider_state(
   p_organization_id uuid, p_job_id uuid, p_actor_id uuid,
   p_claim_id uuid, p_state text, p_provider_request_id text,
-  p_evidence text
+  p_provider_status_url text, p_evidence text
 ) returns jsonb language plpgsql security definer set search_path='' as $$
 declare
   budget private.ai_execution_budget_limits;
@@ -568,7 +575,11 @@ begin
     or length(evidence) not between 1 and 1000
     or (p_provider_request_id is not null
       and p_provider_request_id !~ '^[A-Za-z0-9_-]{1,128}$')
-    or (target<>'outcome_unknown' and p_provider_request_id is null) then
+    or (target<>'outcome_unknown' and p_provider_request_id is null)
+    or ((p_provider_request_id is null) <> (p_provider_status_url is null))
+    or (p_provider_status_url is not null and
+      p_provider_status_url <> 'https://api.higgsfield.ai/requests/'
+        || p_provider_request_id || '/status') then
     raise exception 'Exact sanitized video provider result is required' using errcode='22023';
   end if;
   select * into budget from private.ai_execution_budget_limits
@@ -586,15 +597,21 @@ begin
     or reservation.status not in ('reserved','uncertain') then
     raise exception 'Original video reservation is required' using errcode='42501';
   end if;
-  if job.status=target and job.provider_request_id is not distinct from p_provider_request_id then
+  if job.status=target and job.provider_request_id is not distinct from p_provider_request_id
+    and job.provider_status_url is not distinct from p_provider_status_url then
     return jsonb_build_object('status',target,'idempotent_replay',true);
   end if;
   if job.provider_request_id is not null
     and job.provider_request_id is distinct from p_provider_request_id then
     raise exception 'Provider request identity cannot change' using errcode='23505';
   end if;
+  if job.provider_status_url is not null
+    and job.provider_status_url is distinct from p_provider_status_url then
+    raise exception 'Provider status URL cannot change' using errcode='23505';
+  end if;
   update private.design_video_generation_jobs
     set status=target,provider_request_id=p_provider_request_id,
+      provider_status_url=p_provider_status_url,
       completed_at=case when target in ('provider_failed','safety_refused')
         then clock_timestamp() else null end,
       failure_reason=case when target in ('provider_failed','safety_refused','outcome_unknown')
@@ -612,14 +629,15 @@ begin
     end if;
   end if;
   return jsonb_build_object('status',target,'provider_request_id',p_provider_request_id,
+    'provider_status_url',p_provider_status_url,
     'idempotent_replay',false);
 end;
 $$;
 revoke all on function public.record_design_video_provider_state(
-  uuid,uuid,uuid,uuid,text,text,text)
+  uuid,uuid,uuid,uuid,text,text,text,text)
   from public,anon,authenticated,service_role;
 grant execute on function public.record_design_video_provider_state(
-  uuid,uuid,uuid,uuid,text,text,text)
+  uuid,uuid,uuid,uuid,text,text,text,text)
   to service_role;
 
 -- Billing evidence is reconciled separately from provider completion. Unknown
