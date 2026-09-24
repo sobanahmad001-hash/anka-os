@@ -15,6 +15,7 @@ import { recordAssetReview } from './assetReviews.ts'
 import { previewDeliveryPackage, saveDeliveryPackage } from './packageDelivery.ts'
 import { requireFreshVideoQuote } from '../_shared/designVideoQuote.js'
 import { createDesignMediaAdapter } from '../_shared/designMediaAdapter.ts'
+import { fetchDesignVideoOutput } from '../_shared/designVideoOutput.ts'
 
 type Client = ReturnType<typeof createClient<any>>
 type ScopedClient = Client & { organizationId: string }
@@ -292,7 +293,7 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
   if (['generate_private_image', 'get_private_image_job', 'reconcile_private_image_request', 'sign_private_image_job'].includes(action)) {
     return { root: null, requestedOrganizationId: requestedOrganizationId || '' }
   }
-  if (action === 'get_video_job') {
+  if (['get_video_job', 'poll_video_job', 'ingest_video_output', 'sign_video_output'].includes(action)) {
     return { root: null, requestedOrganizationId: requestedOrganizationId || '' }
   }
   if (action === 'list_experiment_reviewers') {
@@ -1753,7 +1754,7 @@ export async function getDesignVideoQuote(admin: ScopedClient, body: Json, actor
   }
 }
 
-export async function getDesignVideoJob(admin: ScopedClient, body: Json, actorId: string) {
+async function loadActorDesignVideoJob(admin: ScopedClient, body: Json, actorId: string): Promise<Json> {
   const { data, error } = await admin.rpc('get_design_video_job', {
     p_organization_id: admin.organizationId,
     p_job_id: requiredActionId(body.job_id, 'Video job'),
@@ -1762,7 +1763,11 @@ export async function getDesignVideoJob(admin: ScopedClient, body: Json, actorId
   if (error || !data || typeof data !== 'object') {
     throw Object.assign(new Error('Video job is unavailable'), { status: 404 })
   }
-  const job = data as Json
+  return data as Json
+}
+
+export async function getDesignVideoJob(admin: ScopedClient, body: Json, actorId: string) {
+  const job = await loadActorDesignVideoJob(admin, body, actorId)
   return {
     id: job.id, direction_version_id: job.direction_version_id,
     status: job.status, mode: job.mode,
@@ -1772,6 +1777,107 @@ export async function getDesignVideoJob(admin: ScopedClient, body: Json, actorId
     failure_reason: job.failure_reason,
     created_at: job.created_at, updated_at: job.updated_at,
   }
+}
+
+const VIDEO_BUCKET = 'design-generated-video'
+
+export async function ingestDesignVideoOutput(admin: ScopedClient, body: Json, actorId: string,
+  fetcher: typeof fetch = fetch) {
+  // Never fetch provider metadata supplied in this request. Only the original
+  // owner can recover the private, immutable output URL in the job ledger.
+  const job = await loadActorDesignVideoJob(admin, body, actorId)
+  if (job.status === 'ready') return { status: 'ready', job_id: job.id }
+  if (job.status !== 'provider_completed' || typeof job.provider_output_url !== 'string'
+    || typeof job.dispatch_claim_id !== 'string' || typeof job.output_format !== 'string') {
+    throw Object.assign(new Error('Completed private video output is unavailable'), { status: 409 })
+  }
+  const allowedHosts = (Deno.env.get('DESIGN_VIDEO_OUTPUT_ALLOWED_HOSTS') || '')
+    .split(',').map(host => host.trim().toLowerCase()).filter(Boolean)
+  const output = await fetchDesignVideoOutput(job.provider_output_url, allowedHosts,
+    job.output_format as 'mp4' | 'mov', fetcher)
+  const path = `${admin.organizationId}/${job.direction_version_id}/${job.id}/output.${job.output_format}`
+  const bucket = admin.storage.from(VIDEO_BUCKET)
+  const { error: uploadError } = await bucket.upload(path, output.bytes, {
+    contentType: output.contentType, upsert: false,
+  })
+  if (uploadError) {
+    // A prior upload may have succeeded before the Edge response was lost.
+    // Verify its exact bytes before reusing it; never overwrite blindly.
+    const { data: existing, error: downloadError } = await bucket.download(path)
+    if (downloadError || !existing || existing.size !== output.byteLength
+      || existing.type.split(';')[0].toLowerCase() !== output.contentType) {
+      throw Object.assign(new Error('Private video storage conflict'), { status: 409 })
+    }
+    const digest = await crypto.subtle.digest('SHA-256', await existing.arrayBuffer())
+    const checksum = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('')
+    if (checksum !== output.checksum) {
+      throw Object.assign(new Error('Private video storage conflict'), { status: 409 })
+    }
+  }
+  const { data: completed, error: completeError } = await admin.rpc('complete_design_video_storage', {
+    p_organization_id: admin.organizationId, p_job_id: job.id, p_actor_id: actorId,
+    p_claim_id: job.dispatch_claim_id, p_storage_path: path,
+    p_sha256: output.checksum, p_byte_length: output.byteLength,
+    p_mime_type: output.contentType,
+  })
+  if (completeError || completed?.status !== 'ready') {
+    throw Object.assign(new Error('Private video completion is pending recovery'), { status: 503 })
+  }
+  return { status: 'ready', job_id: job.id }
+}
+
+export async function signDesignVideoOutput(admin: ScopedClient, body: Json, actorId: string) {
+  const job = await loadActorDesignVideoJob(admin, body, actorId)
+  if (job.status !== 'ready' || typeof job.output_storage_path !== 'string') {
+    throw Object.assign(new Error('Ready private video is unavailable'), { status: 409 })
+  }
+  const path = `${admin.organizationId}/${job.direction_version_id}/${job.id}/output.${job.output_format}`
+  if (job.output_storage_path !== path) {
+    throw Object.assign(new Error('Private video storage identity is invalid'), { status: 409 })
+  }
+  const { data, error } = await admin.storage.from(VIDEO_BUCKET).createSignedUrl(path, 60)
+  if (error || !data?.signedUrl) {
+    throw Object.assign(new Error('Private video preview is unavailable'), { status: 503 })
+  }
+  return { job_id: job.id, signed_url: data.signedUrl, expires_in: 60 }
+}
+
+export async function pollDesignVideoJob(admin: ScopedClient, body: Json, actorId: string,
+  reader: typeof fetch = fetch) {
+  const job = await loadActorDesignVideoJob(admin, body, actorId)
+  if (job.status !== 'provider_pending' || typeof job.provider_request_id !== 'string'
+    || typeof job.provider_status_url !== 'string'
+    || typeof job.dispatch_claim_id !== 'string'
+    || typeof job.connector_connection_id !== 'string') {
+    throw Object.assign(new Error('Original video status request is unavailable'), { status: 409 })
+  }
+  const { data: connection, error: connectionError } = await admin.from('integration_connections')
+    .select('id,provider,status,secret_name').eq('id', job.connector_connection_id)
+    .eq('organization_id', admin.organizationId).eq('provider', 'higgsfield')
+    .eq('status', 'verified').is('archived_at', null).maybeSingle()
+  if (connectionError || !connection || typeof connection.secret_name !== 'string'
+    || !/^ANKA_HIGGSFIELD_[A-Z0-9_]+$/.test(connection.secret_name)) {
+    throw Object.assign(new Error('Pinned video connection is unavailable'), { status: 503 })
+  }
+  const credential = Deno.env.get(connection.secret_name)
+  if (!credential) throw Object.assign(new Error('Video connection credential is unavailable'), { status: 503 })
+  const { createHiggsfieldClient } = await import('npm:@higgsfield/client@0.2.6/v2')
+  const adapter = createDesignMediaAdapter(createHiggsfieldClient, credential, reader)
+  const receipt = await adapter.status(job.provider_request_id, job.provider_status_url)
+  const state = receipt.state === 'pending' ? 'provider_pending' : receipt.state
+  const { error } = await admin.rpc('record_design_video_provider_state', {
+    p_organization_id: admin.organizationId, p_job_id: job.id,
+    p_actor_id: actorId, p_claim_id: job.dispatch_claim_id,
+    p_state: state, p_provider_request_id: receipt.requestId,
+    p_provider_status_url: receipt.statusUrl || null,
+    p_provider_output_url: receipt.outputUrl || null,
+    p_evidence: state === 'provider_completed'
+      ? 'Original provider request completed; private ingestion pending'
+      : state === 'provider_pending' ? 'Original provider request remains pending'
+      : 'Original provider request ended; billing reconciliation pending',
+  })
+  if (error) throw Object.assign(new Error('Video status receipt could not be recorded'), { status: 503 })
+  return getDesignVideoJob(admin, { job_id: job.id }, actorId)
 }
 
 // The paid switch is intentionally absent in production. This path can only
@@ -1914,6 +2020,9 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       get_video_quote: () => getDesignVideoQuote(admin, body, user.id),
       get_video_job: () => getDesignVideoJob(admin, body, user.id),
       generate_video: () => generateDesignVideo(admin, body, user.id),
+      poll_video_job: () => pollDesignVideoJob(admin, body, user.id),
+      ingest_video_output: () => ingestDesignVideoOutput(admin, body, user.id),
+      sign_video_output: () => signDesignVideoOutput(admin, body, user.id),
       generate_content_request_image: () => generateContentRequestImage(admin, userClient, body, user.id),
       create_content_request_video_placeholder: () => createContentRequestVideoPlaceholder(admin, userClient, body, user.id),
       sign_media_assets: () => signMediaAssets(admin, userClient, body),
