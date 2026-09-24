@@ -119,3 +119,22 @@ Deno.test('recovery refuses untrusted saved URLs before sending credentials', as
   }
   assertEquals(reads, 0)
 })
+
+Deno.test('terminal submissions preserve valid returned URLs and accept omitted URLs', async () => {
+  for (const [status, state] of [['completed', 'provider_completed'], ['failed', 'provider_failed'], ['nsfw', 'safety_refused']] as const) {
+    const raw = { status, request_id: 'r1', video: { url: 'https://example.com/video.mp4' } }
+    const expected = { state, requestId: 'r1', ...(status === 'completed' ? { outputUrl: raw.video.url } : {}) }
+    assertEquals(await fixture(raw).adapter.submit(input), expected)
+    assertEquals(await fixture({ ...raw, status_url: savedUrl('r1') }).adapter.submit(input), { ...expected, statusUrl: savedUrl('r1') })
+    await assertRejects(() => fixture({ ...raw, status_url: savedUrl('other') }).adapter.submit(input), Error, 'outcome unknown')
+  }
+})
+
+Deno.test('terminal recovery keeps the saved URL and missing saved URL cannot trigger HTTP', async () => {
+  let reads = 0
+  const adapter = createDesignMediaAdapter(() => ({ subscribe: async () => null }), 'mock-key:mock-secret',
+    (() => { reads++; return Promise.resolve(Response.json({ status: 'failed', request_id: 'r1', status_url: 'https://attacker.example' })) }) as typeof fetch)
+  assertEquals(await adapter.status('r1', savedUrl('r1')), { state: 'provider_failed', requestId: 'r1', statusUrl: savedUrl('r1') })
+  await assertRejects(() => adapter.status('r1', undefined as unknown as string))
+  assertEquals(reads, 1)
+})

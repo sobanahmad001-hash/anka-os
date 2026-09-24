@@ -24,10 +24,13 @@ function normalize(raw: unknown, expectedId?: string, persistedStatusUrl?: strin
   const row = raw as Record<string, unknown>
   if (typeof row.request_id !== 'string' || !requestIdPattern.test(row.request_id)
     || (expectedId && row.request_id !== expectedId)) throw new Error('Invalid provider receipt')
-  const base = { requestId: row.request_id }
+  // Recovery retains the immutable saved URL. Initial terminal receipts may
+  // omit a URL, but any URL supplied by submission must be validated/preserved.
+  const candidateUrl = persistedStatusUrl ?? row.status_url
+  const base = { requestId: row.request_id,
+    ...(candidateUrl === undefined ? {} : { statusUrl: validateStatusUrl(candidateUrl, row.request_id) }) }
   if (row.status === 'queued' || row.status === 'in_progress') {
-    // A recovery response cannot replace the immutable saved URL.
-    const statusUrl = validateStatusUrl(persistedStatusUrl ?? row.status_url, row.request_id)
+    const statusUrl = validateStatusUrl(candidateUrl, row.request_id)
     return { ...base, state: 'pending', statusUrl }
   }
   if (row.status === 'failed') return { ...base, state: 'provider_failed' }
