@@ -269,7 +269,7 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
   }
   if (action === 'promote_direction_experiment' || action === 'generate_image'
     || action === 'create_video_placeholder' || action === 'get_video_quote'
-    || action === 'generate_video') {
+    || action === 'generate_video' || action === 'list_video_jobs') {
     const root = await callerVersionRoot(userClient, requiredActionId(body.direction_version_id, 'Direction version'))
     return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
   }
@@ -1779,6 +1779,18 @@ export async function getDesignVideoJob(admin: ScopedClient, body: Json, actorId
   }
 }
 
+export async function listDesignVideoJobs(admin: ScopedClient, body: Json, actorId: string) {
+  const { data, error } = await admin.rpc('list_design_video_jobs', {
+    p_organization_id: admin.organizationId,
+    p_direction_version_id: requiredActionId(body.direction_version_id, 'Direction version'),
+    p_actor_id: actorId,
+  })
+  if (error || !Array.isArray(data)) {
+    throw Object.assign(new Error('Private video history is unavailable'), { status: 503 })
+  }
+  return data
+}
+
 const VIDEO_BUCKET = 'design-generated-video'
 
 export async function ingestDesignVideoOutput(admin: ScopedClient, body: Json, actorId: string,
@@ -2019,6 +2031,7 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       create_video_placeholder: () => createVideoPlaceholder(admin, userClient, body, user.id),
       get_video_quote: () => getDesignVideoQuote(admin, body, user.id),
       get_video_job: () => getDesignVideoJob(admin, body, user.id),
+      list_video_jobs: () => listDesignVideoJobs(admin, body, user.id),
       generate_video: () => generateDesignVideo(admin, body, user.id),
       poll_video_job: () => pollDesignVideoJob(admin, body, user.id),
       ingest_video_output: () => ingestDesignVideoOutput(admin, body, user.id),

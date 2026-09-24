@@ -14,9 +14,26 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
   const [format, setFormat] = useState('mp4')
   const [audio, setAudio] = useState(false)
   const [result, setResult] = useState(null)
+  const [jobs, setJobs] = useState([])
+  const [jobsError, setJobsError] = useState('')
+  const [jobsBusy, setJobsBusy] = useState('')
+  const [preview, setPreview] = useState(null)
   const [clock, setClock] = useState(Date.now())
   const sequence = useRef(0)
+  const jobsSequence = useRef(0)
   useEffect(() => () => { sequence.current++ }, [])
+  useEffect(() => {
+    const attempt = ++jobsSequence.current
+    let active = true
+    setJobs([]); setJobsError(''); setJobsBusy(''); setPreview(null)
+    if (!studio || !directionVersionId || requestSignal?.aborted) return
+    studio.listVideoJobs(directionVersionId).then(rows => {
+      if (active && jobsSequence.current === attempt && !requestSignal?.aborted) setJobs(Array.isArray(rows) ? rows : [])
+    }).catch(() => {
+      if (active && jobsSequence.current === attempt && !requestSignal?.aborted) setJobsError('Private video history is unavailable.')
+    })
+    return () => { active = false }
+  }, [studio, directionVersionId, scopeRevision, requestSignal])
   const input = { direction_version_id: directionVersionId, duration_seconds: duration, resolution, aspect_ratio: aspectRatio, output_format: format, generate_audio: audio }
   const key = JSON.stringify([activeOrganizationId, scopeRevision, mode, input])
   const current = result?.key === key ? result : null
@@ -43,6 +60,31 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
       if (sequence.current === attempt && !requestSignal?.aborted) setResult({ key, error: true })
     }
   }
+  async function actOnJob(job, action) {
+    if (!studio || jobsBusy || requestSignal?.aborted) return
+    const attempt = jobsSequence.current
+    const currentScope = () => jobsSequence.current === attempt && !requestSignal?.aborted
+    setJobsBusy(job.id); setJobsError('')
+    try {
+      if (action === 'preview') {
+        const signed = await studio.signVideoOutput(job.id)
+        if (currentScope()) setPreview({ jobId: job.id, url: signed.signed_url, expiresAt: Date.now() + 60000 })
+      } else {
+        if (action === 'poll') await studio.pollVideoJob(job.id)
+        else if (action === 'ingest') await studio.ingestVideoOutput(job.id)
+        const rows = await studio.listVideoJobs(directionVersionId)
+        if (currentScope()) setJobs(Array.isArray(rows) ? rows : [])
+      }
+    } catch {
+      if (currentScope()) setJobsError('This video job could not be updated. Its original request remains recorded.')
+    } finally { if (currentScope()) setJobsBusy('') }
+  }
+  useEffect(() => {
+    if (!preview) return
+    const timer = setTimeout(() => setPreview(current => current?.jobId === preview.jobId ? null : current),
+      Math.max(0, preview.expiresAt - Date.now()))
+    return () => clearTimeout(timer)
+  }, [preview])
   return <details className="mt-3 rounded-xl border border-white/10 p-3 text-xs text-slate-400">
     <summary className="cursor-pointer font-semibold text-slate-200">Video capabilities · generation unavailable</summary>
     <p className="mt-2">Higgsfield Seedance 2.5 supports 480p and 720p. Google media is not configured. Maximum USD $2 per generated video; this limit does not authorize spending.</p>
@@ -70,5 +112,22 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
       <p>Paid execution is disabled. Checking a quote makes no provider request.</p>
     </div>
     <p className="mt-2">Check the Asset Library and existing templates before generating. Preserve original footage for text, logo, date or caption corrections; video assembly is not available here.</p>
+    <div className="mt-3 border-t border-white/10 pt-3">
+      <p className="font-semibold text-slate-200">Your private video jobs</p>
+      {jobsError && <p role="alert" className="mt-2 text-amber-300">{jobsError}</p>}
+      {!jobs.length && !jobsError && <p className="mt-2">No video jobs recorded for this direction.</p>}
+      {jobs.map(job => <div key={job.id} className="mt-2 rounded-lg border border-white/10 p-2">
+        <p className="font-medium text-slate-200">{job.mode} · {job.duration_seconds}s · {job.resolution} · {job.status.replaceAll('_', ' ')}</p>
+        <p className="mt-1">Started {new Date(job.created_at).toLocaleString()}</p>
+        {job.status === 'outcome_unknown' && <p className="mt-1 text-amber-300">The provider outcome needs manual reconciliation. This request will not be submitted again.</p>}
+        {job.status === 'provider_completed' && <p className="mt-1">The provider completed the original request. Save its checked output to private storage.</p>}
+        <div className="mt-2 flex flex-wrap gap-2">
+          {job.status === 'provider_pending' && <button type="button" className="rounded border border-white/20 px-2 py-1 disabled:opacity-40" disabled={Boolean(jobsBusy)} onClick={() => actOnJob(job, 'poll')}>Check original request</button>}
+          {job.status === 'provider_completed' && <button type="button" className="rounded border border-white/20 px-2 py-1 disabled:opacity-40" disabled={Boolean(jobsBusy)} onClick={() => actOnJob(job, 'ingest')}>Save private output</button>}
+          {job.status === 'ready' && <button type="button" className="rounded border border-white/20 px-2 py-1 disabled:opacity-40" disabled={Boolean(jobsBusy)} onClick={() => actOnJob(job, 'preview')}>Open private preview</button>}
+        </div>
+        {preview?.jobId === job.id && <video className="mt-2 max-h-80 w-full" controls src={preview.url} />}
+      </div>)}
+    </div>
   </details>
 }

@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from 'jsr:@std/assert@1.0.14'
-import { generateDesignVideo, getDesignVideoJob, getDesignVideoQuote } from './index.ts'
+import { generateDesignVideo, getDesignVideoJob, getDesignVideoQuote, listDesignVideoJobs } from './index.ts'
 
 const org = '123e4567-e89b-42d3-a456-426614174000'
 const actor = '123e4567-e89b-42d3-a456-426614174001'
@@ -83,4 +83,14 @@ Deno.test('disabled video execution makes no database or provider calls', async 
     if (previous === undefined) Deno.env.delete('DESIGN_VIDEO_PAID_EXECUTION_ENABLED')
     else Deno.env.set('DESIGN_VIDEO_PAID_EXECUTION_ENABLED', previous)
   }
+})
+
+Deno.test('private video history binds actor and direction version in its server RPC', async () => {
+  const admin = { organizationId: org, rpc: async (name: string, args: unknown) => {
+    assertEquals(name, 'list_design_video_jobs')
+    assertEquals(args, { p_organization_id: org, p_direction_version_id: version, p_actor_id: actor })
+    return { data: [{ id: '123e4567-e89b-42d3-a456-426614174004', status: 'ready' }], error: null }
+  } } as unknown as Parameters<typeof listDesignVideoJobs>[0]
+  const jobs = await listDesignVideoJobs(admin, { direction_version_id: version }, actor)
+  assertEquals(jobs.length, 1)
 })

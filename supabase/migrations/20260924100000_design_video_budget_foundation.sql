@@ -390,6 +390,41 @@ revoke all on function public.get_design_video_job(uuid,uuid,uuid)
 grant execute on function public.get_design_video_job(uuid,uuid,uuid)
   to service_role;
 
+create function public.list_design_video_jobs(
+  p_organization_id uuid, p_direction_version_id uuid, p_actor_id uuid
+) returns jsonb language plpgsql security definer set search_path='' as $$
+declare
+  result jsonb;
+begin
+  perform 1 from public.organizations org
+    join public.organization_memberships member on member.organization_id=org.id
+    join public.design_direction_versions version on version.organization_id=org.id
+    where org.id=p_organization_id and org.status='active'
+      and member.user_id=p_actor_id and member.status='active'
+      and member.member_kind='team' and version.id=p_direction_version_id;
+  if not found then
+    raise exception 'Current Design context is required' using errcode='42501';
+  end if;
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'id',job.id,'status',job.status,'mode',job.mode,
+    'duration_seconds',job.duration_seconds,'resolution',job.resolution,
+    'aspect_ratio',job.aspect_ratio,'output_format',job.output_format,
+    'generate_audio',job.generate_audio,'failure_reason',job.failure_reason,
+    'created_at',job.created_at,'updated_at',job.updated_at)
+    order by job.created_at desc,job.id desc),'[]'::jsonb) into result
+    from (select * from private.design_video_generation_jobs
+      where organization_id=p_organization_id
+        and direction_version_id=p_direction_version_id
+        and requested_by=p_actor_id
+      order by created_at desc,id desc limit 50) job;
+  return result;
+end;
+$$;
+revoke all on function public.list_design_video_jobs(uuid,uuid,uuid)
+  from public,anon,authenticated,service_role;
+grant execute on function public.list_design_video_jobs(uuid,uuid,uuid)
+  to service_role;
+
 create function public.reserve_design_video_budget(
   p_organization_id uuid, p_job_id uuid, p_actor_id uuid
 ) returns jsonb language plpgsql security definer set search_path = '' as $$
