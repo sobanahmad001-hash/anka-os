@@ -20,14 +20,15 @@ test('private prompt binds each exact context without borrowing another scope', 
     [{ context_kind: 'organization', project_id: null, department_id: null },
       { scope: 'owner_private_organization_conversation' }],
     [{ context_kind: 'project_team', project_id: earlier, department_id: null },
-      { scope: 'owner_private_project_conversation', project_id: earlier }],
+      { scope: 'owner_private_project_conversation' }],
     [{ context_kind: 'department_private', project_id: null, department_id: 'design' },
       { scope: 'owner_private_department_conversation', department_id: 'design' }],
   ]
   for (const [context, expected] of contexts) {
     const prompt = JSON.parse(buildPrivateConversationPrompt([sourceTurn], source, context))
-    assert.deepEqual(Object.fromEntries(Object.entries(prompt).filter(([key]) => key !== 'source_message_id' && key !== 'turns')), expected)
-    assert.equal(prompt.source_message_id, source)
+    assert.deepEqual(Object.fromEntries(Object.entries(prompt).filter(([key]) => key !== 'turns')), expected)
+    assert.equal(JSON.stringify(prompt).includes(source), false)
+    assert.equal(JSON.stringify(prompt).includes(earlier), false)
     assert.deepEqual(prompt.turns, [{ role: 'user', text: 'Current question' }])
   }
   assert.throws(() => privateConversationScope({ context_kind: 'project_team', project_id: 'wrong' }))
