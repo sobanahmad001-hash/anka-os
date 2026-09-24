@@ -1750,7 +1750,7 @@ export async function getDesignVideoQuote(admin: ScopedClient, body: Json, actor
   return {
     quote: readiness.quote || null,
     organization_cap_configured: readiness.organization_cap_configured === true,
-    paid_execution_enabled: false,
+    paid_execution_enabled: Deno.env.get('DESIGN_VIDEO_PAID_EXECUTION_ENABLED') === 'true',
   }
 }
 

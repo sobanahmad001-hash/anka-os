@@ -8,9 +8,9 @@ export function getDesignVideoQuote(client, organizationId, input, signal) {
 }
 
 // Display validation only. Server revalidation, quote trust and spending remain
-// server-owned. A displayed quote never enables generation in this component.
+// server-owned. A displayed quote alone never authorizes generation.
 export function videoQuoteDisplay(data, input, now = Date.now()) {
-  if (!data || data.paid_execution_enabled !== false || typeof data.organization_cap_configured !== 'boolean') {
+  if (!data || typeof data.paid_execution_enabled !== 'boolean' || typeof data.organization_cap_configured !== 'boolean') {
     return { status: 'invalid', message: 'Quote response unavailable. Check again.' }
   }
   const capMissing = !data.organization_cap_configured
@@ -30,5 +30,20 @@ export function videoQuoteDisplay(data, input, now = Date.now()) {
   return { status: 'quoted', capMissing, quoteId: quote.id, validUntil: quote.valid_until,
     // Upward rounding avoids displaying a lower maximum than the quoted amount.
     maximum: (Math.ceil(quote.max_charge_microusd / 10000) / 100).toFixed(2),
-    message: 'Verified quote for these exact settings. Paid execution remains disabled.' }
+    paidExecutionEnabled: data.paid_execution_enabled,
+    message: data.paid_execution_enabled
+      ? 'Verified quote for these exact settings. Submission still requires a verified connection, budget, and your confirmation.'
+      : 'Verified quote for these exact settings. Paid execution remains disabled.' }
+}
+
+// Display gating only. The server must recheck every condition before reserve/dispatch.
+export function canSubmitVideo({ display, connection, prompt, supported, spendConfirmed }) {
+  return supported === true && spendConfirmed === true
+    && display?.status === 'quoted' && display.capMissing === false
+    && display.paidExecutionEnabled === true && typeof display.quoteId === 'string'
+    && connection?.provider === 'higgsfield' && connection.status === 'verified'
+    && connection.organization_level === true && connection.secret_configured === true
+    && /^ANKA_HIGGSFIELD_[A-Z0-9_]+$/.test(connection.secret_name || '')
+    && typeof prompt === 'string' && prompt.trim().length >= 1
+    && prompt.trim().length <= 12000
 }

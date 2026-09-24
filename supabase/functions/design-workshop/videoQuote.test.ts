@@ -46,6 +46,25 @@ Deno.test('Design quote readiness fails closed on stale price and invalid settin
   assertEquals(calls, 1)
 })
 
+Deno.test('Design quote reports an enabled paid switch without submitting a provider request', async () => {
+  const previous = Deno.env.get('DESIGN_VIDEO_PAID_EXECUTION_ENABLED')
+  Deno.env.set('DESIGN_VIDEO_PAID_EXECUTION_ENABLED', 'true')
+  try {
+    const admin = { organizationId: org, rpc: async (name: string) => {
+      assertEquals(name, 'get_design_video_quote')
+      return { data: { quote: null, organization_cap_configured: false }, error: null }
+    }, from: () => { throw new Error('Connector and provider must not be called') },
+    } as unknown as Parameters<typeof getDesignVideoQuote>[0]
+    const result = await getDesignVideoQuote(admin, body, actor)
+    assertEquals(result.paid_execution_enabled, true)
+    assertEquals(result.organization_cap_configured, false)
+    assertEquals(result.quote, null)
+  } finally {
+    if (previous === undefined) Deno.env.delete('DESIGN_VIDEO_PAID_EXECUTION_ENABLED')
+    else Deno.env.set('DESIGN_VIDEO_PAID_EXECUTION_ENABLED', previous)
+  }
+})
+
 Deno.test('owner job status hides claim, provider receipt, prompt, and storage identity', async () => {
   const jobId = '123e4567-e89b-42d3-a456-426614174004'
   const admin = { organizationId: org, rpc: async (name: string, args: unknown) => {
