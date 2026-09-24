@@ -13,6 +13,7 @@ import {
 import { archiveDesignAsset, DESIGN_ASSET_BUCKET, uploadDesignAssetVersion } from './assetVersions.ts'
 import { recordAssetReview } from './assetReviews.ts'
 import { previewDeliveryPackage, saveDeliveryPackage } from './packageDelivery.ts'
+import { requireFreshVideoQuote } from '../_shared/designVideoQuote.js'
 
 type Client = ReturnType<typeof createClient<any>>
 type ScopedClient = Client & { organizationId: string }
@@ -265,7 +266,7 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
     return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
   }
   if (action === 'promote_direction_experiment' || action === 'generate_image'
-    || action === 'create_video_placeholder') {
+    || action === 'create_video_placeholder' || action === 'get_video_quote') {
     const root = await callerVersionRoot(userClient, requiredActionId(body.direction_version_id, 'Direction version'))
     return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
   }
@@ -1707,6 +1708,46 @@ async function releaseDirection(admin: ScopedClient, body: Json, actorId: string
   return release
 }
 
+export async function getDesignVideoQuote(admin: ScopedClient, body: Json, actorId: string) {
+  const duration = body.duration_seconds
+  const resolution = body.resolution
+  const aspectRatio = body.aspect_ratio
+  const outputFormat = body.output_format
+  const generateAudio = body.generate_audio
+  if (!Number.isInteger(duration) || (duration as number) < 4 || (duration as number) > 30
+    || !['480p', '720p'].includes(resolution as string)
+    || !['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'].includes(aspectRatio as string)
+    || !['mp4', 'mov'].includes(outputFormat as string)
+    || typeof generateAudio !== 'boolean') {
+    throw Object.assign(new Error('Exact supported video settings are required'), { status: 400 })
+  }
+  const { data, error } = await admin.rpc('get_design_video_quote', {
+    p_organization_id: admin.organizationId,
+    p_direction_version_id: requiredActionId(body.direction_version_id, 'Direction version'),
+    p_actor_id: actorId,
+    p_duration_seconds: duration,
+    p_resolution: resolution,
+    p_aspect_ratio: aspectRatio,
+    p_output_format: outputFormat,
+    p_generate_audio: generateAudio,
+  })
+  if (error || !data || typeof data !== 'object') {
+    throw Object.assign(new Error('Video price readiness is unavailable'), { status: 503 })
+  }
+  const readiness = data as { quote?: unknown, organization_cap_configured?: unknown }
+  if (readiness.quote) {
+    requireFreshVideoQuote({
+      duration, resolution, aspect_ratio: aspectRatio,
+      output_format: outputFormat, generate_audio: generateAudio,
+    }, readiness.quote)
+  }
+  return {
+    quote: readiness.quote || null,
+    organization_cap_configured: readiness.organization_cap_configured === true,
+    paid_execution_enabled: false,
+  }
+}
+
 async function handler(req: Request, dependencies: HandlerDependencies = {}) {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
@@ -1745,6 +1786,7 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       retry_image_generation: () => retryImageGeneration(admin, userClient, body, user.id),
       generate_variants: () => generateVariants(admin, userClient, body, user.id),
       create_video_placeholder: () => createVideoPlaceholder(admin, userClient, body, user.id),
+      get_video_quote: () => getDesignVideoQuote(admin, body, user.id),
       generate_content_request_image: () => generateContentRequestImage(admin, userClient, body, user.id),
       create_content_request_video_placeholder: () => createContentRequestVideoPlaceholder(admin, userClient, body, user.id),
       sign_media_assets: () => signMediaAssets(admin, userClient, body),
