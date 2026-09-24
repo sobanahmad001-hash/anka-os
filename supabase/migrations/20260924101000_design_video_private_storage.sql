@@ -36,7 +36,7 @@ begin
     where id=p_job_id and organization_id=p_organization_id for update;
   if not found or job.requested_by<>p_actor_id
     or job.dispatch_claim_id<>p_claim_id
-    or job.status<>'provider_completed'
+    or job.status not in ('provider_completed','ready')
     or job.provider_request_id is null then
     raise exception 'Completed actor-owned video receipt is required' using errcode='42501';
   end if;
@@ -51,6 +51,16 @@ begin
     or p_byte_length not between 12 and 52428800 then
     raise exception 'Exact checked private video object is required' using errcode='22023';
   end if;
+  if job.status='ready' then
+    if job.output_storage_path is distinct from p_storage_path
+      or job.output_sha256 is distinct from p_sha256
+      or job.output_byte_length is distinct from p_byte_length
+      or job.output_mime_type is distinct from p_mime_type then
+      raise exception 'Video output receipt cannot change' using errcode='23505';
+    end if;
+    return jsonb_build_object('job_id',p_job_id,'status','ready',
+      'storage_path',p_storage_path,'idempotent_replay',true);
+  end if;
   perform 1 from storage.objects object
     where object.bucket_id='design-generated-video'
       and object.name=p_storage_path;
@@ -63,7 +73,7 @@ begin
       output_mime_type=p_mime_type,completed_at=clock_timestamp()
     where id=p_job_id and organization_id=p_organization_id;
   return jsonb_build_object('job_id',p_job_id,'status','ready',
-    'storage_path',p_storage_path);
+    'storage_path',p_storage_path,'idempotent_replay',false);
 end;
 $$;
 revoke all on function public.complete_design_video_storage(
