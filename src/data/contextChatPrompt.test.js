@@ -1,10 +1,19 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildPrivateConversationPrompt, privateConversationScope } from '../../supabase/functions/_shared/contextChatPrompt.js'
+import { buildPrivateConversationPrompt, privateConversationScope, requireOwnerAuthoredPromptTurns } from '../../supabase/functions/_shared/contextChatPrompt.js'
 
 const source = '2dfc98d4-50a9-4c84-8f19-dab3d4e90a6e'
 const earlier = '4e47d11a-7b84-4095-8657-93e9ead63c80'
 const sourceTurn = { id: source, role: 'user', status: 'completed', body: 'Current question' }
+
+test('shared teammate text cannot enter the private provider prompt', () => {
+  assert.doesNotThrow(() => requireOwnerAuthoredPromptTurns([
+    { ...sourceTurn, author_id: earlier },
+  ], earlier))
+  assert.throws(() => requireOwnerAuthoredPromptTurns([
+    { ...sourceTurn, author_id: source },
+  ], earlier))
+})
 
 test('private prompt binds each exact context without borrowing another scope', () => {
   const contexts = [

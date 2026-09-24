@@ -37,6 +37,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   const [olderBusy, setOlderBusy] = useState(false)
   const [modelOptions, setModelOptions] = useState([])
   const [selectedModelId, setSelectedModelId] = useState('')
+  const [paidExecutionEnabled, setPaidExecutionEnabled] = useState(false)
   const [aiUseConfirmed, setAiUseConfirmed] = useState(false)
   const [aiBusyMessageId, setAiBusyMessageId] = useState('')
   const [aiNotice, setAiNotice] = useState('')
@@ -71,6 +72,15 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
       return page.some(row => row.id === current) ? current : page[0]?.id || ''
     })
   }, [scope, requestScope, signal])
+
+  useEffect(() => {
+    let current = true
+    setPaidExecutionEnabled(false)
+    departmentChat.getContextChatReadiness(requestScope)
+      .then(result => { if (current && !signal.aborted) setPaidExecutionEnabled(result.paid_execution_enabled === true) })
+      .catch(reason => { if (current) showError(reason) })
+    return () => { current = false }
+  }, [requestScope, signal, showError])
 
   useEffect(() => {
     let current = true
@@ -203,7 +213,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
 
   async function askAi(message, recoverOnly = false) {
     if (aiBusyMessageId || busy) return
-    if (!recoverOnly && (!selectedModelId || !aiUseConfirmed)) return
+    if (!recoverOnly && (!paidExecutionEnabled || !selectedModelId || !aiUseConfirmed)) return
     const targetId = conversationId
     const savedRequest = dispatchRequests.current.get(message.id)
     const request = savedRequest || { id: crypto.randomUUID(), modelId: selectedModelId }
@@ -337,11 +347,12 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
               {!modelOptions.length && <option value="">No approved model available</option>}
               {modelOptions.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
             </select>
-            <p className="mt-2 text-xs text-slate-400">AI replies use the approved organization-level provider connection and count against the organization AI budget. The service will refuse execution until all controls are enabled.</p>
+            <p className="mt-2 text-xs text-slate-400">AI replies use the approved organization-level provider connection and count against the organization AI budget. {paidExecutionEnabled ? 'The service still checks current approval and budget before dispatch.' : 'AI execution is currently off; saved human messages remain available.'}</p>
+            {contextKind === 'project_team' && <p className="mt-2 text-xs text-slate-400">Teammate-authored messages are not sent to a provider. If a requested reply would include one, the request is blocked before reserving budget.</p>}
             <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-300">
               <input type="checkbox" className="mt-1" checked={aiUseConfirmed}
                 onChange={event => setAiUseConfirmed(event.target.checked)}
-                disabled={Boolean(aiBusyMessageId) || !selectedModelId} />
+                disabled={!paidExecutionEnabled || Boolean(aiBusyMessageId) || !selectedModelId} />
               <span>I confirm that this conversation's recent messages, including the message I selected, are safe to send to the selected provider for an AI reply. Project and Workshop records are not added unless I wrote them in these messages.</span>
             </label>
           </div>}
@@ -355,7 +366,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
               {isOwner && message.role === 'user' && message.author_id === user.id
                 && !messages.some(reply => reply.in_reply_to_message_id === message.id) && <div className="mt-3 flex flex-wrap gap-3">
                   <button type="button" className="text-xs font-semibold text-violet-300 disabled:opacity-40"
-                    disabled={!selectedModelId || !aiUseConfirmed || Boolean(aiBusyMessageId) || busy}
+                    disabled={!paidExecutionEnabled || !selectedModelId || !aiUseConfirmed || Boolean(aiBusyMessageId) || busy}
                     onClick={() => askAi(message)}>{aiBusyMessageId === message.id ? 'Checking…' : 'Ask Anka AI'}</button>
                   <button type="button" className="text-xs text-slate-400 hover:text-slate-200 disabled:opacity-40"
                     disabled={Boolean(aiBusyMessageId) || busy} onClick={() => askAi(message, true)}>Check for saved reply</button>

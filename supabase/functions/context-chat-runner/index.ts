@@ -3,7 +3,7 @@ import { namedKey, sha256 } from '../_shared/googleOAuthTokens.ts'
 import { conservativePipelineCeiling, measuredPipelineTokenCost, selectFreshPipelineRate } from '../_shared/n6PipelineCost.ts'
 import { buildN7TextRequest, normalizeN7TextResult } from '../_shared/n7TextProvider.ts'
 import type { N7TextProvider } from '../_shared/n7TextProvider.ts'
-import { buildPrivateConversationPrompt, privateConversationScope } from '../_shared/contextChatPrompt.js'
+import { buildPrivateConversationPrompt, privateConversationScope, requireOwnerAuthoredPromptTurns } from '../_shared/contextChatPrompt.js'
 
 type Json = Record<string, any>
 type Client = ReturnType<typeof createClient<any>>
@@ -173,12 +173,14 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
     const provider = connection.provider as N7TextProvider
     if (!/^[A-Za-z0-9._-]{1,120}$/.test(configuration.model_id)) throw fail('Verified model is invalid')
     const { data: history, error: historyError } = await admin.from('department_chat_messages')
-      .select('id,role,body,status,sequence')
+      .select('id,author_id,role,body,status,sequence')
       .eq('conversation_id', conversation.id).eq('organization_id', organizationId)
       .eq('status', 'completed').lte('sequence', source.sequence)
       .order('sequence', { ascending: false }).limit(12)
     if (historyError) throw fail('Conversation context is unavailable')
-    const prompt = buildPrivateConversationPrompt((history || []).reverse(), messageId, conversation)
+    const orderedHistory = (history || []).reverse()
+    requireOwnerAuthoredPromptTurns(orderedHistory, user.id)
+    const prompt = buildPrivateConversationPrompt(orderedHistory, messageId, conversation)
     const price = selectFreshPipelineRate(env.get(pricingEnv[provider]), configuration.model_id,
       new Date(), provider)
     const maxCost = conservativePipelineCeiling(prompt, price)

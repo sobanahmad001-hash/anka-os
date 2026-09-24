@@ -22,6 +22,13 @@ export function privateConversationScope(context) {
   throw fail('Exact private conversation context is required')
 }
 
+export function requireOwnerAuthoredPromptTurns(rows, ownerId) {
+  requiredId(ownerId, 'conversation owner')
+  if (!Array.isArray(rows) || rows.some(row => row.author_id !== ownerId)) {
+    throw fail('A teammate message is not approved for provider use in this conversation')
+  }
+}
+
 export function buildPrivateConversationPrompt(rows, messageId, context) {
   const boundScope = privateConversationScope(context)
   if (!Array.isArray(rows) || rows.length < 1 || rows.length > 12
