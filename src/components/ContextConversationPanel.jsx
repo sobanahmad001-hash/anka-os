@@ -39,6 +39,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   const [selectedModelId, setSelectedModelId] = useState('')
   const [paidExecutionEnabled, setPaidExecutionEnabled] = useState(false)
   const [aiUseConfirmed, setAiUseConfirmed] = useState(false)
+  const [includeCanonicalContext, setIncludeCanonicalContext] = useState(false)
   const [aiBusyMessageId, setAiBusyMessageId] = useState('')
   const [aiNotice, setAiNotice] = useState('')
   const [error, setError] = useState('')
@@ -104,6 +105,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   useEffect(() => {
     setDraft(drafts.current.get(conversationId) || '')
     setAiUseConfirmed(false)
+    setIncludeCanonicalContext(false)
     setSharing({ candidates: [], recipients: [], loaded: false })
     setShareSelection([])
     if (!conversationId) { setMessages([]); setHasOlder(false); return }
@@ -149,9 +151,11 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
         const options = (result.connections || [])
           .filter(connection => connection.organization_level && connection.status === 'verified')
           .flatMap(connection => (connection.context_model_configurations || []).map(model => ({
-            id: model.id, label: `${connection.display_name || connection.provider} · ${model.model_id}`,
+            id: model.id, provider: connection.provider,
+            label: `${connection.display_name || connection.provider} · ${model.model_id}`,
           })))
         setModelOptions(options)
+        setIncludeCanonicalContext(false)
         setSelectedModelId(previous => options.some(option => option.id === previous)
           ? previous : options[0]?.id || '')
       })
@@ -216,17 +220,25 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
     if (!recoverOnly && (!paidExecutionEnabled || !selectedModelId || !aiUseConfirmed)) return
     const targetId = conversationId
     const savedRequest = dispatchRequests.current.get(message.id)
-    const request = savedRequest || { id: crypto.randomUUID(), modelId: selectedModelId }
+    const approvedGrounding = includeCanonicalContext
+      && modelOptions.some(model => model.id === selectedModelId && model.provider === 'openai')
+      && (contextKind === 'organization' || contextKind === 'project_team')
+    const request = savedRequest?.modelId === selectedModelId
+      && savedRequest?.includeCanonicalContext === approvedGrounding
+      ? savedRequest : { id: crypto.randomUUID(), modelId: selectedModelId,
+        includeCanonicalContext: approvedGrounding }
     if (!recoverOnly) {
       dispatchRequests.current.set(message.id, request)
       setAiUseConfirmed(false)
+      setIncludeCanonicalContext(false)
     }
     setAiBusyMessageId(message.id); setAiNotice(''); setError('')
     try {
       const result = recoverOnly
         ? await contextChatRunner.recover(message.id, requestScope)
         : await contextChatRunner.run({ message_id: message.id,
-          model_configuration_id: request.modelId, dispatch_request_id: request.id }, requestScope)
+          model_configuration_id: request.modelId, dispatch_request_id: request.id,
+          include_canonical_context: request.includeCanonicalContext }, requestScope)
       if (signal.aborted || activeConversation.current !== targetId) return
       if (result.status !== 'completed') {
         setAiNotice('No completed reply is available yet. A claimed request will not be submitted again.')
@@ -287,6 +299,9 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   }
 
   const selected = conversations.find(row => row.id === conversationId)
+  const selectedModel = modelOptions.find(model => model.id === selectedModelId)
+  const canIncludeCanonicalContext = selectedModel?.provider === 'openai'
+    && (contextKind === 'organization' || contextKind === 'project_team')
   const isOwner = selected?.owner_id === user.id
   const description = contextKind === 'department_private'
     ? 'Only you can see these conversations. AI replies require an approved model, a budget, and enabled paid execution.'
@@ -343,7 +358,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
           {isOwner && <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
             <label htmlFor="organization-conversation-model" className="block text-xs font-semibold uppercase tracking-wide text-slate-400">Approved private conversation AI model</label>
             <select id="organization-conversation-model" className={`${INPUT} mt-2`} value={selectedModelId}
-              onChange={event => { setSelectedModelId(event.target.value); setAiUseConfirmed(false) }} disabled={Boolean(aiBusyMessageId) || !modelOptions.length}>
+              onChange={event => { setSelectedModelId(event.target.value); setAiUseConfirmed(false); setIncludeCanonicalContext(false) }} disabled={Boolean(aiBusyMessageId) || !modelOptions.length}>
               {!modelOptions.length && <option value="">No approved model available</option>}
               {modelOptions.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
             </select>
@@ -353,8 +368,15 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
               <input type="checkbox" className="mt-1" checked={aiUseConfirmed}
                 onChange={event => setAiUseConfirmed(event.target.checked)}
                 disabled={!paidExecutionEnabled || Boolean(aiBusyMessageId) || !selectedModelId} />
-              <span>I confirm that this conversation's recent messages, including the message I selected, are safe to send to the selected provider for an AI reply. Project and Workshop records are not added unless I wrote them in these messages.</span>
+              <span>I confirm that this conversation's recent messages, including the message I selected, are safe to send to the selected provider for an AI reply. Records are included only if I select the separate OpenAI option below.</span>
             </label>
+            {canIncludeCanonicalContext && <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-300">
+              <input type="checkbox" className="mt-1" checked={includeCanonicalContext}
+                onChange={event => setIncludeCanonicalContext(event.target.checked)}
+                disabled={!paidExecutionEnabled || Boolean(aiBusyMessageId)} />
+              <span>For this reply, also send OpenAI the current organization name{contextKind === 'project_team'
+                ? ' and this project’s name, description, status, health, scope, and exclusions' : ''}. No other records or record IDs are added.</span>
+            </label>}
           </div>}
           {hasOlder && <button type="button" disabled={olderBusy} onClick={loadOlder}
             className="mt-3 text-xs font-semibold text-violet-300 disabled:opacity-50">Load older messages</button>}

@@ -1,5 +1,6 @@
 import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.14'
-import { handleRequest, requirePrivateChatPaidExecution, requirePrivateConversationAccess } from './index.ts'
+import { handleRequest, requireOpenAiCanonicalContextChoice, requirePrivateChatPaidExecution, requirePrivateConversationAccess } from './index.ts'
+import { buildPrivateConversationPrompt, canonicalOpenAiContext } from '../_shared/contextChatPrompt.js'
 
 Deno.test('paid switch denies new submissions while the handler never calls a provider without auth', async () => {
   let calls = 0
@@ -15,6 +16,29 @@ Deno.test('paid switch denies new submissions while the handler never calls a pr
 const organizationId = '11111111-1111-4111-8111-111111111111'
 const projectId = '22222222-2222-4222-8222-222222222222'
 const userId = '33333333-3333-4333-8333-333333333333'
+
+Deno.test('canonical records enter only an explicit OpenAI prompt with allowlisted fields and no IDs', () => {
+  assertEquals(requireOpenAiCanonicalContextChoice(undefined, 'openai'), false)
+  assertEquals(requireOpenAiCanonicalContextChoice(true, 'openai'), true)
+  assertThrows(() => requireOpenAiCanonicalContextChoice(true, 'anthropic'))
+  assertThrows(() => requireOpenAiCanonicalContextChoice(true, 'google_gemini'))
+  const snapshot = canonicalOpenAiContext(
+    { id: organizationId, name: 'Anka', settings: { secret: 'never-send' } },
+    { id: projectId, name: 'Website', description: 'Current brief',
+      status: 'active', health: 'at_risk', scope_statement: 'Launch scope',
+      exclusions: 'No paid media', private_notes: 'never-send' })
+  const prompt = JSON.parse(buildPrivateConversationPrompt([
+    { id: userId, role: 'user', status: 'completed', body: 'What next?' },
+  ], userId, { context_kind: 'project_team', project_id: projectId,
+    department_id: null }, snapshot))
+  assertEquals(prompt.canonical_context, { organization_name: 'Anka', project: {
+    name: 'Website', description: 'Current brief', status: 'active',
+    health: 'at_risk', scope: 'Launch scope', exclusions: 'No paid media',
+  } })
+  assertEquals(JSON.stringify(prompt).includes(projectId), false)
+  assertEquals(JSON.stringify(prompt).includes(organizationId), false)
+  assertEquals(JSON.stringify(prompt).includes('never-send'), false)
+})
 
 function accessAdmin(tables: Record<string, Record<string, unknown>[]>) {
   return {
