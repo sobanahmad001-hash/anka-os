@@ -14,6 +14,7 @@ import { archiveDesignAsset, DESIGN_ASSET_BUCKET, uploadDesignAssetVersion } fro
 import { recordAssetReview } from './assetReviews.ts'
 import { previewDeliveryPackage, saveDeliveryPackage } from './packageDelivery.ts'
 import { requireFreshVideoQuote } from '../_shared/designVideoQuote.js'
+import { createDesignMediaAdapter } from '../_shared/designMediaAdapter.ts'
 
 type Client = ReturnType<typeof createClient<any>>
 type ScopedClient = Client & { organizationId: string }
@@ -266,7 +267,8 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
     return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
   }
   if (action === 'promote_direction_experiment' || action === 'generate_image'
-    || action === 'create_video_placeholder' || action === 'get_video_quote') {
+    || action === 'create_video_placeholder' || action === 'get_video_quote'
+    || action === 'generate_video') {
     const root = await callerVersionRoot(userClient, requiredActionId(body.direction_version_id, 'Direction version'))
     return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
   }
@@ -1772,6 +1774,105 @@ export async function getDesignVideoJob(admin: ScopedClient, body: Json, actorId
   }
 }
 
+// The paid switch is intentionally absent in production. This path can only
+// reach the provider after the exact job, shared budget, and single-use claim
+// are durably recorded. A lost submit response remains uncertain and is never
+// retried with the same operation key.
+export async function generateDesignVideo(admin: ScopedClient, body: Json, actorId: string) {
+  if (Deno.env.get('DESIGN_VIDEO_PAID_EXECUTION_ENABLED') !== 'true') {
+    throw Object.assign(new Error('Video generation is not enabled'), { status: 503 })
+  }
+  const operationKey = requiredActionId(body.operation_key, 'Operation key')
+  const connectionId = requiredActionId(body.connector_connection_id, 'Design video connection')
+  const quoteId = requiredActionId(body.quote_id, 'Video price quote')
+  if (![operationKey, connectionId, quoteId].every(value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))) {
+    throw Object.assign(new Error('Stable video request identities are required'), { status: 400 })
+  }
+  const prompt = text(body.prompt, 12001)
+  const mode = text(body.mode, 20)
+  if (!prompt || prompt.length > 12000 || !['explore', 'production'].includes(mode)) {
+    throw Object.assign(new Error('Exact video prompt and mode are required'), { status: 400 })
+  }
+  const readiness = await getDesignVideoQuote(admin, body, actorId)
+  const quote = readiness.quote as Json | null
+  if (!quote || quote.id !== quoteId || readiness.organization_cap_configured !== true) {
+    throw Object.assign(new Error('Exact quote and organization cap are required'), { status: 503 })
+  }
+  requireFreshVideoQuote({ duration: body.duration_seconds, resolution: body.resolution,
+    aspect_ratio: body.aspect_ratio, output_format: body.output_format,
+    generate_audio: body.generate_audio }, quote)
+  const { data: connection, error: connectionError } = await admin.from('integration_connections')
+    .select('id,provider,status,secret_name').eq('id', connectionId)
+    .eq('organization_id', admin.organizationId).eq('provider', 'higgsfield')
+    .eq('status', 'verified').is('archived_at', null).maybeSingle()
+  if (connectionError || !connection || typeof connection.secret_name !== 'string'
+    || !/^ANKA_HIGGSFIELD_[A-Z0-9_]+$/.test(connection.secret_name)) {
+    throw Object.assign(new Error('Verified organization video connection is unavailable'), { status: 503 })
+  }
+  const credential = Deno.env.get(connection.secret_name)
+  if (!credential) throw Object.assign(new Error('Video connection credential is unavailable'), { status: 503 })
+  // The official SDK is loaded only after local gates; constructing its
+  // isolated client makes no provider request. SQL rechecks connector mapping.
+  const { createHiggsfieldClient } = await import('npm:@higgsfield/client@0.2.6/v2')
+  const adapter = createDesignMediaAdapter(createHiggsfieldClient, credential)
+  const identity = { p_organization_id: admin.organizationId,
+    p_direction_version_id: requiredActionId(body.direction_version_id, 'Direction version'),
+    p_actor_id: actorId }
+  const { data: created, error: createError } = await admin.rpc('create_design_video_job', {
+    ...identity, p_connector_connection_id: connectionId, p_quote_id: quoteId,
+    p_operation_key: operationKey, p_prompt: prompt, p_mode: mode,
+    p_duration_seconds: body.duration_seconds, p_resolution: body.resolution,
+    p_aspect_ratio: body.aspect_ratio, p_output_format: body.output_format,
+    p_generate_audio: body.generate_audio,
+  })
+  if (createError || !created?.job_id || !created?.request_checksum) {
+    throw Object.assign(new Error('Video job could not be recorded'), { status: 503 })
+  }
+  if (created.idempotent_replay === true && created.status !== 'queued') {
+    return getDesignVideoJob(admin, { job_id: created.job_id }, actorId)
+  }
+  const jobIdentity = { p_organization_id: admin.organizationId,
+    p_job_id: created.job_id, p_actor_id: actorId }
+  const { data: reserved, error: reserveError } = await admin.rpc('reserve_design_video_budget', jobIdentity)
+  if (reserveError || reserved?.status !== 'reserved') {
+    throw Object.assign(new Error('Shared video budget is unavailable'), { status: 503 })
+  }
+  const { data: claim, error: claimError } = await admin.rpc('claim_design_video_dispatch', {
+    ...jobIdentity, p_dispatch_request_id: crypto.randomUUID(),
+    p_request_checksum: created.request_checksum,
+  })
+  if (claimError || !claim?.claim_id) {
+    throw Object.assign(new Error('Video dispatch claim is unavailable'), { status: 503 })
+  }
+  if (claim.must_not_submit === true) return getDesignVideoJob(admin, { job_id: created.job_id }, actorId)
+  const record = async (state: string, requestId: string | null,
+    statusUrl: string | null, outputUrl: string | null, evidence: string) => {
+    const { error } = await admin.rpc('record_design_video_provider_state', {
+      ...jobIdentity, p_claim_id: claim.claim_id, p_state: state,
+      p_provider_request_id: requestId, p_provider_status_url: statusUrl,
+      p_provider_output_url: outputUrl,
+      p_evidence: evidence,
+    })
+    if (error) throw Object.assign(new Error('Video provider receipt could not be recorded'), { status: 503 })
+  }
+  let receipt
+  try {
+    receipt = await adapter.submit({ prompt, duration: body.duration_seconds as number,
+      resolution: body.resolution as string, aspect_ratio: body.aspect_ratio as string,
+      output_format: body.output_format as string, generate_audio: body.generate_audio as boolean })
+  } catch {
+    await record('outcome_unknown', null, null, null,
+      'Submission outcome unavailable; manual provider reconciliation required')
+    return getDesignVideoJob(admin, { job_id: created.job_id }, actorId)
+  }
+  const state = receipt.state === 'pending' ? 'provider_pending' : receipt.state
+  await record(state, receipt.requestId, receipt.statusUrl || null, receipt.outputUrl || null,
+    state === 'provider_completed' ? 'Provider completed; private output ingestion pending'
+      : state === 'provider_pending' ? 'Provider accepted the original request'
+      : 'Provider returned a terminal result; billing reconciliation pending')
+  return getDesignVideoJob(admin, { job_id: created.job_id }, actorId)
+}
+
 async function handler(req: Request, dependencies: HandlerDependencies = {}) {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
@@ -1812,6 +1913,7 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       create_video_placeholder: () => createVideoPlaceholder(admin, userClient, body, user.id),
       get_video_quote: () => getDesignVideoQuote(admin, body, user.id),
       get_video_job: () => getDesignVideoJob(admin, body, user.id),
+      generate_video: () => generateDesignVideo(admin, body, user.id),
       generate_content_request_image: () => generateContentRequestImage(admin, userClient, body, user.id),
       create_content_request_video_placeholder: () => createContentRequestVideoPlaceholder(admin, userClient, body, user.id),
       sign_media_assets: () => signMediaAssets(admin, userClient, body),

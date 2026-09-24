@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from 'jsr:@std/assert@1.0.14'
-import { getDesignVideoJob, getDesignVideoQuote } from './index.ts'
+import { generateDesignVideo, getDesignVideoJob, getDesignVideoQuote } from './index.ts'
 
 const org = '123e4567-e89b-42d3-a456-426614174000'
 const actor = '123e4567-e89b-42d3-a456-426614174001'
@@ -57,13 +57,30 @@ Deno.test('owner job status hides claim, provider receipt, prompt, and storage i
       aspect_ratio: '16:9', output_format: 'mp4', generate_audio: false,
       prompt: 'private prompt', dispatch_claim_id: 'claim-secret',
       provider_request_id: 'provider-secret', provider_status_url: 'https://api.higgsfield.ai/secret',
+      provider_output_url: 'https://private.vendor.example/signed?token=secret',
       output_storage_path: 'private/storage', created_at: '2026-09-24T00:00:00Z',
     }, error: null }
   } } as unknown as Parameters<typeof getDesignVideoJob>[0]
   const visible = await getDesignVideoJob(admin,{ job_id: jobId },actor)
   assertEquals(visible.status,'provider_pending')
   for (const hidden of ['prompt','dispatch_claim_id','provider_request_id',
-    'provider_status_url','output_storage_path']) {
+    'provider_status_url','provider_output_url','output_storage_path']) {
     assertEquals(Object.hasOwn(visible,hidden),false)
+  }
+})
+
+Deno.test('disabled video execution makes no database or provider calls', async () => {
+  const previous = Deno.env.get('DESIGN_VIDEO_PAID_EXECUTION_ENABLED')
+  Deno.env.delete('DESIGN_VIDEO_PAID_EXECUTION_ENABLED')
+  try {
+    const admin = { organizationId: org,
+      rpc: () => { throw new Error('Database must not be called') },
+      from: () => { throw new Error('Connector must not be read') },
+    } as unknown as Parameters<typeof generateDesignVideo>[0]
+    await assertRejects(() => generateDesignVideo(admin, body, actor),
+      Error, 'Video generation is not enabled')
+  } finally {
+    if (previous === undefined) Deno.env.delete('DESIGN_VIDEO_PAID_EXECUTION_ENABLED')
+    else Deno.env.set('DESIGN_VIDEO_PAID_EXECUTION_ENABLED', previous)
   }
 })

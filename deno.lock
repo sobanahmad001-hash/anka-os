@@ -36,6 +36,7 @@
     "packageJson": {
       "dependencies": [
         "npm:@eslint/js@^9.39.4",
+        "npm:@higgsfield/client@0.2.6",
         "npm:@supabase/supabase-js@^2.99.1",
         "npm:@tailwindcss/vite@^4.1.8",
         "npm:@types/pngjs@6.0.5",
