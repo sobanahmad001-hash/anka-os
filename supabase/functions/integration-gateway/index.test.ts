@@ -1,4 +1,4 @@
-import { assertEquals } from 'jsr:@std/assert@1.0.14'
+import { assertEquals, assertRejects } from 'jsr:@std/assert@1.0.14'
 import {
   currentConnectionHealthObservation, handleRequest, safeConnectionHealthObservations,
   syncInitialDepartmentChatModel, testConnection,
@@ -7,6 +7,24 @@ import {
 const ORG_A = '11111111-1111-4111-8111-111111111111'
 const ORG_B = '22222222-2222-4222-8222-222222222222'
 const USER_ID = '33333333-3333-4333-8333-333333333333'
+
+Deno.test('Higgsfield credential test is one read-only request and does not claim model access', async () => {
+  let calls = 0
+  const result = await testConnection({ provider: 'higgsfield', public_config: {} },
+    'offline-id:offline-secret', (async (url, options) => {
+      calls++
+      assertEquals(url, 'https://api.higgsfield.ai/v1/custom-references/list?page=1&page_size=1')
+      assertEquals(options?.method, 'GET')
+      assertEquals(options?.redirect, 'error')
+      assertEquals(options?.headers, { 'hf-api-key': 'offline-id', 'hf-secret': 'offline-secret' })
+      return new Response(JSON.stringify({ page: 1, items: [] }), { status: 200 })
+    }) as typeof fetch)
+  assertEquals(calls, 1)
+  assertEquals(result.summary, { credential_valid: true, model_access_unverified: true,
+    model_id: 'bytedance/seedance-2.5/text-to-video' })
+  await assertRejects(() => testConnection({ provider: 'higgsfield', public_config: {} },
+    'malformed', (async () => { throw new Error('Must not call provider') }) as typeof fetch))
+})
 
 function fixture(options: {
   role?: string
@@ -144,6 +162,39 @@ Deno.test('organization-only text connection creates no department mapping or pr
   assertEquals(response.status, 200)
   assertEquals(test.calls.some(call => call.table === 'integration_connection_departments' && call.operation === 'insert'), false)
   assertEquals(test.calls.some(call => call.table === 'integration_connections' && call.operation === 'insert'), true)
+  assertEquals(test.providerCalls(), 0)
+})
+
+Deno.test('Higgsfield metadata is organization-only and cannot create a department mapping', async () => {
+  const test = fixture()
+  const denied = await test.request({ action: 'save', organization_id: ORG_B,
+    provider: 'higgsfield', display_name: 'Design video',
+    secret_name: 'ANKA_HIGGSFIELD_PRIMARY', department_ids: ['design'] })
+  assertEquals(denied.status, 400)
+  const saved = await test.request({ action: 'save', organization_id: ORG_B,
+    organization_only: true, provider: 'higgsfield', display_name: 'Design video',
+    secret_name: 'ANKA_HIGGSFIELD_PRIMARY', department_ids: ['design'],
+    public_config: { model_id: 'untrusted/model' } })
+  assertEquals(saved.status, 200)
+  const inserted = test.calls.find(call => call.table === 'integration_connections'
+    && call.operation === 'insert')?.value as Record<string, unknown>
+  assertEquals(inserted.organization_id, ORG_B)
+  assertEquals(inserted.status, 'disconnected')
+  assertEquals(inserted.public_config, { model_id: 'bytedance/seedance-2.5/text-to-video' })
+  assertEquals(test.calls.some(call => call.table === 'integration_connection_departments'
+    && call.operation === 'insert'), false)
+  assertEquals(test.providerCalls(), 0)
+})
+
+Deno.test('selected-organization video connection disable records no provider call', async () => {
+  const test = fixture({ provider: 'higgsfield', mappedDepartments: [] })
+  const response = await test.request({ action: 'disable', organization_id: ORG_B,
+    connection_id: test.connection.id })
+  assertEquals(response.status, 200)
+  const event = test.calls.find(call => call.table === 'integration_events'
+    && call.operation === 'insert')?.value as Record<string, unknown>
+  assertEquals(event.organization_id, ORG_B)
+  assertEquals(event.provider, 'higgsfield')
   assertEquals(test.providerCalls(), 0)
 })
 

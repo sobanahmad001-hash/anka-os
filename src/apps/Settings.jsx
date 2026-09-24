@@ -24,8 +24,8 @@ function initialForm(provider = 'openai') {
     display_name: '',
     base_url: '',
     secret_name: `${connector.secretPrefix || ''}PRIMARY`,
-    department_ids: [...connector.departments],
-    organization_only: false,
+    department_ids: provider === 'higgsfield' ? [] : [...connector.departments],
+    organization_only: provider === 'higgsfield',
     owner: '', repo: '', file_key: '', username: '',
     model_id: provider === 'openai' ? 'gpt-5.6-terra' : '',
     property_id: '', site_url: '', customer_id: '', login_customer_id: '',
@@ -63,8 +63,19 @@ export default function Settings() {
 
   async function loadConnections() {
     setError('')
+    const organizationId = activeOrganizationId
+    const revision = scopeRevision
+    const stillCurrent = () => currentModelScope.current.organizationId === organizationId
+      && currentModelScope.current.revision === revision && !requestSignal?.aborted
+    if (!organizationId) {
+      setConnections([]); setCanManage(false); setLoading(false); return
+    }
     try {
-      const [result, brandRows] = await Promise.all([integrations.list(), integrations.listBrands()])
+      const [result, brandRows] = await Promise.all([
+        integrations.listForOrganization(organizationId, null, { signal: requestSignal }),
+        integrations.listBrands(),
+      ])
+      if (!stillCurrent()) return
       setConnections(result.connections || [])
       setBrands(brandRows)
       setReportingDrafts(Object.fromEntries((result.connections || []).filter(connection => connection.provider?.startsWith('google_')).map(connection => [connection.id, {
@@ -73,9 +84,9 @@ export default function Settings() {
       }])))
       setCanManage(Boolean(result.can_manage))
     } catch (loadError) {
-      setError(loadError.message)
+      if (stillCurrent()) setError(loadError.message)
     } finally {
-      setLoading(false)
+      if (stillCurrent()) setLoading(false)
     }
   }
 
@@ -105,7 +116,7 @@ export default function Settings() {
     })
   }
 
-  useEffect(() => { loadConnections() }, [])
+  useEffect(() => { setConnections([]); setCanManage(false); setLoading(true); loadConnections() }, [activeOrganizationId, scopeRevision])
   useEffect(() => {
     setModelConnections([])
     setModelCanManage(false)
@@ -187,8 +198,10 @@ export default function Settings() {
     setMessage('')
     setError('')
     try {
-      const result = await integrations.test(connection.id)
-      setMessage(`${connectorLabel(connection.provider)} verified in ${result.latency_ms} ms.`)
+      const result = await integrations.testForOrganization(activeOrganizationId, connection.id, { signal: requestSignal })
+      setMessage(connection.provider === 'higgsfield'
+        ? `Higgsfield credential checked in ${result.latency_ms} ms. Seedance model access and pricing still need separate checks.`
+        : `${connectorLabel(connection.provider)} verified in ${result.latency_ms} ms.`)
       await loadConnections()
     } catch (testError) {
       setError(testError.message)
@@ -306,7 +319,7 @@ export default function Settings() {
     setMessage('')
     setError('')
     try {
-      await integrations.disable(connection.id)
+      await integrations.disableForOrganization(activeOrganizationId, connection.id, { signal: requestSignal })
       setMessage(`${connection.display_name} was disabled. Its Supabase secret was not deleted.`)
       await loadConnections()
     } catch (disableError) {
@@ -415,6 +428,7 @@ export default function Settings() {
                 {form.provider === 'wordpress' && <><label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Site URL<input required type="url" value={form.base_url} onChange={(event) => setForm({ ...form, base_url: event.target.value })} className={`${INPUT} mt-2 normal-case tracking-normal`} placeholder="https://example.com" /></label><label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">WordPress username<input required value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} className={`${INPUT} mt-2 normal-case tracking-normal`} /></label></>}
 
                 {['openai', 'anthropic', 'google_gemini'].includes(form.provider) && <label className="flex items-start gap-2 rounded-xl border border-purple-900/60 bg-purple-950/20 p-3 text-xs text-purple-100"><input type="checkbox" checked={form.organization_only} onChange={event => setForm(current => ({ ...current, organization_only: event.target.checked, department_ids: event.target.checked ? [] : [...selected.departments] }))} /><span>Organization-only private conversation connection. Keep it separate from department and client engagement connections.</span></label>}
+                {form.provider === 'higgsfield' && <p className="rounded-xl border border-purple-900/60 bg-purple-950/20 p-3 text-xs text-purple-100">This Design video connection belongs to the organization and is never mapped to a client engagement or department. Testing only reads credential access; it does not generate media or authorize spending.</p>}
                 {!form.organization_only && <fieldset><legend className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Department access</legend><div className="mt-2 grid grid-cols-2 gap-2">{Object.entries(DEPARTMENT_LABELS).map(([departmentId, label]) => <label key={departmentId} className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-300"><input type="checkbox" checked={form.department_ids.includes(departmentId)} onChange={() => toggleDepartment(departmentId)} />{label}</label>)}</div></fieldset>}
 
                 <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Supabase secret name<input required value={form.secret_name} onChange={(event) => setForm({ ...form, secret_name: event.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_') })} className={`${INPUT} mt-2 font-mono normal-case tracking-normal`} /><span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-slate-500">Enter the environment variable name only. Never paste the credential into Anka OS.</span></label>

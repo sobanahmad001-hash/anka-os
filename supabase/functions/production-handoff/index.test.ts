@@ -1,4 +1,4 @@
-import { strFromU8, unzipSync } from 'npm:fflate@0.8.2'
+import { strFromU8, unzipSync } from 'npm:fflate@0.8.3'
 import {
   assertHandoffStoragePath,
   buildProductionArchive,

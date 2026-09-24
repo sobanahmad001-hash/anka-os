@@ -1,5 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
-import { strToU8, zipSync } from 'npm:fflate@0.8.2'
+import { strToU8, zipSync } from 'npm:fflate@0.8.3'
 import {
   resolveServerOrganizationContext,
   type ServerOrganizationScope,

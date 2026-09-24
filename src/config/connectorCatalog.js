@@ -124,6 +124,17 @@ export const CONNECTOR_CATALOG = Object.freeze({
     secretPrefix: 'ANKA_GEMINI_',
     capabilities: Object.freeze(['Text and reasoning', 'Model comparison']),
   }),
+  higgsfield: Object.freeze({
+    label: 'Higgsfield API',
+    shortLabel: 'Higgsfield',
+    category: 'Design media',
+    description: 'Organization-only Seedance video connection. Credential testing is read-only; generation requires separate price and budget gates.',
+    departments: Object.freeze(['design']),
+    authMode: 'secret',
+    availability: 'available',
+    secretPrefix: 'ANKA_HIGGSFIELD_',
+    capabilities: Object.freeze(['Read-only credential check', 'Guarded video generation']),
+  }),
 })
 
 export const CONFIGURABLE_CONNECTOR_IDS = Object.freeze(

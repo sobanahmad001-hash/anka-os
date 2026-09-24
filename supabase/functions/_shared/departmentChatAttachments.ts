@@ -1,4 +1,4 @@
-import { inflateSync, Unzlib } from 'npm:fflate@0.8.2'
+import { inflateSync, Unzlib } from 'npm:fflate@0.8.3'
 
 export const ATTACHMENT_LIMITS = Object.freeze({
   filesPerTurn: 3, fileBytes: 5 * 1024 * 1024, docxBytes: 4 * 1024 * 1024,

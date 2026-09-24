@@ -2,7 +2,7 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.99.1'
 
 const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
-const PROVIDERS = new Set(['github', 'figma', 'wordpress', 'openai', 'anthropic', 'google_gemini'])
+const PROVIDERS = new Set(['github', 'figma', 'wordpress', 'openai', 'anthropic', 'google_gemini', 'higgsfield'])
 const DEPARTMENTS = new Set(['content', 'design', 'development', 'marketing'])
 const LEADER_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 const SECRET_PREFIX = {
@@ -12,6 +12,7 @@ const SECRET_PREFIX = {
   openai: 'ANKA_OPENAI_',
   anthropic: 'ANKA_ANTHROPIC_',
   google_gemini: 'ANKA_GEMINI_',
+  higgsfield: 'ANKA_HIGGSFIELD_',
 } as const
 
 const corsHeaders = {
@@ -75,6 +76,7 @@ function safePublicConfig(provider: string, value: unknown) {
   if (provider === 'openai' || provider === 'anthropic' || provider === 'google_gemini') {
     return { model_id: text(input.model_id, 120) || (provider === 'openai' ? 'gpt-5.6-terra' : '') }
   }
+  if (provider === 'higgsfield') return { model_id: 'bytedance/seedance-2.5/text-to-video' }
   return { username: text(input.username, 160) }
 }
 
@@ -234,6 +236,23 @@ export async function testConnection(connection: Record<string, unknown>, secret
       }
       summary = { model_id: config.model_id }
     }
+  } else if (provider === 'higgsfield') {
+    // Official read-only Soul ID listing checks the credential without
+    // generating media. It does not prove access to the Seedance model.
+    if (!/^[^\s:]+:[^\s:]+$/.test(secret)) throw new Error('Higgsfield key ID and secret are required')
+    const [keyId, keySecret] = secret.split(':')
+    response = await fetcher('https://api.higgsfield.ai/v1/custom-references/list?page=1&page_size=1', {
+      method: 'GET', headers: { 'hf-api-key': keyId, 'hf-secret': keySecret },
+      redirect: 'error', signal: AbortSignal.timeout(8000),
+    })
+    if (response.ok) {
+      const data = await response.json()
+      if (!data || !Array.isArray(data.items) || !Number.isInteger(data.page)) {
+        throw new Error('Higgsfield credential check returned an invalid response')
+      }
+      summary = { credential_valid: true, model_access_unverified: true,
+        model_id: 'bytedance/seedance-2.5/text-to-video' }
+    }
   } else {
     throw new Error('Unsupported provider')
   }
@@ -279,7 +298,9 @@ export async function handleRequest(req: Request, dependencies: {
     const modelScopedAction = action === 'list_model_allowlist' || action === 'configure_model_allowlist'
       || action === 'configure_context_organization_models'
       || (action === 'save' && body.organization_only === true)
-    const designScopedAction = (action === 'list' || action === 'test') && body.organization_id !== undefined
+    const designScopedAction = (action === 'list' || action === 'test' || action === 'disable'
+      || (action === 'save' && body.provider === 'higgsfield'))
+      && body.organization_id !== undefined
     const organizationScopedAction = modelScopedAction || designScopedAction
     const selectedOrganizationId = organizationScopedAction ? text(body.organization_id, 80) : ORGANIZATION_ID
     if (organizationScopedAction && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(selectedOrganizationId)) {
@@ -395,8 +416,11 @@ export async function handleRequest(req: Request, dependencies: {
       if (!displayName) return json({ error: 'Connection name is required' }, 400)
       const secretName = validateSecretName(provider, body.secret_name)
       const organizationOnly = body.organization_only === true
-      if (organizationOnly && !['openai', 'anthropic', 'google_gemini'].includes(provider)) {
-        return json({ error: 'Organization-only connections require a text-model provider' }, 400)
+      if (organizationOnly && !['openai', 'anthropic', 'google_gemini', 'higgsfield'].includes(provider)) {
+        return json({ error: 'This provider cannot use an organization-only connection' }, 400)
+      }
+      if (provider === 'higgsfield' && !organizationOnly) {
+        return json({ error: 'Higgsfield Design video requires a separate organization-only connection' }, 400)
       }
       if (organizationOnly && text(body.connection_id, 80)) {
         return json({ error: 'Create a separate organization-only connection' }, 400)
@@ -464,7 +488,7 @@ export async function handleRequest(req: Request, dependencies: {
         .update({ status: 'disabled', archived_at: now }).eq('id', connection.id)
       if (error) throw error
       await adminClient.from('integration_events').insert({
-        organization_id: ORGANIZATION_ID,
+        organization_id: connectionOrganizationId,
         connection_id: connection.id,
         actor_id: user.id,
         operation: 'disabled',

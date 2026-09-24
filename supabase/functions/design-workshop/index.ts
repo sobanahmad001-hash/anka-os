@@ -13,6 +13,9 @@ import {
 import { archiveDesignAsset, DESIGN_ASSET_BUCKET, uploadDesignAssetVersion } from './assetVersions.ts'
 import { recordAssetReview } from './assetReviews.ts'
 import { previewDeliveryPackage, saveDeliveryPackage } from './packageDelivery.ts'
+import { requireFreshVideoQuote } from '../_shared/designVideoQuote.js'
+import { createDesignMediaAdapter } from '../_shared/designMediaAdapter.ts'
+import { fetchDesignVideoOutput } from '../_shared/designVideoOutput.ts'
 
 type Client = ReturnType<typeof createClient<any>>
 type ScopedClient = Client & { organizationId: string }
@@ -265,7 +268,8 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
     return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
   }
   if (action === 'promote_direction_experiment' || action === 'generate_image'
-    || action === 'create_video_placeholder') {
+    || action === 'create_video_placeholder' || action === 'get_video_quote'
+    || action === 'generate_video' || action === 'list_video_jobs') {
     const root = await callerVersionRoot(userClient, requiredActionId(body.direction_version_id, 'Direction version'))
     return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
   }
@@ -287,6 +291,9 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
     return { root: { kind: 'engagement', id: requiredActionId(body.target_engagement_id, 'Target engagement') }, requestedOrganizationId }
   }
   if (['generate_private_image', 'get_private_image_job', 'reconcile_private_image_request', 'sign_private_image_job'].includes(action)) {
+    return { root: null, requestedOrganizationId: requestedOrganizationId || '' }
+  }
+  if (['get_video_job', 'poll_video_job', 'ingest_video_output', 'sign_video_output'].includes(action)) {
     return { root: null, requestedOrganizationId: requestedOrganizationId || '' }
   }
   if (action === 'list_experiment_reviewers') {
@@ -1707,6 +1714,292 @@ async function releaseDirection(admin: ScopedClient, body: Json, actorId: string
   return release
 }
 
+export async function getDesignVideoQuote(admin: ScopedClient, body: Json, actorId: string) {
+  const duration = body.duration_seconds
+  const resolution = body.resolution
+  const aspectRatio = body.aspect_ratio
+  const outputFormat = body.output_format
+  const generateAudio = body.generate_audio
+  if (!Number.isInteger(duration) || (duration as number) < 4 || (duration as number) > 30
+    || !['480p', '720p'].includes(resolution as string)
+    || !['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'].includes(aspectRatio as string)
+    || !['mp4', 'mov'].includes(outputFormat as string)
+    || typeof generateAudio !== 'boolean') {
+    throw Object.assign(new Error('Exact supported video settings are required'), { status: 400 })
+  }
+  const { data, error } = await admin.rpc('get_design_video_quote', {
+    p_organization_id: admin.organizationId,
+    p_direction_version_id: requiredActionId(body.direction_version_id, 'Direction version'),
+    p_actor_id: actorId,
+    p_duration_seconds: duration,
+    p_resolution: resolution,
+    p_aspect_ratio: aspectRatio,
+    p_output_format: outputFormat,
+    p_generate_audio: generateAudio,
+  })
+  if (error || !data || typeof data !== 'object') {
+    throw Object.assign(new Error('Video price readiness is unavailable'), { status: 503 })
+  }
+  const readiness = data as { quote?: unknown, organization_cap_configured?: unknown }
+  if (readiness.quote) {
+    requireFreshVideoQuote({
+      duration, resolution, aspect_ratio: aspectRatio,
+      output_format: outputFormat, generate_audio: generateAudio,
+    }, readiness.quote)
+  }
+  return {
+    quote: readiness.quote || null,
+    organization_cap_configured: readiness.organization_cap_configured === true,
+    paid_execution_enabled: false,
+  }
+}
+
+async function loadActorDesignVideoJob(admin: ScopedClient, body: Json, actorId: string): Promise<Json> {
+  const { data, error } = await admin.rpc('get_design_video_job', {
+    p_organization_id: admin.organizationId,
+    p_job_id: requiredActionId(body.job_id, 'Video job'),
+    p_actor_id: actorId,
+  })
+  if (error || !data || typeof data !== 'object') {
+    throw Object.assign(new Error('Video job is unavailable'), { status: 404 })
+  }
+  return data as Json
+}
+
+export async function getDesignVideoJob(admin: ScopedClient, body: Json, actorId: string) {
+  const job = await loadActorDesignVideoJob(admin, body, actorId)
+  return {
+    id: job.id, direction_version_id: job.direction_version_id,
+    status: job.status, mode: job.mode,
+    duration_seconds: job.duration_seconds, resolution: job.resolution,
+    aspect_ratio: job.aspect_ratio, output_format: job.output_format,
+    generate_audio: job.generate_audio,
+    failure_reason: job.failure_reason,
+    created_at: job.created_at, updated_at: job.updated_at,
+  }
+}
+
+export async function listDesignVideoJobs(admin: ScopedClient, body: Json, actorId: string) {
+  const beforeCreatedAt = body.before_created_at
+  const beforeId = body.before_id
+  if ((beforeCreatedAt == null) !== (beforeId == null)
+    || (beforeCreatedAt != null && (typeof beforeCreatedAt !== 'string'
+      || beforeCreatedAt.length > 40 || !Number.isFinite(Date.parse(beforeCreatedAt))))) {
+    throw Object.assign(new Error('Complete video history cursor is required'), { status: 400 })
+  }
+  const { data, error } = await admin.rpc('list_design_video_jobs', {
+    p_organization_id: admin.organizationId,
+    p_direction_version_id: requiredActionId(body.direction_version_id, 'Direction version'),
+    p_actor_id: actorId,
+    p_before_created_at: beforeCreatedAt || null,
+    p_before_id: beforeId == null ? null : requiredActionId(beforeId, 'Video history cursor'),
+  })
+  if (error || !Array.isArray(data)) {
+    throw Object.assign(new Error('Private video history is unavailable'), { status: 503 })
+  }
+  return data
+}
+
+const VIDEO_BUCKET = 'design-generated-video'
+
+export async function ingestDesignVideoOutput(admin: ScopedClient, body: Json, actorId: string,
+  fetcher: typeof fetch = fetch) {
+  // Never fetch provider metadata supplied in this request. Only the original
+  // owner can recover the private, immutable output URL in the job ledger.
+  const job = await loadActorDesignVideoJob(admin, body, actorId)
+  if (job.status === 'ready') return { status: 'ready', job_id: job.id }
+  if (job.status !== 'provider_completed' || typeof job.provider_output_url !== 'string'
+    || typeof job.dispatch_claim_id !== 'string' || typeof job.output_format !== 'string') {
+    throw Object.assign(new Error('Completed private video output is unavailable'), { status: 409 })
+  }
+  const allowedHosts = (Deno.env.get('DESIGN_VIDEO_OUTPUT_ALLOWED_HOSTS') || '')
+    .split(',').map(host => host.trim().toLowerCase()).filter(Boolean)
+  const output = await fetchDesignVideoOutput(job.provider_output_url, allowedHosts,
+    job.output_format as 'mp4' | 'mov', fetcher)
+  const path = `${admin.organizationId}/${job.direction_version_id}/${job.id}/output.${job.output_format}`
+  const bucket = admin.storage.from(VIDEO_BUCKET)
+  const { error: uploadError } = await bucket.upload(path, output.bytes, {
+    contentType: output.contentType, upsert: false,
+  })
+  if (uploadError) {
+    // A prior upload may have succeeded before the Edge response was lost.
+    // Verify its exact bytes before reusing it; never overwrite blindly.
+    const { data: existing, error: downloadError } = await bucket.download(path)
+    if (downloadError || !existing || existing.size !== output.byteLength
+      || existing.type.split(';')[0].toLowerCase() !== output.contentType) {
+      throw Object.assign(new Error('Private video storage conflict'), { status: 409 })
+    }
+    const digest = await crypto.subtle.digest('SHA-256', await existing.arrayBuffer())
+    const checksum = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('')
+    if (checksum !== output.checksum) {
+      throw Object.assign(new Error('Private video storage conflict'), { status: 409 })
+    }
+  }
+  const { data: completed, error: completeError } = await admin.rpc('complete_design_video_storage', {
+    p_organization_id: admin.organizationId, p_job_id: job.id, p_actor_id: actorId,
+    p_claim_id: job.dispatch_claim_id, p_storage_path: path,
+    p_sha256: output.checksum, p_byte_length: output.byteLength,
+    p_mime_type: output.contentType,
+  })
+  if (completeError || completed?.status !== 'ready') {
+    throw Object.assign(new Error('Private video completion is pending recovery'), { status: 503 })
+  }
+  return { status: 'ready', job_id: job.id }
+}
+
+export async function signDesignVideoOutput(admin: ScopedClient, body: Json, actorId: string) {
+  const job = await loadActorDesignVideoJob(admin, body, actorId)
+  if (job.status !== 'ready' || typeof job.output_storage_path !== 'string') {
+    throw Object.assign(new Error('Ready private video is unavailable'), { status: 409 })
+  }
+  const path = `${admin.organizationId}/${job.direction_version_id}/${job.id}/output.${job.output_format}`
+  if (job.output_storage_path !== path) {
+    throw Object.assign(new Error('Private video storage identity is invalid'), { status: 409 })
+  }
+  const { data, error } = await admin.storage.from(VIDEO_BUCKET).createSignedUrl(path, 60)
+  if (error || !data?.signedUrl) {
+    throw Object.assign(new Error('Private video preview is unavailable'), { status: 503 })
+  }
+  return { job_id: job.id, signed_url: data.signedUrl, expires_in: 60 }
+}
+
+export async function pollDesignVideoJob(admin: ScopedClient, body: Json, actorId: string,
+  reader: typeof fetch = fetch) {
+  const job = await loadActorDesignVideoJob(admin, body, actorId)
+  if (job.status !== 'provider_pending' || typeof job.provider_request_id !== 'string'
+    || typeof job.provider_status_url !== 'string'
+    || typeof job.dispatch_claim_id !== 'string'
+    || typeof job.connector_connection_id !== 'string') {
+    throw Object.assign(new Error('Original video status request is unavailable'), { status: 409 })
+  }
+  const { data: connection, error: connectionError } = await admin.from('integration_connections')
+    .select('id,provider,status,secret_name').eq('id', job.connector_connection_id)
+    .eq('organization_id', admin.organizationId).eq('provider', 'higgsfield')
+    .eq('status', 'verified').is('archived_at', null).maybeSingle()
+  if (connectionError || !connection || typeof connection.secret_name !== 'string'
+    || !/^ANKA_HIGGSFIELD_[A-Z0-9_]+$/.test(connection.secret_name)) {
+    throw Object.assign(new Error('Pinned video connection is unavailable'), { status: 503 })
+  }
+  const credential = Deno.env.get(connection.secret_name)
+  if (!credential) throw Object.assign(new Error('Video connection credential is unavailable'), { status: 503 })
+  const { createHiggsfieldClient } = await import('npm:@higgsfield/client@0.2.6/v2')
+  const adapter = createDesignMediaAdapter(createHiggsfieldClient, credential, reader)
+  const receipt = await adapter.status(job.provider_request_id, job.provider_status_url)
+  const state = receipt.state === 'pending' ? 'provider_pending' : receipt.state
+  const { error } = await admin.rpc('record_design_video_provider_state', {
+    p_organization_id: admin.organizationId, p_job_id: job.id,
+    p_actor_id: actorId, p_claim_id: job.dispatch_claim_id,
+    p_state: state, p_provider_request_id: receipt.requestId,
+    p_provider_status_url: receipt.statusUrl || null,
+    p_provider_output_url: receipt.outputUrl || null,
+    p_evidence: state === 'provider_completed'
+      ? 'Original provider request completed; private ingestion pending'
+      : state === 'provider_pending' ? 'Original provider request remains pending'
+      : 'Original provider request ended; billing reconciliation pending',
+  })
+  if (error) throw Object.assign(new Error('Video status receipt could not be recorded'), { status: 503 })
+  return getDesignVideoJob(admin, { job_id: job.id }, actorId)
+}
+
+// The paid switch is intentionally absent in production. This path can only
+// reach the provider after the exact job, shared budget, and single-use claim
+// are durably recorded. A lost submit response remains uncertain and is never
+// retried with the same operation key.
+export async function generateDesignVideo(admin: ScopedClient, body: Json, actorId: string) {
+  if (Deno.env.get('DESIGN_VIDEO_PAID_EXECUTION_ENABLED') !== 'true') {
+    throw Object.assign(new Error('Video generation is not enabled'), { status: 503 })
+  }
+  const operationKey = requiredActionId(body.operation_key, 'Operation key')
+  const connectionId = requiredActionId(body.connector_connection_id, 'Design video connection')
+  const quoteId = requiredActionId(body.quote_id, 'Video price quote')
+  if (![operationKey, connectionId, quoteId].every(value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))) {
+    throw Object.assign(new Error('Stable video request identities are required'), { status: 400 })
+  }
+  const prompt = text(body.prompt, 12001)
+  const mode = text(body.mode, 20)
+  if (!prompt || prompt.length > 12000 || !['explore', 'production'].includes(mode)) {
+    throw Object.assign(new Error('Exact video prompt and mode are required'), { status: 400 })
+  }
+  const readiness = await getDesignVideoQuote(admin, body, actorId)
+  const quote = readiness.quote as Json | null
+  if (!quote || quote.id !== quoteId || readiness.organization_cap_configured !== true) {
+    throw Object.assign(new Error('Exact quote and organization cap are required'), { status: 503 })
+  }
+  requireFreshVideoQuote({ duration: body.duration_seconds, resolution: body.resolution,
+    aspect_ratio: body.aspect_ratio, output_format: body.output_format,
+    generate_audio: body.generate_audio }, quote)
+  const { data: connection, error: connectionError } = await admin.from('integration_connections')
+    .select('id,provider,status,secret_name').eq('id', connectionId)
+    .eq('organization_id', admin.organizationId).eq('provider', 'higgsfield')
+    .eq('status', 'verified').is('archived_at', null).maybeSingle()
+  if (connectionError || !connection || typeof connection.secret_name !== 'string'
+    || !/^ANKA_HIGGSFIELD_[A-Z0-9_]+$/.test(connection.secret_name)) {
+    throw Object.assign(new Error('Verified organization video connection is unavailable'), { status: 503 })
+  }
+  const credential = Deno.env.get(connection.secret_name)
+  if (!credential) throw Object.assign(new Error('Video connection credential is unavailable'), { status: 503 })
+  // The official SDK is loaded only after local gates; constructing its
+  // isolated client makes no provider request. SQL rechecks connector mapping.
+  const { createHiggsfieldClient } = await import('npm:@higgsfield/client@0.2.6/v2')
+  const adapter = createDesignMediaAdapter(createHiggsfieldClient, credential)
+  const identity = { p_organization_id: admin.organizationId,
+    p_direction_version_id: requiredActionId(body.direction_version_id, 'Direction version'),
+    p_actor_id: actorId }
+  const { data: created, error: createError } = await admin.rpc('create_design_video_job', {
+    ...identity, p_connector_connection_id: connectionId, p_quote_id: quoteId,
+    p_operation_key: operationKey, p_prompt: prompt, p_mode: mode,
+    p_duration_seconds: body.duration_seconds, p_resolution: body.resolution,
+    p_aspect_ratio: body.aspect_ratio, p_output_format: body.output_format,
+    p_generate_audio: body.generate_audio,
+  })
+  if (createError || !created?.job_id || !created?.request_checksum) {
+    throw Object.assign(new Error('Video job could not be recorded'), { status: 503 })
+  }
+  if (created.idempotent_replay === true && created.status !== 'queued') {
+    return getDesignVideoJob(admin, { job_id: created.job_id }, actorId)
+  }
+  const jobIdentity = { p_organization_id: admin.organizationId,
+    p_job_id: created.job_id, p_actor_id: actorId }
+  const { data: reserved, error: reserveError } = await admin.rpc('reserve_design_video_budget', jobIdentity)
+  if (reserveError || reserved?.status !== 'reserved') {
+    throw Object.assign(new Error('Shared video budget is unavailable'), { status: 503 })
+  }
+  const { data: claim, error: claimError } = await admin.rpc('claim_design_video_dispatch', {
+    ...jobIdentity, p_dispatch_request_id: crypto.randomUUID(),
+    p_request_checksum: created.request_checksum,
+  })
+  if (claimError || !claim?.claim_id) {
+    throw Object.assign(new Error('Video dispatch claim is unavailable'), { status: 503 })
+  }
+  if (claim.must_not_submit === true) return getDesignVideoJob(admin, { job_id: created.job_id }, actorId)
+  const record = async (state: string, requestId: string | null,
+    statusUrl: string | null, outputUrl: string | null, evidence: string) => {
+    const { error } = await admin.rpc('record_design_video_provider_state', {
+      ...jobIdentity, p_claim_id: claim.claim_id, p_state: state,
+      p_provider_request_id: requestId, p_provider_status_url: statusUrl,
+      p_provider_output_url: outputUrl,
+      p_evidence: evidence,
+    })
+    if (error) throw Object.assign(new Error('Video provider receipt could not be recorded'), { status: 503 })
+  }
+  let receipt
+  try {
+    receipt = await adapter.submit({ prompt, duration: body.duration_seconds as number,
+      resolution: body.resolution as string, aspect_ratio: body.aspect_ratio as string,
+      output_format: body.output_format as string, generate_audio: body.generate_audio as boolean })
+  } catch {
+    await record('outcome_unknown', null, null, null,
+      'Submission outcome unavailable; manual provider reconciliation required')
+    return getDesignVideoJob(admin, { job_id: created.job_id }, actorId)
+  }
+  const state = receipt.state === 'pending' ? 'provider_pending' : receipt.state
+  await record(state, receipt.requestId, receipt.statusUrl || null, receipt.outputUrl || null,
+    state === 'provider_completed' ? 'Provider completed; private output ingestion pending'
+      : state === 'provider_pending' ? 'Provider accepted the original request'
+      : 'Provider returned a terminal result; billing reconciliation pending')
+  return getDesignVideoJob(admin, { job_id: created.job_id }, actorId)
+}
+
 async function handler(req: Request, dependencies: HandlerDependencies = {}) {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
@@ -1745,6 +2038,13 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       retry_image_generation: () => retryImageGeneration(admin, userClient, body, user.id),
       generate_variants: () => generateVariants(admin, userClient, body, user.id),
       create_video_placeholder: () => createVideoPlaceholder(admin, userClient, body, user.id),
+      get_video_quote: () => getDesignVideoQuote(admin, body, user.id),
+      get_video_job: () => getDesignVideoJob(admin, body, user.id),
+      list_video_jobs: () => listDesignVideoJobs(admin, body, user.id),
+      generate_video: () => generateDesignVideo(admin, body, user.id),
+      poll_video_job: () => pollDesignVideoJob(admin, body, user.id),
+      ingest_video_output: () => ingestDesignVideoOutput(admin, body, user.id),
+      sign_video_output: () => signDesignVideoOutput(admin, body, user.id),
       generate_content_request_image: () => generateContentRequestImage(admin, userClient, body, user.id),
       create_content_request_video_placeholder: () => createContentRequestVideoPlaceholder(admin, userClient, body, user.id),
       sign_media_assets: () => signMediaAssets(admin, userClient, body),

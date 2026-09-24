@@ -37,16 +37,22 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   const [olderBusy, setOlderBusy] = useState(false)
   const [modelOptions, setModelOptions] = useState([])
   const [selectedModelId, setSelectedModelId] = useState('')
+  const [paidExecutionEnabled, setPaidExecutionEnabled] = useState(false)
   const [aiUseConfirmed, setAiUseConfirmed] = useState(false)
+  const [includeCanonicalContext, setIncludeCanonicalContext] = useState(false)
   const [aiBusyMessageId, setAiBusyMessageId] = useState('')
   const [aiNotice, setAiNotice] = useState('')
   const [error, setError] = useState('')
+  const [sharing, setSharing] = useState({ candidates: [], recipients: [], loaded: false })
+  const [shareSelection, setShareSelection] = useState([])
+  const [shareBusy, setShareBusy] = useState(false)
   const pendingRequests = useRef(new Map())
   const dispatchRequests = useRef(new Map())
   const drafts = useRef(new Map())
   const activeConversation = useRef(conversationId)
   const listRevision = useRef(0)
   activeConversation.current = conversationId
+  const selectedOwnerId = conversations.find(row => row.id === conversationId)?.owner_id
 
   const showError = useCallback((reason) => {
     if (signal.aborted) return
@@ -70,6 +76,15 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
 
   useEffect(() => {
     let current = true
+    setPaidExecutionEnabled(false)
+    departmentChat.getContextChatReadiness(requestScope)
+      .then(result => { if (current && !signal.aborted) setPaidExecutionEnabled(result.paid_execution_enabled === true) })
+      .catch(reason => { if (current) showError(reason) })
+    return () => { current = false }
+  }, [requestScope, signal, showError])
+
+  useEffect(() => {
+    let current = true
     const revision = ++listRevision.current
     setLoading(true)
     setError('')
@@ -90,6 +105,9 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   useEffect(() => {
     setDraft(drafts.current.get(conversationId) || '')
     setAiUseConfirmed(false)
+    setIncludeCanonicalContext(false)
+    setSharing({ candidates: [], recipients: [], loaded: false })
+    setShareSelection([])
     if (!conversationId) { setMessages([]); setHasOlder(false); return }
     let current = true
     setMessages([])
@@ -105,6 +123,27 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   }, [conversationId, requestScope, signal, showError])
 
   useEffect(() => {
+    if (contextKind !== 'project_team' || selectedOwnerId !== user.id) return
+    let current = true
+    departmentChat.getProjectContextSharing({ conversation_id: conversationId }, requestScope)
+      .then(result => {
+        if (!current || signal.aborted || activeConversation.current !== conversationId) return
+        const candidates = result.candidates || []
+        const eligible = new Set(candidates.map(candidate => candidate.id))
+        setSharing({ candidates, recipients: result.recipients || [], loaded: true })
+        setShareSelection((result.recipients || [])
+          .map(recipient => recipient.recipient_id).filter(id => eligible.has(id)))
+      })
+      .catch(reason => { if (current) showError(reason) })
+    return () => { current = false }
+  }, [contextKind, conversationId, selectedOwnerId, requestScope, signal, showError, user.id])
+
+  useEffect(() => {
+    if (contextKind === 'project_team' && selectedOwnerId !== user.id) {
+      setModelOptions([])
+      setSelectedModelId('')
+      return undefined
+    }
     let current = true
     integrations.listModelAllowlist(organizationId, { signal })
       .then(result => {
@@ -112,15 +151,17 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
         const options = (result.connections || [])
           .filter(connection => connection.organization_level && connection.status === 'verified')
           .flatMap(connection => (connection.context_model_configurations || []).map(model => ({
-            id: model.id, label: `${connection.display_name || connection.provider} · ${model.model_id}`,
+            id: model.id, provider: connection.provider,
+            label: `${connection.display_name || connection.provider} · ${model.model_id}`,
           })))
         setModelOptions(options)
+        setIncludeCanonicalContext(false)
         setSelectedModelId(previous => options.some(option => option.id === previous)
           ? previous : options[0]?.id || '')
       })
       .catch(reason => { if (current) showError(reason) })
     return () => { current = false }
-  }, [contextKind, organizationId, signal, showError])
+  }, [contextKind, organizationId, selectedOwnerId, signal, showError, user.id])
   async function loadMoreConversations() {
     if (!hasMoreConversations || listBusy) return
     const revision = listRevision.current
@@ -176,20 +217,28 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
 
   async function askAi(message, recoverOnly = false) {
     if (aiBusyMessageId || busy) return
-    if (!recoverOnly && (!selectedModelId || !aiUseConfirmed)) return
+    if (!recoverOnly && (!paidExecutionEnabled || !selectedModelId || !aiUseConfirmed)) return
     const targetId = conversationId
     const savedRequest = dispatchRequests.current.get(message.id)
-    const request = savedRequest || { id: crypto.randomUUID(), modelId: selectedModelId }
+    const approvedGrounding = includeCanonicalContext
+      && modelOptions.some(model => model.id === selectedModelId && model.provider === 'openai')
+      && (contextKind === 'organization' || contextKind === 'project_team')
+    const request = savedRequest?.modelId === selectedModelId
+      && savedRequest?.includeCanonicalContext === approvedGrounding
+      ? savedRequest : { id: crypto.randomUUID(), modelId: selectedModelId,
+        includeCanonicalContext: approvedGrounding }
     if (!recoverOnly) {
       dispatchRequests.current.set(message.id, request)
       setAiUseConfirmed(false)
+      setIncludeCanonicalContext(false)
     }
     setAiBusyMessageId(message.id); setAiNotice(''); setError('')
     try {
       const result = recoverOnly
         ? await contextChatRunner.recover(message.id, requestScope)
         : await contextChatRunner.run({ message_id: message.id,
-          model_configuration_id: request.modelId, dispatch_request_id: request.id }, requestScope)
+          model_configuration_id: request.modelId, dispatch_request_id: request.id,
+          include_canonical_context: request.includeCanonicalContext }, requestScope)
       if (signal.aborted || activeConversation.current !== targetId) return
       if (result.status !== 'completed') {
         setAiNotice('No completed reply is available yet. A claimed request will not be submitted again.')
@@ -227,12 +276,38 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
     } catch (reason) { showError(reason) } finally { if (!signal.aborted) setOlderBusy(false) }
   }
 
+  async function saveSharing() {
+    if (shareBusy || !sharing.loaded || !conversationId) return
+    const targetId = conversationId
+    setShareBusy(true); setError('')
+    try {
+      await departmentChat.setProjectContextSharing({
+        conversation_id: targetId, recipient_ids: shareSelection,
+      }, requestScope)
+      if (signal.aborted || activeConversation.current !== targetId) return
+      const result = await departmentChat.getProjectContextSharing({
+        conversation_id: targetId,
+      }, requestScope)
+      if (signal.aborted || activeConversation.current !== targetId) return
+      const candidates = result.candidates || []
+      const eligible = new Set(candidates.map(candidate => candidate.id))
+      setSharing({ candidates, recipients: result.recipients || [], loaded: true })
+      setShareSelection((result.recipients || [])
+        .map(recipient => recipient.recipient_id).filter(id => eligible.has(id)))
+    } catch (reason) { if (activeConversation.current === targetId) showError(reason) }
+    finally { if (!signal.aborted) setShareBusy(false) }
+  }
+
   const selected = conversations.find(row => row.id === conversationId)
+  const selectedModel = modelOptions.find(model => model.id === selectedModelId)
+  const canIncludeCanonicalContext = selectedModel?.provider === 'openai'
+    && (contextKind === 'organization' || contextKind === 'project_team')
+  const isOwner = selected?.owner_id === user.id
   const description = contextKind === 'department_private'
     ? 'Only you can see these conversations. AI replies require an approved model, a budget, and enabled paid execution.'
     : contextKind === 'organization'
       ? 'Only you can see this organization conversation. AI replies require an approved model, a budget, and enabled paid execution.'
-      : 'Only you can see these conversations for this project. AI replies require an approved model, a budget, and enabled paid execution.'
+      : 'Project conversations start private. You can choose active internal teammates to read and reply; AI replies remain creator-controlled.'
   return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5" aria-label={label}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 className="text-lg font-semibold text-white">{label}</h2>
@@ -260,32 +335,60 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
       <div className="min-h-64 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
         {!selected ? <p className="text-sm text-slate-500">Choose or create a conversation.</p> : <>
           <h3 className="font-semibold text-white">{selected.title}</h3>
-          <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+          {contextKind === 'project_team' && isOwner && <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+            <h4 className="text-sm font-semibold text-white">Share this project conversation</h4>
+            <p className="mt-1 text-xs text-slate-400">Only selected active internal teammates can see all current and future messages and reply. Sharing does not grant AI use, approval, or project record changes. Revoking stops later reads and replies; it cannot recall copies already seen.</p>
+            <div className="mt-3 max-h-40 space-y-2 overflow-auto">
+              {sharing.candidates.map(candidate => <label key={candidate.id} className="flex items-start gap-2 text-xs text-slate-300">
+                <input type="checkbox" checked={shareSelection.includes(candidate.id)}
+                  onChange={event => setShareSelection(current => event.target.checked
+                    ? [...current, candidate.id] : current.filter(id => id !== candidate.id))} />
+                <span>{candidate.full_name || candidate.email || candidate.id}</span>
+              </label>)}
+              {!sharing.loaded && <p className="text-xs text-slate-500">Loading eligible teammates…</p>}
+              {sharing.loaded && !sharing.candidates.length && <p className="text-xs text-slate-500">No eligible teammates available.</p>}
+            </div>
+            <p className="mt-3 text-xs text-slate-400">Currently shared with {sharing.recipients.length} teammate{sharing.recipients.length === 1 ? '' : 's'}. New selection: {shareSelection.length
+              ? sharing.candidates.filter(candidate => shareSelection.includes(candidate.id))
+                .map(candidate => candidate.full_name || candidate.email || candidate.id).join(', ')
+              : 'Only you'}</p>
+            <button type="button" className={BUTTON} disabled={shareBusy || !sharing.loaded}
+              onClick={saveSharing}>{shareBusy ? 'Saving…' : 'Save sharing'}</button>
+          </div>}
+          {isOwner && <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
             <label htmlFor="organization-conversation-model" className="block text-xs font-semibold uppercase tracking-wide text-slate-400">Approved private conversation AI model</label>
             <select id="organization-conversation-model" className={`${INPUT} mt-2`} value={selectedModelId}
-              onChange={event => { setSelectedModelId(event.target.value); setAiUseConfirmed(false) }} disabled={Boolean(aiBusyMessageId) || !modelOptions.length}>
+              onChange={event => { setSelectedModelId(event.target.value); setAiUseConfirmed(false); setIncludeCanonicalContext(false) }} disabled={Boolean(aiBusyMessageId) || !modelOptions.length}>
               {!modelOptions.length && <option value="">No approved model available</option>}
               {modelOptions.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
             </select>
-            <p className="mt-2 text-xs text-slate-400">AI replies use the approved organization-level provider connection and count against the organization AI budget. The service will refuse execution until all controls are enabled.</p>
+            <p className="mt-2 text-xs text-slate-400">AI replies use the approved organization-level provider connection and count against the organization AI budget. {paidExecutionEnabled ? 'The service still checks current approval and budget before dispatch.' : 'AI execution is currently off; saved human messages remain available.'}</p>
+            {contextKind === 'project_team' && <p className="mt-2 text-xs text-slate-400">Teammate-authored messages are not sent to a provider. If a requested reply would include one, the request is blocked before reserving budget.</p>}
             <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-300">
               <input type="checkbox" className="mt-1" checked={aiUseConfirmed}
                 onChange={event => setAiUseConfirmed(event.target.checked)}
-                disabled={Boolean(aiBusyMessageId) || !selectedModelId} />
-              <span>I confirm that this conversation's recent messages, including the message I selected, are safe to send to the selected provider for an AI reply. Project and Workshop records are not added unless I wrote them in these messages.</span>
+                disabled={!paidExecutionEnabled || Boolean(aiBusyMessageId) || !selectedModelId} />
+              <span>I confirm that this conversation's recent messages, including the message I selected, are safe to send to the selected provider for an AI reply. Records are included only if I select the separate OpenAI option below.</span>
             </label>
-          </div>
+            {canIncludeCanonicalContext && <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-300">
+              <input type="checkbox" className="mt-1" checked={includeCanonicalContext}
+                onChange={event => setIncludeCanonicalContext(event.target.checked)}
+                disabled={!paidExecutionEnabled || Boolean(aiBusyMessageId)} />
+              <span>For this reply, also send OpenAI the current organization name{contextKind === 'project_team'
+                ? ' and this project’s name, description, status, health, scope, and exclusions' : ''}. No other records or record IDs are added.</span>
+            </label>}
+          </div>}
           {hasOlder && <button type="button" disabled={olderBusy} onClick={loadOlder}
             className="mt-3 text-xs font-semibold text-violet-300 disabled:opacity-50">Load older messages</button>}
           <div className="mt-4 space-y-3" aria-live="polite">
             {!messages.length && <p className="text-sm text-slate-500">No messages yet.</p>}
             {messages.map(message => <div key={message.id} className="rounded-xl border border-slate-800 bg-slate-900 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-violet-300">{message.role === 'assistant' ? 'Anka AI' : 'You'}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-violet-300">{message.role === 'assistant' ? 'Anka AI' : message.author_id === user.id ? 'You' : 'Teammate'}</p>
               <p className="mt-2 whitespace-pre-wrap text-sm text-slate-200">{message.body}</p>
-              {message.role === 'user'
+              {isOwner && message.role === 'user' && message.author_id === user.id
                 && !messages.some(reply => reply.in_reply_to_message_id === message.id) && <div className="mt-3 flex flex-wrap gap-3">
                   <button type="button" className="text-xs font-semibold text-violet-300 disabled:opacity-40"
-                    disabled={!selectedModelId || !aiUseConfirmed || Boolean(aiBusyMessageId) || busy}
+                    disabled={!paidExecutionEnabled || !selectedModelId || !aiUseConfirmed || Boolean(aiBusyMessageId) || busy}
                     onClick={() => askAi(message)}>{aiBusyMessageId === message.id ? 'Checking…' : 'Ask Anka AI'}</button>
                   <button type="button" className="text-xs text-slate-400 hover:text-slate-200 disabled:opacity-40"
                     disabled={Boolean(aiBusyMessageId) || busy} onClick={() => askAi(message, true)}>Check for saved reply</button>

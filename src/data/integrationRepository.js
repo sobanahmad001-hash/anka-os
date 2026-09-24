@@ -43,6 +43,9 @@ export const integrations = Object.freeze({
     action: 'test', organization_id: organizationId, connection_id: connectionId,
   }, options),
   disable: (connectionId) => invoke({ action: 'disable', connection_id: connectionId }),
+  disableForOrganization: (organizationId, connectionId, options = {}) => invoke({
+    action: 'disable', organization_id: organizationId, connection_id: connectionId,
+  }, options),
   configureContextOrganizationModels: (organizationId, connectionId, modelIds, options = {}) => invoke({
     action: 'configure_context_organization_models',
     organization_id: organizationId, connection_id: connectionId, model_ids: modelIds,

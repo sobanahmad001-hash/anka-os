@@ -377,6 +377,7 @@ function selectedOrganizationFixture() {
     method: 'POST', headers: { Authorization: 'Bearer synthetic', 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }), {
     clients: { admin, userClient: { from: admin.from.bind(admin), auth: { getUser: async () => ({ data: { user: { id: 'actor' } }, error: null }) } } as any },
+    contextChatPaidExecutionEnabled: false,
     fetcher: (async (_url, init) => {
       providerCalls++
       providerRequests.push(init || {})
@@ -448,6 +449,14 @@ function selectedOrganizationFixture() {
     setModelDispatchError: (value: any) => { modelDispatchError = value },
   }
 }
+
+Deno.test('authenticated private chat readiness reports disabled paid execution without contacting a provider', async () => {
+  const fixture = selectedOrganizationFixture()
+  const result = await fixture.request({ action: 'get_context_chat_readiness', organization_id: 'B' })
+  assertEquals(result.status, 200)
+  assertEquals((await result.json()).data.paid_execution_enabled, false)
+  assertEquals(fixture.providerCalls(), 0)
+})
 
 Deno.test('new context conversations stay owner-private and selected-organization scoped', async () => {
   const fixture = selectedOrganizationFixture()

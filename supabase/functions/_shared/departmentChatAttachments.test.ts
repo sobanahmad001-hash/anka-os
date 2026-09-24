@@ -1,5 +1,5 @@
 import { assertEquals, assertThrows } from 'jsr:@std/assert@1.0.14'
-import { strToU8, zipSync, zlibSync } from 'npm:fflate@0.8.2'
+import { strToU8, zipSync, zlibSync } from 'npm:fflate@0.8.3'
 import { inspectDepartmentChatAttachment } from './departmentChatAttachments.ts'
 
 const docxBytes = (document: string) => zipSync({

@@ -11,8 +11,8 @@ export function privateConversationScope(context) {
     return { scope: 'owner_private_organization_conversation' }
   }
   if (context?.context_kind === 'project_team' && context.department_id == null) {
-    return { scope: 'owner_private_project_conversation',
-      project_id: requiredId(context.project_id, 'project') }
+    requiredId(context.project_id, 'project')
+    return { scope: 'owner_private_project_conversation' }
   }
   if (context?.context_kind === 'department_private'
     && context.project_id == null
@@ -22,7 +22,38 @@ export function privateConversationScope(context) {
   throw fail('Exact private conversation context is required')
 }
 
-export function buildPrivateConversationPrompt(rows, messageId, context) {
+export function requireOwnerAuthoredPromptTurns(rows, ownerId) {
+  requiredId(ownerId, 'conversation owner')
+  if (!Array.isArray(rows) || rows.some(row => row.author_id !== ownerId)) {
+    throw fail('A teammate message is not approved for provider use in this conversation')
+  }
+}
+
+/** @param {Record<string, unknown>} organization
+ * @param {Record<string, unknown> | null} [project] */
+export function canonicalOpenAiContext(organization, project = null) {
+  const field = (value, max) => typeof value === 'string' ? value.slice(0, max) : ''
+  if (!organization || !field(organization.name, 200).trim()) {
+    throw fail('Current organization name is required for OpenAI grounding')
+  }
+  if (project && !field(project.name, 200).trim()) {
+    throw fail('Current project name is required for OpenAI grounding')
+  }
+  return {
+    organization_name: field(organization.name, 200),
+    ...(project ? { project: {
+      name: field(project.name, 200),
+      description: field(project.description, 1000),
+      status: field(project.status, 80),
+      health: field(project.health, 80),
+      scope: field(project.scope_statement, 1000),
+      exclusions: field(project.exclusions, 1000),
+    } } : {}),
+  }
+}
+
+/** @param {Record<string, unknown> | null} [canonicalContext] */
+export function buildPrivateConversationPrompt(rows, messageId, context, canonicalContext = null) {
   const boundScope = privateConversationScope(context)
   if (!Array.isArray(rows) || rows.length < 1 || rows.length > 12
     || rows[rows.length - 1]?.id !== messageId
@@ -36,10 +67,12 @@ export function buildPrivateConversationPrompt(rows, messageId, context) {
     }
     return { role: row.role, text: row.body.slice(-8000) }
   })
-  let prompt = JSON.stringify({ ...boundScope, source_message_id: messageId, turns })
+  const payload = () => ({ ...boundScope,
+    ...(canonicalContext ? { canonical_context: canonicalContext } : {}), turns })
+  let prompt = JSON.stringify(payload())
   while (turns.length > 1 && new TextEncoder().encode(prompt).length > 24000) {
     turns.shift()
-    prompt = JSON.stringify({ ...boundScope, source_message_id: messageId, turns })
+    prompt = JSON.stringify(payload())
   }
   if (new TextEncoder().encode(prompt).length > 24000) throw fail('Conversation context exceeds the model bound')
   return prompt

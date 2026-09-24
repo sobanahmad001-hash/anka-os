@@ -34,4 +34,6 @@ jobs:
       - run: deno check --frozen supabase/functions/pipeline-ai-runner/index.ts supabase/functions/pipeline-ai-runner/index.test.ts supabase/functions/_shared/n6PipelineCost.ts supabase/functions/_shared/n6PipelineFallback.ts supabase/functions/_shared/n7TextProvider.ts supabase/functions/_shared/n7TextProvider.test.ts
       - run: deno test --frozen supabase/functions/context-chat-runner/index.test.ts
       - run: deno check --frozen supabase/functions/context-chat-runner/index.ts supabase/functions/context-chat-runner/index.test.ts
+      - run: deno test --allow-env --frozen supabase/functions/_shared/designMediaAdapter.test.ts supabase/functions/_shared/designVideoOutput.test.ts supabase/functions/design-workshop/videoQuote.test.ts supabase/functions/design-workshop/videoOutputActions.test.ts
+      - run: deno check --frozen supabase/functions/_shared/designMediaAdapter.ts supabase/functions/_shared/designMediaAdapter.test.ts supabase/functions/_shared/designVideoOutput.ts supabase/functions/_shared/designVideoOutput.test.ts supabase/functions/design-workshop/videoQuote.test.ts supabase/functions/design-workshop/videoOutputActions.test.ts
       - run: npm run build

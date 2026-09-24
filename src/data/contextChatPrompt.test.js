@@ -1,24 +1,34 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildPrivateConversationPrompt, privateConversationScope } from '../../supabase/functions/_shared/contextChatPrompt.js'
+import { buildPrivateConversationPrompt, privateConversationScope, requireOwnerAuthoredPromptTurns } from '../../supabase/functions/_shared/contextChatPrompt.js'
 
 const source = '2dfc98d4-50a9-4c84-8f19-dab3d4e90a6e'
 const earlier = '4e47d11a-7b84-4095-8657-93e9ead63c80'
 const sourceTurn = { id: source, role: 'user', status: 'completed', body: 'Current question' }
+
+test('shared teammate text cannot enter the private provider prompt', () => {
+  assert.doesNotThrow(() => requireOwnerAuthoredPromptTurns([
+    { ...sourceTurn, author_id: earlier },
+  ], earlier))
+  assert.throws(() => requireOwnerAuthoredPromptTurns([
+    { ...sourceTurn, author_id: source },
+  ], earlier))
+})
 
 test('private prompt binds each exact context without borrowing another scope', () => {
   const contexts = [
     [{ context_kind: 'organization', project_id: null, department_id: null },
       { scope: 'owner_private_organization_conversation' }],
     [{ context_kind: 'project_team', project_id: earlier, department_id: null },
-      { scope: 'owner_private_project_conversation', project_id: earlier }],
+      { scope: 'owner_private_project_conversation' }],
     [{ context_kind: 'department_private', project_id: null, department_id: 'design' },
       { scope: 'owner_private_department_conversation', department_id: 'design' }],
   ]
   for (const [context, expected] of contexts) {
     const prompt = JSON.parse(buildPrivateConversationPrompt([sourceTurn], source, context))
-    assert.deepEqual(Object.fromEntries(Object.entries(prompt).filter(([key]) => key !== 'source_message_id' && key !== 'turns')), expected)
-    assert.equal(prompt.source_message_id, source)
+    assert.deepEqual(Object.fromEntries(Object.entries(prompt).filter(([key]) => key !== 'turns')), expected)
+    assert.equal(JSON.stringify(prompt).includes(source), false)
+    assert.equal(JSON.stringify(prompt).includes(earlier), false)
     assert.deepEqual(prompt.turns, [{ role: 'user', text: 'Current question' }])
   }
   assert.throws(() => privateConversationScope({ context_kind: 'project_team', project_id: 'wrong' }))
