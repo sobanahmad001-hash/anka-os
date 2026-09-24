@@ -57,7 +57,7 @@ function repository(streams, savedBody = '', searches = []) {
       searches.push(input)
       return { items: input.query === 'no match' ? [] : [conversation(input.query ? 'matching-conversation' : 'conversation-' + input.engagement_id)], next_cursor: null }
     },
-    getCapabilities: async () => ({ model_id: 'gpt-test', approved_models: [{ configuration_id: 'configuration-1', model_id: 'gpt-test', display_name: 'Test', is_default: true }], attachments: { supported: false } }),
+    getCapabilities: async () => ({ provider: 'openai', model_id: 'gpt-test', approved_models: [{ configuration_id: 'configuration-1', provider: 'openai', model_id: 'gpt-test', display_name: 'Test', is_default: true }], attachments: { supported: false } }),
     getConversation: async (_d, input) => ({ conversation: conversation(input.conversation_id), messages: savedBody ? [{ id: 'assistant-1', role: 'assistant', status: 'completed', body: savedBody, proposal: null }] : [], sharing: { can_manage: false, recipients: [] } }),
     listAttachments: async () => [],
     listSourceVersions: async () => [],

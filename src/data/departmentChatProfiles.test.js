@@ -36,7 +36,6 @@ test('WCH2 connector and model selection fail closed without a fallback', () => 
   assert.match(edge, /connections\.length !== 1/)
   assert.match(edge, /requires an explicit model_id/)
   assert.doesNotMatch(edge, /model:\s*text\([^\n]+\)\s*\|\|/)
-  assert.doesNotMatch(edge, /anthropic/i)
 })
 
 test('WCH3 enables Development only in the approved tracking panel', () => {

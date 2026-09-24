@@ -49,17 +49,21 @@ function ScopedReviewPanel({ organizationId, reviewerId, signal }) {
     const checked = new Date(draft.checkedAt)
     if (!Number.isFinite(checked.getTime())) { setError('Enter the time you checked provider billing.'); return }
     const checkedAt = checked.toISOString()
-    const fingerprint = [item.claim_id, draft.reference.trim(), checkedAt, draft.evidence.trim()].join(':')
+    const fingerprint = [item.claim_id, draft.kind, draft.reference.trim(), checkedAt,
+      draft.amount.trim(), draft.evidence.trim()].join(':')
     if (request.current?.fingerprint !== fingerprint) request.current = { fingerprint, id: crypto.randomUUID() }
     setBusy(true); setError(''); setNotice('')
     try {
-      const result = await contextChatReleaseReview.release({
-        organizationId, messageId: item.message_id, requestId: request.current.id,
-        providerReference: draft.reference, providerCheckedAt: checkedAt,
-        confirmedNoCharge: true, evidence: draft.evidence,
-      }, { signal })
+      const common = { organizationId, messageId: item.message_id, requestId: request.current.id,
+        providerReference: draft.reference, providerCheckedAt: checkedAt, evidence: draft.evidence }
+      const result = draft.kind === 'charged'
+        ? await contextChatReleaseReview.settleCharge({ ...common, actualCostUsd: draft.amount,
+          confirmedCharge: true }, { signal })
+        : await contextChatReleaseReview.release({ ...common, confirmedNoCharge: true }, { signal })
       if (signal.aborted) return
-      setNotice(result.idempotent_replay ? 'The prior review is already recorded.' : 'No-charge review recorded; held budget released.')
+      setNotice(result.idempotent_replay ? 'The prior review is already recorded.'
+        : draft.kind === 'charged' ? 'Confirmed charge recorded. No reply was saved; the original request cannot be submitted again.'
+          : 'No-charge review recorded; held budget released.')
       setDraft(null)
       request.current = null
       await load()
@@ -69,7 +73,7 @@ function ScopedReviewPanel({ organizationId, reviewerId, signal }) {
 
   return <section className="mt-6 rounded-2xl border border-amber-900/60 bg-slate-900/70 p-5" aria-label="Private AI billing review">
     <h2 className="text-lg font-semibold text-white">Private AI billing review</h2>
-    <p className="mt-1 text-sm text-slate-400">Review only a different person's held claim after the provider confirms no charge. Private conversation text stays hidden. A charged or uncertain outcome must stay reserved until actual cost is reconciled.</p>
+    <p className="mt-1 text-sm text-slate-400">A different owner or operations reviewer checks the exact provider billing result. Confirm no charge to release the hold, or record a verified charge without a saved reply. Private conversation text stays hidden.</p>
     {error && <p role="alert" className="mt-3 text-sm text-red-300">{error}</p>}
     {notice && <p role="status" className="mt-3 text-sm text-emerald-300">{notice}</p>}
     {loading ? <p className="mt-4 text-sm text-slate-500">Loading held claims…</p>
@@ -77,9 +81,10 @@ function ScopedReviewPanel({ organizationId, reviewerId, signal }) {
         : <div className="mt-4 space-y-3">{items.map(item => <div key={item.claim_id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
           <p className="text-sm font-semibold text-white">{item.provider} · {item.model_id} · {item.reservation_status}</p>
           <p className="mt-1 break-all text-xs text-slate-400">Claim {item.claim_id} · Message {item.message_id} · Requester {item.actor_id}</p>
-          <p className="mt-1 text-xs text-slate-400">Claimed {new Date(item.claimed_at).toLocaleString()} · Maximum held {'$' + (Number(item.max_cost_microusd) / 1_000_000).toFixed(4)}</p>
+          <p className="mt-1 text-xs text-slate-400">Claimed {new Date(item.claimed_at).toLocaleString()} · Maximum held {'$' + (Number(item.max_cost_microusd) / 1_000_000).toFixed(6)}</p>
           {item.outcome_evidence && <p className="mt-2 break-all text-xs text-amber-200">Recorded outcome: {item.outcome_evidence}</p>}
-          {item.actor_id === reviewerId ? <p className="mt-2 text-xs text-slate-400">The requester cannot release their own claim.</p>
+          <p className="mt-2 text-xs text-slate-500">If a verified charge exceeds the held maximum, keep it unresolved and escalate the discrepancy.</p>
+          {item.actor_id === reviewerId ? <p className="mt-2 text-xs text-slate-400">The requester cannot review their own claim.</p>
             : draft?.claimId === item.claim_id ? <form onSubmit={event => submitReview(event, item)} className="mt-3 space-y-2">
               <label className="block text-xs text-slate-300">Provider billing reference
                 <input className={input} minLength={8} maxLength={160} required value={draft.reference}
@@ -89,19 +94,30 @@ function ScopedReviewPanel({ organizationId, reviewerId, signal }) {
                 <input type="datetime-local" className={input} required value={draft.checkedAt}
                   onChange={event => setDraft(current => ({ ...current, checkedAt: event.target.value }))} />
               </label>
-              <label className="block text-xs text-slate-300">No-charge evidence
+              {draft.kind === 'charged' && <label className="block text-xs text-slate-300">Confirmed provider charge in USD
+                <input className={input} inputMode="decimal" required value={draft.amount}
+                  onChange={event => setDraft(current => ({ ...current, amount: event.target.value }))} />
+              </label>}
+              <label className="block text-xs text-slate-300">{draft.kind === 'charged' ? 'Charge evidence' : 'No-charge evidence'}
                 <textarea className={input} minLength={20} maxLength={1000} required rows={3} value={draft.evidence}
                   onChange={event => setDraft(current => ({ ...current, evidence: event.target.value }))} />
               </label>
               <label className="flex gap-2 text-xs text-slate-300"><input type="checkbox" checked={draft.confirmed}
                 onChange={event => setDraft(current => ({ ...current, confirmed: event.target.checked }))} />
-                I independently checked provider billing for this exact claim and confirmed no charge.</label>
+                {draft.kind === 'charged'
+                  ? 'I independently checked provider billing for this exact claim and confirmed the charge. No audited reply exists.'
+                  : 'I independently checked provider billing for this exact claim and confirmed no charge.'}</label>
               <div className="flex gap-3">
-                <button type="submit" disabled={busy || !draft.confirmed} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Record review and release held budget</button>
+                <button type="submit" disabled={busy || !draft.confirmed} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{draft.kind === 'charged' ? 'Record charge without reply' : 'Record no charge and release hold'}</button>
                 <button type="button" disabled={busy} onClick={() => setDraft(null)} className="text-xs text-slate-400">Cancel</button>
               </div>
-            </form> : <button type="button" className="mt-2 text-xs font-semibold text-amber-300"
-              onClick={() => { request.current = null; setDraft({ claimId: item.claim_id, reference: '', checkedAt: '', evidence: '', confirmed: false }) }}>Review no charge</button>}
+            </form> : <div className="mt-2 flex flex-wrap gap-4">
+              {['no_charge', 'charged'].map(kind => <button key={kind} type="button" className="text-xs font-semibold text-amber-300"
+                onClick={() => { request.current = null; setDraft({ claimId: item.claim_id, kind,
+                  reference: '', checkedAt: '', amount: '', evidence: '', confirmed: false }) }}>
+                {kind === 'charged' ? 'Review confirmed charge' : 'Review no charge'}
+              </button>)}
+            </div>}
         </div>)}</div>}
     {hasMore && <button type="button" disabled={busy} onClick={() => load(items.length).catch(reason => setError(reason.message))}
       className="mt-4 text-xs font-semibold text-violet-300 disabled:opacity-40">Load more held claims</button>}
