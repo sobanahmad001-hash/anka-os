@@ -86,11 +86,21 @@ Deno.test('disabled video execution makes no database or provider calls', async 
 })
 
 Deno.test('private video history binds actor and direction version in its server RPC', async () => {
+  let calls = 0
   const admin = { organizationId: org, rpc: async (name: string, args: unknown) => {
+    calls++
     assertEquals(name, 'list_design_video_jobs')
-    assertEquals(args, { p_organization_id: org, p_direction_version_id: version, p_actor_id: actor })
+    assertEquals(args, { p_organization_id: org, p_direction_version_id: version, p_actor_id: actor,
+      p_before_created_at: calls === 1 ? null : '2026-09-24T00:00:00Z',
+      p_before_id: calls === 1 ? null : '123e4567-e89b-42d3-a456-426614174004' })
     return { data: [{ id: '123e4567-e89b-42d3-a456-426614174004', status: 'ready' }], error: null }
   } } as unknown as Parameters<typeof listDesignVideoJobs>[0]
   const jobs = await listDesignVideoJobs(admin, { direction_version_id: version }, actor)
   assertEquals(jobs.length, 1)
+  await listDesignVideoJobs(admin, { direction_version_id: version,
+    before_created_at: '2026-09-24T00:00:00Z',
+    before_id: '123e4567-e89b-42d3-a456-426614174004' }, actor)
+  await assertRejects(() => listDesignVideoJobs(admin, {
+    direction_version_id: version, before_created_at: '2026-09-24T00:00:00Z',
+  }, actor), Error, 'Complete video history cursor')
 })

@@ -1780,10 +1780,19 @@ export async function getDesignVideoJob(admin: ScopedClient, body: Json, actorId
 }
 
 export async function listDesignVideoJobs(admin: ScopedClient, body: Json, actorId: string) {
+  const beforeCreatedAt = body.before_created_at
+  const beforeId = body.before_id
+  if ((beforeCreatedAt == null) !== (beforeId == null)
+    || (beforeCreatedAt != null && (typeof beforeCreatedAt !== 'string'
+      || beforeCreatedAt.length > 40 || !Number.isFinite(Date.parse(beforeCreatedAt))))) {
+    throw Object.assign(new Error('Complete video history cursor is required'), { status: 400 })
+  }
   const { data, error } = await admin.rpc('list_design_video_jobs', {
     p_organization_id: admin.organizationId,
     p_direction_version_id: requiredActionId(body.direction_version_id, 'Direction version'),
     p_actor_id: actorId,
+    p_before_created_at: beforeCreatedAt || null,
+    p_before_id: beforeId == null ? null : requiredActionId(beforeId, 'Video history cursor'),
   })
   if (error || !Array.isArray(data)) {
     throw Object.assign(new Error('Private video history is unavailable'), { status: 503 })

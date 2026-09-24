@@ -256,7 +256,10 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
   },
 
   getVideoQuote: input => getDesignVideoQuote(client, organizationId, input, signal),
-  listVideoJobs: directionVersionId => invoke('list_video_jobs', { direction_version_id: directionVersionId }),
+  listVideoJobs: (directionVersionId, cursor = null) => invoke('list_video_jobs', {
+    direction_version_id: directionVersionId,
+    ...(cursor ? { before_created_at: cursor.created_at, before_id: cursor.id } : {}),
+  }),
   getVideoJob: jobId => invoke('get_video_job', { job_id: jobId }),
   generateVideo: input => invoke('generate_video', input),
   pollVideoJob: jobId => invoke('poll_video_job', { job_id: jobId }),

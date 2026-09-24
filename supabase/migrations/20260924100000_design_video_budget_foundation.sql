@@ -391,11 +391,15 @@ grant execute on function public.get_design_video_job(uuid,uuid,uuid)
   to service_role;
 
 create function public.list_design_video_jobs(
-  p_organization_id uuid, p_direction_version_id uuid, p_actor_id uuid
+  p_organization_id uuid, p_direction_version_id uuid, p_actor_id uuid,
+  p_before_created_at timestamptz default null, p_before_id uuid default null
 ) returns jsonb language plpgsql security definer set search_path='' as $$
 declare
   result jsonb;
 begin
+  if (p_before_created_at is null) <> (p_before_id is null) then
+    raise exception 'Complete video history cursor is required' using errcode='22023';
+  end if;
   perform 1 from public.organizations org
     join public.organization_memberships member on member.organization_id=org.id
     join public.design_direction_versions version on version.organization_id=org.id
@@ -416,13 +420,15 @@ begin
       where organization_id=p_organization_id
         and direction_version_id=p_direction_version_id
         and requested_by=p_actor_id
-      order by created_at desc,id desc limit 50) job;
+        and (p_before_created_at is null
+          or (created_at,id) < (p_before_created_at,p_before_id))
+      order by created_at desc,id desc limit 51) job;
   return result;
 end;
 $$;
-revoke all on function public.list_design_video_jobs(uuid,uuid,uuid)
+revoke all on function public.list_design_video_jobs(uuid,uuid,uuid,timestamptz,uuid)
   from public,anon,authenticated,service_role;
-grant execute on function public.list_design_video_jobs(uuid,uuid,uuid)
+grant execute on function public.list_design_video_jobs(uuid,uuid,uuid,timestamptz,uuid)
   to service_role;
 
 create function public.reserve_design_video_budget(

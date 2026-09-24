@@ -4,6 +4,8 @@ import { videoQuoteDisplay } from '../data/designVideoQuoteTransport.js'
 import { designWorkshop } from '../data/designWorkshopRepository.js'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 
+const JOB_PAGE_SIZE = 50
+
 export default function DesignVideoCapabilities({ directionVersionId }) {
   const { activeOrganizationId, requestSignal, scopeRevision } = useOrganization()
   const studio = useMemo(() => activeOrganizationId ? designWorkshop.forOrganization(activeOrganizationId, { signal: requestSignal }) : null, [activeOrganizationId, requestSignal])
@@ -15,6 +17,7 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
   const [audio, setAudio] = useState(false)
   const [result, setResult] = useState(null)
   const [jobs, setJobs] = useState([])
+  const [hasOlderJobs, setHasOlderJobs] = useState(false)
   const [jobsError, setJobsError] = useState('')
   const [jobsBusy, setJobsBusy] = useState('')
   const [preview, setPreview] = useState(null)
@@ -25,10 +28,13 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
   useEffect(() => {
     const attempt = ++jobsSequence.current
     let active = true
-    setJobs([]); setJobsError(''); setJobsBusy(''); setPreview(null)
+    setJobs([]); setHasOlderJobs(false); setJobsError(''); setJobsBusy(''); setPreview(null)
     if (!studio || !directionVersionId || requestSignal?.aborted) return
     studio.listVideoJobs(directionVersionId).then(rows => {
-      if (active && jobsSequence.current === attempt && !requestSignal?.aborted) setJobs(Array.isArray(rows) ? rows : [])
+      if (active && jobsSequence.current === attempt && !requestSignal?.aborted) {
+        setJobs(Array.isArray(rows) ? rows.slice(0, JOB_PAGE_SIZE) : [])
+        setHasOlderJobs(Array.isArray(rows) && rows.length > JOB_PAGE_SIZE)
+      }
     }).catch(() => {
       if (active && jobsSequence.current === attempt && !requestSignal?.aborted) setJobsError('Private video history is unavailable.')
     })
@@ -73,11 +79,29 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
         if (action === 'poll') await studio.pollVideoJob(job.id)
         else if (action === 'ingest') await studio.ingestVideoOutput(job.id)
         const rows = await studio.listVideoJobs(directionVersionId)
-        if (currentScope()) setJobs(Array.isArray(rows) ? rows : [])
+        if (currentScope()) {
+          setJobs(Array.isArray(rows) ? rows.slice(0, JOB_PAGE_SIZE) : [])
+          setHasOlderJobs(Array.isArray(rows) && rows.length > JOB_PAGE_SIZE)
+        }
       }
     } catch {
       if (currentScope()) setJobsError('This video job could not be updated. Its original request remains recorded.')
     } finally { if (currentScope()) setJobsBusy('') }
+  }
+  async function loadOlderJobs() {
+    if (!studio || jobsBusy || !hasOlderJobs || !jobs.length || requestSignal?.aborted) return
+    const attempt = jobsSequence.current
+    const cursor = jobs[jobs.length - 1]
+    setJobsBusy('history'); setJobsError('')
+    try {
+      const rows = await studio.listVideoJobs(directionVersionId, cursor)
+      if (jobsSequence.current !== attempt || requestSignal?.aborted) return
+      const page = Array.isArray(rows) ? rows.slice(0, JOB_PAGE_SIZE) : []
+      setJobs(current => [...current, ...page.filter(row => !current.some(item => item.id === row.id))])
+      setHasOlderJobs(Array.isArray(rows) && rows.length > JOB_PAGE_SIZE)
+    } catch {
+      if (jobsSequence.current === attempt && !requestSignal?.aborted) setJobsError('Older private video history is unavailable.')
+    } finally { if (jobsSequence.current === attempt && !requestSignal?.aborted) setJobsBusy('') }
   }
   useEffect(() => {
     if (!preview) return
@@ -128,6 +152,8 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
         </div>
         {preview?.jobId === job.id && <video className="mt-2 max-h-80 w-full" controls src={preview.url} />}
       </div>)}
+      {hasOlderJobs && <button type="button" className="mt-3 rounded border border-white/20 px-2 py-1 disabled:opacity-40"
+        disabled={Boolean(jobsBusy)} onClick={loadOlderJobs}>Load older private jobs</button>}
     </div>
   </details>
 }
