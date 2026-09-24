@@ -27,14 +27,23 @@ async function requireScopeAccess(admin: Client, organizationId: string, members
   }
 }
 
-async function ownedConversation(admin: Client, organizationId: string, actorId: string, conversationId: string) {
+async function accessibleConversation(admin: Client, organizationId: string, actorId: string, conversationId: string) {
   if (!isContextChatUuid(conversationId)) throw fail('Conversation ID is required')
   const { data, error } = await admin.from('department_chat_conversations')
     .select('id, organization_id, context_kind, project_id, engagement_id, department_id, owner_id, title, state, next_sequence, last_activity_at, created_at')
-    .eq('id', conversationId).eq('organization_id', organizationId).eq('owner_id', actorId)
+    .eq('id', conversationId).eq('organization_id', organizationId)
     .in('context_kind', CONTEXT_KINDS).maybeSingle()
   if (error) throw error
   if (!data) throw fail('Conversation unavailable', 404)
+  if (data.owner_id !== actorId) {
+    if (data.context_kind !== 'project_team') throw fail('Conversation unavailable', 404)
+    const { data: share, error: shareError } = await admin.from('project_context_chat_shares')
+      .select('conversation_id').eq('conversation_id', data.id)
+      .eq('organization_id', organizationId).eq('project_id', data.project_id)
+      .eq('recipient_id', actorId).is('revoked_at', null).maybeSingle()
+    if (shareError) throw shareError
+    if (!share) throw fail('Conversation unavailable', 404)
+  }
   return data
 }
 
@@ -48,6 +57,18 @@ export async function contextChatAction(
     await requireScopeAccess(admin, organizationId, activeMembership, scope)
     if (action === 'list_context_conversations') {
       const offset = validateContextChatListOffset(body.offset)
+      if (scope.context_kind === 'project_team') {
+        const { data, error } = await admin.rpc('list_project_context_chat_conversations', {
+          p_organization_id: organizationId, p_project_id: scope.project_id,
+          p_actor_id: actorId, p_offset: offset,
+        })
+        if (error) throw error
+        return (data || []).map((row: Json) => ({
+          id: row.id, context_kind: row.context_kind, project_id: row.project_id,
+          department_id: row.department_id, owner_id: row.owner_id, title: row.title,
+          state: row.state, last_activity_at: row.last_activity_at, created_at: row.created_at,
+        }))
+      }
       let query = admin.from('department_chat_conversations')
         .select('id, context_kind, project_id, department_id, owner_id, title, state, last_activity_at, created_at')
         .eq('organization_id', organizationId).eq('owner_id', actorId)
@@ -67,8 +88,51 @@ export async function contextChatAction(
     if (error) throw error
     return data
   }
-  const conversation = await ownedConversation(admin, organizationId, actorId, string(body.conversation_id))
+  const conversation = await accessibleConversation(admin, organizationId, actorId, string(body.conversation_id))
   await requireScopeAccess(admin, organizationId, activeMembership, conversation)
+  if (action === 'get_project_context_sharing' || action === 'set_project_context_sharing') {
+    if (conversation.context_kind !== 'project_team' || conversation.owner_id !== actorId) {
+      throw fail('Only the project conversation creator can manage sharing', 403)
+    }
+    if (action === 'set_project_context_sharing') {
+      if (!Array.isArray(body.recipient_ids) || body.recipient_ids.length > 50
+        || body.recipient_ids.some(id => !isContextChatUuid(id))) {
+        throw fail('Choose up to 50 valid recipient IDs')
+      }
+      const { data, error } = await admin.rpc('set_project_context_chat_shares', {
+        p_conversation_id: conversation.id, p_organization_id: organizationId,
+        p_actor_id: actorId, p_recipient_ids: body.recipient_ids,
+      })
+      if (error) throw error
+      return data
+    }
+    const [{ data: memberships, error: memberError }, { data: shares, error: shareError }] =
+      await Promise.all([
+        admin.from('organization_memberships').select('user_id,role')
+          .eq('organization_id', organizationId).eq('member_kind', 'team')
+          .eq('status', 'active').neq('user_id', actorId),
+        admin.from('project_context_chat_shares').select('recipient_id,shared_at')
+          .eq('conversation_id', conversation.id).eq('organization_id', organizationId)
+          .is('revoked_at', null),
+      ])
+    if (memberError) throw memberError
+    if (shareError) throw shareError
+    const ids = (memberships || []).map(member => member.user_id)
+    const { data: profiles, error: profileError } = ids.length
+      ? await admin.from('profiles').select('id,full_name,email').in('id', ids)
+      : { data: [], error: null }
+    if (profileError) throw profileError
+    const names = new Map((profiles || []).map(profile => [profile.id, profile]))
+    return {
+      candidates: (memberships || []).map(member => ({
+        id: member.user_id, role: member.role,
+        full_name: names.get(member.user_id)?.full_name || '',
+        email: names.get(member.user_id)?.email || '',
+      })).sort((a, b) => String(a.full_name || a.email || a.id)
+        .localeCompare(String(b.full_name || b.email || b.id))),
+      recipients: shares || [],
+    }
+  }
   if (action === 'get_context_conversation') {
     const before = body.before_sequence
     if (before !== undefined && (!Number.isSafeInteger(before) || Number(before) < 2)) {

@@ -66,7 +66,7 @@ test('saved conversation actions keep exact caller context and cannot override s
   assert.equal(calls[1].body.limit, 25)
 })
 
-test('owner-private conversation actions use the selected organization and preserve the request signal', async () => {
+test('context conversation and sharing actions use the selected organization and preserve the request signal', async () => {
   const calls = []
   const controller = new AbortController()
   const scope = { organizationId: 'B', signal: controller.signal }
@@ -81,8 +81,11 @@ test('owner-private conversation actions use the selected organization and prese
   await repo.createContextConversation({ ...identity, title: 'Private direction' }, scope)
   await repo.getContextConversation({ organization_id: 'A', conversation_id: 'thread-B', before_sequence: 101 }, scope)
   await repo.appendContextHumanMessage({ organization_id: 'A', conversation_id: 'thread-B', client_request_id: 'request-B', message: 'Save this idea' }, scope)
+  await repo.getProjectContextSharing({ organization_id: 'A', conversation_id: 'thread-B' }, scope)
+  await repo.setProjectContextSharing({ organization_id: 'A', conversation_id: 'thread-B', recipient_ids: ['recipient-B'] }, scope)
   assert.deepEqual(calls.map(call => call.body.action), [
     'list_context_conversations', 'create_context_conversation', 'get_context_conversation', 'append_context_human_message',
+    'get_project_context_sharing', 'set_project_context_sharing',
   ])
   for (const call of calls) {
     assert.equal(call.name, 'department-chat')
