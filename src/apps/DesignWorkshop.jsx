@@ -15,6 +15,7 @@ import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import ProductionHandoffPanel from '../components/ProductionHandoffPanel.jsx'
 import DesignCreativeBriefWorkspace from '../components/DesignCreativeBriefWorkspace.jsx'
 import DesignPrivateImagePanel from '../components/DesignPrivateImagePanel.jsx'
+import DesignVideoCapabilities from '../components/DesignVideoCapabilities.jsx'
 import _PrivateMemoryPanel from './PrivateMemoryPanel.jsx'
 import DesignAssetLibrary from '../components/DesignAssetLibrary.jsx'
 import DesignConnectionsPanel from '../components/DesignConnectionsPanel.jsx'
@@ -528,6 +529,7 @@ function DesignMediaPanel({ version, models, assets, jobs, onGenerateImage, onRe
       </button>
       {allowVideo && <span className="text-sm font-semibold text-slate-500">Video not configured</span>}
     </div>
+    {allowVideo && <DesignVideoCapabilities />}
     {pendingOperationKey && !activeJob && <p className="mt-2 text-xs text-amber-200">The last response was interrupted. “Reconcile request” reuses the same request identity and cannot create a second paid call.</p>}
     {!!versionJobs.length && <div className="mt-3 space-y-2">{versionJobs.map(job => {
       const retryable = job.status === 'failed' && job.failure_phase === 'provider' && !retryChildren.has(job.id)
