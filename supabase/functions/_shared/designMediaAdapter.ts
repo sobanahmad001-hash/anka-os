@@ -7,16 +7,29 @@ type Input = { prompt: string; duration: number; resolution: string; aspect_rati
   output_format: string; generate_audio: boolean }
 type Client = { subscribe(endpoint: string, options: { input: Input; withPolling: boolean }): Promise<unknown> }
 export type SdkFactory = (config: { credentials: string; maxRetries: number; timeout: number; baseURL: string }) => Client
-export type MediaReceipt = { state: 'pending' | 'provider_completed' | 'provider_failed' | 'safety_refused'; requestId: string; outputUrl?: string }
+export type MediaReceipt = { state: 'pending' | 'provider_completed' | 'provider_failed' | 'safety_refused'; requestId: string; statusUrl?: string; outputUrl?: string }
 const requestIdPattern = /^[a-zA-Z0-9_-]{1,128}$/
 
-function normalize(raw: unknown, expectedId?: string): MediaReceipt {
+function validateStatusUrl(value: unknown, requestId: string): string {
+  if (typeof value !== 'string') throw new Error('Invalid persisted status URL')
+  const url = new URL(value)
+  if (url.origin !== 'https://api.higgsfield.ai' || url.username || url.password
+    || url.search || url.hash || url.pathname !== `/requests/${requestId}/status`
+    || value !== url.href) throw new Error('Invalid persisted status URL')
+  return value
+}
+
+function normalize(raw: unknown, expectedId?: string, persistedStatusUrl?: string): MediaReceipt {
   if (!raw || typeof raw !== 'object') throw new Error('Invalid provider receipt')
   const row = raw as Record<string, unknown>
   if (typeof row.request_id !== 'string' || !requestIdPattern.test(row.request_id)
     || (expectedId && row.request_id !== expectedId)) throw new Error('Invalid provider receipt')
   const base = { requestId: row.request_id }
-  if (row.status === 'queued' || row.status === 'in_progress') return { ...base, state: 'pending' }
+  if (row.status === 'queued' || row.status === 'in_progress') {
+    // A recovery response cannot replace the immutable saved URL.
+    const statusUrl = validateStatusUrl(persistedStatusUrl ?? row.status_url, row.request_id)
+    return { ...base, state: 'pending', statusUrl }
+  }
   if (row.status === 'failed') return { ...base, state: 'provider_failed' }
   if (row.status === 'nsfw') return { ...base, state: 'safety_refused' }
   if (row.status !== 'completed') throw new Error('Invalid provider receipt')
@@ -61,16 +74,18 @@ export function createDesignMediaAdapter(createClient: SdkFactory, credential: s
         throw new Error('Media submission outcome unknown; reconcile before resubmission')
       }
     },
-    async status(requestId: string): Promise<MediaReceipt> {
+    // Both arguments must come from the server-owned immutable job receipt,
+    // never browser input. Validation is defense in depth, not authorization.
+    async status(requestId: string, persistedStatusUrl: string): Promise<MediaReceipt> {
       if (typeof requestId !== 'string' || !requestIdPattern.test(requestId)) throw new Error('Invalid provider request identity')
+      const statusUrl = validateStatusUrl(persistedStatusUrl, requestId)
       try {
-        // Reconstruct a trusted URL; never follow provider-supplied status_url.
-        const response = await read(`https://api.higgsfield.ai/requests/${requestId}/status`, {
+        const response = await read(statusUrl, {
           method: 'GET', headers: { Authorization: `Key ${credential}` },
           redirect: 'error', signal: AbortSignal.timeout(30000),
         })
         if (!response.ok) throw new Error('Status unavailable')
-        return normalize(await response.json(), requestId)
+        return normalize(await response.json(), requestId, statusUrl)
       } catch {
         throw new Error('Media status unavailable; retain the original request identity')
       }

@@ -529,7 +529,7 @@ function DesignMediaPanel({ version, models, assets, jobs, onGenerateImage, onRe
       </button>
       {allowVideo && <span className="text-sm font-semibold text-slate-500">Video not configured</span>}
     </div>
-    {allowVideo && <DesignVideoCapabilities />}
+    {allowVideo && <DesignVideoCapabilities directionVersionId={version.id} />}
     {pendingOperationKey && !activeJob && <p className="mt-2 text-xs text-amber-200">The last response was interrupted. “Reconcile request” reuses the same request identity and cannot create a second paid call.</p>}
     {!!versionJobs.length && <div className="mt-3 space-y-2">{versionJobs.map(job => {
       const retryable = job.status === 'failed' && job.failure_phase === 'provider' && !retryChildren.has(job.id)

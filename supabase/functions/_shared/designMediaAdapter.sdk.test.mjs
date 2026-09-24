@@ -19,13 +19,13 @@ axios.defaults.adapter = async config => {
   assert.equal(config.headers.Authorization, 'Key offline:placeholder')
   assert.equal(JSON.parse(config.data).resolution, '720p')
   if (fail) throw new axios.AxiosError('mock network loss', 'ECONNRESET', config)
-  return { data: { status: 'queued', request_id: 'offline-1' }, status: 200, statusText: 'OK', headers: {}, config }
+  return { data: { status: 'queued', request_id: 'offline-1', status_url: 'https://api.higgsfield.ai/requests/offline-1/status' }, status: 200, statusText: 'OK', headers: {}, config }
 }
 try {
   const { createHiggsfieldClient } = requireSdk('./dist/v2/index.js')
   const adapter = createDesignMediaAdapter(createHiggsfieldClient, 'offline:placeholder')
   const input = { prompt: 'Offline fixture', duration: 5, resolution: '720p', aspect_ratio: '16:9', output_format: 'mp4', generate_audio: false }
-  assert.deepEqual(await adapter.submit(input), { state: 'pending', requestId: 'offline-1' })
+  assert.deepEqual(await adapter.submit(input), { state: 'pending', requestId: 'offline-1', statusUrl: 'https://api.higgsfield.ai/requests/offline-1/status' })
   assert.equal(submissions, 1, 'No automatic polling')
   fail = true
   await assert.rejects(() => adapter.submit(input), /outcome unknown/)

@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase.js'
 import { invokeDesignFunction } from './designWorkshopRequest.js'
+import { getDesignVideoQuote } from './designVideoQuoteTransport.js'
 
 function requireOrganization(organizationId) {
   if (typeof organizationId !== 'string' || !organizationId.trim()) throw new TypeError('Active organization is required')
@@ -254,6 +255,7 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
     }
   },
 
+  getVideoQuote: input => getDesignVideoQuote(client, organizationId, input, signal),
   createPageFlow: input => invoke('create_page_flow', input),
   validateCreativeBrief: content => invoke('validate_creative_brief', { content }),
   saveCreativeBrief: input => invoke('save_creative_brief', input),
