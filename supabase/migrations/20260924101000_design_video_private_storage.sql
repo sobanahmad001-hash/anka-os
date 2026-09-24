@@ -51,6 +51,12 @@ begin
     or p_byte_length not between 12 and 52428800 then
     raise exception 'Exact checked private video object is required' using errcode='22023';
   end if;
+  perform 1 from storage.objects object
+    where object.bucket_id='design-generated-video'
+      and object.name=p_storage_path;
+  if not found then
+    raise exception 'Private video storage object is unavailable' using errcode='P0002';
+  end if;
   if job.status='ready' then
     if job.output_storage_path is distinct from p_storage_path
       or job.output_sha256 is distinct from p_sha256
@@ -60,12 +66,6 @@ begin
     end if;
     return jsonb_build_object('job_id',p_job_id,'status','ready',
       'storage_path',p_storage_path,'idempotent_replay',true);
-  end if;
-  perform 1 from storage.objects object
-    where object.bucket_id='design-generated-video'
-      and object.name=p_storage_path;
-  if not found then
-    raise exception 'Private video storage object is unavailable' using errcode='P0002';
   end if;
   update private.design_video_generation_jobs
     set status='ready',output_storage_path=p_storage_path,
