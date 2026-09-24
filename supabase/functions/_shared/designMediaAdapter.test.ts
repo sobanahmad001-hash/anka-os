@@ -54,3 +54,51 @@ Deno.test('status errors and mismatched receipt identity cannot become completed
   }
   assertThrows(() => createDesignMediaAdapter(() => ({ subscribe: async () => null }), ''), Error, 'unavailable')
 })
+
+Deno.test('unrecognized cancellation never implies a refund, safe retry or successful cancellation', async () => {
+  const { adapter, calls } = fixture({ status: 'cancelled', request_id: 'r1', cancel_url: 'https://attacker.example' })
+  await assertRejects(() => adapter.submit(input), Error, 'outcome unknown')
+  assertEquals(calls.length, 2)
+  assertEquals('cancel' in adapter, false)
+})
+
+Deno.test('moderation refusal drops output and untrusted provider metadata', async () => {
+  const { adapter } = fixture({ status: 'nsfw', request_id: 'r1', video: { url: 'https://example.com/refused.mp4' }, detail: 'private prompt' })
+  assertEquals(await adapter.submit(input), { state: 'safety_refused', requestId: 'r1' })
+})
+
+Deno.test('temporary recovery failure retains identity and next recovery never submits', async () => {
+  let reads = 0
+  let submissions = 0
+  const adapter = createDesignMediaAdapter(() => ({ subscribe: async () => { submissions++; return null } }), 'mock-key:mock-secret',
+    (() => {
+      reads++
+      if (reads === 1) throw new Error('timeout containing mock-secret')
+      return Promise.resolve(Response.json({ status: 'completed', request_id: 'same-request', video: { url: 'https://example.com/video.mp4' } }))
+    }) as typeof fetch)
+  const error = await assertRejects(() => adapter.status('same-request'), Error, 'retain the original')
+  assertEquals(error.message.includes('mock-secret'), false)
+  assertEquals((await adapter.status('same-request')).requestId, 'same-request')
+  assertEquals(submissions, 0)
+  assertEquals(reads, 2)
+})
+
+Deno.test('untyped invalid identities are rejected before HTTP and initialization errors are sanitized', async () => {
+  let reads = 0
+  const adapter = createDesignMediaAdapter(() => ({ subscribe: async () => null }), 'mock-key:mock-secret',
+    (() => { reads++; throw new Error('must not read') }) as typeof fetch)
+  for (const id of [null, undefined, 123, {}, '', '../r', 'r?x=1']) {
+    await assertRejects(() => adapter.status(id as string), Error, 'Invalid provider request identity')
+  }
+  assertEquals(reads, 0)
+  const error = assertThrows(() => createDesignMediaAdapter(() => { throw new Error('mock-secret') }, 'mock-key:mock-secret'), Error, 'client unavailable')
+  assertEquals(error.message.includes('mock-secret'), false)
+})
+
+Deno.test('malformed receipt cannot be accepted as a known outcome', async () => {
+  for (const raw of [null, {}, { status: 'queued' }, { status: 'queued', request_id: '../r' }, { status: 'completed', request_id: 'r1' }]) {
+    const { adapter, calls } = fixture(raw)
+    await assertRejects(() => adapter.submit(input), Error, 'outcome unknown')
+    assertEquals(calls.length, 2)
+  }
+})

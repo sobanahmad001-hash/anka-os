@@ -9,6 +9,7 @@ export default function DesignVideoCapabilities() {
   return <details className="mt-3 rounded-xl border border-white/10 p-3 text-xs text-slate-400">
     <summary className="cursor-pointer font-semibold text-slate-200">Video capabilities · generation unavailable</summary>
     <p className="mt-2">Higgsfield Seedance 2.5 supports 480p and 720p. Account access and the generation workflow are not verified. Google media is not configured.</p>
+    <p className="mt-2">Maximum USD $2 per generated video. No verified quote is available for these settings. Generation also requires a separately configured organization budget; the per-video limit does not authorize spending.</p>
     <div className="mt-3 flex flex-wrap gap-3">
       <label>Mode <select className="rounded bg-slate-900 p-2" value={mode} onChange={event => { setMode(event.target.value); setResolution('') }}>
         <option value="explore">Explore</option><option value="production">Production</option>

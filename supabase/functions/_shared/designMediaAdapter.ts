@@ -30,7 +30,7 @@ function normalize(raw: unknown, expectedId?: string): MediaReceipt {
 }
 
 function validate(input: Input): Input {
-  if (typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 12000
+  if (!input || typeof input !== 'object' || typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 12000
     || !Number.isInteger(input.duration) || input.duration < 4 || input.duration > 30
     || !['480p', '720p'].includes(input.resolution)
     || !['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'].includes(input.aspect_ratio)
@@ -45,7 +45,12 @@ function validate(input: Input): Input {
 
 export function createDesignMediaAdapter(createClient: SdkFactory, credential: string, read: typeof fetch = fetch) {
   if (typeof credential !== 'string' || !/^[^\s:]+:[^\s:]+$/.test(credential)) throw new Error('Media credential unavailable')
-  const client = createClient({ credentials: credential, maxRetries: 0, timeout: 30000, baseURL: 'https://api.higgsfield.ai' })
+  let client: Client
+  try {
+    client = createClient({ credentials: credential, maxRetries: 0, timeout: 30000, baseURL: 'https://api.higgsfield.ai' })
+  } catch {
+    throw new Error('Media client unavailable')
+  }
   return {
     async submit(input: Input): Promise<MediaReceipt> {
       const pinned = validate(input)
@@ -57,7 +62,7 @@ export function createDesignMediaAdapter(createClient: SdkFactory, credential: s
       }
     },
     async status(requestId: string): Promise<MediaReceipt> {
-      if (!requestIdPattern.test(requestId)) throw new Error('Invalid provider request identity')
+      if (typeof requestId !== 'string' || !requestIdPattern.test(requestId)) throw new Error('Invalid provider request identity')
       try {
         // Reconstruct a trusted URL; never follow provider-supplied status_url.
         const response = await read(`https://api.higgsfield.ai/requests/${requestId}/status`, {
