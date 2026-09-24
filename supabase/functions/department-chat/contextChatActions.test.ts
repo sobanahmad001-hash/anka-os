@@ -82,4 +82,3 @@ Deno.test('project conversation listing uses the guarded shared-reader RPC', asy
   assertEquals(calls.some(([kind, value]) => kind === 'rpc'
     && value === 'list_project_context_chat_conversations'), true)
 })
-
