@@ -16,6 +16,7 @@ import { previewDeliveryPackage, saveDeliveryPackage } from './packageDelivery.t
 import { requireFreshVideoQuote } from '../_shared/designVideoQuote.js'
 import { createDesignMediaAdapter } from '../_shared/designMediaAdapter.ts'
 import { fetchDesignVideoOutput } from '../_shared/designVideoOutput.ts'
+import { previewVideoPromotion, promotePrivateVideo } from './videoPromotion.ts'
 
 type Client = ReturnType<typeof createClient<any>>
 type ScopedClient = Client & { organizationId: string }
@@ -287,7 +288,8 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
     await callerContentRequestRoot(userClient, requestId)
     return { root: { kind: 'content_request', id: requestId }, requestedOrganizationId }
   }
-  if (action === 'preview_private_promotion' || action === 'promote_private_image') {
+  if (action === 'preview_private_promotion' || action === 'promote_private_image'
+    || action === 'preview_video_promotion' || action === 'promote_private_video') {
     return { root: { kind: 'engagement', id: requiredActionId(body.target_engagement_id, 'Target engagement') }, requestedOrganizationId }
   }
   if (['generate_private_image', 'get_private_image_job', 'reconcile_private_image_request', 'sign_private_image_job'].includes(action)) {
@@ -1562,25 +1564,33 @@ async function signMediaAssets(admin: ScopedClient, userClient: Client, body: Js
   return { signed_urls: signedUrls, expires_in: 300 }
 }
 
-async function signAssetVersions(admin: ScopedClient, userClient: Client, body: Json) {
+export async function signAssetVersions(admin: ScopedClient, userClient: Client, body: Json) {
   const versionIds = uniqueIds(body.version_ids)
   if (!versionIds.length) return { signed_urls: {}, expires_in: 300 }
   const { data: versions, error } = await userClient.from('design_asset_versions')
-    .select('id, storage_bucket, storage_path').in('id', versionIds)
+    .select('id, asset_id, mime_type, storage_bucket, storage_path').in('id', versionIds)
     .eq('organization_id', admin.organizationId)
   if (error || versions?.length !== versionIds.length) {
     throw Object.assign(new Error('One or more Design asset versions are not visible'), { status: 404 })
   }
-  const signable = versions.filter(version => version.storage_bucket === DESIGN_ASSET_BUCKET
-    && String(version.storage_path || '').startsWith(`${admin.organizationId}/`))
+  const signable = versions.filter(version => (version.storage_bucket === DESIGN_ASSET_BUCKET
+    && version.mime_type === 'image/png' && String(version.storage_path || '').startsWith(`${admin.organizationId}/`))
+    || (version.storage_bucket === 'design-generated-video'
+      && ['video/mp4', 'video/quicktime'].includes(version.mime_type)
+      && version.storage_path === `${admin.organizationId}/assets/${version.asset_id}/${version.id}/file.${version.mime_type === 'video/mp4' ? 'mp4' : 'mov'}`))
   if (signable.length !== versionIds.length) {
     throw Object.assign(new Error('One or more Design asset version objects are outside the configured bucket'), { status: 409 })
   }
-  const { data: signed, error: signedError } = await admin.storage.from(DESIGN_ASSET_BUCKET)
-    .createSignedUrls(signable.map(version => version.storage_path), 300)
-  if (signedError) throw signedError
+  const signedGroups = await Promise.all([DESIGN_ASSET_BUCKET, 'design-generated-video'].map(async bucket => {
+    const group = signable.filter(version => version.storage_bucket === bucket)
+    if (!group.length) return []
+    const { data, error: signedError } = await admin.storage.from(bucket)
+      .createSignedUrls(group.map(version => version.storage_path), 300)
+    if (signedError) throw signedError
+    return group.map((version, index) => [version.id, data?.[index]?.signedUrl || null])
+  }))
   return {
-    signed_urls: Object.fromEntries(signable.map((version, index) => [version.id, signed?.[index]?.signedUrl || null])),
+    signed_urls: Object.fromEntries(signedGroups.flat()),
     expires_in: 300,
   }
 }
@@ -2019,7 +2029,7 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       create_session: () => createSession(admin, body, user.id),
       validate_creative_brief: async () => validateCreativeBrief(body.content),
       save_creative_brief: () => saveCreativeBrief(admin, userClient, body, user.id),
-      freeze_creative_brief: () => freezeCreativeBrief(admin, body, user.id),
+      freeze_creative_brief: () => freezeCreativeBrief(admin, body, user.id, userClient),
       set_working_direction: () => setWorkingDirection(admin, body, user.id),
       generate_directions: () => generateDirections(admin, body, user.id),
       create_direction_revision: () => createDirectionRevision(admin, body, user.id),
@@ -2053,6 +2063,8 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       submit_asset_review: () => recordAssetReview(admin, userClient, body, user.id),
       decide_asset_review: () => recordAssetReview(admin, userClient, body, user.id),
       sign_asset_versions: () => signAssetVersions(admin, userClient, body),
+      preview_video_promotion: () => previewVideoPromotion(admin, userClient, body, user.id),
+      promote_private_video: () => promotePrivateVideo(admin, userClient, body, user.id),
       preview_delivery_package: () => previewDeliveryPackage(admin, userClient, body),
       save_delivery_package: () => saveDeliveryPackage(admin, userClient, body, user.id),
     }

@@ -4,6 +4,7 @@ import { canSubmitVideo, videoQuoteDisplay } from '../data/designVideoQuoteTrans
 import { designWorkshop } from '../data/designWorkshopRepository.js'
 import { integrations } from '../data/integrationRepository.js'
 import { useOrganization } from '../context/OrganizationContext.jsx'
+import DesignVideoPromotion from './DesignVideoPromotion.jsx'
 
 const JOB_PAGE_SIZE = 50
 const UNSETTLED_VIDEO_STATUSES = new Set(['queued', 'claimed', 'provider_pending', 'provider_completed', 'outcome_unknown'])
@@ -283,6 +284,7 @@ function ScopedDesignVideoCapabilities({ directionVersionId }) {
           {job.status === 'ready' && <button type="button" className="rounded border border-white/20 px-2 py-1 disabled:opacity-40" disabled={Boolean(jobsBusy)} onClick={() => actOnJob(job, 'preview')}>Open private preview</button>}
         </div>
         {preview?.jobId === job.id && <video className="mt-2 max-h-80 w-full" controls src={preview.url} />}
+        {job.status === 'ready' && <DesignVideoPromotion key={job.id} studio={studio} jobId={job.id} />}
       </div>)}
       {hasOlderJobs && <button type="button" className="mt-3 rounded border border-white/20 px-2 py-1 disabled:opacity-40"
         disabled={Boolean(jobsBusy)} onClick={loadOlderJobs}>Load older private jobs</button>}
