@@ -4,7 +4,7 @@ import { canSubmitVideo, getDesignVideoQuote, videoQuoteDisplay } from './design
 const input = { direction_version_id: 'version-1', duration_seconds: 5, resolution: '720p', aspect_ratio: '16:9', output_format: 'mp4', generate_audio: false }
 const now = Date.parse('2026-09-24T12:00:00Z')
 const quote = { ...input, id: 'quote-1', provider: 'higgsfield', model_id: 'bytedance/seedance-2.5/text-to-video', currency: 'USD', max_charge_microusd: 1440001, verified_at: '2026-09-24T11:00:00Z', valid_until: '2026-09-24T13:00:00Z' }
-const response = { quote, organization_cap_configured: true, paid_execution_enabled: false }
+const response = { quote, organization_cap_configured: true, spend_tracking_configured: true, spend_guard_mode: 'local_monthly_cap', paid_execution_enabled: false }
 test('quote transport pins organization and exact parameters without forwarding prices or actions', async () => {
   let received
   const signal = new AbortController().signal
@@ -24,9 +24,9 @@ test('exact quote rounds displayed maximum upward and reports the server executi
   assert.match(result.message, /disabled/)
   assert.equal(result.paidExecutionEnabled, false)
 })
-test('missing quote and missing organization cap remain separate states', () => {
-  assert.deepEqual(videoQuoteDisplay({ ...response, quote: null, organization_cap_configured: false }, input, now), { status: 'missing', capMissing: true, message: 'No verified quote is available for these exact settings.' })
-  assert.equal(videoQuoteDisplay({ ...response, organization_cap_configured: false }, input, now).status, 'quoted')
+test('missing quote and missing spend tracking remain separate states', () => {
+  assert.deepEqual(videoQuoteDisplay({ ...response, quote: null, organization_cap_configured: false, spend_tracking_configured: false, spend_guard_mode: null }, input, now), { status: 'missing', spendTrackingMissing: true, spendGuardMode: null, message: 'No verified quote is available for these exact settings.' })
+  assert.equal(videoQuoteDisplay({ ...response, organization_cap_configured: false, spend_tracking_configured: false, spend_guard_mode: null }, input, now).status, 'quoted')
 })
 test('expired, over-limit and mismatched responses are not quoted', () => {
   assert.equal(videoQuoteDisplay(response, input, Date.parse(quote.valid_until)).status, 'expired')
@@ -41,9 +41,12 @@ test('video submission remains closed unless every exact local readiness and con
     secret_configured: true, secret_name: 'ANKA_HIGGSFIELD_PRIMARY' }
   const ready = { display, connection, prompt: 'Create one short scene', supported: true, spendConfirmed: true }
   assert.equal(canSubmitVideo(ready), true)
+  assert.equal(canSubmitVideo({ ...ready, display: videoQuoteDisplay({ ...response, paid_execution_enabled: true,
+    organization_cap_configured: false, spend_guard_mode: 'provider_managed' }, input, now) }), true)
+  assert.equal(videoQuoteDisplay({ ...response, spend_tracking_configured: true, spend_guard_mode: null }, input, now).status, 'invalid')
   for (const blocked of [
     { display: videoQuoteDisplay(response, input, now) },
-    { display: videoQuoteDisplay({ ...response, paid_execution_enabled: true, organization_cap_configured: false }, input, now) },
+    { display: videoQuoteDisplay({ ...response, paid_execution_enabled: true, organization_cap_configured: false, spend_tracking_configured: false, spend_guard_mode: null }, input, now) },
     { display: videoQuoteDisplay({ ...response, paid_execution_enabled: true }, input, Date.parse(quote.valid_until)) },
     { connection: { ...connection, organization_level: false } },
     { connection: { ...connection, secret_configured: false } },

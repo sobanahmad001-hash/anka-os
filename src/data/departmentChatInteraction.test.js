@@ -57,7 +57,7 @@ function repository(streams, savedBody = '', searches = []) {
       searches.push(input)
       return { items: input.query === 'no match' ? [] : [conversation(input.query ? 'matching-conversation' : 'conversation-' + input.engagement_id)], next_cursor: null }
     },
-    getCapabilities: async () => ({ provider: 'openai', model_id: 'gpt-test', approved_models: [{ configuration_id: 'configuration-1', provider: 'openai', model_id: 'gpt-test', display_name: 'Test', is_default: true }], attachments: { supported: false } }),
+    getCapabilities: async () => ({ provider: 'openai', model_id: 'gpt-test', answer_readiness: { paid_execution_enabled: true, spend_tracking_configured: true, spend_guard_mode: 'local_monthly_cap', model_price_available: [{ configuration_id: 'configuration-1', fresh_price_available: true }] }, approved_models: [{ configuration_id: 'configuration-1', provider: 'openai', model_id: 'gpt-test', display_name: 'Test', is_default: true }], attachments: { supported: false } }),
     getConversation: async (_d, input) => ({ conversation: conversation(input.conversation_id), messages: savedBody ? [{ id: 'assistant-1', role: 'assistant', status: 'completed', body: savedBody, proposal: null }] : [], sharing: { can_manage: false, recipients: [] } }),
     listAttachments: async () => [],
     listSourceVersions: async () => [],
@@ -667,5 +667,34 @@ for (const action of ['Save to original and continue', 'Discard and continue']) 
     await act(async () => root.unmount())
     await act(async () => release({}))
     assert.deepEqual(calls, [])
+  })
+}
+for (const blocked of [
+  { paid_execution_enabled: false, spend_tracking_configured: true, fresh_price_available: true, message: 'Workshop AI answers are currently off.' },
+  { paid_execution_enabled: true, spend_tracking_configured: false, fresh_price_available: true, message: 'Organization spend tracking is not configured.' },
+  { paid_execution_enabled: true, spend_tracking_configured: true, fresh_price_available: false, message: 'A fresh verified price for this exact model is unavailable.' },
+]) {
+  test('Workshop answer remains unavailable when ' + blocked.message, async t => {
+    const { container, ScopedDepartmentChat } = await setup(t)
+    const repo = repository([])
+    const original = repo.getCapabilities
+    repo.getCapabilities = async (...args) => {
+      const capabilities = await original(...args)
+      return { ...capabilities, answer_readiness: {
+        paid_execution_enabled: blocked.paid_execution_enabled,
+        spend_tracking_configured: blocked.spend_tracking_configured,
+        spend_guard_mode: blocked.spend_tracking_configured ? 'local_monthly_cap' : null,
+        model_price_available: [{ configuration_id: 'configuration-1', fresh_price_available: blocked.fresh_price_available }],
+      } }
+    }
+    globalThis.__departmentChatTestRepository = repo
+    const root = createRoot(container)
+    t.after(() => { try { root.unmount() } catch {} })
+    await act(async () => root.render(createElement(ScopedDepartmentChat, props('a', new AbortController().signal))))
+    await flush()
+    await value(nodes(container, 'textarea')[0], 'Explain')
+    await authorize(container)
+    assert.ok(container.textContent.includes(blocked.message))
+    assert.equal(byText(container, 'button', 'Ask configured AI').disabled, true)
   })
 }

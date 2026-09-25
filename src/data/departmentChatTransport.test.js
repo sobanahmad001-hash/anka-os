@@ -83,7 +83,7 @@ test('context conversation and sharing actions use the selected organization and
   await repo.appendContextHumanMessage({ organization_id: 'A', conversation_id: 'thread-B', client_request_id: 'request-B', message: 'Save this idea' }, scope)
   await repo.getProjectContextSharing({ organization_id: 'A', conversation_id: 'thread-B' }, scope)
   await repo.setProjectContextSharing({ organization_id: 'A', conversation_id: 'thread-B', recipient_ids: ['recipient-B'] }, scope)
-  await repo.getContextChatReadiness(scope)
+  await repo.getContextChatReadiness({ model_configuration_id: 'model-B' }, scope)
   assert.deepEqual(calls.map(call => call.body.action), [
     'list_context_conversations', 'create_context_conversation', 'get_context_conversation', 'append_context_human_message',
     'get_project_context_sharing', 'set_project_context_sharing', 'get_context_chat_readiness',
@@ -97,6 +97,7 @@ test('context conversation and sharing actions use the selected organization and
   assert.equal(calls[0].body.offset, 50)
   assert.equal(calls[2].body.before_sequence, 101)
   assert.equal(calls[3].body.client_request_id, 'request-B')
+  assert.equal(calls[6].body.model_configuration_id, 'model-B')
 })
 
 test('official read narrows to selected organization and forwards cancellation', async () => {

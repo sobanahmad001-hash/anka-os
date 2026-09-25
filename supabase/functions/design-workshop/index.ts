@@ -1750,7 +1750,8 @@ export async function getDesignVideoQuote(admin: ScopedClient, body: Json, actor
   if (error || !data || typeof data !== 'object') {
     throw Object.assign(new Error('Video price readiness is unavailable'), { status: 503 })
   }
-  const readiness = data as { quote?: unknown, organization_cap_configured?: unknown }
+  const readiness = data as { quote?: unknown, organization_cap_configured?: unknown,
+    spend_tracking_configured?: unknown, spend_guard_mode?: unknown }
   if (readiness.quote) {
     requireFreshVideoQuote({
       duration, resolution, aspect_ratio: aspectRatio,
@@ -1760,6 +1761,9 @@ export async function getDesignVideoQuote(admin: ScopedClient, body: Json, actor
   return {
     quote: readiness.quote || null,
     organization_cap_configured: readiness.organization_cap_configured === true,
+    spend_tracking_configured: readiness.spend_tracking_configured === true,
+    spend_guard_mode: ['local_monthly_cap', 'provider_managed'].includes(String(readiness.spend_guard_mode))
+      ? readiness.spend_guard_mode : null,
     paid_execution_enabled: Deno.env.get('DESIGN_VIDEO_PAID_EXECUTION_ENABLED') === 'true',
   }
 }
@@ -1932,8 +1936,8 @@ export async function generateDesignVideo(admin: ScopedClient, body: Json, actor
   }
   const readiness = await getDesignVideoQuote(admin, body, actorId)
   const quote = readiness.quote as Json | null
-  if (!quote || quote.id !== quoteId || readiness.organization_cap_configured !== true) {
-    throw Object.assign(new Error('Exact quote and organization cap are required'), { status: 503 })
+  if (!quote || quote.id !== quoteId || readiness.spend_tracking_configured !== true) {
+    throw Object.assign(new Error('Exact quote and explicit spend tracking are required'), { status: 503 })
   }
   requireFreshVideoQuote({ duration: body.duration_seconds, resolution: body.resolution,
     aspect_ratio: body.aspect_ratio, output_format: body.output_format,

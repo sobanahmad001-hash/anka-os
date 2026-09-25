@@ -234,6 +234,24 @@ function selectedOrganizationFixture() {
     async rpc(name: string, args: any) {
       rpcCalls.push({ name, args })
       events.push('rpc:' + name)
+      if (name === 'assert_context_chat_organization_model') {
+        const model = (rows.context_chat_organization_models || []).find(row =>
+          row.id === args.p_configuration_id && row.organization_id === args.p_organization_id
+          && row.revoked_at === null)
+        const connection = (rows.integration_connections || []).find(row =>
+          row.id === model?.connector_connection_id && row.organization_id === args.p_organization_id
+          && row.status === 'verified' && row.archived_at === null)
+        const mappingExists = ['integration_connection_engagements', 'integration_connection_departments']
+          .some(table => (rows[table] || []).some(row =>
+            row.connection_id === connection?.id && row.organization_id === args.p_organization_id))
+        const verifiedModels = connection?.public_config?.verified_model_ids
+        const listed = connection?.public_config?.model_id === model?.model_id
+          || (Array.isArray(verifiedModels) && verifiedModels.includes(model?.model_id))
+        return model && connection && !mappingExists && listed
+          ? { data: null, error: null }
+          : { data: null, error: { code: '23514', message: 'Selected model is unavailable' } }
+      }
+      if (name === 'get_ai_spend_guard_readiness') return { data: { spend_guard_mode: null, spend_tracking_configured: false, local_monthly_cap_configured: false, external_provider_limit_verified: false }, error: null }
       if (name === 'assert_department_chat_model_dispatch' && modelDispatchError) {
         return { data: null, error: modelDispatchError }
       }
@@ -454,7 +472,11 @@ Deno.test('authenticated private chat readiness reports disabled paid execution 
   const fixture = selectedOrganizationFixture()
   const result = await fixture.request({ action: 'get_context_chat_readiness', organization_id: 'B' })
   assertEquals(result.status, 200)
-  assertEquals((await result.json()).data.paid_execution_enabled, false)
+  const readiness = (await result.json()).data
+  assertEquals(readiness.paid_execution_enabled, false)
+  assertEquals(readiness.spend_tracking_configured, false)
+  assertEquals(readiness.spend_guard_mode, null)
+  assertEquals(readiness.model_status, 'model_not_selected')
   assertEquals(fixture.providerCalls(), 0)
 })
 
@@ -1705,4 +1727,55 @@ Deno.test('P9 stopping local observation does not cancel upstream durable finali
   await Promise.all(background)
   assertEquals(completed, true)
   assertEquals(unknown, false)
+})
+Deno.test('private chat readiness reports selected model credential and price without a provider call', async () => {
+  const fixture = selectedOrganizationFixture()
+  const secretName = 'ANKA_OPENAI_OFFLINE_READINESS_TEST'
+  const priceName = 'N6_OPENAI_MODEL_PRICING_JSON'
+  const previousSecret = Deno.env.get(secretName)
+  const previousPrice = Deno.env.get(priceName)
+  fixture.rows.integration_connections.push({ id: 'private-connection-B', organization_id: 'B',
+    provider: 'openai', status: 'verified', archived_at: null, secret_name: secretName,
+    public_config: { model_id: 'offline' } })
+  fixture.rows.context_chat_organization_models = [{ id: 'private-model-B', organization_id: 'B',
+    connector_connection_id: 'private-connection-B', model_id: 'offline', revoked_at: null }]
+  try {
+    Deno.env.delete(secretName); Deno.env.delete(priceName)
+    const read = async (organizationId: string, modelId: string) => {
+      const response = await fixture.request({ action: 'get_context_chat_readiness',
+        organization_id: organizationId, model_configuration_id: modelId })
+      assertEquals(response.status, 200)
+      return (await response.json()).data
+    }
+    assertEquals((await read('B', 'private-model-B')).model_status, 'credential_unavailable')
+    Deno.env.set(secretName, 'offline-fixture-only')
+    assertEquals((await read('B', 'private-model-B')).model_status, 'price_unavailable')
+    Deno.env.set(priceName, JSON.stringify([{ model_id: 'offline', provider: 'openai',
+      verified_at: new Date().toISOString(), source_url: 'https://developers.openai.com/api/docs/pricing',
+      input_usd_per_million: 1, cached_input_usd_per_million: 1,
+      cache_write_usd_per_million: 1, output_usd_per_million: 1 }]))
+    const ready = await read('B', 'private-model-B')
+    assertEquals(ready.model_status, 'configured')
+    fixture.rows.integration_connection_engagements = [{ organization_id: 'B',
+      connection_id: 'private-connection-B', engagement_id: 'engagement-B' }]
+    assertEquals((await read('B', 'private-model-B')).model_status, 'model_unavailable')
+    fixture.rows.integration_connection_engagements = []
+    fixture.rows.integration_connection_departments = [{ organization_id: 'B',
+      connection_id: 'private-connection-B', department_id: 'design' }]
+    assertEquals((await read('B', 'private-model-B')).model_status, 'model_unavailable')
+    fixture.rows.integration_connection_departments = []
+    const privateConnection = fixture.rows.integration_connections.find(row => row.id === 'private-connection-B')
+    privateConnection.public_config = { model_id: 'different-model' }
+    assertEquals((await read('B', 'private-model-B')).model_status, 'model_unavailable')
+    privateConnection.public_config = { model_id: 'offline' }
+    assertEquals(ready.paid_execution_enabled, false)
+    assertEquals(ready.spend_tracking_configured, false)
+    assertEquals((await read('A', 'private-model-B')).model_status, 'model_unavailable')
+    assertEquals(fixture.providerCalls(), 0)
+  } finally {
+    if (previousSecret === undefined) Deno.env.delete(secretName)
+    else Deno.env.set(secretName, previousSecret)
+    if (previousPrice === undefined) Deno.env.delete(priceName)
+    else Deno.env.set(priceName, previousPrice)
+  }
 })
