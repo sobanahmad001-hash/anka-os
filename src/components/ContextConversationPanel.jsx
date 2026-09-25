@@ -15,11 +15,11 @@ export default function ContextConversationPanel({ contextKind, departmentId = '
   if (!user?.id || !activeOrganizationId || requestSignal.aborted) return null
   const identity = [user.id, activeOrganizationId, scopeRevision, contextKind, departmentId, projectId].join(':')
   return <ScopedContextConversation key={identity} contextKind={contextKind} departmentId={departmentId}
-    projectId={projectId} label={label} organizationId={activeOrganizationId} signal={requestSignal}
+    projectId={projectId} label={label} organizationId={activeOrganizationId} user={user} signal={requestSignal}
     onAccessError={handleOrganizationAccessError} />
 }
 
-function ScopedContextConversation({ contextKind, departmentId, projectId, label, organizationId, signal, onAccessError }) {
+function ScopedContextConversation({ contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError }) {
   const scope = useMemo(() => ({ context_kind: contextKind, ...(departmentId ? { department_id: departmentId } : {}),
     ...(projectId ? { project_id: projectId } : {}) }), [contextKind, departmentId, projectId])
   const requestScope = useMemo(() => ({ organizationId, signal }), [organizationId, signal])
