@@ -2,8 +2,9 @@
 
 ## Candidate, not release authorization
 
-Branch: `feat/design-exact-media-20260925`, based on released `4797a750`.
-Prior frozen `a4d4b7a83b82bab70aaa06d972f2b1a8693dd72e` remains on its original branch; it is not overwritten or bundled here.
+Integrated branch: `feat/design-exact-media-main-20260925`, based on released `6607fcdbc4f198677358551181f2a76716522a6f` (PR254).
+Worktree: `C:/Users/Soban/Documents/ChatGPT/Anka Sphere/anka-os-design-exact-media-20260925`.
+Original candidate `6c51594` and correction `984f3b6` are preserved on `feat/design-exact-media-20260925`. Prior frozen `a4d4b7a83b82bab70aaa06d972f2b1a8693dd72e` is preserved and its already released private-image behavior is unchanged by this package.
 
 Master has explicitly held the engagement-lifecycle restriction pending user policy choice. This candidate follows the closest existing Design image-draft contract: current source access, accessible target, matching organization/brand, and active Design service/catalog. It does **not** add a `planning|active` engagement restriction. No global list, legacy image, N1, approval, or release rules changed. UI says “context with active Design service.” Do not release pending master's decision and independent QA.
 
@@ -26,7 +27,7 @@ Created through CLI `migration new` as `20260925080013` (host clock), then expli
 ## Verification on this candidate
 
 - Full Design Edge folder: **75 passed, 0 failed**, Deno typechecking included.
-- Focused Node suite: **46 passed, 0 failed**, including mounted consent/retry/remount, exact image/video selection, legacy image expiry/comparison, brief recovery, and transport isolation.
+- Integrated focused Node suite: **52 passed, 0 failed**, including mounted consent/retry/remount, exact image/video selection, video download labels, legacy image expiry/comparison, brief recovery, transport isolation, and released private-image promotion regressions.
 - `scripts/verify-design-exact-media.mjs`: **passed** using installed PGlite 0.5.8 with real pgcrypto, in-memory only. It loads actual canonical asset/video table definitions and the new migration, with minimal surrounding schema fixtures. Covers migration parsing, image/video references, typed ID/scope failures, immutable links/receipts/versions, object prerequisites, owner/service revocation, preparation-to-completion suspension, preserved receipt/object, same-key recovery, conflicting target reuse, no duplicate drafts, ACLs, and source RLS.
 - Vite production build: **passed**, existing large-chunk warning.
 - Scoped ESLint: **0 errors, 10 JSX-reference warnings**. `git diff --check`: passed.
@@ -50,4 +51,6 @@ node scripts/verify-design-exact-media.mjs
 .\node_modules\.bin\vite.cmd build
 ```
 
-No production data, fixtures, provider calls, deployment, PR, or release occurred. Existing CLI update metadata in `supabase/.temp/cli-latest` is deliberately excluded from the candidate commit. Master/build management own integration and release; QA receives the exact commit separately.
+The integrated 52-test run also includes `src/data/designPrivatePromotionMounted.test.js` from released main. The migration and SQL fixture were byte-for-byte unchanged by integration from `984f3b6`; the complete offline fixture had passed there, including the reproduced legacy freeze interleaving and corrected outcomes.
+
+No production data, fixtures, provider calls, deployment, PR, or release occurred. Existing CLI update metadata remains untouched in the original worktree; the integrated worktree is clean. Master/build management own integration and release; QA receives the exact commit separately.
