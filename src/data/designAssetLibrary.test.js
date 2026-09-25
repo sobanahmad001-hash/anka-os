@@ -3,6 +3,33 @@ import test from 'node:test'
 import { buildDesignAssetRows, designAssetAccessState, designAssetArchiveEligibility, designAssetLibraryContextKey, designAssetLibraryReducer, designAssetSourceFocus, filterDesignAssetRows, initialDesignAssetLibraryState } from './designAssetLibrary.js'
 
 const now = Date.parse('2026-09-11T12:00:00.000Z')
+
+test('reuse discovery searches authorized metadata and never treats ready or older approval as current approval', () => {
+  const data = { designAssets: [{ id: 'a', name: 'Launch hero', placement: 'Homepage', rights_notes: 'Licensed for autumn campaign' }],
+    designAssetVersions: [
+      { id: 'v1', asset_id: 'a', version_number: 1, lifecycle_status: 'approved', source_kind: 'upload' },
+      { id: 'v2', asset_id: 'a', version_number: 2, lifecycle_status: 'draft', source_kind: 'upload' },
+    ], mediaAssets: [{ id: 'legacy', media_type: 'image', status: 'ready' }] }
+  const rows = buildDesignAssetRows(data)
+  assert.deepEqual(filterDesignAssetRows(rows, { query: 'HOMEPAGE autumn', review: 'draft' }).map(row => row.id), ['a'])
+  assert.deepEqual(filterDesignAssetRows(rows, { query: 'v2' }).map(row => row.assetVersionId), ['v2'])
+  assert.equal(filterDesignAssetRows(rows, { review: 'approved' }).length, 0)
+  assert.deepEqual(filterDesignAssetRows(rows, { review: 'unrecorded' }).map(row => row.id), ['legacy'])
+  assert.equal(filterDesignAssetRows(rows, { query: 'another project' }).length, 0)
+  assert.equal(rows.find(row => row.id === 'a').rightsNotes, 'Licensed for autumn campaign')
+  data.designAssetVersions[1].lifecycle_status = 'approved'
+  assert.deepEqual(filterDesignAssetRows(buildDesignAssetRows(data), { review: 'approved' }).map(row => row.assetVersionId), ['v2'])
+})
+
+test('reuse search preserves typing spaces, bounds input and resets with context', () => {
+  let state = initialDesignAssetLibraryState('a')
+  state = designAssetLibraryReducer(state, { type: 'set_filter', name: 'query', value: 'hero ' })
+  assert.equal(state.filters.query, 'hero ')
+  state = designAssetLibraryReducer(state, { type: 'set_filter', name: 'review', value: 'approved' })
+  assert.deepEqual(designAssetLibraryReducer(state, { type: 'context_changed', contextKey: 'b' }), initialDesignAssetLibraryState('b'))
+  assert.deepEqual(designAssetLibraryReducer(state, { type: 'reset_filters' }).filters, initialDesignAssetLibraryState().filters)
+  assert.equal(designAssetLibraryReducer(state, { type: 'set_filter', name: 'query', value: 'x'.repeat(300) }).filters.query.length, 240)
+})
 const workspace = () => ({
   sessions: [{ id: 'session-a', output_goal: 'Launch assets' }], directions: [{ id: 'direction-a', session_id: 'session-a' }],
   directionVersions: [{ id: 'version-a', direction_id: 'direction-a', version_number: 3, content: { title: 'Quiet confidence' } }], experimentalDirectionVersions: [],
