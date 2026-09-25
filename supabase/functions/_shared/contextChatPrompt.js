@@ -1,4 +1,5 @@
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+import { safeText } from './contextChatRecordSummary.js'
 const fail = message => Object.assign(new Error(message), { status: 409 })
 const requiredId = (value, label) => {
   if (typeof value !== 'string' || !uuid.test(value)) throw fail(`Valid ${label} is required`)
@@ -55,14 +56,68 @@ export function requireOwnerAuthoredPromptTurns(rows, ownerId, evidence = {}) {
   }
 }
 
+const count = value => Number.isSafeInteger(value) && value >= 0 && value <= 50 ? value : 0
+const taskStates = new Set(['backlog', 'ready', 'in_progress', 'blocked',
+  'ready_for_review', 'changes_required', 'done', 'cancelled', 'unknown'])
+const workStates = new Set(['not_started', 'in_progress', 'blocked', 'done', 'unknown'])
+const reviewStates = new Set(['in_production', 'ready_for_internal_review',
+  'changes_required', 'ready_for_client_review', 'client_reviewing',
+  'revision_requested', 'client_approved', 'delivered_published', 'superseded', 'unknown'])
+const statusCounts = (value, allowed) => Object.fromEntries(Object.entries(value || {})
+  .filter(([key, amount]) => allowed.has(key) && Number.isSafeInteger(amount)
+    && amount >= 0 && amount <= 50).slice(0, 12))
+const workItem = (item, allowed) => ({
+  title: safeText(item?.title, 160),
+  status: allowed.has(item?.status) ? item.status : 'unknown',
+  due: /^\d{4}-\d{2}-\d{2}$/.test(item?.due || '') ? item.due : null,
+  assignee: safeText(item?.assignee, 80),
+})
+function approvedWorkSummary(summary) {
+  if (!summary || !['selected_project', 'current_organization_visible_project_sample']
+    .includes(summary.scope) || !Array.isArray(summary.projects)) {
+    throw fail('Authorized work summary is unavailable')
+  }
+  return {
+    scope: summary.scope,
+    as_of: typeof summary.as_of === 'string' && !Number.isNaN(Date.parse(summary.as_of))
+      ? new Date(summary.as_of).toISOString() : null,
+    coverage: {
+      visible_projects_scanned: count(summary.coverage?.visible_projects_scanned),
+      projects_included: count(summary.coverage?.projects_included),
+      more_visible_projects_possible: summary.coverage?.more_visible_projects_possible === true,
+      projects_omitted_from_bounded_summary: summary.coverage?.projects_omitted_from_bounded_summary === true,
+      assignee_labels_available: summary.coverage?.assignee_labels_available === true,
+      counts_describe_recent_visible_samples_only: true,
+    },
+    projects: summary.projects.slice(0, 4).map(row => ({
+      name: safeText(row?.name, 160), status: safeText(row?.status, 40),
+      health: safeText(row?.health, 40),
+      sample: {
+        project_tasks: count(row?.sample?.project_tasks),
+        engagement_work_items: count(row?.sample?.engagement_work_items),
+        linked_engagement: row?.sample?.linked_engagement === true,
+        more_records_possible: row?.sample?.more_records_possible === true,
+        project_task_statuses: statusCounts(row?.sample?.project_task_statuses, taskStates),
+        engagement_work_item_statuses: statusCounts(row?.sample?.engagement_work_item_statuses, workStates),
+      },
+      project_tasks: Array.isArray(row?.project_tasks)
+        ? row.project_tasks.slice(0, 6).map(item => workItem(item, taskStates)) : [],
+      engagement_work_items: Array.isArray(row?.engagement_work_items)
+        ? row.engagement_work_items.slice(0, 6).map(item => workItem(item, workStates)) : [],
+      latest_visible_review_states_in_sample: statusCounts(row?.latest_visible_review_states_in_sample, reviewStates),
+    })),
+  }
+}
+
 /** @param {Record<string, unknown>} organization
- * @param {Record<string, unknown> | null} [project] */
-export function canonicalOpenAiContext(organization, project = null) {
-  const field = (value, max) => typeof value === 'string' ? value.slice(0, max) : ''
-  if (!organization || !field(organization.name, 200).trim()) {
+ * @param {Record<string, unknown> | null} [project]
+ * @param {Record<string, unknown> | null} [workSummary] */
+export function canonicalOpenAiContext(organization, project = null, workSummary = null) {
+  const field = (value, max) => safeText(value, max)
+  if (!organization || !field(organization.name, 200)) {
     throw fail('Current organization name is required for OpenAI grounding')
   }
-  if (project && !field(project.name, 200).trim()) {
+  if (project && !field(project.name, 200)) {
     throw fail('Current project name is required for OpenAI grounding')
   }
   return {
@@ -75,6 +130,7 @@ export function canonicalOpenAiContext(organization, project = null) {
       scope: field(project.scope_statement, 1000),
       exclusions: field(project.exclusions, 1000),
     } } : {}),
+    ...(workSummary ? { work_summary: approvedWorkSummary(workSummary) } : {}),
   }
 }
 

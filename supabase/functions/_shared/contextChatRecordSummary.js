@@ -14,7 +14,7 @@ const REVIEW_STATES = new Set(['in_production', 'ready_for_internal_review',
   'changes_required', 'ready_for_client_review', 'client_reviewing',
   'revision_requested', 'client_approved', 'delivered_published', 'superseded'])
 
-function safeText(value, limit) {
+export function safeText(value, limit) {
   return (typeof value === 'string' ? value : '')
     .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '[redacted contact]')
     .replace(/https?:\/\/\S+/gi, '[redacted link]')
