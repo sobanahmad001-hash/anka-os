@@ -184,13 +184,39 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
     }
     if (!/^[A-Za-z0-9._-]{1,120}$/.test(configuration.model_id)) throw fail('Verified model is invalid')
     const { data: history, error: historyError } = await admin.from('department_chat_messages')
-      .select('id,author_id,role,body,status,sequence')
+      .select('id,conversation_id,organization_id,owner_id,author_id,role,body,status,sequence,ai_run_id,in_reply_to_message_id,client_request_id')
       .eq('conversation_id', conversation.id).eq('organization_id', organizationId)
       .eq('status', 'completed').lte('sequence', source.sequence)
       .order('sequence', { ascending: false }).limit(12)
     if (historyError) throw fail('Conversation context is unavailable')
     const orderedHistory = (history || []).reverse()
-    requireOwnerAuthoredPromptTurns(orderedHistory, user.id)
+    const assistantTurns = orderedHistory.filter(row => row.role === 'assistant')
+    let sourceTurns: Json[] = []
+    let auditedRuns: Json[] = []
+    if (assistantTurns.length) {
+      const sourceIds = assistantTurns.map(row => row.in_reply_to_message_id)
+      const runIds = assistantTurns.map(row => row.ai_run_id)
+      if (sourceIds.some(id => typeof id !== 'string' || !uuid.test(id))
+        || runIds.some(id => typeof id !== 'string' || !uuid.test(id))) {
+        throw fail('Unaudited assistant turn is unavailable')
+      }
+      const [{ data: sources, error: sourceError }, { data: runs, error: runError }] =
+        await Promise.all([
+          admin.from('department_chat_messages')
+            .select('id,conversation_id,organization_id,owner_id,author_id,role,status,sequence')
+            .eq('conversation_id', conversation.id).eq('organization_id', organizationId)
+            .in('id', sourceIds),
+          admin.from('ai_runs')
+            .select('id,organization_id,user_id,status,capability,context_chat_conversation_id,context_chat_message_id,context_manifest,output_text')
+            .eq('organization_id', organizationId).in('id', runIds),
+        ])
+      if (sourceError || runError) throw fail('Audited conversation history is unavailable')
+      sourceTurns = sources || []
+      auditedRuns = runs || []
+    }
+    requireOwnerAuthoredPromptTurns(orderedHistory, user.id, {
+      conversationId: conversation.id, organizationId, sourceTurns, auditedRuns,
+    })
     let canonicalContext = null
     if (includeCanonicalContext) {
       const organization = await one(userClient.from('organizations')

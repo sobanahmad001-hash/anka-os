@@ -385,6 +385,15 @@ export async function handleRequest(req: Request, dependencies: {
         }
       }).filter((connection: Record<string, any>) => !departmentId || connection.department_ids.includes(departmentId))
       const connectionIds: string[] = visibleConnections.map((connection: Record<string, any>) => String(connection.id))
+      let engagementConnectionIds = new Set<string>()
+      if (connectionIds.length) {
+        const { data: engagementMappings, error: engagementMappingError } = await adminClient
+          .from('integration_connection_engagements').select('connection_id')
+          .eq('organization_id', selectedOrganizationId).in('connection_id', connectionIds)
+        if (engagementMappingError) throw engagementMappingError
+        engagementConnectionIds = new Set((engagementMappings || []).map(
+          (mapping: { connection_id: string }) => String(mapping.connection_id)))
+      }
       let observations = new Map<string, Record<string, unknown>>()
       if (connectionIds.length) {
         const latestEvents = await Promise.all(connectionIds.map(async connectionId => {
@@ -401,6 +410,8 @@ export async function handleRequest(req: Request, dependencies: {
         organization_id: selectedOrganizationId,
         connections: visibleConnections.map((connection: Record<string, any>) => ({
           ...connection,
+          organization_level: connection.department_ids.length === 0
+            && !engagementConnectionIds.has(String(connection.id)),
           health_observation: currentConnectionHealthObservation(connection, observations.get(String(connection.id))),
         })),
         can_manage: isLeader,

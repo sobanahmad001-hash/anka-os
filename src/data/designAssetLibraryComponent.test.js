@@ -149,7 +149,7 @@ test('mounted library uploads an exact PNG draft payload and clears the form on 
   await act(async () => root.render(createElement(DesignAssetLibrary, props)))
   await act(async () => byText(environment.container, 'button', 'Upload asset').dispatchEvent(new TestEvent('click', { bubbles: true })))
   assert.match(environment.container.textContent, /Authorized draft upload/)
-  const fileInput = elements(environment.container, 'input')[0]
+  const fileInput = elements(environment.container, 'input').find(node => node.type === 'file' || node.getAttribute('type') === 'file')
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n9sAAAAASUVORK5CYII=', 'base64')
   fileInput.files = [{ name: 'hero.png', type: 'image/png', size: png.length, arrayBuffer: async () => png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength) }]
   await act(async () => fileInput.dispatchEvent(new TestEvent('change', { bubbles: true })))
@@ -196,6 +196,13 @@ test('mounted library selects, filters, clears, focuses source, resets context a
   assert.deepEqual(focused, ['asset-a'])
 
   const status = elements(environment.container, 'select')[0]
+  const review = elements(environment.container, 'select')[3]
+  review.value = 'approved'
+  await act(async () => review.dispatchEvent(new TestEvent('change', { bubbles: true })))
+  assert.match(environment.container.textContent, /0 of 2 authorized assets/)
+  await act(async () => byText(environment.container, 'button', 'Clear filters').dispatchEvent(new TestEvent('click', { bubbles: true })))
+  assert.match(environment.container.textContent, /2 of 2 authorized assets/)
+  assert.ok(elements(environment.container, 'input').find(node => node.type === 'search' || node.getAttribute('type') === 'search'))
   status.value = 'failed'
   await act(async () => status.dispatchEvent(new TestEvent('change', { bubbles: true })))
   assert.match(environment.container.textContent, /1 of 2 authorized assets/)

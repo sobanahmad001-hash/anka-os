@@ -119,7 +119,7 @@ export async function contextChatAction(
     if (shareError) throw shareError
     const ids = (memberships || []).map(member => member.user_id)
     const { data: profiles, error: profileError } = ids.length
-      ? await admin.from('profiles').select('id,full_name,email').in('id', ids)
+      ? await admin.from('profiles').select('id,full_name').in('id', ids)
       : { data: [], error: null }
     if (profileError) throw profileError
     const names = new Map((profiles || []).map(profile => [profile.id, profile]))
@@ -127,9 +127,8 @@ export async function contextChatAction(
       candidates: (memberships || []).map(member => ({
         id: member.user_id, role: member.role,
         full_name: names.get(member.user_id)?.full_name || '',
-        email: names.get(member.user_id)?.email || '',
-      })).sort((a, b) => String(a.full_name || a.email || a.id)
-        .localeCompare(String(b.full_name || b.email || b.id))),
+      })).sort((a, b) => String(a.full_name || a.id)
+        .localeCompare(String(b.full_name || b.id))),
       recipients: shares || [],
     }
   }

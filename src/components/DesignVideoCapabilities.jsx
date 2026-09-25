@@ -1,12 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { SEEDANCE, videoResolutionOptions } from '../data/designMediaCapabilities.js'
-import { videoQuoteDisplay } from '../data/designVideoQuoteTransport.js'
+import { canSubmitVideo, videoQuoteDisplay } from '../data/designVideoQuoteTransport.js'
 import { designWorkshop } from '../data/designWorkshopRepository.js'
+import { integrations } from '../data/integrationRepository.js'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 
 const JOB_PAGE_SIZE = 50
+const UNSETTLED_VIDEO_STATUSES = new Set(['queued', 'claimed', 'provider_pending', 'provider_completed', 'outcome_unknown'])
 
 export default function DesignVideoCapabilities({ directionVersionId }) {
+  const { activeOrganizationId, scopeRevision } = useOrganization()
+  return <ScopedDesignVideoCapabilities
+    key={`${activeOrganizationId}:${scopeRevision}:${directionVersionId}`}
+    directionVersionId={directionVersionId} />
+}
+
+// eslint-disable-next-line no-unused-vars -- This config does not count JSX component references.
+function ScopedDesignVideoCapabilities({ directionVersionId }) {
   const { activeOrganizationId, requestSignal, scopeRevision } = useOrganization()
   const studio = useMemo(() => activeOrganizationId ? designWorkshop.forOrganization(activeOrganizationId, { signal: requestSignal }) : null, [activeOrganizationId, requestSignal])
   const [mode, setMode] = useState('explore')
@@ -16,7 +26,15 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
   const [format, setFormat] = useState('mp4')
   const [audio, setAudio] = useState(false)
   const [result, setResult] = useState(null)
+  const [connections, setConnections] = useState([])
+  const [connectionId, setConnectionId] = useState('')
+  const [connectionError, setConnectionError] = useState('')
+  const [prompt, setPrompt] = useState('')
+  const [spendConfirmed, setSpendConfirmed] = useState(false)
+  const [submitBusy, setSubmitBusy] = useState(false)
+  const [submitNotice, setSubmitNotice] = useState('')
   const [jobs, setJobs] = useState([])
+  const [jobsLoaded, setJobsLoaded] = useState(false)
   const [hasOlderJobs, setHasOlderJobs] = useState(false)
   const [jobsError, setJobsError] = useState('')
   const [jobsBusy, setJobsBusy] = useState('')
@@ -24,16 +42,39 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
   const [clock, setClock] = useState(Date.now())
   const sequence = useRef(0)
   const jobsSequence = useRef(0)
+  const submitInFlight = useRef(false)
+  const submission = useRef({ signature: '', operationKey: '' })
   useEffect(() => () => { sequence.current++ }, [])
+  useEffect(() => {
+    let active = true
+    setConnections([]); setConnectionId(''); setConnectionError('')
+    setPrompt(''); setResult(null); setSubmitNotice(''); setSubmitBusy(false)
+    setSpendConfirmed(false); submission.current = { signature: '', operationKey: '' }
+    if (!activeOrganizationId || requestSignal?.aborted) return
+    integrations.listForOrganization(activeOrganizationId, null, { signal: requestSignal })
+      .then(data => {
+        if (!active || requestSignal?.aborted || data?.organization_id !== activeOrganizationId) return
+        const eligible = (data.connections || []).filter(connection => connection.provider === 'higgsfield'
+          && connection.status === 'verified' && connection.secret_configured === true
+          && connection.organization_level === true
+          && Array.isArray(connection.department_ids) && connection.department_ids.length === 0
+          && /^ANKA_HIGGSFIELD_[A-Z0-9_]+$/.test(connection.secret_name || ''))
+        setConnections(eligible)
+        setConnectionId(current => eligible.some(connection => connection.id === current) ? current : '')
+      })
+      .catch(() => { if (active && !requestSignal?.aborted) setConnectionError('Video connection readiness is unavailable.') })
+    return () => { active = false }
+  }, [activeOrganizationId, scopeRevision, requestSignal])
   useEffect(() => {
     const attempt = ++jobsSequence.current
     let active = true
-    setJobs([]); setHasOlderJobs(false); setJobsError(''); setJobsBusy(''); setPreview(null)
+    setJobs([]); setJobsLoaded(false); setHasOlderJobs(false); setJobsError(''); setJobsBusy(''); setPreview(null)
     if (!studio || !directionVersionId || requestSignal?.aborted) return
     studio.listVideoJobs(directionVersionId).then(rows => {
       if (active && jobsSequence.current === attempt && !requestSignal?.aborted) {
         setJobs(Array.isArray(rows) ? rows.slice(0, JOB_PAGE_SIZE) : [])
         setHasOlderJobs(Array.isArray(rows) && rows.length > JOB_PAGE_SIZE)
+        setJobsLoaded(true)
       }
     }).catch(() => {
       if (active && jobsSequence.current === attempt && !requestSignal?.aborted) setJobsError('Private video history is unavailable.')
@@ -47,6 +88,12 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
   const supported = options.some(option => option.value === resolution && option.supported)
     && Number.isInteger(duration) && duration >= 4 && duration <= (mode === 'explore' ? 5 : 30)
   const display = current?.data ? videoQuoteDisplay(current.data, input, Math.max(clock, Date.now())) : null
+  const paidExecutionEnabled = current?.data?.paid_execution_enabled === true
+  const selectedConnection = connections.find(connection => connection.id === connectionId)
+  const hasUnsettledJob = jobs.some(job => UNSETTLED_VIDEO_STATUSES.has(job.status))
+  const canSubmit = Boolean(studio && directionVersionId && jobsLoaded && !hasUnsettledJob && !submitBusy && !jobsBusy
+    && !requestSignal?.aborted && canSubmitVideo({ display, connection: selectedConnection,
+      prompt, supported, spendConfirmed }))
   const expires = current?.data?.quote?.valid_until
   useEffect(() => {
     const delay = Date.parse(expires) - Date.now()
@@ -54,16 +101,68 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
     const timer = setTimeout(() => setClock(Date.now()), delay + 10)
     return () => clearTimeout(timer)
   }, [expires])
-  function edit(setter, value) { sequence.current++; setResult(null); setter(value) }
+  function edit(setter, value) {
+    sequence.current++; setResult(null); setSpendConfirmed(false)
+    submission.current = { signature: '', operationKey: '' }
+    setter(value)
+  }
   async function checkQuote() {
     if (!studio || !directionVersionId || !supported || requestSignal?.aborted) return
     const attempt = ++sequence.current
     setResult({ key, pending: true })
+    setSpendConfirmed(false)
     try {
       const data = await studio.getVideoQuote(input)
       if (sequence.current === attempt && !requestSignal?.aborted) { setClock(Date.now()); setResult({ key, data }) }
     } catch {
       if (sequence.current === attempt && !requestSignal?.aborted) setResult({ key, error: true })
+    }
+  }
+  async function submitVideo(event) {
+    event.preventDefault()
+    if (!canSubmit || submitInFlight.current) return
+    submitInFlight.current = true
+    const exactPrompt = prompt.trim()
+    const signature = JSON.stringify([activeOrganizationId, directionVersionId, mode,
+      input, connectionId, display.quoteId, exactPrompt])
+    const operationKey = submission.current.signature === signature
+      ? submission.current.operationKey : crypto.randomUUID()
+    submission.current = { signature, operationKey }
+    const attempt = jobsSequence.current
+    setSubmitBusy(true); setSubmitNotice('')
+    try {
+      const job = await studio.generateVideo({ ...input, mode, prompt: exactPrompt,
+        connector_connection_id: connectionId, quote_id: display.quoteId,
+        operation_key: operationKey })
+      if (requestSignal?.aborted || jobsSequence.current !== attempt) return
+      const rows = await studio.listVideoJobs(directionVersionId)
+      if (requestSignal?.aborted || jobsSequence.current !== attempt) return
+      setJobs(Array.isArray(rows) ? rows.slice(0, JOB_PAGE_SIZE) : [])
+      setHasOlderJobs(Array.isArray(rows) && rows.length > JOB_PAGE_SIZE)
+      setJobsLoaded(true)
+      setSubmitNotice(`Original video request recorded (${job.status.replaceAll('_', ' ')}). Check its private history for updates.`)
+      setPrompt(''); setSpendConfirmed(false)
+      submission.current = { signature: '', operationKey: '' }
+    } catch {
+      if (requestSignal?.aborted || jobsSequence.current !== attempt) return
+      setSpendConfirmed(false)
+      setSubmitNotice('Submission outcome could not be confirmed. Check the original job in private history. New requests for this direction remain blocked while it is unresolved.')
+      try {
+        const rows = await studio.listVideoJobs(directionVersionId)
+        if (!requestSignal?.aborted && jobsSequence.current === attempt) {
+          setJobs(Array.isArray(rows) ? rows.slice(0, JOB_PAGE_SIZE) : [])
+          setHasOlderJobs(Array.isArray(rows) && rows.length > JOB_PAGE_SIZE)
+          setJobsLoaded(true)
+        }
+      } catch {
+        if (!requestSignal?.aborted && jobsSequence.current === attempt) {
+          setJobsLoaded(false)
+          setJobsError('Private video history is unavailable. New requests are blocked until it can be checked.')
+        }
+      }
+    } finally {
+      submitInFlight.current = false
+      if (!requestSignal?.aborted && jobsSequence.current === attempt) setSubmitBusy(false)
     }
   }
   async function actOnJob(job, action) {
@@ -110,7 +209,7 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
     return () => clearTimeout(timer)
   }, [preview])
   return <details className="mt-3 rounded-xl border border-white/10 p-3 text-xs text-slate-400">
-    <summary className="cursor-pointer font-semibold text-slate-200">Video capabilities · generation unavailable</summary>
+    <summary className="cursor-pointer font-semibold text-slate-200">Video capabilities · {display?.paidExecutionEnabled && !display.capMissing && selectedConnection ? 'exact quote required' : 'generation unavailable'}</summary>
     <p className="mt-2">Higgsfield Seedance 2.5 supports 480p and 720p. Google media is not configured. Maximum USD $2 per generated video; this limit does not authorize spending.</p>
     <div className="mt-3 flex flex-wrap gap-3">
       <label>Mode <select className="rounded bg-slate-900 p-2" value={mode} onChange={event => { edit(setMode, event.target.value); setResolution('') }}>
@@ -133,8 +232,41 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
         {display.capMissing === true && <p>Organization budget is not configured.</p>}
         {display.capMissing === false && <p>Organization budget configured; this does not confirm remaining funds or reserve spending.</p>}
       </> : <p>No current quote checked for these settings.</p>}
-      <p>Paid execution is disabled. Checking a quote makes no provider request.</p>
+      <p>{paidExecutionEnabled ? 'Paid execution is enabled on the server; a verified connection, budget, exact quote, and explicit confirmation are still required.' : 'Paid execution is disabled. Checking a quote makes no provider request.'}</p>
     </div>
+    <form onSubmit={submitVideo} className="mt-3 space-y-3 rounded-lg border border-white/10 p-3">
+      <p className="font-semibold text-slate-200">Prepare one exact video request</p>
+      <label className="block">Prompt
+        <textarea className="mt-1 w-full rounded bg-slate-900 p-2 text-white" rows="4" maxLength={12000}
+          value={prompt} disabled={submitBusy} onChange={event => {
+            setPrompt(event.target.value); setSpendConfirmed(false)
+            submission.current = { signature: '', operationKey: '' }
+          }} />
+      </label>
+      <label className="block">Verified organization video connection
+        <select className="mt-1 w-full rounded bg-slate-900 p-2" value={connectionId}
+          disabled={submitBusy} onChange={event => {
+            setConnectionId(event.target.value); setSpendConfirmed(false)
+            submission.current = { signature: '', operationKey: '' }
+          }}>
+          <option value="">Choose connection</option>
+          {connections.map(connection => <option key={connection.id} value={connection.id}>{connection.display_name}</option>)}
+        </select>
+      </label>
+      {connectionError && <p role="alert" className="text-amber-300">{connectionError}</p>}
+      {!connections.length && !connectionError && <p>No verified organization-only Higgsfield connection is available.</p>}
+      <label className="flex items-start gap-2"><input type="checkbox" checked={spendConfirmed}
+        disabled={submitBusy || !display?.paidExecutionEnabled || display?.status !== 'quoted'
+          || display?.capMissing !== false || !selectedConnection}
+        onChange={event => setSpendConfirmed(event.target.checked)} />
+        <span>I approve one request with these exact settings and a maximum charge of USD ${display?.status === 'quoted' ? display.maximum : '—'}. The organization monthly budget also applies.</span>
+      </label>
+      <button type="submit" className="rounded border border-violet-500 px-3 py-2 text-violet-100 disabled:cursor-not-allowed disabled:opacity-40"
+        disabled={!canSubmit}>{submitBusy ? 'Recording original request…' : 'Generate one video'}</button>
+      {submitNotice && <p role="status" className="text-amber-200">{submitNotice}</p>}
+      {!jobsLoaded && <p className="text-amber-300">Private video history must load before a new request can be submitted.</p>}
+      {hasUnsettledJob && <p className="text-amber-300">An earlier video request is unresolved. Check its original job before creating another request for this direction.</p>}
+    </form>
     <p className="mt-2">Check the Asset Library and existing templates before generating. Preserve original footage for text, logo, date or caption corrections; video assembly is not available here.</p>
     <div className="mt-3 border-t border-white/10 pt-3">
       <p className="font-semibold text-slate-200">Your private video jobs</p>

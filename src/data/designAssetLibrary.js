@@ -3,7 +3,7 @@ const DATE_WINDOWS = Object.freeze({ day: 1, week: 7, month: 30 })
 const array = value => Array.isArray(value) ? value : []
 const clean = value => typeof value === 'string' ? value.trim() : ''
 
-export const DESIGN_ASSET_LIBRARY_INITIAL_FILTERS = Object.freeze({ status: 'all', source: 'all', date: 'all' })
+export const DESIGN_ASSET_LIBRARY_INITIAL_FILTERS = Object.freeze({ status: 'all', source: 'all', date: 'all', review: 'all', query: '' })
 
 export function initialDesignAssetLibraryState(contextKey = '') {
   return { contextKey: clean(contextKey), view: 'grid', filters: { ...DESIGN_ASSET_LIBRARY_INITIAL_FILTERS }, selectedAssetId: '' }
@@ -37,8 +37,8 @@ export function designAssetLibraryReducer(state, action) {
     return contextKey === state.contextKey ? state : initialDesignAssetLibraryState(contextKey)
   }
   if (action.type === 'set_view' && ['grid', 'list'].includes(action.view)) return { ...state, view: action.view }
-  if (action.type === 'set_filter' && ['status', 'source', 'date'].includes(action.name)) {
-    return { ...state, filters: { ...state.filters, [action.name]: clean(action.value) || 'all' } }
+  if (action.type === 'set_filter' && ['status', 'source', 'date', 'review', 'query'].includes(action.name)) {
+    return { ...state, filters: { ...state.filters, [action.name]: action.name === 'query' ? String(action.value || '').slice(0, 240) : clean(action.value) || 'all' } }
   }
   if (action.type === 'select') return { ...state, selectedAssetId: clean(action.assetId) }
   if (action.type === 'close_detail') return { ...state, selectedAssetId: '' }
@@ -88,7 +88,7 @@ export function buildDesignAssetRows(workspace = {}) {
       sessionLabel: clean(session?.output_goal || session?.page_slug || session?.output_family),
       isExperimental: directionVersion?.is_experimental === true,
       assetId: clean(asset.id), assetVersionId: clean(latest.id), assetVersionNumber: latest.version_number,
-      archivedAt: clean(asset.archived_at),
+      archivedAt: clean(asset.archived_at), placement: clean(asset.placement), rightsNotes: clean(asset.rights_notes),
       assetVersions: versions,
       recorded: Object.freeze({
         dimensions: latest.width && latest.height ? `${latest.width}×${latest.height}` : null,
@@ -143,10 +143,19 @@ export function filterDesignAssetRows(rows, filters = {}, now = Date.now()) {
   const source = clean(filters.source) || 'all'
   const date = clean(filters.date) || 'all'
   const days = DATE_WINDOWS[date]
+  const review = clean(filters.review) || 'all'
+  const terms = clean(filters.query).toLocaleLowerCase().split(/\s+/).filter(Boolean)
   const cutoff = days ? now - (days * 24 * 60 * 60 * 1000) : null
   return array(rows).filter(row => {
     if (status !== 'all' && row.status !== status) return false
     if (source !== 'all' && row.sourceType !== source) return false
+    // Ready is file availability, not approval. Never inherit an older version's
+    // review state or infer permission/licensing from these discovery filters.
+    if (review !== 'all' && (row.recorded?.reviewState || 'unrecorded') !== review) return false
+    const searchable = [row.directionTitle, row.placement, row.rightsNotes, row.prompt,
+      row.id, row.assetVersionId, row.directionVersionId, row.recordedVariantFormat,
+      row.sessionLabel].map(clean).join(' ').toLocaleLowerCase()
+    if (!terms.every(term => searchable.includes(term))) return false
     if (cutoff !== null) {
       const created = Date.parse(row.createdAt)
       if (!Number.isFinite(created) || created < cutoff || created > now) return false

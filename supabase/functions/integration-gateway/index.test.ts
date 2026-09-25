@@ -371,6 +371,25 @@ Deno.test('B05 scoped list uses the selected organization for contributor and le
   assertEquals(denied.status, 403)
 })
 
+Deno.test('Design video list marks only unmapped organization connections eligible', async () => {
+  const base = fixture().connection
+  const connections = [
+    { ...base, id: '55555555-5555-4555-8555-555555555555', provider: 'higgsfield',
+      display_name: 'Organization video', integration_connection_departments: [] },
+    { ...base, id: '66666666-6666-4666-8666-666666666666', provider: 'higgsfield',
+      display_name: 'Engagement video', integration_connection_departments: [] },
+    { ...base, id: '77777777-7777-4777-8777-777777777777', provider: 'higgsfield',
+      display_name: 'Department video', integration_connection_departments: [{ department_id: 'design' }] },
+  ]
+  const test = fixture({ connections, engagementMappings: [{ organization_id: ORG_B,
+    connection_id: connections[1].id }] })
+  const response = await test.request({ action: 'list', organization_id: ORG_B })
+  assertEquals(response.status, 200)
+  const listed = (await response.json()).connections
+  assertEquals(listed.map((row: { organization_level: boolean }) => row.organization_level),
+    [false, false, true])
+})
+
 Deno.test('B05 scoped test requires selected-organization leadership without calling a provider', async () => {
   const contributor = fixture({ role: 'contributor' })
   const response = await contributor.request({

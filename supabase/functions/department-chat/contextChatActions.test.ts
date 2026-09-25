@@ -6,6 +6,7 @@ const project = 'a0000000-0000-4000-8000-000000000002'
 const thread = 'a0000000-0000-4000-8000-000000000003'
 const owner = 'a0000000-0000-4000-8000-000000000004'
 const recipient = 'a0000000-0000-4000-8000-000000000005'
+const unnamed = 'a0000000-0000-4000-8000-000000000006'
 
 function fixture() {
   const rows: Record<string, any[]> = {
@@ -18,6 +19,11 @@ function fixture() {
       recipient_id: recipient, revoked_at: null,
     }],
     projects: [{ id: project, organization_id: org, archived_at: null }],
+    organization_memberships: [
+      { user_id: recipient, organization_id: org, member_kind: 'team', status: 'active', role: 'contributor' },
+      { user_id: unnamed, organization_id: org, member_kind: 'team', status: 'active', role: 'contributor' },
+    ],
+    profiles: [{ id: recipient, full_name: 'Recipient Name' }],
     department_chat_messages: [{ id: 'message', conversation_id: thread,
       organization_id: org, author_id: owner, sequence: 1, body: 'Direction' }],
   }
@@ -27,8 +33,9 @@ function fixture() {
       calls.push(['from', table])
       let selected = [...(rows[table] || [])]
       const query: any = {
-        select() { return query },
+        select(columns: string) { calls.push(['select', [table, columns]]); return query },
         eq(key: string, value: unknown) { selected = selected.filter(row => row[key] === value); return query },
+        neq(key: string, value: unknown) { selected = selected.filter(row => row[key] !== value); return query },
         is(key: string, value: unknown) { selected = selected.filter(row => row[key] === value); return query },
         in(key: string, values: unknown[]) { selected = selected.filter(row => values.includes(row[key])); return query },
         lt(key: string, value: number) { selected = selected.filter(row => row[key] < value); return query },
@@ -81,4 +88,18 @@ Deno.test('project conversation listing uses the guarded shared-reader RPC', asy
   assertEquals(result.length, 1)
   assertEquals(calls.some(([kind, value]) => kind === 'rpc'
     && value === 'list_project_context_chat_conversations'), true)
+})
+
+Deno.test('project sharing candidates use installed profile columns and name or ID fallback', async () => {
+  const { admin, calls } = fixture()
+  const result: any = await contextChatAction('get_project_context_sharing', admin as any,
+    { conversation_id: thread }, owner, org, { role: 'contributor' })
+  assertEquals(calls.some(([kind, value]) => kind === 'select'
+    && Array.isArray(value) && value[0] === 'profiles' && value[1] === 'id,full_name'), true)
+  assertEquals(result.candidates.length, 2)
+  assertEquals(result.candidates.find((candidate: any) => candidate.id === recipient)?.full_name,
+    'Recipient Name')
+  assertEquals(result.candidates.find((candidate: any) => candidate.id === unnamed)?.full_name, '')
+  assertEquals(result.candidates.some((candidate: any) => 'email' in candidate), false)
+  assertEquals(result.recipients[0].recipient_id, recipient)
 })
