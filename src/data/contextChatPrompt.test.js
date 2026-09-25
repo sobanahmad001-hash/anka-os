@@ -15,6 +15,50 @@ test('shared teammate text cannot enter the private provider prompt', () => {
   ], earlier))
 })
 
+test('a second owner turn may use only its own audited prior assistant reply', () => {
+  const organizationId = 'a0000000-0000-4000-8000-000000000001'
+  const conversationId = 'a0000000-0000-4000-8000-000000000002'
+  const runId = 'a0000000-0000-4000-8000-000000000003'
+  const claimId = 'a0000000-0000-4000-8000-000000000004'
+  const replyId = 'a0000000-0000-4000-8000-000000000005'
+  const nextId = 'a0000000-0000-4000-8000-000000000006'
+  const ownerTurn = { ...sourceTurn, author_id: earlier, owner_id: earlier,
+    organization_id: organizationId, conversation_id: conversationId, sequence: 1 }
+  const assistant = { id: replyId, author_id: null, owner_id: earlier,
+    organization_id: organizationId, conversation_id: conversationId,
+    role: 'assistant', status: 'completed', body: 'Audited answer', sequence: 2,
+    ai_run_id: runId, in_reply_to_message_id: source, client_request_id: claimId }
+  const nextTurn = { ...ownerTurn, id: nextId, body: 'Follow-up question', sequence: 3 }
+  const auditedRun = { id: runId, user_id: earlier, organization_id: organizationId,
+    context_chat_conversation_id: conversationId, context_chat_message_id: source,
+    status: 'completed', capability: 'context_chat_answer', output_text: assistant.body,
+    context_manifest: { dispatch_claim_id: claimId, provider_response_id: 'provider-response' } }
+  const rows = [ownerTurn, assistant, nextTurn]
+  const evidence = { conversationId, organizationId, sourceTurns: [ownerTurn], auditedRuns: [auditedRun] }
+  assert.doesNotThrow(() => requireOwnerAuthoredPromptTurns(rows, earlier, evidence))
+  assert.doesNotThrow(() => requireOwnerAuthoredPromptTurns(rows, earlier,
+    { ...evidence, auditedRuns: [{ ...auditedRun, output_text: '  Audited answer  ' }] }))
+  const prompt = JSON.parse(buildPrivateConversationPrompt(rows, nextId,
+    { context_kind: 'organization', project_id: null, department_id: null }))
+  assert.deepEqual(prompt.turns.map(turn => turn.role), ['user', 'assistant', 'user'])
+  assert.throws(() => requireOwnerAuthoredPromptTurns(
+    [ownerTurn, { ...nextTurn, author_id: nextId }], earlier, evidence))
+  assert.throws(() => requireOwnerAuthoredPromptTurns(rows, earlier,
+    { ...evidence, auditedRuns: [] }))
+  assert.throws(() => requireOwnerAuthoredPromptTurns(rows, earlier,
+    { ...evidence, sourceTurns: [{ ...ownerTurn, author_id: nextId }] }))
+  assert.throws(() => requireOwnerAuthoredPromptTurns(
+    [ownerTurn, { ...assistant, owner_id: nextId }, nextTurn], earlier, evidence))
+  assert.throws(() => requireOwnerAuthoredPromptTurns(rows, earlier,
+    { ...evidence, auditedRuns: [{ ...auditedRun, user_id: nextId }] }))
+  assert.throws(() => requireOwnerAuthoredPromptTurns(rows, earlier,
+    { ...evidence, auditedRuns: [{ ...auditedRun, context_chat_conversation_id: nextId }] }))
+  assert.throws(() => requireOwnerAuthoredPromptTurns(rows, earlier,
+    { ...evidence, auditedRuns: [{ ...auditedRun, context_manifest: { dispatch_claim_id: nextId } }] }))
+  assert.throws(() => requireOwnerAuthoredPromptTurns(
+    [ownerTurn, { ...assistant, in_reply_to_message_id: nextId }, nextTurn], earlier, evidence))
+})
+
 test('private prompt binds each exact context without borrowing another scope', () => {
   const contexts = [
     [{ context_kind: 'organization', project_id: null, department_id: null },

@@ -22,10 +22,36 @@ export function privateConversationScope(context) {
   throw fail('Exact private conversation context is required')
 }
 
-export function requireOwnerAuthoredPromptTurns(rows, ownerId) {
+export function requireOwnerAuthoredPromptTurns(rows, ownerId, evidence = {}) {
   requiredId(ownerId, 'conversation owner')
-  if (!Array.isArray(rows) || rows.some(row => row.author_id !== ownerId)) {
+  if (!Array.isArray(rows) || rows.some(row => row.role === 'user' && row.author_id !== ownerId)) {
     throw fail('A teammate message is not approved for provider use in this conversation')
+  }
+  const { conversationId, organizationId, auditedRuns = [], sourceTurns = [] } = evidence
+  for (const row of rows) {
+    if (row.role === 'user' && (!conversationId || !organizationId)) continue
+    if (row.owner_id !== ownerId || row.conversation_id !== conversationId
+      || row.organization_id !== organizationId) throw fail('Conversation history has another owner or scope')
+    if (row.role === 'user') continue
+    if (row.role !== 'assistant' || row.author_id !== null
+      || row.status !== 'completed' || !uuid.test(row.ai_run_id || '')
+      || !uuid.test(row.in_reply_to_message_id || '')
+      || !uuid.test(row.client_request_id || '')) throw fail('Unaudited assistant turn is unavailable')
+    const source = sourceTurns.find(turn => turn.id === row.in_reply_to_message_id)
+    const run = auditedRuns.find(item => item.id === row.ai_run_id)
+    if (!source || source.role !== 'user' || source.status !== 'completed'
+      || source.author_id !== ownerId || source.owner_id !== ownerId
+      || source.conversation_id !== conversationId || source.organization_id !== organizationId
+      || source.sequence >= row.sequence
+      || !run || run.user_id !== ownerId || run.organization_id !== organizationId
+      || run.context_chat_conversation_id !== conversationId
+      || run.context_chat_message_id !== source.id
+      || run.status !== 'completed' || run.capability !== 'context_chat_answer'
+      || run.context_manifest?.dispatch_claim_id !== row.client_request_id
+      || typeof run.context_manifest?.provider_response_id !== 'string'
+      || !run.context_manifest.provider_response_id.trim()
+      || typeof run.output_text !== 'string'
+      || run.output_text.trim() !== row.body) throw fail('Unaudited assistant turn is unavailable')
   }
 }
 
