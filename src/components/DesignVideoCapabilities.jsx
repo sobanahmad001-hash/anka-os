@@ -146,7 +146,7 @@ function ScopedDesignVideoCapabilities({ directionVersionId }) {
     } catch {
       if (requestSignal?.aborted || jobsSequence.current !== attempt) return
       setSpendConfirmed(false)
-      setSubmitNotice('Submission outcome could not be confirmed. Check private history before retrying the same request; it will keep its original operation key.')
+      setSubmitNotice('Submission outcome could not be confirmed. Check the original job in private history. New requests for this direction remain blocked while it is unresolved.')
       try {
         const rows = await studio.listVideoJobs(directionVersionId)
         if (!requestSignal?.aborted && jobsSequence.current === attempt) {
