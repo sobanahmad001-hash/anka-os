@@ -33,6 +33,12 @@ Created through CLI `migration new` as `20260925080013` (host clock), then expli
 - Native multi-session PostgreSQL races/full released migration chain and live Storage transport were **not** exercised. Previous native runtime is unavailable. The in-memory SQL fixture is not a claim of full-chain/native concurrency verification.
 - Required local-only `supabase db advisors --local --type security --fail-on error` could not connect (`127.0.0.1:54322`, no local Supabase server). Manual grants/RLS/search-path checklist and executable ACL checks passed; advisor status is unavailable, not passed.
 
+## QA corrections after 6c51594
+
+- Download CTA/fallback now say video for canonical video selections while retaining image wording for images. Mounted targeted UI/library suite: 14 passed.
+- Reproduced the reported freeze gap using the actual legacy freeze RPC in the offline fixture: eligibility read, archive source, then RPC incorrectly committed. The corrected service RPC invokes an invoker-security SQL guard before mutation **and replay**; it rechecks current canonical team/source/scope eligibility and holds source/engagement/membership/organization row locks through commit. No new N1 role or engagement-lifecycle policy is introduced. Save's source check also locks the source root.
+- Offline corrected tests reject archive, membership revocation and source scope change; failed freezes leave revision unchanged; an archived-source retry fails; restored eligibility reuses the same exact freeze; a key cannot be replayed with another version. This is a deterministic interleaving reproduction, not a native multi-session lock-scheduling test.
+
 ## Reproduction
 
 ```powershell

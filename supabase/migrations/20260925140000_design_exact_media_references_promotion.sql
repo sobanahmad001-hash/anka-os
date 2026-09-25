@@ -54,7 +54,7 @@ begin
       join public.design_assets root on root.id=version.asset_id and root.organization_id=version.organization_id
       where version.id=(ref->>'id')::uuid and version.organization_id=new.organization_id
         and root.archived_at is null
-        and version.mime_type in ('image/png','video/mp4','video/quicktime');
+        and version.mime_type in ('image/png','video/mp4','video/quicktime') for share of root;
     if not found or (brief.visibility='official' and
       (asset.engagement_id is distinct from brief.engagement_id or asset.brand_id is distinct from brief.brand_id)) then
       raise exception 'Media reference is outside exact brief scope' using errcode='42501';
@@ -259,5 +259,89 @@ end;
 $$;
 revoke all on function public.complete_design_video_promotion(uuid,uuid,uuid,uuid,uuid,uuid,text) from public,anon,authenticated,service_role;
 grant execute on function public.complete_design_video_promotion(uuid,uuid,uuid,uuid,uuid,uuid,text) to service_role;
+
+-- Recheck and lock current media eligibility inside the freeze transaction.
+-- The existing canonical asset read boundary is active team membership plus
+-- matching asset/engagement organization and brand; no new N1 policy is defined.
+create function private.assert_design_brief_media_freeze(
+  p_organization_id uuid,p_actor_id uuid,p_brief_id uuid,p_version_id uuid
+) returns void language plpgsql security invoker set search_path='' as $$
+declare brief public.design_creative_briefs; content jsonb; asset record; expected integer; seen integer:=0;
+begin
+  select version.content into content from public.design_creative_brief_versions version
+    where version.id=p_version_id and version.organization_id=p_organization_id
+      and version.creative_brief_id=p_brief_id;
+  if not found then raise exception 'Exact brief version unavailable' using errcode='42501'; end if;
+  expected:=jsonb_array_length(coalesce(content->'media_references','[]'::jsonb));
+  if expected=0 then return; end if;
+  perform 1 from public.organizations org
+    join public.organization_memberships member on member.organization_id=org.id
+    where org.id=p_organization_id and org.status='active' and member.user_id=p_actor_id
+      and member.member_kind='team' and member.status='active' for share of org,member;
+  if not found then raise exception 'Current media source access required' using errcode='42501'; end if;
+  select * into strict brief from public.design_creative_briefs
+    where id=p_brief_id and organization_id=p_organization_id;
+  if brief.visibility='private' and brief.created_by is distinct from p_actor_id then
+    raise exception 'Private brief is owner-only' using errcode='42501';
+  end if;
+  for asset in
+    select root.* from public.design_creative_brief_media_sources source
+    join public.design_asset_versions version on version.id=source.asset_version_id and version.organization_id=source.organization_id
+    join public.design_assets root on root.id=version.asset_id and root.organization_id=version.organization_id
+    join public.engagements engagement on engagement.id=root.engagement_id
+      and engagement.organization_id=root.organization_id and engagement.brand_id=root.brand_id
+    where source.creative_brief_version_id=p_version_id and source.organization_id=p_organization_id
+    order by root.id for share of root,engagement
+  loop
+    if asset.archived_at is not null or (brief.visibility='official' and
+      (asset.engagement_id is distinct from brief.engagement_id or asset.brand_id is distinct from brief.brand_id)) then
+      raise exception 'Pinned media source is no longer eligible' using errcode='42501';
+    end if;
+    seen:=seen+1;
+  end loop;
+  if seen<>expected then raise exception 'Pinned media source is unavailable' using errcode='42501'; end if;
+end;
+$$;
+revoke all on function private.assert_design_brief_media_freeze(uuid,uuid,uuid,uuid) from public,anon,authenticated;
+grant execute on function private.assert_design_brief_media_freeze(uuid,uuid,uuid,uuid) to service_role;
+create or replace function public.freeze_design_creative_brief_version(
+  p_organization_id uuid, p_actor_id uuid, p_creative_brief_id uuid,
+  p_creative_brief_version_id uuid, p_expected_revision integer, p_operation_key uuid
+) returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare v_brief public.design_creative_briefs%rowtype;
+begin
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
+    p_organization_id::text || ':' || p_creative_brief_id::text, 0));
+  select * into v_brief from public.design_creative_briefs
+  where id = p_creative_brief_id and organization_id = p_organization_id for update;
+  if not found then raise exception 'Creative brief not found.' using errcode = 'P0002'; end if;
+  if v_brief.last_freeze_operation_key = p_operation_key
+    and v_brief.frozen_version_id is distinct from p_creative_brief_version_id then
+    raise exception 'Freeze operation key belongs to another exact version' using errcode='23505';
+  end if;
+  perform private.assert_design_brief_media_freeze(p_organization_id,p_actor_id,p_creative_brief_id,p_creative_brief_version_id);
+  if v_brief.last_freeze_operation_key = p_operation_key then
+    return jsonb_build_object('brief', to_jsonb(v_brief), 'idempotent_replay', true);
+  end if;
+  if v_brief.visibility = 'private' and v_brief.created_by <> p_actor_id then
+    raise exception 'Private creative brief is owner-only.' using errcode = '42501';
+  end if;
+  if v_brief.revision <> p_expected_revision then
+    raise exception 'Creative brief changed; reload before freezing.' using errcode = '40001';
+  end if;
+  if not exists (select 1 from public.design_creative_brief_versions version
+    where version.id = p_creative_brief_version_id and version.organization_id = p_organization_id
+      and version.creative_brief_id = v_brief.id and coalesce((version.validation_snapshot->>'valid')::boolean, false)) then
+    raise exception 'Only a complete validated version can be used for generation.' using errcode = '23514';
+  end if;
+  update public.design_creative_briefs set frozen_version_id = p_creative_brief_version_id,
+    revision = revision + 1, last_freeze_operation_key = p_operation_key,
+    updated_by = p_actor_id, updated_at = now() where id = v_brief.id returning * into v_brief;
+  return jsonb_build_object('brief', to_jsonb(v_brief), 'idempotent_replay', false);
+end;
+$$;
+
+revoke all on function public.freeze_design_creative_brief_version(uuid, uuid, uuid, uuid, integer, uuid) from public, anon, authenticated;
+grant execute on function public.freeze_design_creative_brief_version(uuid, uuid, uuid, uuid, integer, uuid) to service_role;
 
 commit;

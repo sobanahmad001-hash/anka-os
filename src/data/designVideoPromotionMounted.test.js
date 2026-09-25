@@ -87,4 +87,23 @@ test('mounted private video promotion stays exact and unapproved', async t => {
     const image=renderToStaticMarkup(createElement(Browser,{row:{...row,mediaType:'image',assetVersions:[...row.assetVersions,{...row.assetVersions[0],id:'v2',version_number:2}]},contextKey:'scope',accessOptions:options}))
     assert.match(image,/<img/);assert.doesNotMatch(image,/<video/)
   })
+  await t.test('selected video has video download and unavailable labels',async t=>{
+    const {default:Library}=await server.ssrLoadModule('/src/components/DesignAssetLibrary.jsx')
+    const env=mountedEnvironment()
+    const keys=['document','window','Event','Node','HTMLElement','IS_REACT_ACT_ENVIRONMENT']
+    const previous=Object.fromEntries(keys.map(key=>[key,globalThis[key]]))
+    Object.assign(globalThis,{document:env.document,window:env.window,Event:env.window.Event,Node:env.window.Node,HTMLElement:env.window.HTMLElement,IS_REACT_ACT_ENVIRONMENT:true})
+    const root=createRoot(env.container);t.after(async()=>{await act(async()=>root.unmount());Object.assign(globalThis,previous)})
+    const workspace={mediaUrlsRequestedAt:Date.now(),mediaUrlExpiresIn:300,mediaUrlOrigin:'https://storage.example',
+      designAssets:[{id:'video',name:'Saved video',output_type:'video'}],designAssetVersions:[{
+        id:'v1',asset_id:'video',version_number:1,mime_type:'video/mp4',lifecycle_status:'draft',source_kind:'private_video_copy',
+        signed_url:'https://storage.example/storage/v1/object/sign/design-generated-video/file.mp4?token=offline'}]}
+    await act(async()=>root.render(createElement(Library,{workspace,contextKey:'scope'})))
+    await act(async()=>props(button(env.container,'View detail')).onClick())
+    assert.match(env.container.textContent,/Open or save signed video/)
+    assert.doesNotMatch(env.container.textContent,/Open or save signed image/)
+    await act(async()=>root.render(createElement(Library,{workspace:{...workspace,designAssetVersions:[{...workspace.designAssetVersions[0],signed_url:null}]},contextKey:'scope'})))
+    assert.match(env.container.textContent,/Video link unavailable/)
+    assert.doesNotMatch(env.container.textContent,/Image link unavailable/)
+  })
 })

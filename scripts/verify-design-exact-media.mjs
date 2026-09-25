@@ -29,8 +29,10 @@ try {
     create table public.engagements(id uuid primary key,organization_id uuid,brand_id uuid,unique(id,organization_id));
     create table public.service_catalog(id uuid primary key,department_id text,is_active boolean);
     create table public.engagement_services(id uuid primary key,organization_id uuid,engagement_id uuid,service_id uuid,status text,unique(id,organization_id));
-    create table public.design_creative_briefs(id uuid primary key,organization_id uuid,visibility text,engagement_id uuid,brand_id uuid,created_by uuid);
-    create table public.design_creative_brief_versions(id uuid primary key,organization_id uuid,creative_brief_id uuid,content jsonb,unique(id,organization_id));
+    create table public.design_creative_briefs(id uuid primary key,organization_id uuid,visibility text,engagement_id uuid,brand_id uuid,created_by uuid,
+      revision integer default 0,frozen_version_id uuid,last_freeze_operation_key uuid,updated_by uuid,updated_at timestamptz);
+    create table public.design_creative_brief_versions(id uuid primary key,organization_id uuid,creative_brief_id uuid,content jsonb,
+      validation_snapshot jsonb default '{"valid":true}',unique(id,organization_id));
     create table public.design_direction_versions(id uuid primary key,organization_id uuid,creative_brief_version_id uuid,unique(id,organization_id));
     create table public.design_media_assets(id uuid primary key,organization_id uuid,unique(id,organization_id));
     create table public.integration_connections(id uuid primary key,organization_id uuid,unique(id,organization_id));
@@ -57,8 +59,8 @@ try {
   await sql('insert into public.engagements values($1,$2,$3)',[ids.engagement,ids.org,ids.brand])
   await sql("insert into public.service_catalog values($1,'design',true)",[ids.catalog])
   await sql("insert into public.engagement_services values($1,$2,$3,$4,'active')",[ids.service,ids.org,ids.engagement,ids.catalog])
-  await sql("insert into public.design_creative_briefs values($1,$2,'official',$3,$4,$5)",[ids.brief,ids.org,ids.engagement,ids.brand,ids.actor])
-  await sql('insert into public.design_creative_brief_versions values($1,$2,$3,$4)',[ids.briefVersion,ids.org,ids.brief,{title:'Exact saved video',rights_notes:'Original rights notes; not a license'}])
+  await sql("insert into public.design_creative_briefs(id,organization_id,visibility,engagement_id,brand_id,created_by) values($1,$2,'official',$3,$4,$5)",[ids.brief,ids.org,ids.engagement,ids.brand,ids.actor])
+  await sql('insert into public.design_creative_brief_versions(id,organization_id,creative_brief_id,content) values($1,$2,$3,$4)',[ids.briefVersion,ids.org,ids.brief,{title:'Exact saved video',rights_notes:'Original rights notes; not a license'}])
   await sql('insert into public.design_direction_versions values($1,$2,$3)',[ids.direction,ids.org,ids.briefVersion])
   await sql('insert into public.integration_connections values($1,$2)',[ids.connector,ids.org])
   await sql('insert into private.design_video_price_quotes values($1,$2)',[ids.quote,ids.org])
@@ -109,7 +111,7 @@ try {
   assert.equal((await sql('select count(*)::int n from public.design_asset_versions')).rows[0].n,1)
   await assert.rejects(()=>sql("update private.design_video_promotions set name='Changed'"))
   await assert.rejects(()=>sql("update public.design_asset_versions set lifecycle_status='approved'"))
-  const pin=async(ref,brief=ids.brief)=>sql('insert into public.design_creative_brief_versions values($1,$2,$3,$4)',
+  const pin=async(ref,brief=ids.brief)=>sql('insert into public.design_creative_brief_versions(id,organization_id,creative_brief_id,content) values($1,$2,$3,$4)',
     [randomUUID(),ids.org,brief,{title:'Pinned',media_references:[ref]}])
   const ref={kind:'design_asset_version',id:first.version_id}
   await pin(ref)
@@ -129,6 +131,37 @@ try {
   await assert.rejects(()=>pin(ref))
   await sql('update public.design_creative_briefs set brand_id=$1 where id=$2',[ids.brand,ids.brief])
   await assert.rejects(()=>sql('delete from public.design_creative_brief_media_sources'))
+  const pinnedVersion=(await sql('select creative_brief_version_id from public.design_creative_brief_media_sources where asset_version_id=$1',[imageVersion])).rows[0].creative_brief_version_id
+  const freezeKey=randomUUID()
+  const freeze=async(version=pinnedVersion)=>(await sql('select public.freeze_design_creative_brief_version($1,$2,$3,$4,0,$5) result',
+    [ids.org,ids.actor,ids.brief,version,freezeKey])).rows[0].result
+  const correctedFreeze=(await sql("select pg_get_functiondef('public.freeze_design_creative_brief_version(uuid,uuid,uuid,uuid,integer,uuid)'::regprocedure) definition")).rows[0].definition
+  const legacyBrief=read('20260904002000_design_b02_creative_briefs.sql')
+  await db.exec(section(legacyBrief,'create or replace function public.freeze_design_creative_brief_version(', 'create or replace function public.set_design_working_direction_preference('))
+  // Reproduce the Edge-read -> archive -> RPC gap with the actual legacy RPC.
+  assert.equal((await sql('select archived_at from public.design_assets where id=$1',[imageAsset])).rows[0].archived_at,null)
+  await sql('update public.design_assets set archived_at=now() where id=$1',[imageAsset])
+  assert.equal((await freeze()).brief.frozen_version_id,pinnedVersion)
+  console.log('REPRODUCED: legacy freeze commits an asset archived after the eligibility read')
+  await db.exec(correctedFreeze)
+  await sql('update public.design_creative_briefs set revision=0,frozen_version_id=null,last_freeze_operation_key=null where id=$1',[ids.brief])
+  await assert.rejects(()=>freeze(),error=>error.code==='42501')
+  assert.equal((await sql('select revision from public.design_creative_briefs where id=$1',[ids.brief])).rows[0].revision,0)
+  await sql('update public.design_assets set archived_at=null where id=$1',[imageAsset])
+  await sql("update public.organization_memberships set status='inactive'")
+  await assert.rejects(()=>freeze(),error=>error.code==='42501')
+  await sql("update public.organization_memberships set status='active'")
+  await sql('update public.engagements set brand_id=$1 where id=$2',[randomUUID(),ids.engagement])
+  await assert.rejects(()=>freeze(),error=>error.code==='42501')
+  await sql('update public.engagements set brand_id=$1 where id=$2',[ids.brand,ids.engagement])
+  assert.equal((await freeze()).brief.frozen_version_id,pinnedVersion)
+  await assert.rejects(()=>freeze(ids.briefVersion),error=>error.code==='23505')
+  await sql('update public.design_assets set archived_at=now() where id=$1',[imageAsset])
+  await assert.rejects(()=>freeze(),error=>error.code==='42501')
+  await sql('update public.design_assets set archived_at=null where id=$1',[imageAsset])
+  assert.equal((await freeze()).idempotent_replay,true)
+  assert.equal((await sql('select revision from public.design_creative_briefs where id=$1',[ids.brief])).rows[0].revision,1)
+  console.log('PASS: SQL freeze rejects changed source/archive/membership before commit and replay; exact-version retry preserved')
   for(const role of ['anon','authenticated']) {
     assert.equal((await sql(`select has_function_privilege('${role}','public.prepare_design_video_promotion(uuid,uuid,uuid,uuid,uuid,uuid,text)','execute') allowed`)).rows[0].allowed,false)
     assert.equal((await sql(`select has_function_privilege('${role}','public.complete_design_video_promotion(uuid,uuid,uuid,uuid,uuid,uuid,text)','execute') allowed`)).rows[0].allowed,false)
