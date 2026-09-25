@@ -6,8 +6,17 @@ import { integrations } from '../data/integrationRepository.js'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 
 const JOB_PAGE_SIZE = 50
+const UNSETTLED_VIDEO_STATUSES = new Set(['queued', 'claimed', 'provider_pending', 'provider_completed', 'outcome_unknown'])
 
 export default function DesignVideoCapabilities({ directionVersionId }) {
+  const { activeOrganizationId, scopeRevision } = useOrganization()
+  return <ScopedDesignVideoCapabilities
+    key={`${activeOrganizationId}:${scopeRevision}:${directionVersionId}`}
+    directionVersionId={directionVersionId} />
+}
+
+// eslint-disable-next-line no-unused-vars -- This config does not count JSX component references.
+function ScopedDesignVideoCapabilities({ directionVersionId }) {
   const { activeOrganizationId, requestSignal, scopeRevision } = useOrganization()
   const studio = useMemo(() => activeOrganizationId ? designWorkshop.forOrganization(activeOrganizationId, { signal: requestSignal }) : null, [activeOrganizationId, requestSignal])
   const [mode, setMode] = useState('explore')
@@ -25,6 +34,7 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
   const [submitBusy, setSubmitBusy] = useState(false)
   const [submitNotice, setSubmitNotice] = useState('')
   const [jobs, setJobs] = useState([])
+  const [jobsLoaded, setJobsLoaded] = useState(false)
   const [hasOlderJobs, setHasOlderJobs] = useState(false)
   const [jobsError, setJobsError] = useState('')
   const [jobsBusy, setJobsBusy] = useState('')
@@ -32,6 +42,7 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
   const [clock, setClock] = useState(Date.now())
   const sequence = useRef(0)
   const jobsSequence = useRef(0)
+  const submitInFlight = useRef(false)
   const submission = useRef({ signature: '', operationKey: '' })
   useEffect(() => () => { sequence.current++ }, [])
   useEffect(() => {
@@ -57,12 +68,13 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
   useEffect(() => {
     const attempt = ++jobsSequence.current
     let active = true
-    setJobs([]); setHasOlderJobs(false); setJobsError(''); setJobsBusy(''); setPreview(null)
+    setJobs([]); setJobsLoaded(false); setHasOlderJobs(false); setJobsError(''); setJobsBusy(''); setPreview(null)
     if (!studio || !directionVersionId || requestSignal?.aborted) return
     studio.listVideoJobs(directionVersionId).then(rows => {
       if (active && jobsSequence.current === attempt && !requestSignal?.aborted) {
         setJobs(Array.isArray(rows) ? rows.slice(0, JOB_PAGE_SIZE) : [])
         setHasOlderJobs(Array.isArray(rows) && rows.length > JOB_PAGE_SIZE)
+        setJobsLoaded(true)
       }
     }).catch(() => {
       if (active && jobsSequence.current === attempt && !requestSignal?.aborted) setJobsError('Private video history is unavailable.')
@@ -78,7 +90,8 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
   const display = current?.data ? videoQuoteDisplay(current.data, input, Math.max(clock, Date.now())) : null
   const paidExecutionEnabled = current?.data?.paid_execution_enabled === true
   const selectedConnection = connections.find(connection => connection.id === connectionId)
-  const canSubmit = Boolean(studio && directionVersionId && !submitBusy && !jobsBusy
+  const hasUnsettledJob = jobs.some(job => UNSETTLED_VIDEO_STATUSES.has(job.status))
+  const canSubmit = Boolean(studio && directionVersionId && jobsLoaded && !hasUnsettledJob && !submitBusy && !jobsBusy
     && !requestSignal?.aborted && canSubmitVideo({ display, connection: selectedConnection,
       prompt, supported, spendConfirmed }))
   const expires = current?.data?.quote?.valid_until
@@ -107,7 +120,8 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
   }
   async function submitVideo(event) {
     event.preventDefault()
-    if (!canSubmit) return
+    if (!canSubmit || submitInFlight.current) return
+    submitInFlight.current = true
     const exactPrompt = prompt.trim()
     const signature = JSON.stringify([activeOrganizationId, directionVersionId, mode,
       input, connectionId, display.quoteId, exactPrompt])
@@ -125,6 +139,7 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
       if (requestSignal?.aborted || jobsSequence.current !== attempt) return
       setJobs(Array.isArray(rows) ? rows.slice(0, JOB_PAGE_SIZE) : [])
       setHasOlderJobs(Array.isArray(rows) && rows.length > JOB_PAGE_SIZE)
+      setJobsLoaded(true)
       setSubmitNotice(`Original video request recorded (${job.status.replaceAll('_', ' ')}). Check its private history for updates.`)
       setPrompt(''); setSpendConfirmed(false)
       submission.current = { signature: '', operationKey: '' }
@@ -137,9 +152,18 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
         if (!requestSignal?.aborted && jobsSequence.current === attempt) {
           setJobs(Array.isArray(rows) ? rows.slice(0, JOB_PAGE_SIZE) : [])
           setHasOlderJobs(Array.isArray(rows) && rows.length > JOB_PAGE_SIZE)
+          setJobsLoaded(true)
         }
-      } catch { /* Original operation key is preserved for explicit recovery. */ }
-    } finally { if (!requestSignal?.aborted && jobsSequence.current === attempt) setSubmitBusy(false) }
+      } catch {
+        if (!requestSignal?.aborted && jobsSequence.current === attempt) {
+          setJobsLoaded(false)
+          setJobsError('Private video history is unavailable. New requests are blocked until it can be checked.')
+        }
+      }
+    } finally {
+      submitInFlight.current = false
+      if (!requestSignal?.aborted && jobsSequence.current === attempt) setSubmitBusy(false)
+    }
   }
   async function actOnJob(job, action) {
     if (!studio || jobsBusy || requestSignal?.aborted) return
@@ -240,6 +264,8 @@ export default function DesignVideoCapabilities({ directionVersionId }) {
       <button type="submit" className="rounded border border-violet-500 px-3 py-2 text-violet-100 disabled:cursor-not-allowed disabled:opacity-40"
         disabled={!canSubmit}>{submitBusy ? 'Recording original request…' : 'Generate one video'}</button>
       {submitNotice && <p role="status" className="text-amber-200">{submitNotice}</p>}
+      {!jobsLoaded && <p className="text-amber-300">Private video history must load before a new request can be submitted.</p>}
+      {hasUnsettledJob && <p className="text-amber-300">An earlier video request is unresolved. Check its original job before creating another request for this direction.</p>}
     </form>
     <p className="mt-2">Check the Asset Library and existing templates before generating. Preserve original footage for text, logo, date or caption corrections; video assembly is not available here.</p>
     <div className="mt-3 border-t border-white/10 pt-3">
