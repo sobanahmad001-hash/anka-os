@@ -1,10 +1,15 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const INPUT = 'w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-violet-500/60'
 const BUTTON = 'rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40'
 const SIZES = [['1024x1024', 'Square · 1024×1024'], ['1024x1536', 'Portrait · 1024×1536'], ['1536x1024', 'Landscape · 1536×1024']]
 
-export default function DesignPrivateImagePanel({ brief, records, engagements, studio, canGenerate, onReload }) {
+export default function DesignPrivateImagePanel(props) {
+  const brief = props.brief
+  return <ScopedDesignPrivateImagePanel key={`${brief?.organization_id || ''}:${brief?.id || ''}:${brief?.frozen_version_id || ''}`} {...props} />
+}
+
+function ScopedDesignPrivateImagePanel({ brief, records, engagements, studio, canGenerate, onReload }) {
   const [prompt, setPrompt] = useState('')
   const [modelId, setModelId] = useState('')
   const [connectionId, setConnectionId] = useState('')
@@ -19,6 +24,10 @@ export default function DesignPrivateImagePanel({ brief, records, engagements, s
   const [targetServiceId, setTargetServiceId] = useState('')
   const [promotionPreview, setPromotionPreview] = useState(null)
   const [promotionKey, setPromotionKey] = useState('')
+  const promotionSequence = useRef(0)
+  const promotionInFlight = useRef(false)
+  const promotionIdentity = useRef('')
+  useEffect(() => () => { promotionSequence.current++ }, [])
   const versionId = brief?.frozen_version_id || ''
   const version = (records.versions || []).find(item => item.id === versionId)
   const models = (records.models || []).filter(item => item.provider === 'openai' && item.supported_output_types?.includes('image'))
@@ -74,29 +83,44 @@ export default function DesignPrivateImagePanel({ brief, records, engagements, s
     catch (reason) { setError(reason.message || 'Private image is unavailable') }
     finally { setBusy('') }
   }
-  function choosePromotionJob(id) { setPromotionJobId(id); setPromotionPreview(null); setPromotionKey(''); setError('') }
-  function chooseTarget(id) { setTargetEngagementId(id); setTargetServiceId(''); setPromotionPreview(null); setPromotionKey(''); setError('') }
-  function chooseService(id) { setTargetServiceId(id); setPromotionPreview(null); setPromotionKey(''); setError('') }
+  function invalidatePromotion() {
+    if (promotionInFlight.current || promotionIdentity.current) return false
+    promotionSequence.current++; setPromotionPreview(null); setPromotionKey(''); setError('')
+    if (busy === 'preview-promotion') setBusy('')
+    return true
+  }
+  function choosePromotionJob(id) { if (invalidatePromotion()) setPromotionJobId(id) }
+  function chooseTarget(id) { if (invalidatePromotion()) { setTargetEngagementId(id); setTargetServiceId('') } }
+  function chooseService(id) { if (invalidatePromotion()) setTargetServiceId(id) }
   async function previewPromotion() {
     if (!promotionJobId || !targetEngagementId || !targetServiceId || busy || promotionKey) return
+    const attempt = ++promotionSequence.current
     setBusy('preview-promotion'); setError('')
-    try { setPromotionPreview(await studio.previewPrivatePromotion({ job_id: promotionJobId,
-      target_engagement_id: targetEngagementId, target_service_id: targetServiceId })) }
-    catch (reason) { setError(reason.message || 'Promotion preview failed') }
-    finally { setBusy('') }
+    try {
+      const preview = await studio.previewPrivatePromotion({ job_id: promotionJobId,
+        target_engagement_id: targetEngagementId, target_service_id: targetServiceId })
+      if (promotionSequence.current === attempt) setPromotionPreview(preview)
+    }
+    catch (reason) { if (promotionSequence.current === attempt) setError(reason.message || 'Promotion preview failed') }
+    finally { if (promotionSequence.current === attempt) setBusy('') }
   }
   async function confirmPromotion() {
-    if (!promotionPreview || busy) return
-    const key = promotionKey || crypto.randomUUID()
+    if (!promotionPreview || busy || promotionInFlight.current) return
+    promotionInFlight.current = true
+    const attempt = promotionSequence.current
+    const key = promotionIdentity.current || crypto.randomUUID()
+    promotionIdentity.current = key
     setPromotionKey(key); setBusy('promote'); setError('')
     try {
       await studio.promotePrivateImage({ job_id: promotionJobId,
         target_engagement_id: targetEngagementId, target_service_id: targetServiceId,
         expected_preview_checksum: promotionPreview.checksum, operation_key: key })
       await onReload()
-      setPromotionKey(''); setPromotionPreview(null)
-    } catch (reason) { setError(reason.message || 'Promotion status is uncertain. Retry the same exact confirmation.') }
-    finally { setBusy('') }
+      if (promotionSequence.current === attempt) {
+        promotionIdentity.current = ''; setPromotionKey(''); setPromotionPreview(null)
+      }
+    } catch (reason) { if (promotionSequence.current === attempt) setError(reason.message || 'Promotion status is uncertain. Retry the same exact confirmation.') }
+    finally { promotionInFlight.current = false; if (promotionSequence.current === attempt) setBusy('') }
   }
   return <section className="mt-5 rounded-2xl border border-amber-400/20 bg-slate-900/70 p-5" aria-label="Private image generation">
     <h2 className="text-xl font-semibold">Private image exploration</h2>

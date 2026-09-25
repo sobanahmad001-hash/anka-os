@@ -374,8 +374,8 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
               <input type="checkbox" className="mt-1" checked={includeCanonicalContext}
                 onChange={event => setIncludeCanonicalContext(event.target.checked)}
                 disabled={!paidExecutionEnabled || Boolean(aiBusyMessageId)} />
-              <span>For this reply, also send OpenAI the current organization name{contextKind === 'project_team'
-                ? ' and this project’s name, description, status, health, scope, and exclusions' : ''}. No other records or record IDs are added.</span>
+              <span>For this Ask AI reply, also send OpenAI the current organization name{contextKind === 'project_team'
+                ? ' and this project’s name, description, status, health, scope, and exclusions' : ''}, plus a bounded sample of accessible project names, status and health, task and work-item titles, status, deadlines and assignee display names, sampled progress counts, and review-state counts. Record IDs, emails, contact details, descriptions of tasks or work items, files, transcripts, private memory, and teammate messages are excluded. The sample may be incomplete.</span>
             </label>}
           </div>}
           {hasOlder && <button type="button" disabled={olderBusy} onClick={loadOlder}

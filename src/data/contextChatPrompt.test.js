@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildPrivateConversationPrompt, privateConversationScope, requireOwnerAuthoredPromptTurns } from '../../supabase/functions/_shared/contextChatPrompt.js'
+import { buildPrivateConversationPrompt, canonicalOpenAiContext, privateConversationScope, requireOwnerAuthoredPromptTurns } from '../../supabase/functions/_shared/contextChatPrompt.js'
 
 const source = '2dfc98d4-50a9-4c84-8f19-dab3d4e90a6e'
 const earlier = '4e47d11a-7b84-4095-8657-93e9ead63c80'
@@ -93,4 +93,40 @@ test('private prompt drops oldest turns to fit its bound but never drops the cur
     { context_kind: 'organization' }))
   assert.throws(() => buildPrivateConversationPrompt([{ ...sourceTurn, body: 'x'.repeat(24001) }], source,
     { context_kind: 'organization' }))
+})
+
+test('explicit OpenAI work context projects only approved bounded fields', () => {
+  const workSummary = {
+    scope: 'selected_project', as_of: '2026-09-25T00:00:00.000Z',
+    private_note: 'never-send',
+    coverage: { visible_projects_scanned: 1, projects_included: 1,
+      more_visible_projects_possible: false, projects_omitted_from_bounded_summary: false,
+      assignee_labels_available: true, private_email: 'never@send.test' },
+    projects: [{ id: earlier, name: 'Website', status: 'active', health: 'at_risk',
+      description: 'raw description never-send',
+      sample: { project_tasks: 1, engagement_work_items: 0, linked_engagement: false,
+        more_records_possible: false, project_task_statuses: { blocked: 1, private_count: 44 },
+        engagement_work_item_statuses: {}, private_count: 44 },
+      project_tasks: [{ id: earlier, title: 'Fix page alice@example.com', status: 'blocked',
+        due: '2026-09-27', assignee: 'Jamie Example', description: 'never-send' }],
+      engagement_work_items: [], review_states_in_recent_visible_version_sample: { ready_for_internal_review: 1 },
+      raw_file: 'never-send' }],
+  }
+  const canonical = canonicalOpenAiContext(
+    { id: earlier, name: 'Anka', private_note: 'never-send' },
+    { id: earlier, name: 'Website', description: 'Scope for bob@example.com',
+      status: 'active', health: 'at_risk', scope_statement: 'Launch', exclusions: 'None',
+      private_note: 'never-send' }, workSummary)
+  const payload = JSON.parse(buildPrivateConversationPrompt([sourceTurn], source,
+    { context_kind: 'project_team', project_id: earlier }, canonical))
+  assert.equal(payload.canonical_context.work_summary.projects[0].project_tasks[0].assignee, 'Jamie Example')
+  assert.equal(payload.canonical_context.work_summary.projects[0].sample.project_task_statuses.blocked, 1)
+  assert.equal(payload.canonical_context.work_summary.projects[0].review_states_in_recent_visible_version_sample.ready_for_internal_review, 1)
+  const encoded = JSON.stringify(payload)
+  for (const forbidden of [earlier, 'alice@example.com', 'bob@example.com', 'never@send.test',
+    'never-send', 'raw description', 'raw_file', 'private_count']) {
+    assert.equal(encoded.includes(forbidden), false, forbidden)
+  }
+  assert.equal(JSON.stringify(canonicalOpenAiContext({ name: 'Anka' })).includes('work_summary'), false)
+  assert.throws(() => canonicalOpenAiContext({ name: 'Anka' }, null, { scope: 'wrong', projects: [] }))
 })
