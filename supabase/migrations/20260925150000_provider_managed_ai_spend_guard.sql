@@ -11,7 +11,7 @@ alter table private.ai_execution_budget_limits
   alter column monthly_limit_microusd drop not null;
 alter table private.ai_execution_budget_limits
   add constraint ai_execution_budget_limits_mode_value_check check (
-    (spend_guard_mode='local_monthly_cap' and monthly_limit_microusd>0)
+    (spend_guard_mode='local_monthly_cap' and monthly_limit_microusd is not null and monthly_limit_microusd>0)
     or (spend_guard_mode='provider_managed' and monthly_limit_microusd is null)
   );
 comment on table private.ai_execution_budget_limits is
