@@ -1502,16 +1502,16 @@ async function chatSpendGuardReadiness(admin: Client, organizationId: string, ac
     external_provider_limit_verified: false }
 }
 
-function freshChatPriceAvailable(provider: string, modelId: string) {
+function freshChatPriceAvailable(provider: string, modelId: string, readEnv: (name: string) => string | undefined) {
   const key = CHAT_PRICING_ENV[provider]
   if (!key) return false
   try {
-    selectFreshPipelineRate(Deno.env.get(key), modelId, new Date(), provider as 'openai' | 'anthropic' | 'google_gemini')
+    selectFreshPipelineRate(readEnv(key), modelId, new Date(), provider as 'openai' | 'anthropic' | 'google_gemini')
     return true
   } catch { return false }
 }
 
-async function contextModelReadiness(admin: Client, organizationId: string, actorId: string, configurationId: string) {
+async function contextModelReadiness(admin: Client, organizationId: string, actorId: string, configurationId: string, readEnv: (name: string) => string | undefined) {
   if (!configurationId) return 'model_not_selected'
   const { error: authorityError } = await admin.rpc('assert_context_chat_organization_model', {
     p_configuration_id: configurationId, p_organization_id: organizationId, p_actor_id: actorId,
@@ -1533,8 +1533,8 @@ async function contextModelReadiness(admin: Client, organizationId: string, acto
     || connection.archived_at || !text(connection.secret_name, 200).startsWith(CHAT_SECRET_PREFIX[connection.provider])) {
     return 'connection_unavailable'
   }
-  if (!Deno.env.get(connection.secret_name)) return 'credential_unavailable'
-  if (!freshChatPriceAvailable(connection.provider, model.model_id)) return 'price_unavailable'
+  if (!readEnv(connection.secret_name)) return 'credential_unavailable'
+  if (!freshChatPriceAvailable(connection.provider, model.model_id, readEnv)) return 'price_unavailable'
   return 'configured'
 }
 
@@ -1559,7 +1559,7 @@ async function getCapabilities(
       ...spendGuard,
       model_price_available: provider.approvedModels.map(model => ({
         configuration_id: model.configuration_id,
-        fresh_price_available: freshChatPriceAvailable(String('provider' in model ? model.provider : 'openai'), String(model.model_id)),
+        fresh_price_available: freshChatPriceAvailable(String('provider' in model ? model.provider : 'openai'), String(model.model_id), name => Deno.env.get(name)),
       })),
     } } : {}),
     provider: savedAnswer ? (provider as WorkshopAnswerRoute).provider : 'openai',
@@ -2064,7 +2064,7 @@ export async function rejectProposal(
   return data
 }
 
-export async function handleRequest(request: Request, dependencies: { clients?: RequestClients, fetcher?: typeof fetch, proposal?: ProposalDependencies, waitUntil?: (promise: Promise<void>) => void, contextChatPaidExecutionEnabled?: boolean } = {}) {
+export async function handleRequest(request: Request, dependencies: { clients?: RequestClients, fetcher?: typeof fetch, proposal?: ProposalDependencies, waitUntil?: (promise: Promise<void>) => void, contextChatPaidExecutionEnabled?: boolean, readinessEnv?: (name: string) => string | undefined } = {}) {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (request.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
   let auditContext: { admin: Client, actorId: string, organizationId: string } | null = null
@@ -2086,7 +2086,7 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
     const action = text(body.action, 60)
     if (action === 'get_context_chat_readiness') {
       const spendGuard = await chatSpendGuardReadiness(admin, organizationId, user.id)
-      const modelStatus = await contextModelReadiness(admin, organizationId, user.id, text(body.model_configuration_id, 80))
+      const modelStatus = await contextModelReadiness(admin, organizationId, user.id, text(body.model_configuration_id, 80), dependencies.readinessEnv ?? (name => Deno.env.get(name)))
       return response({ data: { paid_execution_enabled:
         dependencies.contextChatPaidExecutionEnabled
           ?? Deno.env.get('CONTEXT_CHAT_PAID_EXECUTION_ENABLED') === 'true',

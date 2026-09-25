@@ -169,6 +169,7 @@ const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
 // Executes the real request, authorization, context, connector and RPC boundaries.
 // The query double honors predicates; RPC results are synthetic, not SQL execution.
 function selectedOrganizationFixture() {
+  const readinessEnv = new Map<string, string>()
   const rows: Record<string, any[]> = {}
   const queries: Array<{ table: string, filters: Array<[string, unknown]> }> = []
   const rpcCalls: Array<{ name: string, args: any }> = []
@@ -396,6 +397,7 @@ function selectedOrganizationFixture() {
   }), {
     clients: { admin, userClient: { from: admin.from.bind(admin), auth: { getUser: async () => ({ data: { user: { id: 'actor' } }, error: null }) } } as any },
     contextChatPaidExecutionEnabled: false,
+    readinessEnv: name => readinessEnv.get(name),
     fetcher: (async (_url, init) => {
       providerCalls++
       providerRequests.push(init || {})
@@ -459,7 +461,7 @@ function selectedOrganizationFixture() {
     },
   })
   return {
-    rows, queries, rpcCalls, request, events, admin, providerRequests, backgroundTasks,
+    rows, queries, rpcCalls, request, events, admin, providerRequests, backgroundTasks, readinessEnv,
     providerCalls: () => providerCalls,
     setBeginReplay: (value: boolean) => { beginReplay = value },
     setBeginError: (value: any) => { beginError = value },
@@ -1732,15 +1734,15 @@ Deno.test('private chat readiness reports selected model credential and price wi
   const fixture = selectedOrganizationFixture()
   const secretName = 'ANKA_OPENAI_OFFLINE_READINESS_TEST'
   const priceName = 'N6_OPENAI_MODEL_PRICING_JSON'
-  const previousSecret = Deno.env.get(secretName)
-  const previousPrice = Deno.env.get(priceName)
+  const previousSecret = fixture.readinessEnv.get(secretName)
+  const previousPrice = fixture.readinessEnv.get(priceName)
   fixture.rows.integration_connections.push({ id: 'private-connection-B', organization_id: 'B',
     provider: 'openai', status: 'verified', archived_at: null, secret_name: secretName,
     public_config: { model_id: 'offline' } })
   fixture.rows.context_chat_organization_models = [{ id: 'private-model-B', organization_id: 'B',
     connector_connection_id: 'private-connection-B', model_id: 'offline', revoked_at: null }]
   try {
-    Deno.env.delete(secretName); Deno.env.delete(priceName)
+    fixture.readinessEnv.delete(secretName); fixture.readinessEnv.delete(priceName)
     const read = async (organizationId: string, modelId: string) => {
       const response = await fixture.request({ action: 'get_context_chat_readiness',
         organization_id: organizationId, model_configuration_id: modelId })
@@ -1748,9 +1750,9 @@ Deno.test('private chat readiness reports selected model credential and price wi
       return (await response.json()).data
     }
     assertEquals((await read('B', 'private-model-B')).model_status, 'credential_unavailable')
-    Deno.env.set(secretName, 'offline-fixture-only')
+    fixture.readinessEnv.set(secretName, 'offline-fixture-only')
     assertEquals((await read('B', 'private-model-B')).model_status, 'price_unavailable')
-    Deno.env.set(priceName, JSON.stringify([{ model_id: 'offline', provider: 'openai',
+    fixture.readinessEnv.set(priceName, JSON.stringify([{ model_id: 'offline', provider: 'openai',
       verified_at: new Date().toISOString(), source_url: 'https://developers.openai.com/api/docs/pricing',
       input_usd_per_million: 1, cached_input_usd_per_million: 1,
       cache_write_usd_per_million: 1, output_usd_per_million: 1 }]))
@@ -1773,9 +1775,9 @@ Deno.test('private chat readiness reports selected model credential and price wi
     assertEquals((await read('A', 'private-model-B')).model_status, 'model_unavailable')
     assertEquals(fixture.providerCalls(), 0)
   } finally {
-    if (previousSecret === undefined) Deno.env.delete(secretName)
-    else Deno.env.set(secretName, previousSecret)
-    if (previousPrice === undefined) Deno.env.delete(priceName)
-    else Deno.env.set(priceName, previousPrice)
+    if (previousSecret === undefined) fixture.readinessEnv.delete(secretName)
+    else fixture.readinessEnv.set(secretName, previousSecret)
+    if (previousPrice === undefined) fixture.readinessEnv.delete(priceName)
+    else fixture.readinessEnv.set(priceName, previousPrice)
   }
 })
