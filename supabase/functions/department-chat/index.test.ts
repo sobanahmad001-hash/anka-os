@@ -169,6 +169,7 @@ const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
 // Executes the real request, authorization, context, connector and RPC boundaries.
 // The query double honors predicates; RPC results are synthetic, not SQL execution.
 function selectedOrganizationFixture() {
+  const readinessEnv = new Map<string, string>()
   const rows: Record<string, any[]> = {}
   const queries: Array<{ table: string, filters: Array<[string, unknown]> }> = []
   const rpcCalls: Array<{ name: string, args: any }> = []
@@ -234,6 +235,24 @@ function selectedOrganizationFixture() {
     async rpc(name: string, args: any) {
       rpcCalls.push({ name, args })
       events.push('rpc:' + name)
+      if (name === 'assert_context_chat_organization_model') {
+        const model = (rows.context_chat_organization_models || []).find(row =>
+          row.id === args.p_configuration_id && row.organization_id === args.p_organization_id
+          && row.revoked_at === null)
+        const connection = (rows.integration_connections || []).find(row =>
+          row.id === model?.connector_connection_id && row.organization_id === args.p_organization_id
+          && row.status === 'verified' && row.archived_at === null)
+        const mappingExists = ['integration_connection_engagements', 'integration_connection_departments']
+          .some(table => (rows[table] || []).some(row =>
+            row.connection_id === connection?.id && row.organization_id === args.p_organization_id))
+        const verifiedModels = connection?.public_config?.verified_model_ids
+        const listed = connection?.public_config?.model_id === model?.model_id
+          || (Array.isArray(verifiedModels) && verifiedModels.includes(model?.model_id))
+        return model && connection && !mappingExists && listed
+          ? { data: null, error: null }
+          : { data: null, error: { code: '23514', message: 'Selected model is unavailable' } }
+      }
+      if (name === 'get_ai_spend_guard_readiness') return { data: { spend_guard_mode: null, spend_tracking_configured: false, local_monthly_cap_configured: false, external_provider_limit_verified: false }, error: null }
       if (name === 'assert_department_chat_model_dispatch' && modelDispatchError) {
         return { data: null, error: modelDispatchError }
       }
@@ -378,6 +397,7 @@ function selectedOrganizationFixture() {
   }), {
     clients: { admin, userClient: { from: admin.from.bind(admin), auth: { getUser: async () => ({ data: { user: { id: 'actor' } }, error: null }) } } as any },
     contextChatPaidExecutionEnabled: false,
+    readinessEnv: name => readinessEnv.get(name),
     fetcher: (async (_url, init) => {
       providerCalls++
       providerRequests.push(init || {})
@@ -441,7 +461,7 @@ function selectedOrganizationFixture() {
     },
   })
   return {
-    rows, queries, rpcCalls, request, events, admin, providerRequests, backgroundTasks,
+    rows, queries, rpcCalls, request, events, admin, providerRequests, backgroundTasks, readinessEnv,
     providerCalls: () => providerCalls,
     setBeginReplay: (value: boolean) => { beginReplay = value },
     setBeginError: (value: any) => { beginError = value },
@@ -454,7 +474,11 @@ Deno.test('authenticated private chat readiness reports disabled paid execution 
   const fixture = selectedOrganizationFixture()
   const result = await fixture.request({ action: 'get_context_chat_readiness', organization_id: 'B' })
   assertEquals(result.status, 200)
-  assertEquals((await result.json()).data.paid_execution_enabled, false)
+  const readiness = (await result.json()).data
+  assertEquals(readiness.paid_execution_enabled, false)
+  assertEquals(readiness.spend_tracking_configured, false)
+  assertEquals(readiness.spend_guard_mode, null)
+  assertEquals(readiness.model_status, 'model_not_selected')
   assertEquals(fixture.providerCalls(), 0)
 })
 
@@ -1705,4 +1729,55 @@ Deno.test('P9 stopping local observation does not cancel upstream durable finali
   await Promise.all(background)
   assertEquals(completed, true)
   assertEquals(unknown, false)
+})
+Deno.test('private chat readiness reports selected model credential and price without a provider call', async () => {
+  const fixture = selectedOrganizationFixture()
+  const secretName = 'ANKA_OPENAI_OFFLINE_READINESS_TEST'
+  const priceName = 'N6_OPENAI_MODEL_PRICING_JSON'
+  const previousSecret = fixture.readinessEnv.get(secretName)
+  const previousPrice = fixture.readinessEnv.get(priceName)
+  fixture.rows.integration_connections.push({ id: 'private-connection-B', organization_id: 'B',
+    provider: 'openai', status: 'verified', archived_at: null, secret_name: secretName,
+    public_config: { model_id: 'offline' } })
+  fixture.rows.context_chat_organization_models = [{ id: 'private-model-B', organization_id: 'B',
+    connector_connection_id: 'private-connection-B', model_id: 'offline', revoked_at: null }]
+  try {
+    fixture.readinessEnv.delete(secretName); fixture.readinessEnv.delete(priceName)
+    const read = async (organizationId: string, modelId: string) => {
+      const response = await fixture.request({ action: 'get_context_chat_readiness',
+        organization_id: organizationId, model_configuration_id: modelId })
+      assertEquals(response.status, 200)
+      return (await response.json()).data
+    }
+    assertEquals((await read('B', 'private-model-B')).model_status, 'credential_unavailable')
+    fixture.readinessEnv.set(secretName, 'offline-fixture-only')
+    assertEquals((await read('B', 'private-model-B')).model_status, 'price_unavailable')
+    fixture.readinessEnv.set(priceName, JSON.stringify([{ model_id: 'offline', provider: 'openai',
+      verified_at: new Date().toISOString(), source_url: 'https://developers.openai.com/api/docs/pricing',
+      input_usd_per_million: 1, cached_input_usd_per_million: 1,
+      cache_write_usd_per_million: 1, output_usd_per_million: 1 }]))
+    const ready = await read('B', 'private-model-B')
+    assertEquals(ready.model_status, 'configured')
+    fixture.rows.integration_connection_engagements = [{ organization_id: 'B',
+      connection_id: 'private-connection-B', engagement_id: 'engagement-B' }]
+    assertEquals((await read('B', 'private-model-B')).model_status, 'model_unavailable')
+    fixture.rows.integration_connection_engagements = []
+    fixture.rows.integration_connection_departments = [{ organization_id: 'B',
+      connection_id: 'private-connection-B', department_id: 'design' }]
+    assertEquals((await read('B', 'private-model-B')).model_status, 'model_unavailable')
+    fixture.rows.integration_connection_departments = []
+    const privateConnection = fixture.rows.integration_connections.find(row => row.id === 'private-connection-B')
+    privateConnection.public_config = { model_id: 'different-model' }
+    assertEquals((await read('B', 'private-model-B')).model_status, 'model_unavailable')
+    privateConnection.public_config = { model_id: 'offline' }
+    assertEquals(ready.paid_execution_enabled, false)
+    assertEquals(ready.spend_tracking_configured, false)
+    assertEquals((await read('A', 'private-model-B')).model_status, 'model_unavailable')
+    assertEquals(fixture.providerCalls(), 0)
+  } finally {
+    if (previousSecret === undefined) fixture.readinessEnv.delete(secretName)
+    else fixture.readinessEnv.set(secretName, previousSecret)
+    if (previousPrice === undefined) fixture.readinessEnv.delete(priceName)
+    else fixture.readinessEnv.set(priceName, previousPrice)
+  }
 })

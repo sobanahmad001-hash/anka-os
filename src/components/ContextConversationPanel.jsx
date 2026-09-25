@@ -8,6 +8,13 @@ import { contextChatRunner } from '../data/contextChatRunnerRepository.js'
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-violet-500'
 const BUTTON = 'rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50'
 const PAGE_SIZE = 50
+const MODEL_READINESS_MESSAGES = {
+  model_not_selected: 'Select an approved organization model to use AI.',
+  model_unavailable: 'The selected model is no longer approved. Refresh the conversation.',
+  connection_unavailable: 'The selected organization connection is unavailable.',
+  credential_unavailable: 'The selected connection credential is unavailable to the service.',
+  price_unavailable: 'A fresh verified price for this exact model is unavailable.',
+}
 
 export default function ContextConversationPanel({ contextKind, departmentId = '', projectId = '', label = 'Conversation' }) {
   const { user } = useAuth()
@@ -37,7 +44,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   const [olderBusy, setOlderBusy] = useState(false)
   const [modelOptions, setModelOptions] = useState([])
   const [selectedModelId, setSelectedModelId] = useState('')
-  const [paidExecutionEnabled, setPaidExecutionEnabled] = useState(false)
+  const [readiness, setReadiness] = useState(null)
   const [aiUseConfirmed, setAiUseConfirmed] = useState(false)
   const [includeCanonicalContext, setIncludeCanonicalContext] = useState(false)
   const [aiBusyMessageId, setAiBusyMessageId] = useState('')
@@ -76,12 +83,12 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
 
   useEffect(() => {
     let current = true
-    setPaidExecutionEnabled(false)
-    departmentChat.getContextChatReadiness(requestScope)
-      .then(result => { if (current && !signal.aborted) setPaidExecutionEnabled(result.paid_execution_enabled === true) })
+    setReadiness(null)
+    departmentChat.getContextChatReadiness({ model_configuration_id: selectedModelId }, requestScope)
+      .then(result => { if (current && !signal.aborted) setReadiness({ ...result, model_configuration_id: selectedModelId }) })
       .catch(reason => { if (current) showError(reason) })
     return () => { current = false }
-  }, [requestScope, signal, showError])
+  }, [requestScope, selectedModelId, signal, showError])
 
   useEffect(() => {
     let current = true
@@ -217,7 +224,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
 
   async function askAi(message, recoverOnly = false) {
     if (aiBusyMessageId || busy) return
-    if (!recoverOnly && (!paidExecutionEnabled || !selectedModelId || !aiUseConfirmed)) return
+    if (!recoverOnly && (!localAiChecksPass || !selectedModelId || !aiUseConfirmed)) return
     const targetId = conversationId
     const savedRequest = dispatchRequests.current.get(message.id)
     const approvedGrounding = includeCanonicalContext
@@ -300,13 +307,17 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
 
   const selected = conversations.find(row => row.id === conversationId)
   const selectedModel = modelOptions.find(model => model.id === selectedModelId)
+  const paidExecutionEnabled = readiness?.paid_execution_enabled === true
+  const localAiChecksPass = paidExecutionEnabled && readiness?.model_configuration_id === selectedModelId
+    && readiness?.spend_tracking_configured === true
+    && readiness?.model_status === 'configured'
   const canIncludeCanonicalContext = selectedModel?.provider === 'openai'
     && (contextKind === 'organization' || contextKind === 'project_team')
   const isOwner = selected?.owner_id === user.id
   const description = contextKind === 'department_private'
-    ? 'Only you can see these conversations. AI replies require an approved model, a budget, and enabled paid execution.'
+    ? 'Only you can see these conversations. AI replies require an approved model, configured spend tracking, and enabled paid execution.'
     : contextKind === 'organization'
-      ? 'Only you can see this organization conversation. AI replies require an approved model, a budget, and enabled paid execution.'
+      ? 'Only you can see this organization conversation. AI replies require an approved model, configured spend tracking, and enabled paid execution.'
       : 'Project conversations start private. You can choose active internal teammates to read and reply; AI replies remain creator-controlled.'
   return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5" aria-label={label}>
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -362,18 +373,22 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
               {!modelOptions.length && <option value="">No approved model available</option>}
               {modelOptions.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
             </select>
-            <p className="mt-2 text-xs text-slate-400">AI replies use the approved organization-level provider connection and count against the organization AI budget. {paidExecutionEnabled ? 'The service still checks current approval and budget before dispatch.' : 'AI execution is currently off; saved human messages remain available.'}</p>
-            {contextKind === 'project_team' && <p className="mt-2 text-xs text-slate-400">Teammate-authored messages are not sent to a provider. If a requested reply would include one, the request is blocked before reserving budget.</p>}
+            <p className="mt-2 text-xs text-slate-400">AI replies use the approved organization-level provider connection and are priced and recorded for the organization. {paidExecutionEnabled ? 'The service still rechecks approval, exact pricing, spend tracking and the original request before dispatch.' : 'AI execution is currently off; saved human messages remain available.'}</p>
+            {!readiness && <p className="mt-2 text-xs text-slate-400">Checking AI configuration…</p>}
+            {readiness?.spend_tracking_configured === false && <p className="mt-2 text-xs text-amber-300">Organization spend tracking is not configured.</p>}
+            {readiness?.spend_guard_mode === 'provider_managed' && <p className="mt-2 text-xs text-amber-300">Your provider-side spend limit is managed externally. Anka cannot verify or enforce it; each request is still priced and recorded.</p>}
+            {readiness?.model_status && readiness.model_status !== 'configured' && <p className="mt-2 text-xs text-amber-300">{MODEL_READINESS_MESSAGES[readiness.model_status] || 'Model readiness is unavailable.'}</p>}
+            {contextKind === 'project_team' && <p className="mt-2 text-xs text-slate-400">Teammate-authored messages are not sent to a provider. If a requested reply would include one, the request is blocked before reserving a spend record.</p>}
             <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-300">
               <input type="checkbox" className="mt-1" checked={aiUseConfirmed}
                 onChange={event => setAiUseConfirmed(event.target.checked)}
-                disabled={!paidExecutionEnabled || Boolean(aiBusyMessageId) || !selectedModelId} />
+                disabled={!localAiChecksPass || Boolean(aiBusyMessageId) || !selectedModelId} />
               <span>I confirm that this conversation's recent messages, including the message I selected, are safe to send to the selected provider for an AI reply. Records are included only if I select the separate OpenAI option below.</span>
             </label>
             {canIncludeCanonicalContext && <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-300">
               <input type="checkbox" className="mt-1" checked={includeCanonicalContext}
                 onChange={event => setIncludeCanonicalContext(event.target.checked)}
-                disabled={!paidExecutionEnabled || Boolean(aiBusyMessageId)} />
+                disabled={!localAiChecksPass || Boolean(aiBusyMessageId)} />
               <span>For this Ask AI reply, also send OpenAI the current organization name{contextKind === 'project_team'
                 ? ' and this project’s name, description, status, health, scope, and exclusions' : ''}, plus a bounded sample of accessible project names, status and health, task and work-item titles, status, deadlines and assignee display names, sampled progress counts, and review-state counts. Record IDs, emails, contact details, descriptions of tasks or work items, files, transcripts, private memory, and teammate messages are excluded. The sample may be incomplete.</span>
             </label>}
@@ -388,7 +403,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
               {isOwner && message.role === 'user' && message.author_id === user.id
                 && !messages.some(reply => reply.in_reply_to_message_id === message.id) && <div className="mt-3 flex flex-wrap gap-3">
                   <button type="button" className="text-xs font-semibold text-violet-300 disabled:opacity-40"
-                    disabled={!paidExecutionEnabled || !selectedModelId || !aiUseConfirmed || Boolean(aiBusyMessageId) || busy}
+                    disabled={!localAiChecksPass || !selectedModelId || !aiUseConfirmed || Boolean(aiBusyMessageId) || busy}
                     onClick={() => askAi(message)}>{aiBusyMessageId === message.id ? 'Checking…' : 'Ask Anka AI'}</button>
                   <button type="button" className="text-xs text-slate-400 hover:text-slate-200 disabled:opacity-40"
                     disabled={Boolean(aiBusyMessageId) || busy} onClick={() => askAi(message, true)}>Check for saved reply</button>

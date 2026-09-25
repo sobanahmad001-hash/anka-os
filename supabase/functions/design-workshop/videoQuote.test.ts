@@ -22,7 +22,7 @@ Deno.test('Design quote readiness binds exact server RPC and keeps paid executio
   const calls: unknown[] = []
   const admin = { organizationId: org, rpc: async (name: string, args: unknown) => {
     calls.push([name, args])
-    return { data: { quote: quote(), organization_cap_configured: true }, error: null }
+    return { data: { quote: quote(), organization_cap_configured: true, spend_tracking_configured: true, spend_guard_mode: 'local_monthly_cap' }, error: null }
   } } as unknown as Parameters<typeof getDesignVideoQuote>[0]
   const result = await getDesignVideoQuote(admin, body, actor)
   assertEquals(result.paid_execution_enabled, false)
@@ -39,7 +39,7 @@ Deno.test('Design quote readiness fails closed on stale price and invalid settin
   const admin = { organizationId: org, rpc: async () => {
     calls++
     return { data: { quote: { ...quote(), valid_until: new Date(Date.now() - 1000).toISOString() },
-      organization_cap_configured: true }, error: null }
+      organization_cap_configured: true, spend_tracking_configured: true, spend_guard_mode: 'local_monthly_cap' }, error: null }
   } } as unknown as Parameters<typeof getDesignVideoQuote>[0]
   await assertRejects(() => getDesignVideoQuote(admin, body, actor))
   await assertRejects(() => getDesignVideoQuote(admin, { ...body, resolution: '1080p' }, actor))
@@ -52,12 +52,14 @@ Deno.test('Design quote reports an enabled paid switch without submitting a prov
   try {
     const admin = { organizationId: org, rpc: async (name: string) => {
       assertEquals(name, 'get_design_video_quote')
-      return { data: { quote: null, organization_cap_configured: false }, error: null }
+      return { data: { quote: null, organization_cap_configured: false, spend_tracking_configured: false, spend_guard_mode: null }, error: null }
     }, from: () => { throw new Error('Connector and provider must not be called') },
     } as unknown as Parameters<typeof getDesignVideoQuote>[0]
     const result = await getDesignVideoQuote(admin, body, actor)
     assertEquals(result.paid_execution_enabled, true)
     assertEquals(result.organization_cap_configured, false)
+    assertEquals(result.spend_tracking_configured, false)
+    assertEquals(result.spend_guard_mode, null)
     assertEquals(result.quote, null)
   } finally {
     if (previous === undefined) Deno.env.delete('DESIGN_VIDEO_PAID_EXECUTION_ENABLED')

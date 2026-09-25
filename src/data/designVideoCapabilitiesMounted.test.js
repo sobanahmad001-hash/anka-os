@@ -38,7 +38,7 @@ test('mounted video submission context and uncertainty regressions', async t => 
     fixture = { scope: { activeOrganizationId: 'org-a', scopeRevision: 1, requestSignal: new AbortController().signal }, connections: [connection], rows: [], historyError }
     fixture.studio = {
       listVideoJobs: async () => { if (fixture.historyError) throw new Error('offline history failure'); return fixture.rows },
-      getVideoQuote: async input => ({ paid_execution_enabled: true, organization_cap_configured: true,
+      getVideoQuote: async input => ({ paid_execution_enabled: true, organization_cap_configured: true, spend_tracking_configured: true, spend_guard_mode: 'local_monthly_cap',
         quote: { ...input, id: 'quote', provider: 'higgsfield', model_id: 'bytedance/seedance-2.5/text-to-video', currency: 'USD', max_charge_microusd: 1000000, verified_at: new Date(Date.now() - 1000).toISOString(), valid_until: new Date(Date.now() + 60000).toISOString() } }),
       generateVideo: input => { calls.push(input); return submit.promise },
     }

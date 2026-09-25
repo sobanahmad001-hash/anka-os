@@ -210,7 +210,7 @@ function ScopedDesignVideoCapabilities({ directionVersionId }) {
     return () => clearTimeout(timer)
   }, [preview])
   return <details className="mt-3 rounded-xl border border-white/10 p-3 text-xs text-slate-400">
-    <summary className="cursor-pointer font-semibold text-slate-200">Video capabilities · {display?.paidExecutionEnabled && !display.capMissing && selectedConnection ? 'exact quote required' : 'generation unavailable'}</summary>
+    <summary className="cursor-pointer font-semibold text-slate-200">Video capabilities · {display?.paidExecutionEnabled && !display.spendTrackingMissing && selectedConnection ? 'exact quote required' : 'generation unavailable'}</summary>
     <p className="mt-2">Higgsfield Seedance 2.5 supports 480p and 720p. Google media is not configured. Maximum USD $2 per generated video; this limit does not authorize spending.</p>
     <div className="mt-3 flex flex-wrap gap-3">
       <label>Mode <select className="rounded bg-slate-900 p-2" value={mode} onChange={event => { edit(setMode, event.target.value); setResolution('') }}>
@@ -230,10 +230,11 @@ function ScopedDesignVideoCapabilities({ directionVersionId }) {
       {!supported ? <p>Choose supported settings explicitly.</p> : current?.pending ? <p>Checking quote for these exact settings…</p> : current?.error ? <p>Quote lookup failed. Check again; generation remains unavailable.</p> : display ? <>
         <p>{display.message}</p>
         {display.status === 'quoted' && <p>Quoted maximum USD ${display.maximum} · valid until {new Date(display.validUntil).toLocaleString()}</p>}
-        {display.capMissing === true && <p>Organization budget is not configured.</p>}
-        {display.capMissing === false && <p>Organization budget configured; this does not confirm remaining funds or reserve spending.</p>}
+        {display.spendTrackingMissing === true && <p>Organization spend tracking is not configured.</p>}
+        {display.spendGuardMode === 'local_monthly_cap' && <p>Local organization monthly cap configured; this does not confirm remaining funds or reserve spending.</p>}
+        {display.spendGuardMode === 'provider_managed' && <p>Provider-side spend limit is managed externally. Anka cannot verify or enforce it; local request accounting still applies.</p>}
       </> : <p>No current quote checked for these settings.</p>}
-      <p>{paidExecutionEnabled ? 'Paid execution is enabled on the server; a verified connection, budget, exact quote, and explicit confirmation are still required.' : 'Paid execution is disabled. Checking a quote makes no provider request.'}</p>
+      <p>{paidExecutionEnabled ? 'Paid execution is enabled on the server; a verified connection, spend tracking, exact quote, and explicit confirmation are still required.' : 'Paid execution is disabled. Checking a quote makes no provider request.'}</p>
     </div>
     <form onSubmit={submitVideo} className="mt-3 space-y-3 rounded-lg border border-white/10 p-3">
       <p className="font-semibold text-slate-200">Prepare one exact video request</p>
@@ -258,9 +259,9 @@ function ScopedDesignVideoCapabilities({ directionVersionId }) {
       {!connections.length && !connectionError && <p>No verified organization-only Higgsfield connection is available.</p>}
       <label className="flex items-start gap-2"><input type="checkbox" checked={spendConfirmed}
         disabled={submitBusy || !display?.paidExecutionEnabled || display?.status !== 'quoted'
-          || display?.capMissing !== false || !selectedConnection}
+          || display?.spendTrackingMissing !== false || !selectedConnection}
         onChange={event => setSpendConfirmed(event.target.checked)} />
-        <span>I approve one request with these exact settings and a maximum charge of USD ${display?.status === 'quoted' ? display.maximum : '—'}. The organization monthly budget also applies.</span>
+        <span>I approve one request with these exact settings and a maximum charge of USD ${display?.status === 'quoted' ? display.maximum : '—'}. {display?.spendGuardMode === 'local_monthly_cap' ? 'The organization monthly cap also applies.' : display?.spendGuardMode === 'provider_managed' ? 'Your provider-side limit is managed externally and is not verified by Anka.' : 'Organization spend tracking is required.'}</span>
       </label>
       <button type="submit" className="rounded border border-violet-500 px-3 py-2 text-violet-100 disabled:cursor-not-allowed disabled:opacity-40"
         disabled={!canSubmit}>{submitBusy ? 'Recording original request…' : 'Generate one video'}</button>
