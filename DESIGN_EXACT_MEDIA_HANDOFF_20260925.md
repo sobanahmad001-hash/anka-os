@@ -6,7 +6,7 @@ Integrated branch: `feat/design-exact-media-main-20260925`, based on released `6
 Worktree: `C:/Users/Soban/Documents/ChatGPT/Anka Sphere/anka-os-design-exact-media-20260925`.
 Original candidate `6c51594` and correction `984f3b6` are preserved on `feat/design-exact-media-20260925`. Prior frozen `a4d4b7a83b82bab70aaa06d972f2b1a8693dd72e` is preserved and its already released private-image behavior is unchanged by this package.
 
-Master has explicitly held the engagement-lifecycle restriction pending user policy choice. This candidate follows the closest existing Design image-draft contract: current source access, accessible target, matching organization/brand, and active Design service/catalog. It does **not** add a `planning|active` engagement restriction. No global list, legacy image, N1, approval, or release rules changed. UI says “context with active Design service.” Do not release pending master's decision and independent QA.
+The user explicitly approved the lifecycle rule in master: allow an **unapproved video draft** wherever the caller has access and the Design service/catalog is active, matching existing image promotion. Current source access and matching organization/brand remain required. There is **no** new `planning|active` engagement restriction; existing approval/delivery restrictions remain unchanged. The policy hold is cleared. No global list, legacy image, N1, approval, or release rules changed. UI says “context with active Design service.” Master owns rollout after acceptance gates; this document does not authorize deployment.
 
 ## Contract
 
@@ -42,6 +42,8 @@ Created through CLI `migration new` as `20260925080013` (host clock), then expli
 
 ## Reproduction
 
+Independent evidence: QA task `01a0c3f8-5482-7ad1-92b9-428d1e7d8920` independently inspected exact implementation commit `393c96bed9702ac78ebd2170d8d6eda181a933ca` and reran `scripts/verify-design-exact-media.mjs` from the clean integrated worktree (exit 0). QA confirmed the legacy freeze gap reproduction and corrected archive/membership/brand denial, unchanged revision and exact replay; no new confirmed flaw in that guard. This does not substitute for the remaining native/full-chain/Storage/browser checks.
+
 ```powershell
 $env:DENO_DIR='C:/Users/Soban/Documents/ChatGPT/Anka Sphere/.tmp_design_media_deno'
 & 'C:/Users/Soban/Documents/Codex/2026-09-19/anka-build-management/verification/native-runtimes/deno/deno.exe' test --no-lock --node-modules-dir=none --allow-env --allow-read supabase/functions/design-workshop
@@ -52,5 +54,40 @@ node scripts/verify-design-exact-media.mjs
 ```
 
 The integrated 52-test run also includes `src/data/designPrivatePromotionMounted.test.js` from released main. The migration and SQL fixture were byte-for-byte unchanged by integration from `984f3b6`; the complete offline fixture had passed there, including the reproduced legacy freeze interleaving and corrected outcomes.
+
+## Minimal deployment manifest (master-owned)
+
+Implementation anchor: `393c96bed9702ac78ebd2170d8d6eda181a933ca`; subsequent handoff-only commits do not change its executable code.
+
+| Surface | Required change |
+| --- | --- |
+| Database | Apply only `20260925140000_design_exact_media_references_promotion.sql`, after the verified released migration chain through `20260925130000`. Adds two tables, media constraints/FK/indexes, RLS/grants and functions listed below. No bucket, fixture or provider configuration. |
+| Edge deployment | Only `design-workshop`: changed `index.ts` and `creativeBriefs.ts`; new `mediaReferences.ts` and `videoPromotion.ts`. No other deployed Edge function changes. |
+| Frontend build | Existing Design brief/library/version/video components plus new `DesignVideoPromotion.jsx`; repository transport and media-type mapping. Deploy the matching build, not an older PNG-only reader. |
+
+Database function manifest:
+
+- NEW `public.prepare_design_video_promotion(uuid,uuid,uuid,uuid,uuid,uuid,text)` and `public.complete_design_video_promotion(uuid,uuid,uuid,uuid,uuid,uuid,text)`: service-only private-ledger bridge, security definer, empty search path.
+- NEW `private.record_design_brief_media_sources()` and `private.guard_design_asset_media_kind()`: invoker-security insert trigger functions; new `private.assert_design_brief_media_freeze(uuid,uuid,uuid,uuid)`: invoker-security transaction guard.
+- REPLACE `public.freeze_design_creative_brief_version(uuid,uuid,uuid,uuid,integer,uuid)`: same signature and service-only invoker-security contract, adds atomic media validation and exact replay identity check.
+- Tables: NEW `public.design_creative_brief_media_sources`, NEW `private.design_video_promotions`; EXTEND `public.design_assets` and `public.design_asset_versions` only. Existing private generation ledger, N1 authority, budgets, quote and dispatch functions are not changed.
+
+Rollout sequence after acceptance:
+
+1. Master confirms the integration SHA and database ledger, no unintended pending migrations, required referenced schemas/constraints, and existing private buckets. Reconcile ordering if the ledger moved; never silently use `include-all`, rewrite applied history or assume this file is already installed.
+2. Apply the single transaction-bound migration using the established release mechanism. A lock/statement timeout or SQL error must stop rollout and roll back that transaction; do not deploy the frontend against a failed/partial schema.
+3. Deploy matching `design-workshop`, then the matching frontend. No provider/model toggles, new secrets, bucket policies or rendering upgrades are required. Confirm service-only RPC ACLs and the strengthened freeze definition before exposing writes.
+4. Acceptance owner verifies owner/other-user/other-organization denial, old PNG read compatibility, exact saved video read, same-key retry with one draft, and freeze/source revocation. Use authorized non-production fixtures; production smoke must not create paid requests or unapproved test data.
+
+Recovery / rollback boundaries:
+
+- Before migration commit, transaction rollback is the recovery; preserve the ledger and diagnose the failed statement. After a successful schema commit, prefer retaining additive DDL even if application deployment is postponed.
+- If no new-media writes occurred, master may revert application code to the previous released build while retaining the additive schema. Establish the absence of new refs/video drafts first; do not infer it from a failed browser response.
+- Once any new references, receipts or video drafts exist, do **not** blindly restore the old PNG-only Edge/frontend readers or the old freeze RPC. Master should deploy a narrow server-side pause of the new write actions or a forward fix while preserving compatible readers, atomic guards, immutable receipts and exact retry keys. UI hiding alone is not a write stop.
+- No automatic destructive down migration, removal of immutable rows, storage cleanup, checksum replacement, or applied-ledger edits. Uncertain copy outcomes retain their receipt/object for same-key recovery; any later cleanup or schema contraction requires a separately approved plan.
+
+## Remaining acceptance coordination
+
+QA has been asked to close or identify exact prerequisites for native multi-session PostgreSQL lock scheduling, full released-chain application, and actual Storage/browser-RLS behavior. Required evidence should identify the implementation SHA, disposable environment/chain, actor scopes and observed denial/replay outcomes. No production credentials or signed tokens belong in the packet. The current blocker is missing acceptance environment/evidence, **not** optional lifecycle tightening. Master decides rollout only after these gates are handled; no new timeline/editor/Google-1080 or storage programme is included.
 
 No production data, fixtures, provider calls, deployment, PR, or release occurred. Existing CLI update metadata remains untouched in the original worktree; the integrated worktree is clean. Master/build management own integration and release; QA receives the exact commit separately.
