@@ -40,6 +40,43 @@ Deno.test('canonical records enter only an explicit OpenAI prompt with allowlist
   assertEquals(JSON.stringify(prompt).includes('never-send'), false)
 })
 
+Deno.test('bounded work summary stays opt-in and respects organization versus selected-project scope', () => {
+  const summary = { scope: 'selected_project', as_of: '2026-09-25T00:00:00Z',
+    coverage: { visible_projects_scanned: 1, projects_included: 1,
+      counts_describe_recent_visible_samples_only: true },
+    projects: [{ id: projectId, name: 'Website', status: 'active', health: 'at_risk',
+      sample: { project_tasks: 1, engagement_work_items: 0,
+        project_task_statuses: { blocked: 1 } },
+      project_tasks: [{ id: userId, title: 'Fix launch', status: 'blocked',
+        due: '2026-09-28', assignee: 'Jamie Example' }],
+      engagement_work_items: [],
+      review_states_in_recent_visible_version_sample: {} }],
+  }
+  const rows = [{ id: userId, role: 'user', status: 'completed', body: 'What is blocked?' }]
+  const projectScope = { context_kind: 'project_team', project_id: projectId,
+    department_id: null }
+  const withoutOptIn = JSON.parse(buildPrivateConversationPrompt(rows, userId, projectScope))
+  assertEquals(withoutOptIn.canonical_context, undefined)
+  const projectContext = canonicalOpenAiContext({ name: 'Anka' },
+    { name: 'Website', status: 'active' }, summary)
+  const withOptIn = JSON.parse(buildPrivateConversationPrompt(rows, userId,
+    projectScope, projectContext))
+  assertEquals(withOptIn.canonical_context.work_summary.scope, 'selected_project')
+  assertEquals(withOptIn.canonical_context.work_summary.projects[0].project_tasks[0].title,
+    'Fix launch')
+  assertEquals(JSON.stringify(withOptIn).includes(projectId), false)
+  assertEquals(JSON.stringify(withOptIn).includes(userId), false)
+  const orgContext = canonicalOpenAiContext({ name: 'Anka' }, null,
+    { ...summary, scope: 'current_organization_visible_project_sample' })
+  const orgPrompt = JSON.parse(buildPrivateConversationPrompt(rows, userId,
+    { context_kind: 'organization', project_id: null, department_id: null }, orgContext))
+  assertEquals(orgPrompt.canonical_context.project, undefined)
+  assertEquals(orgPrompt.canonical_context.work_summary.scope,
+    'current_organization_visible_project_sample')
+  assertThrows(() => requireOpenAiCanonicalContextChoice(true, 'anthropic'))
+  assertThrows(() => requireOpenAiCanonicalContextChoice(true, 'google_gemini'))
+})
+
 function accessAdmin(tables: Record<string, Record<string, unknown>[]>) {
   return {
     from(table: string) {

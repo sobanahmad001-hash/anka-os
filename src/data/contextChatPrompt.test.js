@@ -109,7 +109,7 @@ test('explicit OpenAI work context projects only approved bounded fields', () =>
         engagement_work_item_statuses: {}, private_count: 44 },
       project_tasks: [{ id: earlier, title: 'Fix page alice@example.com', status: 'blocked',
         due: '2026-09-27', assignee: 'Jamie Example', description: 'never-send' }],
-      engagement_work_items: [], latest_visible_review_states_in_sample: { ready_for_internal_review: 1 },
+      engagement_work_items: [], review_states_in_recent_visible_version_sample: { ready_for_internal_review: 1 },
       raw_file: 'never-send' }],
   }
   const canonical = canonicalOpenAiContext(
@@ -121,7 +121,7 @@ test('explicit OpenAI work context projects only approved bounded fields', () =>
     { context_kind: 'project_team', project_id: earlier }, canonical))
   assert.equal(payload.canonical_context.work_summary.projects[0].project_tasks[0].assignee, 'Jamie Example')
   assert.equal(payload.canonical_context.work_summary.projects[0].sample.project_task_statuses.blocked, 1)
-  assert.equal(payload.canonical_context.work_summary.projects[0].latest_visible_review_states_in_sample.ready_for_internal_review, 1)
+  assert.equal(payload.canonical_context.work_summary.projects[0].review_states_in_recent_visible_version_sample.ready_for_internal_review, 1)
   const encoded = JSON.stringify(payload)
   for (const forbidden of [earlier, 'alice@example.com', 'bob@example.com', 'never@send.test',
     'never-send', 'raw description', 'raw_file', 'private_count']) {

@@ -75,8 +75,9 @@ async function projectSnapshot(client, organizationId, project, terms) {
       .eq('organization_id', organizationId).eq('legacy_project_id', project.id)
       .limit(1).maybeSingle(), 'linked engagement'),
     required(client.from('deliverable_versions')
-      .select('id,deliverable_id,version_number,review_status,created_at')
+      .select('id,review_status,created_at')
       .eq('organization_id', organizationId).eq('project_id', project.id)
+      .is('withdrawn_at', null)
       .order('created_at', { ascending: false }).limit(TASK_LIMIT + 1),
     'project review states'),
   ])
@@ -90,18 +91,10 @@ async function projectSnapshot(client, organizationId, project, terms) {
   const taskSample = (tasks || []).slice(0, TASK_LIMIT)
   const itemSample = (items || []).slice(0, TASK_LIMIT)
   const versionSample = (versions || []).slice(0, TASK_LIMIT)
-  const latestReviews = []
-  const seen = new Set()
-  for (const version of versionSample) {
-    if (!seen.has(version.deliverable_id)) {
-      seen.add(version.deliverable_id)
-      latestReviews.push(version)
-    }
-  }
   const chosenTasks = relevant(taskSample, terms, ITEM_SEND_LIMIT, ['title', 'status', 'due_date'])
   const chosenItems = relevant(itemSample, terms, ITEM_SEND_LIMIT, ['title', 'status', 'due_date'])
   return { project, engagementLinked: Boolean(engagement?.id), taskSample, itemSample,
-    latestReviews, chosenTasks, chosenItems,
+    versionSample, chosenTasks, chosenItems,
     partial: tasks?.length > TASK_LIMIT || items?.length > TASK_LIMIT
       || versions?.length > TASK_LIMIT }
 }
@@ -130,7 +123,10 @@ export async function loadVisibleWorkSummary(client, organizationId, selectedPro
   if (assigneeIds.length) {
     const result = await client.from('profiles').select('id,full_name').in('id', assigneeIds)
     if (result.error) labelsAvailable = false
-    else profiles = result.data || []
+    else {
+      profiles = result.data || []
+      labelsAvailable = profiles.length === assigneeIds.length
+    }
   }
   const nameById = new Map(profiles.map(row => [row.id, safeText(row.full_name, 80)]))
   const assignee = id => !id ? 'Unassigned' : nameById.get(id) || 'Assigned teammate'
@@ -166,7 +162,7 @@ export async function loadVisibleWorkSummary(client, organizationId, selectedPro
         title: safeText(row.title, 160), status: safeState(row.status, WORK_STATES),
         due: safeDate(row.due_date), assignee: assignee(row.assignee_id),
       })),
-      latest_visible_review_states_in_sample: snapshot.latestReviews.reduce((acc, row) => {
+      review_states_in_recent_visible_version_sample: snapshot.versionSample.reduce((acc, row) => {
         const status = safeState(row.review_status, REVIEW_STATES)
         acc[status] = (acc[status] || 0) + 1
         return acc
@@ -175,10 +171,11 @@ export async function loadVisibleWorkSummary(client, organizationId, selectedPro
   }
   const manifest = {
     as_of: asOf, scope: summary.scope,
+    scanned_project_ids: projectScan.map(row => row.id),
     project_ids: snapshots.map(snapshot => snapshot.project.id),
-    project_task_ids: snapshots.flatMap(snapshot => snapshot.chosenTasks.map(row => row.id)),
-    engagement_work_item_ids: snapshots.flatMap(snapshot => snapshot.chosenItems.map(row => row.id)),
-    review_version_ids: snapshots.flatMap(snapshot => snapshot.latestReviews.slice(0, 20).map(row => row.id)),
+    project_task_ids: snapshots.flatMap(snapshot => snapshot.taskSample.map(row => row.id)),
+    engagement_work_item_ids: snapshots.flatMap(snapshot => snapshot.itemSample.map(row => row.id)),
+    review_version_ids: snapshots.flatMap(snapshot => snapshot.versionSample.map(row => row.id)),
     partial: summary.coverage.projects_omitted_from_bounded_summary
       || snapshots.some(row => row.partial),
   }

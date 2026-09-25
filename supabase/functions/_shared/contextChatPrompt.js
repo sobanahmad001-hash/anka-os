@@ -104,7 +104,8 @@ function approvedWorkSummary(summary) {
         ? row.project_tasks.slice(0, 6).map(item => workItem(item, taskStates)) : [],
       engagement_work_items: Array.isArray(row?.engagement_work_items)
         ? row.engagement_work_items.slice(0, 6).map(item => workItem(item, workStates)) : [],
-      latest_visible_review_states_in_sample: statusCounts(row?.latest_visible_review_states_in_sample, reviewStates),
+      review_states_in_recent_visible_version_sample: statusCounts(
+        row?.review_states_in_recent_visible_version_sample, reviewStates),
     })),
   }
 }
