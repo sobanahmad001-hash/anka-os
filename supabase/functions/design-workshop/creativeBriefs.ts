@@ -1,4 +1,5 @@
 import { stableJson } from '../_shared/approvedArtifactContext.ts'
+import { normalizeMediaReferences, validateMediaReferences } from './mediaReferences.ts'
 
 type Json = Record<string, unknown>
 type Client = any
@@ -28,6 +29,7 @@ export function normalizeCreativeBrief(value: unknown): Json {
     placement_destination: clean(input.placement_destination), instructions: clean(input.instructions, 8000),
     exclusions_constraints: clean(input.exclusions_constraints, 8000), rights_notes: clean(input.rights_notes, 4000),
     requested_outputs: stringList(input.requested_outputs),
+    ...(input.media_references === undefined ? {} : { media_references: normalizeMediaReferences(input.media_references) }),
   }
 }
 
@@ -105,6 +107,8 @@ export async function saveCreativeBrief(admin: Client, userClient: Client, body:
     }
   } else if (visibility !== 'private') throw new Error('Unsupported creative brief visibility')
   const sourceIds = stringList(body.source_version_ids, 50)
+  await validateMediaReferences(userClient, normalizeMediaReferences(content.media_references),
+    admin.organizationId, engagementId, brandId)
   if (sourceIds.length) {
     const { data, error } = await userClient.from('artifact_versions')
       .select('id, organization_id, artifact_id, artifacts!inner(artifact_type, brand_id, organization_id)').in('id', sourceIds)
@@ -134,10 +138,37 @@ export async function saveCreativeBrief(admin: Client, userClient: Client, body:
     p_source_version_ids: sourceIds,
   })
   if (error) throw error
+  if (data?.idempotent_replay) {
+    const saved = data.brief
+    const prior = await userClient.from('design_creative_brief_version_sources')
+      .select('artifact_version_id').eq('creative_brief_version_id', data.version?.id)
+      .eq('organization_id', admin.organizationId)
+    if (prior.error || !Array.isArray(prior.data) || !saved
+      || data.version?.content_checksum !== await checksum(content)
+      || saved.visibility !== visibility || saved.engagement_id !== engagementId || saved.brand_id !== brandId
+      || saved.engagement_service_id !== serviceId
+      || saved.project_task_id !== projectTaskId || saved.engagement_work_item_id !== engagementWorkItemId
+      || (body.creative_brief_id && saved.id !== body.creative_brief_id)
+      || stableJson(prior.data.map((row: Json) => row.artifact_version_id).sort()) !== stableJson([...sourceIds].sort())) {
+      throw new Error('Operation key was already used for a different exact brief version')
+    }
+  }
   return data
 }
 
-export async function freezeCreativeBrief(admin: Client, body: Json, actorId: string) {
+export async function freezeCreativeBrief(admin: Client, body: Json, actorId: string, userClient: Client) {
+  const selected = await userClient.from('design_creative_brief_versions')
+    .select('content')
+    .eq('id', id(body.creative_brief_version_id, 'Creative brief version'))
+    .eq('creative_brief_id', id(body.creative_brief_id, 'Creative brief'))
+    .eq('organization_id', admin.organizationId).maybeSingle()
+  if (selected.error || !selected.data) throw new Error('Exact brief version is unavailable')
+  const parent = await userClient.from('design_creative_briefs').select('engagement_id,brand_id')
+    .eq('id', body.creative_brief_id).eq('organization_id', admin.organizationId).maybeSingle()
+  if (parent.error || !parent.data) throw new Error('Brief context is unavailable')
+  const root = parent.data
+  await validateMediaReferences(userClient, normalizeMediaReferences(selected.data.content?.media_references),
+    admin.organizationId, root?.engagement_id as string | null, root?.brand_id as string | null)
   const { data, error } = await admin.rpc('freeze_design_creative_brief_version', {
     p_organization_id: admin.organizationId, p_actor_id: actorId,
     p_creative_brief_id: id(body.creative_brief_id, 'Creative brief'),

@@ -38,6 +38,9 @@ const DesignCreativeBriefWorkspace = forwardRef(function DesignCreativeBriefWork
   const draft = storedDraft.scopeKey !== scopeKey || (storedDraft.savedVersionId !== (latest?.id || '') && !hasEdits(storedDraft))
     ? snapshot(brief, latest, workspace.creativeBriefSources, scopeKey) : storedDraft
   const { content, sourceIds } = draft
+  const mediaReferences = content.media_references || []
+  const mediaRoots = new Map((workspace.designAssets || []).filter(asset => !asset.archived_at).map(asset => [asset.id, asset]))
+  const mediaOptions = (workspace.designAssetVersions || []).filter(version => mediaRoots.has(version.asset_id))
   const dirty = hasEdits(draft)
   const conflict = draft.savedVersionId !== (latest?.id || '')
   const validation = useMemo(() => validateCreativeBrief(content), [content])
@@ -62,6 +65,16 @@ const DesignCreativeBriefWorkspace = forwardRef(function DesignCreativeBriefWork
     setDraft(current => ({ ...current, sourceIds: current.sourceIds.includes(id)
       ? current.sourceIds.filter(item => item !== id) : [...current.sourceIds, id] }))
   }
+  function toggleMedia(id) {
+    operation.current = null; setSaveError('')
+    setDraft(current => {
+      const refs = current.content.media_references || []
+      const next = refs.some(ref => ref.kind === 'design_asset_version' && ref.id === id)
+        ? refs.filter(ref => ref.id !== id)
+        : [...refs, { kind: 'design_asset_version', id }].sort((a, b) => a.id.localeCompare(b.id))
+      return { ...current, content: { ...current.content, media_references: next } }
+    })
+  }
   async function saveDraft() {
     if (!canSave || conflict || !content.title.trim() || busy === 'save-brief') return false
     const fingerprint = JSON.stringify({ scopeKey, content, sourceIds: [...sourceIds].sort() })
@@ -85,6 +98,16 @@ const DesignCreativeBriefWorkspace = forwardRef(function DesignCreativeBriefWork
   return <section aria-labelledby="creative-brief-title" className="rounded-2xl border border-violet-500/20 bg-slate-900/70 p-5">
     <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-violet-300">B02 · Creative brief</p><h2 id="creative-brief-title" className="mt-2 text-xl font-semibold">Draft before generation</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Save title-only or incomplete work as an immutable version. Validation is guidance, not approval, and no provider runs here.</p></div><span className={`rounded-full px-3 py-1 text-xs font-semibold ${validation.valid ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}`}>{validation.valid ? 'Ready to freeze' : `${validation.missing.length} validation item(s)`}</span></div>
     <form onSubmit={save} className="mt-5 grid gap-4 lg:grid-cols-2">
+      <fieldset className="lg:col-span-2"><legend className="text-xs font-semibold text-cyan-300">Exact saved image/video references</legend>
+        <p className="mt-2 text-sm text-slate-400">Pins one immutable Design asset version, not the latest file. References grant no approval or additional access. Use a private video in a project before referencing it here.</p>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">{mediaOptions.map(version => <label key={version.id} className="flex gap-2 rounded border border-white/10 p-2 text-sm">
+          <input type="checkbox" checked={mediaReferences.some(ref => ref.kind === 'design_asset_version' && ref.id === version.id)} onChange={() => toggleMedia(version.id)} />
+          <span>{mediaRoots.get(version.asset_id).name} · v{version.version_number} · {version.mime_type}<small className="block">design_asset_version · {version.id}</small></span>
+        </label>)}
+        {mediaReferences.filter(ref => !mediaOptions.some(version => version.id === ref.id)).map(ref => <label key={ref.id} className="flex gap-2 p-2 text-sm text-amber-200">
+          <input type="checkbox" checked onChange={() => toggleMedia(ref.id)} /><span>Unavailable exact media reference {ref.id} · remove to save without it</span>
+        </label>)}</div>
+      </fieldset>
       <Field label="Title"><input required maxLength="200" className={INPUT} value={content.title} onChange={event => set('title', event.target.value)} /></Field>
       <Field label="Output type"><select className={INPUT} value={content.output_type} onChange={event => set('output_type', event.target.value)}>{CREATIVE_BRIEF_OUTPUTS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></Field>
       <Field label="Purpose"><textarea rows="3" className={INPUT} value={content.purpose} onChange={event => set('purpose', event.target.value)} /></Field>
