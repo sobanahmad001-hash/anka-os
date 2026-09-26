@@ -29,7 +29,7 @@ test('mounted video submission context and uncertainty regressions', async t => 
     } }] })
   t.after(() => server.close())
   const { default: Component } = await server.ssrLoadModule('/src/components/DesignVideoCapabilities.jsx')
-  async function mount(t, { historyError = false } = {}) {
+  async function mount(t, { historyError = false, beforeGenerate, onNavigationBusyChange } = {}) {
     const env = mountedEnvironment()
     const names = ['document', 'window', 'Event', 'Node', 'HTMLElement', 'IS_REACT_ACT_ENVIRONMENT', '__designVideoFixture', 'fetch']
     const previous = Object.fromEntries(names.map(name => [name, globalThis[name]]))
@@ -46,7 +46,7 @@ test('mounted video submission context and uncertainty regressions', async t => 
       fetch: () => { throw new Error('Network forbidden in mounted video tests') } })
     const root = createRoot(env.container)
     t.after(async () => { await act(async () => root.unmount()); Object.assign(globalThis, previous) })
-    const render = async direction => act(async () => root.render(createElement(Component, { directionVersionId: direction })))
+    const render = async direction => act(async () => root.render(createElement(Component, { directionVersionId: direction, beforeGenerate, onNavigationBusyChange })))
     await render('direction-a')
     const change = async (node, value, checked) => act(async () => propsOf(node).onChange({ target: { value, checked } }))
     async function prepare() {
@@ -100,5 +100,25 @@ test('mounted video submission context and uncertainty regressions', async t => 
     assert.equal(propsOf(button(m.env.container, 'Generate one video')).disabled, true)
     await act(async () => { void m.submitNow() })
     assert.equal(m.calls.length, 0)
+  })
+  await t.test('fresh context rejection blocks paid dispatch after quote and consent', async t => {
+    const m = await mount(t, { beforeGenerate: async () => { throw new Error('Context revoked') } })
+    await m.prepare()
+    await act(async () => m.submitNow())
+    assert.equal(m.calls.length, 0)
+  })
+  await t.test('uncertain video freezes settings and reconciles the exact original payload and key', async t => {
+    const busy = []
+    const m = await mount(t, { onNavigationBusyChange: value => busy.push(value) })
+    await m.prepare()
+    await act(async () => { void m.submitNow() })
+    assert.equal(busy.at(-1), true)
+    await act(async () => m.submit.reject(new Error('lost response')))
+    assert.equal(propsOf(elements(m.env.container, 'textarea')[0]).disabled, true)
+    const original = m.calls[0]
+    fixture.studio.generateVideo = async input => { m.calls.push(input); return { status: 'queued' } }
+    await act(async () => propsOf(button(m.env.container, 'Reconcile same video request')).onClick({ preventDefault() {} }))
+    assert.deepEqual(m.calls[1], original)
+    assert.equal(busy.at(-1), false)
   })
 })

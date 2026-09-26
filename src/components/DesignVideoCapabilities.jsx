@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { SEEDANCE, videoResolutionOptions } from '../data/designMediaCapabilities.js'
 import { canSubmitVideo, videoQuoteDisplay } from '../data/designVideoQuoteTransport.js'
 import { designWorkshop } from '../data/designWorkshopRepository.js'
@@ -9,15 +9,15 @@ import DesignVideoPromotion from './DesignVideoPromotion.jsx'
 const JOB_PAGE_SIZE = 50
 const UNSETTLED_VIDEO_STATUSES = new Set(['queued', 'claimed', 'provider_pending', 'provider_completed', 'outcome_unknown'])
 
-export default function DesignVideoCapabilities({ directionVersionId }) {
+export default function DesignVideoCapabilities({ directionVersionId, beforeGenerate, onNavigationBusyChange }) {
   const { activeOrganizationId, scopeRevision } = useOrganization()
   return <ScopedDesignVideoCapabilities
     key={`${activeOrganizationId}:${scopeRevision}:${directionVersionId}`}
-    directionVersionId={directionVersionId} />
+    directionVersionId={directionVersionId} beforeGenerate={beforeGenerate} onNavigationBusyChange={onNavigationBusyChange} />
 }
 
 // eslint-disable-next-line no-unused-vars -- This config does not count JSX component references.
-function ScopedDesignVideoCapabilities({ directionVersionId }) {
+function ScopedDesignVideoCapabilities({ directionVersionId, beforeGenerate, onNavigationBusyChange }) {
   const { activeOrganizationId, requestSignal, scopeRevision } = useOrganization()
   const studio = useMemo(() => activeOrganizationId ? designWorkshop.forOrganization(activeOrganizationId, { signal: requestSignal }) : null, [activeOrganizationId, requestSignal])
   const [mode, setMode] = useState('explore')
@@ -45,6 +45,10 @@ function ScopedDesignVideoCapabilities({ directionVersionId }) {
   const jobsSequence = useRef(0)
   const submitInFlight = useRef(false)
   const submission = useRef({ signature: '', operationKey: '' })
+  const [pendingRequest, setPendingRequest] = useState(null)
+  const [promotionBusy, setPromotionBusy] = useState({})
+  const reportPromotion = useCallback((busy, jobId) => setPromotionBusy(current => current[jobId] === busy ? current : { ...current, [jobId]: busy }), [])
+  useEffect(() => { onNavigationBusyChange?.(Boolean(submitBusy || jobsBusy || pendingRequest || Object.values(promotionBusy).some(Boolean))) }, [submitBusy, jobsBusy, pendingRequest, promotionBusy, onNavigationBusyChange])
   useEffect(() => () => { sequence.current++ }, [])
   useEffect(() => {
     let active = true
@@ -92,7 +96,7 @@ function ScopedDesignVideoCapabilities({ directionVersionId }) {
   const paidExecutionEnabled = current?.data?.paid_execution_enabled === true
   const selectedConnection = connections.find(connection => connection.id === connectionId)
   const hasUnsettledJob = jobs.some(job => UNSETTLED_VIDEO_STATUSES.has(job.status))
-  const canSubmit = Boolean(studio && directionVersionId && jobsLoaded && !hasUnsettledJob && !submitBusy && !jobsBusy
+  const canSubmit = Boolean(studio && directionVersionId && jobsLoaded && !hasUnsettledJob && !pendingRequest && !submitBusy && !jobsBusy
     && !requestSignal?.aborted && canSubmitVideo({ display, connection: selectedConnection,
       prompt, supported, spendConfirmed }))
   const expires = current?.data?.quote?.valid_until
@@ -103,6 +107,7 @@ function ScopedDesignVideoCapabilities({ directionVersionId }) {
     return () => clearTimeout(timer)
   }, [expires])
   function edit(setter, value) {
+    if (submitInFlight.current || pendingRequest) return
     sequence.current++; setResult(null); setSpendConfirmed(false)
     submission.current = { signature: '', operationKey: '' }
     setter(value)
@@ -119,9 +124,9 @@ function ScopedDesignVideoCapabilities({ directionVersionId }) {
       if (sequence.current === attempt && !requestSignal?.aborted) setResult({ key, error: true })
     }
   }
-  async function submitVideo(event) {
+  async function submitVideo(event, reconcile = false) {
     event.preventDefault()
-    if (!canSubmit || submitInFlight.current) return
+    if ((!canSubmit && !(reconcile && pendingRequest && studio && !requestSignal?.aborted)) || submitInFlight.current) return
     submitInFlight.current = true
     const exactPrompt = prompt.trim()
     const signature = JSON.stringify([activeOrganizationId, directionVersionId, mode,
@@ -132,10 +137,15 @@ function ScopedDesignVideoCapabilities({ directionVersionId }) {
     const attempt = jobsSequence.current
     setSubmitBusy(true); setSubmitNotice('')
     try {
-      const job = await studio.generateVideo({ ...input, mode, prompt: exactPrompt,
-        connector_connection_id: connectionId, quote_id: display.quoteId,
-        operation_key: operationKey })
+      await beforeGenerate?.(directionVersionId)
       if (requestSignal?.aborted || jobsSequence.current !== attempt) return
+      const exactRequest = pendingRequest || { ...input, mode, prompt: exactPrompt,
+        connector_connection_id: connectionId, quote_id: display.quoteId,
+        operation_key: operationKey }
+      setPendingRequest(exactRequest)
+      const job = await studio.generateVideo(exactRequest)
+      if (requestSignal?.aborted || jobsSequence.current !== attempt) return
+      setPendingRequest(null)
       const rows = await studio.listVideoJobs(directionVersionId)
       if (requestSignal?.aborted || jobsSequence.current !== attempt) return
       setJobs(Array.isArray(rows) ? rows.slice(0, JOB_PAGE_SIZE) : [])
@@ -154,6 +164,7 @@ function ScopedDesignVideoCapabilities({ directionVersionId }) {
           setJobs(Array.isArray(rows) ? rows.slice(0, JOB_PAGE_SIZE) : [])
           setHasOlderJobs(Array.isArray(rows) && rows.length > JOB_PAGE_SIZE)
           setJobsLoaded(true)
+          if (rows?.some(row => row.operation_key === (pendingRequest?.operation_key || operationKey))) setPendingRequest(null)
         }
       } catch {
         if (!requestSignal?.aborted && jobsSequence.current === attempt) {
@@ -212,7 +223,7 @@ function ScopedDesignVideoCapabilities({ directionVersionId }) {
   return <details className="mt-3 rounded-xl border border-white/10 p-3 text-xs text-slate-400">
     <summary className="cursor-pointer font-semibold text-slate-200">Video capabilities · {display?.paidExecutionEnabled && !display.spendTrackingMissing && selectedConnection ? 'exact quote required' : 'generation unavailable'}</summary>
     <p className="mt-2">Higgsfield Seedance 2.5 supports 480p and 720p. Google media is not configured. Maximum USD $2 per generated video; this limit does not authorize spending.</p>
-    <div className="mt-3 flex flex-wrap gap-3">
+    <fieldset disabled={submitBusy || Boolean(pendingRequest)} className="mt-3 flex flex-wrap gap-3">
       <label>Mode <select className="rounded bg-slate-900 p-2" value={mode} onChange={event => { edit(setMode, event.target.value); setResolution('') }}>
         <option value="explore">Explore</option><option value="production">Production</option>
       </select></label>
@@ -223,9 +234,9 @@ function ScopedDesignVideoCapabilities({ directionVersionId }) {
       <label>Aspect ratio <select className="rounded bg-slate-900 p-2" value={aspectRatio} onChange={event => edit(setAspectRatio, event.target.value)}>{SEEDANCE.aspectRatios.map(value => <option key={value}>{value}</option>)}</select></label>
       <label>Format <select className="rounded bg-slate-900 p-2" value={format} onChange={event => edit(setFormat, event.target.value)}><option>mp4</option><option>mov</option></select></label>
       <label><input type="checkbox" checked={audio} onChange={event => edit(setAudio, event.target.checked)} /> Generate audio</label>
-    </div>
+    </fieldset>
     <p className="mt-2">{mode === 'explore' ? 'Explore previews are limited to 4–5 seconds.' : '1080p is recommended for final output but unsupported on this model.'} No automatic downgrade or upscale.</p>
-    <button type="button" className="mt-3 rounded border border-white/20 px-3 py-2 disabled:opacity-40" disabled={!studio || !directionVersionId || !supported || current?.pending} onClick={checkQuote}>Check exact quote</button>
+    <button type="button" className="mt-3 rounded border border-white/20 px-3 py-2 disabled:opacity-40" disabled={!studio || !directionVersionId || !supported || current?.pending || submitBusy || Boolean(pendingRequest)} onClick={checkQuote}>Check exact quote</button>
     <div className="mt-2" role="status">
       {!supported ? <p>Choose supported settings explicitly.</p> : current?.pending ? <p>Checking quote for these exact settings…</p> : current?.error ? <p>Quote lookup failed. Check again; generation remains unavailable.</p> : display ? <>
         <p>{display.message}</p>
@@ -240,14 +251,14 @@ function ScopedDesignVideoCapabilities({ directionVersionId }) {
       <p className="font-semibold text-slate-200">Prepare one exact video request</p>
       <label className="block">Prompt
         <textarea className="mt-1 w-full rounded bg-slate-900 p-2 text-white" rows="4" maxLength={12000}
-          value={prompt} disabled={submitBusy} onChange={event => {
+          value={prompt} disabled={submitBusy || Boolean(pendingRequest)} onChange={event => {
             setPrompt(event.target.value); setSpendConfirmed(false)
             submission.current = { signature: '', operationKey: '' }
           }} />
       </label>
       <label className="block">Verified organization video connection
         <select className="mt-1 w-full rounded bg-slate-900 p-2" value={connectionId}
-          disabled={submitBusy} onChange={event => {
+          disabled={submitBusy || Boolean(pendingRequest)} onChange={event => {
             setConnectionId(event.target.value); setSpendConfirmed(false)
             submission.current = { signature: '', operationKey: '' }
           }}>
@@ -266,6 +277,7 @@ function ScopedDesignVideoCapabilities({ directionVersionId }) {
       <button type="submit" className="rounded border border-violet-500 px-3 py-2 text-violet-100 disabled:cursor-not-allowed disabled:opacity-40"
         disabled={!canSubmit}>{submitBusy ? 'Recording original request…' : 'Generate one video'}</button>
       {submitNotice && <p role="status" className="text-amber-200">{submitNotice}</p>}
+      {pendingRequest && <button type="button" disabled={submitBusy} className="rounded border px-3 py-2" onClick={event => submitVideo(event, true)}>Reconcile same video request</button>}
       {!jobsLoaded && <p className="text-amber-300">Private video history must load before a new request can be submitted.</p>}
       {hasUnsettledJob && <p className="text-amber-300">An earlier video request is unresolved. Check its original job before creating another request for this direction.</p>}
     </form>
@@ -285,7 +297,7 @@ function ScopedDesignVideoCapabilities({ directionVersionId }) {
           {job.status === 'ready' && <button type="button" className="rounded border border-white/20 px-2 py-1 disabled:opacity-40" disabled={Boolean(jobsBusy)} onClick={() => actOnJob(job, 'preview')}>Open private preview</button>}
         </div>
         {preview?.jobId === job.id && <video className="mt-2 max-h-80 w-full" controls src={preview.url} />}
-        {job.status === 'ready' && <DesignVideoPromotion key={job.id} studio={studio} jobId={job.id} />}
+        {job.status === 'ready' && <DesignVideoPromotion key={job.id} studio={studio} jobId={job.id} onNavigationBusyChange={reportPromotion} />}
       </div>)}
       {hasOlderJobs && <button type="button" className="mt-3 rounded border border-white/20 px-2 py-1 disabled:opacity-40"
         disabled={Boolean(jobsBusy)} onClick={loadOlderJobs}>Load older private jobs</button>}

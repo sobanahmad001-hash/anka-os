@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-export default function DesignVideoPromotion({ studio, jobId }) {
+export default function DesignVideoPromotion({ studio, jobId, onNavigationBusyChange }) {
   const [targets, setTargets] = useState([])
   const [targetKey, setTargetKey] = useState('')
   const [preview, setPreview] = useState(null)
@@ -11,6 +11,7 @@ export default function DesignVideoPromotion({ studio, jobId }) {
   const request = useRef(null)
   const inFlight = useRef(false)
   const sequence = useRef(0)
+  useEffect(() => { onNavigationBusyChange?.(Boolean(busy || (locked && !done)), jobId) }, [busy, locked, done, jobId, onNavigationBusyChange])
   useEffect(() => {
     const attempt = ++sequence.current
     studio.listEngagements().then(rows => {

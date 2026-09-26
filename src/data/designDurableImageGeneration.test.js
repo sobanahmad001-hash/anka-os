@@ -10,7 +10,7 @@ const read = relative => fs.readFileSync(path.join(root, relative), 'utf8')
 const migration = read('supabase/migrations/20260909202415_design_b03a_durable_generation_jobs.sql')
 const edge = read('supabase/functions/design-workshop/index.ts')
 const repository = read('src/data/designWorkshopRepository.js')
-const ui = read('src/apps/DesignWorkshop.jsx')
+const ui = read('src/apps/DesignWorkshop.jsx') + read('src/components/DesignMediaPanel.jsx')
 
 test('B03A adds one tenant-exact durable request ledger with browser reads and server-only writes', () => {
   assert.match(migration, /create table public\.design_image_generation_jobs/)

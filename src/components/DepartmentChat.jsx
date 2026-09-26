@@ -1,3 +1,4 @@
+import { restrictArtifactTypes } from '../data/departmentChatArtifactTypes.js'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useBlocker } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -19,7 +20,7 @@ export default function DepartmentChat(props) {
   const { user } = useAuth()
   const { activeOrganizationId, scopeRevision, requestSignal, handleOrganizationAccessError, selectOrganization } = useOrganization()
   const [composerDirty, setComposerDirty] = useState(false)
-  const navigationBlocker = useBlocker(composerDirty)
+  const navigationBlocker = useBlocker(composerDirty || Boolean(props.externalNavigationBusy))
   const identity = JSON.stringify([user?.id, activeOrganizationId, scopeRevision, props.engagement?.id, props.departmentId, props.initialConversation?.id || ''])
   if (!user?.id || !activeOrganizationId || requestSignal?.aborted
     || props.engagement?.organization_id !== activeOrganizationId) return null
@@ -36,6 +37,7 @@ export function ScopedDepartmentChat({
   onNavigationBusyChange,
   engagement,
   artifactDefinitions = {},
+  allowedArtifactTypes = null,
   allowArtifactDraft = true,
   artifactForType = () => null,
   stageForType = () => null,
@@ -45,6 +47,7 @@ export function ScopedDepartmentChat({
   requestSignal,
   handleOrganizationAccessError,
   navigationBlocker,
+  externalNavigationBusy = false,
   onComposerDirtyChange,
   selectOrganization,
 }) {
@@ -85,8 +88,9 @@ export function ScopedDepartmentChat({
   }, [requestSignal])
   const contextPanelId = useId()
   const profile = departmentChatProfile(departmentId)
+  const artifactTypes = useMemo(() => restrictArtifactTypes(profile.artifactTypes, allowedArtifactTypes), [profile, allowedArtifactTypes])
   const resolvedDepartmentLabel = departmentLabel || profile.label
-  const [artifactType, setArtifactType] = useState(profile.artifactTypes[0] || '')
+  const [artifactType, setArtifactType] = useState(artifactTypes[0] || '')
   const [proposalMode, setProposalMode] = useState(['content', 'design', 'marketing'].includes(departmentId) ? 'answer' : 'artifact')
   const [prompt, setPrompt] = useState('')
   const [safe, setSafe] = useState(false)
@@ -200,7 +204,7 @@ export function ScopedDepartmentChat({
     setPrompt('')
     setSafe(false)
     setProposalMode(supportsSavedConversations ? 'answer' : 'artifact')
-    setArtifactType(profile.artifactTypes[0] || '')
+    setArtifactType(artifactTypes[0] || '')
     setTitle('')
     setWorkItemType(profile.workItemTypes[0] || 'task')
     setPriority('medium')
@@ -225,8 +229,8 @@ export function ScopedDepartmentChat({
     clearComposer()
     if (!saved) return
     setPrompt(saved.prompt || '')
-    setProposalMode(!allowArtifactDraft && saved.proposal_mode === 'artifact' ? 'answer' : saved.proposal_mode || 'answer')
-    if (profile.artifactTypes.includes(saved.artifact_type)) setArtifactType(saved.artifact_type)
+    setProposalMode((!allowArtifactDraft || !artifactTypes.includes(saved.artifact_type)) && saved.proposal_mode === 'artifact' ? 'answer' : saved.proposal_mode || 'answer')
+    if (artifactTypes.includes(saved.artifact_type)) setArtifactType(saved.artifact_type)
     if (profile.workItemTypes.includes(saved.work_item_type)) setWorkItemType(saved.work_item_type)
     setTitle(saved.work_item_title || '')
     setPriority(['low', 'medium', 'high', 'urgent'].includes(saved.priority) ? saved.priority : 'medium')
@@ -244,9 +248,9 @@ export function ScopedDepartmentChat({
   }, [busy, historyBusy, attachmentBusy, sourceBusy, draftSaving, onNavigationBusyChange, requestSignal])
   useEffect(() => { onComposerDirtyChange?.(hasUnsentComposer) }, [hasUnsentComposer, onComposerDirtyChange])
   useEffect(() => {
-    if (navigationBlocker?.state !== 'blocked' || busy || historyBusy || attachmentBusy || sourceBusy || draftSaving) return
+    if (navigationBlocker?.state !== 'blocked' || externalNavigationBusy || busy || historyBusy || attachmentBusy || sourceBusy || draftSaving) return
     setPendingDraftSwitch(current => current || { label: 'leave this page', proceed: () => navigationBlocker.proceed() })
-  }, [navigationBlocker?.state, navigationBlocker?.proceed, busy, historyBusy, attachmentBusy, sourceBusy, draftSaving])
+  }, [navigationBlocker?.state, navigationBlocker?.proceed, externalNavigationBusy, busy, historyBusy, attachmentBusy, sourceBusy, draftSaving])
   useEffect(() => {
     if (!hasUnsentComposer) return undefined
     const warn = event => { event.preventDefault(); event.returnValue = '' }
@@ -295,7 +299,7 @@ export function ScopedDepartmentChat({
   }
 
   async function finishDraftSwitch(save) {
-    if (!pendingDraftSwitch || draftSaving) return
+    if (!pendingDraftSwitch || draftSaving || externalNavigationBusy) return
     const generation = ++draftSwitchGeneration.current
     const pending = pendingDraftSwitch
     if (save) {
@@ -821,6 +825,7 @@ export function ScopedDepartmentChat({
   async function submit(event) {
     event.preventDefault()
     if (busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim()) return
+    if (proposalMode === 'artifact' && !artifactTypes.includes(artifactType)) { setError('This artifact tool is unavailable in this chat.'); return }
     if (!allowArtifactDraft && proposalMode === 'artifact') { setError('Open the specialist Studio to draft an artifact.'); return }
     if (supportsSavedConversations && proposalMode !== 'answer' && selectedProvider !== 'openai') {
       setError('Artifact and work-item previews currently require an approved OpenAI model. Choose one or switch to a conversational answer.')
@@ -922,6 +927,7 @@ export function ScopedDepartmentChat({
   }
   async function decide(action, target = result) {
     if (!target?.proposal_id) return
+    if (action === 'confirm' && allowedArtifactTypes !== null && target.proposal_kind === 'artifact_version' && !artifactTypes.includes(target.target_key)) { setError('This artifact tool is unavailable in this chat.'); return }
     const isCurrent = completion.current.begin()
     if (!isCurrent()) return
     setBusy(true)
@@ -1067,7 +1073,7 @@ export function ScopedDepartmentChat({
         <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Task mode
           <select disabled={busy || historyBusy} className={`${INPUT} mt-2 normal-case tracking-normal`} value={proposalMode} onChange={event => setProposalMode(event.target.value)}>
             {supportsSavedConversations && <option value="answer">Conversational answer</option>}
-            {allowArtifactDraft && <option value="artifact">Artifact draft</option>}
+            {allowArtifactDraft && artifactTypes.length > 0 && <option value="artifact">Artifact draft</option>}
             <option value="work_item">Work item draft</option>
           </select>
         </label>
@@ -1098,7 +1104,7 @@ export function ScopedDepartmentChat({
           <>
             <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Artifact type
               <select className={`${INPUT} mt-2 normal-case tracking-normal`} value={artifactType} onChange={event => setArtifactType(event.target.value)}>
-                {profile.artifactTypes.map(type => <option key={type} value={type}>{artifactDefinitions[type]?.label || type}</option>)}
+                {artifactTypes.map(type => <option key={type} value={type}>{artifactDefinitions[type]?.label || type}</option>)}
               </select>
             </label>
             <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Artifact title
@@ -1201,7 +1207,7 @@ export function ScopedDepartmentChat({
 
         {supportsSavedConversations && currentConversation && <button type="button" disabled={busy || historyBusy || attachmentBusy || draftSaving || !prompt.trim()} onClick={saveUnsentDraft} className="w-full rounded-xl border border-sky-700 px-4 py-2.5 text-sm font-semibold text-sky-200 disabled:opacity-50">{draftSaving ? 'Saving draft…' : 'Save draft to this conversation'}</button>}
         <button
-          disabled={busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim() || !safe || proposalModelUnavailable || (isAnswerMode && !answerLocalChecksPass) || (supportsSavedConversations && (!currentConversation || currentConversation.state !== 'active' || !modelConfigurationId)) || (isWorkItemMode && !title.trim()) || (!isAnswerMode && !isWorkItemMode && !artifactType)}
+          disabled={busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim() || !safe || proposalModelUnavailable || (isAnswerMode && !answerLocalChecksPass) || (supportsSavedConversations && (!currentConversation || currentConversation.state !== 'active' || !modelConfigurationId)) || (isWorkItemMode && !title.trim()) || (!isAnswerMode && !isWorkItemMode && !artifactTypes.includes(artifactType))}
           className={`${PRIMARY} w-full`}
         >
           {busy ? (isAnswerMode ? 'Processing answer…' : 'Generating safe preview…') : isAnswerMode ? 'Ask configured AI' : isWorkItemMode ? 'Preview draft work item' : 'Preview draft artifact'}
@@ -1238,7 +1244,8 @@ export function ScopedDepartmentChat({
       </div>
     </aside>
   </div>
-  {pendingDraftSwitch && <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Unsent chat draft" onKeyDown={handleDraftDialogKey} className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-5"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><h2 className="text-xl font-semibold text-white">Keep this unsent work?</h2><p className="mt-2 text-sm text-slate-300">Before you {pendingDraftSwitch.label}, stay here, save text to the original conversation, or discard it. Exact source and file selections, model choice, and AI-use consent are never saved.</p>{error && <p role="alert" className="mt-3 text-sm text-red-300">{error}</p>}<div className="mt-6 flex flex-wrap justify-end gap-2"><button ref={stayButtonRef} type="button" disabled={draftSaving} onClick={closeDraftSwitch}>Stay</button><button ref={discardButtonRef} type="button" disabled={draftSaving} onClick={() => finishDraftSwitch(false)}>Discard and continue</button><button ref={saveButtonRef} type="button" disabled={draftSaving || !conversationId || !prompt.trim()} onClick={() => finishDraftSwitch(true)} className={PRIMARY}>{draftSaving ? 'Saving…' : 'Save to original and continue'}</button></div>{!prompt.trim() && <p className="mt-3 text-xs text-amber-300">Add a message to save a draft; source selections alone cannot be saved.</p>}</section></div>}
+  {externalNavigationBusy && navigationBlocker?.state === 'blocked' && <div role="status" className="rounded-xl border border-amber-600 p-4">Keep this page open while the media request is pending or unconfirmed. <button type="button" onClick={() => navigationBlocker.reset()}>Stay on this page</button></div>}
+  {pendingDraftSwitch && <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Unsent chat draft" onKeyDown={handleDraftDialogKey} className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-5"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><h2 className="text-xl font-semibold text-white">Keep this unsent work?</h2><p className="mt-2 text-sm text-slate-300">Before you {pendingDraftSwitch.label}, stay here, save text to the original conversation, or discard it. Exact source and file selections, model choice, and AI-use consent are never saved.</p>{error && <p role="alert" className="mt-3 text-sm text-red-300">{error}</p>}<div className="mt-6 flex flex-wrap justify-end gap-2"><button ref={stayButtonRef} type="button" disabled={draftSaving} onClick={closeDraftSwitch}>Stay</button><button ref={discardButtonRef} type="button" disabled={draftSaving || externalNavigationBusy} onClick={() => finishDraftSwitch(false)}>Discard and continue</button><button ref={saveButtonRef} type="button" disabled={draftSaving || externalNavigationBusy || !conversationId || !prompt.trim()} onClick={() => finishDraftSwitch(true)} className={PRIMARY}>{draftSaving ? 'Saving…' : 'Save to original and continue'}</button></div>{!prompt.trim() && <p className="mt-3 text-xs text-amber-300">Add a message to save a draft; source selections alone cannot be saved.</p>}</section></div>}
   </>
 }
 

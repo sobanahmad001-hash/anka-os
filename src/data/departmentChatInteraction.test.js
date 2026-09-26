@@ -698,3 +698,56 @@ for (const blocked of [
     assert.equal(byText(container, 'button', 'Ask configured AI').disabled, true)
   })
 }
+
+test('opt-in artifact allowlist constrains rendered tools, restored drafts and direct submit without changing ordinary chat', async t => {
+  const { container, ScopedDepartmentChat } = await setup(t)
+  const repo = repository([]), proposals = []
+  repo.getUnsentDraft = async () => ({ prompt: 'Saved unsupported prompt', proposal_mode: 'artifact', artifact_type: 'discovery' })
+  repo.proposeArtifact = async (_department, input) => { proposals.push(input); return { proposal_id: 'proposal-allowed', preview: { title: 'Allowed preview' }, status: 'pending', expires_at: new Date(Date.now() + 60000).toISOString() } }
+  globalThis.__departmentChatTestRepository = repo
+  const root = createRoot(container)
+
+  await act(async () => root.render(createElement(ScopedDepartmentChat, { ...props('a', new AbortController().signal), allowedArtifactTypes: ['vision'] })))
+  await flush()
+  const mode = nodes(container, 'select').find(select => select.options?.some(option => option.textContent === 'Artifact draft'))
+  assert.ok(mode); assert.equal(mode.value, 'answer')
+  await value(mode, 'artifact')
+  const tool = nodes(container, 'select').find(select => select.options?.some(option => option.value === 'vision'))
+  assert.ok(tool); assert.deepEqual(tool.options.map(option => option.value), ['vision'])
+  await value(tool, 'discovery'); await start(container)
+  assert.equal(proposals.length, 0); assert.match(container.textContent, /artifact tool is unavailable/)
+  await value(tool, 'vision'); await start(container)
+  assert.equal(proposals.length, 1); assert.equal(proposals[0].artifact_type, 'vision')
+  assert.match(container.textContent, /Allowed preview/)
+  let confirmations = 0
+  repo.confirmProposal = async () => { confirmations += 1; return { outcome: 'accepted' } }
+  await act(async () => root.render(createElement(ScopedDepartmentChat, { ...props('a', new AbortController().signal), allowedArtifactTypes: [] })))
+  await flush()
+  await act(async () => byText(container, 'button', 'Confirm official draft').dispatchEvent(new E('click')))
+  assert.equal(confirmations, 0)
+  assert.match(container.textContent, /artifact tool is unavailable/)
+  await act(async () => root.unmount())
+})
+
+test('Design media busy reuses the existing route blocker and cannot discard through an in-flight operation', async t => {
+  const { container, ScopedDepartmentChat } = await setup(t)
+  globalThis.__departmentChatTestRepository = repository([])
+  const root = createRoot(container), transitions = []
+  const blocker = { state: 'blocked', proceed: () => transitions.push('proceed'), reset: () => transitions.push('reset') }
+  const base = { ...props('a', new AbortController().signal), navigationBlocker: blocker }
+  await act(async () => root.render(createElement(ScopedDepartmentChat, { ...base, externalNavigationBusy: true })))
+  await flush()
+  assert.match(container.textContent, /media request is pending/)
+  assert.equal(byText(container, 'button', 'Discard and continue'), undefined)
+  await act(async () => byText(container, 'button', 'Stay on this page').dispatchEvent(new E('click')))
+  assert.deepEqual(transitions, ['reset'])
+  await act(async () => root.render(createElement(ScopedDepartmentChat, { ...base, externalNavigationBusy: false })))
+  await flush(); assert.ok(byText(container, 'button', 'Discard and continue'))
+  await act(async () => root.render(createElement(ScopedDepartmentChat, { ...base, externalNavigationBusy: true })))
+  await flush()
+  const discard = byText(container, 'button', 'Discard and continue')
+  const propsKey = Object.keys(discard).find(key => key.startsWith('__reactProps$'))
+  await act(async () => discard[propsKey].onClick())
+  assert.deepEqual(transitions, ['reset'])
+  await act(async () => root.unmount())
+})

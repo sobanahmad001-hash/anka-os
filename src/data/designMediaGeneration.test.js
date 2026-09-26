@@ -10,7 +10,7 @@ const read = relative => fs.readFileSync(path.join(root, relative), 'utf8')
 const migration = read('supabase/migrations/20260829113811_design_media_generation.sql')
 const edge = read('supabase/functions/design-workshop/index.ts')
 const repository = read('src/data/designWorkshopRepository.js')
-const ui = read('src/apps/DesignWorkshop.jsx')
+const ui = read('src/apps/DesignWorkshop.jsx') + read('src/components/DesignMediaPanel.jsx')
 
 test('generated media is private, exact-version scoped, and explicitly exposed through RLS', () => {
   assert.match(migration, /'design-generated-media'[\s\S]*false,[\s\S]*10485760/)
