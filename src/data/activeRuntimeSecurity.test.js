@@ -21,7 +21,7 @@ test('primary navigation exposes canonical Workshop parents while specialist rou
   for (const path of ['/sphere/figma', '/sphere/assets', '/sphere/wp-sites', '/sphere/campaigns']) {
     assert.doesNotMatch(nav, new RegExp(`path: '${path}'`))
   }
-  for (const path of ['/sphere/workspace', '/sphere/internal', '/sphere/my-work', '/sphere/content', '/sphere/design', '/sphere/marketing', '/sphere/delivery', '/sphere/clients', '/sphere/portal']) {
+  for (const path of ['/sphere/workspace', '/sphere/portfolio', '/sphere/my-work', '/sphere/content', '/sphere/design', '/sphere/marketing', '/sphere/delivery', '/sphere/clients', '/sphere/portal']) {
     assert.match(nav, new RegExp(`path: '${path}'`))
   }
   for (const path of ['/sphere/content/studio', '/sphere/design/workshop', '/sphere/design/systems', '/sphere/marketing/studio', '/sphere/marketing/seo']) {

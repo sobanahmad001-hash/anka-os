@@ -31,6 +31,6 @@ test('all four department routes use one canonical workshop', async () => {
   assert.match(navigationSource, /Content Workshop/)
   assert.match(navigationSource, /Design Workshop/)
   assert.match(navigationSource, /Marketing Workshop/)
-  assert.match(navigationSource, /Delivery & Support/)
-  assert.match(navigationSource, /label: 'Development'/)
+  assert.match(navigationSource, /Coordination/)
+  assert.match(navigationSource, /label: 'Development delivery'/)
 })

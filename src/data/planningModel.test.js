@@ -102,7 +102,7 @@ test('P5 is wired into Project Workspace without cross-type drag or browser date
   const myWorkSource = readFileSync(new URL('../apps/MyWork.jsx', import.meta.url), 'utf8')
   const deliverySource = readFileSync(new URL('./deliveryRepository.js', import.meta.url), 'utf8')
 
-  assert.match(workspaceSource, /\['planning', 'Planning'\]/)
+  assert.match(workspaceSource, /\['planning', 'Schedule & Planning'\]/)
   assert.match(workspaceSource, /<ProjectPlanningPanel[\s\S]*organizationId=\{activeOrganizationId\}[\s\S]*membership=\{activeMembership\}/)
   assert.match(planningSource, /Project Tasks are not draggable/)
   assert.match(planningSource, /WORK_ITEM_STATUSES\.map\(status/)

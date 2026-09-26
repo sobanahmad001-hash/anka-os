@@ -7,7 +7,7 @@ test('reports and records is a first-class Sphere route', () => {
   const nav = fs.readFileSync(new URL('../config/environmentNav.js', import.meta.url), 'utf8')
   assert.match(app, /sphere\/reports/)
   assert.match(app, /ReportsAndRecords/)
-  assert.match(nav, /Reports & Records/)
+  assert.match(nav, /label: 'Reports'.*\/sphere\/reports/)
 })
 
 test('reports and records consumes the active organization and isolates stale project loads', () => {
