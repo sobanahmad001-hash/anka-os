@@ -5,6 +5,7 @@ import DepartmentConnectors from '../components/DepartmentConnectors.jsx'
 import DepartmentChat from '../components/DepartmentChat.jsx'
 import ContextConversationPanel from '../components/ContextConversationPanel.jsx'
 import WorkshopContextShell from '../components/WorkshopContextShell.jsx'
+import WorkshopChatWorkspace from '../components/WorkshopChatWorkspace.jsx'
 import _WorkshopTabs from '../components/WorkshopTabs.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
@@ -390,8 +391,7 @@ export default function DepartmentWorkshop({ departmentId }) {
 
         {departmentId === 'development' ? <_WorkshopTabs departmentId={departmentId} activeTab={activeTab} onChange={setActiveTab} tabs={availableTabs} /> : (
           <nav aria-label="Workshop sections" className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 p-3">
-            <button type="button" aria-pressed={activeTab === 'private'} onClick={() => setActiveTab('private')} className="rounded-lg border border-violet-500/40 px-3 py-2 text-sm text-violet-200">Private exploration</button>
-            <button type="button" aria-pressed={activeTab === 'chat'} onClick={() => setActiveTab('chat')} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Project / engagement chat</button>
+            <button type="button" aria-pressed={['private', 'chat'].includes(activeTab)} onClick={() => { if (!['private', 'chat'].includes(activeTab)) setActiveTab('private') }} className="rounded-lg border border-violet-500/40 px-3 py-2 text-sm text-violet-200">Chat</button>
             <label className="min-w-0 flex-1 text-xs text-slate-400">Work queue & tools
               <select aria-label="Work queue and tools" className={`${INPUT_CLASS} mt-1`} value={['private', 'chat'].includes(activeTab) ? '' : activeTab} onChange={event => { if (event.target.value) setActiveTab(event.target.value) }}>
                 <option value="">Choose a secondary workspace</option>
@@ -404,15 +404,16 @@ export default function DepartmentWorkshop({ departmentId }) {
         )}
 
         <div id={`${departmentId}-${activeTab}-panel`} role={departmentId === 'development' ? 'tabpanel' : 'region'} aria-label={departmentId === 'development' ? undefined : 'Workshop workspace'} aria-labelledby={departmentId === 'development' ? `${departmentId}-${activeTab}-tab` : undefined}>
+        {['private', 'chat'].includes(activeTab) ? <WorkshopChatWorkspace key={`${user?.id}:${activeOrganizationId}:${scopeRevision}:${departmentId}`} mode={activeTab} onModeChange={setActiveTab} departmentName={config.shortName} projectName={projectName} engagementName={chatEngagement?.name}>
         {activeTab === 'private' ? (
           <div className="mt-6 space-y-3">
             <p className="text-sm text-slate-400">Explore privately with your {config.shortName} specialist. Selecting project chat opens separate engagement conversations; it does not share or move these messages. Use specialist tools for governed project outputs.</p>
             <ContextConversationPanel contextKind="department_private" departmentId={departmentId} label={`${config.shortName} private conversations`} workshopLayout />
           </div>
-        ) : activeTab === 'chat' ? (
-          <section className="mt-6 space-y-5" aria-label={`${config.shortName} shared chat`}>
+        ) : (
+          <section className="space-y-5" aria-label={`${config.shortName} engagement conversations`}>
             <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-              <h2 className="text-lg font-semibold">Shared Department Chat</h2>
+              <h2 className="text-lg font-semibold">Engagement context</h2>
               <p className="mt-2 text-sm leading-6 text-slate-400">Choose a client engagement with an active or planned {config.shortName} service. Conversations stay attached to that exact engagement; an administrator-approved model connection is required before sending.</p>
               {workspace.workstreams.length > 0 && <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.13em] text-slate-400">Current workstream
                 <select className={`${INPUT_CLASS} mt-2 normal-case tracking-normal`} value={selectedWorkstreamId} onChange={event => { setSelectedWorkstreamId(event.target.value); setSelectedChatEngagementId('') }}>
@@ -426,8 +427,8 @@ export default function DepartmentWorkshop({ departmentId }) {
                 </select>
               </label> : <p className="mt-4 text-sm text-amber-300">No eligible engagement is available in this workstream. Select an active workstream and activate this department's service on its engagement.</p>}
             </div>
-            {chatEngagement && <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_240px]">
-              <div className="min-w-0"><DepartmentChat departmentId={departmentId} engagement={chatEngagement} allowArtifactDraft={false} /></div>
+            {chatEngagement && <div className="space-y-4">
+              <div className="min-w-0"><DepartmentChat departmentId={departmentId} engagement={chatEngagement} allowArtifactDraft={false} presentationLabel="Engagement conversations" /></div>
               <aside aria-label="Selected project context" className="space-y-4 rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm">
                 <h2 className="font-semibold">{projectName}</h2>
                 <p className="text-slate-400">{chatEngagement.name} · {config.shortName}</p>
@@ -437,7 +438,8 @@ export default function DepartmentWorkshop({ departmentId }) {
               </aside>
             </div>}
           </section>
-        ) : activeTab === 'connectors' ? (
+        )}
+        </WorkshopChatWorkspace> : activeTab === 'connectors' ? (
           <div className="mt-6"><DepartmentConnectors departmentId={departmentId} departmentName={config.shortName} /></div>
         ) : activeTab === 'specialists' ? (
           <div className="mt-6"><SpecialistQueues config={config} navigationContext={navigationContext.status === 'empty' ? navigationContext : contextValidation.context} /></div>

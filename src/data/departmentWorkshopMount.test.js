@@ -227,6 +227,7 @@ async function mountWorkshop(t, DepartmentWorkshop, departmentId, harness) {
     HTMLElement: globalThis.HTMLElement,
     IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT,
     dwsHarness: globalThis.__dwsHarness,
+    fetch: globalThis.fetch,
   }
 
   Object.assign(globalThis, {
@@ -236,6 +237,7 @@ async function mountWorkshop(t, DepartmentWorkshop, departmentId, harness) {
     Node: TestNode,
     HTMLElement: TestElement,
     IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: () => { throw new Error('Workshop presentation must not call a provider or network') },
     __dwsHarness: {
       search: harness.search || '',
       auth: harness.auth,
@@ -258,6 +260,7 @@ async function mountWorkshop(t, DepartmentWorkshop, departmentId, harness) {
       HTMLElement: previous.HTMLElement,
       IS_REACT_ACT_ENVIRONMENT: previous.IS_REACT_ACT_ENVIRONMENT,
       __dwsHarness: previous.dwsHarness,
+      fetch: previous.fetch,
     })
   }
   t.after(cleanup)
@@ -318,9 +321,18 @@ for (const department of departments) {
     assert.match(text, /Assets & outputs|Reviews/)
     assert.doesNotMatch(text, /Active workstreams|Chat for/)
     const all = node => [node, ...node.childNodes.flatMap(all)]
-    const projectButton = all(environment.container).find(node => node.tagName === 'BUTTON' && node.textContent === 'Project / engagement chat')
-    await act(async () => projectButton.dispatchEvent(new TestEvent('click')))
-    assert.match(environment.container.textContent, /Shared Department Chat/)
+    const nav = all(environment.container).find(node => node.getAttribute?.('aria-label') === 'Workshop sections')
+    assert.equal(all(nav).filter(node => node.tagName === 'BUTTON' && node.textContent === 'Chat').length, 1)
+    assert.doesNotMatch(nav.textContent, /Private exploration|Project \/ engagement chat/)
+    assert.match(text, /Visibility: only you/)
+    const context = all(environment.container).find(node => node.getAttribute?.('aria-label') === 'Conversation context')
+    const contextProps = context[Object.keys(context).find(key => key.startsWith('__reactProps$'))]
+    await act(async () => contextProps.onChange({ target: { value: 'chat' } }))
+    assert.match(environment.container.textContent, /department_private:/, 'current view stays open until explicit confirmation')
+    const switchButton = all(environment.container).find(node => node.tagName === 'BUTTON' && node.textContent === 'Switch context')
+    await act(async () => switchButton.dispatchEvent(new TestEvent('click')))
+    assert.match(environment.container.textContent, /Engagement context/)
+    assert.match(environment.container.textContent, /Visibility: per conversation/)
     assert.doesNotMatch(environment.container.textContent, /department_private:/)
     const queue = all(environment.container).find(node => node.tagName === 'SELECT' && node.getAttribute('aria-label') === 'Work queue and tools')
     const queueProps = queue[Object.keys(queue).find(key => key.startsWith('__reactProps$'))]
@@ -458,7 +470,7 @@ test('mounted Workshop chat shows the exact eligible engagement and a clear prer
       search: '?ctxOrg=org-1&ctxProject=project-a&ctxEngagement=engagement-a&ctxWorkshopTab=chat',
     })
     await waitForStable(environment, () => /Chat for Launch engagement/.test(environment.container.textContent), 'chat-' + department)
-    assert.match(environment.container.textContent, /Shared Department Chat/)
+    assert.match(environment.container.textContent, /Engagement context/)
     assert.match(environment.container.textContent, /Project brief & context/)
     assert.match(environment.container.textContent, /Assets, outputs & review evidence/)
     await cleanup()
@@ -471,4 +483,21 @@ test('mounted Workshop chat shows the exact eligible engagement and a clear prer
   })
   await waitForStable(environment, () => /No eligible engagement/.test(environment.container.textContent))
   assert.doesNotMatch(environment.container.textContent, /Chat for Launch engagement/)
+})
+
+test('unified Chat retains explicit private deep links and Development task default', async t => {
+  const vite = await workshopServer(t)
+  const { default: Workshop } = await vite.ssrLoadModule('/src/apps/DepartmentWorkshop.jsx')
+  for (const [department, search, expected] of [
+    ['design', '?ctxWorkshopTab=private', /department_private:design:true/],
+    ['development', '', /No Project Tasks in this workstream/],
+  ]) {
+    const { environment, cleanup } = await mountWorkshop(t, Workshop, department, {
+      auth: { user: { id: 'user-1' } }, organization: withOrganizationScope(), search,
+      delivery: { getDepartmentWorkspace: async () => workspaceBase() },
+    })
+    assert.match(environment.container.textContent, expected)
+    if (department === 'development') assert.doesNotMatch(environment.container.textContent, /Conversation context/)
+    await cleanup()
+  }
 })

@@ -29,6 +29,7 @@ export default function DepartmentChat(props) {
 export function ScopedDepartmentChat({
   departmentId,
   departmentLabel,
+  presentationLabel = 'Shared Department Chat',
   engagement,
   artifactDefinitions = {},
   allowArtifactDraft = true,
@@ -991,7 +992,7 @@ export function ScopedDepartmentChat({
     </aside>}
     <form onSubmit={submit} className="min-w-0 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 sm:p-6">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-400">Shared Department Chat · {departmentId}</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-400">{presentationLabel} · {departmentId}</p>
         <h2 className="mt-2 text-2xl font-semibold text-white">Ask, explore, or prepare a governed proposal</h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Ordinary answers stay conversational and create no official record. Artifact and work-item modes remain explicit governed proposals requiring separate confirmation.</p>
         {supportsSavedConversations && <p className="mt-2 text-xs leading-5 text-slate-500">Work context: canonical client engagement. Saved conversations are creator-private until explicitly shared with eligible internal contributors. Standalone private-project and internal-project chat modes are unavailable here.</p>}
