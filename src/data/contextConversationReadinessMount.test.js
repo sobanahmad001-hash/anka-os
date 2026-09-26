@@ -8,7 +8,7 @@ import { mountedEnvironment } from './testSupport/n1bMountedDom.js'
 const descendants = node => [node, ...node.childNodes.flatMap(descendants)]
 const button = (root, label) => descendants(root).find(node => node.tagName === 'BUTTON' && node.textContent.includes(label))
 
-async function mount(t, readiness) {
+async function mount(t, readiness, panelProps = {}) {
   const environment = mountedEnvironment()
   const values = { document: environment.document, window: environment.window,
     Event: environment.window.Event, Node: environment.window.Node,
@@ -17,6 +17,8 @@ async function mount(t, readiness) {
   Object.assign(globalThis, values)
   const calls = []
   globalThis.__contextReadinessFixture = {
+    rows: [{ id: 'conversation', owner_id: 'actor', title: 'Private', state: 'active' }],
+    created: [],
     readiness: input => { calls.push(input); return readiness(input) },
     runner: () => { throw new Error('Provider runner must not be called') },
   }
@@ -33,7 +35,14 @@ async function mount(t, readiness) {
         if (id === '\0context-auth') return 'export const useAuth = () => ({ user: { id: "actor" } })'
         if (id === '\0context-organization') return 'export const useOrganization = () => ({ activeOrganizationId: "org", scopeRevision: 1, requestSignal: globalThis.__contextReadinessFixture.signal, handleOrganizationAccessError: () => {} })'
         if (id === '\0context-repository') return `export const departmentChat = {
-          listContextConversations: async () => [{ id: 'conversation', owner_id: 'actor', title: 'Private', state: 'active' }],
+          listContextConversations: async () => globalThis.__contextReadinessFixture.rows,
+          createContextConversation: async input => {
+            const fixture = globalThis.__contextReadinessFixture
+            fixture.created.push(input)
+            const row = { id: 'new-conversation', owner_id: 'actor', title: input.title }
+            fixture.rows = [row, ...fixture.rows]
+            return row
+          },
           getContextConversation: async () => ({ messages: [{ id: 'message', author_id: 'actor', role: 'user', body: 'Question', status: 'completed' }], has_older: false }),
           getContextChatReadiness: async input => globalThis.__contextReadinessFixture.readiness(input),
         }`
@@ -45,9 +54,9 @@ async function mount(t, readiness) {
   const root = createRoot(environment.container)
   globalThis.__contextReadinessFixture.signal = new AbortController().signal
   t.after(async () => { await act(async () => root.unmount()); await vite.close(); Object.assign(globalThis, previous); delete globalThis.__contextReadinessFixture })
-  await act(async () => root.render(createElement(Panel, { contextKind: 'organization', label: 'Organization conversations' })))
+  await act(async () => root.render(createElement(Panel, { contextKind: 'organization', label: 'Organization conversations', ...panelProps })))
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
-  return { environment, calls }
+  return { environment, calls, root, Panel }
 }
 
 for (const [label, readiness, expected] of [
@@ -62,4 +71,29 @@ for (const [label, readiness, expected] of [
   const ask = button(environment.container, 'Ask Anka AI')
   assert.ok(ask)
   assert.equal(ask.disabled, true, 'per-request consent is still required even when local checks pass')
+})
+
+test('Workshop conversation search, creation and department reset stay private', async t => {
+  const { environment, root, Panel } = await mount(t, () => ({ paid_execution_enabled: false }),
+    { contextKind: 'department_private', departmentId: 'design', workshopLayout: true })
+  const props = node => node[Object.keys(node).find(key => key.startsWith('__reactProps$'))]
+  const search = () => descendants(environment.container).find(node => node.tagName === 'INPUT' && props(node)['aria-label'] === 'Search loaded conversations')
+  await act(async () => props(search()).onChange({ target: { value: 'missing' } }))
+  assert.match(environment.container.textContent, /No matching loaded conversations/)
+  assert.equal(button(environment.container, 'Private'), undefined)
+  assert.match(environment.container.textContent, /Question/, 'search must not replace the open transcript')
+  await act(async () => props(search()).onChange({ target: { value: '' } }))
+  assert.ok(button(environment.container, 'Private'))
+  const title = descendants(environment.container).find(node => node.tagName === 'INPUT' && props(node)['aria-label'] === 'New conversation title')
+  await act(async () => props(title).onChange({ target: { value: 'New direction' } }))
+  const form = descendants(environment.container).find(node => node.tagName === 'FORM' && node.textContent.includes('New conversation'))
+  await act(async () => props(form).onSubmit({ preventDefault() {} }))
+  assert.deepEqual(globalThis.__contextReadinessFixture.created, [{ context_kind: 'department_private', department_id: 'design', title: 'New direction' }])
+  assert.ok(button(environment.container, 'New direction'))
+  assert.match(environment.container.textContent, /AI unavailable; you can still save messages/)
+  await act(async () => props(search()).onChange({ target: { value: 'old search' } }))
+  globalThis.__contextReadinessFixture.rows = []
+  await act(async () => root.render(createElement(Panel, { contextKind: 'department_private', departmentId: 'content', workshopLayout: true })))
+  assert.equal(props(search()).value, '')
+  assert.doesNotMatch(environment.container.textContent, /New direction|Question/)
 })

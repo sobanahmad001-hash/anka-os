@@ -16,17 +16,17 @@ const MODEL_READINESS_MESSAGES = {
   price_unavailable: 'A fresh verified price for this exact model is unavailable.',
 }
 
-export default function ContextConversationPanel({ contextKind, departmentId = '', projectId = '', label = 'Conversation' }) {
+export default function ContextConversationPanel({ contextKind, departmentId = '', projectId = '', label = 'Conversation', workshopLayout = false }) {
   const { user } = useAuth()
   const { activeOrganizationId, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
   if (!user?.id || !activeOrganizationId || requestSignal.aborted) return null
   const identity = [user.id, activeOrganizationId, scopeRevision, contextKind, departmentId, projectId].join(':')
   return <ScopedContextConversation key={identity} contextKind={contextKind} departmentId={departmentId}
     projectId={projectId} label={label} organizationId={activeOrganizationId} user={user} signal={requestSignal}
-    onAccessError={handleOrganizationAccessError} />
+    onAccessError={handleOrganizationAccessError} workshopLayout={workshopLayout} />
 }
 
-function ScopedContextConversation({ contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError }) {
+function ScopedContextConversation({ contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError, workshopLayout }) {
   const scope = useMemo(() => ({ context_kind: contextKind, ...(departmentId ? { department_id: departmentId } : {}),
     ...(projectId ? { project_id: projectId } : {}) }), [contextKind, departmentId, projectId])
   const requestScope = useMemo(() => ({ organizationId, signal }), [organizationId, signal])
@@ -38,6 +38,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   const [messages, setMessages] = useState([])
   const [hasOlder, setHasOlder] = useState(false)
   const [title, setTitle] = useState('')
+  const [conversationSearch, setConversationSearch] = useState('')
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -326,16 +327,20 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
     </div>
     {error && <p role="alert" className="mt-4 rounded-xl border border-red-900 bg-red-950/50 px-3 py-2 text-sm text-red-300">{error}</p>}
     {aiNotice && <p role="status" className="mt-4 rounded-xl border border-amber-900 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">{aiNotice}</p>}
-    <form onSubmit={createConversation} className="mt-5 flex flex-wrap gap-2">
+    <div className="mt-5 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+      <div className="space-y-3" aria-label="Conversation navigation">
+    <form onSubmit={createConversation} className="flex flex-wrap gap-2">
       <input className={`${INPUT} min-w-52 flex-1`} aria-label="New conversation title" placeholder="New conversation title"
         maxLength={160} value={title} onChange={event => setTitle(event.target.value)} />
       <button className={BUTTON} disabled={busy || loading}>New conversation</button>
     </form>
-    <div className="mt-5 grid gap-4 lg:grid-cols-[220px_1fr]">
       <div className="space-y-2" aria-label="Saved conversations">
+        <h3 className="text-sm font-semibold text-slate-300">Recent conversations</h3>
+        <input className={INPUT} aria-label="Search loaded conversations" placeholder="Search loaded conversations" value={conversationSearch} onChange={event => setConversationSearch(event.target.value)} />
         {loading && <p className="text-sm text-slate-500">Loading conversations…</p>}
         {!loading && !conversations.length && <p className="text-sm text-slate-500">No conversations yet.</p>}
-        {conversations.map(row => <button key={row.id} type="button" onClick={() => { drafts.current.set(conversationId, draft); setConversationId(row.id) }}
+        {conversationSearch && !conversations.some(row => row.title.toLowerCase().includes(conversationSearch.toLowerCase())) && <p className="text-xs text-slate-400">No matching loaded conversations. Load older conversations to search more.</p>}
+        {conversations.filter(row => row.title.toLowerCase().includes(conversationSearch.toLowerCase())).map(row => <button key={row.id} type="button" aria-pressed={row.id === conversationId} onClick={() => { drafts.current.set(conversationId, draft); setConversationId(row.id) }}
           className={`w-full rounded-xl border p-3 text-left text-sm ${row.id === conversationId ? 'border-violet-500 bg-violet-950/30 text-white' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}>
           {row.title}</button>)}
         {hasMoreConversations && <button type="button" onClick={loadMoreConversations} disabled={listBusy || busy}
@@ -343,7 +348,8 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
           {listBusy ? 'Loading…' : 'Load older conversations'}
         </button>}
       </div>
-      <div className="min-h-64 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+      </div>
+      <div className="min-h-64 min-w-0 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
         {!selected ? <p className="text-sm text-slate-500">Choose or create a conversation.</p> : <>
           <h3 className="font-semibold text-white">{selected.title}</h3>
           {contextKind === 'project_team' && isOwner && <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
@@ -373,12 +379,15 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
               {!modelOptions.length && <option value="">No approved model available</option>}
               {modelOptions.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
             </select>
+            {workshopLayout && <p role="status" className="mt-2 text-xs text-slate-300">{!readiness ? 'Checking AI availability…' : localAiChecksPass ? 'AI configuration ready; your consent is required for each reply.' : 'AI unavailable; you can still save messages.'}</p>}
+            <details open={!workshopLayout} className="mt-2 text-xs text-slate-400"><summary>AI availability details</summary>
             <p className="mt-2 text-xs text-slate-400">AI replies use the approved organization-level provider connection and are priced and recorded for the organization. {paidExecutionEnabled ? 'The service still rechecks approval, exact pricing, spend tracking and the original request before dispatch.' : 'AI execution is currently off; saved human messages remain available.'}</p>
             {!readiness && <p className="mt-2 text-xs text-slate-400">Checking AI configuration…</p>}
             {readiness?.spend_tracking_configured === false && <p className="mt-2 text-xs text-amber-300">Organization spend tracking is not configured.</p>}
             {readiness?.spend_guard_mode === 'provider_managed' && <p className="mt-2 text-xs text-amber-300">Your provider-side spend limit is managed externally. Anka cannot verify or enforce it; each request is still priced and recorded.</p>}
             {readiness?.model_status && readiness.model_status !== 'configured' && <p className="mt-2 text-xs text-amber-300">{MODEL_READINESS_MESSAGES[readiness.model_status] || 'Model readiness is unavailable.'}</p>}
             {contextKind === 'project_team' && <p className="mt-2 text-xs text-slate-400">Teammate-authored messages are not sent to a provider. If a requested reply would include one, the request is blocked before reserving a spend record.</p>}
+            </details>
             <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-300">
               <input type="checkbox" className="mt-1" checked={aiUseConfirmed}
                 onChange={event => setAiUseConfirmed(event.target.checked)}
