@@ -698,3 +698,33 @@ for (const blocked of [
     assert.equal(byText(container, 'button', 'Ask configured AI').disabled, true)
   })
 }
+
+test('opt-in artifact allowlist constrains rendered tools, restored drafts and direct submit without changing ordinary chat', async t => {
+  const { container, ScopedDepartmentChat } = await setup(t)
+  const repo = repository([]), proposals = []
+  repo.getUnsentDraft = async () => ({ prompt: 'Saved unsupported prompt', proposal_mode: 'artifact', artifact_type: 'discovery' })
+  repo.proposeArtifact = async (_department, input) => { proposals.push(input); return { proposal_id: 'proposal-allowed', preview: { title: 'Allowed preview' }, status: 'pending', expires_at: new Date(Date.now() + 60000).toISOString() } }
+  globalThis.__departmentChatTestRepository = repo
+  const root = createRoot(container)
+
+  await act(async () => root.render(createElement(ScopedDepartmentChat, { ...props('a', new AbortController().signal), allowedArtifactTypes: ['vision'] })))
+  await flush()
+  const mode = nodes(container, 'select').find(select => select.options?.some(option => option.textContent === 'Artifact draft'))
+  assert.ok(mode); assert.equal(mode.value, 'answer')
+  await value(mode, 'artifact')
+  const tool = nodes(container, 'select').find(select => select.options?.some(option => option.value === 'vision'))
+  assert.ok(tool); assert.deepEqual(tool.options.map(option => option.value), ['vision'])
+  await value(tool, 'discovery'); await start(container)
+  assert.equal(proposals.length, 0); assert.match(container.textContent, /artifact tool is unavailable/)
+  await value(tool, 'vision'); await start(container)
+  assert.equal(proposals.length, 1); assert.equal(proposals[0].artifact_type, 'vision')
+  assert.match(container.textContent, /Allowed preview/)
+  let confirmations = 0
+  repo.confirmProposal = async () => { confirmations += 1; return { outcome: 'accepted' } }
+  await act(async () => root.render(createElement(ScopedDepartmentChat, { ...props('a', new AbortController().signal), allowedArtifactTypes: [] })))
+  await flush()
+  await act(async () => byText(container, 'button', 'Confirm official draft').dispatchEvent(new E('click')))
+  assert.equal(confirmations, 0)
+  assert.match(container.textContent, /artifact tool is unavailable/)
+  await act(async () => root.unmount())
+})
