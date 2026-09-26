@@ -1,3 +1,5 @@
+import DesignChatTools from '../components/DesignChatTools.jsx'
+import MarketingArtifactChat from '../components/MarketingArtifactChat.jsx'
 import ContentArtifactChat from '../components/ContentArtifactChat.jsx'
 import ContentWorkshopActions from '../components/ContentWorkshopActions.jsx'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -227,6 +229,19 @@ export default function DepartmentWorkshop({ departmentId }) {
     if (currentChatPane.current.key === chatPaneKey) setChatNavigationState({ key: chatPaneKey, busy })
   }, [chatPaneKey])
   const chatNavigationBusy = chatNavigationState.key === chatPaneKey && chatNavigationState.busy
+  const [designNavigationState, setDesignNavigationState] = useState({ key: '', busy: false })
+  const currentDesignPane = useRef({ identity: '', generation: 0, key: '' })
+  const designPaneIdentity = JSON.stringify([chatScopeKey, departmentId === 'design' && activeTab === 'chat'])
+  if (currentDesignPane.current.identity !== designPaneIdentity) {
+    const generation = currentDesignPane.current.generation + 1
+    currentDesignPane.current = { identity: designPaneIdentity, generation, key: JSON.stringify([designPaneIdentity, generation]) }
+  }
+  const designPaneKey = currentDesignPane.current.key
+  const reportDesignNavigationBusy = useCallback(busy => {
+    if (currentDesignPane.current.key === designPaneKey) setDesignNavigationState({ key: designPaneKey, busy })
+  }, [designPaneKey])
+  const designNavigationBusy = designNavigationState.key === designPaneKey && designNavigationState.busy
+  const navigationLocked = chatNavigationBusy || designNavigationBusy
 
   const visibleData = useMemo(() => {
     if (!workspace) return { tasks: [], workItems: [], services: [], stages: [], research: [], deliverables: [], requests: [], milestones: [] }
@@ -412,21 +427,21 @@ export default function DepartmentWorkshop({ departmentId }) {
 
         {departmentId === 'development' ? <_WorkshopTabs departmentId={departmentId} activeTab={activeTab} onChange={setActiveTab} tabs={availableTabs} /> : (
           <nav aria-label="Workshop sections" className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 p-3">
-            <button type="button" aria-pressed={['private', 'chat'].includes(activeTab)} onClick={() => { if (!['private', 'chat'].includes(activeTab)) setActiveTab('private') }} className="rounded-lg border border-violet-500/40 px-3 py-2 text-sm text-violet-200">Chat</button>
+            <button type="button" aria-pressed={['private', 'chat'].includes(activeTab)} disabled={navigationLocked} onClick={() => { if (navigationLocked) return; if (!['private', 'chat'].includes(activeTab)) setActiveTab('private') }} className="rounded-lg border border-violet-500/40 px-3 py-2 text-sm text-violet-200">Chat</button>
             <label className="min-w-0 flex-1 text-xs text-slate-400">Work queue & tools
-              <select aria-label="Work queue and tools" className={`${INPUT_CLASS} mt-1`} value={['private', 'chat'].includes(activeTab) ? '' : activeTab} onChange={event => { if (event.target.value) setActiveTab(event.target.value) }}>
+              <select disabled={navigationLocked} aria-label="Work queue and tools" className={`${INPUT_CLASS} mt-1`} value={['private', 'chat'].includes(activeTab) ? '' : activeTab} onChange={event => { if (!navigationLocked && event.target.value) setActiveTab(event.target.value) }}>
                 <option value="">Choose a secondary workspace</option>
                 {WORKSHOP_TABS.map(([id, title]) => <option key={id} value={id}>{id === 'specialists' ? 'Specialist tools' : title}</option>)}
               </select>
             </label>
-            <button type="button" aria-pressed={activeTab === 'deliverables'} onClick={() => setActiveTab('deliverables')} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Assets & outputs</button>
+            <button type="button" aria-pressed={activeTab === 'deliverables'} disabled={navigationLocked} onClick={() => { if (!navigationLocked) setActiveTab('deliverables') }} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Assets & outputs</button>
             <Link to="/sphere/my-work?tab=review" className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Reviews</Link>
           </nav>
         )}
 
         <div id={`${departmentId}-${activeTab}-panel`} role={departmentId === 'development' ? 'tabpanel' : 'region'} aria-label={departmentId === 'development' ? undefined : 'Workshop workspace'} aria-labelledby={departmentId === 'development' ? `${departmentId}-${activeTab}-tab` : undefined}>
-        {['private', 'chat'].includes(activeTab) ? <WorkshopChatWorkspace key={chatScopeKey} mode={activeTab} navigationBusy={chatNavigationBusy} onModeChange={mode => { setChatSelection(null); setActiveTab(mode) }} departmentName={config.shortName} projectName={projectName} engagementName={chatEngagement?.name}
-          onConversationSelect={item => { if (item.kind === 'engagement' && (item.engagementId !== chatEngagement?.id || item.projectId !== projectId)) return; setChatSelection(current => ({ scopeKey: chatScopeKey, item, revision: (current?.revision || 0) + 1 })); setActiveTab(item.kind === 'private' ? 'private' : 'chat') }}
+        {['private', 'chat'].includes(activeTab) ? <WorkshopChatWorkspace key={chatScopeKey} mode={activeTab} navigationBusy={navigationLocked} onModeChange={mode => { if (navigationLocked) return; setChatSelection(null); setActiveTab(mode) }} departmentName={config.shortName} projectName={projectName} engagementName={chatEngagement?.name}
+          onConversationSelect={item => { if (navigationLocked) return; if (item.kind === 'engagement' && (item.engagementId !== chatEngagement?.id || item.projectId !== projectId)) return; setChatSelection(current => ({ scopeKey: chatScopeKey, item, revision: (current?.revision || 0) + 1 })); setActiveTab(item.kind === 'private' ? 'private' : 'chat') }}
           conversationList={onOpen => <WorkshopConversationList organizationId={activeOrganizationId} actorId={user?.id} scopeRevision={scopeRevision} departmentId={departmentId} engagement={chatEngagement} signal={requestSignal} onOpen={onOpen} refreshKey={conversationListRevision} />}>
         {activeTab === 'private' ? (
           <div className="mt-6 space-y-3">
@@ -439,19 +454,20 @@ export default function DepartmentWorkshop({ departmentId }) {
               <h2 className="text-lg font-semibold">Engagement context</h2>
               <p className="mt-2 text-sm leading-6 text-slate-400">Choose a client engagement with an active or planned {config.shortName} service. Conversations stay attached to that exact engagement; an administrator-approved model connection is required before sending.</p>
               {workspace.workstreams.length > 0 && <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.13em] text-slate-400">Current workstream
-                <select className={`${INPUT_CLASS} mt-2 normal-case tracking-normal`} value={selectedWorkstreamId} onChange={event => { setSelectedWorkstreamId(event.target.value); setSelectedChatEngagementId('') }}>
+                <select className={`${INPUT_CLASS} mt-2 normal-case tracking-normal`} disabled={navigationLocked} value={selectedWorkstreamId} onChange={event => { if (navigationLocked) return; setSelectedWorkstreamId(event.target.value); setSelectedChatEngagementId('') }}>
                   {workspace.workstreams.map(workstream => <option key={workstream.id} value={workstream.id}>{workstream.projects?.name || workstream.name} · {workstream.name}</option>)}
                 </select>
               </label>}
               {chatEngagements.length > 0 ? <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.13em] text-slate-400">Client engagement
-                <select className={`${INPUT_CLASS} mt-2 normal-case tracking-normal`} value={chatEngagement?.id || ''} onChange={event => setSelectedChatEngagementId(event.target.value)}>
+                <select className={`${INPUT_CLASS} mt-2 normal-case tracking-normal`} disabled={navigationLocked} value={chatEngagement?.id || ''} onChange={event => { if (!navigationLocked) setSelectedChatEngagementId(event.target.value) }}>
                   <option value="">Choose an engagement</option>
                   {chatEngagements.map(engagement => <option key={engagement.id} value={engagement.id}>{engagement.name}</option>)}
                 </select>
               </label> : <p className="mt-4 text-sm text-amber-300">No eligible engagement is available in this workstream. Select an active workstream and activate this department's service on its engagement.</p>}
             </div>
             {chatEngagement && <div className="space-y-4">
-              <div className="min-w-0">{departmentId === 'content' ? <ContentArtifactChat key={selectedConversationRevision} projectId={projectId} engagement={chatEngagement} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} /> : <DepartmentChat key={selectedConversationRevision} departmentId={departmentId} engagement={chatEngagement} allowArtifactDraft={false} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} />}</div>
+              <div className="min-w-0">{departmentId === 'content' ? <ContentArtifactChat key={selectedConversationRevision} projectId={projectId} engagement={chatEngagement} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} /> : departmentId === 'marketing' ? <MarketingArtifactChat key={selectedConversationRevision} projectId={projectId} engagement={chatEngagement} activeServiceId={contextValidation.context?.activeServiceId || undefined} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} /> : <DepartmentChat key={selectedConversationRevision} departmentId={departmentId} engagement={chatEngagement} allowArtifactDraft={false} externalNavigationBusy={designNavigationBusy} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} />}</div>
+              {departmentId === 'design' && <DesignChatTools key={designPaneKey} engagement={chatEngagement} onNavigationBusyChange={reportDesignNavigationBusy} />}
               {departmentId === 'content' && <ContentWorkshopActions key={chatScopeKey} organizationId={activeOrganizationId} projectId={projectId} engagement={chatEngagement} services={workspace.services} unavailable={Boolean(error) || loading || requestSignal?.aborted} busy={chatNavigationBusy} />}
               <aside aria-label="Selected project context" className="space-y-4 rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm">
                 <h2 className="font-semibold">{projectName}</h2>

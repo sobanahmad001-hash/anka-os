@@ -158,6 +158,8 @@ function workshopStubs() {
       if (source && source.endsWith('OrganizationContext.jsx')) return '/0dws-org'
       if (source && source.endsWith('delivery.js')) return '/0dws-delivery'
       if (source && source.endsWith('contentStudioRepository.js')) return '/0dws-content-studio'
+      if (source && source.endsWith('DesignChatTools.jsx')) return '/0dws-design-tools'
+      if (source && source.endsWith('MarketingArtifactChat.jsx')) return '/0dws-marketing-chat'
       if (source && source.endsWith('DepartmentChat.jsx')) return '/0dws-chat'
       if (source && source.endsWith('ContextConversationPanel.jsx')) return '/0dws-private'
       if (source && source.endsWith('departmentChatRepository.js')) return '/0dws-conversation-repository'
@@ -166,6 +168,8 @@ function workshopStubs() {
     load(id) {
       if (id === '/0dws-content-studio') return `export const contentStudio = { forOrganization: org => ({ load: async id => { const workspace = await globalThis.__dwsHarness.delivery.getDepartmentWorkspace('content', org); return { engagement: workspace.engagements.find(row => row.id === id), artifacts: [], stages: [], versions: [], contentServices: workspace.services || [] } } }) }`
       if (id === '/0dws-conversation-repository') return 'export const departmentChat = { listContextConversations: async () => globalThis.__dwsHarness.privateRows || [], searchConversations: async () => ({ items: [] }) }'
+      if (id === '/0dws-design-tools') return "import { createElement, useEffect } from 'react'; export default function Tools(props) { globalThis.__dwsHarness.designToolsProps = props; useEffect(() => { globalThis.__dwsHarness.designMounts = (globalThis.__dwsHarness.designMounts || 0) + 1 }, []); return createElement('p', null, 'Inline Design tools') }"
+      if (id === '/0dws-marketing-chat') return "import { createElement } from 'react'; export default function Chat(props) { globalThis.__dwsHarness.marketingChatProps = props; return createElement('p', null, 'Chat for ' + props.engagement.name) }"
       if (id === '/0dws-chat') return "import { createElement } from 'react'; export default function Chat(props) { globalThis.__dwsHarness.engagementChatProps = props; return createElement('p', null, 'Chat for ' + props.engagement.name) }"
       if (id === '/0dws-private') return "import { createElement, useEffect } from 'react'; export default function Chat(props) { useEffect(() => { globalThis.__dwsHarness.privateMounts = (globalThis.__dwsHarness.privateMounts || 0) + 1 }, []); globalThis.__dwsHarness.privateChatProps = props; return createElement('p', null, props.contextKind + ':' + props.departmentId + ':' + props.workshopLayout) }"
       if (id === '/0dws-auth' || id === '\\\\0dws-auth') return 'export const useAuth = () => globalThis.__dwsHarness.auth'
@@ -480,7 +484,7 @@ test('mounted Workshop chat shows the exact eligible engagement and a clear prer
     assert.match(environment.container.textContent, /Assets, outputs & review evidence/)
     await cleanup()
   }
-  const { environment } = await mountWorkshop(t, DepartmentWorkshop, 'design', {
+  const { environment, root } = await mountWorkshop(t, DepartmentWorkshop, 'design', {
     auth: { user: { id: 'user-1' } },
     organization: withOrganizationScope(),
     delivery: { getDepartmentWorkspace: async () => ({ ...workspace, services: [] }) },
@@ -561,4 +565,43 @@ test('selecting the same loaded row again reopens its exact pane after internal 
     assert.equal(globalThis.__dwsHarness.privateChatProps.initialConversation.id, 'exact')
     assert.equal(globalThis.__dwsHarness.privateMounts, firstMounts + count)
   }
+})
+
+test('integrated Design tools OR busy blocks queue/context changes and rejects stale busy callbacks', async t => {
+  const all = node => [node, ...node.childNodes.flatMap(all)]
+  const vite = await workshopServer(t)
+  const { default: DepartmentWorkshop } = await vite.ssrLoadModule('/src/apps/DepartmentWorkshop.jsx')
+  const workspace = { ...workspaceBase(), services: [{ id: 'service-a', engagement_id: 'engagement-a', status: 'active' }] }
+  const { environment, root } = await mountWorkshop(t, DepartmentWorkshop, 'design', {
+    auth: { user: { id: 'user-1' } }, organization: withOrganizationScope(),
+    delivery: { getDepartmentWorkspace: async () => workspace },
+    search: '?ctxOrg=org-1&ctxProject=project-a&ctxEngagement=engagement-a&ctxWorkshopTab=chat',
+  })
+  await waitForStable(environment, () => /Inline Design tools/.test(environment.container.textContent))
+  const harness = globalThis.__dwsHarness
+  const mediaCallback = harness.designToolsProps.onNavigationBusyChange
+  await act(async () => mediaCallback(true)); await flush()
+  const elements = all(environment.container)
+  const queue = elements.find(node => node.getAttribute?.('aria-label') === 'Work queue and tools')
+  assert.ok(queue); assert.equal(queue.disabled, true)
+  assert.equal(harness.engagementChatProps.externalNavigationBusy, true)
+  const mounts = harness.designMounts
+  await act(async () => { harness.engagementChatProps.onNavigationBusyChange(true); mediaCallback(false) }); await flush()
+  assert.equal(queue.disabled, true)
+  await act(async () => harness.engagementChatProps.onNavigationBusyChange(false)); await flush()
+  assert.equal(queue.disabled, false); assert.equal(harness.designMounts, mounts)
+  const oldCallback = mediaCallback
+  harness.organization = { ...harness.organization, scopeRevision: harness.organization.scopeRevision + 1 }
+  await act(async () => root.render(createElement(DepartmentWorkshop, { departmentId: 'design' })))
+  await waitForStable(environment, () => /Inline Design tools/.test(environment.container.textContent))
+  await act(async () => oldCallback(true)); await flush()
+  const currentQueue = all(environment.container).find(node => node.getAttribute?.('aria-label') === 'Work queue and tools')
+  assert.equal(currentQueue.disabled, false)
+  const inactiveCallback = harness.designToolsProps.onNavigationBusyChange
+  const propsKey = Object.keys(currentQueue).find(key => key.startsWith('__reactProps$'))
+  await act(async () => currentQueue[propsKey].onChange({ target: { value: 'research' } }))
+  await flush(); assert.doesNotMatch(environment.container.textContent, /Inline Design tools/)
+  await act(async () => inactiveCallback(true)); await flush()
+  const inactiveQueue = all(environment.container).find(node => node.getAttribute?.('aria-label') === 'Work queue and tools')
+  assert.equal(inactiveQueue.disabled, false)
 })

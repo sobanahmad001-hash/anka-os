@@ -20,7 +20,7 @@ export default function DepartmentChat(props) {
   const { user } = useAuth()
   const { activeOrganizationId, scopeRevision, requestSignal, handleOrganizationAccessError, selectOrganization } = useOrganization()
   const [composerDirty, setComposerDirty] = useState(false)
-  const navigationBlocker = useBlocker(composerDirty)
+  const navigationBlocker = useBlocker(composerDirty || Boolean(props.externalNavigationBusy))
   const identity = JSON.stringify([user?.id, activeOrganizationId, scopeRevision, props.engagement?.id, props.departmentId, props.initialConversation?.id || ''])
   if (!user?.id || !activeOrganizationId || requestSignal?.aborted
     || props.engagement?.organization_id !== activeOrganizationId) return null
@@ -47,6 +47,7 @@ export function ScopedDepartmentChat({
   requestSignal,
   handleOrganizationAccessError,
   navigationBlocker,
+  externalNavigationBusy = false,
   onComposerDirtyChange,
   selectOrganization,
 }) {
@@ -247,9 +248,9 @@ export function ScopedDepartmentChat({
   }, [busy, historyBusy, attachmentBusy, sourceBusy, draftSaving, onNavigationBusyChange, requestSignal])
   useEffect(() => { onComposerDirtyChange?.(hasUnsentComposer) }, [hasUnsentComposer, onComposerDirtyChange])
   useEffect(() => {
-    if (navigationBlocker?.state !== 'blocked' || busy || historyBusy || attachmentBusy || sourceBusy || draftSaving) return
+    if (navigationBlocker?.state !== 'blocked' || externalNavigationBusy || busy || historyBusy || attachmentBusy || sourceBusy || draftSaving) return
     setPendingDraftSwitch(current => current || { label: 'leave this page', proceed: () => navigationBlocker.proceed() })
-  }, [navigationBlocker?.state, navigationBlocker?.proceed, busy, historyBusy, attachmentBusy, sourceBusy, draftSaving])
+  }, [navigationBlocker?.state, navigationBlocker?.proceed, externalNavigationBusy, busy, historyBusy, attachmentBusy, sourceBusy, draftSaving])
   useEffect(() => {
     if (!hasUnsentComposer) return undefined
     const warn = event => { event.preventDefault(); event.returnValue = '' }
@@ -298,7 +299,7 @@ export function ScopedDepartmentChat({
   }
 
   async function finishDraftSwitch(save) {
-    if (!pendingDraftSwitch || draftSaving) return
+    if (!pendingDraftSwitch || draftSaving || externalNavigationBusy) return
     const generation = ++draftSwitchGeneration.current
     const pending = pendingDraftSwitch
     if (save) {
@@ -1243,7 +1244,8 @@ export function ScopedDepartmentChat({
       </div>
     </aside>
   </div>
-  {pendingDraftSwitch && <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Unsent chat draft" onKeyDown={handleDraftDialogKey} className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-5"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><h2 className="text-xl font-semibold text-white">Keep this unsent work?</h2><p className="mt-2 text-sm text-slate-300">Before you {pendingDraftSwitch.label}, stay here, save text to the original conversation, or discard it. Exact source and file selections, model choice, and AI-use consent are never saved.</p>{error && <p role="alert" className="mt-3 text-sm text-red-300">{error}</p>}<div className="mt-6 flex flex-wrap justify-end gap-2"><button ref={stayButtonRef} type="button" disabled={draftSaving} onClick={closeDraftSwitch}>Stay</button><button ref={discardButtonRef} type="button" disabled={draftSaving} onClick={() => finishDraftSwitch(false)}>Discard and continue</button><button ref={saveButtonRef} type="button" disabled={draftSaving || !conversationId || !prompt.trim()} onClick={() => finishDraftSwitch(true)} className={PRIMARY}>{draftSaving ? 'Saving…' : 'Save to original and continue'}</button></div>{!prompt.trim() && <p className="mt-3 text-xs text-amber-300">Add a message to save a draft; source selections alone cannot be saved.</p>}</section></div>}
+  {externalNavigationBusy && navigationBlocker?.state === 'blocked' && <div role="status" className="rounded-xl border border-amber-600 p-4">Keep this page open while the media request is pending or unconfirmed. <button type="button" onClick={() => navigationBlocker.reset()}>Stay on this page</button></div>}
+  {pendingDraftSwitch && <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Unsent chat draft" onKeyDown={handleDraftDialogKey} className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-5"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><h2 className="text-xl font-semibold text-white">Keep this unsent work?</h2><p className="mt-2 text-sm text-slate-300">Before you {pendingDraftSwitch.label}, stay here, save text to the original conversation, or discard it. Exact source and file selections, model choice, and AI-use consent are never saved.</p>{error && <p role="alert" className="mt-3 text-sm text-red-300">{error}</p>}<div className="mt-6 flex flex-wrap justify-end gap-2"><button ref={stayButtonRef} type="button" disabled={draftSaving} onClick={closeDraftSwitch}>Stay</button><button ref={discardButtonRef} type="button" disabled={draftSaving || externalNavigationBusy} onClick={() => finishDraftSwitch(false)}>Discard and continue</button><button ref={saveButtonRef} type="button" disabled={draftSaving || externalNavigationBusy || !conversationId || !prompt.trim()} onClick={() => finishDraftSwitch(true)} className={PRIMARY}>{draftSaving ? 'Saving…' : 'Save to original and continue'}</button></div>{!prompt.trim() && <p className="mt-3 text-xs text-amber-300">Add a message to save a draft; source selections alone cannot be saved.</p>}</section></div>}
   </>
 }
 
