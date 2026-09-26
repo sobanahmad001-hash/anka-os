@@ -207,6 +207,9 @@ export async function testConnection(connection: Record<string, unknown>, secret
     })
     if (response.ok) {
       const data = await response.json()
+      if (typeof data?.id !== 'string' || data.id !== config.model_id) {
+        throw new Error('OpenAI model verification did not match the configured model ID')
+      }
       summary = { model_id: data.id, owned_by: data.owned_by }
     }
   } else if (provider === 'anthropic') {
@@ -217,7 +220,9 @@ export async function testConnection(connection: Record<string, unknown>, secret
     })
     if (response.ok) {
       const data = await response.json()
-      if (!data?.id) throw new Error('Anthropic model verification returned no model ID')
+      if (typeof data?.id !== 'string' || data.id !== config.model_id) {
+        throw new Error('Anthropic model verification did not match the configured model ID')
+      }
       summary = { model_id: data.id }
     }
   } else if (provider === 'google_gemini') {
