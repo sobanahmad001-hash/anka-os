@@ -33,7 +33,7 @@ export default function ProjectEngagementWorkspace() {
   const { projectId } = useParams()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const requestedTab = searchParams.get('tab')
+  const requestedTab = searchParams.get('tab') ?? 'discussion'
   const tab = [...TABS, ...WORK_TABS, ...SERVICES_TABS, ['retainer-planning']].some(([id]) => id === requestedTab) ? requestedTab : 'overview'
   const focusedRecord = parseWorkshopNavigation(searchParams).workRecord
   const selectTab = (id) => {

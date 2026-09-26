@@ -72,7 +72,7 @@ export default function LivingProjectReference() {
   if (snapshotId && doc) { try { snapshot = selectLivingProjectSnapshot(doc.snapshots, snapshotId, activeOrganizationId, projectId, loaded.records.livingRecord.id) } catch { /* Invalid history never falls back to current reference. */ } }
   const selectHistory = id => { const next = new URLSearchParams(params); if (id) next.set('snapshot', id); else next.delete('snapshot'); setParams(next) }
   return <main className="min-h-full bg-slate-950 p-4 text-white sm:p-8"><div className="mx-auto max-w-6xl space-y-5">
-    <Link to={`/sphere/workspace/projects/${encodeURIComponent(projectId)}`} className="text-sm text-violet-300">← Project Overview</Link>
+    <Link to={`/sphere/workspace/projects/${encodeURIComponent(projectId)}?tab=overview`} className="text-sm text-violet-300">← Project Overview</Link>
     <header className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-3xl font-semibold">Living Project Document</h1><p className="mt-2 text-slate-400">{doc?.project.name || 'Exact selected project'} · recorded work, decisions and open changes.</p></div><button className={button} onClick={load} disabled={loading || saving}>{loading ? 'Refreshing…' : 'Refresh current records'}</button></header>
     {errorMessage && <p role="alert" className="text-rose-300">{errorMessage}</p>}{noticeMessage && <p role="status" className="text-amber-200">{noticeMessage}</p>}
     {!doc && !errorMessage && <p className="text-slate-400">{loading ? 'Loading accessible project records…' : 'Select an accessible organization and project.'}</p>}
