@@ -5,7 +5,7 @@ const INPUT = 'w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-
 const BUTTON = 'rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40'
 
 export default function DesignMediaPanel({ version, models, assets, jobs, onGenerateImage, onRefreshImageJob, onRetryImageJob,
-  allowVideo = true, busy, onNavigationBusyChange }) {
+  allowVideo = true, busy, onNavigationBusyChange, presentation }) {
   const imageModels = models.filter(model => model.supported_output_types?.includes('image'))
   const versionAssets = assets.filter(asset => asset.design_direction_version_id === version.id)
   const versionJobs = (jobs || []).filter(job => job.direction_version_id === version.id)
@@ -16,6 +16,9 @@ export default function DesignMediaPanel({ version, models, assets, jobs, onGene
   const [pendingOperationKey, setPendingOperationKey] = useState('')
   const submissionInFlight = useRef(false)
   const exactRequest = useRef(null)
+  const [previewId, setPreviewId] = useState('')
+  const previewAsset = versionAssets.find(asset => asset.id === previewId)
+  const RequestHistory = presentation === 'workbench' ? 'details' : 'div'
   useEffect(() => { onNavigationBusyChange?.(Boolean(pendingOperationKey || busy)) }, [pendingOperationKey, busy, onNavigationBusyChange])
 
   async function submitImage(request = null) {
@@ -36,8 +39,13 @@ export default function DesignMediaPanel({ version, models, assets, jobs, onGene
     }
   }
 
-  return <section className="mt-4 rounded-2xl border border-violet-400/15 bg-slate-950/50 p-3">
+  return <section className={presentation === 'workbench' ? 'design-image-workbench' : 'mt-4 rounded-2xl border border-violet-400/15 bg-slate-950/50 p-3'}>
     <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-violet-300">Generated media</p><p className="mt-1 text-[11px] text-slate-500">Attached only to immutable version {version.id.slice(0, 8)}</p></div><Badge tone="violet">{versionAssets.length} outputs</Badge></div>
+    {presentation === 'workbench' && <section className="design-output-preview" aria-label="Image output preview">
+      <label>Saved image preview<select aria-label="Saved image preview" value={previewId} onChange={event => setPreviewId(event.target.value)}><option value="">Choose an exact output</option>{versionAssets.filter(asset => asset.media_type === 'image').map(asset => <option key={asset.id} value={asset.id}>{asset.prompt?.slice(0, 65) || 'Image'} · {asset.status} · {asset.id.slice(0, 8)}</option>)}</select></label>
+      {previewAsset ? <><MediaAsset asset={previewAsset} /><p className="design-preview-provenance">Exact output: {previewAsset.id} · Direction: {version.id}. Generated output — no approval inferred.</p></> : <div className="design-output-empty">Your image preview appears here. Select a saved output above, or use the image controls below.</div>}
+    </section>}
+    {presentation === 'workbench' && <h3 className="mt-4 font-semibold">Image controls</h3>}
     <textarea aria-label="Image prompt" disabled={Boolean(pendingOperationKey)} rows="3" className={`${INPUT} mt-3`} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="Static image generation prompt" />
     {imageModels.length ? <select aria-label="Image model" disabled={Boolean(pendingOperationKey)} className={`${INPUT} mt-2`} value={modelId} onChange={event => setModelId(event.target.value)}>{imageModels.map(model => <option key={model.id} value={model.id}>{model.display_name}</option>)}</select> : <p className="mt-2 text-xs text-amber-300">No active image model is registered yet.</p>}
     <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -49,7 +57,7 @@ export default function DesignMediaPanel({ version, models, assets, jobs, onGene
     </div>
     {allowVideo && <DesignVideoCapabilities directionVersionId={version.id} />}
     {pendingOperationKey && !activeJob && <p className="mt-2 text-xs text-amber-200">The last response was interrupted. “Reconcile request” reuses the same request identity and cannot create a second paid call.</p>}
-    {!!versionJobs.length && <div className="mt-3 space-y-2">{versionJobs.map(job => {
+    {!!versionJobs.length && <RequestHistory open={presentation === 'workbench' && Boolean(activeJob || pendingOperationKey) ? true : undefined} className="mt-3 space-y-2">{presentation === 'workbench' && <summary>Requests & recovery · {versionJobs.length}</summary>}{versionJobs.map(job => {
       const retryable = job.status === 'failed' && job.failure_phase === 'provider' && !retryChildren.has(job.id)
       const tone = job.status === 'succeeded' ? 'green' : ['failed', 'outcome_unknown'].includes(job.status) ? 'red' : 'violet'
       return <article key={job.id} className="rounded-xl border border-white/10 bg-white/[0.025] p-3 text-xs">
@@ -63,9 +71,9 @@ export default function DesignMediaPanel({ version, models, assets, jobs, onGene
           {retryable && <button disabled={busy === `retry-image-${job.id}`} onClick={() => onRetryImageJob(job.id, crypto.randomUUID())} className="rounded-lg border border-red-400/30 px-2.5 py-1.5 font-semibold text-red-200">Retry confirmed provider failure</button>}
         </div>
       </article>
-    })}</div>}
+    })}</RequestHistory>}
     <p className="mt-3 text-[11px] leading-5 text-slate-500">Cancellation is not supported after submission. Requests remain reopenable here, and unresolved outcomes block replacement generation.</p>
-    <div className="mt-3 grid gap-3">{versionAssets.map(asset => <MediaAsset key={asset.id} asset={asset} />)}</div>
+    {presentation !== 'workbench' && <div className="mt-3 grid gap-3">{versionAssets.map(asset => <MediaAsset key={asset.id} asset={asset} />)}</div>}
   </section>
 }
 

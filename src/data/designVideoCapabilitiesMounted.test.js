@@ -29,13 +29,13 @@ test('mounted video submission context and uncertainty regressions', async t => 
     } }] })
   t.after(() => server.close())
   const { default: Component } = await server.ssrLoadModule('/src/components/DesignVideoCapabilities.jsx')
-  async function mount(t, { historyError = false, beforeGenerate, onNavigationBusyChange } = {}) {
+  async function mount(t, { historyError = false, beforeGenerate, onNavigationBusyChange, presentation, rows = [] } = {}) {
     const env = mountedEnvironment()
     const names = ['document', 'window', 'Event', 'Node', 'HTMLElement', 'IS_REACT_ACT_ENVIRONMENT', '__designVideoFixture', 'fetch']
     const previous = Object.fromEntries(names.map(name => [name, globalThis[name]]))
     const submit = deferred()
     const calls = []
-    fixture = { scope: { activeOrganizationId: 'org-a', scopeRevision: 1, requestSignal: new AbortController().signal }, connections: [connection], rows: [], historyError }
+    fixture = { scope: { activeOrganizationId: 'org-a', scopeRevision: 1, requestSignal: new AbortController().signal }, connections: [connection], rows, historyError }
     fixture.studio = {
       listVideoJobs: async () => { if (fixture.historyError) throw new Error('offline history failure'); return fixture.rows },
       getVideoQuote: async input => ({ paid_execution_enabled: true, organization_cap_configured: true, spend_tracking_configured: true, spend_guard_mode: 'local_monthly_cap',
@@ -46,7 +46,7 @@ test('mounted video submission context and uncertainty regressions', async t => 
       fetch: () => { throw new Error('Network forbidden in mounted video tests') } })
     const root = createRoot(env.container)
     t.after(async () => { await act(async () => root.unmount()); Object.assign(globalThis, previous) })
-    const render = async direction => act(async () => root.render(createElement(Component, { directionVersionId: direction, beforeGenerate, onNavigationBusyChange })))
+    const render = async direction => act(async () => root.render(createElement(Component, { directionVersionId: direction, beforeGenerate, onNavigationBusyChange, presentation })))
     await render('direction-a')
     const change = async (node, value, checked) => act(async () => propsOf(node).onChange({ target: { value, checked } }))
     async function prepare() {
@@ -120,5 +120,24 @@ test('mounted video submission context and uncertainty regressions', async t => 
     await act(async () => propsOf(button(m.env.container, 'Reconcile same video request')).onClick({ preventDefault() {} }))
     assert.deepEqual(m.calls[1], original)
     assert.equal(busy.at(-1), false)
+  })
+  await t.test('workbench signed video preview stays private, exact and separate from draft promotion', async t => {
+    const m = await mount(t, { presentation: 'workbench' })
+    const signed = []
+    fixture.studio.signVideoOutput = async id => { signed.push(id); return { signed_url: 'https://offline.invalid/exact-video' } }
+    fixture.studio.listEngagements = async () => []
+    fixture.rows = [{ id: 'ready-job', status: 'ready', mode: 'explore', duration_seconds: 5, resolution: '720p', created_at: new Date().toISOString() }]
+    fixture.scope = { ...fixture.scope, scopeRevision: 2 }
+    await m.render('direction-a')
+    assert.equal(elements(m.env.container, 'video').length, 0)
+    assert.match(m.env.container.textContent, /Private video preview/)
+    await act(async () => propsOf(button(m.env.container, 'Open private preview')).onClick())
+    assert.deepEqual(signed, ['ready-job'])
+    assert.equal(propsOf(elements(m.env.container, 'video')[0]).src, 'https://offline.invalid/exact-video')
+    assert.match(m.env.container.textContent, /No project copy or approval inferred/)
+    assert.match(m.env.container.textContent, /Copies this exact saved video to an unapproved draft/)
+    assert.equal(m.calls.length, 0)
+    await m.render('direction-b')
+    assert.equal(elements(m.env.container, 'video').length, 0, 'new direction cannot inherit the prior signed preview')
   })
 })

@@ -31,6 +31,7 @@ export function ScopedDepartmentChat({
   departmentId,
   departmentLabel,
   presentationLabel = 'Shared Department Chat',
+  presentation,
   initialConversation = null,
   hideConversationList = false,
   onConversationListChange,
@@ -134,12 +135,13 @@ export function ScopedDepartmentChat({
   const [sourceBusy, setSourceBusy] = useState(false)
   const [sourceError, setSourceError] = useState('')
   const [sourceRefresh, setSourceRefresh] = useState(0)
-  const [contextExpanded, setContextExpanded] = useState(() => !globalThis.window?.matchMedia || globalThis.window.matchMedia('(min-width: 1280px)').matches)
+  const [contextExpanded, setContextExpanded] = useState(() => presentation !== 'workbench' && (!globalThis.window?.matchMedia || globalThis.window.matchMedia('(min-width: 1280px)').matches))
 
   const [pendingDraftSwitch, setPendingDraftSwitch] = useState(null)
   const [draftSaving, setDraftSaving] = useState(false)
   const [draftNotice, setDraftNotice] = useState('')
   useEffect(() => {
+    if (presentation === 'workbench') return undefined
     const media = window.matchMedia?.('(min-width: 1280px)')
     if (!media) return undefined
     const resize = () => {
@@ -149,7 +151,7 @@ export function ScopedDepartmentChat({
     resize()
     media.addEventListener?.('change', resize)
     return () => media.removeEventListener?.('change', resize)
-  }, [])
+  }, [presentation])
   useEffect(() => {
     if (result) { focusPreviewOnOpen.current = true; setContextExpanded(true) }
   }, [result])
@@ -985,7 +987,8 @@ export function ScopedDepartmentChat({
     }
   }
 
-  return <><div className={`grid gap-6 ${supportsSavedConversations ? hideConversationList ? 'xl:grid-cols-[minmax(0,1fr)_320px]' : 'xl:grid-cols-[260px_minmax(0,1fr)_320px]' : 'xl:grid-cols-[minmax(0,1fr)_360px]'}`}>
+  const SourcePanel = presentation === 'workbench' ? 'details' : 'section'
+  return <><div className={presentation === 'workbench' ? 'design-chat-composer grid min-w-0 gap-4' : `grid gap-6 ${supportsSavedConversations ? hideConversationList ? 'xl:grid-cols-[minmax(0,1fr)_320px]' : 'xl:grid-cols-[260px_minmax(0,1fr)_320px]' : 'xl:grid-cols-[minmax(0,1fr)_360px]'}`}>
     {supportsSavedConversations && !hideConversationList && <aside className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
       <div className="flex items-center justify-between gap-3">
         <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Conversations</p><p className="mt-1 text-xs text-emerald-300">Private to you or deliberately shared</p></div>
@@ -1018,7 +1021,7 @@ export function ScopedDepartmentChat({
       {supportsSavedConversations && hideConversationList && <button type="button" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)} className="mb-4 rounded-lg bg-sky-700 px-3 py-2 text-sm">New engagement conversation</button>}
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-400">{presentationLabel} · {departmentId}</p>
-        <h2 className="mt-2 text-2xl font-semibold text-white">Ask, explore, or prepare a governed proposal</h2>
+        <h2 className="mt-2 text-2xl font-semibold text-white">{presentation === 'workbench' ? 'Discuss the direction' : 'Ask, explore, or prepare a governed proposal'}</h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Ordinary answers stay conversational and create no official record. Artifact and work-item modes remain explicit governed proposals requiring separate confirmation.</p>
         {supportsSavedConversations && <p className="mt-2 text-xs leading-5 text-slate-500">Work context: canonical client engagement. Saved conversations are creator-private until explicitly shared with eligible internal contributors. Standalone private-project and internal-project chat modes are unavailable here.</p>}
       </div>
@@ -1117,7 +1120,8 @@ export function ScopedDepartmentChat({
           </>
         )}
 
-        {supportsSavedConversations && <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4" aria-label="Exact artifact sources">
+        {supportsSavedConversations && <SourcePanel className="rounded-xl border border-slate-800 bg-slate-950/40 p-4" aria-label="Exact artifact sources">
+          {presentation === 'workbench' && <summary>References · {selectedSourceVersionIds.length} selected</summary>}
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Exact approved artifact versions</p>
           <p className="mt-2 text-xs leading-5 text-slate-500">Only versions approved for this engagement and eligible for AI use appear. Preview the full content, then include up to five exact versions for this turn. No artifact is included automatically.</p>
           <button type="button" disabled={sourceBusy || busy || historyBusy} onClick={() => setSourceRefresh(value => value + 1)} className="mt-2 text-xs text-sky-300 disabled:opacity-50">Refresh permitted versions</button>
@@ -1147,9 +1151,10 @@ export function ScopedDepartmentChat({
             </button>
           </div>}
           <p className="mt-2 text-xs text-slate-500">{selectedSourceVersionIds.length} of 5 exact versions selected. Permission and approval are rechecked at send.</p>
-        </section>}
+        </SourcePanel>}
 
-        {supportsSavedConversations && capabilities?.attachments?.supported && <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+        {supportsSavedConversations && capabilities?.attachments?.supported && <SourcePanel className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+          {presentation === 'workbench' && <summary>Source files · {selectedAttachmentIds.length} selected</summary>}
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Explicit source files</p>
           <p className="mt-2 text-xs leading-5 text-slate-500">TXT, Markdown, and DOCX contribute validated text. PNG/JPEG are reference-only and are never sent to the model. PDF and scanned/OCR documents are unavailable. Choose up to 3 files: 5 MiB per file; DOCX 4 MiB. Extracted text is limited to 16,000 characters per file and 24,000 per turn; rejected limits never truncate content.</p>
           <input
@@ -1194,7 +1199,7 @@ export function ScopedDepartmentChat({
             })}
           </div>}
           <p className="mt-3 text-xs text-slate-500">Choose up to three files for this turn. Only checked files are linked to the request; rejected limits never truncate content. Revocation blocks later server reads and replies, but cannot recall copies someone already saved.</p>
-        </section>}
+        </SourcePanel>}
 
         <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{isAnswerMode ? 'Message' : 'Draft request'}
           <textarea ref={composerRef} required rows="10" className={`${INPUT} mt-2 normal-case tracking-normal`} value={prompt} onInput={event => setPrompt(event.currentTarget.value)} placeholder={isAnswerMode ? 'Ask a question or explore the work context. This will not create an official output.' : 'Describe the draft you need, the evidence to prioritize, known constraints, tone, and gaps the team should keep visible.'} />

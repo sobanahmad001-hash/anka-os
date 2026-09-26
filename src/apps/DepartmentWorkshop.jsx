@@ -128,6 +128,8 @@ export default function DepartmentWorkshop({ departmentId }) {
   const currentScope = useRef(null)
   currentScope.current = { organizationId: activeOrganizationId, revision: scopeRevision }
   const config = DEPARTMENT_CONFIG[departmentId]
+  const ContextSetup = departmentId === 'design' ? 'details' : 'div'
+  const ProjectContext = departmentId === 'design' ? 'details' : 'aside'
   const legacyDepartmentAllowed = canViewDepartment(activeMembership, departmentId)
   const accessKey = [user?.id, activeOrganizationId, scopeRevision, departmentId].join(':')
   const needsDepartmentLookup = Boolean(user?.id && activeOrganizationId && !legacyDepartmentAllowed && config)
@@ -440,7 +442,7 @@ export default function DepartmentWorkshop({ departmentId }) {
         )}
 
         <div id={`${departmentId}-${activeTab}-panel`} role={departmentId === 'development' ? 'tabpanel' : 'region'} aria-label={departmentId === 'development' ? undefined : 'Workshop workspace'} aria-labelledby={departmentId === 'development' ? `${departmentId}-${activeTab}-tab` : undefined}>
-        {['private', 'chat'].includes(activeTab) ? <WorkshopChatWorkspace key={chatScopeKey} mode={activeTab} navigationBusy={navigationLocked} onModeChange={mode => { if (navigationLocked) return; setChatSelection(null); setActiveTab(mode) }} departmentName={config.shortName} projectName={projectName} engagementName={chatEngagement?.name}
+        {['private', 'chat'].includes(activeTab) ? <WorkshopChatWorkspace key={chatScopeKey} presentation={departmentId === 'design' ? 'design' : undefined} mode={activeTab} navigationBusy={navigationLocked} onModeChange={mode => { if (navigationLocked) return; setChatSelection(null); setActiveTab(mode) }} departmentName={config.shortName} projectName={projectName} engagementName={chatEngagement?.name}
           onConversationSelect={item => { if (navigationLocked) return; if (item.kind === 'engagement' && (item.engagementId !== chatEngagement?.id || item.projectId !== projectId)) return; setChatSelection(current => ({ scopeKey: chatScopeKey, item, revision: (current?.revision || 0) + 1 })); setActiveTab(item.kind === 'private' ? 'private' : 'chat') }}
           conversationList={onOpen => <WorkshopConversationList organizationId={activeOrganizationId} actorId={user?.id} scopeRevision={scopeRevision} departmentId={departmentId} engagement={chatEngagement} signal={requestSignal} onOpen={onOpen} refreshKey={conversationListRevision} />}>
         {activeTab === 'private' ? (
@@ -450,7 +452,8 @@ export default function DepartmentWorkshop({ departmentId }) {
           </div>
         ) : (
           <section className="space-y-5" aria-label={`${config.shortName} engagement conversations`}>
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+            <ContextSetup open={departmentId === 'design' && !chatEngagement ? true : undefined} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+              {departmentId === 'design' && <summary>Project context · {chatEngagement?.name || 'Choose an engagement'}</summary>}
               <h2 className="text-lg font-semibold">Engagement context</h2>
               <p className="mt-2 text-sm leading-6 text-slate-400">Choose a client engagement with an active or planned {config.shortName} service. Conversations stay attached to that exact engagement; an administrator-approved model connection is required before sending.</p>
               {workspace.workstreams.length > 0 && <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.13em] text-slate-400">Current workstream
@@ -464,18 +467,19 @@ export default function DepartmentWorkshop({ departmentId }) {
                   {chatEngagements.map(engagement => <option key={engagement.id} value={engagement.id}>{engagement.name}</option>)}
                 </select>
               </label> : <p className="mt-4 text-sm text-amber-300">No eligible engagement is available in this workstream. Select an active workstream and activate this department's service on its engagement.</p>}
-            </div>
-            {chatEngagement && <div className="space-y-4">
-              <div className="min-w-0">{departmentId === 'content' ? <ContentArtifactChat key={selectedConversationRevision} projectId={projectId} engagement={chatEngagement} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} /> : departmentId === 'marketing' ? <MarketingArtifactChat key={selectedConversationRevision} projectId={projectId} engagement={chatEngagement} activeServiceId={contextValidation.context?.activeServiceId || undefined} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} /> : <DepartmentChat key={selectedConversationRevision} departmentId={departmentId} engagement={chatEngagement} allowArtifactDraft={false} externalNavigationBusy={designNavigationBusy} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} />}</div>
-              {departmentId === 'design' && <DesignChatTools key={designPaneKey} engagement={chatEngagement} onNavigationBusyChange={reportDesignNavigationBusy} />}
+            </ContextSetup>
+            {chatEngagement && <div className={departmentId === 'design' ? 'design-workbench-grid' : 'space-y-4'}>
+              <div className="min-w-0">{departmentId === 'content' ? <ContentArtifactChat key={selectedConversationRevision} projectId={projectId} engagement={chatEngagement} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} /> : departmentId === 'marketing' ? <MarketingArtifactChat key={selectedConversationRevision} projectId={projectId} engagement={chatEngagement} activeServiceId={contextValidation.context?.activeServiceId || undefined} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} /> : <DepartmentChat key={selectedConversationRevision} presentation={departmentId === 'design' ? 'workbench' : undefined} departmentId={departmentId} engagement={chatEngagement} allowArtifactDraft={false} externalNavigationBusy={designNavigationBusy} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} />}</div>
+              {departmentId === 'design' && <DesignChatTools key={designPaneKey} presentation="workbench" engagement={chatEngagement} onNavigationBusyChange={reportDesignNavigationBusy} />}
               {departmentId === 'content' && <ContentWorkshopActions key={chatScopeKey} organizationId={activeOrganizationId} projectId={projectId} engagement={chatEngagement} services={workspace.services} unavailable={Boolean(error) || loading || requestSignal?.aborted} busy={chatNavigationBusy} />}
-              <aside aria-label="Selected project context" className="space-y-4 rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm">
+              <ProjectContext aria-label="Selected project context" className="design-project-reference space-y-4 rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm">
+                {departmentId === 'design' && <summary>Project references & review</summary>}
                 <h2 className="font-semibold">{projectName}</h2>
                 <p className="text-slate-400">{chatEngagement.name} · {config.shortName}</p>
                 <Link className="block text-violet-300" to={`/sphere/workspace/projects/${encodeURIComponent(projectId)}?tab=overview`}>Project brief & context</Link>
                 <Link className="block text-violet-300" to={`/sphere/workspace/projects/${encodeURIComponent(projectId)}?tab=outputs`}>Assets, outputs & review evidence</Link>
                 <p className="text-xs leading-5 text-slate-400">Select exact references and supported private attachments in this conversation. Output previews stay drafts until the existing governed action is completed; switching context does not publish private exploration.</p>
-              </aside>
+              </ProjectContext>
             </div>}
           </section>
         )}

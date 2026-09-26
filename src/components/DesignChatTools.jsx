@@ -6,13 +6,13 @@ import { eligibleDesignVersions, requireDesignVersion } from '../data/designChat
 import DesignMediaPanel from './DesignMediaPanel.jsx'
 import DesignVideoCapabilities from './DesignVideoCapabilities.jsx'
 
-export default function DesignChatTools({ engagement, onNavigationBusyChange }) {
+export default function DesignChatTools({ engagement, onNavigationBusyChange, presentation }) {
   const { activeOrganizationId, scopeRevision } = useOrganization()
   return <ScopedDesignChatTools key={`${activeOrganizationId}:${scopeRevision}:${engagement?.project_id}:${engagement?.id}`}
-    engagement={engagement} onNavigationBusyChange={onNavigationBusyChange} />
+    engagement={engagement} onNavigationBusyChange={onNavigationBusyChange} presentation={presentation} />
 }
 
-function ScopedDesignChatTools({ engagement, onNavigationBusyChange }) {
+function ScopedDesignChatTools({ engagement, onNavigationBusyChange, presentation }) {
   const { activeOrganizationId, activeMembership, requestSignal } = useOrganization()
   const studio = useMemo(() => activeOrganizationId ? designWorkshop.forOrganization(activeOrganizationId, { signal: requestSignal }) : null, [activeOrganizationId, requestSignal])
   const scope = useMemo(() => ({ organizationId: activeOrganizationId, projectId: engagement?.project_id, engagementId: engagement?.id }), [activeOrganizationId, engagement?.project_id, engagement?.id])
@@ -100,24 +100,26 @@ function ScopedDesignChatTools({ engagement, onNavigationBusyChange }) {
   }
   if (!engagement || !scope.projectId) return <p className="text-sm text-slate-400">Select a project engagement to use Design tools. Private chat is not copied into project context.</p>
   if (!allowed) return <p className="text-sm text-slate-400">Design generation is unavailable for your current membership.</p>
-  return <section aria-label="Design chat tools" className="rounded-xl border border-white/10 p-3">
+  return <section aria-label="Design chat tools" className={presentation === 'workbench' ? 'design-tools-workbench' : 'rounded-xl border border-white/10 p-3'}>
     <p className="font-semibold">Design tools</p>
-    <p className="mt-1 text-xs text-slate-400">Choose an existing immutable direction. Tool selection does not generate or share anything. Video outputs remain private until explicitly copied to an unapproved project draft.</p>
+    <p className="mt-1 text-xs text-slate-400">Work from an exact saved direction. Video stays private until you explicitly copy an unapproved draft to a project.</p>
     <label className="mt-3 block text-sm">Exact direction version
       <select aria-label="Exact direction version" value={versionId} disabled={navigationBusy} className="ml-2 max-w-full rounded bg-slate-900 p-2"
         onChange={event => { if (navigationBusy) return; setVersionId(event.target.value); setTool(''); setOpened({ image: false, video: false }) }}>
         <option value="">Choose exact version</option>
-        {versions.map(item => <option key={item.id} value={item.id}>{item.content?.title || 'Direction'} · v{item.version_number} · {item.id}</option>)}
+        {versions.map(item => <option key={item.id} value={item.id}>{item.content?.title || 'Direction'} · v{item.version_number} · {presentation === 'workbench' ? item.id.slice(0, 8) : item.id}</option>)}
       </select>
     </label>
+    {presentation === 'workbench' && version && <details className="design-direction-reference"><summary>Selected reference & version</summary><p>{version.content?.creative_thesis || version.content?.imagery_direction || 'Saved direction'}</p><p>Project: {scope.projectId} · Engagement: {scope.engagementId}</p><p>Exact immutable version: {version.id}</p><p>This reference is not a release or approval. Review remains in the existing project workflow.</p></details>}
     {!versions.length && <p className="mt-2 text-sm text-amber-200">No eligible direction version is loaded. An active Design service and an existing project direction are required; create one in the Design Workshop.</p>}
     <div className="mt-3 flex gap-2">{['image', 'video'].map(name => <button key={name} type="button" disabled={!version} aria-pressed={tool === name} className="rounded border border-white/20 px-3 py-2 disabled:opacity-40" onClick={() => { setTool(name); setOpened(current => ({ ...current, [name]: true })) }}>{name === 'image' ? 'Image' : 'Video'}</button>)}</div>
     {notice && <p role="status" className="mt-2 text-sm text-amber-200">{notice}</p>}
     {navigationBusy && <p className="mt-2 text-xs text-amber-200">Keep this context open while a request is pending or its outcome is unconfirmed.</p>}
+    {presentation === 'workbench' && !tool && <div className="design-output-empty">Choose an exact direction, then Image or Video to open controls and existing outputs. No request runs on selection.</div>}
     {version && <div key={version.id}>
-      {opened.image && <div hidden={tool !== 'image'}><DesignMediaPanel version={version} models={workspace.models} assets={workspace.mediaAssets} jobs={workspace.imageGenerationJobs} allowVideo={false} busy={busy}
+      {opened.image && <div hidden={tool !== 'image'}><DesignMediaPanel presentation={presentation} version={version} models={workspace.models} assets={workspace.mediaAssets} jobs={workspace.imageGenerationJobs} allowVideo={false} busy={busy}
         onNavigationBusyChange={setImageBusy} onGenerateImage={(...args) => imageAction('generate', args)} onRefreshImageJob={(...args) => imageAction('status', args)} onRetryImageJob={(...args) => imageAction('retry', args)} /></div>}
-      {opened.video && <div hidden={tool !== 'video'}><DesignVideoCapabilities directionVersionId={version.id} beforeGenerate={revalidate} onNavigationBusyChange={setVideoBusy} /></div>}
+      {opened.video && <div hidden={tool !== 'video'}><DesignVideoCapabilities presentation={presentation} directionVersionId={version.id} beforeGenerate={revalidate} onNavigationBusyChange={setVideoBusy} /></div>}
     </div>}
   </section>
 }
