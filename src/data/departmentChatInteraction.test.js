@@ -84,6 +84,40 @@ async function setup(t) {
   return { ...env, ScopedDepartmentChat }
 }
 
+test('Design workbench disclosures keep source selection and unsent draft mounted with consent visible', async t => {
+  const { container, window, ScopedDepartmentChat } = await setup(t)
+  window.matchMedia = () => ({ matches: true, addEventListener() {}, removeEventListener() {} })
+  const repo = repository([])
+  const id = '11111111-1111-4111-8111-111111111111'
+  repo.listSourceVersions = async () => [{ artifact_version_id: id, title: 'Exact reference', artifact_type: 'vision', version_number: 1 }]
+  repo.previewSourceVersion = async () => ({ artifact_version_id: id, title: 'Exact reference', content: { text: 'EXACT_REFERENCE' } })
+  globalThis.__departmentChatTestRepository = repo
+  const root = createRoot(container)
+  t.after(() => { try { root.unmount() } catch {} })
+  await act(async () => root.render(createElement(ScopedDepartmentChat, { ...props('a', new AbortController().signal), presentation: 'workbench', hideConversationList: true })))
+  await flush()
+  const details = nodes(container, 'details').find(node => node.getAttribute('aria-label') === 'Exact artifact sources')
+  assert.equal(byText(container, 'button', 'Context and output').getAttribute('aria-expanded'), 'false', 'wide viewport does not force open the workbench context')
+  assert.ok(details)
+  assert.equal(details.hasAttribute('open'), false)
+  details.setAttribute('open', '')
+  await act(async () => byText(container, 'button', 'Preview exact version').dispatchEvent(new E('click')))
+  await flush()
+  await act(async () => byText(container, 'button', 'Include this exact version').dispatchEvent(new E('click')))
+  const composer = nodes(container, 'textarea')[0]
+  await value(composer, 'Retain this unsent draft')
+  details.removeAttribute('open')
+  assert.match(byText(details, 'summary', 'References').textContent, /1 selected/)
+  assert.equal(nodes(container, 'textarea')[0], composer)
+  assert.equal(composer.value, 'Retain this unsent draft')
+  const consent = nodes(container, 'input').find(node => node.parentNode?.textContent.includes('I confirm this message'))
+  assert.ok(consent)
+  assert.equal(details.contains(consent), false)
+  assert.equal(byText(container, 'button', 'Ask configured AI').disabled, true)
+  assert.equal(nodes(container, 'div').find(node => node.getAttribute('class')?.includes('design-chat-composer')).getAttribute('class').includes('xl:grid-cols'), false)
+  await act(async () => root.unmount())
+})
+
 test('P9C narrow context panel expands for output and keeps official proposal controls keyboard reachable', async t => {
   const { container, window, document, ScopedDepartmentChat } = await setup(t)
   let wide = false

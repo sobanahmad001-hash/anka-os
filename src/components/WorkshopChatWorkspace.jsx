@@ -1,17 +1,22 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
+import './designWorkshopPresentation.css'
 
 // Presentation only: each child retains its own store, permissions and saved-thread controls.
-export default function WorkshopChatWorkspace({ mode, onModeChange, departmentName, projectName, engagementName, conversationList, onConversationSelect, navigationBusy = false, children }) {
+export default function WorkshopChatWorkspace({ mode, onModeChange, departmentName, projectName, engagementName, conversationList, onConversationSelect, navigationBusy = false, presentation, children }) {
+  const design = presentation === 'design'
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const historyId = useId()
   const [pendingMode, setPendingMode] = useState(null)
   const [pendingConversation, setPendingConversation] = useState(null)
   const cancel = () => { setPendingMode(null); setPendingConversation(null) }
   const privateMode = mode === 'private'
-  return <section aria-label="Workshop Chat" className="mt-6 space-y-4">
+  return <section aria-label="Workshop Chat" className={design ? 'design-workshop mt-6 space-y-4' : 'mt-6 space-y-4'}>
     <header className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div><h2 className="text-xl font-semibold">Chat</h2>
           <p className="mt-1 text-sm text-slate-400">Saved conversations for {departmentName}. Choose the context you want to open.</p>
         </div>
+        {design && conversationList && <button type="button" aria-expanded={historyOpen} aria-controls={historyId} onClick={() => setHistoryOpen(value => !value)}>Conversations</button>}
         <label className="grid w-full gap-2 text-xs font-semibold text-slate-300 sm:w-auto">Conversation context
           <select aria-label="Conversation context" value={pendingMode || mode} onChange={event => { setPendingConversation(null); setPendingMode(event.target.value === mode ? null : event.target.value) }} className="max-w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
             <option value="private">Private exploration</option>
@@ -34,8 +39,8 @@ export default function WorkshopChatWorkspace({ mode, onModeChange, departmentNa
         </div>
       </div>}
     </header>
-    {conversationList ? <div className="grid items-start gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-      {conversationList(item => { setPendingConversation(item); setPendingMode(item.kind === 'private' ? 'private' : 'chat') })}
+    {conversationList ? <div className={design ? `design-chat-layout ${historyOpen ? 'history-open' : ''}` : 'grid items-start gap-4 lg:grid-cols-[260px_minmax(0,1fr)]'}>
+      <div id={historyId} hidden={design && !historyOpen}>{conversationList(item => { setPendingConversation(item); setPendingMode(item.kind === 'private' ? 'private' : 'chat') })}</div>
       <div className="min-w-0">{children}</div>
     </div> : children}
   </section>

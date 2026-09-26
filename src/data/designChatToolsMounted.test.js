@@ -18,6 +18,10 @@ test('actual inline image controls preserve exact uncertain identity, idle mount
   Object.assign(globalThis, { document: env.document, window: env.window, IS_REACT_ACT_ENVIRONMENT: true, fetch: () => { throw new Error('Network forbidden') } })
   let context = { activeOrganizationId: 'org-a', activeMembership: { departmentId: 'design' }, scopeRevision: 1, requestSignal: new AbortController().signal }
   let data = workspace(), fail = true, delayedLoad = null
+  data.mediaAssets = [
+    { id: 'image-a', design_direction_version_id: 'version-a', media_type: 'image', status: 'ready', signed_url: 'https://offline.invalid/exact-image', prompt: 'Exact saved image' },
+    { id: 'image-other', design_direction_version_id: 'version-other', media_type: 'image', status: 'ready', signed_url: 'https://offline.invalid/other', prompt: 'Other version image' },
+  ]
   const calls = [], navigation = []
   const studio = { load: async () => delayedLoad ? delayedLoad.promise : data,
     generateImage: async (...args) => { calls.push(args); if (fail) throw new Error('Lost response'); return { id: 'durable-job' } },
@@ -45,7 +49,7 @@ test('actual inline image controls preserve exact uncertain identity, idle mount
   const Component = load('DesignChatTools'), root = createRoot(env.container)
   const report = value => navigation.push(value)
   const engagement = data.engagement
-  const render = () => act(async () => root.render(React.createElement(Component, { engagement, onNavigationBusyChange: report })))
+  const render = () => act(async () => root.render(React.createElement(Component, { engagement, onNavigationBusyChange: report, presentation: 'workbench' })))
   t.after(async () => { await act(async () => root.unmount()); Object.assign(globalThis, previous) })
   const button = text => elements(env.container, 'button').find(node => node.textContent === text)
   const select = () => elements(env.container, 'select').find(node => props(node)['aria-label'] === 'Exact direction version')
@@ -56,6 +60,12 @@ test('actual inline image controls preserve exact uncertain identity, idle mount
   await act(async () => props(select()).onChange({ target: { value: 'version-a' } }))
   await click(button('Image'))
   assert.equal(calls.length, 0)
+  const outputSelect = elements(env.container, 'select').find(node => props(node)['aria-label'] === 'Saved image preview')
+  assert.equal(elements(outputSelect, 'option').length, 2, 'only the exact direction output is offered')
+  assert.equal(elements(env.container, 'img').length, 0, 'no implicit latest output selection')
+  await act(async () => props(outputSelect).onChange({ target: { value: 'image-a' } }))
+  assert.equal(props(elements(env.container, 'img')[0]).src, 'https://offline.invalid/exact-image')
+  assert.equal(calls.length, 0, 'preview selection never generates')
   await click(button('Generate image'))
   assert.equal(calls.length, 1)
   assert.deepEqual(calls[0].slice(0, 3), ['version-a', 'model-a', 'Exact original prompt'])
@@ -65,6 +75,7 @@ test('actual inline image controls preserve exact uncertain identity, idle mount
   await click(button('Video'))
   assert.match(env.container.textContent, /No current quote/)
   await click(button('Image'))
+  assert.equal(props(elements(env.container, 'img')[0]).src, 'https://offline.invalid/exact-image', 'card switching retains exact preview')
   fail = false
   await click(button('Reconcile request'))
   assert.equal(calls.length, 2)

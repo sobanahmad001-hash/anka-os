@@ -1,0 +1,58 @@
+/* Opt-in Design presentation. No global utility, media or authority overrides. */
+.design-workshop { color: var(--anka-ink); container-type: inline-size; }
+/* Translate only neutral surfaces/text inside this opt-in workspace; media pixels and semantic statuses are untouched. */
+.design-workshop :is([class~="bg-slate-900"], [class~="bg-slate-900/70"], [class~="bg-slate-950"], [class~="bg-slate-950/40"], [class~="bg-slate-950/50"]) { background: var(--anka-surface); }
+.design-workshop :is([class~="text-slate-200"], [class~="text-slate-300"], [class~="text-white"]) { color: var(--anka-ink); }
+.design-workshop :is([class~="text-slate-400"], [class~="text-slate-500"], [class~="text-slate-600"]) { color: var(--anka-muted); }
+.design-workshop :is([class~="border-slate-700"], [class~="border-slate-800"], [class~="border-slate-900"]) { border-color: var(--anka-line); }
+.design-workshop :is([class~="text-amber-100"], [class~="text-amber-200"], [class~="text-amber-300"]) { color: var(--anka-warning); }
+.design-workshop :is([class~="text-red-200"], [class~="text-red-300"]) { color: var(--anka-danger); }
+.design-workshop :is([class~="text-sky-200"], [class~="text-sky-300"], [class~="text-sky-400"], [class~="text-violet-300"]) { color: var(--anka-violet); }
+.design-workshop button:is([class~="bg-sky-600"], [class~="bg-sky-700"], [class~="bg-violet-600"]) { background: var(--anka-violet); color: var(--anka-on-violet); }
+.design-workshop .design-chat-composer { min-width: 0; overflow-wrap: anywhere; }
+.design-workshop [hidden] { display: none; }
+.design-workshop .design-chat-layout { display: grid; gap: 18px; align-items: start; }
+.design-workshop .design-workbench-grid { display: grid; gap: 20px; align-items: start; }
+.design-workshop .design-project-reference { grid-column: 1 / -1; }
+.design-workshop .design-tools-workbench { min-width: 0; padding: 18px; border: 1px solid var(--anka-line); border-radius: 14px; background: var(--anka-surface); }
+.design-workshop .design-direction-reference { margin-block: 12px; padding: 10px 12px; font-size: 12px; overflow-wrap: anywhere; background: var(--anka-canvas); border-radius: 8px; }
+.design-workshop .design-image-workbench, .design-workshop .design-video-workbench { margin-top: 16px; }
+.design-workshop .design-output-preview { margin-block: 16px; padding: 14px; border: 1px solid var(--anka-line); background: var(--anka-canvas); border-radius: 12px; }
+.design-workshop .design-output-preview label { display: grid; gap: 8px; font-size: 13px; }
+.design-workshop .design-output-preview figure { margin-top: 12px; background: var(--anka-surface); border-color: var(--anka-line); }
+.design-workshop .design-output-preview :is(img, video) { display: block; width: 100%; height: clamp(240px, 32vw, 480px); object-fit: contain; background: var(--anka-canvas); }
+.design-workshop .design-output-preview video { margin-top: 12px; }
+.design-workshop .design-output-empty { min-height: 260px; display: grid; place-content: center; padding: 28px; text-align: center; color: var(--anka-muted); border: 1px dashed var(--anka-line); border-radius: 10px; font-size: 14px; line-height: 1.7; margin-top: 12px; }
+.design-workshop .design-preview-provenance { font-size: 12px; color: var(--anka-muted); overflow-wrap: anywhere; margin-top: 12px; }
+.design-workshop summary { cursor: pointer; font-weight: 600; line-height: 1.6; }
+.design-workshop details > summary + * { margin-top: 12px; }
+.design-workshop :is(button, select, textarea, input) { max-width: 100%; }
+.design-workshop > header, .design-workshop details, .design-workshop [aria-label="Workshop saved conversations"],
+.design-workshop .design-tools-workbench :is(article, form, section) { border-color: var(--anka-line); }
+.design-workshop > header, .design-workshop [aria-label="Workshop saved conversations"] { background: var(--anka-surface); }
+.design-workshop .design-tools-workbench :is(select, textarea, input:not([type="checkbox"])) { background: var(--anka-surface-raised); color: var(--anka-ink); border: 1px solid var(--anka-line); border-radius: 8px; padding: 8px 10px; }
+.design-workshop .design-tools-workbench [aria-label="Exact direction version"] { display: block; width: 100%; margin: 8px 0 0; }
+.design-workshop .design-tools-workbench :is(button, summary):focus-visible,
+.design-workshop :is(button, select, textarea, input, a, summary):focus-visible { outline: 3px solid var(--anka-focus); outline-offset: 3px; }
+.design-workshop button[aria-pressed="true"] { background: var(--anka-violet-soft); color: var(--anka-violet); border-color: var(--anka-violet); }
+.design-workshop > header > div > button { border: 1px solid var(--anka-line); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+.design-workshop .design-tools-workbench [class*="text-slate-"] { color: var(--anka-muted); }
+.design-workshop .design-tools-workbench :is(h3, p.font-semibold, p.font-medium, summary) { color: var(--anka-ink); }
+.design-workshop .design-tools-workbench [class*="text-amber-"] { color: var(--anka-warning); }
+.design-workshop .design-tools-workbench [class*="text-red-"] { color: var(--anka-danger); }
+.design-workshop .design-tools-workbench [class*="text-violet-"] { color: var(--anka-violet); }
+.design-workshop .design-tools-workbench button { border-radius: 8px; }
+.design-workshop .design-tools-workbench button[class*="bg-violet-"] { background: var(--anka-violet); color: var(--anka-on-violet); }
+@container (min-width: 1000px) {
+  .design-workshop .design-workbench-grid { grid-template-columns: minmax(320px, .85fr) minmax(420px, 1.15fr); }
+}
+@container (min-width: 1280px) {
+  .design-workshop .design-chat-layout.history-open { grid-template-columns: 230px minmax(0, 1fr); }
+  .design-workshop .history-open .design-workbench-grid { grid-template-columns: minmax(300px, .85fr) minmax(390px, 1.15fr); }
+}
+@media (max-width: 600px) {
+  .design-workshop .design-tools-workbench { padding: 12px; }
+  .design-workshop .design-output-preview { padding: 10px; }
+  .design-workshop .design-output-preview :is(img, video) { height: 260px; }
+  .design-workshop :is(select, textarea, input) { font-size: 16px; }
+}
