@@ -6,6 +6,7 @@
 .design-workshop-surface :is([class~="border-slate-600"], [class~="border-slate-700"], [class~="border-slate-800"]) { border-color: var(--anka-line); }
 .design-workshop-surface :is([class~="text-violet-200"], [class~="text-violet-300"]) { color: var(--anka-violet); }
 .design-workshop-surface button:is([class~="bg-violet-600"], [class~="bg-sky-600"], [class~="bg-sky-700"]) { background: var(--anka-violet); color: var(--anka-on-violet); }
+.design-workshop-surface :is(button, a):is([class~="bg-emerald-700"], [class~="bg-purple-600"]) { background: var(--anka-violet); color: var(--anka-on-violet); }
 .design-workshop-surface :is([class~="text-amber-100"], [class~="text-amber-200"], [class~="text-amber-300"]) { color: var(--anka-warning); }
 .design-workshop-surface :is([class~="text-red-200"], [class~="text-red-300"]) { color: var(--anka-danger); }
 .design-workshop-surface .design-private-conversation { padding: 16px; border: 1px solid var(--anka-line); border-radius: 12px; background: var(--anka-surface); }
