@@ -20,7 +20,7 @@ export default function DepartmentChat(props) {
   const { activeOrganizationId, scopeRevision, requestSignal, handleOrganizationAccessError, selectOrganization } = useOrganization()
   const [composerDirty, setComposerDirty] = useState(false)
   const navigationBlocker = useBlocker(composerDirty)
-  const identity = JSON.stringify([user?.id, activeOrganizationId, scopeRevision, props.engagement?.id, props.departmentId])
+  const identity = JSON.stringify([user?.id, activeOrganizationId, scopeRevision, props.engagement?.id, props.departmentId, props.initialConversation?.id || ''])
   if (!user?.id || !activeOrganizationId || requestSignal?.aborted
     || props.engagement?.organization_id !== activeOrganizationId) return null
   return <ScopedDepartmentChat key={identity} {...props} userId={user.id} organizationId={activeOrganizationId} requestSignal={requestSignal} handleOrganizationAccessError={handleOrganizationAccessError} navigationBlocker={navigationBlocker} onComposerDirtyChange={setComposerDirty} selectOrganization={selectOrganization} />
@@ -29,6 +29,11 @@ export default function DepartmentChat(props) {
 export function ScopedDepartmentChat({
   departmentId,
   departmentLabel,
+  presentationLabel = 'Shared Department Chat',
+  initialConversation = null,
+  hideConversationList = false,
+  onConversationListChange,
+  onNavigationBusyChange,
   engagement,
   artifactDefinitions = {},
   allowArtifactDraft = true,
@@ -44,6 +49,7 @@ export function ScopedDepartmentChat({
   selectOrganization,
 }) {
   const completion = useRef(null)
+  const requestedConversation = useRef(initialConversation).current
   const answerObservation = useRef(null)
   const attachmentCompletion = useRef(null)
   const draftSwitchGeneration = useRef(0)
@@ -230,6 +236,12 @@ export function ScopedDepartmentChat({
 
   const hasUnsentComposer = Boolean(prompt.trim() || title.trim() || language.trim()
     || pendingFiles.length || selectedAttachmentIds.length || selectedSourceVersionIds.length)
+  useEffect(() => {
+    onNavigationBusyChange?.(!requestSignal?.aborted && Boolean(busy || historyBusy || attachmentBusy || sourceBusy || draftSaving))
+    const clear = () => onNavigationBusyChange?.(false)
+    requestSignal?.addEventListener?.('abort', clear, { once: true })
+    return () => { requestSignal?.removeEventListener?.('abort', clear); clear() }
+  }, [busy, historyBusy, attachmentBusy, sourceBusy, draftSaving, onNavigationBusyChange, requestSignal])
   useEffect(() => { onComposerDirtyChange?.(hasUnsentComposer) }, [hasUnsentComposer, onComposerDirtyChange])
   useEffect(() => {
     if (navigationBlocker?.state !== 'blocked' || busy || historyBusy || attachmentBusy || sourceBusy || draftSaving) return
@@ -473,12 +485,13 @@ export function ScopedDepartmentChat({
     ]).then(async ([conversationResult, capabilityResult]) => {
       if (!isCurrent()) return
       if (conversationResult.status === 'rejected') throw conversationResult.reason
-      const rows = conversationResult.value.items || []
+      const listedRows = conversationResult.value.items || []
+      const rows = requestedConversation && !listedRows.some(row => row.id === requestedConversation.id) ? [...listedRows, requestedConversation] : listedRows
       setConversations(rows)
       setNextConversationCursor(conversationResult.value.next_cursor || null)
       setCapabilities(capabilityResult.status === 'fulfilled' ? capabilityResult.value : null)
       if (capabilityResult.status === 'rejected') setError(capabilityResult.reason?.message || 'Configured AI is unavailable.')
-      const selected = rows[0] || null
+      const selected = requestedConversation || rows[0] || null
       setConversationId(selected?.id || '')
       setConversationTitle(selected?.title || '')
       if (selected) {
@@ -487,7 +500,9 @@ export function ScopedDepartmentChat({
           engagement_id: engagement.id,
           project_id: projectId,
         }, requestScope)
-        if (isCurrent()) setMessages(data.messages || [])
+        if (!isCurrent()) return
+        if (requestedConversation && data.conversation?.id !== selected.id) throw new Error('Selected conversation is unavailable')
+        setMessages(data.messages || [])
         const attachmentRows = await departmentChat.listAttachments(departmentId, {
           conversation_id: selected.id, engagement_id: engagement.id, project_id: projectId,
         }, requestScope)
@@ -510,11 +525,12 @@ export function ScopedDepartmentChat({
         if (isCurrent()) await restoreUnsentDraft(selected.id, isCurrent)
       }
     }).catch(reason => {
+      if (isCurrent() && requestedConversation) { setConversationId(''); setMessages([]); setConversationTitle('') }
       handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message))
     }).finally(() => {
       if (isCurrent()) setHistoryBusy(false)
     })
-  }, [departmentId, engagement.id, handleOrganizationAccessError, organizationId, projectId, requestScope, supportsSavedConversations])
+  }, [departmentId, engagement.id, handleOrganizationAccessError, organizationId, projectId, requestScope, supportsSavedConversations, requestedConversation])
 
   async function createConversation() {
     const isCurrent = completion.current.begin()
@@ -529,6 +545,7 @@ export function ScopedDepartmentChat({
       }, requestScope)
       if (!isCurrent()) return
       setConversations(current => [created, ...current])
+      onConversationListChange?.()
       setConversationSearchDraft('')
       setConversationSearchQuery('')
       setNextConversationCursor(null)
@@ -639,6 +656,7 @@ export function ScopedDepartmentChat({
       success: updated => {
         setConversations(current => current.map(item => item.id === updated.id ? updated : item))
         setConversationTitle(updated.title)
+        onConversationListChange?.()
       },
       failure: (reason, isCurrent) => handleCurrentChatFailure(
         isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message),
@@ -659,6 +677,7 @@ export function ScopedDepartmentChat({
         state,
       }, requestScope),
       success: async (updated, isCurrent) => {
+        onConversationListChange?.()
         const selected = await loadConversationList(state === 'active' ? updated.id : '', includeArchived, isCurrent)
         if (!isCurrent()) return
         if (selected) await loadConversation(selected.id, isCurrent, true)
@@ -960,8 +979,8 @@ export function ScopedDepartmentChat({
     }
   }
 
-  return <><div className={`grid gap-6 ${supportsSavedConversations ? 'xl:grid-cols-[260px_minmax(0,1fr)_320px]' : 'xl:grid-cols-[minmax(0,1fr)_360px]'}`}>
-    {supportsSavedConversations && <aside className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+  return <><div className={`grid gap-6 ${supportsSavedConversations ? hideConversationList ? 'xl:grid-cols-[minmax(0,1fr)_320px]' : 'xl:grid-cols-[260px_minmax(0,1fr)_320px]' : 'xl:grid-cols-[minmax(0,1fr)_360px]'}`}>
+    {supportsSavedConversations && !hideConversationList && <aside className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
       <div className="flex items-center justify-between gap-3">
         <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Conversations</p><p className="mt-1 text-xs text-emerald-300">Private to you or deliberately shared</p></div>
         <button type="button" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)} className="rounded-lg bg-sky-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">New</button>
@@ -990,8 +1009,9 @@ export function ScopedDepartmentChat({
       </div>
     </aside>}
     <form onSubmit={submit} className="min-w-0 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 sm:p-6">
+      {supportsSavedConversations && hideConversationList && <button type="button" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)} className="mb-4 rounded-lg bg-sky-700 px-3 py-2 text-sm">New engagement conversation</button>}
       <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-400">Shared Department Chat · {departmentId}</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-400">{presentationLabel} · {departmentId}</p>
         <h2 className="mt-2 text-2xl font-semibold text-white">Ask, explore, or prepare a governed proposal</h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Ordinary answers stay conversational and create no official record. Artifact and work-item modes remain explicit governed proposals requiring separate confirmation.</p>
         {supportsSavedConversations && <p className="mt-2 text-xs leading-5 text-slate-500">Work context: canonical client engagement. Saved conversations are creator-private until explicitly shared with eligible internal contributors. Standalone private-project and internal-project chat modes are unavailable here.</p>}
