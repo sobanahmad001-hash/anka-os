@@ -7,7 +7,7 @@ export type PipelineModelRate = {
   source_url: string
   input_usd_per_million: number
   cached_input_usd_per_million: number
-  cache_write_usd_per_million: number
+  cache_write_usd_per_million: number | null
   output_usd_per_million: number
 }
 
@@ -56,8 +56,14 @@ export function selectFreshPipelineRate(raw: string | undefined, modelId: string
     throw new Error('N6 model price evidence is stale or unverified')
   }
   if (![item.input_usd_per_million, item.cached_input_usd_per_million,
-    item.cache_write_usd_per_million, item.output_usd_per_million].every(rate)) {
+    item.output_usd_per_million].every(rate)) {
     throw new Error('N6 model price rates are invalid')
+  }
+  // These transports do not create explicit caches. Null means not applicable,
+  // not a free cache-write rate; Anthropic still requires its published rate.
+  if (!rate(item.cache_write_usd_per_million)
+    && !(item.cache_write_usd_per_million === null && provider !== 'anthropic')) {
+    throw new Error('N6 cache-write price is invalid')
   }
   return item
 }
@@ -69,7 +75,7 @@ export function conservativePipelineCeiling(prompt: string, price: PipelineModel
     throw new Error('N6 prompt or output bound is invalid')
   }
   const inputRate = Math.max(price.input_usd_per_million,
-    price.cached_input_usd_per_million, price.cache_write_usd_per_million)
+    price.cached_input_usd_per_million, price.cache_write_usd_per_million ?? 0)
   const ceiling = Math.ceil((bytes + 4096) * inputRate
     + maxOutputTokens * price.output_usd_per_million)
   if (!Number.isSafeInteger(ceiling) || ceiling <= 0) throw new Error('N6 cost ceiling is invalid')
@@ -85,11 +91,14 @@ export function measuredPipelineTokenCost(usage: ResponseUsage, price: PipelineM
     || cached + cacheWrite > input) {
     throw new Error('N6 provider token usage is incomplete')
   }
+  if (cacheWrite > 0 && price.cache_write_usd_per_million === null) {
+    throw new Error('N6 unexpected cache-write usage cannot be settled')
+  }
   const regular = input - cached - cacheWrite
   const measured = Math.ceil(
     regular * price.input_usd_per_million
     + cached * price.cached_input_usd_per_million
-    + cacheWrite * price.cache_write_usd_per_million
+    + cacheWrite * (price.cache_write_usd_per_million ?? 0)
     + output * price.output_usd_per_million
   )
   if (!Number.isSafeInteger(measured) || measured < 0) throw new Error('N6 measured token cost is invalid')

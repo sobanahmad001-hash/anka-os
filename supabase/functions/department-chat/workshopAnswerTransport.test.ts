@@ -30,7 +30,7 @@ function environment(provider: WorkshopAnswerInput['route']['provider'], enabled
     : name === pricing[provider] ? JSON.stringify([{
       provider, model_id: 'verified', verified_at: new Date().toISOString(),
       source_url: source[provider], input_usd_per_million: 1,
-      cached_input_usd_per_million: 1, cache_write_usd_per_million: 1,
+      cached_input_usd_per_million: 1, cache_write_usd_per_million: provider === 'anthropic' ? 1 : null,
       output_usd_per_million: 1,
     }]) : undefined }
 }
@@ -195,4 +195,27 @@ Deno.test('Workshop settlement continues after the client stops observing', asyn
   await durableTask
   assertEquals(calls, ['reserve_workshop_chat_budget', 'claim_workshop_chat_dispatch',
     'provider', 'complete_workshop_chat_answer_with_budget'])
+})
+
+Deno.test('Workshop preserves exact configured model identity and retains unknown cost on alias mismatch', async () => {
+  const calls: string[] = []
+  const admin = { async rpc(name: string) {
+    calls.push(name)
+    if (name === 'reserve_workshop_chat_budget') return { data: { status: 'reserved' }, error: null }
+    if (name === 'claim_workshop_chat_dispatch') return { data: {
+      status: 'claimed', must_not_submit: false, claim_id: 'claim-1',
+      provider: 'openai', connector_connection_id: 'connector',
+      model_configuration_id: 'configuration', model_id: 'verified',
+    }, error: null }
+    if (name === 'mark_workshop_chat_outcome_unknown') return { data: { status: 'unknown' }, error: null }
+    throw new Error('Unexpected RPC ' + name)
+  } }
+  const fetcher = (async () => new Response(JSON.stringify({
+    ...providerBody('openai'), model: 'verified-snapshot',
+  }))) as typeof fetch
+  const response = await dispatchWorkshopAnswer(admin, input('openai'), fetcher,
+    environment('openai'), keepAlive)
+  assertEquals((await response.text()).includes('"type":"unknown"'), true)
+  assertEquals(calls.includes('complete_workshop_chat_answer_with_budget'), false)
+  assertEquals(calls.includes('mark_workshop_chat_outcome_unknown'), true)
 })

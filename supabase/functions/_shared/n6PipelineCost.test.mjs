@@ -58,3 +58,31 @@ test('N7 pricing evidence is provider-specific and fresh', () => {
     ...entry, provider: 'anthropic', source_url: 'https://platform.claude.com.evil.test/docs/en/about-claude/pricing',
   }]), entry.model_id, now, 'anthropic'), /unverified/)
 })
+
+test('explicit N/A cache-write pricing works only for transports without cache creation', () => {
+  for (const [provider, source_url] of [
+    ['openai', entry.source_url],
+    ['google_gemini', 'https://ai.google.dev/gemini-api/docs/pricing'],
+  ]) {
+    const candidate = { ...entry, provider, source_url, cache_write_usd_per_million: null }
+    const price = selectFreshPipelineRate(JSON.stringify([candidate]), entry.model_id, now, provider)
+    assert.equal(price.cache_write_usd_per_million, null)
+    const prompt = 'Pinned work'
+    assert.equal(conservativePipelineCeiling(prompt, price),
+      Math.ceil((new TextEncoder().encode(prompt).length + 4096) * 2 + 1024 * 12))
+    assert.equal(measuredPipelineTokenCost({ input_tokens: 100, output_tokens: 10,
+      input_tokens_details: { cached_tokens: 20 } }, price), 284)
+    assert.throws(() => measuredPipelineTokenCost({ input_tokens: 100, output_tokens: 10,
+      input_tokens_details: { cache_write_tokens: 1 } }, price), /cannot be settled/)
+    for (const invalid of [undefined, 0, -1, 'not_applicable']) {
+      assert.throws(() => selectFreshPipelineRate(JSON.stringify([
+        { ...candidate, cache_write_usd_per_million: invalid },
+      ]), entry.model_id, now, provider), /cache-write/)
+    }
+  }
+  const anthropic = { ...entry, provider: 'anthropic',
+    source_url: 'https://platform.claude.com/docs/en/about-claude/pricing',
+    cache_write_usd_per_million: null }
+  assert.throws(() => selectFreshPipelineRate(JSON.stringify([anthropic]),
+    entry.model_id, now, 'anthropic'), /cache-write/)
+})
