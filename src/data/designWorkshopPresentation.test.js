@@ -38,6 +38,46 @@ test('Design history disclosure retains mounted search and chat draft, with scop
   assert.match(env.container.textContent,/creator-private unless explicitly shared/)
 })
 
+test('colored Workshop confirmation buttons and primary links retain paired contrast in both themes', async t => {
+  const css = readFileSync(new URL('../components/designWorkshopPresentation.css', import.meta.url), 'utf8')
+  const theme = readFileSync(new URL('../index.css', import.meta.url), 'utf8')
+  const selector = '.design-workshop-surface :is(button, a):is([class~="bg-emerald-700"], [class~="bg-purple-600"])'
+  assert.ok(css.includes(`${selector} { background: var(--anka-violet); color: var(--anka-on-violet); }`))
+  // This selector adds an element specificity over the neutral text-white mapping;
+  // it also beats single-class Tailwind hover colors without changing media pixels.
+  const luminance = hex => {
+    const rgb = hex.match(/[a-f\d]{2}/gi).map(value => parseInt(value, 16) / 255)
+      .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
+    return rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722
+  }
+  for (const block of [theme.match(/:root \{([^}]+)\}/)[1], theme.match(/:root\[data-theme="dark"\] \{([^}]+)\}/)[1]]) {
+    const background = block.match(/--anka-violet: (#[a-f\d]+)/i)[1]
+    const foreground = block.match(/--anka-on-violet: (#[a-f\d]+)/i)[1]
+    const values = [luminance(background), luminance(foreground)].sort((a, b) => b - a)
+    assert.ok((values[0] + .05) / (values[1] + .05) >= 4.5, `${foreground} on ${background}`)
+  }
+  const env = mountedEnvironment(), previous = { document: globalThis.document, window: globalThis.window, IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT }
+  Object.assign(globalThis, { document: env.document, window: env.window, IS_REACT_ACT_ENVIRONMENT: true })
+  const source = readFileSync(new URL('../components/DepartmentChat.jsx', import.meta.url), 'utf8')
+  const compiled = transformSync(source.slice(source.indexOf('function ProposalPreview(')), { loader: 'jsx', jsxFactory: 'React.createElement' }).code
+  const Preview = new Function('React', 'useState', 'useEffect', `${compiled}; return ProposalPreview`)(React, useState, useEffect)
+  const parent = readFileSync(new URL('../apps/DepartmentWorkshop.jsx', import.meta.url), 'utf8')
+  const link = parent.match(/<Link to="\/sphere\/engagements" className="block rounded-xl bg-purple-600[^]*?<\/Link>/)[0]
+  const linkCode = transformSync(`const control = ${link}`, { loader: 'jsx', jsxFactory: 'React.createElement' }).code
+  const anchor = new Function('React', 'Link', `${linkCode}; return control`)(React, ({ to, ...rest }) => React.createElement('a', { ...rest, href: to }))
+  const root = createRoot(env.container)
+  t.after(async () => { await act(async () => root.unmount()); Object.assign(globalThis, previous) })
+  await act(async () => root.render(React.createElement('section', { className: 'design-workshop-surface' },
+    React.createElement(Preview, { result: { proposal_id: 'contrast', status: 'pending', expires_at: new Date(Date.now() + 60_000).toISOString() } }), anchor)))
+  const confirm = elements(env.container, 'button').find(node => node.textContent === 'Confirm official draft')
+  assert.match(props(confirm).className, /bg-emerald-700/)
+  assert.match(props(confirm).className, /text-white/)
+  const actionLink = elements(env.container, 'a').find(node => node.textContent === 'Open engagement workspace')
+  assert.match(props(actionLink).className, /bg-purple-600/)
+  assert.match(props(actionLink).className, /text-white/)
+  assert.equal(props(actionLink).href, '/sphere/engagements')
+})
+
 test('Design-only layout opts in without changing media jobs or shared chat transport',()=>{
   const css=readFileSync(new URL('../components/designWorkshopPresentation.css',import.meta.url),'utf8')
   const parent=readFileSync(new URL('../apps/DepartmentWorkshop.jsx',import.meta.url),'utf8')
@@ -49,4 +89,13 @@ test('Design-only layout opts in without changing media jobs or shared chat tran
   assert.match(parent,/presentation=\{departmentId === 'design' \? 'design' : undefined\}/)
   assert.match(parent,/externalNavigationBusy=\{designNavigationBusy\}/)
   assert.match(parent,/key=\{designPaneKey\}/)
+  assert.match(parent,/\['design', 'content', 'marketing'\]\.includes\(departmentId\) \? 'design-workshop-surface h-full overflow-y-auto'/)
+  assert.match(css,/\.design-workshop-surface \{ background: var\(--anka-canvas\); color: var\(--anka-ink\); \}/)
+  assert.match(parent,/Video · how to open Higgsfield tools/)
+  assert.match(parent,/Generation is not available in private exploration/)
+  assert.match(parent,/does not share or move this private conversation/)
+  assert.match(parent,/Higgsfield is a video connection, not a text-chat model/)
+  assert.match(parent,/draft tools · how to open/)
+  assert.match(parent,/Campaign brief suggestions are applied selectively/)
+  assert.match(parent,/Project draft tools are not enabled in this private context/)
 })

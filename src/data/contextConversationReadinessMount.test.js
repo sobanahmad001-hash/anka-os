@@ -7,6 +7,7 @@ import { mountedEnvironment } from './testSupport/n1bMountedDom.js'
 
 const descendants = node => [node, ...node.childNodes.flatMap(descendants)]
 const button = (root, label) => descendants(root).find(node => node.tagName === 'BUTTON' && node.textContent.includes(label))
+const reactProps = node => node[Object.keys(node).find(key => key.startsWith('__reactProps$'))]
 
 async function mount(t, readiness, panelProps = {}) {
   const environment = mountedEnvironment()
@@ -71,6 +72,48 @@ for (const [label, readiness, expected] of [
   const ask = button(environment.container, 'Ask Anka AI')
   assert.ok(ask)
   assert.equal(ask.disabled, true, 'per-request consent is still required even when local checks pass')
+})
+
+for (const departmentId of ['design', 'content', 'marketing']) test(`compact ${departmentId} private composer retains explicit per-reply consent and mounted draft`, async t => {
+  const { environment } = await mount(t, () => ({ paid_execution_enabled: true, spend_tracking_configured: true, model_status: 'configured' }),
+    { contextKind: 'department_private', departmentId, workshopLayout: true, hideConversationList: true })
+  const all = () => descendants(environment.container)
+  const toolbar = all().find(node => reactProps(node)?.className === 'private-composer-toolbar')
+  assert.ok(toolbar)
+  const transcript = all().find(node => reactProps(node)?.['aria-live'] === 'polite')
+  const composer = all().find(node => node.tagName === 'TEXTAREA')
+  assert.ok(all().indexOf(transcript) < all().indexOf(toolbar))
+  assert.ok(all().indexOf(toolbar) < all().indexOf(composer))
+  const creation = all().find(node => reactProps(node)?.className === 'private-new-conversation')
+  assert.equal(creation.tagName, 'DETAILS')
+  assert.ok(!reactProps(creation).open)
+  const details = descendants(toolbar).find(node => node.tagName === 'DETAILS')
+  assert.equal(reactProps(details).open, false)
+  const consent = descendants(toolbar).filter(node => node.tagName === 'INPUT')
+  assert.equal(consent.length, 1, 'private exploration must not offer canonical record context')
+  assert.equal(reactProps(consent[0]).checked, false)
+  assert.match(toolbar.textContent, /OpenAI · verified/)
+  assert.match(toolbar.textContent, /recent messages, including the message I selected/)
+  assert.equal(button(environment.container, 'Ask Anka AI').disabled, true)
+  await act(async () => reactProps(composer).onChange({ target: { value: 'Keep private draft' } }))
+  await act(async () => reactProps(consent[0]).onChange({ target: { checked: true } }))
+  assert.equal(button(environment.container, 'Ask Anka AI').disabled, false)
+  let dispatches = 0
+  globalThis.__contextReadinessFixture.runner = () => { dispatches++; return { status: 'pending' } }
+  await act(async () => reactProps(button(environment.container, 'Ask Anka AI')).onClick())
+  assert.equal(dispatches, 1)
+  assert.equal(reactProps(consent[0]).checked, false)
+  assert.equal(button(environment.container, 'Ask Anka AI').disabled, true)
+  assert.equal(reactProps(composer).value, 'Keep private draft')
+  assert.equal(globalThis.__contextReadinessFixture.created.length, 0)
+})
+
+test('Development private conversation retains default presentation', async t => {
+  const { environment } = await mount(t, () => ({ paid_execution_enabled: false }),
+    { contextKind: 'department_private', departmentId: 'development', workshopLayout: true, hideConversationList: true })
+  assert.ok(!descendants(environment.container).some(node => reactProps(node)?.className === 'private-composer-toolbar'))
+  assert.ok(!descendants(environment.container).some(node => reactProps(node)?.className === 'private-new-conversation'))
+  assert.ok(button(environment.container, 'New conversation'))
 })
 
 test('Workshop conversation search, creation and department reset stay private', async t => {

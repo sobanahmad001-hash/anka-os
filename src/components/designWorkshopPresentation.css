@@ -1,4 +1,32 @@
-/* Opt-in Design presentation. No global utility, media or authority overrides. */
+/* Opt-in Workshop presentation. No global utility, media or authority overrides. */
+.design-workshop-surface { background: var(--anka-canvas); color: var(--anka-ink); }
+.design-workshop-surface :is([class~="text-slate-200"], [class~="text-slate-300"], [class~="text-white"]) { color: var(--anka-ink); }
+.design-workshop-surface :is([class~="text-slate-400"], [class~="text-slate-500"], [class~="text-slate-600"]) { color: var(--anka-muted); }
+.design-workshop-surface :is([class~="bg-slate-900"], [class~="bg-slate-900/70"], [class~="bg-slate-950"], [class~="bg-slate-950/40"], [class~="bg-slate-950/50"]) { background: var(--anka-surface); }
+.design-workshop-surface :is([class~="border-slate-600"], [class~="border-slate-700"], [class~="border-slate-800"]) { border-color: var(--anka-line); }
+.design-workshop-surface :is([class~="text-violet-200"], [class~="text-violet-300"]) { color: var(--anka-violet); }
+.design-workshop-surface button:is([class~="bg-violet-600"], [class~="bg-sky-600"], [class~="bg-sky-700"]) { background: var(--anka-violet); color: var(--anka-on-violet); }
+.design-workshop-surface :is(button, a):is([class~="bg-emerald-700"], [class~="bg-purple-600"]) { background: var(--anka-violet); color: var(--anka-on-violet); }
+.design-workshop-surface :is([class~="text-amber-100"], [class~="text-amber-200"], [class~="text-amber-300"]) { color: var(--anka-warning); }
+.design-workshop-surface :is([class~="text-red-200"], [class~="text-red-300"]) { color: var(--anka-danger); }
+.design-workshop-surface .design-private-conversation { padding: 16px; border: 1px solid var(--anka-line); border-radius: 12px; background: var(--anka-surface); }
+.design-workshop-surface :is(button, select, textarea, input, a, summary):focus-visible { outline: 3px solid var(--anka-focus); outline-offset: 3px; }
+.design-workshop-surface summary { cursor: pointer; font-weight: 600; line-height: 1.6; }
+.design-workshop-surface .private-new-conversation form { margin-top: 8px; }
+.design-private-conversation .private-new-conversation { font-size: 13px; }
+.design-private-conversation .private-new-conversation form { max-width: 560px; }
+.design-private-conversation .private-composer-toolbar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px 12px; margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--anka-line); }
+.design-private-conversation .private-composer-toolbar > * { margin-top: 0; min-width: 0; }
+.design-private-conversation .private-composer-toolbar > label:first-child { font-size: 11px; }
+.design-private-conversation .private-composer-toolbar > select { width: 100%; padding: 6px 10px; background: var(--anka-surface-raised); }
+.design-private-conversation .private-composer-toolbar > label:has(input) { grid-column: 1 / -1; }
+.design-private-conversation .private-composer-toolbar > details { grid-column: 1 / -1; }
+.design-private-conversation .private-conversation-body > form { margin-top: 12px; padding-top: 0; border-top: 0; }
+.design-private-video-guide p { margin-top: 8px; color: var(--anka-muted); line-height: 1.6; }
+@container (min-width: 600px) {
+  .design-private-conversation .private-composer-toolbar { grid-template-columns: minmax(220px, 360px) minmax(0, 1fr); align-items: center; }
+  .design-private-conversation .private-composer-toolbar > label:first-child { grid-column: 1 / -1; }
+}
 .design-workshop { color: var(--anka-ink); container-type: inline-size; }
 /* Translate only neutral surfaces/text inside this opt-in workspace; media pixels and semantic statuses are untouched. */
 .design-workshop :is([class~="bg-slate-900"], [class~="bg-slate-900/70"], [class~="bg-slate-950"], [class~="bg-slate-950/40"], [class~="bg-slate-950/50"]) { background: var(--anka-surface); }
