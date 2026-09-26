@@ -1,3 +1,4 @@
+import LivingProjectReference from './apps/LivingProjectReference.jsx'
 import PlanningWorkspace from './apps/PlanningWorkspace.jsx'
 import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
@@ -77,6 +78,7 @@ export default function App() {
         <Route path="sphere/workspace" element={<WorkspaceHome />} />
         <Route path="sphere/portfolio" element={<PortfolioWorkspace />} />
         <Route path="sphere/workspace/projects/:projectId" element={<ProjectEngagementWorkspace />} />
+        <Route path="sphere/workspace/projects/:projectId/document" element={<LivingProjectReference />} />
         <Route path="sphere/internal" element={<InternalWorkspace />} />
         <Route path="sphere/engagements" element={<OperatingSpine initialView="engagements" />} />
         <Route path="sphere/projects" element={<Navigate to="/sphere/portfolio" replace />} />
