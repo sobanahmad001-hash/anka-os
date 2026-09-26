@@ -1,3 +1,4 @@
+import ContentWorkshopActions from '../components/ContentWorkshopActions.jsx'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
@@ -450,6 +451,7 @@ export default function DepartmentWorkshop({ departmentId }) {
             </div>
             {chatEngagement && <div className="space-y-4">
               <div className="min-w-0"><DepartmentChat key={selectedConversationRevision} departmentId={departmentId} engagement={chatEngagement} allowArtifactDraft={false} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} /></div>
+              {departmentId === 'content' && <ContentWorkshopActions key={chatScopeKey} organizationId={activeOrganizationId} projectId={projectId} engagement={chatEngagement} services={workspace.services} unavailable={Boolean(error) || loading || requestSignal?.aborted} busy={chatNavigationBusy} />}
               <aside aria-label="Selected project context" className="space-y-4 rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm">
                 <h2 className="font-semibold">{projectName}</h2>
                 <p className="text-slate-400">{chatEngagement.name} · {config.shortName}</p>
