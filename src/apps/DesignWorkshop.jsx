@@ -15,7 +15,7 @@ import ArtifactRelationsPanel from '../components/ArtifactRelationsPanel.jsx'
 import ProductionHandoffPanel from '../components/ProductionHandoffPanel.jsx'
 import DesignCreativeBriefWorkspace from '../components/DesignCreativeBriefWorkspace.jsx'
 import DesignPrivateImagePanel from '../components/DesignPrivateImagePanel.jsx'
-import DesignVideoCapabilities from '../components/DesignVideoCapabilities.jsx'
+import DesignMediaPanel, { MediaAsset } from '../components/DesignMediaPanel.jsx'
 import _PrivateMemoryPanel from './PrivateMemoryPanel.jsx'
 import DesignAssetLibrary from '../components/DesignAssetLibrary.jsx'
 import DesignConnectionsPanel from '../components/DesignConnectionsPanel.jsx'
@@ -489,73 +489,6 @@ function DirectionCard({ direction, versions, version, models, mediaAssets, gene
   return <Panel><div className="flex items-start justify-between gap-3"><div><p className="text-xs uppercase tracking-wider text-slate-500">{storyboard ? 'Frame' : 'Direction'} {direction.direction_slot} · v{version?.version_number}</p><h3 className="mt-2 text-xl font-semibold">{content.title}</h3></div><div className="flex flex-wrap gap-2">{working && <Badge tone="violet">Working</Badge>}{(selected || released) && <Badge tone="green">{storyboard ? (released ? 'Sequence released' : 'Release anchor') : (released ? 'Released' : 'Selected')}</Badge>}</div></div><div role="button" tabIndex="0" aria-label={`Click to anchor a proofing comment on ${storyboard ? 'this frame' : 'this direction'}`} onClick={anchorAt} onKeyDown={event => { if (event.key === 'Enter') setAnchor({ x: 0.5, y: 0.5 }) }} className="relative mt-4 cursor-crosshair overflow-hidden rounded-2xl border border-white/10" style={{ background: content.preview_spec?.background || '#111827' }}><div className="p-5"><div className="h-2 w-16 rounded-full" style={{ background: content.preview_spec?.accent || '#8b5cf6' }} /><p className="mt-10 text-2xl font-bold text-white">{content.creative_thesis}</p><p className="mt-3 text-sm text-white/70">{content.preview_spec?.composition}</p></div><div className="flex">{palette.map((color, index) => <div key={index} title={`${color.name}: ${color.hex}`} className="h-10 flex-1" style={{ background: color.hex }} />)}</div>{anchor && <span className="pointer-events-none absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-violet-500 shadow-lg" style={{ left: `${anchor.x * 100}%`, top: `${anchor.y * 100}%` }} />}</div><p className="mt-2 text-[11px] text-violet-300">Click the {storyboard ? 'frame' : 'direction'} preview to anchor a positional comment.</p><DesignMediaPanel key={version.id} version={version} models={models} assets={mediaAssets} jobs={generationJobs} onGenerateImage={onGenerateImage} onRefreshImageJob={onRefreshImageJob} onRetryImageJob={onRetryImageJob} onGenerateVideo={onGenerateVideo} allowVideo={!storyboard} busy={busy} /><p className="mt-4 text-sm leading-6 text-slate-400">{content.rationale}</p><div className="mt-4 flex flex-wrap gap-2">{(content.visual_principles || []).map(item => <Badge key={item}>{item}</Badge>)}</div><p className="mt-4 text-xs text-slate-500">Model run {version?.generation_run_id?.slice(0, 8) || 'human refinement'} · immutable version {version?.id?.slice(0, 8)}</p><div className="mt-5 flex flex-wrap gap-2"><button onClick={onRefine} className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold">Refine as new version</button><button disabled={working || busy === `working-${version.id}`} onClick={onSetWorking} className="rounded-xl border border-violet-400/30 px-3 py-2 text-sm font-semibold text-violet-200 disabled:opacity-40">{working ? 'Current Working direction' : 'Set as Working direction'}</button>{canSelect && <button disabled={busy === `select-${version.id}`} onClick={onSelect} className={BUTTON}>{storyboard ? 'Use as sequence release anchor' : 'Record final selection'}</button>}</div><p className="mt-2 text-xs text-slate-500">Working direction is reversible. Final selection and release remain separate immutable decisions.</p><VersionProofingPanel targetKind="design_direction" versions={versions} initialVersionId={version?.id} department="design" theme="violet" visualAnchor={anchor} visualAnchorVersionId={version?.id} onClearVisualAnchor={() => setAnchor(null)} /></Panel>
 }
 
-function DesignMediaPanel({ version, models, assets, jobs, onGenerateImage, onRefreshImageJob, onRetryImageJob,
-  allowVideo = true, busy }) {
-  const imageModels = models.filter(model => model.supported_output_types?.includes('image'))
-  const versionAssets = assets.filter(asset => asset.design_direction_version_id === version.id)
-  const versionJobs = (jobs || []).filter(job => job.direction_version_id === version.id)
-  const activeJob = versionJobs.find(job => ['queued', 'running', 'outcome_unknown'].includes(job.status))
-  const retryChildren = new Set(versionJobs.map(job => job.retry_of_job_id).filter(Boolean))
-  const [prompt, setPrompt] = useState([version.content?.imagery_direction, version.content?.creative_thesis].filter(Boolean).join('\n\n'))
-  const [modelId, setModelId] = useState(imageModels[0]?.id || '')
-  const [pendingOperationKey, setPendingOperationKey] = useState('')
-  const submissionInFlight = useRef(false)
-
-  async function submitImage(request = null) {
-    if (submissionInFlight.current) return
-    submissionInFlight.current = true
-    const requestKey = request?.operation_key || pendingOperationKey || crypto.randomUUID()
-    setPendingOperationKey(requestKey)
-    try {
-      const completed = await onGenerateImage(
-        request?.model_registry_id || modelId,
-        request?.prompt || prompt,
-        requestKey,
-      )
-      if (completed) setPendingOperationKey('')
-    } finally {
-      submissionInFlight.current = false
-    }
-  }
-
-  return <section className="mt-4 rounded-2xl border border-violet-400/15 bg-slate-950/50 p-3">
-    <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-violet-300">Generated media</p><p className="mt-1 text-[11px] text-slate-500">Attached only to immutable version {version.id.slice(0, 8)}</p></div><Badge tone="violet">{versionAssets.length} outputs</Badge></div>
-    <textarea rows="3" className={`${INPUT} mt-3`} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="Static image generation prompt" />
-    {imageModels.length ? <select className={`${INPUT} mt-2`} value={modelId} onChange={event => setModelId(event.target.value)}>{imageModels.map(model => <option key={model.id} value={model.id}>{model.display_name}</option>)}</select> : <p className="mt-2 text-xs text-amber-300">No active image model is registered yet.</p>}
-    <div className="mt-2 flex flex-wrap items-center gap-3">
-      <button disabled={!prompt.trim() || !modelId || Boolean(activeJob) || busy === `image-${version.id}`}
-        onClick={() => submitImage()} className={BUTTON}>
-        {busy === `image-${version.id}` ? 'Submitting request…' : pendingOperationKey ? 'Reconcile request' : 'Generate image'}
-      </button>
-      {allowVideo && <span className="text-sm font-semibold text-slate-500">Video not configured</span>}
-    </div>
-    {allowVideo && <DesignVideoCapabilities directionVersionId={version.id} />}
-    {pendingOperationKey && !activeJob && <p className="mt-2 text-xs text-amber-200">The last response was interrupted. “Reconcile request” reuses the same request identity and cannot create a second paid call.</p>}
-    {!!versionJobs.length && <div className="mt-3 space-y-2">{versionJobs.map(job => {
-      const retryable = job.status === 'failed' && job.failure_phase === 'provider' && !retryChildren.has(job.id)
-      const tone = job.status === 'succeeded' ? 'green' : ['failed', 'outcome_unknown'].includes(job.status) ? 'red' : 'violet'
-      return <article key={job.id} className="rounded-xl border border-white/10 bg-white/[0.025] p-3 text-xs">
-        <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-semibold">Request {job.id.slice(0, 8)}</p><Badge tone={tone}>{job.status.replaceAll('_', ' ')}</Badge></div>
-        <p className="mt-1 text-slate-500">{new Date(job.created_at).toLocaleString()} · exact model {job.model_registry_id.slice(0, 8)}</p>
-        {job.failure_reason && <p className="mt-2 leading-5 text-red-200">{job.failure_reason}</p>}
-        {job.status === 'outcome_unknown' && <p className="mt-2 leading-5 text-amber-200">The provider outcome cannot be proven. Paid retry is blocked; reconcile externally before any new request.</p>}
-        <div className="mt-2 flex flex-wrap gap-2">
-          {job.status === 'queued' && <button disabled={busy === `image-${version.id}`} onClick={() => submitImage(job)} className="rounded-lg border border-violet-400/30 px-2.5 py-1.5 font-semibold text-violet-200">Resume queued request</button>}
-          {['running', 'outcome_unknown'].includes(job.status) && <button disabled={busy === `image-job-${job.id}`} onClick={() => onRefreshImageJob(job.id)} className="rounded-lg border border-white/10 px-2.5 py-1.5 font-semibold">Check status</button>}
-          {retryable && <button disabled={busy === `retry-image-${job.id}`} onClick={() => onRetryImageJob(job.id, crypto.randomUUID())} className="rounded-lg border border-red-400/30 px-2.5 py-1.5 font-semibold text-red-200">Retry confirmed provider failure</button>}
-        </div>
-      </article>
-    })}</div>}
-    <p className="mt-3 text-[11px] leading-5 text-slate-500">Cancellation is not supported after submission. Requests remain reopenable here, and unresolved outcomes block replacement generation.</p>
-    <div className="mt-3 grid gap-3">{versionAssets.map(asset => <MediaAsset key={asset.id} asset={asset} />)}</div>
-  </section>
-}
-
-function MediaAsset({ asset }) {
-  if (asset.media_type === 'image' && asset.status === 'ready') return <figure className="overflow-hidden rounded-xl border border-white/10 bg-black/30">{asset.signed_url ? <img src={asset.signed_url} alt={asset.prompt} className="w-full object-cover" /> : <div className="p-4 text-xs text-amber-300">The private image link expired. Refresh the Workshop to renew it.</div>}<figcaption className="p-3 text-xs text-slate-400">{asset.prompt}</figcaption></figure>
-  const failed = asset.status === 'failed'
-  return <div className={`rounded-xl border p-3 text-xs ${failed ? 'border-red-500/20 bg-red-500/5 text-red-200' : asset.status === 'unavailable' ? 'border-amber-500/20 bg-amber-500/5 text-amber-200' : 'border-violet-500/20 bg-violet-500/5 text-violet-200'}`}><p className="font-semibold capitalize">{asset.media_type} · {asset.status}</p><p className="mt-1 leading-5">{asset.failure_reason || (asset.status === 'generating' ? 'Generation is in progress. Refresh to check again.' : asset.prompt)}</p>{failed && <p className="mt-1 text-slate-400">Adjust the prompt or connector, then generate a new attempt. This failed record stays in the audit trail.</p>}</div>
-}
 
 function FlowModal({ workspace, onClose, onSave, busy }) {
   const options = approvedArchitectureOptions(workspace)
