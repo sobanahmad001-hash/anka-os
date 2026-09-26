@@ -159,11 +159,13 @@ function workshopStubs() {
       if (source && source.endsWith('delivery.js')) return '/0dws-delivery'
       if (source && source.endsWith('DepartmentChat.jsx')) return '/0dws-chat'
       if (source && source.endsWith('ContextConversationPanel.jsx')) return '/0dws-private'
+      if (source && source.endsWith('departmentChatRepository.js')) return '/0dws-conversation-repository'
       return null
     },
     load(id) {
-      if (id === '/0dws-chat') return "import { createElement } from 'react'; export default function Chat(props) { return createElement('p', null, 'Chat for ' + props.engagement.name) }"
-      if (id === '/0dws-private') return "import { createElement } from 'react'; export default function Chat(props) { return createElement('p', null, props.contextKind + ':' + props.departmentId + ':' + props.workshopLayout) }"
+      if (id === '/0dws-conversation-repository') return 'export const departmentChat = { listContextConversations: async () => globalThis.__dwsHarness.privateRows || [], searchConversations: async () => ({ items: [] }) }'
+      if (id === '/0dws-chat') return "import { createElement } from 'react'; export default function Chat(props) { globalThis.__dwsHarness.engagementChatProps = props; return createElement('p', null, 'Chat for ' + props.engagement.name) }"
+      if (id === '/0dws-private') return "import { createElement, useEffect } from 'react'; export default function Chat(props) { useEffect(() => { globalThis.__dwsHarness.privateMounts = (globalThis.__dwsHarness.privateMounts || 0) + 1 }, []); globalThis.__dwsHarness.privateChatProps = props; return createElement('p', null, props.contextKind + ':' + props.departmentId + ':' + props.workshopLayout) }"
       if (id === '/0dws-auth' || id === '\\\\0dws-auth') return 'export const useAuth = () => globalThis.__dwsHarness.auth'
       if (id === '/0dws-org' || id === '\\\\0dws-org') return 'export const useOrganization = () => globalThis.__dwsHarness.organization'
       if (id === '/0dws-delivery' || id === '\\\\0dws-delivery') {
@@ -240,6 +242,7 @@ async function mountWorkshop(t, DepartmentWorkshop, departmentId, harness) {
     fetch: () => { throw new Error('Workshop presentation must not call a provider or network') },
     __dwsHarness: {
       search: harness.search || '',
+      privateRows: harness.privateRows || [],
       auth: harness.auth,
       organization: harness.organization,
       delivery: harness.delivery,
@@ -499,5 +502,61 @@ test('unified Chat retains explicit private deep links and Development task defa
     assert.match(environment.container.textContent, expected)
     if (department === 'development') assert.doesNotMatch(environment.container.textContent, /Conversation context/)
     await cleanup()
+  }
+})
+
+test('stale pane busy callback cannot unlock current conversation or leave a permanent navigation freeze', async t => {
+  const vite = await workshopServer(t)
+  const { default: Workshop } = await vite.ssrLoadModule('/src/apps/DepartmentWorkshop.jsx')
+  const workspace = workspaceBase()
+  workspace.services[0].status = 'active'
+  const { environment } = await mountWorkshop(t, Workshop, 'design', {
+    auth: { user: { id: 'user-1' } }, organization: withOrganizationScope(),
+    search: '?ctxOrg=org-1&ctxProject=project-a&ctxEngagement=engagement-a&ctxWorkshopTab=private',
+    delivery: { getDepartmentWorkspace: async () => workspace },
+  })
+  const all = node => [node, ...node.childNodes.flatMap(all)]
+  const props = node => node[Object.keys(node).find(key => key.startsWith('__reactProps$'))]
+  const choose = value => act(async () => props(all(environment.container).find(node => node.getAttribute?.('aria-label') === 'Conversation context')).onChange({ target: { value } }))
+  const switchButton = () => all(environment.container).find(node => node.tagName === 'BUTTON' && node.textContent === 'Switch context')
+  const oldCallback = globalThis.__dwsHarness.privateChatProps.onNavigationBusyChange
+  await choose('chat')
+  await act(async () => props(switchButton()).onClick())
+  const currentCallback = globalThis.__dwsHarness.engagementChatProps.onNavigationBusyChange
+  await act(async () => currentCallback(true))
+  await choose('private')
+  await act(async () => oldCallback(false))
+  assert.equal(props(switchButton()).disabled, true)
+  await act(async () => currentCallback(false))
+  assert.equal(props(switchButton()).disabled, false)
+  await act(async () => props(switchButton()).onClick())
+  await act(async () => currentCallback(true))
+  await choose('chat')
+  assert.equal(props(switchButton()).disabled, false, 'old in-flight report cannot freeze the replacement pane')
+  const replacementCallback = globalThis.__dwsHarness.privateChatProps.onNavigationBusyChange
+  await act(async () => replacementCallback(true))
+  await act(async () => oldCallback(false))
+  assert.equal(props(switchButton()).disabled, true, 'returning to the same scope must not revive an old mount callback')
+  await act(async () => replacementCallback(false))
+  assert.equal(props(switchButton()).disabled, false)
+})
+
+test('selecting the same loaded row again reopens its exact pane after internal conversation changes', async t => {
+  const vite = await workshopServer(t)
+  const { default: Workshop } = await vite.ssrLoadModule('/src/apps/DepartmentWorkshop.jsx')
+  const { environment } = await mountWorkshop(t, Workshop, 'design', {
+    auth: { user: { id: 'user-1' } }, organization: withOrganizationScope(),
+    privateRows: [{ id: 'exact', title: 'Exact private row', context_kind: 'department_private', department_id: 'design', owner_id: 'user-1', project_id: null }],
+    delivery: { getDepartmentWorkspace: async () => workspaceBase() },
+  })
+  const all = node => [node, ...node.childNodes.flatMap(all)]
+  const props = node => node[Object.keys(node).find(key => key.startsWith('__reactProps$'))]
+  const button = label => all(environment.container).find(node => node.tagName === 'BUTTON' && node.textContent.startsWith(label))
+  const firstMounts = globalThis.__dwsHarness.privateMounts
+  for (let count = 1; count <= 2; count++) {
+    await act(async () => props(button('Exact private row')).onClick())
+    await act(async () => props(button('Switch context')).onClick())
+    assert.equal(globalThis.__dwsHarness.privateChatProps.initialConversation.id, 'exact')
+    assert.equal(globalThis.__dwsHarness.privateMounts, firstMounts + count)
   }
 })

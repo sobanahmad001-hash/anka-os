@@ -18,10 +18,13 @@ test('unified Workshop Chat labels existing histories and requires a deliberate 
   const root = createRoot(environment.container)
   t.after(async () => { await act(async () => root.unmount()); await vite.close(); Object.assign(globalThis, previous) })
   const calls = []
+  const selections = []
   const props = node => node[Object.keys(node).find(key => key.startsWith('__reactProps$'))]
   const button = text => elements(environment.container, 'button').find(node => node.textContent === text)
-  const render = async (mode, key = 'org-1') => act(async () => root.render(createElement(Chat,
-    { key, mode, onModeChange: value => calls.push(value), departmentName: 'Design', projectName: 'Launch', engagementName: 'Campaign' },
+  const render = async (mode, key = 'org-1', navigationBusy = false) => act(async () => root.render(createElement(Chat,
+    { key, mode, navigationBusy, onModeChange: value => calls.push(value), departmentName: 'Design', projectName: 'Launch', engagementName: 'Campaign',
+      onConversationSelect: item => selections.push(item),
+      conversationList: open => createElement('button', { onClick: () => open({ key: 'engagement:same', kind: 'engagement', row: { id: 'same', title: 'Exact saved thread' } }) }, 'Open saved thread') },
     createElement('p', null, mode === 'private' ? 'Existing private saved list' : 'Existing engagement saved list'))))
   await render('private')
   assert.match(environment.container.textContent, /no project attached/)
@@ -45,6 +48,20 @@ test('unified Workshop Chat labels existing histories and requires a deliberate 
   await render('private', 'org-2')
   assert.equal(button('Switch context'), undefined, 'scope remount must discard pending context intent')
   assert.deepEqual(calls, ['chat'], 'render and scope reset cannot dispatch a context change')
+  await act(async () => props(button('Open saved thread')).onClick())
+  assert.deepEqual(selections, [])
+  assert.match(environment.container.textContent, /Existing private saved list/, 'current pane stays mounted so its unsent draft can be saved')
+  await act(async () => props(button('Stay in current context')).onClick())
+  assert.deepEqual(selections, [])
+  await act(async () => props(button('Open saved thread')).onClick())
+  await render('private', 'org-2', true)
+  assert.equal(props(button('Switch context')).disabled, true)
+  await act(async () => props(button('Switch context')).onClick())
+  assert.deepEqual(selections, [], 'external navigation must not bypass an in-flight operation guard')
+  await render('private', 'org-2', false)
+  await act(async () => props(button('Switch context')).onClick())
+  assert.equal(selections[0].key, 'engagement:same')
+  assert.deepEqual(calls, ['chat'], 'exact selection callback replaces generic mode navigation')
 })
 
 test('engagement chat optional presentation label preserves its default and controls', async t => {

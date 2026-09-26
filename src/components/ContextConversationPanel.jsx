@@ -16,17 +16,18 @@ const MODEL_READINESS_MESSAGES = {
   price_unavailable: 'A fresh verified price for this exact model is unavailable.',
 }
 
-export default function ContextConversationPanel({ contextKind, departmentId = '', projectId = '', label = 'Conversation', workshopLayout = false }) {
+export default function ContextConversationPanel({ contextKind, departmentId = '', projectId = '', label = 'Conversation', workshopLayout = false, initialConversation = null, hideConversationList = false, onConversationListChange, onNavigationBusyChange }) {
   const { user } = useAuth()
   const { activeOrganizationId, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
   if (!user?.id || !activeOrganizationId || requestSignal.aborted) return null
-  const identity = [user.id, activeOrganizationId, scopeRevision, contextKind, departmentId, projectId].join(':')
+  const identity = [user.id, activeOrganizationId, scopeRevision, contextKind, departmentId, projectId, initialConversation?.id || ''].join(':')
   return <ScopedContextConversation key={identity} contextKind={contextKind} departmentId={departmentId}
     projectId={projectId} label={label} organizationId={activeOrganizationId} user={user} signal={requestSignal}
-    onAccessError={handleOrganizationAccessError} workshopLayout={workshopLayout} />
+    onAccessError={handleOrganizationAccessError} workshopLayout={workshopLayout} initialConversation={initialConversation} hideConversationList={hideConversationList} onConversationListChange={onConversationListChange} onNavigationBusyChange={onNavigationBusyChange} />
 }
 
-function ScopedContextConversation({ contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError, workshopLayout }) {
+function ScopedContextConversation({ contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError, workshopLayout, initialConversation, hideConversationList, onConversationListChange, onNavigationBusyChange }) {
+  const requestedConversation = useRef(initialConversation).current
   const scope = useMemo(() => ({ context_kind: contextKind, ...(departmentId ? { department_id: departmentId } : {}),
     ...(projectId ? { project_id: projectId } : {}) }), [contextKind, departmentId, projectId])
   const requestScope = useMemo(() => ({ organizationId, signal }), [organizationId, signal])
@@ -41,6 +42,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   const [conversationSearch, setConversationSearch] = useState('')
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(true)
+  const [historyBusy, setHistoryBusy] = useState(false)
   const [busy, setBusy] = useState(false)
   const [olderBusy, setOlderBusy] = useState(false)
   const [modelOptions, setModelOptions] = useState([])
@@ -61,6 +63,12 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   const listRevision = useRef(0)
   activeConversation.current = conversationId
   const selectedOwnerId = conversations.find(row => row.id === conversationId)?.owner_id
+  useEffect(() => {
+    onNavigationBusyChange?.(!signal?.aborted && Boolean(busy || loading || historyBusy || olderBusy || listBusy || shareBusy || aiBusyMessageId))
+    const clear = () => onNavigationBusyChange?.(false)
+    signal?.addEventListener?.('abort', clear, { once: true })
+    return () => { signal?.removeEventListener?.('abort', clear); clear() }
+  }, [busy, loading, historyBusy, olderBusy, listBusy, shareBusy, aiBusyMessageId, onNavigationBusyChange, signal])
 
   const showError = useCallback((reason) => {
     if (signal.aborted) return
@@ -100,15 +108,15 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
       .then(rows => {
         if (!current || signal.aborted || revision !== listRevision.current) return
         const page = (rows || []).slice(0, PAGE_SIZE)
-        setConversations(page)
+        setConversations(requestedConversation && !page.some(row => row.id === requestedConversation.id) ? [...page, requestedConversation] : page)
         setHasMoreConversations((rows || []).length > PAGE_SIZE)
         setNextOffset(page.length)
-        setConversationId(page[0]?.id || '')
+        setConversationId(requestedConversation?.id || page[0]?.id || '')
       })
       .catch(reason => { if (current) showError(reason) })
       .finally(() => { if (current && !signal.aborted) setLoading(false) })
     return () => { current = false }
-  }, [scope, requestScope, signal, showError])
+  }, [scope, requestScope, signal, showError, requestedConversation])
 
   useEffect(() => {
     setDraft(drafts.current.get(conversationId) || '')
@@ -116,19 +124,22 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
     setIncludeCanonicalContext(false)
     setSharing({ candidates: [], recipients: [], loaded: false })
     setShareSelection([])
-    if (!conversationId) { setMessages([]); setHasOlder(false); return }
+    if (!conversationId) { setMessages([]); setHasOlder(false); setHistoryBusy(false); return }
     let current = true
+    setHistoryBusy(true)
     setMessages([])
     setHasOlder(false)
     departmentChat.getContextConversation({ conversation_id: conversationId }, requestScope)
       .then(result => {
         if (!current || signal.aborted) return
+        if (requestedConversation && result.conversation?.id !== conversationId) throw new Error('Selected conversation is unavailable')
         setMessages(result.messages || [])
         setHasOlder(Boolean(result.has_older))
       })
-      .catch(reason => { if (current) showError(reason) })
+      .catch(reason => { if (current) { setMessages([]); if (requestedConversation) setConversationId(''); showError(reason) } })
+      .finally(() => { if (current && !signal.aborted) setHistoryBusy(false) })
     return () => { current = false }
-  }, [conversationId, requestScope, signal, showError])
+  }, [conversationId, requestScope, signal, showError, requestedConversation])
 
   useEffect(() => {
     if (contextKind !== 'project_team' || selectedOwnerId !== user.id) return
@@ -196,6 +207,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
       if (signal.aborted) return
       setTitle('')
       await refresh(created.id)
+      onConversationListChange?.()
     } catch (reason) { showError(reason) } finally { if (!signal.aborted) setBusy(false) }
   }
 
@@ -327,14 +339,14 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
     </div>
     {error && <p role="alert" className="mt-4 rounded-xl border border-red-900 bg-red-950/50 px-3 py-2 text-sm text-red-300">{error}</p>}
     {aiNotice && <p role="status" className="mt-4 rounded-xl border border-amber-900 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">{aiNotice}</p>}
-    <div className="mt-5 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+    <div className={`mt-5 grid gap-4 ${hideConversationList ? '' : 'lg:grid-cols-[220px_minmax(0,1fr)]'}`}>
       <div className="space-y-3" aria-label="Conversation navigation">
     <form onSubmit={createConversation} className="flex flex-wrap gap-2">
       <input className={`${INPUT} min-w-52 flex-1`} aria-label="New conversation title" placeholder="New conversation title"
         maxLength={160} value={title} onChange={event => setTitle(event.target.value)} />
       <button className={BUTTON} disabled={busy || loading}>New conversation</button>
     </form>
-      <div className="space-y-2" aria-label="Saved conversations">
+      {!hideConversationList && <div className="space-y-2" aria-label="Saved conversations">
         <h3 className="text-sm font-semibold text-slate-300">Recent conversations</h3>
         <input className={INPUT} aria-label="Search loaded conversations" placeholder="Search loaded conversations" value={conversationSearch} onChange={event => setConversationSearch(event.target.value)} />
         {loading && <p className="text-sm text-slate-500">Loading conversations…</p>}
@@ -347,7 +359,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
           className="w-full rounded-xl border border-slate-700 px-3 py-2 text-xs font-semibold text-violet-300 disabled:opacity-50">
           {listBusy ? 'Loading…' : 'Load older conversations'}
         </button>}
-      </div>
+      </div>}
       </div>
       <div className="min-h-64 min-w-0 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
         {!selected ? <p className="text-sm text-slate-500">Choose or create a conversation.</p> : <>

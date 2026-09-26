@@ -6,6 +6,7 @@ import DepartmentChat from '../components/DepartmentChat.jsx'
 import ContextConversationPanel from '../components/ContextConversationPanel.jsx'
 import WorkshopContextShell from '../components/WorkshopContextShell.jsx'
 import WorkshopChatWorkspace from '../components/WorkshopChatWorkspace.jsx'
+import WorkshopConversationList from '../components/WorkshopConversationList.jsx'
 import _WorkshopTabs from '../components/WorkshopTabs.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
@@ -147,6 +148,11 @@ export default function DepartmentWorkshop({ departmentId }) {
   const [activeTab, setActiveTab] = useState(initialTab)
   const [selectedWorkstreamId, setSelectedWorkstreamId] = useState('')
   const [selectedChatEngagementId, setSelectedChatEngagementId] = useState(navigationContext.engagementId || '')
+  const [chatSelection, setChatSelection] = useState(null)
+  const [chatNavigationState, setChatNavigationState] = useState({ key: '', busy: false })
+  const currentChatPane = useRef({ identity: '', generation: 0, key: '' })
+  const [conversationListRevision, setConversationListRevision] = useState(0)
+  const refreshConversationList = useCallback(() => setConversationListRevision(value => value + 1), [])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -189,6 +195,7 @@ export default function DepartmentWorkshop({ departmentId }) {
 
   useEffect(() => {
     setWorkspace(null); setActiveTab('tasks'); setSelectedWorkstreamId(''); setSelectedChatEngagementId(navigationContext.engagementId || ''); setLoading(true); setSaving(false); setError('')
+    setChatSelection(null)
     if (initialTab !== 'tasks') setActiveTab(initialTab)
     setTaskForm(initialTask); setResearchForm(initialResearch); setDeliverableForm(initialDeliverable); setRequestForm(initialRequest)
     if (!organizationLoading && !selectionRequired && activeOrganizationId && departmentAllowed) loadWorkspace()
@@ -205,7 +212,19 @@ export default function DepartmentWorkshop({ departmentId }) {
         && ['planned', 'active'].includes(service.status)))
     : []
   const chatEngagement = chatEngagements.find(engagement => engagement.id === selectedChatEngagementId)
-    || (chatEngagements.length === 1 ? chatEngagements[0] : null)
+  const chatScopeKey = JSON.stringify([user?.id, activeOrganizationId, scopeRevision, departmentId, projectId, chatEngagement?.id])
+  const selectedConversation = chatSelection?.scopeKey === chatScopeKey ? chatSelection.item : null
+  const selectedConversationRevision = selectedConversation ? chatSelection.revision : 0
+  const chatPaneIdentity = JSON.stringify([chatScopeKey, activeTab, selectedConversation?.key || '', selectedConversationRevision])
+  if (currentChatPane.current.identity !== chatPaneIdentity) {
+    const generation = currentChatPane.current.generation + 1
+    currentChatPane.current = { identity: chatPaneIdentity, generation, key: JSON.stringify([chatPaneIdentity, generation]) }
+  }
+  const chatPaneKey = currentChatPane.current.key
+  const reportChatNavigationBusy = useCallback(busy => {
+    if (currentChatPane.current.key === chatPaneKey) setChatNavigationState({ key: chatPaneKey, busy })
+  }, [chatPaneKey])
+  const chatNavigationBusy = chatNavigationState.key === chatPaneKey && chatNavigationState.busy
 
   const visibleData = useMemo(() => {
     if (!workspace) return { tasks: [], workItems: [], services: [], stages: [], research: [], deliverables: [], requests: [], milestones: [] }
@@ -404,11 +423,13 @@ export default function DepartmentWorkshop({ departmentId }) {
         )}
 
         <div id={`${departmentId}-${activeTab}-panel`} role={departmentId === 'development' ? 'tabpanel' : 'region'} aria-label={departmentId === 'development' ? undefined : 'Workshop workspace'} aria-labelledby={departmentId === 'development' ? `${departmentId}-${activeTab}-tab` : undefined}>
-        {['private', 'chat'].includes(activeTab) ? <WorkshopChatWorkspace key={`${user?.id}:${activeOrganizationId}:${scopeRevision}:${departmentId}`} mode={activeTab} onModeChange={setActiveTab} departmentName={config.shortName} projectName={projectName} engagementName={chatEngagement?.name}>
+        {['private', 'chat'].includes(activeTab) ? <WorkshopChatWorkspace key={chatScopeKey} mode={activeTab} navigationBusy={chatNavigationBusy} onModeChange={mode => { setChatSelection(null); setActiveTab(mode) }} departmentName={config.shortName} projectName={projectName} engagementName={chatEngagement?.name}
+          onConversationSelect={item => { if (item.kind === 'engagement' && (item.engagementId !== chatEngagement?.id || item.projectId !== projectId)) return; setChatSelection(current => ({ scopeKey: chatScopeKey, item, revision: (current?.revision || 0) + 1 })); setActiveTab(item.kind === 'private' ? 'private' : 'chat') }}
+          conversationList={onOpen => <WorkshopConversationList organizationId={activeOrganizationId} actorId={user?.id} scopeRevision={scopeRevision} departmentId={departmentId} engagement={chatEngagement} signal={requestSignal} onOpen={onOpen} refreshKey={conversationListRevision} />}>
         {activeTab === 'private' ? (
           <div className="mt-6 space-y-3">
             <p className="text-sm text-slate-400">Explore privately with your {config.shortName} specialist. Selecting project chat opens separate engagement conversations; it does not share or move these messages. Use specialist tools for governed project outputs.</p>
-            <ContextConversationPanel contextKind="department_private" departmentId={departmentId} label={`${config.shortName} private conversations`} workshopLayout />
+            <ContextConversationPanel key={selectedConversationRevision} contextKind="department_private" departmentId={departmentId} label={`${config.shortName} private conversations`} workshopLayout hideConversationList initialConversation={selectedConversation?.kind === 'private' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} />
           </div>
         ) : (
           <section className="space-y-5" aria-label={`${config.shortName} engagement conversations`}>
@@ -428,7 +449,7 @@ export default function DepartmentWorkshop({ departmentId }) {
               </label> : <p className="mt-4 text-sm text-amber-300">No eligible engagement is available in this workstream. Select an active workstream and activate this department's service on its engagement.</p>}
             </div>
             {chatEngagement && <div className="space-y-4">
-              <div className="min-w-0"><DepartmentChat departmentId={departmentId} engagement={chatEngagement} allowArtifactDraft={false} presentationLabel="Engagement conversations" /></div>
+              <div className="min-w-0"><DepartmentChat key={selectedConversationRevision} departmentId={departmentId} engagement={chatEngagement} allowArtifactDraft={false} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} /></div>
               <aside aria-label="Selected project context" className="space-y-4 rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm">
                 <h2 className="font-semibold">{projectName}</h2>
                 <p className="text-slate-400">{chatEngagement.name} · {config.shortName}</p>
