@@ -57,3 +57,22 @@ test('history returns only the exact saved projection and never current-source f
     assert.throws(() => selectLivingProjectSnapshot([snapshot], ...args), { status: 403 })
   }
 })
+test('recurring plans preserve approved versus draft versions and reject foreign linked templates', () => {
+  const input = fixture()
+  input.recurring = { project: input.records.project,
+    engagement: { id: 'engagement', organization_id: 'org', project_id: 'project' },
+    plans: [{ id: 'plan', organization_id: 'org', project_id: 'project', engagement_id: 'engagement' }],
+    versions: [{ id: 'approved-version', plan_id: 'plan', organization_id: 'org', frequency: 'monthly' },
+      { id: 'draft-version', plan_id: 'plan', organization_id: 'org', frequency: 'weekly' }],
+    approvals: [{ id: 'approval', organization_id: 'org', plan_id: 'plan', plan_version_id: 'approved-version' }],
+    templateItems: [{ id: 'template', organization_id: 'org', plan_id: 'plan', plan_version_id: 'approved-version' }] }
+  const document = composeLivingProjectReference(input)
+  assert.deepEqual(document.recurringPlans[0].versions.map(row => [row.id, row.approved, row.items.length]),
+    [['approved-version', true, 1], ['draft-version', false, 0]])
+  assert.equal(JSON.stringify(document.coreProjection).includes('approved-version'), false)
+  input.recurring.templateItems[0].plan_version_id = 'foreign-version'
+  assert.throws(() => composeLivingProjectReference(input), { status: 403 })
+  input.recurring.templateItems[0].plan_version_id = 'approved-version'
+  input.recurring.approvals[0].organization_id = 'foreign-org'
+  assert.throws(() => composeLivingProjectReference(input), { status: 403 })
+})

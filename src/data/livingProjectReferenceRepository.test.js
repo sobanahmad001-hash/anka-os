@@ -7,6 +7,7 @@ function factory() {
   const compiled = transformSync(readFileSync(new URL('./livingProjectReferenceRepository.js', import.meta.url), 'utf8'), { format: 'cjs' }).code
   const module = { exports: {} }
   const require = name => {
+    if (name.includes('retainerReviewRepository')) return { createRetainerReviewRepository: () => ({}) }
     if (name.includes('reportsAndRecordsRepository')) return { createReportsAndRecordsRepository: () => ({}) }
     if (name.endsWith('/livingProjectReference.js')) return { composeLivingProjectReference: input => input }
     return { supabase: {}, projectEngagementWorkspace: {}, projectServiceScopeRepository: {},
@@ -54,4 +55,18 @@ test('checkpoint delegates exact caller identity/version to existing snapshot RP
   const options = { signal: controller.signal }
   assert.deepEqual(await repository.preserve(input, options), [input, options])
   assert.deepEqual(calls, ['preserve'])
+})
+test('retainer source receives exact project/engagement/user/signal and is composed only for retainers', async () => {
+  const controller = new AbortController(), calls = []
+  const recurringSnapshot = { plans: [] }
+  const repository = factory()({
+    records: { getProjectWorkspace: async () => ({}) },
+    workspace: { get: async () => ({ project: { engagement_type: 'retainer' }, engagement: { id: 'engagement' } }) },
+    services: { snapshot: async () => null }, proposals: { list: async () => [] }, memory: { list: async () => null },
+    pipeline: { list: async () => null },
+    recurring: { get: async scope => { calls.push(scope); return recurringSnapshot } },
+  })
+  const result = await repository.load('org', 'project', { signal: controller.signal, actorId: 'user' })
+  assert.deepEqual(calls, [{ organizationId: 'org', projectId: 'project', engagementId: 'engagement', actorId: 'user', signal: controller.signal }])
+  assert.equal(result.document.recurring, recurringSnapshot)
 })
