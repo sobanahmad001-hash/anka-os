@@ -74,9 +74,9 @@ for (const [label, readiness, expected] of [
   assert.equal(ask.disabled, true, 'per-request consent is still required even when local checks pass')
 })
 
-test('compact Design private composer retains explicit per-reply consent and mounted draft', async t => {
+for (const departmentId of ['design', 'content', 'marketing']) test(`compact ${departmentId} private composer retains explicit per-reply consent and mounted draft`, async t => {
   const { environment } = await mount(t, () => ({ paid_execution_enabled: true, spend_tracking_configured: true, model_status: 'configured' }),
-    { contextKind: 'department_private', departmentId: 'design', workshopLayout: true, hideConversationList: true })
+    { contextKind: 'department_private', departmentId, workshopLayout: true, hideConversationList: true })
   const all = () => descendants(environment.container)
   const toolbar = all().find(node => reactProps(node)?.className === 'private-composer-toolbar')
   assert.ok(toolbar)
@@ -108,9 +108,9 @@ test('compact Design private composer retains explicit per-reply consent and mou
   assert.equal(globalThis.__contextReadinessFixture.created.length, 0)
 })
 
-test('Content private conversation retains default presentation', async t => {
+test('Development private conversation retains default presentation', async t => {
   const { environment } = await mount(t, () => ({ paid_execution_enabled: false }),
-    { contextKind: 'department_private', departmentId: 'content', workshopLayout: true, hideConversationList: true })
+    { contextKind: 'department_private', departmentId: 'development', workshopLayout: true, hideConversationList: true })
   assert.ok(!descendants(environment.container).some(node => reactProps(node)?.className === 'private-composer-toolbar'))
   assert.ok(!descendants(environment.container).some(node => reactProps(node)?.className === 'private-new-conversation'))
   assert.ok(button(environment.container, 'New conversation'))

@@ -1,4 +1,4 @@
-/* Opt-in Design presentation. No global utility, media or authority overrides. */
+/* Opt-in Workshop presentation. No global utility, media or authority overrides. */
 .design-workshop-surface { background: var(--anka-canvas); color: var(--anka-ink); }
 .design-workshop-surface :is([class~="text-slate-200"], [class~="text-slate-300"], [class~="text-white"]) { color: var(--anka-ink); }
 .design-workshop-surface :is([class~="text-slate-400"], [class~="text-slate-500"], [class~="text-slate-600"]) { color: var(--anka-muted); }
@@ -6,7 +6,12 @@
 .design-workshop-surface :is([class~="border-slate-600"], [class~="border-slate-700"], [class~="border-slate-800"]) { border-color: var(--anka-line); }
 .design-workshop-surface :is([class~="text-violet-200"], [class~="text-violet-300"]) { color: var(--anka-violet); }
 .design-workshop-surface button:is([class~="bg-violet-600"], [class~="bg-sky-600"], [class~="bg-sky-700"]) { background: var(--anka-violet); color: var(--anka-on-violet); }
-.design-workshop .design-private-conversation { padding: 16px; border: 1px solid var(--anka-line); border-radius: 12px; background: var(--anka-surface); }
+.design-workshop-surface :is([class~="text-amber-100"], [class~="text-amber-200"], [class~="text-amber-300"]) { color: var(--anka-warning); }
+.design-workshop-surface :is([class~="text-red-200"], [class~="text-red-300"]) { color: var(--anka-danger); }
+.design-workshop-surface .design-private-conversation { padding: 16px; border: 1px solid var(--anka-line); border-radius: 12px; background: var(--anka-surface); }
+.design-workshop-surface :is(button, select, textarea, input, a, summary):focus-visible { outline: 3px solid var(--anka-focus); outline-offset: 3px; }
+.design-workshop-surface summary { cursor: pointer; font-weight: 600; line-height: 1.6; }
+.design-workshop-surface .private-new-conversation form { margin-top: 8px; }
 .design-private-conversation .private-new-conversation { font-size: 13px; }
 .design-private-conversation .private-new-conversation form { max-width: 560px; }
 .design-private-conversation .private-composer-toolbar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px 12px; margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--anka-line); }

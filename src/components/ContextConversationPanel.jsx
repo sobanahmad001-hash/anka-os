@@ -332,7 +332,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
     : contextKind === 'organization'
       ? 'Only you can see this organization conversation. AI replies require an approved model, configured spend tracking, and enabled paid execution.'
       : 'Project conversations start private. You can choose active internal teammates to read and reply; AI replies remain creator-controlled.'
-  const compact = workshopLayout && contextKind === 'department_private' && departmentId === 'design'
+  const compact = workshopLayout && contextKind === 'department_private' && ['design', 'content', 'marketing'].includes(departmentId)
   const Navigation = compact ? 'details' : Fragment
   const modelControls = isOwner && <div className={compact ? "private-composer-toolbar" : "mt-3 rounded-xl border border-slate-800 bg-slate-900/70 p-3"}>
             <label htmlFor="organization-conversation-model" className="block text-xs font-semibold uppercase tracking-wide text-slate-400">Approved private conversation AI model</label>

@@ -404,7 +404,7 @@ export default function DepartmentWorkshop({ departmentId }) {
   )
 
   return (
-    <div className={departmentId === 'design' ? 'design-workshop-surface h-full overflow-y-auto' : 'h-full overflow-y-auto bg-slate-950 text-white'}>
+    <div className={['design', 'content', 'marketing'].includes(departmentId) ? 'design-workshop-surface h-full overflow-y-auto' : 'h-full overflow-y-auto bg-slate-950 text-white'}>
       <div className="mx-auto max-w-7xl px-6 py-7">
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div>
@@ -455,6 +455,13 @@ export default function DepartmentWorkshop({ departmentId }) {
               <p>Video jobs are owner-private but anchored to that project direction. Generation is not available in private exploration. A verified credential alone does not enable generation: exact pricing, spend, paid-execution, provider and consent checks still apply.</p>
             </details>}
             <ContextConversationPanel key={selectedConversationRevision} contextKind="department_private" departmentId={departmentId} label={`${config.shortName} private conversations`} workshopLayout hideConversationList initialConversation={selectedConversation?.kind === 'private' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} />
+            {['content', 'marketing'].includes(departmentId) && <details className="design-private-video-guide rounded-xl border border-slate-700 px-3 py-2 text-sm">
+              <summary>{config.shortName} draft tools · how to open</summary>
+              <p>Use the Conversation context selector above: choose Project / engagement, then confirm Switch context after saving unsaved text. Choose an eligible client engagement with an active or planned {config.shortName} service. This opens a separate history; it does not share or move this private conversation.</p>
+              <p>Available draft types come from that engagement’s existing {config.shortName} tools and your access. Previewing a proposal does not create an official record; use the existing explicit review and confirmation controls.</p>
+              {departmentId === 'marketing' && <p>Campaign brief suggestions are applied selectively in the governed editor, not confirmed as an official draft from chat.</p>}
+              <p>Private exploration remains text conversation here. Project draft tools are not enabled in this private context. Model approval, provider disclosure, per-reply consent and spend checks still apply.</p>
+            </details>}
           </div>
         ) : (
           <section className="space-y-5" aria-label={`${config.shortName} engagement conversations`}>
