@@ -1,3 +1,4 @@
+import ContentArtifactChat from '../components/ContentArtifactChat.jsx'
 import ContentWorkshopActions from '../components/ContentWorkshopActions.jsx'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -450,7 +451,7 @@ export default function DepartmentWorkshop({ departmentId }) {
               </label> : <p className="mt-4 text-sm text-amber-300">No eligible engagement is available in this workstream. Select an active workstream and activate this department's service on its engagement.</p>}
             </div>
             {chatEngagement && <div className="space-y-4">
-              <div className="min-w-0"><DepartmentChat key={selectedConversationRevision} departmentId={departmentId} engagement={chatEngagement} allowArtifactDraft={false} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} /></div>
+              <div className="min-w-0">{departmentId === 'content' ? <ContentArtifactChat key={selectedConversationRevision} projectId={projectId} engagement={chatEngagement} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} /> : <DepartmentChat key={selectedConversationRevision} departmentId={departmentId} engagement={chatEngagement} allowArtifactDraft={false} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} />}</div>
               {departmentId === 'content' && <ContentWorkshopActions key={chatScopeKey} organizationId={activeOrganizationId} projectId={projectId} engagement={chatEngagement} services={workspace.services} unavailable={Boolean(error) || loading || requestSignal?.aborted} busy={chatNavigationBusy} />}
               <aside aria-label="Selected project context" className="space-y-4 rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm">
                 <h2 className="font-semibold">{projectName}</h2>

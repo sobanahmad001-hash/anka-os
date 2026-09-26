@@ -157,12 +157,14 @@ function workshopStubs() {
       if (source && source.endsWith('AuthContext.jsx')) return '/0dws-auth'
       if (source && source.endsWith('OrganizationContext.jsx')) return '/0dws-org'
       if (source && source.endsWith('delivery.js')) return '/0dws-delivery'
+      if (source && source.endsWith('contentStudioRepository.js')) return '/0dws-content-studio'
       if (source && source.endsWith('DepartmentChat.jsx')) return '/0dws-chat'
       if (source && source.endsWith('ContextConversationPanel.jsx')) return '/0dws-private'
       if (source && source.endsWith('departmentChatRepository.js')) return '/0dws-conversation-repository'
       return null
     },
     load(id) {
+      if (id === '/0dws-content-studio') return `export const contentStudio = { forOrganization: org => ({ load: async id => { const workspace = await globalThis.__dwsHarness.delivery.getDepartmentWorkspace('content', org); return { engagement: workspace.engagements.find(row => row.id === id), artifacts: [], stages: [], versions: [], contentServices: workspace.services || [] } } }) }`
       if (id === '/0dws-conversation-repository') return 'export const departmentChat = { listContextConversations: async () => globalThis.__dwsHarness.privateRows || [], searchConversations: async () => ({ items: [] }) }'
       if (id === '/0dws-chat') return "import { createElement } from 'react'; export default function Chat(props) { globalThis.__dwsHarness.engagementChatProps = props; return createElement('p', null, 'Chat for ' + props.engagement.name) }"
       if (id === '/0dws-private') return "import { createElement, useEffect } from 'react'; export default function Chat(props) { useEffect(() => { globalThis.__dwsHarness.privateMounts = (globalThis.__dwsHarness.privateMounts || 0) + 1 }, []); globalThis.__dwsHarness.privateChatProps = props; return createElement('p', null, props.contextKind + ':' + props.departmentId + ':' + props.workshopLayout) }"
