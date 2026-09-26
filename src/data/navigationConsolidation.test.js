@@ -17,7 +17,7 @@ const activeLabels = (pathname) => links
 test('primary navigation has one Workshop entry per production department', () => {
   assert.deepEqual(
     sphere.items.filter((item) => item.isHeader).map((item) => item.label),
-    ['Workspace', 'Workshops', 'Delivery & Support', 'Tools'],
+    ['Workspace', 'Workshops', 'Coordination', 'Tools'],
   )
   assert.deepEqual(
     links.filter((item) => item.path.startsWith('/sphere/content')).map((item) => item.label),
@@ -67,7 +67,7 @@ test('desktop and mobile use effective organization membership for navigation', 
   const leader = { organizationId: 'org-a', role: 'system_owner', departmentId: null }
   const leaderPaths = paths(sphere, { activeMembership: leader })
   for (const path of ['/sphere/content', '/sphere/design', '/sphere/marketing',
-    '/sphere/delivery', '/users', '/settings']) assert.ok(leaderPaths.includes(path))
+    '/sphere/delivery', '/settings']) assert.ok(leaderPaths.includes(path))
   assert.ok(!paths(sphere, { activeMembership: leader, aiAssistance: false }).includes('/assistant'))
 
   const adminEnvironment = environmentNav.find(environment => environment.key === 'admin')
@@ -113,4 +113,15 @@ test('specialist tools remain routed inside their parent Workshops with safe ret
     const source = readFileSync(new URL('../apps/' + file + '.jsx', import.meta.url), 'utf8')
     assert.match(source, /Back to (Content|Design|Marketing) Workshop/)
   }
+})
+
+test('secondary department members see their Workshops without gaining admin navigation', () => {
+  const paths = visibleEnvironmentItems(sphere, { activeMembership: {
+    organizationId: 'org-a', role: 'contributor', departmentId: 'design', departmentIds: ['design', 'content'],
+  } }).map(item => item.path)
+  assert.ok(paths.includes('/sphere/design'))
+  assert.ok(paths.includes('/sphere/content'))
+  assert.ok(!paths.includes('/sphere/marketing'))
+  assert.ok(!paths.includes('/settings'))
+  assert.deepEqual(visibleEnvironmentItems(sphere, { activeMembership: { departmentIds: ['content'] } }), [])
 })

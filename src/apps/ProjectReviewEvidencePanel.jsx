@@ -8,7 +8,7 @@ export default function ProjectReviewEvidencePanel({ deliverables }) {
     ...version, deliverableTitle: deliverable.title,
   })))
   return <section aria-label="Exact-version review and release evidence" className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">Exact-version review and release</h2><p className="mt-1 text-xs leading-5 text-slate-500">Specialist decisions, project-manager confirmation, and client release are separate recorded facts. This view does not approve or release anything.</p></div><_Link to="/sphere/my-work" className="rounded-lg border border-violet-500/25 px-3 py-2 text-xs font-semibold text-violet-200">Open My Work actions</_Link></div>
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">Exact-version review and release</h2><p className="mt-1 text-xs leading-5 text-slate-500">Specialist decisions, project-manager confirmation, and client release are separate recorded facts. This view does not approve or release anything.</p></div><_Link to="/sphere/my-work?tab=review" className="rounded-lg border border-violet-500/25 px-3 py-2 text-xs font-semibold text-violet-200">Open review queue</_Link></div>
     <div className="mt-4 space-y-3">{versions.length ? versions.map(version => {
       const quality = version.approvals?.find(item => item.approval_type === 'internal_quality')
       const pm = version.pmConfirmations?.[0]

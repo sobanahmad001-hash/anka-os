@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { delivery } from '../data/delivery.js'
@@ -48,13 +48,20 @@ const buildMyWorkReadiness = (workspace = {}) => {
 const labelize = value => String(value || '').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
 const dateLabel = value => value ? new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(new Date(`${value}T00:00:00`)) : 'No deadline'
 
-export default function MyWork() {
+export default function MyWork({ initialTab = 'overview', title = 'My Work' }) {
   const { user } = useAuth()
   const { activeOrganizationId, selectionRequired, loading: organizationLoading, handleOrganizationAccessError, scopeRevision, requestSignal } = useOrganization()
   const currentScope = useRef(null)
   currentScope.current = { organizationId: activeOrganizationId, revision: scopeRevision }
   const [workspace, setWorkspace] = useState(null)
-  const [activeTab, setActiveTab] = useState('overview')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedTab = searchParams.get('tab')
+  const activeTab = TABS.some(([id]) => id === requestedTab) ? requestedTab : initialTab
+  const setActiveTab = (id) => {
+    const next = new URLSearchParams(searchParams)
+    next.set('tab', id)
+    setSearchParams(next)
+  }
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState('')
   const [error, setError] = useState('')
@@ -96,7 +103,7 @@ export default function MyWork() {
   }, [activeOrganizationId, handleOrganizationAccessError, organizationLoading, requestSignal, scopeRevision, selectionRequired, user?.id])
 
   useEffect(() => {
-    setWorkspace(null); setActiveTab('overview'); setLoading(true); setSaving(''); setError('')
+    setWorkspace(null); setLoading(true); setSaving(''); setError('')
     setVersionTarget(null); setVersionForm({ title: '', changeSummary: '', previewUrl: '', file: null, clientApprovalRequired: false })
     setReviewTarget(null); setReviewForm({ decision: 'approved', rationale: '', quality: true, brief: true, technical: true })
     setSubmissionTarget(null); setReviewerCandidates([]); setReviewerId('')
@@ -209,7 +216,7 @@ export default function MyWork() {
       <header className="border-b border-slate-800 bg-slate-950/95 px-6 py-5">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-400">Personal operating queue</p>
         <div className="mt-1 flex flex-wrap items-end justify-between gap-4">
-          <div><h1 className="text-2xl font-semibold">My Work</h1><p className="mt-1 text-sm text-slate-400">Personal readiness and supported actions across assignments, handoffs, exact-version review, and controlled release.</p></div>
+          <div><h1 className="text-2xl font-semibold">{title}</h1><p className="mt-1 text-sm text-slate-400">Personal readiness and supported actions across assignments, handoffs, exact-version review, and controlled release.</p></div>
           <div className="flex flex-wrap gap-3"><Metric label="Project Tasks" value={readiness.projectTasks.total} /><Metric label="Engagement Work Items" value={readiness.engagementWorkItems.total} /><Metric label="Awaiting review" value={readiness.internalReviews.total} /><Metric label="Ready to release" value={readiness.controlledReleases.total} /></div>
         </div>
       </header>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useOrganization } from '../context/OrganizationContext.jsx'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { projectEngagementWorkspace } from '../data/projectEngagementWorkspace'
 import RetainerPlanningPanel from '../components/RetainerPlanningPanel'
 import ProjectPlanningPanel from '../components/ProjectPlanningPanel.jsx'
@@ -13,19 +13,14 @@ import _ProjectReviewEvidencePanel from './ProjectReviewEvidencePanel.jsx'
 import { appendWorkshopNavigation, parseWorkshopNavigation } from '../data/workshopNavigation.js'
 
 const TABS = [
-  ['overview', 'Setup & context'],
-  ['services', 'Services & Scope'],
-  ['journey', 'Journey'],
-  ['work', 'Work'],
-  ['discussion', 'Discussion'],
-  ['project-tasks', 'Project Tasks'],
-  ['engagement-work', 'Engagement Work Items'],
-  ['planning', 'Planning'],
-  ['outputs', 'Files & Outputs'],
-  ['activity', 'Activity'],
+  ['overview', 'Overview'], ['work', 'Work'], ['discussion', 'Chat'],
+  ['services', 'Services & Pipelines'], ['outputs', 'Files & Outputs'],
+  ['reviews', 'Reviews & Delivery'], ['activity', 'Activity'],
 ]
-const planningTabIndex = TABS.findIndex(([id]) => id === 'planning')
-
+const WORK_TABS = [['work', 'All work'], ['project-tasks', 'Project Tasks'], ['engagement-work', 'Engagement Work Items'], ['planning', 'Schedule & Planning']]
+const SERVICES_TABS = [['services', 'Scope & Services'], ['journey', 'Journey']]
+const primaryTab = id => WORK_TABS.some(([key]) => key === id) || id === 'retainer-planning'
+  ? 'work' : id === 'journey' ? 'services' : id
 const label = (value) => value ? value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) : 'Unknown'
 const date = (value) => value ? new Date(`${value.slice(0, 10)}T00:00:00Z`).toLocaleDateString() : 'Not set'
 const loadFailureKind = (cause) => cause?.membershipMismatch || [401, 403].includes(Number(cause?.status))
@@ -39,7 +34,7 @@ export default function ProjectEngagementWorkspace() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const requestedTab = searchParams.get('tab')
-  const tab = [...TABS, ['retainer-planning']].some(([id]) => id === requestedTab) ? requestedTab : 'overview'
+  const tab = [...TABS, ...WORK_TABS, ...SERVICES_TABS, ['retainer-planning']].some(([id]) => id === requestedTab) ? requestedTab : 'overview'
   const focusedRecord = parseWorkshopNavigation(searchParams).workRecord
   const selectTab = (id) => {
     const next = new URLSearchParams(searchParams)
@@ -118,9 +113,9 @@ export default function ProjectEngagementWorkspace() {
   const { project, identity, summary } = workspace
   const showRetainerPlanning = identity.hasEngagement
     && (project.engagement_type === 'retainer' || workspace.engagement?.engagement_type === 'retainer')
-  const tabs = showRetainerPlanning
-    ? [...TABS.slice(0, planningTabIndex + 1), ['retainer-planning', 'Retainer Planning'], ...TABS.slice(planningTabIndex + 1)]
-    : TABS
+  const tabs = TABS
+  const selectedPrimaryTab = primaryTab(tab)
+  const subTabs = selectedPrimaryTab === 'work' ? [...WORK_TABS, ...(showRetainerPlanning ? [['retainer-planning', 'Recurring Planning']] : [])] : selectedPrimaryTab === 'services' ? SERVICES_TABS : []
   const onTabKeyDown = (event, index) => {
     const keys = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: tabs.length - 1 }
     if (!(event.key in keys)) return
@@ -141,7 +136,7 @@ export default function ProjectEngagementWorkspace() {
             <p className="mt-2 text-sm text-slate-400">{[identity.clientName, identity.brandName].filter(Boolean).join(' · ') || (identity.workType === 'Internal Work' ? 'Internal project; no client identity is required.' : 'No client or brand identity is attached.')}</p>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">{project.description || project.scope_statement || 'No project description recorded.'}</p>
           </div>
-          <div className="flex items-center gap-2"><button type="button" onClick={load} disabled={loading} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm hover:bg-white/[0.08] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={project.status} /><ProjectDraftActivation project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onActivated={load} onAccessError={handleOrganizationAccessError} /></div>
+          <div className="flex flex-wrap items-center gap-2">{identity.hasEngagement && workspace.engagement?.id && <Link to={`/sphere/engagements?engagement=${encodeURIComponent(workspace.engagement.id)}&tab=pipeline&project=${encodeURIComponent(projectId)}`} className="rounded-xl border border-violet-500/25 px-4 py-2 text-sm text-violet-200">Open Pipeline</Link>}<button type="button" onClick={load} disabled={loading} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm hover:bg-white/[0.08] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={project.status} /><ProjectDraftActivation project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onActivated={load} onAccessError={handleOrganizationAccessError} /></div>
         </header>
 
         <ProjectManagerAssignment project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onAssigned={load} onAccessError={handleOrganizationAccessError} />
@@ -158,10 +153,11 @@ export default function ProjectEngagementWorkspace() {
         </section>
 
         <nav role="tablist" aria-label="Project workspace sections" className="mt-7 flex gap-1 overflow-x-auto border-b border-white/[0.08]">
-          {tabs.map(([id, title], index) => <button type="button" role="tab" id={`project-tab-${id}`} aria-selected={tab === id} aria-controls="project-workspace-panel" tabIndex={tab === id ? 0 : -1} key={id} onClick={() => selectTab(id)} onKeyDown={(event) => onTabKeyDown(event, index)} className={`whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ${tab === id ? 'border-violet-400 text-white' : 'border-transparent text-slate-500 hover:text-slate-200'}`}>{title}</button>)}
+          {tabs.map(([id, title], index) => <button type="button" role="tab" id={`project-tab-${id}`} aria-selected={selectedPrimaryTab === id} aria-controls="project-workspace-panel" tabIndex={selectedPrimaryTab === id ? 0 : -1} key={id} onClick={() => selectTab(id)} onKeyDown={(event) => onTabKeyDown(event, index)} className={`whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ${selectedPrimaryTab === id ? 'border-violet-400 text-white' : 'border-transparent text-slate-500 hover:text-slate-200'}`}>{title}</button>)}
         </nav>
 
-        <div id="project-workspace-panel" role="tabpanel" aria-labelledby={`project-tab-${tab}`} className="mt-6" tabIndex={0}>
+        {subTabs.length > 0 && <nav aria-label={`${selectedPrimaryTab === 'work' ? 'Work' : 'Services'} views`} className="mt-4 flex flex-wrap gap-2">{subTabs.map(([id, title]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => selectTab(id)} className={`rounded-lg border px-3 py-2 text-sm ${tab === id ? 'border-violet-400/40 bg-violet-500/10 text-violet-200' : 'border-white/10 text-slate-400'}`}>{title}</button>)}</nav>}
+        <div id="project-workspace-panel" role="tabpanel" aria-labelledby={`project-tab-${selectedPrimaryTab}`} className="mt-6" tabIndex={0}>
           {tab === 'overview' && <Overview workspace={workspace} />}
           {tab === 'services' && <ServicesAndScope workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={load} onAccessError={handleOrganizationAccessError} />}
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
@@ -175,6 +171,7 @@ export default function ProjectEngagementWorkspace() {
           {tab === 'planning' && <ProjectPlanningPanel workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} onRefresh={load} />}
           {tab === 'retainer-planning' && showRetainerPlanning && <RetainerPlanningPanel project={project} engagement={workspace.engagement} services={workspace.services} />}
           {tab === 'outputs' && <Outputs workspace={workspace} />}
+          {tab === 'reviews' && <_ProjectReviewEvidencePanel deliverables={workspace.deliverables} />}
           {tab === 'activity' && <Activity rows={workspace.activity} />}
         </div>
       </div>

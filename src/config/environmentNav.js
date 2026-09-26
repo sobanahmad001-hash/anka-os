@@ -22,26 +22,22 @@ export const environmentNav = [
     items: [
       { label: 'Workspace', path: null, isHeader: true },
       { label: 'Home', path: '/sphere/workspace' },
-      { label: 'Projects', path: '/sphere/portfolio', activePrefixes: ['/sphere/workspace/projects'] },
-      { label: 'Clients', path: '/sphere/clients', activePrefixes: ['/sphere/clients'] },
-      { label: 'Internal Work', path: '/sphere/internal' },
       { label: 'My Work', path: '/sphere/my-work', activePrefixes: ['/sphere/workspace/items'] },
-
+      { label: 'Projects', path: '/sphere/portfolio', activePrefixes: ['/sphere/workspace/projects', '/sphere/internal', '/sphere/engagements'] },
+      { label: 'Clients', path: '/sphere/clients', activePrefixes: ['/sphere/clients'] },
       { label: 'Workshops', path: null, isHeader: true },
       { label: 'Content Workshop', path: '/sphere/content', dept: 'content', activePrefixes: ['/sphere/content'] },
       { label: 'Design Workshop', path: '/sphere/design', dept: 'design', activePrefixes: ['/sphere/design'] },
       { label: 'Marketing Workshop', path: '/sphere/marketing', dept: 'marketing', activePrefixes: ['/sphere/marketing'] },
-
-      { label: 'Delivery & Support', path: null, isHeader: true },
-      { label: 'Development', path: '/sphere/delivery', dept: 'development', activePrefixes: ['/sphere/delivery'] },
-      { label: 'Sphere Events', path: '/sphere/events', dept: null },
+      { label: 'Coordination', path: null, isHeader: true },
+      { label: 'Reviews & Delivery', path: '/sphere/reviews' },
+      { label: 'Planning', path: '/sphere/planning', activePrefixes: ['/sphere/events'] },
+      { label: 'Reports', path: '/sphere/reports' },
+      { label: 'Development delivery', path: '/sphere/delivery', dept: 'development', activePrefixes: ['/sphere/delivery'] },
       { label: 'Client Portal', path: '/sphere/portal' },
-      { label: 'Reports & Records', path: '/sphere/reports' },
-
       { label: 'Tools', path: null, isHeader: true },
       { label: 'Assistant', path: '/assistant' },
-      { label: 'Users', path: '/users', organizationAdmin: true, legacyAdminFallback: true },
-      { label: 'Connectors', path: '/settings', organizationAdmin: true },
+      { label: 'Administration', path: '/settings', organizationAdmin: true },
     ],
   },
 ]
@@ -81,6 +77,7 @@ export function isNavigationItemVisible(item, {
   if (item.dept) {
     return ALL_DEPARTMENT_ROLES.has(activeMembership.role)
       || activeMembership.departmentId === item.dept
+      || activeMembership.departmentIds?.includes(item.dept) === true
   }
   return true
 }

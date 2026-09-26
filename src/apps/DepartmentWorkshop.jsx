@@ -142,7 +142,7 @@ export default function DepartmentWorkshop({ departmentId }) {
   }, [accessKey, activeOrganizationId, departmentId, handleOrganizationAccessError, needsDepartmentLookup, requestSignal, user?.id])
   const [workspace, setWorkspace] = useState(null)
   const availableTabs = departmentId === 'development' ? WORKSHOP_TABS : CHAT_WORKSHOP_TABS
-  const initialTab = availableTabs.some(([id]) => id === navigationContext.workshopTab) ? navigationContext.workshopTab : 'tasks'
+  const initialTab = availableTabs.some(([id]) => id === navigationContext.workshopTab) ? navigationContext.workshopTab : departmentId === 'development' ? 'tasks' : 'private'
   const [activeTab, setActiveTab] = useState(initialTab)
   const [selectedWorkstreamId, setSelectedWorkstreamId] = useState('')
   const [selectedChatEngagementId, setSelectedChatEngagementId] = useState(navigationContext.engagementId || '')
@@ -379,20 +379,36 @@ export default function DepartmentWorkshop({ departmentId }) {
         {error && <div className="mt-5 rounded-xl border border-red-900/60 bg-red-950/50 px-4 py-3 text-sm text-red-300">{error}</div>}
         <WorkshopContextShell navigation={navigationContext} validation={contextValidation} returnTarget={returnTarget} projectName={linkedProject?.projects?.name}>
 
-        <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+        {(departmentId === 'development' || !['private', 'chat'].includes(activeTab)) && <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
           <Stat label="Active workstreams" value={workspace.workstreams.length} note="Across current engagements" />
           <Stat label="Project Tasks" value={workspace.tasks.filter((task) => !['done', 'cancelled'].includes(task.status)).length} note={`${projectTaskOverdue} overdue`} />
           <Stat label="Engagement Work Items" value={workspace.workItems.filter((item) => item.status !== 'done').length} note={`${workItemOverdue} overdue`} />
           <Stat label="Service commitments" value={workspace.services.length} note="Planned and active scope" />
           <Stat label="Active stages" value={workspace.stages.filter((stage) => !['completed', 'cancelled'].includes(stage.status)).length} note="Accountable journey stages" />
           <Stat label="Incoming requests" value={incoming} note="Cross-department handoffs" />
-        </div>
+        </div>}
 
-        <_WorkshopTabs departmentId={departmentId} activeTab={activeTab} onChange={setActiveTab} tabs={availableTabs} />
+        {departmentId === 'development' ? <_WorkshopTabs departmentId={departmentId} activeTab={activeTab} onChange={setActiveTab} tabs={availableTabs} /> : (
+          <nav aria-label="Workshop sections" className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 p-3">
+            <button type="button" aria-pressed={activeTab === 'private'} onClick={() => setActiveTab('private')} className="rounded-lg border border-violet-500/40 px-3 py-2 text-sm text-violet-200">Private exploration</button>
+            <button type="button" aria-pressed={activeTab === 'chat'} onClick={() => setActiveTab('chat')} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Project / engagement chat</button>
+            <label className="min-w-0 flex-1 text-xs text-slate-400">Work queue & tools
+              <select aria-label="Work queue and tools" className={`${INPUT_CLASS} mt-1`} value={['private', 'chat'].includes(activeTab) ? '' : activeTab} onChange={event => { if (event.target.value) setActiveTab(event.target.value) }}>
+                <option value="">Choose a secondary workspace</option>
+                {WORKSHOP_TABS.map(([id, title]) => <option key={id} value={id}>{id === 'specialists' ? 'Specialist tools' : title}</option>)}
+              </select>
+            </label>
+            <button type="button" aria-pressed={activeTab === 'deliverables'} onClick={() => setActiveTab('deliverables')} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Assets & outputs</button>
+            <Link to="/sphere/my-work?tab=review" className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Reviews</Link>
+          </nav>
+        )}
 
-        <div id={`${departmentId}-${activeTab}-panel`} role="tabpanel" aria-labelledby={`${departmentId}-${activeTab}-tab`}>
+        <div id={`${departmentId}-${activeTab}-panel`} role={departmentId === 'development' ? 'tabpanel' : 'region'} aria-label={departmentId === 'development' ? undefined : 'Workshop workspace'} aria-labelledby={departmentId === 'development' ? `${departmentId}-${activeTab}-tab` : undefined}>
         {activeTab === 'private' ? (
-          <div className="mt-6"><ContextConversationPanel contextKind="department_private" departmentId={departmentId} label={`${config.shortName} private conversations`} /></div>
+          <div className="mt-6 space-y-3">
+            <p className="text-sm text-slate-400">Explore privately with your {config.shortName} specialist. Selecting project chat opens separate engagement conversations; it does not share or move these messages. Use specialist tools for governed project outputs.</p>
+            <ContextConversationPanel contextKind="department_private" departmentId={departmentId} label={`${config.shortName} private conversations`} workshopLayout />
+          </div>
         ) : activeTab === 'chat' ? (
           <section className="mt-6 space-y-5" aria-label={`${config.shortName} shared chat`}>
             <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
@@ -410,7 +426,16 @@ export default function DepartmentWorkshop({ departmentId }) {
                 </select>
               </label> : <p className="mt-4 text-sm text-amber-300">No eligible engagement is available in this workstream. Select an active workstream and activate this department's service on its engagement.</p>}
             </div>
-            {chatEngagement && <DepartmentChat departmentId={departmentId} engagement={chatEngagement} allowArtifactDraft={false} />}
+            {chatEngagement && <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_240px]">
+              <div className="min-w-0"><DepartmentChat departmentId={departmentId} engagement={chatEngagement} allowArtifactDraft={false} /></div>
+              <aside aria-label="Selected project context" className="space-y-4 rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm">
+                <h2 className="font-semibold">{projectName}</h2>
+                <p className="text-slate-400">{chatEngagement.name} · {config.shortName}</p>
+                <Link className="block text-violet-300" to={`/sphere/workspace/projects/${encodeURIComponent(projectId)}?tab=overview`}>Project brief & context</Link>
+                <Link className="block text-violet-300" to={`/sphere/workspace/projects/${encodeURIComponent(projectId)}?tab=outputs`}>Assets, outputs & review evidence</Link>
+                <p className="text-xs leading-5 text-slate-400">Select exact references and supported private attachments in this conversation. Output previews stay drafts until the existing governed action is completed; switching context does not publish private exploration.</p>
+              </aside>
+            </div>}
           </section>
         ) : activeTab === 'connectors' ? (
           <div className="mt-6"><DepartmentConnectors departmentId={departmentId} departmentName={config.shortName} /></div>

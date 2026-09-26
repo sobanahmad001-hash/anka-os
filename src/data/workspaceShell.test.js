@@ -17,7 +17,7 @@ test('workspace shell provides responsive navigation and an accessible visual hi
   assert.match(header, /header-\$\{item\.label\}/)
   assert.match(nav, /label: 'Workspace'/)
   assert.match(nav, /label: 'Workshops'/)
-  assert.match(nav, /label: 'Delivery & Support'/)
+  assert.match(nav, /label: 'Coordination'/)
   assert.match(sidebar, /aria-current=/)
   assert.match(header, /aria-controls="workspace-mobile-navigation"/)
 })

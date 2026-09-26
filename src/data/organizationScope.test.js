@@ -46,7 +46,7 @@ test('repository applies user, team, membership, and organization filters', asyn
   const query = { select(value) { calls.push(['select', value]); return this }, eq(column, value) { calls.push(['eq', column, value]); return this }, abortSignal(value) { calls.push(['abortSignal', value]); return this }, then(resolve) { return Promise.resolve({ data: [row('org-a')], error: null }).then(resolve) } }
   const memberships = await createOrganizationScopeRepository({ from(table) { calls.push(['from', table]); return query } }).listActiveTeamMemberships('user-a', { signal })
   assert.deepEqual(memberships.map(item => item.organizationId), ['org-a'])
-  assert.deepEqual(calls.filter(call => call[0] === 'eq'), [['eq', 'user_id', 'user-a'], ['eq', 'member_kind', 'team'], ['eq', 'status', 'active'], ['eq', 'organization.status', 'active']])
+  assert.deepEqual(calls.filter(call => call[0] === 'eq'), [['eq', 'user_id', 'user-a'], ['eq', 'member_kind', 'team'], ['eq', 'status', 'active'], ['eq', 'organization.status', 'active'], ['eq', 'user_id', 'user-a'], ['eq', 'status', 'active']])
   assert.deepEqual(calls.at(-1), ['abortSignal', signal])
 })
 
@@ -96,4 +96,19 @@ test('shared provider, selector, and application-content gate are wired without 
   assert.match(gate, /resolveOrganizationGateState\(scope\)/)
   assert.match(gate, /key=\{decision\.scopeKey\}/)
   assert.doesNotMatch(auth, /activeOrganization|OrganizationProvider/)
+})
+
+test('secondary departments are active, deduplicated and isolated to a current organization', async () => {
+  const results = {
+    organization_memberships: [row('org-a')],
+    organization_department_memberships: [
+      { organization_id: 'org-a', department_id: 'content', status: 'active' },
+      { organization_id: 'org-a', department_id: 'design', status: 'active' },
+      { organization_id: 'org-a', department_id: 'marketing', status: 'revoked' },
+      { organization_id: 'org-b', department_id: 'development', status: 'active' },
+    ],
+  }
+  const client = { from(table) { return { select() { return this }, eq() { return this }, then(resolve) { return Promise.resolve({ data: results[table], error: null }).then(resolve) } } } }
+  const memberships = await createOrganizationScopeRepository(client).listActiveTeamMemberships('user-a')
+  assert.deepEqual(memberships[0].departmentIds, ['design', 'content'])
 })

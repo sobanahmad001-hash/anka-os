@@ -158,10 +158,12 @@ function workshopStubs() {
       if (source && source.endsWith('OrganizationContext.jsx')) return '/0dws-org'
       if (source && source.endsWith('delivery.js')) return '/0dws-delivery'
       if (source && source.endsWith('DepartmentChat.jsx')) return '/0dws-chat'
+      if (source && source.endsWith('ContextConversationPanel.jsx')) return '/0dws-private'
       return null
     },
     load(id) {
       if (id === '/0dws-chat') return "import { createElement } from 'react'; export default function Chat(props) { return createElement('p', null, 'Chat for ' + props.engagement.name) }"
+      if (id === '/0dws-private') return "import { createElement } from 'react'; export default function Chat(props) { return createElement('p', null, props.contextKind + ':' + props.departmentId + ':' + props.workshopLayout) }"
       if (id === '/0dws-auth' || id === '\\\\0dws-auth') return 'export const useAuth = () => globalThis.__dwsHarness.auth'
       if (id === '/0dws-org' || id === '\\\\0dws-org') return 'export const useOrganization = () => globalThis.__dwsHarness.organization'
       if (id === '/0dws-delivery' || id === '\\\\0dws-delivery') {
@@ -302,6 +304,32 @@ function workspaceBase() {
 const departments = ['content', 'design', 'marketing']
 
 for (const department of departments) {
+  test(`mounted ${department} defaults to private exploration with secondary tools`, async t => {
+    const vite = await workshopServer(t)
+    const { default: Workshop } = await vite.ssrLoadModule('/src/apps/DepartmentWorkshop.jsx')
+    const { environment } = await mountWorkshop(t, Workshop, department, {
+      auth: { user: { id: 'user-1' } }, organization: withOrganizationScope(),
+      delivery: { getDepartmentWorkspace: async () => workspaceBase() },
+    })
+    const text = environment.container.textContent
+    assert.match(text, new RegExp('department_private:' + department + ':true'))
+    assert.match(text, /does not share or move these messages/)
+    assert.match(text, /Work queue & tools/)
+    assert.match(text, /Assets & outputs|Reviews/)
+    assert.doesNotMatch(text, /Active workstreams|Chat for/)
+    const all = node => [node, ...node.childNodes.flatMap(all)]
+    const projectButton = all(environment.container).find(node => node.tagName === 'BUTTON' && node.textContent === 'Project / engagement chat')
+    await act(async () => projectButton.dispatchEvent(new TestEvent('click')))
+    assert.match(environment.container.textContent, /Shared Department Chat/)
+    assert.doesNotMatch(environment.container.textContent, /department_private:/)
+    const queue = all(environment.container).find(node => node.tagName === 'SELECT' && node.getAttribute('aria-label') === 'Work queue and tools')
+    const queueProps = queue[Object.keys(queue).find(key => key.startsWith('__reactProps$'))]
+    await act(async () => queueProps.onChange({ target: { value: 'tasks' } }))
+    assert.match(environment.container.textContent, /No Project Tasks in this workstream/)
+  })
+}
+
+for (const department of departments) {
   test(`mounted ${department} workshop renders an empty workspace`, async (t) => {
     const vite = await workshopServer(t)
     const { default: DepartmentWorkshop } = await vite.ssrLoadModule('/src/apps/DepartmentWorkshop.jsx')
@@ -322,7 +350,7 @@ for (const department of departments) {
       auth: { user: { id: 'user-1' } },
       organization: withOrganizationScope(),
       delivery: { getDepartmentWorkspace: async () => workspace },
-      search: '',
+      search: '?ctxWorkshopTab=tasks',
     })
 
     await waitForStable(environment, () => /No active/.test(environment.container.textContent), `empty-workspace-${department}`)
@@ -368,7 +396,7 @@ test('mounted workshops accept valid exact context and reject missing pointers',
   const { default: DepartmentWorkshop } = await vite.ssrLoadModule('/src/apps/DepartmentWorkshop.jsx')
 
   const validWorkspace = workspaceBase()
-  const validQuery = '?ctxOrg=org-1&ctxProject=project-a&ctxEngagement=engagement-a&ctxService=service-a&ctxStage=stage-a'
+  const validQuery = '?ctxOrg=org-1&ctxProject=project-a&ctxEngagement=engagement-a&ctxService=service-a&ctxStage=stage-a&ctxWorkshopTab=tasks'
   for (const department of departments) {
     const { environment, cleanup } = await mountWorkshop(t, DepartmentWorkshop, department, {
       auth: { user: { id: 'user-1' } },
@@ -431,6 +459,8 @@ test('mounted Workshop chat shows the exact eligible engagement and a clear prer
     })
     await waitForStable(environment, () => /Chat for Launch engagement/.test(environment.container.textContent), 'chat-' + department)
     assert.match(environment.container.textContent, /Shared Department Chat/)
+    assert.match(environment.container.textContent, /Project brief & context/)
+    assert.match(environment.container.textContent, /Assets, outputs & review evidence/)
     await cleanup()
   }
   const { environment } = await mountWorkshop(t, DepartmentWorkshop, 'design', {

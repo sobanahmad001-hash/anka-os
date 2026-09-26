@@ -45,7 +45,7 @@ test('external event server writes require an allowed department or leadership',
 test('Sphere Events is shared and supports every required planning flow', () => {
   assert.deepEqual(EVENT_CONTENT_TYPES, ['blog', 'social', 'email', 'design_asset'])
   assert.match(app, /path="sphere\/events" element={<ExternalEvents \/>}/)
-  assert.match(nav, /Sphere Events.*\/sphere\/events.*dept: null/)
+  assert.match(nav, /label: 'Planning'.*\/sphere\/planning.*\/sphere\/events/)
   assert.match(screen, /externalEvents\.listDue/)
   assert.match(screen, /workItems\.save/)
   assert.match(screen, /updateLinkStatus/)

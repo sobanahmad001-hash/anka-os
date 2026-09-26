@@ -1,3 +1,4 @@
+import PlanningWorkspace from './apps/PlanningWorkspace.jsx'
 import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
@@ -80,6 +81,8 @@ export default function App() {
         <Route path="sphere/engagements" element={<OperatingSpine initialView="engagements" />} />
         <Route path="sphere/projects" element={<Navigate to="/sphere/portfolio" replace />} />
         <Route path="sphere/my-work" element={<MyWork />} />
+        <Route path="sphere/reviews" element={<MyWork initialTab="review" title="Reviews & Delivery" />} />
+        <Route path="sphere/planning" element={<PlanningWorkspace />} />
         <Route path="sphere/workspace/items/:recordKind/:recordId" element={<WorkItemDetail />} />
         <Route path="sphere/content" element={<DepartmentWorkshop departmentId="content" />} />
         <Route path="sphere/content/studio" element={<ContentStudio />} />
