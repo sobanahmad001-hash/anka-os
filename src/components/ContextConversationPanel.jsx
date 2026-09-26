@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { departmentChat } from '../data/departmentChatRepository.js'
@@ -332,7 +332,39 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
     : contextKind === 'organization'
       ? 'Only you can see this organization conversation. AI replies require an approved model, configured spend tracking, and enabled paid execution.'
       : 'Project conversations start private. You can choose active internal teammates to read and reply; AI replies remain creator-controlled.'
-  return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5" aria-label={label}>
+  const compact = workshopLayout && contextKind === 'department_private' && departmentId === 'design'
+  const Navigation = compact ? 'details' : Fragment
+  const modelControls = isOwner && <div className={compact ? "private-composer-toolbar" : "mt-3 rounded-xl border border-slate-800 bg-slate-900/70 p-3"}>
+            <label htmlFor="organization-conversation-model" className="block text-xs font-semibold uppercase tracking-wide text-slate-400">Approved private conversation AI model</label>
+            <select id="organization-conversation-model" className={`${INPUT} mt-2`} value={selectedModelId}
+              onChange={event => { setSelectedModelId(event.target.value); setAiUseConfirmed(false); setIncludeCanonicalContext(false) }} disabled={Boolean(aiBusyMessageId) || !modelOptions.length}>
+              {!modelOptions.length && <option value="">No approved model available</option>}
+              {modelOptions.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
+            </select>
+            {workshopLayout && <p role="status" className="mt-2 text-xs text-slate-300">{!readiness ? 'Checking AI availability…' : localAiChecksPass ? 'AI configuration ready; your consent is required for each reply.' : 'AI unavailable; you can still save messages.'}</p>}
+            <details open={!workshopLayout} className="mt-2 text-xs text-slate-400"><summary>AI availability details</summary>
+            <p className="mt-2 text-xs text-slate-400">AI replies use the approved organization-level provider connection and are priced and recorded for the organization. {paidExecutionEnabled ? 'The service still rechecks approval, exact pricing, spend tracking and the original request before dispatch.' : 'AI execution is currently off; saved human messages remain available.'}</p>
+            {!readiness && <p className="mt-2 text-xs text-slate-400">Checking AI configuration…</p>}
+            {readiness?.spend_tracking_configured === false && <p className="mt-2 text-xs text-amber-300">Organization spend tracking is not configured.</p>}
+            {readiness?.spend_guard_mode === 'provider_managed' && <p className="mt-2 text-xs text-amber-300">Your provider-side spend limit is managed externally. Anka cannot verify or enforce it; each request is still priced and recorded.</p>}
+            {readiness?.model_status && readiness.model_status !== 'configured' && <p className="mt-2 text-xs text-amber-300">{MODEL_READINESS_MESSAGES[readiness.model_status] || 'Model readiness is unavailable.'}</p>}
+            {contextKind === 'project_team' && <p className="mt-2 text-xs text-slate-400">Teammate-authored messages are not sent to a provider. If a requested reply would include one, the request is blocked before reserving a spend record.</p>}
+            </details>
+            <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-300">
+              <input type="checkbox" className="mt-1" checked={aiUseConfirmed}
+                onChange={event => setAiUseConfirmed(event.target.checked)}
+                disabled={!localAiChecksPass || Boolean(aiBusyMessageId) || !selectedModelId} />
+              <span>{compact ? <>I confirm this conversation's recent messages, including the message I selected, are safe to send to <strong>{selectedModel?.provider || 'the selected provider'} · {selectedModel?.label || 'no model selected'}</strong> for one organization-billed AI reply. No project records are included.</> : <>I confirm that this conversation's recent messages, including the message I selected, are safe to send to the selected provider for an AI reply. Records are included only if I select the separate OpenAI option below.</>}</span>
+            </label>
+            {canIncludeCanonicalContext && <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-300">
+              <input type="checkbox" className="mt-1" checked={includeCanonicalContext}
+                onChange={event => setIncludeCanonicalContext(event.target.checked)}
+                disabled={!localAiChecksPass || Boolean(aiBusyMessageId)} />
+              <span>For this Ask AI reply, also send OpenAI the current organization name{contextKind === 'project_team'
+                ? ' and this project’s name, description, status, health, scope, and exclusions' : ''}, plus a bounded sample of accessible project names, status and health, task and work-item titles, status, deadlines and assignee display names, sampled progress counts, and review-state counts. Record IDs, emails, contact details, descriptions of tasks or work items, files, transcripts, private memory, and teammate messages are excluded. The sample may be incomplete.</span>
+            </label>}
+          </div>
+  return <section className={compact ? "design-private-conversation" : "rounded-2xl border border-slate-800 bg-slate-900/70 p-5"} aria-label={label}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 className="text-lg font-semibold text-white">{label}</h2>
         <p className="mt-1 text-sm text-slate-400">{description}</p></div>
@@ -341,11 +373,14 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
     {aiNotice && <p role="status" className="mt-4 rounded-xl border border-amber-900 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">{aiNotice}</p>}
     <div className={`mt-5 grid gap-4 ${hideConversationList ? '' : 'lg:grid-cols-[220px_minmax(0,1fr)]'}`}>
       <div className="space-y-3" aria-label="Conversation navigation">
+    <Navigation {...(compact ? { className: 'private-new-conversation' } : {})}>
+      {compact && <summary>New conversation</summary>}
     <form onSubmit={createConversation} className="flex flex-wrap gap-2">
       <input className={`${INPUT} min-w-52 flex-1`} aria-label="New conversation title" placeholder="New conversation title"
         maxLength={160} value={title} onChange={event => setTitle(event.target.value)} />
       <button className={BUTTON} disabled={busy || loading}>New conversation</button>
     </form>
+    </Navigation>
       {!hideConversationList && <div className="space-y-2" aria-label="Saved conversations">
         <h3 className="text-sm font-semibold text-slate-300">Recent conversations</h3>
         <input className={INPUT} aria-label="Search loaded conversations" placeholder="Search loaded conversations" value={conversationSearch} onChange={event => setConversationSearch(event.target.value)} />
@@ -361,7 +396,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
         </button>}
       </div>}
       </div>
-      <div className="min-h-64 min-w-0 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+      <div className={compact ? 'private-conversation-body min-w-0' : 'min-h-64 min-w-0 rounded-xl border border-slate-800 bg-slate-950/50 p-4'}>
         {!selected ? <p className="text-sm text-slate-500">Choose or create a conversation.</p> : <>
           <h3 className="font-semibold text-white">{selected.title}</h3>
           {contextKind === 'project_team' && isOwner && <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
@@ -384,36 +419,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
             <button type="button" className={BUTTON} disabled={shareBusy || !sharing.loaded}
               onClick={saveSharing}>{shareBusy ? 'Saving…' : 'Save sharing'}</button>
           </div>}
-          {isOwner && <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
-            <label htmlFor="organization-conversation-model" className="block text-xs font-semibold uppercase tracking-wide text-slate-400">Approved private conversation AI model</label>
-            <select id="organization-conversation-model" className={`${INPUT} mt-2`} value={selectedModelId}
-              onChange={event => { setSelectedModelId(event.target.value); setAiUseConfirmed(false); setIncludeCanonicalContext(false) }} disabled={Boolean(aiBusyMessageId) || !modelOptions.length}>
-              {!modelOptions.length && <option value="">No approved model available</option>}
-              {modelOptions.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
-            </select>
-            {workshopLayout && <p role="status" className="mt-2 text-xs text-slate-300">{!readiness ? 'Checking AI availability…' : localAiChecksPass ? 'AI configuration ready; your consent is required for each reply.' : 'AI unavailable; you can still save messages.'}</p>}
-            <details open={!workshopLayout} className="mt-2 text-xs text-slate-400"><summary>AI availability details</summary>
-            <p className="mt-2 text-xs text-slate-400">AI replies use the approved organization-level provider connection and are priced and recorded for the organization. {paidExecutionEnabled ? 'The service still rechecks approval, exact pricing, spend tracking and the original request before dispatch.' : 'AI execution is currently off; saved human messages remain available.'}</p>
-            {!readiness && <p className="mt-2 text-xs text-slate-400">Checking AI configuration…</p>}
-            {readiness?.spend_tracking_configured === false && <p className="mt-2 text-xs text-amber-300">Organization spend tracking is not configured.</p>}
-            {readiness?.spend_guard_mode === 'provider_managed' && <p className="mt-2 text-xs text-amber-300">Your provider-side spend limit is managed externally. Anka cannot verify or enforce it; each request is still priced and recorded.</p>}
-            {readiness?.model_status && readiness.model_status !== 'configured' && <p className="mt-2 text-xs text-amber-300">{MODEL_READINESS_MESSAGES[readiness.model_status] || 'Model readiness is unavailable.'}</p>}
-            {contextKind === 'project_team' && <p className="mt-2 text-xs text-slate-400">Teammate-authored messages are not sent to a provider. If a requested reply would include one, the request is blocked before reserving a spend record.</p>}
-            </details>
-            <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-300">
-              <input type="checkbox" className="mt-1" checked={aiUseConfirmed}
-                onChange={event => setAiUseConfirmed(event.target.checked)}
-                disabled={!localAiChecksPass || Boolean(aiBusyMessageId) || !selectedModelId} />
-              <span>I confirm that this conversation's recent messages, including the message I selected, are safe to send to the selected provider for an AI reply. Records are included only if I select the separate OpenAI option below.</span>
-            </label>
-            {canIncludeCanonicalContext && <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-300">
-              <input type="checkbox" className="mt-1" checked={includeCanonicalContext}
-                onChange={event => setIncludeCanonicalContext(event.target.checked)}
-                disabled={!localAiChecksPass || Boolean(aiBusyMessageId)} />
-              <span>For this Ask AI reply, also send OpenAI the current organization name{contextKind === 'project_team'
-                ? ' and this project’s name, description, status, health, scope, and exclusions' : ''}, plus a bounded sample of accessible project names, status and health, task and work-item titles, status, deadlines and assignee display names, sampled progress counts, and review-state counts. Record IDs, emails, contact details, descriptions of tasks or work items, files, transcripts, private memory, and teammate messages are excluded. The sample may be incomplete.</span>
-            </label>}
-          </div>}
+          {!compact && modelControls}
           {hasOlder && <button type="button" disabled={olderBusy} onClick={loadOlder}
             className="mt-3 text-xs font-semibold text-violet-300 disabled:opacity-50">Load older messages</button>}
           <div className="mt-4 space-y-3" aria-live="polite">
@@ -431,6 +437,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
                 </div>}
             </div>)}
           </div>
+          {compact && modelControls}
           <form onSubmit={sendMessage} className="mt-5 space-y-2 border-t border-slate-800 pt-4">
             <label htmlFor="private-conversation-message" className="text-xs font-semibold uppercase tracking-wide text-slate-400">Your message</label>
             <textarea id="private-conversation-message" className={INPUT} rows={3} maxLength={8000}
