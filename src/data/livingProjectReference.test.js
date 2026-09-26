@@ -32,7 +32,7 @@ test('document separates applied agreement, proposals and unconfirmed preference
   assert.equal(document.activeConfiguration.id, 'activated')
   assert.equal(document.coreProjection.source_version, 4)
   assert.equal(JSON.stringify(document.coreProjection).includes('Reviewed preference'), false)
-  assert.match(document.coverage, /not all service, pipeline or decision sections/)
+  assert.match(document.coverage, /v1 core record or v2 recorded reference sections/)
 })
 
 test('foreign project sources and unmatched pipeline activations fail closed', () => {

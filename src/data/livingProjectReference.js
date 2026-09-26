@@ -55,7 +55,7 @@ export function composeLivingProjectReference({ organizationId, projectId, recor
     workstreams: workspace.workstreams,
     owner: workspace.context.projectOwner,
     unavailable,
-    coverage: 'Current reference includes accessible canonical records. Existing preserved snapshots cover the core project record, not all service, pipeline or decision sections. Audience has no separate canonical project brief field; no audience is inferred. Recurring versions retain their recorded approval and effective dates.',
+    coverage: 'Current reference includes accessible canonical records. Checkpoints identify their saved schema: v1 core record or v2 recorded reference sections. Older history remains exactly as saved. Audience has no separate canonical project brief field; no audience is inferred. Recurring versions retain their recorded approval and effective dates.',
   }
 }
 

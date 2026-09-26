@@ -62,7 +62,7 @@ test('mounted document isolates exact saved history and suppresses pending check
   assert.doesNotMatch(env.container.textContent, /org-a historic|org-a brief/)
   params = new URLSearchParams(); await render()
   assert.match(env.container.textContent, /org-a brief/)
-  await click('Preserve core checkpoint')
+  await click('Preserve checkpoint')
   assert.equal(typeof resolveSave, 'function')
   organization = { ...organization, scopeRevision: 2 }; await render()
   assert.equal(typeof lateLoad, 'function')
