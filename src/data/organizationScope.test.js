@@ -91,7 +91,7 @@ test('shared provider, selector, and application-content gate are wired without 
   assert.match(main, /<AuthProvider>[\s\S]*<OrganizationProvider>/)
   assert.match(header, /aria-label="Active organization"/)
   assert.match(layout, /import OrganizationGate from '\.\/OrganizationGate'/)
-  assert.match(layout, /<Header \/>[\s\S]*<OrganizationGate>[\s\S]*<Sidebar \/>[\s\S]*<Outlet \/>[\s\S]*<AssistantFloat \/>[\s\S]*<\/OrganizationGate>/)
+  assert.match(layout, /<Header\b[\s\S]*?\/>[\s\S]*<OrganizationGate>[\s\S]*<Sidebar\b[^>]*\/>[\s\S]*<Outlet \/>[\s\S]*<AssistantFloat \/>[\s\S]*<\/OrganizationGate>/)
   assert.equal((layout.match(/<OrganizationGate>/g) || []).length, 1)
   assert.match(gate, /resolveOrganizationGateState\(scope\)/)
   assert.match(gate, /key=\{decision\.scopeKey\}/)

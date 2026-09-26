@@ -1,0 +1,38 @@
+/* Shell chrome only. Content surfaces retain their own presentation. */
+.anka-shell { background: var(--anka-canvas); color: var(--anka-ink); height: 100dvh; }
+.anka-shell .shell-header, .anka-shell .shell-sidebar { background: var(--anka-surface); border-color: var(--anka-line); }
+.anka-shell .shell-header { min-height: 72px; padding-block: 12px; flex-wrap: wrap; }
+.anka-shell .shell-sidebar { width: 240px; }
+.anka-shell .shell-ink { color: var(--anka-ink); }
+.anka-shell .shell-muted { color: var(--anka-muted); }
+.anka-shell .shell-line { border-color: var(--anka-line); }
+.anka-shell .shell-brand-fill { background: var(--anka-violet-soft); color: var(--anka-violet); }
+.anka-shell .shell-brand-fill svg { stroke: currentColor; }
+.anka-shell .shell-unread-badge { background: var(--anka-violet); color: var(--anka-on-violet); }
+.anka-shell .shell-popover { background: var(--anka-surface-raised); border-color: var(--anka-line); color: var(--anka-ink); }
+.anka-shell .shell-mobile-navigation { top: calc(100% + 4px); max-height: min(70dvh, 38rem); }
+.anka-shell .shell-sidebar-toggle { align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid var(--anka-line); border-radius: 8px; flex-shrink: 0; }
+.anka-shell .shell-header select { background: var(--anka-surface); color: var(--anka-ink); border-color: var(--anka-line); max-width: 13rem; }
+.anka-shell .shell-header button, .anka-shell .shell-sidebar a { cursor: pointer; }
+.anka-shell .shell-header button:hover, .anka-shell .shell-sidebar a:hover { background: var(--anka-violet-soft); color: var(--anka-violet); }
+.anka-shell .shell-header [aria-current="page"], .anka-shell .shell-sidebar [aria-current="page"] { background: var(--anka-violet-soft); color: var(--anka-violet); border-color: transparent; box-shadow: none; }
+.anka-shell .shell-sidebar a svg { color: currentColor; }
+.anka-shell .shell-sidebar span[class*="rounded-full"] { background: var(--anka-violet-soft); color: var(--anka-violet); border-color: var(--anka-line); text-transform: none; letter-spacing: normal; }
+.anka-shell .shell-environment-link { padding: 10px 12px; font-size: 13px; border-radius: 8px; }
+.anka-shell .shell-header :is(button, select, a):focus-visible,
+.anka-shell .shell-sidebar a:focus-visible,
+.anka-shell .shell-skip-link:focus-visible { outline: 3px solid var(--anka-focus); outline-offset: 3px; }
+.anka-shell .shell-header button:disabled { cursor: not-allowed; opacity: .55; }
+.anka-shell .shell-skip-link { position: fixed; top: 8px; left: 12px; z-index: 100; padding: 10px 14px; background: var(--anka-surface-raised); color: var(--anka-ink); border-radius: 8px; transform: translateY(-180%); }
+.anka-shell .shell-skip-link:focus { transform: translateY(0); }
+@media (max-width: 767px) {
+  .anka-shell .shell-header { gap: 8px; }
+  .anka-shell .shell-header-actions { width: 100%; margin-left: 0; flex-wrap: wrap; }
+  .anka-shell .shell-header-actions > label { flex: 1; min-width: 0; }
+  .anka-shell .shell-header select { max-width: 100%; font-size: 16px; }
+  .anka-shell .shell-header-actions button { min-height: 40px; min-width: 40px; }
+  .anka-shell #workspace-notifications { position: fixed; top: 9rem; left: 12px; right: 12px; width: auto; max-height: calc(100dvh - 10rem); overflow-y: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .anka-shell .shell-header *, .anka-shell .shell-sidebar * { transition: none; }
+}
