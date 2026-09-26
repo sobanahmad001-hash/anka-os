@@ -17,7 +17,7 @@ const activeLabels = (pathname) => links
 test('primary navigation has one Workshop entry per production department', () => {
   assert.deepEqual(
     sphere.items.filter((item) => item.isHeader).map((item) => item.label),
-    ['Workspace', 'Workshops', 'Delivery & Support', 'Tools'],
+    ['Workspace', 'Workshops', 'Coordination', 'Tools'],
   )
   assert.deepEqual(
     links.filter((item) => item.path.startsWith('/sphere/content')).map((item) => item.label),
@@ -67,7 +67,7 @@ test('desktop and mobile use effective organization membership for navigation', 
   const leader = { organizationId: 'org-a', role: 'system_owner', departmentId: null }
   const leaderPaths = paths(sphere, { activeMembership: leader })
   for (const path of ['/sphere/content', '/sphere/design', '/sphere/marketing',
-    '/sphere/delivery', '/users', '/settings']) assert.ok(leaderPaths.includes(path))
+    '/sphere/delivery', '/settings']) assert.ok(leaderPaths.includes(path))
   assert.ok(!paths(sphere, { activeMembership: leader, aiAssistance: false }).includes('/assistant'))
 
   const adminEnvironment = environmentNav.find(environment => environment.key === 'admin')

@@ -48,7 +48,7 @@ const buildMyWorkReadiness = (workspace = {}) => {
 const labelize = value => String(value || '').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
 const dateLabel = value => value ? new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(new Date(`${value}T00:00:00`)) : 'No deadline'
 
-export default function MyWork() {
+export default function MyWork({ initialTab = 'overview', title = 'My Work' }) {
   const { user } = useAuth()
   const { activeOrganizationId, selectionRequired, loading: organizationLoading, handleOrganizationAccessError, scopeRevision, requestSignal } = useOrganization()
   const currentScope = useRef(null)
@@ -56,7 +56,7 @@ export default function MyWork() {
   const [workspace, setWorkspace] = useState(null)
   const [searchParams, setSearchParams] = useSearchParams()
   const requestedTab = searchParams.get('tab')
-  const activeTab = TABS.some(([id]) => id === requestedTab) ? requestedTab : 'overview'
+  const activeTab = TABS.some(([id]) => id === requestedTab) ? requestedTab : initialTab
   const setActiveTab = (id) => {
     const next = new URLSearchParams(searchParams)
     next.set('tab', id)
@@ -216,7 +216,7 @@ export default function MyWork() {
       <header className="border-b border-slate-800 bg-slate-950/95 px-6 py-5">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-400">Personal operating queue</p>
         <div className="mt-1 flex flex-wrap items-end justify-between gap-4">
-          <div><h1 className="text-2xl font-semibold">My Work</h1><p className="mt-1 text-sm text-slate-400">Personal readiness and supported actions across assignments, handoffs, exact-version review, and controlled release.</p></div>
+          <div><h1 className="text-2xl font-semibold">{title}</h1><p className="mt-1 text-sm text-slate-400">Personal readiness and supported actions across assignments, handoffs, exact-version review, and controlled release.</p></div>
           <div className="flex flex-wrap gap-3"><Metric label="Project Tasks" value={readiness.projectTasks.total} /><Metric label="Engagement Work Items" value={readiness.engagementWorkItems.total} /><Metric label="Awaiting review" value={readiness.internalReviews.total} /><Metric label="Ready to release" value={readiness.controlledReleases.total} /></div>
         </div>
       </header>

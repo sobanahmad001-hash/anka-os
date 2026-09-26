@@ -94,6 +94,7 @@ export default function PortfolioWorkspace({ initialOwnerKind = 'all' }) {
         {error && <div role="alert" className="mt-6 rounded-2xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>}
         {loading && !snapshot && <div className="mt-8 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-10 text-center text-sm text-slate-400">Loading live portfolio data…</div>}
 
+        <nav aria-label="Project work type" className="mt-5 flex flex-wrap gap-2">{[['all', 'All Projects'], ['client', 'Client Work'], ['internal', 'Internal Work']].map(([kind, title]) => <button type="button" key={kind} aria-pressed={filters.ownerKind === kind} onClick={() => setFilters(current => ({ ...current, ownerKind: kind }))} className={`rounded-xl border px-4 py-2 text-sm ${filters.ownerKind === kind ? 'border-violet-400/40 bg-violet-500/10 text-violet-200' : 'border-white/10 text-slate-400'}`}>{title}</button>)}</nav>
         {snapshot && <>
           <section aria-label="Portfolio summary" className="mt-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
             {metrics.map((item) => <div key={item.title} className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4"><p className="text-xs text-slate-500">{item.title}</p><p className="mt-2 text-2xl font-semibold">{item.value}</p><p className="mt-1 text-[11px] text-slate-600">{item.note}</p></div>)}

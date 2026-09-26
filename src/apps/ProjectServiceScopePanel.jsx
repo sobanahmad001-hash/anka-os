@@ -88,8 +88,8 @@ export default function ProjectServiceScopePanel({ project, organizationId, memb
   const available = snapshot?.catalog.filter(service => !snapshot.scopes.some(scope => scope.service_id === service.id)) || []
   return <section aria-label="Selected services" className="space-y-5">
     <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5">
-      <h2 className="font-semibold">Selected services</h2>
-      <p className="mt-1 text-sm text-slate-400">Proposals do not start delivery. Activation is a separate action after the project is active.</p>
+      <h2 className="font-semibold">Selected services · scope</h2>
+      <p className="mt-1 text-sm text-slate-400">Services define what is included. Pipelines define how delivery runs. Add services as scope grows; proposals do not start delivery. Activation is a separate action after the project is active.</p>
       {loading && <p className="mt-4 text-sm text-slate-400">Loading service scope…</p>}
       {error && <p role="alert" className="mt-4 rounded-lg border border-rose-500/25 bg-rose-500/10 p-3 text-sm text-rose-200">{error}</p>}
       {notice && <p role="status" className="mt-4 text-sm text-emerald-200">{notice}</p>}
@@ -97,7 +97,7 @@ export default function ProjectServiceScopePanel({ project, organizationId, memb
         const service = snapshot.catalog.find(row => row.id === scope.service_id)
         const owner = snapshot.members.find(row => row.id === scope.owner_id)
         return <article key={scope.id} className="rounded-xl border border-white/10 p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-medium">{service?.name || 'Previously selected service'}</h3><p className="mt-1 text-xs text-slate-400">{title(scope.status)} · {title(scope.source)} · Quantity {scope.quantity}{owner ? ` · ${owner.name}` : ''}{scope.target_date ? ` · Target ${scope.target_date}` : ''}</p></div>
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="mb-1 text-xs font-semibold uppercase text-violet-300">{title(service?.department_id || 'other')}</p><h3 className="font-medium">{service?.name || 'Previously selected service'}</h3><p className="mt-1 text-xs text-slate-400">{title(scope.status)} · {title(scope.source)} · Quantity {scope.quantity}{owner ? ` · ${owner.name}` : ''}{scope.target_date ? ` · Target ${scope.target_date}` : ''}</p></div>
             {canManage && <div className="flex flex-wrap gap-2">
               {scope.status === 'proposed' && <button type="button" disabled={saving || project.status !== 'active'} onClick={() => run('activate', scope)} className="rounded-lg border border-violet-400/30 px-3 py-1.5 text-xs text-violet-200 disabled:opacity-40">Activate service</button>}
               {scope.status === 'active' && ['pause', 'complete', 'cancel'].map(action => <button type="button" key={action} disabled={saving} onClick={() => beginReview(scope, action)} className="rounded-lg border border-amber-400/30 px-3 py-1.5 text-xs text-amber-200 disabled:opacity-40">{title(action)}…</button>)}
@@ -114,7 +114,7 @@ export default function ProjectServiceScopePanel({ project, organizationId, memb
       ownerId: form.ownerId, startDate: form.startDate, targetDate: form.targetDate }) }} className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5">
       <h2 className="font-semibold">Propose a service</h2>
       <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <label className="text-xs text-slate-400">Catalogue service<select required className={inputClass} value={form.serviceId} onChange={event => { setForm(value => ({ ...value, serviceId: event.target.value })); pending.current = null }}><option value="">Select service</option>{available.map(service => <option key={service.id} value={service.id}>{service.name}</option>)}</select></label>
+        <label className="text-xs text-slate-400">Catalogue service<select required className={inputClass} value={form.serviceId} onChange={event => { setForm(value => ({ ...value, serviceId: event.target.value })); pending.current = null }}><option value="">Select service</option>{[...new Set(available.map(service => service.department_id || 'other'))].map(department => <optgroup key={department} label={title(department)}>{available.filter(service => (service.department_id || 'other') === department).map(service => <option key={service.id} value={service.id}>{service.name}</option>)}</optgroup>)}</select></label>
         <label className="text-xs text-slate-400">Owner<select className={inputClass} value={form.ownerId} onChange={event => setForm(value => ({ ...value, ownerId: event.target.value }))}><option value="">Unassigned</option>{snapshot.members.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
         <label className="text-xs text-slate-400">Quantity<input required min="1" type="number" className={inputClass} value={form.quantity} onChange={event => setForm(value => ({ ...value, quantity: event.target.value }))} /></label>
         <div className="grid grid-cols-2 gap-3"><label className="text-xs text-slate-400">Start<input type="date" className={inputClass} value={form.startDate} onChange={event => setForm(value => ({ ...value, startDate: event.target.value }))} /></label><label className="text-xs text-slate-400">Target<input type="date" min={form.startDate || undefined} className={inputClass} value={form.targetDate} onChange={event => setForm(value => ({ ...value, targetDate: event.target.value }))} /></label></div>

@@ -1,3 +1,4 @@
+import { featureFlags } from '../config/featureFlags.js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -59,7 +60,7 @@ export default function WorkspaceHome() {
             <p className="workspace-description">The work that needs attention across {activeOrganization?.name || 'your organization'}, with every signal linked back to its canonical record.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => navigate('/sphere/my-work')} className="workspace-button workspace-button-primary">Open My Work</button>
+            {featureFlags.aiAssistance && <button type="button" onClick={() => navigate('/assistant')} className="workspace-button workspace-button-primary">Open organization chat</button>}<button type="button" onClick={() => navigate('/sphere/my-work')} className="workspace-button">Open My Work</button>
             <button type="button" onClick={load} disabled={loading} className="workspace-button">{loading ? 'Refreshing…' : 'Refresh'}</button>
           </div>
         </header>
