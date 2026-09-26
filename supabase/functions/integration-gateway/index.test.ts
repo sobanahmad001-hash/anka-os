@@ -38,6 +38,7 @@ function fixture(options: {
   engagementMappings?: Array<Record<string, unknown>>
   connections?: Array<Record<string, unknown>>
   events?: Array<Record<string, unknown>>
+  verificationBody?: Record<string, unknown>
 } = {}) {
   const calls: Array<{ client: string; table?: string; operation: string; value?: unknown }> = []
   const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = []
@@ -48,6 +49,7 @@ function fixture(options: {
     provider: options.provider || 'openai',
     status: options.connectionStatus || 'verified',
     archived_at: null,
+    secret_name: options.verificationBody ? 'ANKA_OPENAI_FIXTURE' : null,
     display_name: 'Organization B OpenAI',
     public_config: {
       model_id: 'gpt-default',
@@ -104,6 +106,7 @@ function fixture(options: {
           return limitCount === null ? data : data.slice(0, limitCount)
         }
         const result = (single = false) => {
+          if (operation === 'update') calls.push({ client: name, table, operation, value: inserted })
           if (operation === 'insert') {
             calls.push({ client: name, table, operation, value: inserted })
             return { data: inserted, error: null }
@@ -144,10 +147,10 @@ function fixture(options: {
     body: JSON.stringify(body),
   }), {
     clients: { userClient, adminClient },
-    env: () => undefined,
+    env: name => name === 'ANKA_OPENAI_FIXTURE' ? 'fixture-secret' : undefined,
     fetcher: async () => {
       providerCalls++
-      return new Response('{}')
+      return Response.json(options.verificationBody || {})
     },
   })
   return { request, adminClient, connection, calls, rpcCalls, providerCalls: () => providerCalls }
@@ -488,3 +491,37 @@ for (const provider of ['anthropic', 'google_gemini']) {
     assertEquals(fixtureForProvider.providerCalls(), 0)
   })
 }
+
+for (const provider of ['openai', 'anthropic']) {
+  Deno.test(provider + ' model verification requires the exact configured returned ID', async () => {
+    const connection = { provider, public_config: { model_id: 'configured-model' } }
+    const result = await testConnection(connection, 'fixture-secret',
+      async () => Response.json({ id: 'configured-model' }))
+    assertEquals(result.summary.model_id, 'configured-model')
+    for (const body of [{}, { id: null }, { id: 7 }, { id: '' }, { id: 'configured-model-snapshot' }]) {
+      await assertRejects(() => testConnection(connection, 'fixture-secret',
+        async () => Response.json(body)), Error, 'did not match the configured model ID')
+    }
+  })
+
+  Deno.test(provider + ' mismatched verification cannot mark verified or initialize model approvals', async () => {
+    const test = fixture({ provider, connectionStatus: 'configured', verificationBody: { id: 'gpt-default-snapshot' } })
+    const response = await test.request({ action: 'test', organization_id: ORG_B, connection_id: test.connection.id })
+    assertEquals(response.status, 502)
+    assertEquals((await response.json()).code, 'CONNECTION_FAILED')
+    assertEquals(test.providerCalls(), 1)
+    const updates = test.calls.filter(call => call.table === 'integration_connections' && call.operation === 'update')
+    assertEquals(updates.map(call => (call.value as Record<string, unknown>).status), ['error'])
+    assertEquals(test.rpcCalls, [])
+    const events = test.calls.filter(call => call.table === 'integration_events' && call.operation === 'insert')
+    assertEquals(events.length, 1)
+    assertEquals((events[0].value as Record<string, unknown>).operation, 'tested')
+    assertEquals((events[0].value as Record<string, unknown>).outcome, 'failed')
+  })
+}
+
+Deno.test('Gemini verification retains exact requested resource identity', async () => {
+  await assertRejects(() => testConnection({ provider: 'google_gemini', public_config: { model_id: 'gemini-test' } },
+    'fixture-secret', async () => Response.json({ name: 'models/gemini-test-snapshot', supportedGenerationMethods: ['generateContent'] })),
+  Error, 'Google Gemini model cannot generate content')
+})
