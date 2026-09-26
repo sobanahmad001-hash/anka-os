@@ -8,6 +8,7 @@
 .anka-shell .shell-line { border-color: var(--anka-line); }
 .anka-shell .shell-brand-fill { background: var(--anka-violet-soft); color: var(--anka-violet); }
 .anka-shell .shell-brand-fill svg { stroke: currentColor; }
+.anka-shell .shell-unread-badge { background: var(--anka-violet); color: var(--anka-on-violet); }
 .anka-shell .shell-popover { background: var(--anka-surface-raised); border-color: var(--anka-line); color: var(--anka-ink); }
 .anka-shell .shell-mobile-navigation { top: calc(100% + 4px); max-height: min(70dvh, 38rem); }
 .anka-shell .shell-sidebar-toggle { align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid var(--anka-line); border-radius: 8px; flex-shrink: 0; }

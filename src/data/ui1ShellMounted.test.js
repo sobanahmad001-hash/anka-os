@@ -20,6 +20,7 @@ test('shell preserves scoped routes, collapse state, mobile navigation and Escap
   let membership = { organizationId: 'org-a', role: 'member', departmentId: 'design' }
   const navigated = []
   let signedOut = 0
+  let unread = 0
   const components = {}
   function load(name) {
     if (components[name]) return components[name]
@@ -31,7 +32,7 @@ test('shell preserves scoped routes, collapse state, mobile navigation and Escap
       if (name.includes('OrganizationContext')) return { useOrganization: () => ({ activeMembership: membership, memberships: [], activeOrganizationId: 'org-a', selectOrganization() {} }) }
       if (name.includes('environmentNav')) return navigation
       if (name.includes('featureFlags')) return { featureFlags: { aiAssistance: true } }
-      if (name.includes('useNotifications')) return { useNotifications: () => ({ notifications: [], unread: 0, markRead() {}, markAllRead() {} }) }
+      if (name.includes('useNotifications')) return { useNotifications: () => ({ notifications: [], unread, markRead() {}, markAllRead() {} }) }
       if (name.includes('AppearanceSelector')) return { __esModule: true, default: () => React.createElement('select', { 'aria-label': 'Appearance' }, ...['System', 'Light', 'Dark'].map(value => React.createElement('option', { key: value }, value))) }
       if (name.includes('OrganizationGate')) return { __esModule: true, default: ({ children }) => children }
       if (name.includes('AssistantFloat')) return { __esModule: true, default: () => null }
@@ -84,6 +85,14 @@ test('shell preserves scoped routes, collapse state, mobile navigation and Escap
   await escape()
   assert.equal(props(notificationToggle)['aria-expanded'], false)
   assert.equal(env.document.activeElement, notificationToggle)
+  for (const count of [3, 12]) {
+    unread = count
+    await render()
+    const badge = elements(button('Open notifications'), 'span').find(node => props(node).className.includes('shell-unread-badge'))
+    assert.ok(badge)
+    assert.equal(badge.textContent, count > 9 ? '9+' : String(count))
+    assert.doesNotMatch(props(badge).className, /shell-ink|bg-purple/)
+  }
   await click(button('Sign out'))
   assert.equal(signedOut, 1)
   profile = { ...profile, role: 'admin' }
@@ -103,4 +112,22 @@ test('responsive shell styles are scoped and semantic without recoloring workspa
   assert.match(css, /prefers-reduced-motion/)
   assert.match(css, /var\(--anka-surface\)/)
   assert.doesNotMatch(css, /filter\s*:|\.anka-workspace\s|!important/)
+})
+
+test('unread badge semantic foreground/background meet small-text contrast in both themes', () => {
+  const css = readFileSync(new URL('../components/workspaceShell.css', import.meta.url), 'utf8')
+  assert.match(css, /\.shell-unread-badge\s*\{\s*background: var\(--anka-violet\); color: var\(--anka-on-violet\);\s*\}/)
+  const theme = readFileSync(new URL('../index.css', import.meta.url), 'utf8')
+  const backgrounds = [...theme.matchAll(/--anka-violet:\s*(#[0-9a-f]{6})/gi)].map(match => match[1])
+  const foregrounds = [...theme.matchAll(/--anka-on-violet:\s*(#[0-9a-f]{6})/gi)].map(match => match[1])
+  assert.equal(backgrounds.length, 2)
+  assert.equal(foregrounds.length, 2)
+  const luminance = hex => hex.slice(1).match(/../g).map(value => parseInt(value, 16) / 255)
+    .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
+    .reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0)
+  backgrounds.forEach((background, index) => {
+    const values = [luminance(background), luminance(foregrounds[index])].sort((a, b) => b - a)
+    const ratio = (values[0] + .05) / (values[1] + .05)
+    assert.ok(ratio >= 4.5, `theme ${index}: ${ratio.toFixed(2)}:1`)
+  })
 })

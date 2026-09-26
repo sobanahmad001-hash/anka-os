@@ -169,7 +169,7 @@ export default function Header({ sidebarCollapsed = false, onToggleSidebar }) {
               <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
             </svg>
             {unread > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-purple-600 shell-ink text-xs rounded-full flex items-center justify-center font-medium">
+              <span className="shell-unread-badge absolute -top-0.5 -right-0.5 w-4 h-4 text-xs rounded-full flex items-center justify-center font-medium">
                 {unread > 9 ? '9+' : unread}
               </span>
             )}
