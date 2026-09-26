@@ -171,7 +171,7 @@ export default function ProjectEngagementWorkspace() {
           {tab === 'planning' && <ProjectPlanningPanel workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} onRefresh={load} />}
           {tab === 'retainer-planning' && showRetainerPlanning && <RetainerPlanningPanel project={project} engagement={workspace.engagement} services={workspace.services} />}
           {tab === 'outputs' && <Outputs workspace={workspace} />}
-          {tab === 'reviews' && <_ProjectReviewEvidencePanel workspace={workspace} />}
+          {tab === 'reviews' && <_ProjectReviewEvidencePanel deliverables={workspace.deliverables} />}
           {tab === 'activity' && <Activity rows={workspace.activity} />}
         </div>
       </div>
