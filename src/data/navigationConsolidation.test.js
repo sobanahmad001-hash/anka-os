@@ -114,3 +114,14 @@ test('specialist tools remain routed inside their parent Workshops with safe ret
     assert.match(source, /Back to (Content|Design|Marketing) Workshop/)
   }
 })
+
+test('secondary department members see their Workshops without gaining admin navigation', () => {
+  const paths = visibleEnvironmentItems(sphere, { activeMembership: {
+    organizationId: 'org-a', role: 'contributor', departmentId: 'design', departmentIds: ['design', 'content'],
+  } }).map(item => item.path)
+  assert.ok(paths.includes('/sphere/design'))
+  assert.ok(paths.includes('/sphere/content'))
+  assert.ok(!paths.includes('/sphere/marketing'))
+  assert.ok(!paths.includes('/settings'))
+  assert.deepEqual(visibleEnvironmentItems(sphere, { activeMembership: { departmentIds: ['content'] } }), [])
+})

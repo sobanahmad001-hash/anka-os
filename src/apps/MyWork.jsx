@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { delivery } from '../data/delivery.js'
@@ -54,7 +54,14 @@ export default function MyWork() {
   const currentScope = useRef(null)
   currentScope.current = { organizationId: activeOrganizationId, revision: scopeRevision }
   const [workspace, setWorkspace] = useState(null)
-  const [activeTab, setActiveTab] = useState('overview')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedTab = searchParams.get('tab')
+  const activeTab = TABS.some(([id]) => id === requestedTab) ? requestedTab : 'overview'
+  const setActiveTab = (id) => {
+    const next = new URLSearchParams(searchParams)
+    next.set('tab', id)
+    setSearchParams(next)
+  }
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState('')
   const [error, setError] = useState('')
@@ -96,7 +103,7 @@ export default function MyWork() {
   }, [activeOrganizationId, handleOrganizationAccessError, organizationLoading, requestSignal, scopeRevision, selectionRequired, user?.id])
 
   useEffect(() => {
-    setWorkspace(null); setActiveTab('overview'); setLoading(true); setSaving(''); setError('')
+    setWorkspace(null); setLoading(true); setSaving(''); setError('')
     setVersionTarget(null); setVersionForm({ title: '', changeSummary: '', previewUrl: '', file: null, clientApprovalRequired: false })
     setReviewTarget(null); setReviewForm({ decision: 'approved', rationale: '', quality: true, brief: true, technical: true })
     setSubmissionTarget(null); setReviewerCandidates([]); setReviewerId('')

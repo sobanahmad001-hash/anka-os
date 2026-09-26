@@ -83,7 +83,7 @@ export default function WorkspaceHome() {
             <Panel title="Blockers" description="Explicitly blocked Project Tasks and Engagement Work Items." action="View all projects" onAction={() => navigate('/sphere/portfolio')}>
               <WorkList rows={snapshot.blockers.slice(0, 6)} empty="No work is explicitly blocked." navigate={navigate} />
             </Panel>
-            <Panel title="Reviews" description="Exact deliverable versions awaiting a human review decision." action="Open review queue" onAction={() => navigate('/sphere/my-work')}>
+            <Panel title="Reviews" description="Exact deliverable versions awaiting a human review decision." action="Open review queue" onAction={() => navigate('/sphere/my-work?tab=review')}>
               <ReviewList rows={snapshot.reviews.slice(0, 6)} navigate={navigate} />
             </Panel>
           </section>
@@ -109,7 +109,7 @@ function Summary({ snapshot, navigate }) {
     ['Engagement Work Items', snapshot.summary.engagementWorkItems, 'Open delivery items', '/sphere/portfolio', 'indigo'],
     ['Due in 14 days', snapshot.summary.dueSoon, `${snapshot.summary.overdue} overdue`, '/sphere/my-work', snapshot.summary.overdue ? 'rose' : 'emerald'],
     ['Blocked', snapshot.summary.blocked, 'Explicit blocked state', '/sphere/portfolio', snapshot.summary.blocked ? 'amber' : 'emerald'],
-    ['Reviews', snapshot.summary.reviews, 'Human decisions waiting', '/sphere/my-work', 'fuchsia'],
+    ['Reviews', snapshot.summary.reviews, 'Human decisions waiting', '/sphere/my-work?tab=review', 'fuchsia'],
   ]
   return <section aria-label="Workspace summary" className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">{cards.map(([title, value, note, path, tone]) => <button type="button" key={title} onClick={() => navigate(path)} className="workspace-metric group text-left"><span className={`workspace-metric-dot workspace-metric-dot-${tone}`} /><p className="text-xs font-medium text-slate-400">{title}</p><p className="mt-3 text-3xl font-semibold tracking-tight text-white">{value}</p><p className="mt-1 text-[11px] text-slate-600 transition-colors group-hover:text-slate-400">{note}</p></button>)}</section>
 }

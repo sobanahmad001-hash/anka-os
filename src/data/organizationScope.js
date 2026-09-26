@@ -85,7 +85,20 @@ export function createOrganizationScopeRepository(client) {
       if (signal && typeof query.abortSignal === 'function') query = query.abortSignal(signal)
       const { data, error } = await query
       if (error) throw error
-      return normalizeOrganizationMemberships(data || [])
+      const memberships = normalizeOrganizationMemberships(data || [])
+      if (!memberships.length) return memberships
+      let departmentsQuery = client.from('organization_department_memberships')
+        .select('organization_id, department_id, status').eq('user_id', userId).eq('status', 'active')
+      if (signal && typeof departmentsQuery.abortSignal === 'function') departmentsQuery = departmentsQuery.abortSignal(signal)
+      const { data: departments, error: departmentsError } = await departmentsQuery
+      signal?.throwIfAborted()
+      if (departmentsError) throw departmentsError
+      return memberships.map(membership => ({
+        ...membership,
+        departmentIds: [...new Set([membership.departmentId, ...(departments || [])
+          .filter(row => row.organization_id === membership.organizationId && row.status === 'active')
+          .map(row => row.department_id)].filter(Boolean))],
+      }))
     },
   })
 }

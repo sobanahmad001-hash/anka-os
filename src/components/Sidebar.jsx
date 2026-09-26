@@ -11,7 +11,7 @@ export default function Sidebar() {
   const activeEnvKey = getEnvironmentFromPath(location.pathname)
   const activeEnv = environmentNav.find((environment) => environment.key === activeEnvKey)
     || environmentNav.find((environment) => environment.key === 'sphere')
-  const userDept = activeMembership?.departmentId
+  const userDepartments = activeMembership?.departmentIds || [activeMembership?.departmentId].filter(Boolean)
   const allDepartments = ['system_owner', 'operations_admin', 'executive'].includes(activeMembership?.role)
 
   const visibleItems = visibleEnvironmentItems(activeEnv, {
@@ -42,11 +42,11 @@ export default function Sidebar() {
             <div className="mt-0.5 text-[11px] text-slate-500">{activeEnv.description}</div>
           </div>
         </div>
-        {activeEnv.key === 'sphere' && userDept && !allDepartments && (
-          <div className="mt-4">
-            <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${departmentBadgeColors[userDept] || 'bg-gray-700 text-gray-300'}`}>
+        {activeEnv.key === 'sphere' && userDepartments.length > 0 && !allDepartments && (
+          <div className="mt-4 flex flex-wrap gap-1">
+            {userDepartments.map(userDept => <span key={userDept} className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${departmentBadgeColors[userDept] || 'bg-gray-700 text-gray-300'}`}>
               {userDept} department
-            </span>
+            </span>)}
           </div>
         )}
         {activeEnv.key === 'sphere' && allDepartments && (

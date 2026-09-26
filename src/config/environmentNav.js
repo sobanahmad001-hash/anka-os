@@ -81,6 +81,7 @@ export function isNavigationItemVisible(item, {
   if (item.dept) {
     return ALL_DEPARTMENT_ROLES.has(activeMembership.role)
       || activeMembership.departmentId === item.dept
+      || activeMembership.departmentIds?.includes(item.dept) === true
   }
   return true
 }

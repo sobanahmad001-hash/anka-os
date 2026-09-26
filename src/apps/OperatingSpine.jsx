@@ -42,6 +42,7 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
   const [searchParams] = useSearchParams()
   const requestedEngagementId = searchParams.get('engagement') || ''
   const requestedWorkspaceTab = searchParams.get('tab') || 'overview'
+  const returnProjectId = searchParams.get('project') || ''
   const [view, setView] = useState(initialView)
   const [clients, setClients] = useState([])
   const [services, setServices] = useState([])
@@ -330,7 +331,7 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
 
   if (loading) return <div className="flex h-full items-center justify-center"><div className="h-9 w-9 animate-spin rounded-full border-2 border-slate-800 border-t-violet-500" /></div>
 
-  if (workspace) return <EngagementWorkspace workspace={workspace} owners={ownerOptions} organizationId={activeOrganizationId} membership={activeMembership} signal={requestSignal} initialTab={requestedWorkspaceTab} onRefresh={() => openEngagement(workspace.engagement.id, { quiet: true })} onBack={() => setWorkspace(null)} />
+  if (workspace) return <EngagementWorkspace workspace={workspace} owners={ownerOptions} organizationId={activeOrganizationId} membership={activeMembership} signal={requestSignal} initialTab={requestedWorkspaceTab} returnProjectId={returnProjectId} onRefresh={() => openEngagement(workspace.engagement.id, { quiet: true })} onBack={() => setWorkspace(null)} />
 
   return (
     <div className="h-full overflow-y-auto text-white">
@@ -376,13 +377,13 @@ function ServiceCatalogue({ services }) {
   return <section className="mt-6 grid gap-5 xl:grid-cols-2">{OPERATING_DEPARTMENTS.map(department => <article key={department.id} className="rounded-2xl border border-white/[0.07] bg-[#0e111a]/80 p-5"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-400">{department.name}</p><div className="mt-4 grid gap-2">{services.filter(service => service.department_id === department.id).map(service => <div key={service.id} className="rounded-xl border border-white/[0.06] bg-white/[0.025] p-3"><p className="text-sm font-semibold">{service.name}</p><p className="mt-1 text-xs leading-5 text-slate-500">{service.description}</p></div>)}</div></article>)}</section>
 }
 
-function EngagementWorkspace({ workspace, owners, organizationId, membership, signal, initialTab = 'overview', onRefresh, onBack }) {
+function EngagementWorkspace({ workspace, owners, organizationId, membership, signal, initialTab = 'overview', returnProjectId = '', onRefresh, onBack }) {
   const [tab, setTab] = useState(initialTab)
   const stageById = new Map(workspace.stages.map(stage => [stage.id, stage]))
   const hasDevelopment = workspace.services.some(item => item.status === 'active' && item.service_catalog?.department_id === 'development')
 
   return <div className="h-full overflow-y-auto text-white"><div className="mx-auto max-w-[1480px] px-4 py-6 sm:px-6 lg:px-8">
-    <button onClick={onBack} className="text-sm text-slate-500 hover:text-white">← Back to engagements</button>
+    <button onClick={onBack} className="text-sm text-slate-500 hover:text-white">← Back to engagements</button>{returnProjectId && <Link to={`/sphere/workspace/projects/${encodeURIComponent(returnProjectId)}`} className="ml-4 text-sm text-violet-300 hover:text-white">Back to project</Link>}
     <header className="mt-5 flex flex-wrap items-start justify-between gap-5"><div><p className="text-xs text-violet-400">{workspace.engagement.agency_clients?.name} · {workspace.engagement.brands?.name}</p><h1 className="mt-1 text-3xl font-semibold">{workspace.engagement.name}</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">{workspace.engagement.objective || 'No objective recorded.'}</p></div><Badge>{labelize(workspace.engagement.status)}</Badge></header>
     <div className="mt-7 grid gap-3 sm:grid-cols-4"><Metric label="Services" value={workspace.services.length} /><Metric label="Journey stages" value={workspace.stages.length} /><Metric label="Dependencies" value={workspace.dependencies.length} /><Metric label="Scoped connectors" value={workspace.connectors.length} /></div>
     <nav className="mt-7 flex gap-2 border-b border-white/[0.07]">
