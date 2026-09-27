@@ -64,9 +64,10 @@ function ScopedDesignVideoCapabilities({ directionVersionId: projectDirectionVer
   const submission = useRef({ signature: '', operationKey: '' })
   const [pendingRequest, setPendingRequest] = useState(null)
   const [promotionBusy, setPromotionBusy] = useState({})
+  const privateUnsettled = Boolean(privateConversationId && jobs.some(job => UNSETTLED_VIDEO_STATUSES.has(job.status)))
   const reportPromotion = useCallback((busy, jobId) => setPromotionBusy(current => current[jobId] === busy ? current : { ...current, [jobId]: busy }), [])
-  useEffect(() => { onNavigationBusyChange?.(Boolean(submitBusy || jobsBusy || pendingRequest || Object.values(promotionBusy).some(Boolean))) }, [submitBusy, jobsBusy, pendingRequest, promotionBusy, onNavigationBusyChange])
-  useEffect(() => () => { sequence.current++ }, [])
+  useEffect(() => { onNavigationBusyChange?.(Boolean(submitBusy || jobsBusy || pendingRequest || privateUnsettled || Object.values(promotionBusy).some(Boolean))) }, [submitBusy, jobsBusy, pendingRequest, privateUnsettled, promotionBusy, onNavigationBusyChange])
+  useEffect(() => () => { sequence.current++; jobsSequence.current++ }, [])
   useEffect(() => {
     let active = true
     setConnections([]); setConnectionId(''); setConnectionError('')

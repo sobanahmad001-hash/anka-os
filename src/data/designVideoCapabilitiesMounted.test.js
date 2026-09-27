@@ -62,7 +62,7 @@ test('mounted video submission context and uncertainty regressions', async t => 
       await change(elements(env.container, 'input').at(-1), undefined, true)
     }
     const submitNow = () => propsOf(elements(env.container, 'form')[0]).onSubmit({ preventDefault() {} })
-    return { env, submit, calls, render, prepare, submitNow }
+    return { env, submit, calls, render, prepare, submitNow, unmount: () => act(async () => root.unmount()) }
   }
   for (const kind of ['direction', 'organization', 'scope revision']) await t.test(kind + ' switch clears consent/prompt and old pending busy', async t => {
     const m = await mount(t); await m.prepare()
@@ -131,6 +131,22 @@ test('mounted video submission context and uncertainty regressions', async t => 
     await m.render('private-b')
     assert.equal(elements(m.env.container, 'video').length, 0)
     assert.equal(m.calls.length, 0)
+  })
+  await t.test('private deferred context check cannot dispatch after unmount', async t => {
+    const check = deferred()
+    const m = await mount(t, { privateConversationId: 'private-a', beforeGenerate: () => check.promise })
+    await m.prepare()
+    let pending
+    await act(async () => { pending = m.submitNow() })
+    assert.equal(m.calls.length, 0)
+    await m.unmount()
+    await act(async () => { check.resolve(); await pending })
+    assert.equal(m.calls.length, 0, 'cleanup invalidates job generation before any provider dispatch')
+  })
+  await t.test('private durable unknown history keeps navigation locked after remount', async t => {
+    const busy = []
+    await mount(t, { privateConversationId: 'private-a', onNavigationBusyChange: value => busy.push(value), rows: [{ id: 'unknown', private_conversation_id: 'private-a', status: 'outcome_unknown', created_at: new Date().toISOString() }] })
+    assert.equal(busy.at(-1), true)
   })
   await t.test('rapid double submit invokes one mocked request', async t => {
     const m = await mount(t); await m.prepare()
