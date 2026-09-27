@@ -7,6 +7,13 @@ export function getDesignVideoQuote(client, organizationId, input, signal) {
     { direction_version_id, duration_seconds, resolution, aspect_ratio, output_format, generate_audio }, { signal })
 }
 
+export function getPrivateDesignVideoQuote(client, organizationId, input, signal) {
+  if (!organizationId || !input?.private_conversation_id || input.direction_version_id) throw new Error('Exact private Design conversation is required');
+  const { private_conversation_id, duration_seconds, resolution, aspect_ratio, output_format, generate_audio } = input;
+  return invokeDesignFunction(client, 'design-workshop', organizationId, 'get_private_video_quote',
+    { private_conversation_id, duration_seconds, resolution, aspect_ratio, output_format, generate_audio }, { signal });
+}
+
 // Display validation only. Server revalidation, quote trust and spending remain
 // server-owned. A displayed quote alone never authorizes generation.
 export function videoQuoteDisplay(data, input, now = Date.now()) {
