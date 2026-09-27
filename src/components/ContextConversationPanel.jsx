@@ -1,9 +1,10 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { departmentChat } from '../data/departmentChatRepository.js'
 import { integrations } from '../data/integrationRepository.js'
 import { contextChatRunner } from '../data/contextChatRunnerRepository.js'
+const PrivateDesignVideoTools = lazy(() => import('./PrivateDesignVideoTools.jsx'))
 
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-violet-500'
 const BUTTON = 'rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50'
@@ -36,6 +37,10 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   const [nextOffset, setNextOffset] = useState(0)
   const [listBusy, setListBusy] = useState(false)
   const [conversationId, setConversationId] = useState('')
+  const [assetType, setAssetType] = useState('text')
+  const [videoOpened, setVideoOpened] = useState(false)
+  const [videoActivity, setVideoActivity] = useState(null)
+  const videoBusy = videoActivity?.conversationId === conversationId && videoActivity.busy
   const [messages, setMessages] = useState([])
   const [hasOlder, setHasOlder] = useState(false)
   const [title, setTitle] = useState('')
@@ -62,13 +67,22 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   const activeConversation = useRef(conversationId)
   const listRevision = useRef(0)
   activeConversation.current = conversationId
+  const reportVideoBusy = useCallback(value => {
+    if (activeConversation.current === conversationId) setVideoActivity({ conversationId, busy: value })
+  }, [conversationId])
+  const checkPrivateVideoContext = useCallback(async exactId => {
+    if (signal.aborted || activeConversation.current !== exactId || contextKind !== 'department_private' || departmentId !== 'design') throw new Error('Private video context changed')
+    const result = await departmentChat.getContextConversation({ conversation_id: exactId }, { organizationId, signal })
+    const row = result.conversation
+    if (signal.aborted || activeConversation.current !== exactId || row?.id !== exactId || row.owner_id !== user.id || (row.organization_id && row.organization_id !== organizationId) || row.context_kind !== 'department_private' || row.department_id !== 'design' || row.project_id || row.state !== 'active') throw new Error('Private video context is unavailable')
+  }, [signal, contextKind, departmentId, organizationId, user.id])
   const selectedOwnerId = conversations.find(row => row.id === conversationId)?.owner_id
   useEffect(() => {
-    onNavigationBusyChange?.(!signal?.aborted && Boolean(busy || loading || historyBusy || olderBusy || listBusy || shareBusy || aiBusyMessageId))
+    onNavigationBusyChange?.(!signal?.aborted && Boolean(busy || loading || historyBusy || olderBusy || listBusy || shareBusy || aiBusyMessageId || videoBusy))
     const clear = () => onNavigationBusyChange?.(false)
     signal?.addEventListener?.('abort', clear, { once: true })
     return () => { signal?.removeEventListener?.('abort', clear); clear() }
-  }, [busy, loading, historyBusy, olderBusy, listBusy, shareBusy, aiBusyMessageId, onNavigationBusyChange, signal])
+  }, [busy, loading, historyBusy, olderBusy, listBusy, shareBusy, aiBusyMessageId, videoBusy, onNavigationBusyChange, signal])
 
   const showError = useCallback((reason) => {
     if (signal.aborted) return
@@ -120,6 +134,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
 
   useEffect(() => {
     setDraft(drafts.current.get(conversationId) || '')
+    setAssetType('text'); setVideoOpened(false); setVideoActivity(null)
     setAiUseConfirmed(false)
     setIncludeCanonicalContext(false)
     setSharing({ candidates: [], recipients: [], loaded: false })
@@ -199,6 +214,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
 
   async function createConversation(event) {
     event.preventDefault()
+    if (videoBusy) return
     setBusy(true); setError('')
     try {
       const created = await departmentChat.createContextConversation({
@@ -378,7 +394,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
     <form onSubmit={createConversation} className="flex flex-wrap gap-2">
       <input className={`${INPUT} min-w-52 flex-1`} aria-label="New conversation title" placeholder="New conversation title"
         maxLength={160} value={title} onChange={event => setTitle(event.target.value)} />
-      <button className={BUTTON} disabled={busy || loading}>New conversation</button>
+      <button className={BUTTON} disabled={busy || loading || videoBusy}>New conversation</button>
     </form>
     </Navigation>
       {!hideConversationList && <div className="space-y-2" aria-label="Saved conversations">
@@ -387,7 +403,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
         {loading && <p className="text-sm text-slate-500">Loading conversations…</p>}
         {!loading && !conversations.length && <p className="text-sm text-slate-500">No conversations yet.</p>}
         {conversationSearch && !conversations.some(row => row.title.toLowerCase().includes(conversationSearch.toLowerCase())) && <p className="text-xs text-slate-400">No matching loaded conversations. Load older conversations to search more.</p>}
-        {conversations.filter(row => row.title.toLowerCase().includes(conversationSearch.toLowerCase())).map(row => <button key={row.id} type="button" aria-pressed={row.id === conversationId} onClick={() => { drafts.current.set(conversationId, draft); setConversationId(row.id) }}
+        {conversations.filter(row => row.title.toLowerCase().includes(conversationSearch.toLowerCase())).map(row => <button key={row.id} type="button" disabled={videoBusy} aria-pressed={row.id === conversationId} onClick={() => { if (videoBusy) return; drafts.current.set(conversationId, draft); setConversationId(row.id) }}
           className={`w-full rounded-xl border p-3 text-left text-sm ${row.id === conversationId ? 'border-violet-500 bg-violet-950/30 text-white' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}>
           {row.title}</button>)}
         {hasMoreConversations && <button type="button" onClick={loadMoreConversations} disabled={listBusy || busy}
@@ -437,6 +453,16 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
                 </div>}
             </div>)}
           </div>
+          {compact && departmentId === 'design' && isOwner && <label className="mt-4 grid gap-2 text-sm">Create
+            <select className={`${INPUT} max-w-sm`} aria-label="Private Design asset type" value={assetType} disabled={Boolean(videoBusy || busy || aiBusyMessageId || historyBusy)}
+              onChange={event => { if (videoBusy || busy || aiBusyMessageId || historyBusy) return; setAssetType(event.target.value); if (event.target.value === 'video') setVideoOpened(true) }}>
+              <option value="text">Text conversation</option><option value="video" disabled={selected.state !== 'active'}>Video · Higgsfield</option>
+            </select>
+          </label>}
+          {videoOpened && departmentId === 'design' && contextKind === 'department_private' && isOwner && <div hidden={assetType !== 'video'}>
+            <Suspense fallback={<p role="status">Loading private video tools…</p>}><PrivateDesignVideoTools key={conversationId} conversationId={conversationId} beforeGenerate={checkPrivateVideoContext} onNavigationBusyChange={reportVideoBusy} /></Suspense>
+          </div>}
+          <div hidden={assetType !== 'text'}>
           {compact && modelControls}
           <form onSubmit={sendMessage} className="mt-5 space-y-2 border-t border-slate-800 pt-4">
             <label htmlFor="private-conversation-message" className="text-xs font-semibold uppercase tracking-wide text-slate-400">Your message</label>
@@ -445,6 +471,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
               placeholder="Capture an idea, question, or direction for this private conversation." />
             <button className={BUTTON} disabled={busy || !draft.trim()}>Save message</button>
           </form>
+          </div>
         </>}
       </div>
     </div>

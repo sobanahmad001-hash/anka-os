@@ -9,17 +9,34 @@ import DesignVideoPromotion from './DesignVideoPromotion.jsx'
 const JOB_PAGE_SIZE = 50
 const UNSETTLED_VIDEO_STATUSES = new Set(['queued', 'claimed', 'provider_pending', 'provider_completed', 'outcome_unknown'])
 
-export default function DesignVideoCapabilities({ directionVersionId, beforeGenerate, onNavigationBusyChange, presentation }) {
+export default function DesignVideoCapabilities({ directionVersionId, privateConversationId, beforeGenerate, onNavigationBusyChange, presentation }) {
   const { activeOrganizationId, scopeRevision } = useOrganization()
   return <ScopedDesignVideoCapabilities
-    key={`${activeOrganizationId}:${scopeRevision}:${directionVersionId}`}
-    directionVersionId={directionVersionId} beforeGenerate={beforeGenerate} onNavigationBusyChange={onNavigationBusyChange} presentation={presentation} />
+    key={`${activeOrganizationId}:${scopeRevision}:${directionVersionId || ''}:${privateConversationId || ''}`}
+    directionVersionId={directionVersionId} privateConversationId={privateConversationId} beforeGenerate={beforeGenerate} onNavigationBusyChange={onNavigationBusyChange} presentation={presentation} />
 }
 
 // eslint-disable-next-line no-unused-vars -- This config does not count JSX component references.
-function ScopedDesignVideoCapabilities({ directionVersionId, beforeGenerate, onNavigationBusyChange, presentation }) {
+function ScopedDesignVideoCapabilities({ directionVersionId: projectDirectionVersionId, privateConversationId, beforeGenerate, onNavigationBusyChange, presentation }) {
   const { activeOrganizationId, requestSignal, scopeRevision } = useOrganization()
-  const studio = useMemo(() => activeOrganizationId ? designWorkshop.forOrganization(activeOrganizationId, { signal: requestSignal }) : null, [activeOrganizationId, requestSignal])
+  const privateMode = Boolean(privateConversationId)
+  // One real anchor only. A private conversation is never a fabricated project direction.
+  const directionVersionId = privateMode ? (projectDirectionVersionId ? '' : privateConversationId) : projectDirectionVersionId
+  const studio = useMemo(() => {
+    if (!activeOrganizationId) return null
+    const source = designWorkshop.forOrganization(activeOrganizationId, { signal: requestSignal })
+    if (!privateConversationId) return source
+    if (projectDirectionVersionId || !['getPrivateVideoQuote', 'generatePrivateVideo', 'listPrivateVideoJobs'].every(name => typeof source[name] === 'function')) return null
+    return { ...source,
+      getVideoQuote: input => source.getPrivateVideoQuote(input),
+      generateVideo: input => source.generatePrivateVideo(input),
+      listVideoJobs: async (_anchor, cursor) => {
+        const rows = await source.listPrivateVideoJobs(privateConversationId, cursor)
+        if (!Array.isArray(rows) || rows.some(row => row.private_conversation_id !== privateConversationId || row.direction_version_id || (row.organization_id && row.organization_id !== activeOrganizationId))) throw new Error('Private video history scope mismatch')
+        return rows
+      },
+    }
+  }, [activeOrganizationId, requestSignal, privateConversationId, projectDirectionVersionId])
   const [mode, setMode] = useState('explore')
   const [resolution, setResolution] = useState('720p')
   const [duration, setDuration] = useState(5)
@@ -86,7 +103,7 @@ function ScopedDesignVideoCapabilities({ directionVersionId, beforeGenerate, onN
     })
     return () => { active = false }
   }, [studio, directionVersionId, scopeRevision, requestSignal])
-  const input = { direction_version_id: directionVersionId, duration_seconds: duration, resolution, aspect_ratio: aspectRatio, output_format: format, generate_audio: audio }
+  const input = { ...(privateMode ? { private_conversation_id: privateConversationId } : { direction_version_id: directionVersionId }), duration_seconds: duration, resolution, aspect_ratio: aspectRatio, output_format: format, generate_audio: audio }
   const key = JSON.stringify([activeOrganizationId, scopeRevision, mode, input])
   const current = result?.key === key ? result : null
   const options = videoResolutionOptions(mode)
@@ -130,14 +147,14 @@ function ScopedDesignVideoCapabilities({ directionVersionId, beforeGenerate, onN
     submitInFlight.current = true
     const exactPrompt = prompt.trim()
     const signature = JSON.stringify([activeOrganizationId, directionVersionId, mode,
-      input, connectionId, display.quoteId, exactPrompt])
+      input, connectionId, display?.quoteId, exactPrompt])
     const operationKey = submission.current.signature === signature
       ? submission.current.operationKey : crypto.randomUUID()
     submission.current = { signature, operationKey }
     const attempt = jobsSequence.current
     setSubmitBusy(true); setSubmitNotice('')
     try {
-      await beforeGenerate?.(directionVersionId)
+      if (!privateMode || !reconcile) await beforeGenerate?.(directionVersionId)
       if (requestSignal?.aborted || jobsSequence.current !== attempt) return
       const exactRequest = pendingRequest || { ...input, mode, prompt: exactPrompt,
         connector_connection_id: connectionId, quote_id: display.quoteId,
@@ -157,7 +174,7 @@ function ScopedDesignVideoCapabilities({ directionVersionId, beforeGenerate, onN
     } catch {
       if (requestSignal?.aborted || jobsSequence.current !== attempt) return
       setSpendConfirmed(false)
-      setSubmitNotice('Submission outcome could not be confirmed. Check the original job in private history. New requests for this direction remain blocked while it is unresolved.')
+      setSubmitNotice('Submission outcome could not be confirmed. Check the original job in private history. New requests for this context remain blocked while it is unresolved.')
       try {
         const rows = await studio.listVideoJobs(directionVersionId)
         if (!requestSignal?.aborted && jobsSequence.current === attempt) {
@@ -220,13 +237,25 @@ function ScopedDesignVideoCapabilities({ directionVersionId, beforeGenerate, onN
       Math.max(0, preview.expiresAt - Date.now()))
     return () => clearTimeout(timer)
   }, [preview])
+  const connectionPicker = <label className="block">Verified organization video connection
+        <select className="mt-1 w-full rounded bg-slate-900 p-2" value={connectionId}
+          disabled={submitBusy || Boolean(pendingRequest)} onChange={event => {
+            setConnectionId(event.target.value); setSpendConfirmed(false)
+            submission.current = { signature: '', operationKey: '' }
+          }}>
+          <option value="">Choose connection</option>
+          {connections.map(connection => <option key={connection.id} value={connection.id}>{connection.display_name}</option>)}
+        </select>
+      </label>
   return <details open={presentation === 'workbench' ? true : undefined} className={presentation === 'workbench' ? 'design-video-workbench' : 'mt-3 rounded-xl border border-white/10 p-3 text-xs text-slate-400'}>
     <summary className="cursor-pointer font-semibold text-slate-200">Video capabilities · {display?.paidExecutionEnabled && !display.spendTrackingMissing && selectedConnection ? 'exact quote required' : 'generation unavailable'}</summary>
+    {privateMode && <p role="status" className="mt-2">{studio ? 'Owner-private video · no project required. Server eligibility and exact quote checks still apply.' : 'Private video service is not available in this build. No generation or project fallback is enabled.'} Only the video prompt and settings you explicitly approve are sent to Higgsfield; conversation history and attachments are not included. This text-to-video model does not support reference uploads here.</p>}
     {presentation === 'workbench' && <section className="design-output-preview" aria-label="Private video output preview">
       <h3>Private video preview</h3>
-      {preview ? <><video controls src={preview.url} /><p className="design-preview-provenance">Private job: {preview.jobId} · Direction: {directionVersionId}. Preview link expires automatically. No project copy or approval inferred.</p></> : <div className="design-output-empty">Open a ready output from your private jobs below. Existing preview links expire automatically; no video is generated by opening this panel.</div>}
+      {preview ? <><video controls src={preview.url} /><p className="design-preview-provenance">Private job: {preview.jobId} · {privateMode ? 'Private conversation' : 'Direction'}: {directionVersionId}. Preview link expires automatically. No project copy or approval inferred.</p></> : <div className="design-output-empty">Open a ready output from your private jobs below. Existing preview links expire automatically; no video is generated by opening this panel.</div>}
     </section>}
     <p className="mt-2">Higgsfield Seedance 2.5 supports 480p and 720p. Google media is not configured. Maximum USD $2 per generated video; this limit does not authorize spending.</p>
+    {privateMode && connectionPicker}
     <fieldset disabled={submitBusy || Boolean(pendingRequest)} className="mt-3 flex flex-wrap gap-3">
       <label>Mode <select className="rounded bg-slate-900 p-2" value={mode} onChange={event => { edit(setMode, event.target.value); setResolution('') }}>
         <option value="explore">Explore</option><option value="production">Production</option>
@@ -260,36 +289,27 @@ function ScopedDesignVideoCapabilities({ directionVersionId, beforeGenerate, onN
             submission.current = { signature: '', operationKey: '' }
           }} />
       </label>
-      <label className="block">Verified organization video connection
-        <select className="mt-1 w-full rounded bg-slate-900 p-2" value={connectionId}
-          disabled={submitBusy || Boolean(pendingRequest)} onChange={event => {
-            setConnectionId(event.target.value); setSpendConfirmed(false)
-            submission.current = { signature: '', operationKey: '' }
-          }}>
-          <option value="">Choose connection</option>
-          {connections.map(connection => <option key={connection.id} value={connection.id}>{connection.display_name}</option>)}
-        </select>
-      </label>
+      {!privateMode && connectionPicker}
       {connectionError && <p role="alert" className="text-amber-300">{connectionError}</p>}
       {!connections.length && !connectionError && <p>No verified organization-only Higgsfield connection is available.</p>}
       <label className="flex items-start gap-2"><input type="checkbox" checked={spendConfirmed}
         disabled={submitBusy || !display?.paidExecutionEnabled || display?.status !== 'quoted'
           || display?.spendTrackingMissing !== false || !selectedConnection}
         onChange={event => setSpendConfirmed(event.target.checked)} />
-        <span>I approve one request with these exact settings and a maximum charge of USD ${display?.status === 'quoted' ? display.maximum : '—'}. {display?.spendGuardMode === 'local_monthly_cap' ? 'The organization monthly cap also applies.' : display?.spendGuardMode === 'provider_managed' ? 'Your provider-side limit is managed externally and is not verified by Anka.' : 'Organization spend tracking is required.'}</span>
+        <span>I approve sending this video prompt and exact settings to Higgsfield Seedance 2.5 through {selectedConnection?.display_name || 'the selected video connection'} for one request with a maximum charge of USD ${display?.status === 'quoted' ? display.maximum : '—'}. {display?.spendGuardMode === 'local_monthly_cap' ? 'The organization monthly cap also applies.' : display?.spendGuardMode === 'provider_managed' ? 'Your provider-side limit is managed externally and is not verified by Anka.' : 'Organization spend tracking is required.'}</span>
       </label>
       <button type="submit" className="rounded border border-violet-500 px-3 py-2 text-violet-100 disabled:cursor-not-allowed disabled:opacity-40"
         disabled={!canSubmit}>{submitBusy ? 'Recording original request…' : 'Generate one video'}</button>
       {submitNotice && <p role="status" className="text-amber-200">{submitNotice}</p>}
       {pendingRequest && <button type="button" disabled={submitBusy} className="rounded border px-3 py-2" onClick={event => submitVideo(event, true)}>Reconcile same video request</button>}
       {!jobsLoaded && <p className="text-amber-300">Private video history must load before a new request can be submitted.</p>}
-      {hasUnsettledJob && <p className="text-amber-300">An earlier video request is unresolved. Check its original job before creating another request for this direction.</p>}
+      {hasUnsettledJob && <p className="text-amber-300">An earlier video request is unresolved. Check its original job before creating another request for this context.</p>}
     </form>
     <p className="mt-2">Check the Asset Library and existing templates before generating. Preserve original footage for text, logo, date or caption corrections; video assembly is not available here.</p>
     <div className="mt-3 border-t border-white/10 pt-3">
       <p className="font-semibold text-slate-200">Your private video jobs</p>
       {jobsError && <p role="alert" className="mt-2 text-amber-300">{jobsError}</p>}
-      {!jobs.length && !jobsError && <p className="mt-2">No video jobs recorded for this direction.</p>}
+      {!jobs.length && !jobsError && <p className="mt-2">No video jobs recorded for this {privateMode ? 'private conversation' : 'direction'}.</p>}
       {jobs.map(job => <div key={job.id} className="mt-2 rounded-lg border border-white/10 p-2">
         <p className="font-medium text-slate-200">{job.mode} · {job.duration_seconds}s · {job.resolution} · {job.status.replaceAll('_', ' ')}</p>
         <p className="mt-1">Started {new Date(job.created_at).toLocaleString()}</p>
