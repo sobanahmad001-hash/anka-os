@@ -298,7 +298,7 @@ export function createOperatingSpineRepository(client) {
       const designDirectionVersionIds = designDirectionVersions.map((version) => version.id)
       const pageDesigns = designDirectionVersionIds.length
         ? await dataOrThrow(client.from('website_page_designs')
-          .select('id, organization_id, design_direction_version_id, slug, status, created_at, updated_at')
+          .select('id, organization_id, design_direction_version_id, slug, status, created_at')
           .eq('organization_id', organizationId)
           .in('design_direction_version_id', designDirectionVersionIds)
           .order('created_at', { ascending: false }), signal)

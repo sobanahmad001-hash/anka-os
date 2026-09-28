@@ -127,7 +127,7 @@ function ScopedAnkaAssistant() {
     try {
       if (!departmentId) return setError('Select an operating department.')
       const response = await aiRepository.run({ organizationId: activeOrganizationId, capability, projectId: projectId || null, engagementId: engagementId || null, departmentId, input })
-      setResult(response)
+      setResult({ ...response, capability, runContext: { projectId: projectId || null, engagementId: engagementId || null, departmentId } })
       setRuns(current => [{
         id: response.run_id, project_id: projectId || null, engagement_id: engagementId || null, capability,
         status: 'completed', output_text: response.content,
@@ -160,7 +160,7 @@ function ScopedAnkaAssistant() {
 
   async function confirmProposal() {
     const action = result?.proposed_action
-    if (!action || !user?.id || workspace?.project?.organization_id !== activeOrganizationId) return
+    if (!action || !user?.id || workspace?.project?.organization_id !== activeOrganizationId || result?.runContext?.projectId !== projectId || workspace?.project?.id !== result?.runContext?.projectId) return setError('Reopen this audited proposal in its original project before confirming it.')
     setDecisionSaving(true)
     setError('')
     try {
@@ -229,40 +229,85 @@ function ScopedAnkaAssistant() {
   if (loading) return <div className="flex h-full items-center justify-center bg-slate-950"><div className="h-8 w-8 animate-spin rounded-full border-b-2 border-purple-500" /></div>
 
   return <div className="min-h-full bg-slate-950 text-white">
-    <header className="border-b border-slate-800 bg-gradient-to-r from-purple-950/50 to-slate-950 px-6 py-6"><div className="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-400">Human-controlled intelligence</p><h1 className="mt-1 text-2xl font-semibold">Anka AI Assistant</h1><p className="mt-1 text-sm text-slate-400">Private conversations for organization and project work, with separate audited record tools.</p></div><div className="flex flex-wrap gap-2"><button onClick={() => setActiveTab('assistant')} className={`rounded-xl px-4 py-2 text-sm ${activeTab === 'assistant' ? 'bg-purple-600' : 'bg-slate-800 text-slate-400'}`}>Record tools</button><button onClick={() => setActiveTab('conversations')} className={`rounded-xl px-4 py-2 text-sm ${activeTab === 'conversations' ? 'bg-purple-600' : 'bg-slate-800 text-slate-400'}`}>Conversations</button><button onClick={() => setActiveTab('private')} className={`rounded-xl px-4 py-2 text-sm ${activeTab === 'private' ? 'bg-purple-600' : 'bg-slate-800 text-slate-400'}`}>Private memory</button><button onClick={() => setActiveTab('policy')} className={'rounded-xl px-4 py-2 text-sm ' + (activeTab === 'policy' ? 'bg-purple-600' : 'bg-slate-800 text-slate-400')}>Organization policy</button><button onClick={() => setActiveTab('audit')} className={`rounded-xl px-4 py-2 text-sm ${activeTab === 'audit' ? 'bg-purple-600' : 'bg-slate-800 text-slate-400'}`}>AI Audit</button></div></div></header>
+    <header className="border-b border-slate-800 bg-gradient-to-r from-purple-950/50 to-slate-950 px-6 py-6"><div className="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-400">Human-controlled intelligence</p><h1 className="mt-1 text-2xl font-semibold">Anka AI Assistant</h1><p className="mt-1 text-sm text-slate-400">Private conversations for organization and project work, with separate audited record tools.</p></div><div className="flex flex-wrap gap-2"><button onClick={() => setActiveTab('conversations')} className={`rounded-xl px-4 py-2 text-sm ${activeTab === 'conversations' ? 'bg-purple-600' : 'bg-slate-800 text-slate-400'}`}>Chat</button><button onClick={() => setActiveTab('assistant')} className={`rounded-xl px-4 py-2 text-sm ${activeTab === 'assistant' ? 'bg-purple-600' : 'bg-slate-800 text-slate-400'}`}>Record tools</button><button onClick={() => setActiveTab('private')} className={`rounded-xl px-4 py-2 text-sm ${activeTab === 'private' ? 'bg-purple-600' : 'bg-slate-800 text-slate-400'}`}>Private memory</button><button onClick={() => setActiveTab('policy')} className={'rounded-xl px-4 py-2 text-sm ' + (activeTab === 'policy' ? 'bg-purple-600' : 'bg-slate-800 text-slate-400')}>Organization policy</button><button onClick={() => setActiveTab('audit')} className={`rounded-xl px-4 py-2 text-sm ${activeTab === 'audit' ? 'bg-purple-600' : 'bg-slate-800 text-slate-400'}`}>AI Audit</button></div></div></header>
     <div className="border-b border-amber-900/50 bg-amber-950/20 px-6 py-3 text-center text-xs text-amber-300">AI can analyze, draft, review, and propose. It cannot approve, publish, deploy, launch spend, change scope, or act without your confirmation.</div>
     {error && <div className="mx-auto mt-4 max-w-7xl rounded-xl border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">{error}</div>}
 
     {activeTab === 'assistant' ? <main className="mx-auto grid max-w-7xl gap-6 p-6 xl:grid-cols-[360px_1fr]">
-      <form onSubmit={runAssistant} className="h-fit space-y-5 rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div><h2 className="font-semibold">Request assistance</h2><p className="mt-1 text-xs text-slate-500">The server retrieves the canonical project plus its Operating Spine extension, when present, and uses the verified connector mapped to the selected department.</p></div><Field label="Capability"><div className="space-y-2">{CAPABILITIES.map(([id, label, description]) => <button type="button" disabled={id === 'action_proposal' && !workspace?.workstreams?.length} key={id} onClick={() => setCapability(id)} className={`w-full rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-40 ${capability === id ? 'border-purple-600 bg-purple-950/40' : 'border-slate-800 bg-slate-950/40'}`}><p className="text-sm font-medium">{label}</p><p className="mt-1 text-xs text-slate-500">{description}</p></button>)}</div></Field><Field label="Project context"><select className={INPUT} value={projectId} onChange={event => setProjectId(event.target.value)}><option value="">My work only</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></Field>{engagementId && <p className="rounded-xl border border-violet-900/60 bg-violet-950/20 px-3 py-2 text-xs text-violet-300">Operating Spine services and artifacts are included automatically.</p>}<Field label="Operating department"><select required className={INPUT} value={departmentId} onChange={event => setDepartmentId(event.target.value)}><option value="">Select department</option>{departmentOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></Field><_AssistantMemoryContext organizationId={activeOrganizationId} projectId={projectId} departmentId={departmentId} scopeRevision={scopeRevision} onAccessError={handleOrganizationAccessError} /><Field label={capability === 'project_pulse' ? 'Specific focus (optional)' : 'Request'}><textarea className={INPUT} rows="5" value={input} onChange={event => setInput(event.target.value)} placeholder={placeholder(capability)} /></Field><button disabled={running || !departmentId || (projectId && !workspace) || (engagementId && !engagementWorkspace) || (!projectId && capability !== 'daily_brief')} className="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold disabled:opacity-50">{running ? 'Analyzing authorized context…' : `Run ${selectedCapability?.[1]}`}</button></form>
+      <form onSubmit={runAssistant} className="h-fit space-y-5 rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><div><h2 className="font-semibold">Request assistance</h2><p className="mt-1 text-xs text-slate-500">The server retrieves the canonical project plus its Operating Spine extension, when present, and uses the verified connector mapped to the selected department.</p></div><Field label="Capability"><div className="space-y-2">{CAPABILITIES.map(([id, label, description]) => <button type="button" disabled={id === 'action_proposal' && !workspace?.workstreams?.length} key={id} onClick={() => setCapability(id)} className={`w-full rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-40 ${capability === id ? 'border-purple-600 bg-purple-950/40' : 'border-slate-800 bg-slate-950/40'}`}><p className="text-sm font-medium">{label}</p><p className="mt-1 text-xs text-slate-500">{description}</p></button>)}</div></Field><Field label="Project context"><select className={INPUT} value={projectId} disabled={running || Boolean(result?.proposed_action && !result?.decision)} onChange={event => setProjectId(event.target.value)}><option value="">My work only</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></Field>{engagementId && <p className="rounded-xl border border-violet-900/60 bg-violet-950/20 px-3 py-2 text-xs text-violet-300">Operating Spine services and artifacts are included automatically.</p>}<Field label="Operating department"><select required className={INPUT} value={departmentId} onChange={event => setDepartmentId(event.target.value)}><option value="">Select department</option>{departmentOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></Field><_AssistantMemoryContext organizationId={activeOrganizationId} projectId={projectId} departmentId={departmentId} scopeRevision={scopeRevision} onAccessError={handleOrganizationAccessError} /><Field label={capability === 'project_pulse' ? 'Specific focus (optional)' : 'Request'}><textarea className={INPUT} rows="5" value={input} onChange={event => setInput(event.target.value)} placeholder={placeholder(capability)} /></Field><button disabled={running || !departmentId || (projectId && !workspace) || (engagementId && !engagementWorkspace) || (!projectId && capability !== 'daily_brief')} className="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold disabled:opacity-50">{running ? 'Analyzing authorized context…' : `Run ${selectedCapability?.[1]}`}</button></form>
 
-      <section className="min-w-0 space-y-5">{result ? <><article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-purple-400">{labelize(capability)}</p><p className="mt-1 text-xs text-slate-600">{DEPARTMENT_LABELS[result.department_id] || labelize(result.department_id)} · {result.provider} · {result.model} · Run {result.run_id}</p></div><Usage usage={result.usage} /></div><pre className="mt-5 whitespace-pre-wrap font-sans text-sm leading-7 text-slate-200">{result.content}</pre><SourceManifest manifest={result.context_manifest} /></article>{result.proposed_action && <ProposalCard result={result} workspace={workspace} saving={decisionSaving} onConfirm={confirmProposal} onReject={rejectProposal} />}</> : <div className="flex min-h-[540px] items-center justify-center rounded-2xl border border-dashed border-slate-800 bg-slate-900/30 p-8 text-center"><div><div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-purple-600 text-2xl font-bold">A</div><h2 className="mt-5 text-lg font-semibold">Select a capability, project, and department</h2><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-500">Anka will use canonical tasks, research, deliverables, requests, the Living Project Record, and the verified connector assigned to that department. Record IDs and connector scope are preserved in the audit manifest.</p></div></div>}</section>
+      <section className="min-w-0 space-y-5">{result ? <><article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-purple-400">{labelize(result.capability || capability)}</p><p className="mt-1 text-xs text-slate-600">{DEPARTMENT_LABELS[result.department_id] || labelize(result.department_id)} · {result.provider} · {result.model} · Run {result.run_id}</p></div><Usage usage={result.usage} /></div><pre className="mt-5 whitespace-pre-wrap font-sans text-sm leading-7 text-slate-200">{result.content}</pre><SourceManifest manifest={result.context_manifest} /></article>{result.proposed_action && <ProposalCard result={result} workspace={workspace} saving={decisionSaving} onConfirm={confirmProposal} onReject={rejectProposal} />}</> : <div className="flex min-h-[540px] items-center justify-center rounded-2xl border border-dashed border-slate-800 bg-slate-900/30 p-8 text-center"><div><div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-purple-600 text-2xl font-bold">A</div><h2 className="mt-5 text-lg font-semibold">Select a capability, project, and department</h2><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-500">Anka will use canonical tasks, research, deliverables, requests, the Living Project Record, and the verified connector assigned to that department. Record IDs and connector scope are preserved in the audit manifest.</p></div></div>}</section>
     </main> : activeTab === 'conversations' ? <main className="mx-auto max-w-6xl space-y-5 p-6">
       <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
         <h2 className="font-semibold">Choose conversation context</h2>
         <p className="mt-1 text-sm text-slate-400">Organization and project conversations keep separate histories and access rules. Use Record tools for structured work across canonical records.</p>
         <div className="mt-3 flex flex-wrap gap-3">
-          <label className="text-sm">Context <select className={INPUT} value={chatScope} onChange={event => setChatScope(event.target.value)}>
+          <label className="text-sm">Context <select className={INPUT} value={chatScope} onChange={event => { setChatScope(event.target.value); if (event.target.value === 'organization') { setChatProjectId(''); setProjectId('') } }}>
             <option value="organization">Organization</option><option value="project">Project</option>
           </select></label>
           {chatScope === 'project' && <label className="min-w-64 flex-1 text-sm">Project <select className={INPUT}
             value={projects.some(project => project.id === chatProjectId) ? chatProjectId : ''}
-            onChange={event => setChatProjectId(event.target.value)}>
+            onChange={event => { setChatProjectId(event.target.value); setProjectId(event.target.value) }}>
             <option value="">Choose project</option>
             {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
           </select></label>}
         </div>
       </div>
       {chatScope === 'organization'
-        ? <ContextConversationPanel contextKind="organization" label="Organization conversations" />
+        ? <ContextConversationPanel contextKind="organization" label="Organization chat" />
         : projects.some(project => project.id === chatProjectId)
-          ? <ContextConversationPanel contextKind="project_team" projectId={chatProjectId} label="Project conversations" />
+          ? <ContextConversationPanel contextKind="project_team" projectId={chatProjectId} label="Project chat" />
           : <p className="rounded-xl border border-slate-800 p-5 text-sm text-slate-400">Choose an accessible project to view its conversations.</p>}
+      {result && <AssistantRunCard result={result} capability={result.capability || capability}
+        projectName={projects.find(project => project.id === result.runContext?.projectId)?.name || 'Organization work'}
+        matchingProject={result.runContext?.projectId === (chatScope === 'project' ? chatProjectId : null)
+          && (!result.runContext?.projectId || workspace?.project?.id === result.runContext.projectId)}
+        workspace={workspace} decisionSaving={decisionSaving} onConfirm={confirmProposal} onReject={rejectProposal}
+        onViewAudit={() => setActiveTab('audit')} />}
+      <AssistantConversationActions projectMode={chatScope === 'project'}
+        projectReady={Boolean(chatScope === 'project' && chatProjectId && workspace?.project?.id === chatProjectId)}
+        onOpen={nextCapability => {
+          setCapability(nextCapability)
+          setInput('')
+          setActiveTab('assistant')
+        }} />
       <ContextChatReleaseReviewPanel />
     </main> : activeTab === 'private' ? <main className="mx-auto max-w-5xl p-6"><_PrivateMemoryPanel organizationId={activeOrganizationId} ownerId={user?.id} scopeRevision={scopeRevision} onAccessError={handleOrganizationAccessError} /></main> : activeTab === 'policy' ? <main className="mx-auto max-w-5xl p-6"><_OrganizationPolicyPanel organizationId={activeOrganizationId} scopeRevision={scopeRevision} onAccessError={handleOrganizationAccessError} /><_PromotedMemoryRetentionPanel organizationId={activeOrganizationId} scopeRevision={scopeRevision} onAccessError={handleOrganizationAccessError} /></main> : <AuditView runs={runs} projects={projectById} engagements={engagementById} usage={usage} />}
   </div>
 }
 
+function AssistantConversationActions({ projectMode, projectReady, onOpen }) {
+  const actions = projectMode
+    ? [
+        ['project_pulse', 'Project status and blockers'],
+        ['writing_support', 'Draft project content'],
+        ['quality_review', 'Review project work'],
+        ['action_proposal', 'Propose a project task'],
+      ]
+    : [['daily_brief', 'Prepare my daily brief']]
+  return <section aria-label="Conversation record actions" className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">Record tools</h2>
+      <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-400">Run an audited capability alongside this chat. The chat transcript is not copied into the request; enter any prompt in Record tools. Results stay in AI Audit and appear here for this session.</p></div>
+      {!projectMode && <span className="rounded-full border border-slate-700 px-2.5 py-1 text-xs text-slate-400">Organization scope</span>}
+      {projectMode && <span className={`rounded-full border px-2.5 py-1 text-xs ${projectReady ? 'border-emerald-800 text-emerald-300' : 'border-amber-800 text-amber-300'}`}>{projectReady ? 'Selected project ready' : 'Choose an accessible project first'}</span>}
+    </div>
+    <div className="mt-3 flex flex-wrap gap-2">{actions.map(([id, title]) => <button key={id} type="button" disabled={projectMode && !projectReady}
+      onClick={() => onOpen(id)} className="rounded-xl border border-violet-500/30 bg-violet-500/[0.06] px-3 py-2 text-sm font-medium text-violet-200 hover:bg-violet-500/10 disabled:cursor-not-allowed disabled:opacity-40">{title}</button>)}</div>
+  </section>
+}
+
+function AssistantRunCard({ result, capability, projectName, matchingProject, workspace, decisionSaving, onConfirm, onReject, onViewAudit }) {
+  return <article aria-label="Audited record tool result" className="rounded-2xl border border-violet-900/60 bg-violet-950/20 p-5">
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-violet-300">{labelize(capability)} · audited run</p>
+      <p className="mt-1 text-xs text-slate-400">{projectName} · {result.provider} · {result.model} · Run {result.run_id}</p></div><button type="button" onClick={onViewAudit} className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-300">Open AI Audit</button></div>
+    <p className="mt-3 text-xs leading-5 text-slate-400">This result is displayed beside chat but is not saved as a conversation message. Its durable record is the audited AI run.</p>
+    <pre className="mt-4 whitespace-pre-wrap font-sans text-sm leading-7 text-slate-200">{result.content}</pre>
+    <SourceManifest manifest={result.context_manifest} />
+    {result.proposed_action && <>{matchingProject
+      ? <ProposalCard result={result} workspace={workspace} saving={decisionSaving} onConfirm={onConfirm} onReject={onReject} />
+      : <p role="status" className="mt-4 rounded-xl border border-amber-800 bg-amber-950/30 p-3 text-xs text-amber-200">This proposal belongs to a different project. Reopen that project chat or Record tools to review it; confirmation is disabled in this context.</p>}</>}
+  </article>
+}
 function ProposalCard({ result, workspace, saving, onConfirm, onReject }) {
   const action = result.proposed_action
   const workstream = workspace?.workstreams.find(item => item.id === action.params.workstream_id)

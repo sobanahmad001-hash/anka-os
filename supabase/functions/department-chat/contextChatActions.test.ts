@@ -34,6 +34,11 @@ function fixture() {
       let selected = [...(rows[table] || [])]
       const query: any = {
         select(columns: string) { calls.push(['select', [table, columns]]); return query },
+        update(patch: Record<string, unknown>) {
+          calls.push(['update', [table, patch]])
+          for (const row of selected) Object.assign(row, patch)
+          return query
+        },
         eq(key: string, value: unknown) { selected = selected.filter(row => row[key] === value); return query },
         neq(key: string, value: unknown) { selected = selected.filter(row => row[key] !== value); return query },
         is(key: string, value: unknown) { selected = selected.filter(row => row[key] === value); return query },
@@ -102,4 +107,26 @@ Deno.test('project sharing candidates use installed profile columns and name or 
   assertEquals(result.candidates.find((candidate: any) => candidate.id === unnamed)?.full_name, '')
   assertEquals(result.candidates.some((candidate: any) => 'email' in candidate), false)
   assertEquals(result.recipients[0].recipient_id, recipient)
+})
+
+Deno.test('only the project conversation owner can rename a saved title', async () => {
+  const { admin, rows, calls } = fixture()
+  const result: any = await contextChatAction('rename_context_conversation', admin as any,
+    { conversation_id: thread, title: '  Revised direction  ' }, owner, org,
+    { user_id: owner, role: 'contributor' })
+  assertEquals(result.title, 'Revised direction')
+  assertEquals(rows.department_chat_conversations[0].title, 'Revised direction')
+  assertEquals(calls.some(([kind]) => kind === 'update'), true)
+  await assertRejects(() => contextChatAction('rename_context_conversation', admin as any,
+    { conversation_id: thread, title: 'Unauthorized edit' }, recipient, org,
+    { user_id: recipient, role: 'contributor' }))
+  assertEquals(calls.filter(([kind]) => kind === 'update').length, 1)
+})
+
+Deno.test('saved conversation titles reject blank and overlong values', async () => {
+  const { admin } = fixture()
+  for (const title of ['   ', 'x'.repeat(161)]) {
+    await assertRejects(() => contextChatAction('rename_context_conversation', admin as any,
+      { conversation_id: thread, title }, owner, org, { user_id: owner, role: 'contributor' }))
+  }
 })

@@ -268,6 +268,10 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
     const root = await callerDirectionRoot(userClient, requiredActionId(body.direction_id, 'Direction'))
     return { root: { kind: 'engagement', id: root.engagementId }, requestedOrganizationId }
   }
+  if (['get_private_video_quote','generate_private_video','list_private_video_jobs'].includes(action)) {
+    if (body.direction_version_id || !body.private_conversation_id) throw new Error('Exact private conversation only is required');
+    return { root: null, requestedOrganizationId: requestedOrganizationId || '' };
+  }
   if (action === 'promote_direction_experiment' || action === 'generate_image'
     || action === 'create_video_placeholder' || action === 'get_video_quote'
     || action === 'generate_video' || action === 'list_video_jobs') {
@@ -1724,6 +1728,19 @@ async function releaseDirection(admin: ScopedClient, body: Json, actorId: string
   return release
 }
 
+function videoContext(body: Json) {
+  if (body.private_conversation_id != null) {
+    if (body.direction_version_id != null) throw Object.assign(new Error('Exactly one video context is required'), { status: 400 });
+    return { p_private_conversation_id: requiredActionId(body.private_conversation_id, 'Private conversation') };
+  }
+  return { p_direction_version_id: requiredActionId(body.direction_version_id, 'Direction version') };
+}
+export function designVideoStoragePath(job: Json, organizationId: string) {
+  const privateId = job.private_conversation_id;
+  if ((privateId != null) === (job.direction_version_id != null)) throw new Error('Exact video storage context required');
+  const anchor = privateId != null ? 'private/' + requiredActionId(job.requested_by, 'Video owner') + '/' + requiredActionId(privateId, 'Private conversation') : requiredActionId(job.direction_version_id, 'Direction version');
+  return organizationId + '/' + anchor + '/' + requiredActionId(job.id, 'Video job') + '/output.' + job.output_format;
+}
 export async function getDesignVideoQuote(admin: ScopedClient, body: Json, actorId: string) {
   const duration = body.duration_seconds
   const resolution = body.resolution
@@ -1737,9 +1754,9 @@ export async function getDesignVideoQuote(admin: ScopedClient, body: Json, actor
     || typeof generateAudio !== 'boolean') {
     throw Object.assign(new Error('Exact supported video settings are required'), { status: 400 })
   }
-  const { data, error } = await admin.rpc('get_design_video_quote', {
+  const { data, error } = await admin.rpc(body.private_conversation_id ? 'get_private_design_video_quote' : 'get_design_video_quote', {
     p_organization_id: admin.organizationId,
-    p_direction_version_id: requiredActionId(body.direction_version_id, 'Direction version'),
+    ...videoContext(body),
     p_actor_id: actorId,
     p_duration_seconds: duration,
     p_resolution: resolution,
@@ -1783,7 +1800,7 @@ async function loadActorDesignVideoJob(admin: ScopedClient, body: Json, actorId:
 export async function getDesignVideoJob(admin: ScopedClient, body: Json, actorId: string) {
   const job = await loadActorDesignVideoJob(admin, body, actorId)
   return {
-    id: job.id, direction_version_id: job.direction_version_id,
+    id: job.id, direction_version_id: job.direction_version_id, private_conversation_id: job.private_conversation_id,
     status: job.status, mode: job.mode,
     duration_seconds: job.duration_seconds, resolution: job.resolution,
     aspect_ratio: job.aspect_ratio, output_format: job.output_format,
@@ -1801,9 +1818,9 @@ export async function listDesignVideoJobs(admin: ScopedClient, body: Json, actor
       || beforeCreatedAt.length > 40 || !Number.isFinite(Date.parse(beforeCreatedAt))))) {
     throw Object.assign(new Error('Complete video history cursor is required'), { status: 400 })
   }
-  const { data, error } = await admin.rpc('list_design_video_jobs', {
+  const { data, error } = await admin.rpc(body.private_conversation_id ? 'list_private_design_video_jobs' : 'list_design_video_jobs', {
     p_organization_id: admin.organizationId,
-    p_direction_version_id: requiredActionId(body.direction_version_id, 'Direction version'),
+    ...videoContext(body),
     p_actor_id: actorId,
     p_before_created_at: beforeCreatedAt || null,
     p_before_id: beforeId == null ? null : requiredActionId(beforeId, 'Video history cursor'),
@@ -1830,7 +1847,7 @@ export async function ingestDesignVideoOutput(admin: ScopedClient, body: Json, a
     .split(',').map(host => host.trim().toLowerCase()).filter(Boolean)
   const output = await fetchDesignVideoOutput(job.provider_output_url, allowedHosts,
     job.output_format as 'mp4' | 'mov', fetcher)
-  const path = `${admin.organizationId}/${job.direction_version_id}/${job.id}/output.${job.output_format}`
+  const path = designVideoStoragePath(job, admin.organizationId)
   const bucket = admin.storage.from(VIDEO_BUCKET)
   const { error: uploadError } = await bucket.upload(path, output.bytes, {
     contentType: output.contentType, upsert: false,
@@ -1866,7 +1883,7 @@ export async function signDesignVideoOutput(admin: ScopedClient, body: Json, act
   if (job.status !== 'ready' || typeof job.output_storage_path !== 'string') {
     throw Object.assign(new Error('Ready private video is unavailable'), { status: 409 })
   }
-  const path = `${admin.organizationId}/${job.direction_version_id}/${job.id}/output.${job.output_format}`
+  const path = designVideoStoragePath(job, admin.organizationId)
   if (job.output_storage_path !== path) {
     throw Object.assign(new Error('Private video storage identity is invalid'), { status: 409 })
   }
@@ -1957,9 +1974,9 @@ export async function generateDesignVideo(admin: ScopedClient, body: Json, actor
   const { createHiggsfieldClient } = await import('npm:@higgsfield/client@0.2.6/v2')
   const adapter = createDesignMediaAdapter(createHiggsfieldClient, credential)
   const identity = { p_organization_id: admin.organizationId,
-    p_direction_version_id: requiredActionId(body.direction_version_id, 'Direction version'),
+    ...videoContext(body),
     p_actor_id: actorId }
-  const { data: created, error: createError } = await admin.rpc('create_design_video_job', {
+  const { data: created, error: createError } = await admin.rpc(body.private_conversation_id ? 'create_private_design_video_job' : 'create_design_video_job', {
     ...identity, p_connector_connection_id: connectionId, p_quote_id: quoteId,
     p_operation_key: operationKey, p_prompt: prompt, p_mode: mode,
     p_duration_seconds: body.duration_seconds, p_resolution: body.resolution,
@@ -2053,9 +2070,12 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       generate_variants: () => generateVariants(admin, userClient, body, user.id),
       create_video_placeholder: () => createVideoPlaceholder(admin, userClient, body, user.id),
       get_video_quote: () => getDesignVideoQuote(admin, body, user.id),
+      get_private_video_quote: () => getDesignVideoQuote(admin, body, user.id),
       get_video_job: () => getDesignVideoJob(admin, body, user.id),
       list_video_jobs: () => listDesignVideoJobs(admin, body, user.id),
+      list_private_video_jobs: () => listDesignVideoJobs(admin, body, user.id),
       generate_video: () => generateDesignVideo(admin, body, user.id),
+      generate_private_video: () => generateDesignVideo(admin, body, user.id),
       poll_video_job: () => pollDesignVideoJob(admin, body, user.id),
       ingest_video_output: () => ingestDesignVideoOutput(admin, body, user.id),
       sign_video_output: () => signDesignVideoOutput(admin, body, user.id),

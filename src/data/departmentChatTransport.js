@@ -73,6 +73,7 @@ export function createDepartmentChatRepository(client) {
     rejectProposal: (proposalId, scope) => invoke('reject_proposal', { proposal_id: proposalId }, scope),
     listContextConversations: (input, scope) => invoke('list_context_conversations', input, scope),
     createContextConversation: (input, scope) => invoke('create_context_conversation', input, scope),
+    renameContextConversation: (input, scope) => invoke('rename_context_conversation', input, scope),
     getContextConversation: (input, scope) => invoke('get_context_conversation', input, scope),
     appendContextHumanMessage: (input, scope) => invoke('append_context_human_message', input, scope),
     getProjectContextSharing: (input, scope) => invoke('get_project_context_sharing', input, scope),

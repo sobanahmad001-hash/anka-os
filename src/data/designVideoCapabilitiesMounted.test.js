@@ -29,7 +29,7 @@ test('mounted video submission context and uncertainty regressions', async t => 
     } }] })
   t.after(() => server.close())
   const { default: Component } = await server.ssrLoadModule('/src/components/DesignVideoCapabilities.jsx')
-  async function mount(t, { historyError = false, beforeGenerate, onNavigationBusyChange, presentation, rows = [] } = {}) {
+  async function mount(t, { historyError = false, beforeGenerate, onNavigationBusyChange, presentation, rows = [], privateConversationId, privateApi = true, bothAnchors = false } = {}) {
     const env = mountedEnvironment()
     const names = ['document', 'window', 'Event', 'Node', 'HTMLElement', 'IS_REACT_ACT_ENVIRONMENT', '__designVideoFixture', 'fetch']
     const previous = Object.fromEntries(names.map(name => [name, globalThis[name]]))
@@ -42,21 +42,27 @@ test('mounted video submission context and uncertainty regressions', async t => 
         quote: { ...input, id: 'quote', provider: 'higgsfield', model_id: 'bytedance/seedance-2.5/text-to-video', currency: 'USD', max_charge_microusd: 1000000, verified_at: new Date(Date.now() - 1000).toISOString(), valid_until: new Date(Date.now() + 60000).toISOString() } }),
       generateVideo: input => { calls.push(input); return submit.promise },
     }
+    if (privateConversationId && privateApi) {
+      fixture.studio.listPrivateVideoJobs = fixture.studio.listVideoJobs
+      fixture.studio.getPrivateVideoQuote = fixture.studio.getVideoQuote
+      fixture.studio.generatePrivateVideo = fixture.studio.generateVideo
+      fixture.studio.listVideoJobs = fixture.studio.getVideoQuote = fixture.studio.generateVideo = () => { throw new Error('Private video must not use project APIs') }
+    }
     Object.assign(globalThis, { document: env.document, window: env.window, Event: env.window.Event, Node: env.window.Node, HTMLElement: env.window.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true, __designVideoFixture: fixture,
       fetch: () => { throw new Error('Network forbidden in mounted video tests') } })
     const root = createRoot(env.container)
     t.after(async () => { await act(async () => root.unmount()); Object.assign(globalThis, previous) })
-    const render = async direction => act(async () => root.render(createElement(Component, { directionVersionId: direction, beforeGenerate, onNavigationBusyChange, presentation })))
-    await render('direction-a')
+    const render = async anchor => act(async () => root.render(createElement(Component, { ...(privateConversationId ? { privateConversationId: anchor, ...(bothAnchors ? { directionVersionId: 'invalid' } : {}) } : { directionVersionId: anchor }), beforeGenerate, onNavigationBusyChange, presentation })))
+    await render(privateConversationId || 'direction-a')
     const change = async (node, value, checked) => act(async () => propsOf(node).onChange({ target: { value, checked } }))
     async function prepare() {
       await act(async () => propsOf(button(env.container, 'Check exact quote')).onClick())
       await change(elements(env.container, 'textarea')[0], 'Offline prompt')
-      await change(elements(env.container, 'select').at(-1), 'connection')
+      await change(elements(env.container, 'select').find(node => node.textContent.includes('Choose connection')), 'connection')
       await change(elements(env.container, 'input').at(-1), undefined, true)
     }
     const submitNow = () => propsOf(elements(env.container, 'form')[0]).onSubmit({ preventDefault() {} })
-    return { env, submit, calls, render, prepare, submitNow }
+    return { env, submit, calls, render, prepare, submitNow, unmount: () => act(async () => root.unmount()) }
   }
   for (const kind of ['direction', 'organization', 'scope revision']) await t.test(kind + ' switch clears consent/prompt and old pending busy', async t => {
     const m = await mount(t); await m.prepare()
@@ -73,6 +79,74 @@ test('mounted video submission context and uncertainty regressions', async t => 
     assert.doesNotMatch(m.env.container.textContent, /Original video request recorded/)
     await m.prepare()
     assert.equal(propsOf(button(m.env.container, 'Generate one video')).disabled, false, 'new scope must not stay busy')
+  })
+  await t.test('private exact conversation payload and same-key recovery never use project APIs', async t => {
+    const busy = []
+    const m = await mount(t, { privateConversationId: 'private-a', onNavigationBusyChange: value => busy.push(value) })
+    await m.prepare()
+    assert.equal(propsOf(button(m.env.container, 'Generate one video')).disabled, false)
+    await act(async () => { void m.submitNow(); void m.submitNow() })
+    assert.equal(m.calls.length, 1)
+    const original = m.calls[0]
+    assert.equal(original.private_conversation_id, 'private-a')
+    assert.equal(original.prompt, 'Offline prompt')
+    for (const key of ['direction_version_id', 'project_id', 'engagement_id', 'messages', 'history', 'attachments']) assert.ok(!(key in original))
+    assert.equal(busy.at(-1), true)
+    await act(async () => m.submit.reject(new Error('response interrupted')))
+    assert.equal(propsOf(elements(m.env.container, 'textarea')[0]).disabled, true)
+    fixture.studio.generatePrivateVideo = async input => { m.calls.push(input); return { status: 'queued' } }
+    await act(async () => propsOf(button(m.env.container, 'Reconcile same video request')).onClick({ preventDefault() {} }))
+    assert.deepEqual(m.calls[1], original)
+    assert.equal(busy.at(-1), false)
+    assert.equal(elements(m.env.container, 'input').at(-1).checked, false)
+  })
+  for (const options of [{ privateApi: false }, { bothAnchors: true }]) await t.test('private unavailable or ambiguous anchor ' + JSON.stringify(options), async t => {
+    const m = await mount(t, { privateConversationId: 'private-a', ...options })
+    assert.equal(propsOf(button(m.env.container, 'Check exact quote')).disabled, true)
+    assert.equal(propsOf(button(m.env.container, 'Generate one video')).disabled, true)
+    assert.match(m.env.container.textContent, /No generation or project fallback/)
+    assert.equal(m.calls.length, 0)
+  })
+  await t.test('private foreign history fails closed', async t => {
+    const m = await mount(t, { privateConversationId: 'private-a', rows: [{ id: 'foreign', private_conversation_id: 'private-b', status: 'ready' }] })
+    await m.prepare()
+    assert.match(m.env.container.textContent, /history is unavailable/)
+    assert.equal(propsOf(button(m.env.container, 'Generate one video')).disabled, true)
+    assert.equal(button(m.env.container, 'Open private preview'), undefined)
+  })
+  await t.test('private signed output is exact and clears on conversation change', async t => {
+    const m = await mount(t, { privateConversationId: 'private-a', presentation: 'workbench' })
+    const signed = []
+    fixture.studio.signVideoOutput = async id => { signed.push(id); return { signed_url: 'https://offline.invalid/private-video' } }
+    fixture.studio.listEngagements = async () => []
+    fixture.rows = [{ id: 'private-job', private_conversation_id: 'private-a', status: 'ready', mode: 'explore', duration_seconds: 5, resolution: '720p', created_at: new Date().toISOString() }]
+    fixture.scope = { ...fixture.scope, scopeRevision: 2 }
+    await m.render('private-a')
+    await act(async () => propsOf(button(m.env.container, 'Open private preview')).onClick())
+    assert.deepEqual(signed, ['private-job'])
+    assert.equal(propsOf(elements(m.env.container, 'video')[0]).src, 'https://offline.invalid/private-video')
+    assert.match(m.env.container.textContent, /Private conversation: private-a/)
+    assert.match(m.env.container.textContent, /Use in project/)
+    fixture.rows = []
+    await m.render('private-b')
+    assert.equal(elements(m.env.container, 'video').length, 0)
+    assert.equal(m.calls.length, 0)
+  })
+  await t.test('private deferred context check cannot dispatch after unmount', async t => {
+    const check = deferred()
+    const m = await mount(t, { privateConversationId: 'private-a', beforeGenerate: () => check.promise })
+    await m.prepare()
+    let pending
+    await act(async () => { pending = m.submitNow() })
+    assert.equal(m.calls.length, 0)
+    await m.unmount()
+    await act(async () => { check.resolve(); await pending })
+    assert.equal(m.calls.length, 0, 'cleanup invalidates job generation before any provider dispatch')
+  })
+  await t.test('private durable unknown history keeps navigation locked after remount', async t => {
+    const busy = []
+    await mount(t, { privateConversationId: 'private-a', onNavigationBusyChange: value => busy.push(value), rows: [{ id: 'unknown', private_conversation_id: 'private-a', status: 'outcome_unknown', created_at: new Date().toISOString() }] })
+    assert.equal(busy.at(-1), true)
   })
   await t.test('rapid double submit invokes one mocked request', async t => {
     const m = await mount(t); await m.prepare()

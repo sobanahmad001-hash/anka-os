@@ -50,6 +50,7 @@ export default function ProjectEngagementWorkspace() {
   const [error, setError] = useState('')
   const [failureKind, setFailureKind] = useState('')
   const [loadedAt, setLoadedAt] = useState(null)
+  const [projectChatMode, setProjectChatMode] = useState('team')
 
   const load = useCallback(async () => {
     if (organizationLoading || selectionRequired || !activeOrganizationId || requestSignal?.aborted) return
@@ -133,16 +134,16 @@ export default function ProjectEngagementWorkspace() {
           <div className="max-w-4xl">
             <div className="flex flex-wrap items-center gap-2 text-xs"><Pill>{identity.workType}</Pill><Pill>{label(project.engagement_type)}</Pill>{identity.hasEngagement && <Pill>Engagement connected</Pill>}</div>
             <h1 className="mt-3 text-3xl font-semibold tracking-tight">{project.name}</h1>
-            <p className="mt-2 text-sm text-slate-400">{[identity.clientName, identity.brandName].filter(Boolean).join(' · ') || (identity.workType === 'Internal Work' ? 'Internal project; no client identity is required.' : 'No client or brand identity is attached.')}</p>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">{project.description || project.scope_statement || 'No project description recorded.'}</p>
+            <p className={`mt-2 text-sm text-slate-400 ${tab === 'discussion' ? 'sr-only' : ''}`}>{[identity.clientName, identity.brandName].filter(Boolean).join(' · ') || (identity.workType === 'Internal Work' ? 'Internal project; no client identity is required.' : 'No client or brand identity is attached.')}</p>
+            <p className={`mt-3 max-w-3xl text-sm leading-6 text-slate-400 ${tab === 'discussion' ? 'sr-only' : ''}`}>{project.description || project.scope_statement || 'No project description recorded.'}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">{identity.hasEngagement && workspace.engagement?.id && <Link to={`/sphere/engagements?engagement=${encodeURIComponent(workspace.engagement.id)}&tab=pipeline&project=${encodeURIComponent(projectId)}`} className="rounded-xl border border-violet-500/25 px-4 py-2 text-sm text-violet-200">Open Pipeline</Link>}<button type="button" onClick={load} disabled={loading} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm hover:bg-white/[0.08] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={project.status} /><ProjectDraftActivation project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onActivated={load} onAccessError={handleOrganizationAccessError} /></div>
         </header>
 
-        <ProjectManagerAssignment project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onAssigned={load} onAccessError={handleOrganizationAccessError} />
+        {tab !== 'discussion' && <ProjectManagerAssignment project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onAssigned={load} onAccessError={handleOrganizationAccessError} />}
 
         {error && <div role="alert" className="mt-5 rounded-xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-100"><p className="font-medium">Refresh failed; showing previously loaded data.</p><p className="mt-1 text-xs text-amber-200/80">{error}{loadedAt ? ` · Loaded ${loadedAt.toLocaleTimeString()}` : ''}</p></div>}
-        <section aria-label="Workspace summary" className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+        {tab === 'overview' && <section aria-label="Workspace summary" className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
           <Metric title="Project Tasks" value={summary.openProjectTasks} note="Open canonical tasks" />
           <Metric title="Engagement Work Items" value={summary.openEngagementWorkItems} note="Open delivery items" />
           <Metric title="Active engagement services" value={workspace.activeServices.length} note={workspace.deliveryShape.label} />
@@ -150,7 +151,7 @@ export default function ProjectEngagementWorkspace() {
           <Metric title="Milestones" value={summary.openMilestones} note="Open checkpoints" />
           <Metric title="Review queue" value={summary.reviewQueue} note="Versions in review/revision" />
           <Metric title="Progress" value={summary.progress === null ? 'Not set' : `${summary.progress}%`} note={`Due ${date(project.due_date)}`} />
-        </section>
+        </section>}
 
         <nav role="tablist" aria-label="Project workspace sections" className="mt-7 flex gap-1 overflow-x-auto border-b border-white/[0.08]">
           {tabs.map(([id, title], index) => <button type="button" role="tab" id={`project-tab-${id}`} aria-selected={selectedPrimaryTab === id} aria-controls="project-workspace-panel" tabIndex={selectedPrimaryTab === id ? 0 : -1} key={id} onClick={() => selectTab(id)} onKeyDown={(event) => onTabKeyDown(event, index)} className={`whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ${selectedPrimaryTab === id ? 'border-violet-400 text-white' : 'border-transparent text-slate-500 hover:text-slate-200'}`}>{title}</button>)}
@@ -162,9 +163,22 @@ export default function ProjectEngagementWorkspace() {
           {tab === 'services' && <ServicesAndScope workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={load} onAccessError={handleOrganizationAccessError} />}
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
           {tab === 'work' && <WorkViews workspace={workspace} navigate={navigate} searchParams={searchParams} setSearchParams={setSearchParams} />}
-          {tab === 'discussion' && <div className="space-y-6">
-            <ProjectDiscussionPanel organizationId={activeOrganizationId} projectId={project.id} tasks={workspace.projectTasks} workstreams={workspace.workstreams} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={handleOrganizationAccessError} onApplied={load} />
-            <ContextConversationPanel contextKind="project_team" projectId={project.id} label="Project conversations" />
+          {tab === 'discussion' && <div className="space-y-4">
+            <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-violet-300">{project.name} · Chat</p>
+              <h2 className="mt-1 text-lg font-semibold">Talk with your project team</h2>
+              <p className="mt-1 text-sm leading-5 text-slate-400">Project activity and private AI conversations are separate. Team messages use the project discussion permissions; AI conversations start private; each owner can choose active internal teammates to share a conversation with.</p>
+              <nav aria-label="Project chat views" className="mt-4 flex flex-wrap gap-2">
+                <button type="button" aria-pressed={projectChatMode === 'team'} onClick={() => setProjectChatMode('team')} className={`rounded-xl border px-4 py-2 text-sm ${projectChatMode === 'team' ? 'border-violet-400/40 bg-violet-500/10 text-violet-100' : 'border-white/10 text-slate-400'}`}>Team discussion · shared</button>
+                <button type="button" aria-pressed={projectChatMode === 'private'} onClick={() => setProjectChatMode('private')} className={`rounded-xl border px-4 py-2 text-sm ${projectChatMode === 'private' ? 'border-violet-400/40 bg-violet-500/10 text-violet-100' : 'border-white/10 text-slate-400'}`}>AI conversations</button>
+              </nav>
+            </div>
+            <section hidden={projectChatMode !== 'team'} aria-label="Shared project team discussion">
+              <ProjectDiscussionPanel organizationId={activeOrganizationId} projectId={project.id} tasks={workspace.projectTasks} workstreams={workspace.workstreams} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={handleOrganizationAccessError} onApplied={load} />
+            </section>
+            <section hidden={projectChatMode !== 'private'} aria-label="Project AI conversations">
+              <ContextConversationPanel contextKind="project_team" projectId={project.id} label="Project AI conversations" />
+            </section>
           </div>}
           {tab === 'project-tasks' && <ProjectTasks rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
           {tab === 'engagement-work' && <EngagementWork rows={workspace.engagementWorkItems} hasEngagement={identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} />}

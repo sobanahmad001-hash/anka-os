@@ -5,6 +5,7 @@ import test from 'node:test'
 import { createOperatingSpineRepository, pipelineDepartmentFlags } from './operatingSpineRepository.js'
 
 const migration = readFileSync(new URL('../../supabase/migrations/20260827150000_operating_spine_core.sql', import.meta.url), 'utf8')
+const pageDesignMigration = readFileSync(new URL('../../supabase/migrations/20260831110424_rp4_html_css_page_designs.sql', import.meta.url), 'utf8')
 const repository = readFileSync(new URL('./operatingSpineRepository.js', import.meta.url), 'utf8')
 const remediation = readFileSync(new URL('../../supabase/migrations/20260827140000_operating_spine_security_remediation.sql', import.meta.url), 'utf8')
 const app = readFileSync(new URL('../App.jsx', import.meta.url), 'utf8')
@@ -111,6 +112,16 @@ test('EPV1 adds pipeline aggregates to getEngagement', () => {
   assert.match(repository, /wordpressExportJobs/)
 })
 
+test('EPV1 page-design projection matches the installed page-design table contract', () => {
+  const tableDefinition = pageDesignMigration.match(/create table public\.website_page_designs \(([\s\S]*?)\n\);/)?.[1]
+  assert.ok(tableDefinition, 'the canonical page-design table definition must be present')
+  const columns = new Set([...tableDefinition.matchAll(/^\s{2}([a-z_]+)\s+(?:uuid|text|timestamptz)/gm)].map((match) => match[1]))
+  const repositoryProjection = repository.match(/from\('website_page_designs'\)[\s\S]*?\.select\('([^']+)'\)/)?.[1]
+  assert.ok(repositoryProjection, 'the page-design query must use an explicit projection')
+  for (const column of repositoryProjection.split(',').map(value => value.trim())) {
+    assert.ok(columns.has(column), `website_page_designs has no ${column} column`)
+  }
+})
 test('Engagement workspace renders a pipeline tab and read-only entry points', () => {
   assert.match(operatingSpineView, /pipeline/i)
   assert.match(operatingSpineView, /Pipeline snapshot/)

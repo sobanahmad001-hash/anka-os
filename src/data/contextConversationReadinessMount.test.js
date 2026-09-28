@@ -20,12 +20,15 @@ async function mount(t, readiness, panelProps = {}) {
   globalThis.__contextReadinessFixture = {
     rows: [{ id: 'conversation', owner_id: 'actor', title: 'Private', state: 'active' }],
     created: [],
+    renamed: [],
+    messages: [{ id: 'message', conversation_id: 'conversation', author_id: 'actor', role: 'user', body: 'Question', status: 'completed' }],
     readiness: input => { calls.push(input); return readiness(input) },
     runner: () => { throw new Error('Provider runner must not be called') },
   }
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent',
     plugins: [{ name: 'offline-context-readiness', enforce: 'pre',
       resolveId(source) {
+        if (source.endsWith('PrivateDesignVideoTools.jsx')) return '\0context-video'
         if (source.endsWith('/context/AuthContext.jsx') || source.endsWith('../context/AuthContext.jsx')) return '\0context-auth'
         if (source.endsWith('/context/OrganizationContext.jsx') || source.endsWith('../context/OrganizationContext.jsx')) return '\0context-organization'
         if (source.endsWith('departmentChatRepository.js')) return '\0context-repository'
@@ -33,6 +36,12 @@ async function mount(t, readiness, panelProps = {}) {
         if (source.endsWith('contextChatRunnerRepository.js')) return '\0context-runner'
       },
       load(id) {
+        if (id === '\0context-video') return `import { createElement, useEffect, useState } from 'react'; export default function Tools(props) {
+          const [draft, setDraft] = useState('');
+          globalThis.__contextReadinessFixture.videoProps = props;
+          useEffect(() => { globalThis.__contextReadinessFixture.videoMounts = (globalThis.__contextReadinessFixture.videoMounts || 0) + 1 }, []);
+          return createElement('input', { 'aria-label': 'Video fixture prompt', value: draft, onChange: event => setDraft(event.target.value) });
+        }`
         if (id === '\0context-auth') return 'export const useAuth = () => ({ user: { id: "actor" } })'
         if (id === '\0context-organization') return 'export const useOrganization = () => ({ activeOrganizationId: "org", scopeRevision: 1, requestSignal: globalThis.__contextReadinessFixture.signal, handleOrganizationAccessError: () => {} })'
         if (id === '\0context-repository') return `export const departmentChat = {
@@ -44,7 +53,23 @@ async function mount(t, readiness, panelProps = {}) {
             fixture.rows = [row, ...fixture.rows]
             return row
           },
-          getContextConversation: async () => ({ messages: [{ id: 'message', author_id: 'actor', role: 'user', body: 'Question', status: 'completed' }], has_older: false }),
+          getContextConversation: async input => {
+            const fixture = globalThis.__contextReadinessFixture
+            const conversation = fixture.exactConversation?.id === input.conversation_id ? fixture.exactConversation : fixture.rows.find(row => row.id === input.conversation_id)
+            return { conversation, messages: fixture.messages.filter(row => row.conversation_id === input.conversation_id), has_older: false }
+          },
+          appendContextHumanMessage: async input => {
+            const message = { id: 'saved-human', conversation_id: input.conversation_id, author_id: 'actor', role: 'user', body: input.message, status: 'completed' }
+            globalThis.__contextReadinessFixture.messages.push(message)
+            return message
+          },
+          renameContextConversation: async input => {
+            const fixture = globalThis.__contextReadinessFixture
+            fixture.renamed.push(input)
+            const row = fixture.rows.find(item => item.id === input.conversation_id)
+            row.title = input.title
+            return row
+          },
           getContextChatReadiness: async input => globalThis.__contextReadinessFixture.readiness(input),
         }`
         if (id === '\0context-integrations') return `export const integrations = { listModelAllowlist: async () => ({ connections: [{ id: 'connector', organization_level: true, status: 'verified', provider: 'openai', display_name: 'OpenAI', context_model_configurations: [{ id: 'model', model_id: 'verified' }] }] }) }`
@@ -108,6 +133,48 @@ for (const departmentId of ['design', 'content', 'marketing']) test(`compact ${d
   assert.equal(globalThis.__contextReadinessFixture.created.length, 0)
 })
 
+test('Design asset switch retains mounted text/video drafts and ORs video navigation busy', async t => {
+  const reports = []
+  const { environment } = await mount(t, () => ({ paid_execution_enabled: false }),
+    { contextKind: 'department_private', departmentId: 'design', workshopLayout: true, onNavigationBusyChange: value => reports.push(value) })
+  const all = () => descendants(environment.container)
+  const asset = () => all().find(node => reactProps(node)?.['aria-label'] === 'Private Design asset type')
+  const textDraft = all().find(node => node.tagName === 'TEXTAREA')
+  await act(async () => reactProps(textDraft).onChange({ target: { value: 'Unsent private text' } }))
+  await act(async () => reactProps(asset()).onChange({ target: { value: 'video' } }))
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+  const fixture = globalThis.__contextReadinessFixture
+  assert.equal(fixture.videoProps.conversationId, 'conversation')
+  fixture.exactConversation = { id: 'conversation', owner_id: 'actor', organization_id: 'org', context_kind: 'department_private', department_id: 'design', state: 'active' }
+  await fixture.videoProps.beforeGenerate('conversation')
+  fixture.exactConversation = { ...fixture.exactConversation, state: 'archived' }
+  await assert.rejects(fixture.videoProps.beforeGenerate('conversation'), /unavailable/)
+  fixture.exactConversation = { ...fixture.exactConversation, state: 'active', owner_id: 'another-user' }
+  await assert.rejects(fixture.videoProps.beforeGenerate('conversation'), /unavailable/)
+  const videoDraft = all().find(node => reactProps(node)?.['aria-label'] === 'Video fixture prompt')
+  await act(async () => reactProps(videoDraft).onChange({ target: { value: 'Unsent private video' } }))
+  await act(async () => reactProps(asset()).onChange({ target: { value: 'text' } }))
+  assert.equal(reactProps(textDraft).value, 'Unsent private text')
+  await act(async () => reactProps(asset()).onChange({ target: { value: 'video' } }))
+  assert.equal(reactProps(videoDraft).value, 'Unsent private video')
+  assert.equal(fixture.videoMounts, 1)
+  await act(async () => fixture.videoProps.onNavigationBusyChange(true))
+  assert.equal(reports.at(-1), true)
+  assert.equal(reactProps(asset()).disabled, true)
+  assert.equal(button(environment.container, 'New conversation').disabled, true)
+  await act(async () => reactProps(asset()).onChange({ target: { value: 'text' } }))
+  assert.equal(reactProps(asset()).value, 'video')
+  await act(async () => fixture.videoProps.onNavigationBusyChange(false))
+  assert.equal(reports.at(-1), false)
+  assert.equal(fixture.created.length, 0)
+  const staleVideoCallback = fixture.videoProps.onNavigationBusyChange
+  const createForm = all().find(node => node.tagName === 'FORM' && node.textContent.includes('New conversation'))
+  await act(async () => reactProps(createForm).onSubmit({ preventDefault() {} }))
+  await act(async () => staleVideoCallback(true))
+  assert.equal(reports.at(-1), false, 'old pane cannot lock the new conversation')
+  assert.equal(reactProps(asset()).value, 'text')
+})
+
 test('Development private conversation retains default presentation', async t => {
   const { environment } = await mount(t, () => ({ paid_execution_enabled: false }),
     { contextKind: 'department_private', departmentId: 'development', workshopLayout: true, hideConversationList: true })
@@ -127,7 +194,7 @@ test('Workshop conversation search, creation and department reset stay private',
   assert.match(environment.container.textContent, /Question/, 'search must not replace the open transcript')
   await act(async () => props(search()).onChange({ target: { value: '' } }))
   assert.ok(button(environment.container, 'Private'))
-  const title = descendants(environment.container).find(node => node.tagName === 'INPUT' && props(node)['aria-label'] === 'New conversation title')
+  const title = descendants(environment.container).find(node => node.tagName === 'INPUT' && props(node)['aria-label'] === 'Optional conversation title')
   await act(async () => props(title).onChange({ target: { value: 'New direction' } }))
   const form = descendants(environment.container).find(node => node.tagName === 'FORM' && node.textContent.includes('New conversation'))
   await act(async () => props(form).onSubmit({ preventDefault() {} }))
@@ -139,4 +206,29 @@ test('Workshop conversation search, creation and department reset stay private',
   await act(async () => root.render(createElement(Panel, { contextKind: 'department_private', departmentId: 'content', workshopLayout: true })))
   assert.equal(props(search()).value, '')
   assert.doesNotMatch(environment.container.textContent, /New direction|Question/)
+})
+
+test('first saved message titles a new conversation and the owner can rename it', async t => {
+  const { environment } = await mount(t, () => ({ paid_execution_enabled: false }))
+  const props = node => node[Object.keys(node).find(key => key.startsWith('__reactProps$'))]
+  const all = () => descendants(environment.container)
+  const createForm = all().find(node => node.tagName === 'FORM' && node.textContent.includes('New conversation'))
+  await act(async () => props(createForm).onSubmit({ preventDefault() {} }))
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+  const composer = all().find(node => node.tagName === 'TEXTAREA')
+  await act(async () => props(composer).onChange({ target: { value: '  Explain   the launch plan  ' } }))
+  const sendForm = all().find(node => node.tagName === 'FORM' && descendants(node).includes(composer))
+  await act(async () => props(sendForm).onSubmit({ preventDefault() {} }))
+  assert.deepEqual(globalThis.__contextReadinessFixture.created[0], {
+    context_kind: 'organization', title: 'New conversation',
+  })
+  assert.deepEqual(globalThis.__contextReadinessFixture.renamed[0], {
+    conversation_id: 'new-conversation', title: 'Explain the launch plan',
+  })
+  const renameInput = all().find(node => node.tagName === 'INPUT' && props(node)['aria-label'] === 'Rename conversation')
+  await act(async () => props(renameInput).onChange({ target: { value: 'Launch notes' } }))
+  const renameForm = all().find(node => node.tagName === 'FORM' && descendants(node).includes(renameInput))
+  await act(async () => props(renameForm).onSubmit({ preventDefault() {} }))
+  assert.equal(globalThis.__contextReadinessFixture.renamed[1].title, 'Launch notes')
+  assert.ok(button(environment.container, 'Launch notes'))
 })
