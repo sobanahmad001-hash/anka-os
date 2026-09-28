@@ -20,9 +20,16 @@ async function checkAccess(admin: any, caller: any, body: Json, actorId: string)
   })
   if (error || job?.status !== 'ready' || job.requested_by !== actorId
     || job.organization_id !== admin.organizationId) throw new Error('Ready owner-private source is unavailable')
+  const privateConversationId = job.private_conversation_id
+  const directionVersionId = job.direction_version_id
+  if ((privateConversationId != null) === (directionVersionId != null)) {
+    throw new Error('Exact private or direction source identity is required')
+  }
   const [source, target, service] = await Promise.all([
-    caller.from('design_direction_versions').select('id,organization_id,creative_brief_version_id').eq('id', job.direction_version_id)
-      .eq('organization_id', admin.organizationId).maybeSingle(),
+    privateConversationId == null
+      ? caller.from('design_direction_versions').select('id,organization_id,creative_brief_version_id').eq('id', directionVersionId)
+        .eq('organization_id', admin.organizationId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
     caller.from('engagements').select('id,organization_id,brand_id').eq('id', id(body.target_engagement_id))
       .eq('organization_id', admin.organizationId).maybeSingle(),
     caller.from('engagement_services').select('id,service_catalog!inner(department_id,is_active)')
@@ -30,10 +37,12 @@ async function checkAccess(admin: any, caller: any, body: Json, actorId: string)
       .eq('organization_id', admin.organizationId).eq('status','active').maybeSingle(),
   ])
   const catalog = Array.isArray(service.data?.service_catalog) ? service.data.service_catalog[0] : service.data?.service_catalog
-  if (source.error || target.error || service.error || !source.data || !target.data || !service.data
+  if (source.error || target.error || service.error
+    || (privateConversationId == null && !source.data) || !target.data || !service.data
     || catalog?.department_id !== 'design' || catalog?.is_active !== true) {
     throw new Error('Current source and target Design access is required')
   }
+  if (privateConversationId != null) return
   const brief = await caller.from('design_creative_brief_versions').select('id,organization_id')
     .eq('id', source.data.creative_brief_version_id).eq('organization_id', admin.organizationId).maybeSingle()
   const pinned = await caller.from('design_creative_brief_version_sources').select('artifact_version_id')
@@ -84,10 +93,22 @@ export async function promotePrivateVideo(admin: any, caller: any, body: Json, a
   const parameters = args(admin, body, actorId, true)
   const { data: prepared, error } = await admin.rpc('prepare_design_video_promotion', parameters)
   if (error || !prepared || prepared.checksum !== body.expected_checksum) throw new Error('Promotion context changed or unavailable')
-  id(prepared.asset_id); id(prepared.version_id); id(prepared.direction_version_id)
+  id(prepared.asset_id); id(prepared.version_id); id(prepared.job_id)
+  if (prepared.job_id !== body.job_id
+    || prepared.target_engagement_id !== body.target_engagement_id
+    || prepared.target_service_id !== body.target_service_id) {
+    throw new Error('Exact video promotion target is required')
+  }
   const format = prepared.format
-  if (!['mp4','mov'].includes(format) || prepared.source_path !==
-    `${admin.organizationId}/${prepared.direction_version_id}/${body.job_id}/output.${format}`) {
+  const privateConversationId = prepared.private_conversation_id
+  const directionVersionId = prepared.direction_version_id
+  if ((privateConversationId != null) === (directionVersionId != null) || !['mp4','mov'].includes(format)) {
+    throw new Error('Private video source identity mismatch')
+  }
+  const anchor = privateConversationId == null
+    ? id(directionVersionId)
+    : `private/${id(actorId)}/${id(privateConversationId)}`
+  if (prepared.source_path !== `${admin.organizationId}/${anchor}/${body.job_id}/output.${format}`) {
     throw new Error('Private video source identity mismatch')
   }
   const path = `${admin.organizationId}/assets/${prepared.asset_id}/${prepared.version_id}/file.${format}`
