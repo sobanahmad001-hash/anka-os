@@ -41,7 +41,7 @@ const DEPARTMENT_CONFIG = {
     surfaceLabel: 'Workshop overview',
     shortName: 'Content',
     accent: 'amber',
-    accentClass: 'text-amber-400',
+    accentClass: "text-[var(--anka-violet)]",
     description: 'Research, strategy, messaging, writing, editing, and publishing handoffs connected to each engagement.',
     specialists: [{ name: 'Content Studio', description: 'Authoring, requests, and publishing preparation.', path: '/sphere/content/studio' }],
   },
@@ -50,7 +50,7 @@ const DEPARTMENT_CONFIG = {
     surfaceLabel: 'Workshop overview',
     shortName: 'Design',
     accent: 'pink',
-    accentClass: 'text-pink-400',
+    accentClass: "text-[var(--anka-violet)]",
     description: 'Creative briefs, identity systems, concepts, production, review targets, and approved design outputs.',
     specialists: [{ name: 'Design Workshop', description: 'Direction generation, comparison, proofing, and release.', path: '/sphere/design/workshop' }, { name: 'Design Systems', description: 'Released design-system specifications and reuse.', path: '/sphere/design/systems' }],
   },
@@ -59,7 +59,7 @@ const DEPARTMENT_CONFIG = {
     surfaceLabel: 'Workshop overview',
     shortName: 'Marketing',
     accent: 'emerald',
-    accentClass: 'text-emerald-400',
+    accentClass: "text-[var(--anka-violet)]",
     description: 'Campaign planning, channel execution, distribution, optimization, reporting, and cross-department requests.',
     specialists: [{ name: 'Marketing Studio', description: 'Campaign, reporting, planning, and optimization tools.', path: '/sphere/marketing/studio' }, { name: 'Technical SEO', description: 'Page health, inspection, and search tracking.', path: '/sphere/marketing/seo' }],
   },
@@ -68,14 +68,14 @@ const DEPARTMENT_CONFIG = {
     surfaceLabel: 'Delivery capability',
     shortName: 'Development',
     accent: 'blue',
-    accentClass: 'text-blue-400',
+    accentClass: "text-[var(--anka-violet)]",
     description: 'WordPress delivery, cross-engagement development queues, QA, launch readiness, maintenance, and technical handoffs.',
     specialists: [],
   },
 }
 
-const INPUT_CLASS = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20'
-const LABEL_CLASS = 'mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.13em] text-slate-500'
+const INPUT_CLASS = 'w-full rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] px-3.5 py-2.5 text-sm text-[var(--anka-ink)] focus:border-[var(--anka-focus)] focus:ring-2 focus:ring-[var(--anka-focus)]'
+const LABEL_CLASS = 'mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.13em] text-[var(--anka-muted)]'
 
 function labelize(value) {
   return String(value || '').replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
@@ -88,22 +88,22 @@ function dateLabel(value) {
 
 function Badge({ children, tone = 'slate' }) {
   const tones = {
-    slate: 'bg-slate-800 text-slate-300',
-    amber: 'bg-amber-950 text-amber-300',
-    pink: 'bg-pink-950 text-pink-300',
-    emerald: 'bg-emerald-950 text-emerald-300',
-    blue: 'bg-blue-950 text-blue-300',
-    red: 'bg-red-950 text-red-300',
+    slate: "bg-[var(--anka-surface-raised)] text-[var(--anka-ink)]",
+    amber: "bg-[var(--anka-warning-soft)] text-[var(--anka-warning)]",
+    pink: "bg-[var(--anka-violet-soft)] text-[var(--anka-violet)]",
+    emerald: "bg-[var(--anka-success-soft)] text-[var(--anka-success)]",
+    blue: "bg-[var(--anka-surface-raised)] text-[var(--anka-info)]",
+    red: "bg-[var(--anka-danger-soft)] text-[var(--anka-danger)]",
   }
   return <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${tones[tone] || tones.slate}`}>{children}</span>
 }
 
 function Stat({ label, value, note }) {
-  return <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-slate-500">{label}</p><p className="mt-2 text-2xl font-semibold text-white">{value}</p><p className="mt-1 text-xs text-slate-500">{note}</p></div>
+  return <div className="workspace-card p-4"><p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-[var(--anka-muted)]">{label}</p><p className="mt-2 text-2xl font-semibold text-[var(--anka-ink)]">{value}</p><p className="mt-1 text-xs text-[var(--anka-muted)]">{note}</p></div>
 }
 
 function Empty({ title, description }) {
-  return <div className="rounded-xl border border-dashed border-slate-700 px-5 py-10 text-center"><p className="font-medium text-slate-200">{title}</p><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-500">{description}</p></div>
+  return <div className="rounded-xl border border-dashed border-[var(--anka-line)] px-5 py-10 text-center"><p className="font-medium text-[var(--anka-ink)]">{title}</p><p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-[var(--anka-muted)]">{description}</p></div>
 }
 
 function Field({ label, children }) {
@@ -338,17 +338,17 @@ export default function DepartmentWorkshop({ departmentId }) {
   if (!config) return null
 
   if (organizationLoading || departmentAccessLoading || loading) {
-    return <div className="flex h-full items-center justify-center bg-slate-950"><div className="h-9 w-9 animate-spin rounded-full border-2 border-slate-700 border-t-purple-500" /></div>
+    return <div className="flex h-full items-center justify-center bg-[var(--anka-canvas)]"><div className="h-9 w-9 animate-spin rounded-full border-2 border-[var(--anka-line)] border-t-[var(--anka-violet)]" /></div>
   }
 
-  if (!departmentAllowed) return <div className="flex h-full items-center justify-center bg-slate-950 p-6 text-center"><div><h1 className="text-xl font-semibold text-white">Department workspace unavailable</h1><p className="mt-2 text-sm text-slate-400">Your active team membership does not include this department.</p></div></div>
+  if (!departmentAllowed) return <div className="flex h-full items-center justify-center bg-[var(--anka-canvas)] p-6 text-center"><div><h1 className="workspace-title">Department workspace unavailable</h1><p className="mt-2 text-sm text-[var(--anka-muted)]">Your active team membership does not include this department.</p></div></div>
 
   if (!workspace) return (
-    <div className="flex h-full items-center justify-center bg-slate-950 p-6 text-center text-white">
+    <div className="flex h-full items-center justify-center bg-[var(--anka-canvas)] p-6 text-center text-[var(--anka-ink)]">
       <section role="alert">
-        <h1 className="text-xl font-semibold">Department workspace unavailable</h1>
-        <p className="mt-2 text-sm text-slate-400">{error || 'The department workspace could not be loaded.'}</p>
-        <button type="button" onClick={loadWorkspace} className="mt-4 rounded-xl bg-purple-600 px-4 py-2 text-sm font-semibold">Try again</button>
+        <h1 className="workspace-title">Department workspace unavailable</h1>
+        <p className="mt-2 text-sm text-[var(--anka-muted)]">{error || 'The department workspace could not be loaded.'}</p>
+        <button type="button" onClick={loadWorkspace} className="mt-4 rounded-xl bg-[var(--anka-violet)] px-4 py-2 text-sm font-semibold text-[var(--anka-on-violet)]">Try again</button>
       </section>
     </div>
   )
@@ -404,18 +404,18 @@ export default function DepartmentWorkshop({ departmentId }) {
   )
 
   return (
-    <div className={['design', 'content', 'marketing'].includes(departmentId) ? 'design-workshop-surface h-full overflow-y-auto' : 'h-full overflow-y-auto bg-slate-950 text-white'}>
-      <div className="mx-auto max-w-7xl px-6 py-7">
+    <div className={['design', 'content', 'marketing'].includes(departmentId) ? 'design-workshop-surface h-full overflow-y-auto' : "h-full overflow-y-auto bg-[var(--anka-canvas)] text-[var(--anka-ink)]"}>
+      <div className="workspace-container workspace-page">
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div>
             <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${config.accentClass}`}>{config.surfaceLabel}</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight">{config.name}</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">{config.description}</p>
+            <h1 className="workspace-title">{config.name}</h1>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--anka-muted)]">{config.description}</p>
           </div>
-          <Link to="/sphere/engagements" className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-semibold text-slate-300 hover:border-purple-600 hover:text-white">Engagements</Link>
+          <Link to="/sphere/engagements" className="rounded-xl border border-[var(--anka-line)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-ink)] hover:border-[var(--anka-violet)] hover:text-[var(--anka-ink)]">Engagements</Link>
         </div>
 
-        {error && <div className="mt-5 rounded-xl border border-red-900/60 bg-red-950/50 px-4 py-3 text-sm text-red-300">{error}</div>}
+        {error && <div className="mt-5 rounded-xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] px-4 py-3 text-sm text-[var(--anka-danger)]">{error}</div>}
         <WorkshopContextShell navigation={navigationContext} validation={contextValidation} returnTarget={returnTarget} projectName={linkedProject?.projects?.name}>
 
         {(departmentId === 'development' || !['private', 'chat'].includes(activeTab)) && <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
@@ -428,16 +428,16 @@ export default function DepartmentWorkshop({ departmentId }) {
         </div>}
 
         {departmentId === 'development' ? <_WorkshopTabs departmentId={departmentId} activeTab={activeTab} onChange={setActiveTab} tabs={availableTabs} /> : (
-          <nav aria-label="Workshop sections" className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 p-3">
-            <button type="button" aria-pressed={['private', 'chat'].includes(activeTab)} disabled={navigationLocked} onClick={() => { if (navigationLocked) return; if (!['private', 'chat'].includes(activeTab)) setActiveTab('private') }} className="rounded-lg border border-violet-500/40 px-3 py-2 text-sm text-violet-200">Chat</button>
-            <label className="min-w-0 flex-1 text-xs text-slate-400">Work queue & tools
+          <nav aria-label="Workshop sections" className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-[var(--anka-line)] p-3">
+            <button type="button" aria-pressed={['private', 'chat'].includes(activeTab)} disabled={navigationLocked} onClick={() => { if (navigationLocked) return; if (!['private', 'chat'].includes(activeTab)) setActiveTab('private') }} className="rounded-lg border border-[var(--anka-violet)] px-3 py-2 text-sm text-[var(--anka-violet)]">Chat</button>
+            <label className="min-w-0 flex-1 text-xs text-[var(--anka-muted)]">Work queue & tools
               <select disabled={navigationLocked} aria-label="Work queue and tools" className={`${INPUT_CLASS} mt-1`} value={['private', 'chat'].includes(activeTab) ? '' : activeTab} onChange={event => { if (!navigationLocked && event.target.value) setActiveTab(event.target.value) }}>
                 <option value="">Choose a secondary workspace</option>
                 {WORKSHOP_TABS.map(([id, title]) => <option key={id} value={id}>{id === 'specialists' ? 'Specialist tools' : title}</option>)}
               </select>
             </label>
-            <button type="button" aria-pressed={activeTab === 'deliverables'} disabled={navigationLocked} onClick={() => { if (!navigationLocked) setActiveTab('deliverables') }} className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Assets & outputs</button>
-            <Link to="/sphere/my-work?tab=review" className="rounded-lg border border-slate-700 px-3 py-2 text-sm">Reviews</Link>
+            <button type="button" aria-pressed={activeTab === 'deliverables'} disabled={navigationLocked} onClick={() => { if (!navigationLocked) setActiveTab('deliverables') }} className="rounded-lg border border-[var(--anka-line)] px-3 py-2 text-sm">Assets & outputs</button>
+            <Link to="/sphere/my-work?tab=review" className="rounded-lg border border-[var(--anka-line)] px-3 py-2 text-sm">Reviews</Link>
           </nav>
         )}
 
@@ -447,15 +447,15 @@ export default function DepartmentWorkshop({ departmentId }) {
           conversationList={onOpen => <WorkshopConversationList organizationId={activeOrganizationId} actorId={user?.id} scopeRevision={scopeRevision} departmentId={departmentId} engagement={chatEngagement} signal={requestSignal} onOpen={onOpen} refreshKey={conversationListRevision} />}>
         {activeTab === 'private' ? (
           <div className="mt-6 space-y-3">
-            <p className="text-sm text-slate-400">Explore privately with your {config.shortName} specialist. Selecting project chat opens separate engagement conversations; it does not share or move these messages. Use specialist tools for governed project outputs.</p>
-            {departmentId === 'design' && <details className="design-private-video-guide rounded-xl border border-slate-700 px-3 py-2 text-sm">
+            <p className="text-sm text-[var(--anka-muted)]">Explore privately with your {config.shortName} specialist. Selecting project chat opens separate engagement conversations; it does not share or move these messages. Use specialist tools for governed project outputs.</p>
+            {departmentId === 'design' && <details className="design-private-video-guide rounded-xl border border-[var(--anka-line)] px-3 py-2 text-sm">
               <summary>Video · private exploration</summary>
               <p>Open a saved private conversation and choose Video in its Create selector. No project is required for the private-video path when the service is available. Higgsfield is a video connection, not a text-chat model.</p>
               <p>Approve only the exact video prompt and settings you intend to send. Private chat history and attachments are not sent. A verified credential alone does not enable generation: eligibility, exact pricing, spend, paid-execution, provider and consent checks still apply.</p>
               <p>Outputs stay owner-private. Use in project is a separate explicit, authorized draft copy; it does not share or move this private conversation or imply approval.</p>
             </details>}
             <ContextConversationPanel key={selectedConversationRevision} contextKind="department_private" departmentId={departmentId} label={`${config.shortName} private conversations`} workshopLayout hideConversationList initialConversation={selectedConversation?.kind === 'private' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} />
-            {['content', 'marketing'].includes(departmentId) && <details className="design-private-video-guide rounded-xl border border-slate-700 px-3 py-2 text-sm">
+            {['content', 'marketing'].includes(departmentId) && <details className="design-private-video-guide rounded-xl border border-[var(--anka-line)] px-3 py-2 text-sm">
               <summary>{config.shortName} draft tools · how to open</summary>
               <p>Use the Conversation context selector above: choose Project / engagement, then confirm Switch context after saving unsaved text. Choose an eligible client engagement with an active or planned {config.shortName} service. This opens a separate history; it does not share or move this private conversation.</p>
               <p>Available draft types come from that engagement’s existing {config.shortName} tools and your access. Previewing a proposal does not create an official record; use the existing explicit review and confirmation controls.</p>
@@ -465,33 +465,33 @@ export default function DepartmentWorkshop({ departmentId }) {
           </div>
         ) : (
           <section className="space-y-5" aria-label={`${config.shortName} engagement conversations`}>
-            <ContextSetup open={departmentId === 'design' && !chatEngagement ? true : undefined} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+            <ContextSetup open={departmentId === 'design' && !chatEngagement ? true : undefined} className="workspace-card p-5">
               {departmentId === 'design' && <summary>Project context · {chatEngagement?.name || 'Choose an engagement'}</summary>}
               <h2 className="text-lg font-semibold">Engagement context</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-400">Choose a client engagement with an active or planned {config.shortName} service. Conversations stay attached to that exact engagement; an administrator-approved model connection is required before sending.</p>
-              {workspace.workstreams.length > 0 && <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.13em] text-slate-400">Current workstream
+              <p className="mt-2 text-sm leading-6 text-[var(--anka-muted)]">Choose a client engagement with an active or planned {config.shortName} service. Conversations stay attached to that exact engagement; an administrator-approved model connection is required before sending.</p>
+              {workspace.workstreams.length > 0 && <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.13em] text-[var(--anka-muted)]">Current workstream
                 <select className={`${INPUT_CLASS} mt-2 normal-case tracking-normal`} disabled={navigationLocked} value={selectedWorkstreamId} onChange={event => { if (navigationLocked) return; setSelectedWorkstreamId(event.target.value); setSelectedChatEngagementId('') }}>
                   {workspace.workstreams.map(workstream => <option key={workstream.id} value={workstream.id}>{workstream.projects?.name || workstream.name} · {workstream.name}</option>)}
                 </select>
               </label>}
-              {chatEngagements.length > 0 ? <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.13em] text-slate-400">Client engagement
+              {chatEngagements.length > 0 ? <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.13em] text-[var(--anka-muted)]">Client engagement
                 <select className={`${INPUT_CLASS} mt-2 normal-case tracking-normal`} disabled={navigationLocked} value={chatEngagement?.id || ''} onChange={event => { if (!navigationLocked) setSelectedChatEngagementId(event.target.value) }}>
                   <option value="">Choose an engagement</option>
                   {chatEngagements.map(engagement => <option key={engagement.id} value={engagement.id}>{engagement.name}</option>)}
                 </select>
-              </label> : <p className="mt-4 text-sm text-amber-300">No eligible engagement is available in this workstream. Select an active workstream and activate this department's service on its engagement.</p>}
+              </label> : <p className="mt-4 text-sm text-[var(--anka-warning)]">No eligible engagement is available in this workstream. Select an active workstream and activate this department's service on its engagement.</p>}
             </ContextSetup>
             {chatEngagement && <div className={departmentId === 'design' ? 'design-workbench-grid' : 'space-y-4'}>
               <div className="min-w-0">{departmentId === 'content' ? <ContentArtifactChat key={selectedConversationRevision} projectId={projectId} engagement={chatEngagement} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} /> : departmentId === 'marketing' ? <MarketingArtifactChat key={selectedConversationRevision} projectId={projectId} engagement={chatEngagement} activeServiceId={contextValidation.context?.activeServiceId || undefined} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} /> : <DepartmentChat key={selectedConversationRevision} presentation={departmentId === 'design' ? 'workbench' : undefined} departmentId={departmentId} engagement={chatEngagement} allowArtifactDraft={false} externalNavigationBusy={designNavigationBusy} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} />}</div>
               {departmentId === 'design' && <DesignChatTools key={designPaneKey} presentation="workbench" engagement={chatEngagement} onNavigationBusyChange={reportDesignNavigationBusy} />}
               {departmentId === 'content' && <ContentWorkshopActions key={chatScopeKey} organizationId={activeOrganizationId} projectId={projectId} engagement={chatEngagement} services={workspace.services} unavailable={Boolean(error) || loading || requestSignal?.aborted} busy={chatNavigationBusy} />}
-              <ProjectContext aria-label="Selected project context" className="design-project-reference space-y-4 rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm">
+              <ProjectContext aria-label="Selected project context" className="design-project-reference space-y-4 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4 text-sm">
                 {departmentId === 'design' && <summary>Project references & review</summary>}
                 <h2 className="font-semibold">{projectName}</h2>
-                <p className="text-slate-400">{chatEngagement.name} · {config.shortName}</p>
-                <Link className="block text-violet-300" to={`/sphere/workspace/projects/${encodeURIComponent(projectId)}?tab=overview`}>Project brief & context</Link>
-                <Link className="block text-violet-300" to={`/sphere/workspace/projects/${encodeURIComponent(projectId)}?tab=outputs`}>Assets, outputs & review evidence</Link>
-                <p className="text-xs leading-5 text-slate-400">Select exact references and supported private attachments in this conversation. Output previews stay drafts until the existing governed action is completed; switching context does not publish private exploration.</p>
+                <p className="text-[var(--anka-muted)]">{chatEngagement.name} · {config.shortName}</p>
+                <Link className="block text-[var(--anka-violet)]" to={`/sphere/workspace/projects/${encodeURIComponent(projectId)}?tab=overview`}>Project brief & context</Link>
+                <Link className="block text-[var(--anka-violet)]" to={`/sphere/workspace/projects/${encodeURIComponent(projectId)}?tab=outputs`}>Assets, outputs & review evidence</Link>
+                <p className="text-xs leading-5 text-[var(--anka-muted)]">Select exact references and supported private attachments in this conversation. Output previews stay drafts until the existing governed action is completed; switching context does not publish private exploration.</p>
               </ProjectContext>
             </div>}
           </section>
@@ -504,14 +504,14 @@ export default function DepartmentWorkshop({ departmentId }) {
           <div className="mt-7"><Empty title={`No active ${config.shortName} workstreams`} description="Create an engagement and activate this department's services. The work will appear here automatically. Department connectors remain available from the Connectors tab." /></div>
         ) : (
           <>
-            <div className="mt-7 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+            <div className="mt-7 workspace-card p-4">
               <label className="grid gap-2 md:grid-cols-[190px_1fr] md:items-center">
-                <span className="text-xs font-semibold uppercase tracking-[0.13em] text-slate-500">Current workstream</span>
+                <span className="text-xs font-semibold uppercase tracking-[0.13em] text-[var(--anka-muted)]">Current workstream</span>
                 <select className={INPUT_CLASS} value={selectedWorkstreamId} onChange={(event) => setSelectedWorkstreamId(event.target.value)}>
                   {workspace.workstreams.map((workstream) => <option key={workstream.id} value={workstream.id}>{workstream.projects?.name || workstream.name} · {workstream.name}</option>)}
                 </select>
               </label>
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--anka-muted)]">
                 <Badge tone={config.accent}>{config.shortName}</Badge>
                 <span>{projectName}</span>
                 <span>·</span>
@@ -539,7 +539,7 @@ function WorkspaceList({ activeTab, data, workspace, selectedWorkstreamId, onTra
   const workstreamNames = new Map(workspace.relatedWorkstreams.map((workstream) => [workstream.id, workstream.name]))
 
   if (activeTab === 'tasks') {
-      return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><Header title="Project Tasks" description="Canonical project-level tasks owned by this department workstream." />{data.tasks.length === 0 ? <Empty title="No Project Tasks in this workstream" description="Add the first task using the action panel." /> : <div className="space-y-3">{data.tasks.map((task) => <div key={task.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium text-white">{task.title}</p><p className="mt-1 text-xs text-slate-500">{projectNames.get(task.project_id)} · Due {dateLabel(task.due_date)}</p></div><Badge tone={task.status === 'blocked' ? 'red' : task.status === 'done' ? 'emerald' : 'blue'}>{labelize(task.status)}</Badge></div>{task.acceptance_criteria && <p className="mt-3 text-sm leading-6 text-slate-400">Acceptance: {task.acceptance_criteria}</p>}<div className="mt-4 flex flex-wrap gap-2">{(TASK_TRANSITIONS[task.status] || []).map((status) => <button disabled={saving} type="button" key={status} onClick={() => onTransition(task, status)} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:border-purple-600 hover:text-white disabled:opacity-50">Move to {labelize(status)}</button>)}</div></div>)}</div>}</section>
+      return <section className="workspace-card p-5"><Header title="Project Tasks" description="Canonical project-level tasks owned by this department workstream." />{data.tasks.length === 0 ? <Empty title="No Project Tasks in this workstream" description="Add the first task using the action panel." /> : <div className="space-y-3">{data.tasks.map((task) => <div key={task.id} className="rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium text-[var(--anka-ink)]">{task.title}</p><p className="mt-1 text-xs text-[var(--anka-muted)]">{projectNames.get(task.project_id)} · Due {dateLabel(task.due_date)}</p></div><Badge tone={task.status === 'blocked' ? 'red' : task.status === 'done' ? 'emerald' : 'blue'}>{labelize(task.status)}</Badge></div>{task.acceptance_criteria && <p className="mt-3 text-sm leading-6 text-[var(--anka-muted)]">Acceptance: {task.acceptance_criteria}</p>}<div className="mt-4 flex flex-wrap gap-2">{(TASK_TRANSITIONS[task.status] || []).map((status) => <button disabled={saving} type="button" key={status} onClick={() => onTransition(task, status)} className="rounded-lg border border-[var(--anka-line)] px-2.5 py-1.5 text-xs text-[var(--anka-ink)] hover:border-[var(--anka-violet)] hover:text-[var(--anka-ink)] disabled:opacity-50">Move to {labelize(status)}</button>)}</div></div>)}</div>}</section>
   }
 
   if (activeTab === 'engagement-work') return <ListSection title="Engagement Work Items" description="Engagement-level commitments remain separate from Project Tasks and are managed in their owning engagement." emptyTitle="No Engagement Work Items">{data.workItems.map((item) => <Record key={item.id} title={item.title} meta={`${item.engagements?.name || 'Engagement'} · Due ${dateLabel(item.due_date)}`} badge={item.status}><p>{item.description || 'No description provided.'}</p></Record>)}</ListSection>
@@ -562,22 +562,22 @@ function WorkspaceList({ activeTab, data, workspace, selectedWorkstreamId, onTra
 }
 
 function Header({ title, description }) {
-  return <div className="mb-5"><h2 className="font-semibold text-white">{title}</h2><p className="mt-1 text-sm text-slate-400">{description}</p></div>
+  return <div className="mb-5"><h2 className="font-semibold text-[var(--anka-ink)]">{title}</h2><p className="mt-1 text-sm text-[var(--anka-muted)]">{description}</p></div>
 }
 
 function ListSection({ title, description, emptyTitle, children }) {
   const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children)
-  return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><Header title={title} description={description} />{hasChildren ? <div className="space-y-3">{children}</div> : <Empty title={emptyTitle} description="Create the first record from the action panel or the project workspace." />}</section>
+  return <section className="workspace-card p-5"><Header title={title} description={description} />{hasChildren ? <div className="space-y-3">{children}</div> : <Empty title={emptyTitle} description="Create the first record from the action panel or the project workspace." />}</section>
 }
 
 function Record({ title, meta, badge, children }) {
-  return <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-medium text-white">{title}</p><p className="mt-1 text-xs text-slate-500">{meta}</p></div><Badge>{labelize(badge)}</Badge></div><div className="mt-3 text-sm leading-6 text-slate-400">{children}</div></div>
+  return <div className="rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-medium text-[var(--anka-ink)]">{title}</p><p className="mt-1 text-xs text-[var(--anka-muted)]">{meta}</p></div><Badge>{labelize(badge)}</Badge></div><div className="mt-3 text-sm leading-6 text-[var(--anka-muted)]">{children}</div></div>
 }
 
 function ActionPanel(props) {
   const { activeTab, saving } = props
-  if (activeTab === 'milestones') return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><Header title="Engagement-level control" description="Milestones span departments. Manage them from the engagement workspace to keep one accountable journey." /><Link to="/sphere/engagements" className="block rounded-xl bg-purple-600 px-4 py-2.5 text-center text-sm font-semibold text-white hover:bg-purple-500">Open engagement workspace</Link></section>
-  if (activeTab === 'engagement-work' || activeTab === 'services') return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><Header title="Existing authority retained" description="This coordination view is read-only for engagement services, stages, and Work Items. Use the owning engagement or specialist workspace for supported actions." /><Link to="/sphere/engagements" className="block rounded-xl bg-purple-600 px-4 py-2.5 text-center text-sm font-semibold text-white hover:bg-purple-500">Open engagement workspace</Link></section>
+  if (activeTab === 'milestones') return <section className="workspace-card p-5"><Header title="Engagement-level control" description="Milestones span departments. Manage them from the engagement workspace to keep one accountable journey." /><Link to="/sphere/engagements" className="block rounded-xl bg-purple-600 px-4 py-2.5 text-center text-sm font-semibold text-white hover:bg-purple-500">Open engagement workspace</Link></section>
+  if (activeTab === 'engagement-work' || activeTab === 'services') return <section className="workspace-card p-5"><Header title="Existing authority retained" description="This coordination view is read-only for engagement services, stages, and Work Items. Use the owning engagement or specialist workspace for supported actions." /><Link to="/sphere/engagements" className="block rounded-xl bg-purple-600 px-4 py-2.5 text-center text-sm font-semibold text-white hover:bg-purple-500">Open engagement workspace</Link></section>
   if (activeTab === 'tasks') return <FormShell title="Add task" description="Creates internal department work." onSubmit={props.onCreateTask} saving={saving}><Field label="Task title"><input required className={INPUT_CLASS} value={props.taskForm.title} onChange={(event) => props.setTaskForm({ ...props.taskForm, title: event.target.value })} /></Field><Field label="Acceptance criteria"><textarea className={`${INPUT_CLASS} min-h-24`} value={props.taskForm.acceptanceCriteria} onChange={(event) => props.setTaskForm({ ...props.taskForm, acceptanceCriteria: event.target.value })} /></Field><div className="grid grid-cols-2 gap-3"><Field label="Priority"><select className={INPUT_CLASS} value={props.taskForm.priority} onChange={(event) => props.setTaskForm({ ...props.taskForm, priority: event.target.value })}><option>low</option><option>medium</option><option>high</option><option>urgent</option></select></Field><Field label="Due"><input type="date" className={INPUT_CLASS} value={props.taskForm.dueDate} onChange={(event) => props.setTaskForm({ ...props.taskForm, dueDate: event.target.value })} /></Field></div></FormShell>
   if (activeTab === 'research') return <FormShell title="Add research" description="Evidence remains shared with the project." onSubmit={props.onCreateResearch} saving={saving}><Field label="Title"><input required className={INPUT_CLASS} value={props.researchForm.title} onChange={(event) => props.setResearchForm({ ...props.researchForm, title: event.target.value })} /></Field><Field label="Type"><select className={INPUT_CLASS} value={props.researchForm.researchType} onChange={(event) => props.setResearchForm({ ...props.researchForm, researchType: event.target.value })}><option>general</option><option>market</option><option>competitor</option><option>audience</option><option>keyword</option><option>visual</option><option>technical</option></select></Field><Field label="Question"><textarea className={`${INPUT_CLASS} min-h-20`} value={props.researchForm.question} onChange={(event) => props.setResearchForm({ ...props.researchForm, question: event.target.value })} /></Field><Field label="Findings"><textarea className={`${INPUT_CLASS} min-h-24`} value={props.researchForm.findings} onChange={(event) => props.setResearchForm({ ...props.researchForm, findings: event.target.value })} /></Field></FormShell>
   if (activeTab === 'deliverables') return <FormShell title="Add deliverable" description="Creates the output identity; version review comes next." onSubmit={props.onCreateDeliverable} saving={saving}><Field label="Title"><input required className={INPUT_CLASS} value={props.deliverableForm.title} onChange={(event) => props.setDeliverableForm({ ...props.deliverableForm, title: event.target.value })} /></Field><Field label="Type"><input className={INPUT_CLASS} value={props.deliverableForm.deliverableType} onChange={(event) => props.setDeliverableForm({ ...props.deliverableForm, deliverableType: event.target.value })} /></Field><Field label="Due"><input type="date" className={INPUT_CLASS} value={props.deliverableForm.dueDate} onChange={(event) => props.setDeliverableForm({ ...props.deliverableForm, dueDate: event.target.value })} /></Field></FormShell>
@@ -585,11 +585,11 @@ function ActionPanel(props) {
 }
 
 function SpecialistQueues({ config, navigationContext }) {
-  return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><Header title="Specialist queues" description="Department coordination stays here; specialist production behavior remains in its existing Studio or Workshop." />{config.specialists.length ? <div className="grid gap-3 md:grid-cols-2">{config.specialists.map((item) => <Link key={item.path} to={appendWorkshopNavigation(item.path, { ...navigationContext, workshopTab: '' })} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4 hover:border-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-500"><p className="font-medium text-white">{item.name}</p><p className="mt-2 text-sm leading-6 text-slate-400">{item.description}</p></Link>)}</div> : <Empty title="No separate specialist queue" description="Development coordination and its existing supported actions remain on this workspace." />}</section>
+  return <section className="workspace-card p-5"><Header title="Specialist queues" description="Department coordination stays here; specialist production behavior remains in its existing Studio or Workshop." />{config.specialists.length ? <div className="grid gap-3 md:grid-cols-2">{config.specialists.map((item) => <Link key={item.path} to={appendWorkshopNavigation(item.path, { ...navigationContext, workshopTab: '' })} className="rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-4 hover:border-[var(--anka-violet)] focus:ring-2 focus:ring-[var(--anka-focus)]"><p className="font-medium text-[var(--anka-ink)]">{item.name}</p><p className="mt-2 text-sm leading-6 text-[var(--anka-muted)]">{item.description}</p></Link>)}</div> : <Empty title="No separate specialist queue" description="Development coordination and its existing supported actions remain on this workspace." />}</section>
 }
 
 function FormShell({ title, description, onSubmit, saving, children }) {
-  return <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5"><Header title={title} description={description} /><form onSubmit={onSubmit} className="space-y-4">{children}<button disabled={saving} className="w-full rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-purple-500 disabled:opacity-50">{saving ? 'Saving…' : title}</button></form></section>
+  return <section className="workspace-card p-5"><Header title={title} description={description} /><form onSubmit={onSubmit} className="space-y-4">{children}<button disabled={saving} className="w-full rounded-xl bg-[var(--anka-violet)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-on-violet)] hover:bg-[var(--anka-violet)] disabled:opacity-50">{saving ? 'Saving…' : title}</button></form></section>
 }
 
 export { DEPARTMENT_CONFIG }

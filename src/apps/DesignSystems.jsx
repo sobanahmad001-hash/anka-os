@@ -233,27 +233,27 @@ export default function DesignSystems() {
     await load(selectedId)
   }
 
-  if (loading) return <div className="flex h-full items-center justify-center bg-slate-950 text-sm text-slate-500">Loading Design Systems Library…</div>
+  if (loading) return <div className="flex h-full items-center justify-center bg-[var(--anka-canvas)] text-sm text-[var(--anka-muted)]">Loading Design Systems Library…</div>
 
-  return <div className="h-full overflow-y-auto bg-slate-950 text-white">
-    <div className="mx-auto max-w-7xl px-5 py-7 lg:px-8">
+  return <div className="h-full overflow-y-auto bg-[var(--anka-canvas)] text-[var(--anka-ink)]">
+    <div className="workspace-container workspace-page">
       <header className="flex flex-wrap items-start justify-between gap-5">
-        <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-pink-300">Design Studio · Persistent library</p><h1 className="mt-2 text-3xl font-semibold">Design Systems</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Manual, versioned specifications for tokens, typography, components, and usage rules. Released versions remain browsable and linkable from other artifacts.</p></div>
-        <div className="flex gap-2"><Link to={parentWorkshopPath} className={SECONDARY}>Back to Design Workshop</Link><button type="button" onClick={startNew} disabled={!workspace.services.length} className="rounded-xl bg-pink-600 px-4 py-2 text-sm font-semibold hover:bg-pink-500 disabled:opacity-40">New design system</button></div>
+        <div><p className="workspace-eyebrow">Design Studio · Persistent library</p><h1 className="workspace-title">Design Systems</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--anka-muted)]">Manual, versioned specifications for tokens, typography, components, and usage rules. Released versions remain browsable and linkable from other artifacts.</p></div>
+        <div className="flex gap-2"><Link to={parentWorkshopPath} className="workspace-button disabled:cursor-not-allowed disabled:opacity-50">Back to Design Workshop</Link><button type="button" onClick={startNew} disabled={!workspace.services.length} className="rounded-xl bg-[var(--anka-violet)] px-4 py-2 text-sm font-semibold hover:bg-[var(--anka-violet)] disabled:opacity-40 text-[var(--anka-on-violet)]">New design system</button></div>
       </header>
-      <div className="mt-5 rounded-xl border border-pink-500/20 bg-pink-950/15 px-4 py-3 text-sm text-pink-100"><span className="font-semibold">Structured specification, not a renderer.</span> DS5 documents standards for repeat use; it does not generate content or preview live components.</div>
-      {error && <div className="mt-4 rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">{error}</div>}
-      {message && <div className="mt-4 rounded-xl border border-emerald-800 bg-emerald-950/25 px-4 py-3 text-sm text-emerald-300">{message}</div>}
+      <div className="mt-5 rounded-xl border border-[var(--anka-violet)] bg-[var(--anka-violet-soft)] px-4 py-3 text-sm text-[var(--anka-violet)]"><span className="font-semibold">Structured specification, not a renderer.</span> DS5 documents standards for repeat use; it does not generate content or preview live components.</div>
+      {error && <div className="mt-4 rounded-xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] px-4 py-3 text-sm text-[var(--anka-danger)]">{error}</div>}
+      {message && <div className="mt-4 rounded-xl border border-[var(--anka-success)] bg-[var(--anka-success-soft)] px-4 py-3 text-sm text-[var(--anka-success)]">{message}</div>}
 
       <div className="mt-7 grid gap-6 xl:grid-cols-[330px_1fr]">
         <aside className="space-y-4">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><input className={INPUT} placeholder="Search systems, brands, engagements" value={search} onChange={event => setSearch(event.target.value)} /><label className="mt-3 flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={releasedOnly} onChange={event => setReleasedOnly(event.target.checked)} />Released library only</label></div>
-          <div className="space-y-3">{cards.map(artifact => { const released = releasedVersionsFor(artifact.id, workspace.versions, workspace.approvals)[0]; return <button type="button" key={artifact.id} onClick={() => choose(artifact.id)} className={`w-full rounded-2xl border p-4 text-left ${artifact.id === selectedId ? 'border-pink-500/60 bg-pink-950/20' : 'border-slate-800 bg-slate-900/60 hover:border-slate-700'}`}><div className="flex items-start justify-between gap-3"><p className="font-semibold text-white">{artifact.title}</p><span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase ${released ? 'bg-emerald-950 text-emerald-300' : 'bg-amber-950 text-amber-300'}`}>{released ? `Released v${released.version_number}` : 'Draft'}</span></div><p className="mt-2 text-xs text-slate-500">{related(artifact.brands)?.name || 'Brand'} · {related(artifact.engagements)?.name || 'Engagement'}</p></button>})}{!cards.length && <p className="rounded-2xl border border-dashed border-slate-800 p-6 text-center text-sm text-slate-600">No matching released design systems.</p>}</div>
+          <div className="workspace-card p-4"><input className="w-full rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] px-3 py-2.5 text-sm text-[var(--anka-ink)] focus:border-[var(--anka-focus)]" placeholder="Search systems, brands, engagements" value={search} onChange={event => setSearch(event.target.value)} /><label className="mt-3 flex items-center gap-2 text-xs text-[var(--anka-muted)]"><input type="checkbox" checked={releasedOnly} onChange={event => setReleasedOnly(event.target.checked)} />Released library only</label></div>
+          <div className="space-y-3">{cards.map(artifact => { const released = releasedVersionsFor(artifact.id, workspace.versions, workspace.approvals)[0]; return <button type="button" key={artifact.id} onClick={() => choose(artifact.id)} className={`w-full rounded-2xl border p-4 text-left ${artifact.id === selectedId ? "border-[var(--anka-violet)] bg-[var(--anka-violet-soft)]" : "border-[var(--anka-line)] bg-[var(--anka-surface)] hover:border-[var(--anka-line)]"}`}><div className="flex items-start justify-between gap-3"><p className="font-semibold text-[var(--anka-ink)]">{artifact.title}</p><span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase ${released ? "bg-[var(--anka-success-soft)] text-[var(--anka-success)]" : "bg-[var(--anka-warning-soft)] text-[var(--anka-warning)]"}`}>{released ? `Released v${released.version_number}` : 'Draft'}</span></div><p className="mt-2 text-xs text-[var(--anka-muted)]">{related(artifact.brands)?.name || 'Brand'} · {related(artifact.engagements)?.name || 'Engagement'}</p></button>})}{!cards.length && <p className="rounded-2xl border border-dashed border-[var(--anka-line)] p-6 text-center text-sm text-[var(--anka-muted)]">No matching released design systems.</p>}</div>
         </aside>
 
         <main className="min-w-0 space-y-6">
           {exactUnavailable ? (
-            <div className="rounded-2xl border border-amber-800 bg-amber-950/25 px-5 py-4 text-amber-100">
+            <div className="rounded-2xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] px-5 py-4 text-[var(--anka-warning)]">
               <p className="font-semibold">Exact Design System unavailable</p>
               <p className="mt-1 text-sm">No other artifact or version was substituted.</p>
             </div>
@@ -312,5 +312,3 @@ function DesignSystemEditor({ form, setForm, services, selectedArtifact, activeS
 function EditorSection({ title, onAdd, children }) { return <section className="mt-6"><div className="mb-3 flex items-center justify-between gap-3"><h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-400">{title}</h3><button type="button" onClick={onAdd} className={SECONDARY}>Add</button></div><div className="space-y-3">{children}</div></section> }
 function Field({ label: fieldLabel, children }) { return <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{fieldLabel}<div className="mt-2 normal-case tracking-normal">{children}</div></label> }
 function Remove({ disabled, onClick }) { return <button type="button" disabled={disabled} onClick={onClick} className={`${SECONDARY} mt-2`}>Remove</button> }
-
-

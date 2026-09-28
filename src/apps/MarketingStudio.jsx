@@ -96,8 +96,8 @@ function titleize(value) {
 }
 
 function Notice({ error, message }) {
-  if (error) return <div className="rounded-xl border border-red-900/60 bg-red-950/50 px-4 py-3 text-sm text-red-300">{error}</div>
-  if (message) return <div className="rounded-xl border border-emerald-900/60 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">{message}</div>
+  if (error) return <div className="rounded-xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] px-4 py-3 text-sm text-[var(--anka-danger)]">{error}</div>
+  if (message) return <div className="rounded-xl border border-[var(--anka-success)] bg-[var(--anka-success-soft)] px-4 py-3 text-sm text-[var(--anka-success)]">{message}</div>
   return null
 }
 
@@ -280,26 +280,26 @@ export default function MarketingStudio() {
   }
 
   if (!organizationReady) {
-    return <div className="flex h-full items-center justify-center bg-slate-950 p-6 text-sm text-slate-400">{organizationLoading ? 'Loading organization access…' : 'Choose an active organization before opening Marketing Studio.'}</div>
+    return <div className="flex h-full items-center justify-center bg-[var(--anka-canvas)] p-6 text-sm text-[var(--anka-muted)]">{organizationLoading ? 'Loading organization access…' : 'Choose an active organization before opening Marketing Studio.'}</div>
   }
 
   if (!loading && context.mode === 'choose') return <MarketingEntryShell parentPath={parentWorkshopPath}>
-    <section className="mx-auto max-w-3xl rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Marketing Studio</p>
-      <h1 className="mt-2 text-2xl font-semibold">Choose Marketing work</h1>
-      <p className="mt-2 text-sm text-slate-400">Select an authorized engagement. Marketing Studio will not choose work silently.</p>
-      <div className="mt-5 grid gap-3">{selectableEngagements.map(item => <button type="button" key={item.id} onClick={() => setSearchParams(marketingSelectionParams(navigationContext, item, activeOrganizationId))} className="rounded-xl border border-slate-700 px-4 py-3 text-left text-sm font-semibold text-slate-200 hover:border-emerald-500">{item.name} · {item.brands?.name || 'Brand'}</button>)}</div>
-      {!selectableEngagements.length && <p className="mt-5 text-sm text-slate-500">No active Marketing engagement is available in this organization.</p>}
-      <button type="button" onClick={() => setSearchParams(privateMarketingParams(navigationContext, activeOrganizationId))} className={BUTTON + ' mt-5'}>Open private experiment</button>
+    <section className="mx-auto max-w-3xl workspace-card p-6">
+      <p className="workspace-eyebrow">Marketing Studio</p>
+      <h1 className="workspace-title">Choose Marketing work</h1>
+      <p className="mt-2 text-sm text-[var(--anka-muted)]">Select an authorized engagement. Marketing Studio will not choose work silently.</p>
+      <div className="mt-5 grid gap-3">{selectableEngagements.map(item => <button type="button" key={item.id} onClick={() => setSearchParams(marketingSelectionParams(navigationContext, item, activeOrganizationId))} className="rounded-xl border border-[var(--anka-line)] px-4 py-3 text-left text-sm font-semibold text-[var(--anka-ink)] hover:border-[var(--anka-violet)]">{item.name} · {item.brands?.name || 'Brand'}</button>)}</div>
+      {!selectableEngagements.length && <p className="mt-5 text-sm text-[var(--anka-muted)]">No active Marketing engagement is available in this organization.</p>}
+      <button type="button" onClick={() => setSearchParams(privateMarketingParams(navigationContext, activeOrganizationId))} className="workspace-button mt-5">Open private experiment</button>
     </section>
   </MarketingEntryShell>
 
   if (!loading && context.mode === 'private') return <MarketingEntryShell parentPath={parentWorkshopPath}>
-    <section className="mx-auto max-w-7xl rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-400">Private experiment</p>
-      <h1 className="mt-2 text-2xl font-semibold">Private Marketing workspace</h1>
-      <p className="mt-2 text-sm leading-6 text-slate-400">Quick Tasks is the sole private Marketing mode. It receives no project, engagement, brand, provider account, or official save target.</p>
-      <button type="button" onClick={() => setSearchParams({})} className={BUTTON + ' mt-5'}>Choose official work</button>
+    <section className="workspace-container workspace-card workspace-page">
+      <p className="workspace-eyebrow">Private experiment</p>
+      <h1 className="workspace-title">Private Marketing workspace</h1>
+      <p className="mt-2 text-sm leading-6 text-[var(--anka-muted)]">Quick Tasks is the sole private Marketing mode. It receives no project, engagement, brand, provider account, or official save target.</p>
+      <button type="button" onClick={() => setSearchParams({})} className="workspace-button mt-5">Choose official work</button>
     </section>
     <QuickTasks organizationId={activeOrganizationId} defaultDepartment="marketing" />
   </MarketingEntryShell>
@@ -310,7 +310,7 @@ export default function MarketingStudio() {
       : validateWorkshopNavigation(navigationContext, { status: 'denied' })
     return <MarketingEntryShell parentPath={parentWorkshopPath}><WorkshopContextShell navigation={navigationContext} validation={rejected} returnTarget={workspaceReturnTarget(rejected)}>
       <div />
-    </WorkshopContextShell><div className="mt-5 text-center"><button type="button" onClick={() => setSearchParams({})} className={BUTTON}>Choose permitted work</button></div></MarketingEntryShell>
+    </WorkshopContextShell><div className="mt-5 text-center"><button type="button" onClick={() => setSearchParams({})} className="workspace-button disabled:cursor-not-allowed disabled:opacity-50">Choose permitted work</button></div></MarketingEntryShell>
   }
 
   function selectTab(nextTab) {
@@ -325,39 +325,39 @@ export default function MarketingStudio() {
   }
 
   return (
-    <div className="h-full overflow-y-auto bg-slate-950 text-white">
-      <header className="border-b border-slate-800 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.12),transparent_36%)] px-6 py-6">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-5">
+    <div className="h-full overflow-y-auto bg-[var(--anka-canvas)] text-[var(--anka-ink)]">
+      <header className="border-b border-[var(--anka-line)] bg-[var(--anka-surface)] px-6 py-6">
+        <div className="workspace-container flex flex-wrap items-end justify-between gap-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-400">Marketing department</p>
-            <h1 className="mt-1 text-3xl font-semibold tracking-tight">Marketing Studio</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Plan campaigns, maintain backlink outreach research, version accountable marketing artifacts, and inspect live read-only performance.</p>
+            <p className="workspace-eyebrow">Marketing department</p>
+            <h1 className="workspace-title">Marketing Studio</h1>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--anka-muted)]">Plan campaigns, maintain backlink outreach research, version accountable marketing artifacts, and inspect live read-only performance.</p>
           </div>
-          <Link to={parentWorkshopPath} className={BUTTON}>Back to Marketing Workshop</Link>
+          <Link to={parentWorkshopPath} className="workspace-button disabled:cursor-not-allowed disabled:opacity-50">Back to Marketing Workshop</Link>
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl space-y-6 px-6 py-6">
+      <main className="workspace-container space-y-6 workspace-page">
         <WorkshopContextShell navigation={navigationContext} validation={contextValidation} returnTarget={returnTarget} projectName={context.engagement?.name}>
         <Notice error={error} message={message} />
-        <section className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-          <label className="min-w-72 flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Marketing engagement
-            <select value={engagementId} onChange={event => { const item = engagements.find(candidate => candidate.id === event.target.value); setSearchParams(item ? marketingSelectionParams(navigationContext, item, activeOrganizationId) : {}) }} className={`${INPUT} mt-2 normal-case tracking-normal`}>
+        <section className="flex flex-wrap items-end gap-4 workspace-card p-5">
+          <label className="min-w-72 flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Marketing engagement
+            <select value={engagementId} onChange={event => { const item = engagements.find(candidate => candidate.id === event.target.value); setSearchParams(item ? marketingSelectionParams(navigationContext, item, activeOrganizationId) : {}) }} className={`w-full rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] px-3.5 py-2.5 text-sm text-[var(--anka-ink)] focus:border-[var(--anka-focus)] focus:ring-2 focus:ring-[var(--anka-focus)] mt-2 normal-case tracking-normal`}>
               <option value="">Choose work</option>
               {engagements.map(item => <option key={item.id} value={item.id}>{item.name} · {item.brands?.name || 'Brand'}</option>)}
             </select>
           </label>
-          {workspace?.engagement && <div className="rounded-xl bg-slate-950 px-4 py-3 text-sm text-slate-400"><span className="font-semibold text-white">{workspace.engagement.brands?.name}</span><span className="mx-2 text-slate-700">/</span>{workspace.engagement.agency_clients?.name}</div>}
+          {workspace?.engagement && <div className="rounded-xl bg-[var(--anka-canvas)] px-4 py-3 text-sm text-[var(--anka-muted)]"><span className="font-semibold text-[var(--anka-ink)]">{workspace.engagement.brands?.name}</span><span className="mx-2 text-[var(--anka-muted)]">/</span>{workspace.engagement.agency_clients?.name}</div>}
         </section>
 
-        <nav className="flex gap-2 overflow-x-auto border-b border-slate-800">
+        <nav className="flex gap-2 overflow-x-auto border-b border-[var(--anka-line)]">
           {MARKETING_TABS.map(([id, label]) => (
-            <button key={id} onClick={() => selectTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? 'border-emerald-400 text-emerald-300' : 'border-transparent text-slate-500 hover:text-white'}`}>{label}</button>
+            <button key={id} onClick={() => selectTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? "border-[var(--anka-violet)] text-[var(--anka-violet)]" : "border-transparent text-[var(--anka-muted)] hover:text-[var(--anka-ink)]"}`}>{label}</button>
           ))}
         </nav>
 
-        {loading && !(tab === 'reports' && workspace) ? <div className="py-20 text-center text-sm text-slate-500">Loading Marketing Studio…</div> : !workspace ? (
-          <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-sm text-slate-500">Select an engagement with a Marketing service to begin.</div>
+        {loading && !(tab === 'reports' && workspace) ? <div className="py-20 text-center text-sm text-[var(--anka-muted)]">Loading Marketing Studio…</div> : !workspace ? (
+          <div className="rounded-2xl border border-dashed border-[var(--anka-line)] px-6 py-16 text-center text-sm text-[var(--anka-muted)]">Select an engagement with a Marketing service to begin.</div>
         ) : tab === 'overview' ? (
           <MarketingOverview
             key={`${activeOrganizationId}:${scopeRevision}:${engagementId}`}
@@ -452,13 +452,13 @@ export default function MarketingStudio() {
         )}
         </WorkshopContextShell>
       </main>
-      {navigationBlocker.state === 'blocked' && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-5"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">{reportDirty ? 'Unsaved marketing report' : 'Unsaved campaign brief'}</p><h2 className="mt-2 text-xl font-semibold">Keep, save, or discard your changes?</h2><p className="mt-2 text-sm text-slate-400">The current context will not change until you choose.</p><div className="mt-6 flex flex-wrap justify-end gap-2"><button type="button" className={BUTTON} onClick={() => navigationBlocker.reset()}>Stay</button><button type="button" className={BUTTON} onClick={() => { setBriefDirty(false); setReportDirty(false); navigationBlocker.proceed() }}>Discard and continue</button>{!reportDirty && <button type="button" className={PRIMARY} disabled={saving} onClick={async () => { const result = await briefSaveRef.current?.(); if (result) { setBriefDirty(false); navigationBlocker.proceed() } }}>{saving ? 'Saving…' : 'Save current and continue'}</button>}</div>{reportDirty && <p className="mt-3 text-xs text-slate-500">Stay on the report to save it deliberately. An ambiguous earlier save must be reconciled before another submission.</p>}</section></div>}
+      {navigationBlocker.state === 'blocked' && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-5"><section className="w-full max-w-lg workspace-card p-6 shadow-2xl"><p className="workspace-eyebrow">{reportDirty ? 'Unsaved marketing report' : 'Unsaved campaign brief'}</p><h2 className="mt-2 text-xl font-semibold">Keep, save, or discard your changes?</h2><p className="mt-2 text-sm text-[var(--anka-muted)]">The current context will not change until you choose.</p><div className="mt-6 flex flex-wrap justify-end gap-2"><button type="button" className="workspace-button disabled:cursor-not-allowed disabled:opacity-50" onClick={() => navigationBlocker.reset()}>Stay</button><button type="button" className="workspace-button disabled:cursor-not-allowed disabled:opacity-50" onClick={() => { setBriefDirty(false); setReportDirty(false); navigationBlocker.proceed() }}>Discard and continue</button>{!reportDirty && <button type="button" className="workspace-button workspace-button-primary disabled:cursor-not-allowed disabled:opacity-50" disabled={saving} onClick={async () => { const result = await briefSaveRef.current?.(); if (result) { setBriefDirty(false); navigationBlocker.proceed() } }}>{saving ? 'Saving…' : 'Save current and continue'}</button>}</div>{reportDirty && <p className="mt-3 text-xs text-[var(--anka-muted)]">Stay on the report to save it deliberately. An ambiguous earlier save must be reconciled before another submission.</p>}</section></div>}
     </div>
   )
 }
 
 function MarketingEntryShell({ children, parentPath }) {
-  return <div className="h-full overflow-y-auto bg-slate-950 px-6 py-8 text-white"><div className="mx-auto mb-5 max-w-3xl"><Link to={parentPath} className={BUTTON}>Back to Marketing Workshop</Link></div>{children}</div>
+  return <div className="h-full overflow-y-auto bg-[var(--anka-canvas)] px-6 py-8 text-[var(--anka-ink)]"><div className="mx-auto mb-5 max-w-3xl"><Link to={parentPath} className="workspace-button disabled:cursor-not-allowed disabled:opacity-50">Back to Marketing Workshop</Link></div>{children}</div>
 }
 
 function Campaigns({ studio, campaignPlans, workspace, campaignId, setCampaignId, selected, saving, act, canEditPlan, onAccessError }) {

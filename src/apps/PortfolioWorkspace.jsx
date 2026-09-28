@@ -76,28 +76,28 @@ export default function PortfolioWorkspace({ initialOwnerKind = 'all' }) {
   const updateFilter = (key) => (event) => setFilters((current) => ({ ...current, [key]: event.target.value }))
 
   return (
-    <main className="min-h-full bg-[#090c13] p-4 text-slate-100 sm:p-6 lg:p-8">
-      <div className="mx-auto max-w-[1600px]">
+    <main className="workspace-page">
+      <div className="workspace-container">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">Coordination</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight">Portfolio Workspace</h1>
-            <p className="mt-2 max-w-3xl text-sm text-slate-400">A project-root view of Client Work and Internal Work. Project Tasks and Engagement Work Items remain separate.</p>
+            <p className="workspace-eyebrow">Coordination</p>
+            <h1 className="workspace-title">Portfolio Workspace</h1>
+            <p className="workspace-description">A project-root view of Client Work and Internal Work. Project Tasks and Engagement Work Items remain separate.</p>
           </div>
-          <div className="flex gap-2">{canShowAuthorityAdministration(activeMembership) && <button type="button" onClick={() => setShowSetup(true)} disabled={showSetup} className="rounded-xl bg-violet-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">New draft project</button>}<button type="button" onClick={load} disabled={loading} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-slate-200 hover:bg-white/[0.08] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button></div>
+          <div className="flex gap-2">{canShowAuthorityAdministration(activeMembership) && <button type="button" onClick={() => setShowSetup(true)} disabled={showSetup} className="rounded-xl workspace-button workspace-button-primary px-4 py-2 text-sm font-semibold disabled:opacity-50">New draft project</button>}<button type="button" onClick={load} disabled={loading} className="workspace-button font-medium text-[var(--anka-ink)] hover:bg-[var(--anka-surface-raised)] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button></div>
         </div>
 
         {showSetup && canShowAuthorityAdministration(activeMembership) && <ProjectDraftSetupPanel organizationId={activeOrganizationId} scopeRevision={scopeRevision} requestSignal={requestSignal} initialType="project" onCreated={(result) => navigate(`/sphere/workspace/projects/${result.project_id}?tab=services`)} onCancel={() => setShowSetup(false)} onAccessError={handleOrganizationAccessError} />}
 
         {!organizationLoading && !selectionRequired && activeOrganizationId && <ProjectRequestPanel organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={handleOrganizationAccessError} />}
 
-        {error && <div role="alert" className="mt-6 rounded-2xl border border-rose-500/25 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>}
-        {loading && !snapshot && <div className="mt-8 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-10 text-center text-sm text-slate-400">Loading live portfolio data…</div>}
+        {error && <div role="alert" className="mt-6 rounded-2xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] p-4 text-sm text-[var(--anka-danger)]">{error}</div>}
+        {loading && !snapshot && <div className="mt-8 workspace-card p-10 text-center text-sm text-[var(--anka-muted)]">Loading live portfolio data…</div>}
 
-        <nav aria-label="Project work type" className="mt-5 flex flex-wrap gap-2">{[['all', 'All Projects'], ['client', 'Client Work'], ['internal', 'Internal Work']].map(([kind, title]) => <button type="button" key={kind} aria-pressed={filters.ownerKind === kind} onClick={() => setFilters(current => ({ ...current, ownerKind: kind }))} className={`rounded-xl border px-4 py-2 text-sm ${filters.ownerKind === kind ? 'border-violet-400/40 bg-violet-500/10 text-violet-200' : 'border-white/10 text-slate-400'}`}>{title}</button>)}</nav>
+        <nav aria-label="Project work type" className="mt-5 flex flex-wrap gap-2">{[['all', 'All Projects'], ['client', 'Client Work'], ['internal', 'Internal Work']].map(([kind, title]) => <button type="button" key={kind} aria-pressed={filters.ownerKind === kind} onClick={() => setFilters(current => ({ ...current, ownerKind: kind }))} className={`rounded-xl border px-4 py-2 text-sm ${filters.ownerKind === kind ? 'border-[var(--anka-violet)] bg-[var(--anka-violet-soft)] text-[var(--anka-violet)]' : 'border-[var(--anka-line)] text-[var(--anka-muted)]'}`}>{title}</button>)}</nav>
         {snapshot && <>
           <section aria-label="Portfolio summary" className="mt-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-            {metrics.map((item) => <div key={item.title} className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4"><p className="text-xs text-slate-500">{item.title}</p><p className="mt-2 text-2xl font-semibold">{item.value}</p><p className="mt-1 text-[11px] text-slate-600">{item.note}</p></div>)}
+            {metrics.map((item) => <div key={item.title} className="workspace-card p-4"><p className="text-xs text-[var(--anka-muted)]">{item.title}</p><p className="mt-2 text-2xl font-semibold">{item.value}</p><p className="mt-1 text-[11px] text-[var(--anka-muted)]">{item.note}</p></div>)}
           </section>
 
           <PortfolioFilters filters={filters} statuses={statuses} owners={owners} updateFilter={updateFilter} />
@@ -110,9 +110,9 @@ export default function PortfolioWorkspace({ initialOwnerKind = 'all' }) {
 }
 
 function PortfolioFilters({ filters, statuses, owners, updateFilter }) {
-  const selectClass = 'rounded-xl border border-white/10 bg-[#111622] px-3 py-2 text-sm text-slate-200'
+  const selectClass = 'rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] px-3 py-2 text-sm text-[var(--anka-ink)]'
   return (
-    <section aria-label="Portfolio filters" className="mt-6 grid gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4 sm:grid-cols-2 xl:grid-cols-5">
+    <section aria-label="Portfolio filters" className="mt-6 grid gap-3 workspace-card p-4 sm:grid-cols-2 xl:grid-cols-5">
       <Filter label="Work type"><select className={selectClass} value={filters.ownerKind} onChange={updateFilter('ownerKind')}><option value="all">All work</option><option value="client">Client Work</option><option value="internal">Internal Work</option></select></Filter>
       <Filter label="Status"><select className={selectClass} value={filters.status} onChange={updateFilter('status')}><option value="all">All statuses</option>{statuses.map((status) => <option key={status} value={status}>{label(status)}</option>)}</select></Filter>
       <Filter label="Due"><select className={selectClass} value={filters.due} onChange={updateFilter('due')}>{PORTFOLIO_DUE_FILTERS.map((due) => <option key={due} value={due}>{due === 'all' ? 'All due dates' : label(due)}</option>)}</select></Filter>
@@ -123,16 +123,16 @@ function PortfolioFilters({ filters, statuses, owners, updateFilter }) {
 }
 
 function Filter({ label: title, children }) {
-  return <label className="flex min-w-0 flex-col gap-1.5 text-xs font-medium text-slate-500"><span>{title}</span>{children}</label>
+  return <label className="flex min-w-0 flex-col gap-1.5 text-xs font-medium text-[var(--anka-muted)]"><span>{title}</span>{children}</label>
 }
 
 function DepartmentLoad({ rows }) {
   if (!rows.length) return null
   return (
-    <section className="mt-6 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4">
+    <section className="mt-6 workspace-card p-4">
       <h2 className="text-sm font-semibold">Department load</h2>
       <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {rows.map((row) => <div key={row.department} className="rounded-xl border border-white/[0.06] bg-black/10 p-3"><p className="text-sm font-medium">{label(row.department)}</p><p className="mt-2 text-xs text-slate-500">{row.projects} projects</p><div className="mt-2 flex flex-wrap gap-2 text-[11px]"><span className="rounded-full bg-sky-500/10 px-2 py-1 text-sky-300">{row.projectTasks} Project Tasks</span><span className="rounded-full bg-violet-500/10 px-2 py-1 text-violet-300">{row.engagementWorkItems} Engagement Work Items</span></div></div>)}
+        {rows.map((row) => <div key={row.department} className="rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] p-3"><p className="text-sm font-medium">{label(row.department)}</p><p className="mt-2 text-xs text-[var(--anka-muted)]">{row.projects} projects</p><div className="mt-2 flex flex-wrap gap-2 text-[11px]"><span className="rounded-full bg-[var(--anka-surface-raised)] px-2 py-1 text-[var(--anka-info)]">{row.projectTasks} Project Tasks</span><span className="rounded-full bg-[var(--anka-violet-soft)] px-2 py-1 text-[var(--anka-violet)]">{row.engagementWorkItems} Engagement Work Items</span></div></div>)}
       </div>
     </section>
   )
@@ -140,9 +140,9 @@ function DepartmentLoad({ rows }) {
 
 function PortfolioTable({ rows, navigate }) {
   return (
-    <section className="mt-6 overflow-hidden rounded-2xl border border-white/[0.07] bg-white/[0.02]">
-      <div className="flex items-center justify-between border-b border-white/[0.07] px-4 py-3"><h2 className="text-sm font-semibold">Projects</h2><span className="text-xs text-slate-500">{rows.length} shown</span></div>
-      {!rows.length ? <p className="p-10 text-center text-sm text-slate-500">No projects match these filters.</p> : <div className="overflow-x-auto"><table className="min-w-full text-left text-sm"><thead className="bg-white/[0.025] text-[11px] uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Project</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Owner / due</th><th className="px-4 py-3">Project Tasks</th><th className="px-4 py-3">Engagement Work Items</th><th className="px-4 py-3">Attention signals</th></tr></thead><tbody className="divide-y divide-white/[0.06]">{rows.map((row) => <ProjectRow key={row.id} row={row} navigate={navigate} />)}</tbody></table></div>}
+    <section className="mt-6 overflow-hidden workspace-card">
+      <div className="flex items-center justify-between border-b border-[var(--anka-line)] px-4 py-3"><h2 className="text-sm font-semibold">Projects</h2><span className="text-xs text-[var(--anka-muted)]">{rows.length} shown</span></div>
+      {!rows.length ? <p className="p-10 text-center text-sm text-[var(--anka-muted)]">No projects match these filters.</p> : <div className="overflow-x-auto"><table className="min-w-full text-left text-sm"><thead className="bg-[var(--anka-surface)] text-[11px] uppercase tracking-wide text-[var(--anka-muted)]"><tr><th className="px-4 py-3">Project</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Owner / due</th><th className="px-4 py-3">Project Tasks</th><th className="px-4 py-3">Engagement Work Items</th><th className="px-4 py-3">Attention signals</th></tr></thead><tbody className="divide-y divide-[var(--anka-line)]">{rows.map((row) => <ProjectRow key={row.id} row={row} navigate={navigate} />)}</tbody></table></div>}
     </section>
   )
 }
@@ -150,5 +150,5 @@ function PortfolioTable({ rows, navigate }) {
 function ProjectRow({ row, navigate }) {
   const taskText = `${row.projectTasks.open} open · ${row.projectTasks.blocked} blocked · ${row.projectTasks.overdue} overdue`
   const itemText = `${row.engagementWorkItems.open} open · ${row.engagementWorkItems.blocked} blocked · ${row.engagementWorkItems.overdue} overdue`
-  return <tr className="align-top text-slate-300"><td className="px-4 py-4"><div className="font-medium text-white">{row.name}</div><div className="mt-1 text-xs text-slate-500">{row.ownerKind === 'internal' ? 'Internal Work' : `Client Work${row.clientName ? ` · ${row.clientName}` : ''}`}{row.brandName ? ` · ${row.brandName}` : ''}</div><button type="button" onClick={() => navigate(`/sphere/workspace/projects/${row.id}`)} className="mt-2 text-xs font-medium text-violet-300 hover:text-violet-200">Open project workspace →</button></td><td className="px-4 py-4"><span className="rounded-full border border-white/10 px-2 py-1 text-xs">{label(row.status)}</span><div className="mt-2 text-xs text-slate-500">{label(row.health)}</div></td><td className="px-4 py-4"><div>{row.owner.name}</div><div className="mt-1 text-xs text-slate-500">{row.dueDate || 'No due date'}</div></td><td className="px-4 py-4 text-xs">{taskText}</td><td className="px-4 py-4 text-xs"><div>{itemText}</div>{row.engagementWorkItems.automationFlags > 0 && <div className="mt-1 text-amber-300">{row.engagementWorkItems.automationFlags} automation flags</div>}</td><td className="max-w-xs px-4 py-4 text-xs">{row.attentionSignals.length ? <ul className="space-y-1 text-amber-200">{row.attentionSignals.map((signal) => <li key={signal}>• {signal}</li>)}</ul> : <span className="text-slate-600">None</span>}</td></tr>
+  return <tr className="align-top text-[var(--anka-ink)]"><td className="px-4 py-4"><div className="font-medium text-[var(--anka-ink)]">{row.name}</div><div className="mt-1 text-xs text-[var(--anka-muted)]">{row.ownerKind === 'internal' ? 'Internal Work' : `Client Work${row.clientName ? ` · ${row.clientName}` : ''}`}{row.brandName ? ` · ${row.brandName}` : ''}</div><button type="button" onClick={() => navigate(`/sphere/workspace/projects/${row.id}`)} className="mt-2 text-xs font-medium text-[var(--anka-violet)] hover:text-[var(--anka-violet)]">Open project workspace →</button></td><td className="px-4 py-4"><span className="rounded-full border border-[var(--anka-line)] px-2 py-1 text-xs">{label(row.status)}</span><div className="mt-2 text-xs text-[var(--anka-muted)]">{label(row.health)}</div></td><td className="px-4 py-4"><div>{row.owner.name}</div><div className="mt-1 text-xs text-[var(--anka-muted)]">{row.dueDate || 'No due date'}</div></td><td className="px-4 py-4 text-xs">{taskText}</td><td className="px-4 py-4 text-xs"><div>{itemText}</div>{row.engagementWorkItems.automationFlags > 0 && <div className="mt-1 text-[var(--anka-warning)]">{row.engagementWorkItems.automationFlags} automation flags</div>}</td><td className="max-w-xs px-4 py-4 text-xs">{row.attentionSignals.length ? <ul className="space-y-1 text-[var(--anka-warning)]">{row.attentionSignals.map((signal) => <li key={signal}>• {signal}</li>)}</ul> : <span className="text-[var(--anka-muted)]">None</span>}</td></tr>
 }
