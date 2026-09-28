@@ -90,6 +90,20 @@ export async function contextChatAction(
   }
   const conversation = await accessibleConversation(admin, organizationId, actorId, string(body.conversation_id))
   await requireScopeAccess(admin, organizationId, activeMembership, conversation)
+  if (action === 'rename_context_conversation') {
+    if (conversation.owner_id !== actorId) throw fail('Only the conversation creator can rename it', 403)
+    const title = string(body.title)
+    if (title.length < 1 || title.length > 160) throw fail('Conversation title must be between 1 and 160 characters')
+    const { data, error } = await admin.from('department_chat_conversations')
+      .update({ title, updated_at: new Date().toISOString() })
+      .eq('id', conversation.id).eq('organization_id', organizationId)
+      .eq('owner_id', actorId).eq('context_kind', conversation.context_kind)
+      .select('id, context_kind, project_id, department_id, owner_id, title, state, last_activity_at, created_at')
+      .maybeSingle()
+    if (error) throw error
+    if (!data) throw fail('Conversation unavailable', 404)
+    return data
+  }
   if (action === 'get_project_context_sharing' || action === 'set_project_context_sharing') {
     if (conversation.context_kind !== 'project_team' || conversation.owner_id !== actorId) {
       throw fail('Only the project conversation creator can manage sharing', 403)

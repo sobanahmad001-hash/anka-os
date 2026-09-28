@@ -20,6 +20,8 @@ async function mount(t, readiness, panelProps = {}) {
   globalThis.__contextReadinessFixture = {
     rows: [{ id: 'conversation', owner_id: 'actor', title: 'Private', state: 'active' }],
     created: [],
+    renamed: [],
+    messages: [{ id: 'message', conversation_id: 'conversation', author_id: 'actor', role: 'user', body: 'Question', status: 'completed' }],
     readiness: input => { calls.push(input); return readiness(input) },
     runner: () => { throw new Error('Provider runner must not be called') },
   }
@@ -44,7 +46,19 @@ async function mount(t, readiness, panelProps = {}) {
             fixture.rows = [row, ...fixture.rows]
             return row
           },
-          getContextConversation: async () => ({ messages: [{ id: 'message', author_id: 'actor', role: 'user', body: 'Question', status: 'completed' }], has_older: false }),
+          getContextConversation: async input => ({ messages: globalThis.__contextReadinessFixture.messages.filter(row => row.conversation_id === input.conversation_id), has_older: false }),
+          appendContextHumanMessage: async input => {
+            const message = { id: 'saved-human', conversation_id: input.conversation_id, author_id: 'actor', role: 'user', body: input.message, status: 'completed' }
+            globalThis.__contextReadinessFixture.messages.push(message)
+            return message
+          },
+          renameContextConversation: async input => {
+            const fixture = globalThis.__contextReadinessFixture
+            fixture.renamed.push(input)
+            const row = fixture.rows.find(item => item.id === input.conversation_id)
+            row.title = input.title
+            return row
+          },
           getContextChatReadiness: async input => globalThis.__contextReadinessFixture.readiness(input),
         }`
         if (id === '\0context-integrations') return `export const integrations = { listModelAllowlist: async () => ({ connections: [{ id: 'connector', organization_level: true, status: 'verified', provider: 'openai', display_name: 'OpenAI', context_model_configurations: [{ id: 'model', model_id: 'verified' }] }] }) }`
@@ -127,7 +141,7 @@ test('Workshop conversation search, creation and department reset stay private',
   assert.match(environment.container.textContent, /Question/, 'search must not replace the open transcript')
   await act(async () => props(search()).onChange({ target: { value: '' } }))
   assert.ok(button(environment.container, 'Private'))
-  const title = descendants(environment.container).find(node => node.tagName === 'INPUT' && props(node)['aria-label'] === 'New conversation title')
+  const title = descendants(environment.container).find(node => node.tagName === 'INPUT' && props(node)['aria-label'] === 'Optional conversation title')
   await act(async () => props(title).onChange({ target: { value: 'New direction' } }))
   const form = descendants(environment.container).find(node => node.tagName === 'FORM' && node.textContent.includes('New conversation'))
   await act(async () => props(form).onSubmit({ preventDefault() {} }))
@@ -139,4 +153,29 @@ test('Workshop conversation search, creation and department reset stay private',
   await act(async () => root.render(createElement(Panel, { contextKind: 'department_private', departmentId: 'content', workshopLayout: true })))
   assert.equal(props(search()).value, '')
   assert.doesNotMatch(environment.container.textContent, /New direction|Question/)
+})
+
+test('first saved message titles a new conversation and the owner can rename it', async t => {
+  const { environment } = await mount(t, () => ({ paid_execution_enabled: false }))
+  const props = node => node[Object.keys(node).find(key => key.startsWith('__reactProps$'))]
+  const all = () => descendants(environment.container)
+  const createForm = all().find(node => node.tagName === 'FORM' && node.textContent.includes('New conversation'))
+  await act(async () => props(createForm).onSubmit({ preventDefault() {} }))
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+  const composer = all().find(node => node.tagName === 'TEXTAREA')
+  await act(async () => props(composer).onChange({ target: { value: '  Explain   the launch plan  ' } }))
+  const sendForm = all().find(node => node.tagName === 'FORM' && descendants(node).includes(composer))
+  await act(async () => props(sendForm).onSubmit({ preventDefault() {} }))
+  assert.deepEqual(globalThis.__contextReadinessFixture.created[0], {
+    context_kind: 'organization', title: 'New conversation',
+  })
+  assert.deepEqual(globalThis.__contextReadinessFixture.renamed[0], {
+    conversation_id: 'new-conversation', title: 'Explain the launch plan',
+  })
+  const renameInput = all().find(node => node.tagName === 'INPUT' && props(node)['aria-label'] === 'Rename conversation')
+  await act(async () => props(renameInput).onChange({ target: { value: 'Launch notes' } }))
+  const renameForm = all().find(node => node.tagName === 'FORM' && descendants(node).includes(renameInput))
+  await act(async () => props(renameForm).onSubmit({ preventDefault() {} }))
+  assert.equal(globalThis.__contextReadinessFixture.renamed[1].title, 'Launch notes')
+  assert.ok(button(environment.container, 'Launch notes'))
 })

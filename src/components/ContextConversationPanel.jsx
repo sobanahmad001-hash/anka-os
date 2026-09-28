@@ -4,6 +4,7 @@ import { useOrganization } from '../context/OrganizationContext.jsx'
 import { departmentChat } from '../data/departmentChatRepository.js'
 import { integrations } from '../data/integrationRepository.js'
 import { contextChatRunner } from '../data/contextChatRunnerRepository.js'
+import { contextChatTitleFromMessage } from '../data/contextChatTitle.js'
 
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-violet-500'
 const BUTTON = 'rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50'
@@ -39,6 +40,8 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   const [messages, setMessages] = useState([])
   const [hasOlder, setHasOlder] = useState(false)
   const [title, setTitle] = useState('')
+  const [renameTitle, setRenameTitle] = useState('')
+  const [renameBusy, setRenameBusy] = useState(false)
   const [conversationSearch, setConversationSearch] = useState('')
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(true)
@@ -202,7 +205,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
     setBusy(true); setError('')
     try {
       const created = await departmentChat.createContextConversation({
-        ...scope, title: title.trim() || `New ${label.toLowerCase()}`,
+        ...scope, title: title.trim() || 'New conversation',
       }, requestScope)
       if (signal.aborted) return
       setTitle('')
@@ -211,6 +214,21 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
     } catch (reason) { showError(reason) } finally { if (!signal.aborted) setBusy(false) }
   }
 
+  async function renameCurrentConversation(nextTitle = renameTitle) {
+    const normalized = nextTitle.trim()
+    if (!conversationId || !isOwner || !normalized || normalized.length > 160 || renameBusy) return
+    const targetId = conversationId
+    setRenameBusy(true); setError('')
+    try {
+      const updated = await departmentChat.renameContextConversation({
+        conversation_id: targetId, title: normalized,
+      }, requestScope)
+      if (signal.aborted || activeConversation.current !== targetId) return
+      setConversations(current => current.map(row => row.id === targetId ? { ...row, ...updated } : row))
+      setRenameTitle(updated.title)
+    } catch (reason) { showError(reason) }
+    finally { if (!signal.aborted) setRenameBusy(false) }
+  }
   async function sendMessage(event) {
     event.preventDefault()
     const content = draft.trim()
@@ -229,6 +247,10 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
       drafts.current.delete(targetId)
       if (activeConversation.current !== targetId) return
       setMessages(current => current.some(message => message.id === saved.id) ? current : [...current, saved])
+      const firstSavedMessage = messages.length === 0
+        && selected?.owner_id === user.id
+        && selected.title === 'New conversation'
+      if (firstSavedMessage) await renameCurrentConversation(contextChatTitleFromMessage(content))
       setDraft('')
       setAiUseConfirmed(false)
       await refresh(targetId)
@@ -319,6 +341,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   }
 
   const selected = conversations.find(row => row.id === conversationId)
+  useEffect(() => { setRenameTitle(selected?.title || '') }, [selected?.id, selected?.title])
   const selectedModel = modelOptions.find(model => model.id === selectedModelId)
   const paidExecutionEnabled = readiness?.paid_execution_enabled === true
   const localAiChecksPass = paidExecutionEnabled && readiness?.model_configuration_id === selectedModelId
@@ -376,9 +399,10 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
     <Navigation {...(compact ? { className: 'private-new-conversation' } : {})}>
       {compact && <summary>New conversation</summary>}
     <form onSubmit={createConversation} className="flex flex-wrap gap-2">
-      <input className={`${INPUT} min-w-52 flex-1`} aria-label="New conversation title" placeholder="New conversation title"
+      <input className={`${INPUT} min-w-52 flex-1`} aria-label="Optional conversation title" placeholder="Optional title; first message can title it"
         maxLength={160} value={title} onChange={event => setTitle(event.target.value)} />
       <button className={BUTTON} disabled={busy || loading}>New conversation</button>
+      <span className="self-center text-xs text-slate-500">Leave the title blank to use your first saved message.</span>
     </form>
     </Navigation>
       {!hideConversationList && <div className="space-y-2" aria-label="Saved conversations">
@@ -398,7 +422,19 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
       </div>
       <div className={compact ? 'private-conversation-body min-w-0' : 'min-h-64 min-w-0 rounded-xl border border-slate-800 bg-slate-950/50 p-4'}>
         {!selected ? <p className="text-sm text-slate-500">Choose or create a conversation.</p> : <>
-          <h3 className="font-semibold text-white">{selected.title}</h3>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <h3 className="font-semibold text-white">{selected.title}</h3>
+            {isOwner && <details className="text-xs text-slate-300">
+              <summary className="cursor-pointer">Rename conversation</summary>
+              <form className="mt-2 flex gap-2" onSubmit={event => { event.preventDefault(); renameCurrentConversation() }}>
+                <input className={`${INPUT} min-w-40`} aria-label="Rename conversation" maxLength={160}
+                  value={renameTitle} onChange={event => setRenameTitle(event.target.value)} />
+                <button type="submit" className={BUTTON} disabled={renameBusy || busy || !renameTitle.trim() || renameTitle.length > 160}>
+                  {renameBusy ? 'Saving…' : 'Save'}
+                </button>
+              </form>
+            </details>}
+          </div>
           {contextKind === 'project_team' && isOwner && <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
             <h4 className="text-sm font-semibold text-white">Share this project conversation</h4>
             <p className="mt-1 text-xs text-slate-400">Only selected active internal teammates can see all current and future messages and reply. Sharing does not grant AI use, approval, or project record changes. Revoking stops later reads and replies; it cannot recall copies already seen.</p>
