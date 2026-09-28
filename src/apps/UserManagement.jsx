@@ -34,13 +34,13 @@ export default function UserManagement() {
   const [legacy, setLegacy] = useState(false)
   const canAdmin = canShowAuthorityAdministration(scope.activeMembership)
   const canLegacy = profile?.role === 'admin'
-  if (scope.loading) return <p className="p-6 text-slate-300">Loading organization…</p>
-  if (!canAdmin && !canLegacy) return <div className="p-6 text-slate-300">Select an organization where you are an active System Owner or Operations Admin to manage compatibility records.</div>
+  if (scope.loading) return <p className="p-6 text-[var(--anka-ink)]">Loading organization…</p>
+  if (!canAdmin && !canLegacy) return <div className="p-6 text-[var(--anka-ink)]">Select an organization where you are an active System Owner or Operations Admin to manage compatibility records.</div>
   const showLegacy = canLegacy && (legacy || !canAdmin)
-  return <div className="flex h-full flex-col overflow-auto bg-gray-950">
-    <nav aria-label="Team administration modes" className="flex flex-wrap gap-3 border-b border-slate-800 p-4 text-sm text-slate-200">
-      {canAdmin && <button aria-pressed={!showLegacy} onClick={() => setLegacy(false)}>Compatibility records — selected organization</button>}
-      {canLegacy && <button aria-pressed={showLegacy} onClick={() => setLegacy(true)}>Legacy team controls — Anka organization</button>}
+  return <div className="flex h-full flex-col overflow-auto bg-[var(--anka-canvas)] text-[var(--anka-ink)]">
+    <nav aria-label="Team administration modes" className="flex flex-wrap gap-3 border-b border-[var(--anka-line)] p-4 text-sm text-[var(--anka-ink)]">
+      {canAdmin && <button className="workspace-button aria-pressed:border-[var(--anka-violet)] aria-pressed:bg-[var(--anka-violet-soft)] aria-pressed:text-[var(--anka-violet)]" aria-pressed={!showLegacy} onClick={() => setLegacy(false)}>Compatibility records — selected organization</button>}
+      {canLegacy && <button className="workspace-button aria-pressed:border-[var(--anka-violet)] aria-pressed:bg-[var(--anka-violet-soft)] aria-pressed:text-[var(--anka-violet)]" aria-pressed={showLegacy} onClick={() => setLegacy(true)}>Legacy team controls — Anka organization</button>}
     </nav>
     {showLegacy ? <LegacyTeamManagement /> : <AuthorityCompatibilityAdmin
       key={user?.id + ':' + scope.activeOrganizationId + ':' + scope.scopeRevision}
@@ -161,59 +161,59 @@ function LegacyTeamManagement() {
   }), [users, search, filterDepartment])
 
   if (profile?.role !== 'admin') return <Navigate to="/sphere/engagements" replace />
-  if (loading) return <div className="flex h-full items-center justify-center bg-gray-950"><div className="h-8 w-8 animate-spin rounded-full border-b-2 border-purple-500" /></div>
+  if (loading) return <div className="flex h-full items-center justify-center bg-[var(--anka-canvas)]"><div className="h-8 w-8 animate-spin rounded-full border-b-2 border-[var(--anka-violet)]" /></div>
 
   return (
-    <div className="flex h-full flex-col bg-gray-950 text-white">
-      <header className="flex items-center justify-between border-b border-gray-800 px-6 py-4">
+    <div className="flex h-full flex-col bg-[var(--anka-canvas)] text-[var(--anka-ink)]">
+      <header className="flex items-center justify-between border-b border-[var(--anka-line)] px-6 py-4">
         <div>
-          <h2 className="text-lg font-bold">Team Management</h2>
-          <p className="mt-0.5 text-xs text-gray-400">{users.length} organization members across four departments</p>
+          <h2 className="workspace-title">Team Management</h2>
+          <p className="mt-0.5 text-xs text-[var(--anka-muted)]">{users.length} organization members across four departments</p>
         </div>
-        <button onClick={() => setShowInvite(value => !value)} className="rounded-lg bg-purple-600 px-4 py-2 text-sm hover:bg-purple-700">+ Invite Member</button>
+        <button onClick={() => setShowInvite(value => !value)} className="workspace-button workspace-button-primary">+ Invite Member</button>
       </header>
 
-      <section className="grid grid-cols-2 gap-3 border-b border-gray-800 px-6 py-4 md:grid-cols-5">
-        <Stat label="Total" value={users.length} color="text-white" />
+      <section className="grid grid-cols-2 gap-3 border-b border-[var(--anka-line)] px-6 py-4 md:grid-cols-5">
+        <Stat label="Total" value={users.length} color="text-[var(--anka-ink)]" />
         {DEPARTMENTS.map(department => (
-          <Stat key={department.id} label={department.label} value={users.filter(user => (user.membership?.department_id || user.department) === department.id).length} color="text-purple-300" />
+          <Stat key={department.id} label={department.label} value={users.filter(user => (user.membership?.department_id || user.department) === department.id).length} color="text-[var(--anka-violet)]" />
         ))}
       </section>
 
       {showInvite && (
-        <section className="mx-6 mt-4 space-y-4 rounded-xl border border-gray-700 bg-gray-800 p-5">
+        <section className="mx-6 mt-4 space-y-4 workspace-card p-5">
           <h3 className="text-sm font-semibold">Invite a team member</h3>
           <div className="grid gap-3 md:grid-cols-3">
             <Field label="Email">
-              <input type="email" value={invite.email} onChange={event => setInvite({ ...invite, email: event.target.value })} placeholder="teammate@company.com" className="w-full rounded-lg bg-gray-700 px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-purple-500" />
+              <input type="email" value={invite.email} onChange={event => setInvite({ ...invite, email: event.target.value })} placeholder="teammate@company.com" className="w-full rounded-lg bg-[var(--anka-surface-raised)] px-3 py-2 text-sm focus:ring-1 focus:ring-[var(--anka-focus)]" />
             </Field>
             <Field label="Department">
-              <select value={invite.department} onChange={event => setInvite({ ...invite, department: event.target.value })} className="w-full rounded-lg bg-gray-700 px-3 py-2 text-sm">
+              <select value={invite.department} onChange={event => setInvite({ ...invite, department: event.target.value })} className="w-full rounded-lg bg-[var(--anka-surface-raised)] px-3 py-2 text-sm">
                 {DEPARTMENTS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
               </select>
             </Field>
             <Field label="Organization role">
-              <select value={invite.role} onChange={event => setInvite({ ...invite, role: event.target.value })} className="w-full rounded-lg bg-gray-700 px-3 py-2 text-sm">
+              <select value={invite.role} onChange={event => setInvite({ ...invite, role: event.target.value })} className="w-full rounded-lg bg-[var(--anka-surface-raised)] px-3 py-2 text-sm">
                 {ROLES.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
               </select>
             </Field>
           </div>
           <div className="flex gap-3">
-            <button onClick={inviteUser} disabled={inviting || !invite.email.trim()} className="rounded-lg bg-purple-600 px-4 py-2 text-sm disabled:opacity-50">{inviting ? 'Sending…' : 'Send invite'}</button>
-            <button onClick={() => setShowInvite(false)} className="px-3 text-sm text-gray-400 hover:text-white">Cancel</button>
+            <button onClick={inviteUser} disabled={inviting || !invite.email.trim()} className="workspace-button workspace-button-primary disabled:opacity-50">{inviting ? 'Sending…' : 'Send invite'}</button>
+            <button onClick={() => setShowInvite(false)} className="px-3 text-sm text-[var(--anka-muted)] hover:text-[var(--anka-ink)]">Cancel</button>
           </div>
         </section>
       )}
 
-      {(error || notice) && <div className={`mx-6 mt-4 rounded-lg border px-4 py-3 text-sm ${error ? 'border-red-800 bg-red-950/50 text-red-300' : 'border-green-800 bg-green-950/50 text-green-300'}`}>{error || notice}</div>}
+      {(error || notice) && <div className={`mx-6 mt-4 rounded-lg border px-4 py-3 text-sm ${error ? 'border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] text-[var(--anka-danger)]' : 'border-[var(--anka-success)] bg-[var(--anka-success-soft)] text-[var(--anka-success)]'}`}>{error || notice}</div>}
 
       <section className="flex items-center gap-3 px-6 py-3">
-        <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search team…" className="w-52 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs outline-none" />
-        <select value={filterDepartment} onChange={event => setFilterDepartment(event.target.value)} className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs">
+        <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search team…" className="w-52 rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] px-3 py-2 text-xs" />
+        <select value={filterDepartment} onChange={event => setFilterDepartment(event.target.value)} className="rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] px-3 py-2 text-xs">
           <option value="all">All departments</option>
           {DEPARTMENTS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
         </select>
-        <span className="ml-auto text-xs text-gray-500">{filtered.length} shown</span>
+        <span className="ml-auto text-xs text-[var(--anka-muted)]">{filtered.length} shown</span>
       </section>
 
       <main className="flex-1 space-y-2 overflow-y-auto px-6 pb-6">
@@ -221,37 +221,37 @@ function LegacyTeamManagement() {
           const department = user.membership?.department_id || user.department || 'content'
           const role = user.membership?.role || 'contributor'
           return (
-            <article key={user.id} className="flex flex-wrap items-center gap-4 rounded-xl border border-gray-700 bg-gray-800 p-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-purple-600 text-sm font-bold">{(user.full_name || user.email || '?')[0].toUpperCase()}</div>
+            <article key={user.id} className="flex flex-wrap items-center gap-4 workspace-card p-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--anka-violet-soft)] text-sm font-bold">{(user.full_name || user.email || '?')[0].toUpperCase()}</div>
               <div className="min-w-48 flex-1">
-                <p className="text-sm font-semibold">{user.full_name || 'No name set'} {user.id === profile?.id && <span className="ml-1 text-xs text-gray-500">you</span>}</p>
-                <p className="text-xs text-gray-400">{user.email || 'No email'}</p>
+                <p className="text-sm font-semibold">{user.full_name || 'No name set'} {user.id === profile?.id && <span className="ml-1 text-xs text-[var(--anka-muted)]">you</span>}</p>
+                <p className="text-xs text-[var(--anka-muted)]">{user.email || 'No email'}</p>
               </div>
               <Field label="Department">
-                <select value={department} onChange={event => updateUser(user, { department: event.target.value })} disabled={saving === user.id} className="rounded-lg border border-gray-600 bg-gray-900 px-3 py-2 text-xs">
+                <select value={department} onChange={event => updateUser(user, { department: event.target.value })} disabled={saving === user.id} className="rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface)] px-3 py-2 text-xs">
                   {DEPARTMENTS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
                 </select>
               </Field>
               <Field label="Role">
-                <select value={role} onChange={event => updateUser(user, { role: event.target.value })} disabled={user.id === profile?.id || saving === user.id} className="rounded-lg border border-gray-600 bg-gray-900 px-3 py-2 text-xs disabled:opacity-50">
+                <select value={role} onChange={event => updateUser(user, { role: event.target.value })} disabled={user.id === profile?.id || saving === user.id} className="rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface)] px-3 py-2 text-xs disabled:opacity-50">
                   {ROLES.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
                   {role === 'system_owner' && <option value="system_owner">System owner</option>}
                 </select>
               </Field>
-              {user.id !== profile?.id && <button onClick={() => deactivateUser(user)} disabled={saving === user.id || user.membership?.status === 'revoked'} className="rounded-lg px-3 py-2 text-xs text-red-300 hover:bg-red-950/50 disabled:opacity-50">{user.membership?.status === 'revoked' ? 'Deactivated' : 'Deactivate Anka access'}</button>}
+              {user.id !== profile?.id && <button onClick={() => deactivateUser(user)} disabled={saving === user.id || user.membership?.status === 'revoked'} className="rounded-lg px-3 py-2 text-xs text-[var(--anka-danger)] hover:bg-[var(--anka-danger-soft)] disabled:opacity-50">{user.membership?.status === 'revoked' ? 'Deactivated' : 'Deactivate Anka access'}</button>}
             </article>
           )
         })}
-        {!filtered.length && <div className="py-16 text-center text-sm text-gray-500">No team members found.</div>}
+        {!filtered.length && <div className="py-16 text-center text-sm text-[var(--anka-muted)]">No team members found.</div>}
       </main>
     </div>
   )
 }
 
 function Field({ label, children }) {
-  return <label className="block"><span className="mb-1 block text-xs text-gray-400">{label}</span>{children}</label>
+  return <label className="block"><span className="mb-1 block text-xs text-[var(--anka-muted)]">{label}</span>{children}</label>
 }
 
 function Stat({ label, value, color }) {
-  return <div className="rounded-xl border border-gray-700 bg-gray-800 p-3 text-center"><p className={`text-xl font-bold ${color}`}>{value}</p><p className="mt-0.5 text-xs text-gray-500">{label}</p></div>
+  return <div className="workspace-card p-3 text-center"><p className={`text-xl font-bold ${color}`}>{value}</p><p className="mt-0.5 text-xs text-[var(--anka-muted)]">{label}</p></div>
 }

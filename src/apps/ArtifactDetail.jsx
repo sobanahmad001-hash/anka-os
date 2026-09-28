@@ -19,14 +19,14 @@ export default function ArtifactDetail() {
     return () => { active = false }
   }, [artifactId])
 
-  return <main className="min-h-full bg-slate-950 px-5 py-7 text-white lg:px-8">
-    <div className="mx-auto max-w-5xl">
-      <Link to={artifact ? owningWorkspacePath(artifact) : '/sphere/engagements'} className="text-sm text-slate-500 hover:text-white">← Back to owning workspace</Link>
-      {loading ? <div className="py-24 text-center text-sm text-slate-500">Loading artifact…</div> : error ? <div className="mt-6 rounded-xl border border-red-900/50 bg-red-950/30 p-4 text-sm text-red-300">{error}</div> : artifact && <>
-        <header className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-300">Canonical artifact</p>
-          <h1 className="mt-2 text-3xl font-semibold">{artifact.title}</h1>
-          <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-400"><span className="rounded-full bg-slate-950 px-3 py-1.5">{artifactTypeLabel(artifact.artifact_type)}</span><span className="rounded-full bg-slate-950 px-3 py-1.5">Created {new Date(artifact.created_at).toLocaleString()}</span></div>
+  return <main className="workspace-page bg-[var(--anka-canvas)]">
+    <div className="workspace-container">
+      <Link to={artifact ? owningWorkspacePath(artifact) : '/sphere/engagements'} className="text-sm text-[var(--anka-muted)] hover:text-[var(--anka-ink)]">← Back to owning workspace</Link>
+      {loading ? <div className="py-24 text-center text-sm text-[var(--anka-muted)]">Loading artifact…</div> : error ? <div className="mt-6 rounded-xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] p-4 text-sm text-[var(--anka-danger)]">{error}</div> : artifact && <>
+        <header className="mt-6 workspace-card p-6">
+          <p className="workspace-eyebrow">Canonical artifact</p>
+          <h1 className="workspace-title">{artifact.title}</h1>
+          <div className="mt-4 flex flex-wrap gap-2 text-xs text-[var(--anka-muted)]"><span className="rounded-full bg-[var(--anka-canvas)] px-3 py-1.5">{artifactTypeLabel(artifact.artifact_type)}</span><span className="rounded-full bg-[var(--anka-canvas)] px-3 py-1.5">Created {new Date(artifact.created_at).toLocaleString()}</span></div>
         </header>
         <ArtifactRelationsPanel artifact={artifact} />
       </>}

@@ -41,10 +41,9 @@ test('Design history disclosure retains mounted search and chat draft, with scop
 test('colored Workshop confirmation buttons and primary links retain paired contrast in both themes', async t => {
   const css = readFileSync(new URL('../components/designWorkshopPresentation.css', import.meta.url), 'utf8')
   const theme = readFileSync(new URL('../index.css', import.meta.url), 'utf8')
-  const selector = '.design-workshop-surface :is(button, a):is([class~="bg-emerald-700"], [class~="bg-purple-600"])'
+  const selector = '.design-workshop-surface :is(button, a):is([class~="bg-[var(--anka-violet)]"])'
   assert.ok(css.includes(`${selector} { background: var(--anka-violet); color: var(--anka-on-violet); }`))
-  // This selector adds an element specificity over the neutral text-white mapping;
-  // it also beats single-class Tailwind hover colors without changing media pixels.
+  // Primary actions pair the violet token with its matching foreground above single-class utilities.
   const luminance = hex => {
     const rgb = hex.match(/[a-f\d]{2}/gi).map(value => parseInt(value, 16) / 255)
       .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
@@ -62,7 +61,7 @@ test('colored Workshop confirmation buttons and primary links retain paired cont
   const compiled = transformSync(source.slice(source.indexOf('function ProposalPreview(')), { loader: 'jsx', jsxFactory: 'React.createElement' }).code
   const Preview = new Function('React', 'useState', 'useEffect', `${compiled}; return ProposalPreview`)(React, useState, useEffect)
   const parent = readFileSync(new URL('../apps/DepartmentWorkshop.jsx', import.meta.url), 'utf8')
-  const link = parent.match(/<Link to="\/sphere\/engagements" className="block rounded-xl bg-purple-600[^]*?<\/Link>/)[0]
+  const link = parent.match(/<Link to="\/sphere\/engagements" className="block rounded-xl bg-\[var\(--anka-violet\)\][^]*?<\/Link>/)[0]
   const linkCode = transformSync(`const control = ${link}`, { loader: 'jsx', jsxFactory: 'React.createElement' }).code
   const anchor = new Function('React', 'Link', `${linkCode}; return control`)(React, ({ to, ...rest }) => React.createElement('a', { ...rest, href: to }))
   const root = createRoot(env.container)
@@ -70,11 +69,11 @@ test('colored Workshop confirmation buttons and primary links retain paired cont
   await act(async () => root.render(React.createElement('section', { className: 'design-workshop-surface' },
     React.createElement(Preview, { result: { proposal_id: 'contrast', status: 'pending', expires_at: new Date(Date.now() + 60_000).toISOString() } }), anchor)))
   const confirm = elements(env.container, 'button').find(node => node.textContent === 'Confirm official draft')
-  assert.match(props(confirm).className, /bg-emerald-700/)
-  assert.match(props(confirm).className, /text-white/)
+  assert.ok(props(confirm).className.includes('bg-[var(--anka-success-soft)]'))
+  assert.ok(props(confirm).className.includes('text-[var(--anka-success)]'))
   const actionLink = elements(env.container, 'a').find(node => node.textContent === 'Open engagement workspace')
-  assert.match(props(actionLink).className, /bg-purple-600/)
-  assert.match(props(actionLink).className, /text-white/)
+  assert.ok(props(actionLink).className.includes('bg-[var(--anka-violet)]'))
+  assert.ok(props(actionLink).className.includes('text-[var(--anka-on-violet)]'))
   assert.equal(props(actionLink).href, '/sphere/engagements')
 })
 

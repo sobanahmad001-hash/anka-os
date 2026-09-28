@@ -10,16 +10,16 @@ const projectLink = (projectId, commentId) =>
 
 function _MemoryRows({ label, rows, statement }) {
   return <div>
-    <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label} · {rows.length}</h4>
-    {rows.slice(0, 10).map(row => <article key={row.id} className="mt-2 rounded-lg border border-slate-800 bg-slate-950/50 p-3">
-      <p className="text-xs text-slate-200">{row[statement]}</p>
-      <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-slate-500">
+    <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--anka-muted)]">{label} · {rows.length}</h4>
+    {rows.slice(0, 10).map(row => <article key={row.id} className="mt-2 rounded-lg border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-3">
+      <p className="text-xs text-[var(--anka-ink)]">{row[statement]}</p>
+      <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-[var(--anka-muted)]">
         {row.scope_kind && <span>{row.scope_kind === 'brand' ? 'Brand' : 'Client'}</span>}
         <span>Reviewed {row.reviewed_at ? new Date(row.reviewed_at).toLocaleDateString() : 'date unavailable'}</span>
-        {row.project_id && row.source_comment_id ? <a className="text-violet-300" href={projectLink(row.project_id, row.source_comment_id)}>Source discussion</a> : row.source_note && <span>Source basis: {row.source_note}</span>}
+        {row.project_id && row.source_comment_id ? <a className="text-[var(--anka-violet)]" href={projectLink(row.project_id, row.source_comment_id)}>Source discussion</a> : row.source_note && <span>Source basis: {row.source_note}</span>}
       </div>
     </article>)}
-    {rows.length > 10 && <p className="mt-2 text-[11px] text-slate-500">Showing 10 of {rows.length}; open the relevant memory screen for the full set.</p>}
+    {rows.length > 10 && <p className="mt-2 text-[11px] text-[var(--anka-muted)]">Showing 10 of {rows.length}; open the relevant memory screen for the full set.</p>}
   </div>
 }
 
@@ -73,18 +73,18 @@ export default function AssistantMemoryContext({
   }, [organizationId, projectId, departmentId, scopeRevision, refreshRevision, onAccessError])
 
   if (!projectId || !departmentId) return null
-  return <section aria-label="Reviewed memory preview" className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
-    <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-semibold">Reviewed memory for this selection</h3><button type="button" onClick={() => setRefreshRevision(value => value + 1)} className="text-xs text-violet-300">Refresh sources</button></div>
-    <p className="mt-1 text-xs leading-5 text-slate-500">This is a read-only preview. For an Assistant run with a verified connection mapped to this engagement, the server rechecks and sends up to 20 confirmed statements total from the policy, project, matching client/brand, and authorized department scopes. Private memory, raw source notes, and transcripts are omitted. Project-only or unmapped runs omit memory.</p>
-    {error && <p role="alert" className="mt-3 text-xs text-rose-300">{error}</p>}
-    {!context && !error && <p className="mt-3 text-xs text-slate-500">Checking current sources…</p>}
+  return <section aria-label="Reviewed memory preview" className="rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4 text-[var(--anka-ink)]">
+    <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-semibold">Reviewed memory for this selection</h3><button type="button" onClick={() => setRefreshRevision(value => value + 1)} className="text-xs text-[var(--anka-violet)]">Refresh sources</button></div>
+    <p className="mt-1 text-xs leading-5 text-[var(--anka-muted)]">This is a read-only preview. For an Assistant run with a verified connection mapped to this engagement, the server rechecks and sends up to 20 confirmed statements total from the policy, project, matching client/brand, and authorized department scopes. Private memory, raw source notes, and transcripts are omitted. Project-only or unmapped runs omit memory.</p>
+    {error && <p role="alert" className="mt-3 text-xs text-[var(--anka-danger)]">{error}</p>}
+    {!context && !error && <p className="mt-3 text-xs text-[var(--anka-muted)]">Checking current sources…</p>}
     {context && <div className="mt-4 space-y-4">
       <_MemoryRows label="Organization policies" rows={context.policy} statement="statement" />
       <_MemoryRows label="Project lessons" rows={context.project} statement="statement" />
       <_MemoryRows label="Client and brand requirements" rows={context.clientBrand} statement="statement" />
-      {context.clientBrandUnavailable && <p className="text-xs text-slate-500">No active client and brand scope is available for this project.</p>}
+      {context.clientBrandUnavailable && <p className="text-xs text-[var(--anka-muted)]">No active client and brand scope is available for this project.</p>}
       <_MemoryRows label="Department methods" rows={context.department} statement="generalized_statement" />
-      {context.departmentUnavailable && <p className="text-xs text-slate-500">Department methods are unavailable to this role.</p>}
+      {context.departmentUnavailable && <p className="text-xs text-[var(--anka-muted)]">Department methods are unavailable to this role.</p>}
     </div>}
   </section>
 }

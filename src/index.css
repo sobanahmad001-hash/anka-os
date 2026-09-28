@@ -160,7 +160,11 @@ textarea {
 .workspace-button:hover { background: var(--anka-surface-raised); color: var(--anka-ink); }
 .workspace-button:disabled { cursor: wait; opacity: 0.55; }
 .workspace-button-primary { border-color: var(--anka-violet); background: var(--anka-violet); color: var(--anka-on-violet); }
-.workspace-button-primary:hover { background: var(--anka-violet); }
+.workspace-button-primary:hover { background: var(--anka-violet); color: var(--anka-on-violet); }
+.workspace-button[aria-pressed="true"] { border-color: var(--anka-violet); background: var(--anka-violet-soft); color: var(--anka-violet); }
+
+.workspace-action-warning { background: var(--anka-warning-soft); color: var(--anka-warning); }
+.workspace-action-success { background: var(--anka-success-soft); color: var(--anka-success); }
 
 .workspace-card,
 .workspace-metric {

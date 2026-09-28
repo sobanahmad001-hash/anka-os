@@ -303,7 +303,7 @@ for (const outcome of ['success', 'failure']) test('attachment ' + outcome + ' k
   await act(async () => byText(container, 'button', 'Discard and continue').dispatchEvent(new E('click')))
   await flush()
   assert.doesNotMatch(container.textContent, /old.png|OLD_UPLOAD_DENIED/)
-  assert.ok(byText(container, 'button', 'conversation-b').getAttribute('class')?.includes('border-sky-600'))
+  assert.ok(byText(container, 'button', 'conversation-b').getAttribute('class')?.includes('border-[var(--anka-info)]'))
 })
 
 test('mounted chat renders one saved answer and preserves answer mode through partial and durable states', async t => {

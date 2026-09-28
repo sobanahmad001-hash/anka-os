@@ -13,7 +13,7 @@ import { supabase } from '../lib/supabase.js'
 
 const reportsAndRecords = createReportsAndRecordsRepository(supabase)
 
-const BUTTON = 'rounded-xl border border-slate-700 px-3.5 py-2 text-sm font-medium text-slate-200 transition hover:border-purple-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50'
+const BUTTON = 'workspace-button outline-none focus-visible:ring-2 focus-visible:ring-[var(--anka-focus)] disabled:cursor-not-allowed disabled:opacity-50'
 
 function labelize(value) {
   return String(value || 'unknown').replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
@@ -30,34 +30,34 @@ function saveFile(fileName, content, type) {
 
 function Metric({ label, value, note }) {
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-      <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
-      <p className="mt-1 text-xs text-slate-500">{note}</p>
+    <div className="workspace-metric">
+      <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--anka-muted)]">{label}</p>
+      <p className="mt-2 text-2xl font-semibold text-[var(--anka-ink)]">{value}</p>
+      <p className="mt-1 text-xs text-[var(--anka-muted)]">{note}</p>
     </div>
   )
 }
 
 function RecordSection({ title, children }) {
   return (
-    <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-      <h2 className="text-base font-semibold text-white">{title}</h2>
+    <section className="workspace-card p-5">
+      <h2 className="text-base font-semibold text-[var(--anka-ink)]">{title}</h2>
       <div className="mt-4">{children}</div>
     </section>
   )
 }
 
 function StatusRows({ items, empty, titleKey = 'title' }) {
-  if (!items.length) return <p className="text-sm text-slate-500">{empty}</p>
+  if (!items.length) return <p className="text-sm text-[var(--anka-muted)]">{empty}</p>
   return (
     <div className="space-y-2">
       {items.map((item, index) => (
-        <div key={item.id || `${item[titleKey]}-${index}`} className="flex items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3">
+        <div key={item.id || `${item[titleKey]}-${index}`} className="flex items-center justify-between gap-4 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] px-4 py-3">
           <div>
-            <p className="text-sm font-medium text-slate-100">{item[titleKey]}</p>
-            {(item.due_date || item.target_date) && <p className="mt-1 text-xs text-slate-500">Target {item.due_date || item.target_date}</p>}
+            <p className="text-sm font-medium text-[var(--anka-ink)]">{item[titleKey]}</p>
+            {(item.due_date || item.target_date) && <p className="mt-1 text-xs text-[var(--anka-muted)]">Target {item.due_date || item.target_date}</p>}
           </div>
-          <span className="rounded-full bg-slate-800 px-2.5 py-1 text-xs text-slate-300">{labelize(item.status)}</span>
+          <span className="rounded-full border border-[var(--anka-line)] bg-[var(--anka-surface)] px-2.5 py-1 text-xs text-[var(--anka-muted)]">{labelize(item.status)}</span>
         </div>
       ))}
     </div>
@@ -212,38 +212,38 @@ export default function ReportsAndRecords() {
   }
 
   if (loading && !workspace) {
-    return <div className="flex h-full items-center justify-center bg-slate-950 text-slate-400">Preparing project records…</div>
+    return <div className="workspace-page flex h-full items-center justify-center text-[var(--anka-muted)]">Preparing project records…</div>
   }
 
   return (
-    <div className="h-full overflow-y-auto bg-slate-950 text-white">
-      <header className="border-b border-slate-800 bg-slate-950/95 px-6 py-5 print:border-0">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-4">
+    <div className="workspace-page h-full overflow-y-auto">
+      <header className="mx-auto max-w-7xl pb-5 print:border-0">
+        <div className="workspace-card flex flex-wrap items-end justify-between gap-4 p-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-purple-400">Delivery intelligence</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight">Reports & Living Records</h1>
-            <p className="mt-2 max-w-3xl text-sm text-slate-400">Versioned project truth generated from canonical work. Client records contain released information only. Recent activity is a bounded feed, not a complete event record.</p>
+            <p className="workspace-eyebrow">Delivery intelligence</p>
+            <h1 className="workspace-title">Reports & Living Records</h1>
+            <p className="workspace-description mt-2">Versioned project truth generated from canonical work. Client records contain released information only. Recent activity is a bounded feed, not a complete event record.</p>
           </div>
-          <label className="min-w-64 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+          <label className="min-w-64 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">
             Project
-            <select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2.5 text-sm font-medium normal-case tracking-normal text-white outline-none focus:border-purple-500">
+            <select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="mt-2 w-full rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] px-3.5 py-2.5 text-sm font-medium normal-case tracking-normal text-[var(--anka-ink)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--anka-focus)]">
               {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
             </select>
           </label>
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl space-y-5 px-6 py-6">
-        {error && <div className="rounded-xl border border-red-900/60 bg-red-950/50 px-4 py-3 text-sm text-red-300">{error}</div>}
-        {message && <div className="rounded-xl border border-emerald-900/60 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">{message}</div>}
+      <main className="mx-auto max-w-7xl space-y-5">
+        {error && <div className="rounded-xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] px-4 py-3 text-sm text-[var(--anka-danger)]">{error}</div>}
+        {message && <div className="rounded-xl border border-[var(--anka-success)] bg-[var(--anka-success-soft)] px-4 py-3 text-sm text-[var(--anka-success)]">{message}</div>}
         {!workspace ? (
-          <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-16 text-center text-slate-500">Create a project to begin its automatic living record.</div>
+          <div className="workspace-card border-dashed px-6 py-16 text-center text-[var(--anka-muted)]">Create a project to begin its automatic living record.</div>
         ) : (
           <>
             <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
-              <div className="flex rounded-xl border border-slate-800 bg-slate-900 p-1">
+              <div className="flex flex-wrap gap-2">
                 {['internal', 'client'].map((kind) => (
-                  <button key={kind} type="button" onClick={() => setProjectionKind(kind)} className={`rounded-lg px-4 py-2 text-sm font-medium ${projectionKind === kind ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                  <button key={kind} type="button" onClick={() => setProjectionKind(kind)} aria-pressed={projectionKind === kind} className={`rounded-lg px-4 py-2 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-[var(--anka-focus)] ${projectionKind === kind ? 'bg-[var(--anka-violet)] text-[var(--anka-on-violet)]' : 'text-[var(--anka-muted)] hover:text-[var(--anka-ink)]'}`}>
                     {labelize(kind)} record
                   </button>
                 ))}
@@ -257,15 +257,15 @@ export default function ReportsAndRecords() {
             </div>
 
             {projectionKind === 'client' && (
-              <div className="rounded-xl border border-blue-900/60 bg-blue-950/30 px-4 py-3 text-sm leading-6 text-blue-200 print:hidden">
+              <div className="rounded-xl border border-[var(--anka-info)] bg-[var(--anka-surface-raised)] px-4 py-3 text-sm leading-6 text-[var(--anka-info)] print:hidden">
                 This preview includes only client-visible milestones, released deliverable versions, client requests, and client-visible activity. It does not publish or approve anything.
               </div>
             )}
 
-            <section className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 to-slate-950 p-6">
-              <p className="text-xs uppercase tracking-[0.15em] text-slate-500">{labelize(projectionKind)} living record · source v{projection.source_version}</p>
-              <h2 className="mt-2 text-3xl font-semibold">{projection.project.name}</h2>
-              <p className="mt-3 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-slate-400">{projection.project.summary || projection.project.description || 'No summary recorded.'}</p>
+            <section className="workspace-card p-6">
+              <p className="text-xs uppercase tracking-[0.15em] text-[var(--anka-muted)]">{labelize(projectionKind)} living record · source v{projection.source_version}</p>
+              <h2 className="mt-2 text-3xl font-semibold text-[var(--anka-ink)]">{projection.project.name}</h2>
+              <p className="mt-3 max-w-4xl whitespace-pre-wrap text-sm leading-6 text-[var(--anka-muted)]">{projection.project.summary || projection.project.description || 'No summary recorded.'}</p>
               <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <Metric label="Status" value={labelize(projection.project.status)} note={`Health: ${labelize(projection.project.health)}`} />
                 <Metric label="Due" value={projection.project.due_date || 'Not set'} note="Engagement target" />
