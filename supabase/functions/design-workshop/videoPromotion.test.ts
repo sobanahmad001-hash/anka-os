@@ -1,19 +1,19 @@
 import { assertEquals, assertRejects } from 'jsr:@std/assert@1.0.14'
 import { previewVideoPromotion, promotePrivateVideo } from './videoPromotion.ts'
-const ids = Array.from({length:8},(_,i)=>`11111111-1111-4111-8111-${String(i+1).padStart(12,'0')}`)
-const [org,actor,jobId,direction,engagement,service,asset,version] = ids
+const ids = Array.from({length:9},(_,i)=>`11111111-1111-4111-8111-${String(i+1).padStart(12,'0')}`)
+const [org,actor,jobId,direction,engagement,service,asset,version,conversation] = ids
 const body = { job_id:jobId,target_engagement_id:engagement,target_service_id:service,operation_key:crypto.randomUUID(),expected_checksum:'b'.repeat(64) }
 const bytes = new Uint8Array([0,0,0,12,102,116,121,112,105,115,111,109])
-async function fixture() {
+async function fixture({ privateVideo = false } = {}) {
   const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(x=>x.toString(16).padStart(2,'0')).join('')
   const state = { revoked:false, uploadConflict:false, corrupt:false, failComplete:false, completed:false,
-    calls:[] as string[], uploads:0, params:[] as unknown[], revokeAfterUpload:false, serviceActive:true, deactivateServiceAfterUpload:false }
-  const prepared = {job_id:jobId,direction_version_id:direction,target_engagement_id:engagement,target_service_id:service,
+    calls:[] as string[], downloads:[] as string[], readTables:[] as string[], uploads:0, params:[] as unknown[], revokeAfterUpload:false, serviceActive:true, deactivateServiceAfterUpload:false }
+  const prepared = {job_id:jobId,direction_version_id:privateVideo?null:direction,private_conversation_id:privateVideo?conversation:null,target_engagement_id:engagement,target_service_id:service,
     brand_id:'brand',name:'Exact video',rights_notes:'Recorded, not a license',checksum:body.expected_checksum,
-    source_path:`${org}/${direction}/${jobId}/output.mp4`,sha256:hash,byte_length:12,mime_type:'video/mp4',format:'mp4',asset_id:asset,version_id:version}
+    source_path:privateVideo?`${org}/private/${actor}/${conversation}/${jobId}/output.mp4`:`${org}/${direction}/${jobId}/output.mp4`,sha256:hash,byte_length:12,mime_type:'video/mp4',format:'mp4',asset_id:asset,version_id:version}
   const admin = {organizationId:org,rpc:async(name:string,args:unknown)=>{
     state.calls.push(name)
-    if(name==='get_design_video_job') return {data:state.revoked?null:{id:jobId,organization_id:org,requested_by:actor,status:'ready',direction_version_id:direction}}
+    if(name==='get_design_video_job') return {data:state.revoked?null:{id:jobId,organization_id:org,requested_by:actor,status:'ready',direction_version_id:privateVideo?null:direction,private_conversation_id:privateVideo?conversation:null}}
     if(name==='prepare_design_video_promotion') {state.params.push(args);return {data:prepared}}
     if(state.failComplete) {state.failComplete=false;return {error:new Error('lost')}}
     const replay=state.completed;state.completed=true
@@ -21,7 +21,7 @@ async function fixture() {
   },storage:{from:(bucket:string)=>{
     assertEquals(bucket,'design-generated-video')
     return {download:async(path:string)=>{
-      state.calls.push('download')
+      state.calls.push('download');state.downloads.push(path)
       const output=new Uint8Array(bytes)
       if(state.corrupt&&path.includes('/assets/'))output[11]=0
       return {data:new Blob([output],{type:'video/mp4'})}
@@ -34,6 +34,7 @@ async function fixture() {
     }}
   }}}
   const caller={from:(table:string)=>{
+    state.readTables.push(table)
     const data = table==='design_direction_versions'?{id:direction,creative_brief_version_id:'brief'}:
       table==='engagements'?{id:engagement,brand_id:'brand'}:
       table==='engagement_services'?(state.serviceActive?{id:service,service_catalog:{department_id:'design',is_active:true}}:null):
@@ -46,6 +47,15 @@ async function fixture() {
 Deno.test('promotion preview excludes private paths/provider URLs and makes no storage write',async()=>{
   const f=await fixture();const result=await previewVideoPromotion(f.admin,f.caller,body,actor)
   assertEquals(result.status,'draft');assertEquals('source_path' in result,false);assertEquals('sha256' in result,false)
+  assertEquals(f.state.uploads,0)
+})
+Deno.test('private promotion preview keeps the owner-private source path server-side',async()=>{
+  const f=await fixture({privateVideo:true})
+  const result=await previewVideoPromotion(f.admin,f.caller,body,actor)
+  assertEquals(result.status,'draft')
+  assertEquals('source_path' in result,false)
+  assertEquals(f.state.readTables.includes('design_direction_versions'),false)
+  assertEquals(f.state.downloads.length,0)
   assertEquals(f.state.uploads,0)
 })
 Deno.test('promotion copies exact bytes without provider call; retry rechecks access and reuses IDs',async()=>{
@@ -78,4 +88,23 @@ Deno.test('target service suspension during copy blocks registration and retry w
   f.state.serviceActive=true;f.state.deactivateServiceAfterUpload=false;f.state.uploadConflict=true
   assertEquals((await promotePrivateVideo(f.admin,f.caller,body,actor)).version_id,version)
   assertEquals(f.state.params[0],f.state.params[1])
+})
+Deno.test('private conversation promotion copies from the exact owner-private path without reading a direction or brief',async()=>{
+  const f=await fixture({privateVideo:true})
+  const result=await promotePrivateVideo(f.admin,f.caller,body,actor)
+  assertEquals(result.version_id,version)
+  assertEquals(f.state.downloads[0],`${org}/private/${actor}/${conversation}/${jobId}/output.mp4`)
+  assertEquals(f.state.readTables.includes('design_direction_versions'),false)
+  assertEquals(f.state.readTables.includes('design_creative_brief_versions'),false)
+  assertEquals(f.state.calls.includes('complete_design_video_promotion'),true)
+})
+Deno.test('promotion fails closed when a source has both or neither context anchors',async()=>{
+  const f=await fixture({privateVideo:true})
+  f.prepared.direction_version_id=direction
+  await assertRejects(()=>promotePrivateVideo(f.admin,f.caller,body,actor))
+  assertEquals(f.state.downloads.length,0)
+  f.prepared.direction_version_id=null
+  f.prepared.private_conversation_id=null
+  await assertRejects(()=>promotePrivateVideo(f.admin,f.caller,body,actor))
+  assertEquals(f.state.downloads.length,0)
 })
