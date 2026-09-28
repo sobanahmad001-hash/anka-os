@@ -36,7 +36,7 @@ export default function MarketingArtifactChat({ engagement, projectId, activeSer
   }, [load, key, requestSignal])
   const targets = state?.key === key && state.status === 'ready' && !requestSignal?.aborted ? state.targets : null
   return <section aria-label="Marketing artifact chat" className="space-y-3">
-    {!targets && <p role="status" className="text-sm text-amber-200">{state?.key !== key || state.status === 'loading' ? 'Loading Marketing draft tools. Ordinary chat remains available.' : 'Marketing draft tools are unavailable for this context. Ordinary chat remains available.'}</p>}
+    {!targets && <p role="status" className="text-sm text-[var(--anka-warning)]">{state?.key !== key || state.status === 'loading' ? 'Loading Marketing draft tools. Ordinary chat remains available.' : 'Marketing draft tools are unavailable for this context. Ordinary chat remains available.'}</p>}
     <DepartmentChat {...conversationProps} key={key} engagement={engagement} departmentId="marketing"
       allowedArtifactTypes={MARKETING_CHAT_ARTIFACT_TYPES} allowArtifactDraft={Boolean(targets)}
       artifactDefinitions={targets?.definitions || {}} artifactForType={targets?.artifactForType} stageForType={targets?.stageForType}

@@ -85,35 +85,35 @@ export default function ProjectTaskProposalPanel({ organizationId, projectId, ta
     setSupersedesId(proposal.id); requestId.current = null
   }
   const change = setter => event => { setter(event.target.value); requestId.current = null }
-  return <section aria-label="Project task change proposals" className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5">
+  return <section aria-label="Project task change proposals" className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-5 text-[var(--anka-ink)]">
     <h2 className="font-semibold">Proposed task changes</h2>
-    <p className="mt-1 text-sm text-slate-400">A proposal records the exact task version, impact, and cost. It changes no work until an authorized team member confirms it.</p>
-    {error && <p role="alert" className="mt-3 rounded-lg border border-rose-500/25 bg-rose-500/10 p-3 text-sm text-rose-200">{error}</p>}
-    {loading ? <p className="mt-4 text-sm text-slate-400">Loading proposals…</p> : <div className="mt-4 space-y-3">
-      {proposals.map(proposal => <article key={proposal.id} className="rounded-xl border border-white/10 p-4 text-sm">
-        <div className="flex flex-wrap items-center justify-between gap-2"><strong>{tasks.find(item => item.id === proposal.task_id)?.title || 'Project Task'}</strong><span className="text-xs text-slate-400">{label(proposal.status)}</span></div>
-        <p className="mt-2 text-slate-300">{label(proposal.before_status)} → {label(proposal.proposed_status)} · Task version {proposal.expected_row_version}</p>
-        <p className="mt-2 text-slate-400">Reason: {proposal.rationale}</p>
-        <p className="mt-1 text-slate-400">Impact: {proposal.impact}</p>
-        <p className="mt-1 text-slate-400">Cost: {proposal.cost_note}</p>
-        {proposal.source_comment_id && <p className="mt-1 text-xs text-violet-300">Linked to project discussion message</p>}
-        {proposal.failure_reason && <p className="mt-2 text-xs text-amber-300">Approved, but not applied: {proposal.failure_reason}. Create a new proposal after reviewing the task.</p>}
+    <p className="mt-1 text-sm text-[var(--anka-muted)]">A proposal records the exact task version, impact, and cost. It changes no work until an authorized team member confirms it.</p>
+    {error && <p role="alert" className="mt-3 rounded-lg border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] p-3 text-sm text-[var(--anka-danger)]">{error}</p>}
+    {loading ? <p className="mt-4 text-sm text-[var(--anka-muted)]">Loading proposals…</p> : <div className="mt-4 space-y-3">
+      {proposals.map(proposal => <article key={proposal.id} className="rounded-xl border border-[var(--anka-line)] p-4 text-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2"><strong>{tasks.find(item => item.id === proposal.task_id)?.title || 'Project Task'}</strong><span className="text-xs text-[var(--anka-muted)]">{label(proposal.status)}</span></div>
+        <p className="mt-2 text-[var(--anka-ink)]">{label(proposal.before_status)} → {label(proposal.proposed_status)} · Task version {proposal.expected_row_version}</p>
+        <p className="mt-2 text-[var(--anka-muted)]">Reason: {proposal.rationale}</p>
+        <p className="mt-1 text-[var(--anka-muted)]">Impact: {proposal.impact}</p>
+        <p className="mt-1 text-[var(--anka-muted)]">Cost: {proposal.cost_note}</p>
+        {proposal.source_comment_id && <p className="mt-1 text-xs text-[var(--anka-violet)]">Linked to project discussion message</p>}
+        {proposal.failure_reason && <p className="mt-2 text-xs text-[var(--anka-warning)]">Approved, but not applied: {proposal.failure_reason}. Create a new proposal after reviewing the task.</p>}
         {proposal.status === 'pending' && <div className="mt-3 flex flex-wrap gap-2">
-          <button type="button" disabled={busy} onClick={() => decide(proposal, 'approve')} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-medium disabled:opacity-40">Confirm and apply</button>
-          <button type="button" disabled={busy} onClick={() => decide(proposal, 'reject')} className="rounded-lg border border-white/10 px-3 py-2 text-xs disabled:opacity-40">Reject</button>
-          <button type="button" disabled={busy} onClick={() => revise(proposal)} className="rounded-lg border border-white/10 px-3 py-2 text-xs disabled:opacity-40">Revise</button>
+          <button type="button" disabled={busy} onClick={() => decide(proposal, 'approve')} className="rounded-lg bg-[var(--anka-success-soft)] px-3 py-2 text-xs font-medium text-[var(--anka-success)] disabled:opacity-40">Confirm and apply</button>
+          <button type="button" disabled={busy} onClick={() => decide(proposal, 'reject')} className="rounded-lg border border-[var(--anka-line)] px-3 py-2 text-xs disabled:opacity-40">Reject</button>
+          <button type="button" disabled={busy} onClick={() => revise(proposal)} className="rounded-lg border border-[var(--anka-line)] px-3 py-2 text-xs disabled:opacity-40">Revise</button>
         </div>}
       </article>)}
-      {!proposals.length && <p className="text-sm text-slate-500">No change proposals yet.</p>}
+      {!proposals.length && <p className="text-sm text-[var(--anka-muted)]">No change proposals yet.</p>}
     </div>}
-    <form onSubmit={submit} className="mt-6 space-y-3 border-t border-white/10 pt-5">
+    <form onSubmit={submit} className="mt-6 space-y-3 border-t border-[var(--anka-line)] pt-5">
       <h3 className="font-medium">{supersedesId ? 'Revise proposal' : 'Propose a task status change'}</h3>
-      {sourceCommentId && <p className="text-xs text-violet-300">Source: selected project discussion message</p>}
-      <label className="block text-xs text-slate-400">Project Task<select required value={taskId} onChange={change(setTaskId)} className="mt-1 w-full rounded-lg border border-white/10 bg-[#111622] p-2 text-sm text-white"><option value="">Select task</option>{tasks.filter(item => !item.archived_at).map(item => <option key={item.id} value={item.id}>{item.title} · v{item.row_version}</option>)}</select></label>
-      {task && <p className="text-xs text-slate-400">Current status: {label(task.status)} · Exact version: {task.row_version}</p>}
-      <label className="block text-xs text-slate-400">Proposed status<select required value={nextStatus} onChange={change(setNextStatus)} className="mt-1 w-full rounded-lg border border-white/10 bg-[#111622] p-2 text-sm text-white"><option value="">Select status</option>{STATUSES.filter(status => status !== task?.status).map(status => <option key={status} value={status}>{label(status)}</option>)}</select></label>
-      {[[rationale, setRationale, 'Reason', 4000], [impact, setImpact, 'Impact on work', 4000], [costNote, setCostNote, 'Cost or resource impact', 2000]].map(([value, setter, title, maximum]) => <label key={title} className="block text-xs text-slate-400">{title}<textarea required rows={2} maxLength={maximum} value={value} onChange={change(setter)} className="mt-1 w-full rounded-lg border border-white/10 bg-[#111622] p-2 text-sm text-white" /></label>)}
-      <div className="flex gap-2"><button type="submit" disabled={busy || !task || !nextStatus} className="rounded-lg bg-violet-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">{busy ? 'Saving…' : 'Save proposal'}</button>{supersedesId && <button type="button" onClick={clear} className="rounded-lg border border-white/10 px-3 py-2 text-sm">Cancel revision</button>}</div>
+      {sourceCommentId && <p className="text-xs text-[var(--anka-violet)]">Source: selected project discussion message</p>}
+      <label className="block text-xs text-[var(--anka-muted)]">Project Task<select required value={taskId} onChange={change(setTaskId)} className="mt-1 w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-2 text-sm text-[var(--anka-ink)]"><option value="">Select task</option>{tasks.filter(item => !item.archived_at).map(item => <option key={item.id} value={item.id}>{item.title} · v{item.row_version}</option>)}</select></label>
+      {task && <p className="text-xs text-[var(--anka-muted)]">Current status: {label(task.status)} · Exact version: {task.row_version}</p>}
+      <label className="block text-xs text-[var(--anka-muted)]">Proposed status<select required value={nextStatus} onChange={change(setNextStatus)} className="mt-1 w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-2 text-sm text-[var(--anka-ink)]"><option value="">Select status</option>{STATUSES.filter(status => status !== task?.status).map(status => <option key={status} value={status}>{label(status)}</option>)}</select></label>
+      {[[rationale, setRationale, 'Reason', 4000], [impact, setImpact, 'Impact on work', 4000], [costNote, setCostNote, 'Cost or resource impact', 2000]].map(([value, setter, title, maximum]) => <label key={title} className="block text-xs text-[var(--anka-muted)]">{title}<textarea required rows={2} maxLength={maximum} value={value} onChange={change(setter)} className="mt-1 w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-2 text-sm text-[var(--anka-ink)]" /></label>)}
+      <div className="flex gap-2"><button type="submit" disabled={busy || !task || !nextStatus} className="rounded-lg bg-[var(--anka-violet)] px-4 py-2 text-sm font-semibold text-[var(--anka-on-violet)] disabled:opacity-40">{busy ? 'Saving…' : 'Save proposal'}</button>{supersedesId && <button type="button" onClick={clear} className="rounded-lg border border-[var(--anka-line)] px-3 py-2 text-sm">Cancel revision</button>}</div>
     </form>
   </section>
 }

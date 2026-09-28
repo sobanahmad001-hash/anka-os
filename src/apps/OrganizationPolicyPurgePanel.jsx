@@ -40,22 +40,22 @@ export default function OrganizationPolicyPurgePanel({ organizationId, policies,
   }
 
   if (!records.length) return null
-  return <section aria-label="Policy history purge" className="rounded-xl border border-rose-900/40 p-4">
-    <h3 className="text-sm font-medium text-rose-200">Protected history purge</h3>
-    <p className="mt-1 text-xs text-slate-400">Only a system owner can erase a full policy correction chain. Review every linked ID first. The audit keeps a content-free tombstone.</p>
+  return <section aria-label="Policy history purge" className="rounded-xl border border-[var(--anka-danger)] p-4">
+    <h3 className="text-sm font-medium text-[var(--anka-danger)]">Protected history purge</h3>
+    <p className="mt-1 text-xs text-[var(--anka-muted)]">Only a system owner can erase a full policy correction chain. Review every linked ID first. The audit keeps a content-free tombstone.</p>
     <div className="mt-3 max-h-44 space-y-2 overflow-y-auto">{records.map(item =>
-      <div key={item.id} className="flex items-start justify-between gap-2 rounded-lg border border-slate-800 p-2">
-        <p className="text-xs text-slate-400">{item.status || 'candidate'} · {item.statement} · {item.id}</p>
-        <button type="button" disabled={busy} onClick={() => inspect(item.id)} className="shrink-0 text-xs text-rose-300 disabled:opacity-40">Preview purge</button>
+      <div key={item.id} className="flex items-start justify-between gap-2 rounded-lg border border-[var(--anka-line)] p-2">
+        <p className="text-xs text-[var(--anka-muted)]">{item.status || 'candidate'} · {item.statement} · {item.id}</p>
+        <button type="button" disabled={busy} onClick={() => inspect(item.id)} className="shrink-0 text-xs text-[var(--anka-danger)] disabled:opacity-40">Preview purge</button>
       </div>)}</div>
-    {error && <p role="alert" className="mt-3 text-xs text-rose-300">{error}</p>}
-    {preview && <form onSubmit={purge} className="mt-4 rounded-lg border border-rose-500/30 p-4">
-      <h4 className="text-sm font-medium text-rose-200">Permanently purge {preview.policy_ids.length} linked polic{preview.policy_ids.length === 1 ? 'y' : 'ies'}</h4>
-      <ul className="mt-2 space-y-1 text-xs text-slate-400">{preview.records.map(item =>
+    {error && <p role="alert" className="mt-3 text-xs text-[var(--anka-danger)]">{error}</p>}
+    {preview && <form onSubmit={purge} className="mt-4 rounded-lg border border-[var(--anka-danger)] p-4">
+      <h4 className="text-sm font-medium text-[var(--anka-danger)]">Permanently purge {preview.policy_ids.length} linked polic{preview.policy_ids.length === 1 ? 'y' : 'ies'}</h4>
+      <ul className="mt-2 space-y-1 text-xs text-[var(--anka-muted)]">{preview.records.map(item =>
         <li key={item.id}>{item.status} · {item.id}</li>)}</ul>
-      <label className="mt-3 block text-xs text-slate-400">Reason<textarea required minLength={10} maxLength={1000} value={reason} onChange={event => { setReason(event.target.value); requestId.current = null }} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 p-2 text-sm" /></label>
-      <label className="mt-3 block text-xs text-slate-400">Type PURGE<input required value={confirmation} onChange={event => { setConfirmation(event.target.value); requestId.current = null }} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 p-2 text-sm" /></label>
-      <div className="mt-3 flex gap-3"><button type="submit" disabled={busy || confirmation !== 'PURGE' || reason.trim().length < 10} className="text-xs font-semibold text-rose-300 disabled:opacity-40">Permanently purge reviewed policies</button><button type="button" onClick={() => { setPreview(null); requestId.current = null }} className="text-xs text-slate-400">Cancel</button></div>
+      <label className="mt-3 block text-xs text-[var(--anka-muted)]">Reason<textarea required minLength={10} maxLength={1000} value={reason} onChange={event => { setReason(event.target.value); requestId.current = null }} className="mt-1 w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-2 text-sm text-[var(--anka-ink)]" /></label>
+      <label className="mt-3 block text-xs text-[var(--anka-muted)]">Type PURGE<input required value={confirmation} onChange={event => { setConfirmation(event.target.value); requestId.current = null }} className="mt-1 w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-2 text-sm text-[var(--anka-ink)]" /></label>
+      <div className="mt-3 flex gap-3"><button type="submit" disabled={busy || confirmation !== 'PURGE' || reason.trim().length < 10} className="text-xs font-semibold text-[var(--anka-danger)] disabled:opacity-40">Permanently purge reviewed policies</button><button type="button" onClick={() => { setPreview(null); requestId.current = null }} className="text-xs text-[var(--anka-muted)]">Cancel</button></div>
     </form>}
   </section>
 }

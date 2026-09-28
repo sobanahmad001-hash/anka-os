@@ -146,7 +146,7 @@ function QuickLinks({ navigate }) {
 }
 
 function Panel({ title, description, action, onAction, children }) {
-  return <section className="workspace-card min-w-0 p-5"><div className="mb-4 flex items-start justify-between gap-4"><div><h2 className="text-base font-semibold text-[var(--anka-ink)]">{title}</h2><p className="mt-1 text-xs leading-5 text-[var(--anka-muted)]">{description}</p></div>{action && <button type="button" onClick={onAction} className="shrink-0 text-xs font-medium text-[var(--anka-violet)] hover:text-[var(--anka-violet)]">{action} →</button>}</div>{children}</section>
+  return <section className="workspace-card min-w-0 p-5"><div className="mb-4 flex items-start justify-between gap-4"><div><h2 className="text-base font-semibold text-[var(--anka-ink)]">{title}</h2><p className="mt-1 text-xs leading-5 text-[var(--anka-muted)]">{description}</p></div>{action && <button type="button" onClick={onAction} className="shrink-0 text-xs font-medium text-[var(--anka-violet)] hover:text-[var(--anka-ink)]">{action} →</button>}</div>{children}</section>
 }
 
 function MiniMetric({ label: title, value, tone = 'slate' }) { const colors = { sky: 'text-[var(--anka-info)]', violet: 'text-[var(--anka-violet)]', rose: 'text-[var(--anka-danger)]', slate: 'text-[var(--anka-ink)]' }; return <div className="rounded-xl bg-[var(--anka-surface-raised)] p-2.5"><p className={`text-base font-semibold ${colors[tone] || colors.slate}`}>{value}</p><p className="mt-0.5 text-[10px] text-[var(--anka-muted)]">{title}</p></div> }

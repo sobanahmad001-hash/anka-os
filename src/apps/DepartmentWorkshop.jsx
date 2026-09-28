@@ -589,7 +589,7 @@ function SpecialistQueues({ config, navigationContext }) {
 }
 
 function FormShell({ title, description, onSubmit, saving, children }) {
-  return <section className="workspace-card p-5"><Header title={title} description={description} /><form onSubmit={onSubmit} className="space-y-4">{children}<button disabled={saving} className="w-full rounded-xl bg-[var(--anka-violet)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-on-violet)] hover:bg-[var(--anka-violet)] disabled:opacity-50">{saving ? 'Saving…' : title}</button></form></section>
+  return <section className="workspace-card p-5"><Header title={title} description={description} /><form onSubmit={onSubmit} className="space-y-4">{children}<button disabled={saving} className="w-full rounded-xl bg-[var(--anka-violet)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-on-violet)] hover:brightness-110 disabled:opacity-50">{saving ? 'Saving…' : title}</button></form></section>
 }
 
 export { DEPARTMENT_CONFIG }

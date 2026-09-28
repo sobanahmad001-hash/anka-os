@@ -12,8 +12,8 @@ import { departmentChatVersionHistoryPath, linkedDepartmentChatVersions } from '
 import { departmentChatProfile } from '../data/departmentChatProfiles.js'
 import { departmentChat } from '../data/departmentChatRepository.js'
 
-const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20'
-const PRIMARY = 'rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50'
+const INPUT = 'w-full rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] px-3.5 py-2.5 text-sm text-[var(--anka-ink)] placeholder:text-[var(--anka-muted)] outline-none focus:border-[var(--anka-focus)] focus:ring-2 focus:ring-[var(--anka-focus)]/20'
+const PRIMARY = 'rounded-xl bg-[var(--anka-violet)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-on-violet)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50'
 const MODEL_PROVIDER_LABELS = { openai: 'OpenAI', anthropic: 'Claude', google_gemini: 'Gemini' }
 
 export default function DepartmentChat(props) {
@@ -989,72 +989,72 @@ export function ScopedDepartmentChat({
 
   const SourcePanel = presentation === 'workbench' ? 'details' : 'section'
   return <><div className={presentation === 'workbench' ? 'design-chat-composer grid min-w-0 gap-4' : `grid gap-6 ${supportsSavedConversations ? hideConversationList ? 'xl:grid-cols-[minmax(0,1fr)_320px]' : 'xl:grid-cols-[260px_minmax(0,1fr)_320px]' : 'xl:grid-cols-[minmax(0,1fr)_360px]'}`}>
-    {supportsSavedConversations && !hideConversationList && <aside className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+    {supportsSavedConversations && !hideConversationList && <aside className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4">
       <div className="flex items-center justify-between gap-3">
-        <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Conversations</p><p className="mt-1 text-xs text-emerald-300">Private to you or deliberately shared</p></div>
-        <button type="button" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)} className="rounded-lg bg-sky-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">New</button>
+        <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--anka-muted)]">Conversations</p><p className="mt-1 text-xs text-[var(--anka-success)]">Private to you or deliberately shared</p></div>
+        <button type="button" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)} className="rounded-lg bg-[var(--anka-violet)] px-3 py-2 text-xs font-semibold text-[var(--anka-on-violet)] disabled:opacity-50">New</button>
       </div>
       <form className="mt-4 space-y-2" role="search" onSubmit={event => { event.preventDefault(); requestDraftSwitch('search conversations', () => searchSavedConversations(event)) }}>
-        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Search permitted conversations
+        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Search permitted conversations
           <input type="search" maxLength="160" value={conversationSearchDraft} disabled={busy || historyBusy} onInput={event => setConversationSearchDraft(event.currentTarget.value)} placeholder="Titles and messages" className={`${INPUT} mt-2 normal-case tracking-normal`} />
         </label>
         <div className="flex gap-2">
-          <button type="submit" disabled={busy || historyBusy} className="rounded-lg border border-sky-800 px-3 py-2 text-xs font-semibold text-sky-200 disabled:opacity-50">Search</button>
-          {conversationSearchQuery && <button type="button" disabled={busy || historyBusy} onClick={() => requestDraftSwitch('clear conversation search', () => clearConversationSearch().catch(reason => setError(reason.message)))} className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 disabled:opacity-50">Clear</button>}
+          <button type="submit" disabled={busy || historyBusy} className="rounded-lg border border-[var(--anka-info)] px-3 py-2 text-xs font-semibold text-[var(--anka-info)] disabled:opacity-50">Search</button>
+          {conversationSearchQuery && <button type="button" disabled={busy || historyBusy} onClick={() => requestDraftSwitch('clear conversation search', () => clearConversationSearch().catch(reason => setError(reason.message)))} className="rounded-lg border border-[var(--anka-line)] px-3 py-2 text-xs text-[var(--anka-ink)] disabled:opacity-50">Clear</button>}
         </div>
       </form>
-      <label className="mt-4 flex items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={includeArchived} disabled={busy || historyBusy} onChange={event => requestDraftSwitch('change archived view', () => toggleArchived(event.target.checked).catch(reason => setError(reason.message)))} />Show archived</label>
+      <label className="mt-4 flex items-center gap-2 text-xs text-[var(--anka-muted)]"><input type="checkbox" checked={includeArchived} disabled={busy || historyBusy} onChange={event => requestDraftSwitch('change archived view', () => toggleArchived(event.target.checked).catch(reason => setError(reason.message)))} />Show archived</label>
       <div className="mt-4 space-y-2">
-        {conversations.map(conversation => <button type="button" key={conversation.id} disabled={busy || historyBusy} onClick={() => conversation.id !== conversationId && requestDraftSwitch('open another conversation', () => selectConversation(conversation.id))} className={`w-full rounded-xl border px-3 py-3 text-left text-sm disabled:opacity-50 ${conversation.id === conversationId ? 'border-sky-600 bg-sky-950/40 text-white' : 'border-slate-800 text-slate-300 hover:border-slate-700'}`}>
+        {conversations.map(conversation => <button type="button" key={conversation.id} disabled={busy || historyBusy} onClick={() => conversation.id !== conversationId && requestDraftSwitch('open another conversation', () => selectConversation(conversation.id))} className={`w-full rounded-xl border px-3 py-3 text-left text-sm disabled:opacity-50 ${conversation.id === conversationId ? 'border-[var(--anka-info)] bg-[var(--anka-surface-raised)] text-[var(--anka-ink)]' : 'border-[var(--anka-line)] text-[var(--anka-ink)] hover:border-[var(--anka-muted)]'}`}>
           <span className="block truncate font-medium">{conversation.title}</span>
-          <span className="mt-1 block text-xs capitalize text-slate-500">{conversation.access_role === 'recipient' ? 'Shared with you' : 'Yours'} · {conversation.state} · {new Date(conversation.last_activity_at).toLocaleString()}</span>
+          <span className="mt-1 block text-xs capitalize text-[var(--anka-muted)]">{conversation.access_role === 'recipient' ? 'Shared with you' : 'Yours'} · {conversation.state} · {new Date(conversation.last_activity_at).toLocaleString()}</span>
           {(conversation.has_pending_run || conversation.has_failed_run) && <span className="mt-2 flex flex-wrap gap-1 text-[11px]">
-            {conversation.has_pending_run && <span className="rounded-full bg-amber-950 px-2 py-0.5 text-amber-300">Run pending</span>}
-            {conversation.has_failed_run && <span className="rounded-full bg-red-950 px-2 py-0.5 text-red-300">Run needs attention</span>}
+            {conversation.has_pending_run && <span className="rounded-full bg-[var(--anka-warning-soft)] px-2 py-0.5 text-[var(--anka-warning)]">Run pending</span>}
+            {conversation.has_failed_run && <span className="rounded-full bg-[var(--anka-danger-soft)] px-2 py-0.5 text-[var(--anka-danger)]">Run needs attention</span>}
           </span>}
         </button>)}
-        {!conversations.length && <p className="rounded-xl border border-dashed border-slate-800 p-4 text-xs leading-5 text-slate-500">{conversationSearchQuery ? 'No permitted conversations match this search.' : `No ${includeArchived ? '' : 'active '}saved conversations yet.`}</p>}
-        {nextConversationCursor && <button type="button" disabled={busy || historyBusy} onClick={() => loadMoreConversations().catch(reason => setError(reason.message))} className="w-full rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 disabled:opacity-50">Load more</button>}
+        {!conversations.length && <p className="rounded-xl border border-dashed border-[var(--anka-line)] p-4 text-xs leading-5 text-[var(--anka-muted)]">{conversationSearchQuery ? 'No permitted conversations match this search.' : `No ${includeArchived ? '' : 'active '}saved conversations yet.`}</p>}
+        {nextConversationCursor && <button type="button" disabled={busy || historyBusy} onClick={() => loadMoreConversations().catch(reason => setError(reason.message))} className="w-full rounded-lg border border-[var(--anka-line)] px-3 py-2 text-xs font-semibold text-[var(--anka-ink)] disabled:opacity-50">Load more</button>}
       </div>
     </aside>}
-    <form onSubmit={submit} className="min-w-0 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 sm:p-6">
-      {supportsSavedConversations && hideConversationList && <button type="button" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)} className="mb-4 rounded-lg bg-sky-700 px-3 py-2 text-sm">New engagement conversation</button>}
+    <form onSubmit={submit} className="min-w-0 rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4 sm:p-6">
+      {supportsSavedConversations && hideConversationList && <button type="button" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)} className="mb-4 rounded-lg bg-[var(--anka-violet)] px-3 py-2 text-sm text-[var(--anka-on-violet)]">New engagement conversation</button>}
       <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-400">{presentationLabel} · {departmentId}</p>
-        <h2 className="mt-2 text-2xl font-semibold text-white">{presentation === 'workbench' ? 'Discuss the direction' : 'Ask, explore, or prepare a governed proposal'}</h2>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Ordinary answers stay conversational and create no official record. Artifact and work-item modes remain explicit governed proposals requiring separate confirmation.</p>
-        {supportsSavedConversations && <p className="mt-2 text-xs leading-5 text-slate-500">Work context: canonical client engagement. Saved conversations are creator-private until explicitly shared with eligible internal contributors. Standalone private-project and internal-project chat modes are unavailable here.</p>}
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--anka-info)]">{presentationLabel} · {departmentId}</p>
+        <h2 className="mt-2 text-2xl font-semibold text-[var(--anka-ink)]">{presentation === 'workbench' ? 'Discuss the direction' : 'Ask, explore, or prepare a governed proposal'}</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--anka-muted)]">Ordinary answers stay conversational and create no official record. Artifact and work-item modes remain explicit governed proposals requiring separate confirmation.</p>
+        {supportsSavedConversations && <p className="mt-2 text-xs leading-5 text-[var(--anka-muted)]">Work context: canonical client engagement. Saved conversations are creator-private until explicitly shared with eligible internal contributors. Standalone private-project and internal-project chat modes are unavailable here.</p>}
       </div>
-      {error && <div className="mt-5 rounded-xl border border-red-900/60 bg-red-950/40 p-3 text-sm text-red-300">{error}</div>}
-      {draftNotice && <div className="mt-5 rounded-xl border border-sky-900/60 bg-sky-950/30 p-3 text-sm text-sky-200">{draftNotice}</div>}
-      {observationNotice && <div className="mt-5 rounded-xl border border-amber-900/60 bg-amber-950/30 p-3 text-sm text-amber-200">{observationNotice}</div>}
-      {answerState.text && <div className="mt-5 rounded-xl border border-sky-900/60 bg-sky-950/20 p-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-sky-300">{answerState.durable ? 'Saved answer' : 'Live partial · not yet durable'}</p><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-200">{answerState.text}</p></div>}
-      {supportsSavedConversations && !projectId && <div className="mt-5 rounded-xl border border-amber-900/60 bg-amber-950/30 p-3 text-sm text-amber-200">Saved chat requires a canonical project-owned engagement.</div>}
-      {supportsSavedConversations && currentConversation && <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+      {error && <div className="mt-5 rounded-xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] p-3 text-sm text-[var(--anka-danger)]">{error}</div>}
+      {draftNotice && <div className="mt-5 rounded-xl border border-[var(--anka-info)] bg-[var(--anka-surface-raised)] p-3 text-sm text-[var(--anka-info)]">{draftNotice}</div>}
+      {observationNotice && <div className="mt-5 rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] p-3 text-sm text-[var(--anka-warning)]">{observationNotice}</div>}
+      {answerState.text && <div className="mt-5 rounded-xl border border-[var(--anka-info)] bg-[var(--anka-surface-raised)] p-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-info)]">{answerState.durable ? 'Saved answer' : 'Live partial · not yet durable'}</p><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[var(--anka-ink)]">{answerState.text}</p></div>}
+      {supportsSavedConversations && !projectId && <div className="mt-5 rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] p-3 text-sm text-[var(--anka-warning)]">Saved chat requires a canonical project-owned engagement.</div>}
+      {supportsSavedConversations && currentConversation && <div className="mt-5 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-4">
         <div className="flex flex-wrap items-end gap-3">
-          <label className="min-w-0 flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Conversation title
+          <label className="min-w-0 flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Conversation title
             <input maxLength="160" readOnly={!isConversationOwner} disabled={busy || historyBusy} className={`${INPUT} mt-2 normal-case tracking-normal`} value={conversationTitle} onChange={event => setConversationTitle(event.target.value)} />
           </label>
-          {isConversationOwner && <button type="button" disabled={busy || historyBusy || !conversationTitle.trim()} onClick={() => renameConversation().catch(reason => setError(reason.message))} className="rounded-lg border border-slate-700 px-3 py-2.5 text-xs text-slate-200 disabled:opacity-50">Rename</button>}
-          {isConversationOwner && <button type="button" disabled={busy || historyBusy} onClick={() => requestDraftSwitch('change conversation state', () => setConversationState(currentConversation.state === 'active' ? 'archived' : 'active').catch(reason => setError(reason.message)))} className="rounded-lg border border-slate-700 px-3 py-2.5 text-xs text-slate-200 disabled:opacity-50">{currentConversation.state === 'active' ? 'Archive' : 'Reopen'}</button>}
+          {isConversationOwner && <button type="button" disabled={busy || historyBusy || !conversationTitle.trim()} onClick={() => renameConversation().catch(reason => setError(reason.message))} className="rounded-lg border border-[var(--anka-line)] px-3 py-2.5 text-xs text-[var(--anka-ink)] disabled:opacity-50">Rename</button>}
+          {isConversationOwner && <button type="button" disabled={busy || historyBusy} onClick={() => requestDraftSwitch('change conversation state', () => setConversationState(currentConversation.state === 'active' ? 'archived' : 'active').catch(reason => setError(reason.message)))} className="rounded-lg border border-[var(--anka-line)] px-3 py-2.5 text-xs text-[var(--anka-ink)] disabled:opacity-50">{currentConversation.state === 'active' ? 'Archive' : 'Reopen'}</button>}
         </div>
-        <p className="mt-3 text-xs text-slate-500">{isConversationOwner ? 'History stays private unless you explicitly share it with eligible internal contributors.' : 'The creator shared read and reply access with you. This adds no approval, tool, release, publishing, or paid-action authority.'}</p>
-        {sharing.can_manage && <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Share conversation and linked previews</p>
+        <p className="mt-3 text-xs text-[var(--anka-muted)]">{isConversationOwner ? 'History stays private unless you explicitly share it with eligible internal contributors.' : 'The creator shared read and reply access with you. This adds no approval, tool, release, publishing, or paid-action authority.'}</p>
+        {sharing.can_manage && <div className="mt-4 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Share conversation and linked previews</p>
           <div className="mt-3 max-h-40 space-y-2 overflow-auto">
-            {shareCandidates.map(candidate => <label key={candidate.id} className="flex items-start gap-3 text-sm text-slate-300">
+            {shareCandidates.map(candidate => <label key={candidate.id} className="flex items-start gap-3 text-sm text-[var(--anka-ink)]">
               <input type="checkbox" checked={recipientIds.includes(candidate.id)} disabled={busy || historyBusy} onChange={() => setRecipientIds(current => current.includes(candidate.id) ? current.filter(id => id !== candidate.id) : [...current, candidate.id])} />
-              <span>{candidate.full_name || candidate.email || 'Internal contributor'}<span className="block text-xs text-slate-500">{candidate.role} · {candidate.department_id || 'organization leadership'}</span></span>
+              <span>{candidate.full_name || candidate.email || 'Internal contributor'}<span className="block text-xs text-[var(--anka-muted)]">{candidate.role} · {candidate.department_id || 'organization leadership'}</span></span>
             </label>)}
-            {!shareCandidates.length && <p className="text-xs text-slate-500">No other currently eligible internal contributors.</p>}
+            {!shareCandidates.length && <p className="text-xs text-[var(--anka-muted)]">No other currently eligible internal contributors.</p>}
           </div>
-          <button type="button" disabled={busy || historyBusy} onClick={() => saveSharing().catch(reason => setError(reason.message))} className="mt-3 rounded-lg border border-sky-700 px-3 py-2 text-xs font-semibold text-sky-200 disabled:opacity-50">Save sharing</button>
-          <p className="mt-2 text-xs text-slate-500">Removing a person revokes later reads and replies immediately. Sharing never grants approval or execution power.</p>
+          <button type="button" disabled={busy || historyBusy} onClick={() => saveSharing().catch(reason => setError(reason.message))} className="mt-3 rounded-lg border border-[var(--anka-info)] px-3 py-2 text-xs font-semibold text-[var(--anka-info)] disabled:opacity-50">Save sharing</button>
+          <p className="mt-2 text-xs text-[var(--anka-muted)]">Removing a person revokes later reads and replies immediately. Sharing never grants approval or execution power.</p>
         </div>}
       </div>}
       {supportsSavedConversations && <ConversationHistory messages={messages} userId={userId} busy={busy} onConfirm={proposal => decide('confirm', proposal)} onReject={proposal => decide('reject', proposal)} />}
       <div className="mt-6 space-y-5">
-        {supportsSavedConversations && capabilities && <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Approved model
+        {supportsSavedConversations && capabilities && <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Approved model
           <select
             className={`${INPUT} mt-2 normal-case tracking-normal`}
             value={modelConfigurationId}
@@ -1069,31 +1069,31 @@ export function ScopedDepartmentChat({
           >
             {(capabilities.approved_models || []).map(model => <option key={model.configuration_id} value={model.configuration_id}>{MODEL_PROVIDER_LABELS[model.provider || capabilities.provider] || 'Provider unavailable'} · {model.display_name || model.model_id}{model.is_default ? ' · default' : ''}</option>)}
           </select>
-          <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-slate-500">Only administrator-approved models verified through this engagement's connector are available. A revoked or stale choice is rejected before dispatch without fallback.</span>
-          {isAnswerMode && answerReadiness && <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-amber-300">{!answerReadiness.paid_execution_enabled ? 'Workshop AI answers are currently off.' : !answerReadiness.spend_tracking_configured ? 'Organization spend tracking is not configured.' : !selectedPriceReady ? 'A fresh verified price for this exact model is unavailable.' : answerReadiness.spend_guard_mode === 'provider_managed' ? 'Provider-side spend limits are managed externally and cannot be verified or enforced by Anka. Each request is still priced and recorded.' : 'Local checks passed; the service will recheck before dispatch.'}</span>}
-          {isAnswerMode && !answerReadiness && <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-amber-300">Workshop answer readiness is unavailable.</span>}
+          <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-muted)]">Only administrator-approved models verified through this engagement's connector are available. A revoked or stale choice is rejected before dispatch without fallback.</span>
+          {isAnswerMode && answerReadiness && <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-warning)]">{!answerReadiness.paid_execution_enabled ? 'Workshop AI answers are currently off.' : !answerReadiness.spend_tracking_configured ? 'Organization spend tracking is not configured.' : !selectedPriceReady ? 'A fresh verified price for this exact model is unavailable.' : answerReadiness.spend_guard_mode === 'provider_managed' ? 'Provider-side spend limits are managed externally and cannot be verified or enforced by Anka. Each request is still priced and recorded.' : 'Local checks passed; the service will recheck before dispatch.'}</span>}
+          {isAnswerMode && !answerReadiness && <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-warning)]">Workshop answer readiness is unavailable.</span>}
         </label>}
-        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Task mode
+        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Task mode
           <select disabled={busy || historyBusy} className={`${INPUT} mt-2 normal-case tracking-normal`} value={proposalMode} onChange={event => setProposalMode(event.target.value)}>
             {supportsSavedConversations && <option value="answer">Conversational answer</option>}
             {allowArtifactDraft && artifactTypes.length > 0 && <option value="artifact">Artifact draft</option>}
             <option value="work_item">Work item draft</option>
           </select>
         </label>
-        {proposalModelUnavailable && <p className="text-xs text-amber-300">Artifact and work-item previews currently require an approved OpenAI model. Choose one above or switch to a conversational answer.</p>}
+        {proposalModelUnavailable && <p className="text-xs text-[var(--anka-warning)]">Artifact and work-item previews currently require an approved OpenAI model. Choose one above or switch to a conversational answer.</p>}
 
         {isAnswerMode ? null : isWorkItemMode ? (
           <>
-            <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Work item title
+            <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Work item title
               <input required className={`${INPUT} mt-2 normal-case tracking-normal`} value={title} onChange={event => setTitle(event.target.value)} placeholder="Short title for the proposed work item" />
             </label>
             <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Work item type
+              <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Work item type
                 <select className={`${INPUT} mt-2 normal-case tracking-normal`} value={workItemType} onChange={event => setWorkItemType(event.target.value)}>
                   {profile.workItemTypes.map(type => <option key={type} value={type}>{type[0].toUpperCase() + type.slice(1)}</option>)}
                 </select>
               </label>
-              <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Priority
+              <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Priority
                 <select className={`${INPUT} mt-2 normal-case tracking-normal`} value={priority} onChange={event => setPriority(event.target.value)}>
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
@@ -1105,64 +1105,64 @@ export function ScopedDepartmentChat({
           </>
         ) : (
           <>
-            <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Artifact type
+            <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Artifact type
               <select className={`${INPUT} mt-2 normal-case tracking-normal`} value={artifactType} onChange={event => setArtifactType(event.target.value)}>
                 {artifactTypes.map(type => <option key={type} value={type}>{artifactDefinitions[type]?.label || type}</option>)}
               </select>
             </label>
-            <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Artifact title
+            <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Artifact title
               <input className={`${INPUT} mt-2 normal-case tracking-normal`} value={artifactForType(artifactType)?.title || `${artifactDefinitions[artifactType]?.label || resolvedDepartmentLabel} artifact`} readOnly />
             </label>
-            {requiresContentLanguage && <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Language
+            {requiresContentLanguage && <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Language
               <input maxLength="120" className={`${INPUT} mt-2 normal-case tracking-normal`} value={language} onChange={event => setLanguage(event.target.value)} placeholder="Optional only when approved Vision or organization default supplies it" />
-              <span className="mt-2 block font-normal normal-case tracking-normal text-slate-500">Explicit choice wins; otherwise the server uses the approved brand value, then the organization default. If none exists, selection is required.</span>
+              <span className="mt-2 block font-normal normal-case tracking-normal text-[var(--anka-muted)]">Explicit choice wins; otherwise the server uses the approved brand value, then the organization default. If none exists, selection is required.</span>
             </label>}
           </>
         )}
 
-        {supportsSavedConversations && <SourcePanel className="rounded-xl border border-slate-800 bg-slate-950/40 p-4" aria-label="Exact artifact sources">
+        {supportsSavedConversations && <SourcePanel className="rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-4" aria-label="Exact artifact sources">
           {presentation === 'workbench' && <summary>References · {selectedSourceVersionIds.length} selected</summary>}
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Exact approved artifact versions</p>
-          <p className="mt-2 text-xs leading-5 text-slate-500">Only versions approved for this engagement and eligible for AI use appear. Preview the full content, then include up to five exact versions for this turn. No artifact is included automatically.</p>
-          <button type="button" disabled={sourceBusy || busy || historyBusy} onClick={() => setSourceRefresh(value => value + 1)} className="mt-2 text-xs text-sky-300 disabled:opacity-50">Refresh permitted versions</button>
-          {sourceError && <p role="alert" className="mt-2 text-xs text-red-300">{sourceError}</p>}
-          {sourceConversationId !== conversationId ? <p className="mt-2 text-xs text-slate-500">Checking permitted versions…</p>
-            : sourceVersions.length === 0 ? <p className="mt-2 text-xs text-slate-500">No permitted approved versions available.</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Exact approved artifact versions</p>
+          <p className="mt-2 text-xs leading-5 text-[var(--anka-muted)]">Only versions approved for this engagement and eligible for AI use appear. Preview the full content, then include up to five exact versions for this turn. No artifact is included automatically.</p>
+          <button type="button" disabled={sourceBusy || busy || historyBusy} onClick={() => setSourceRefresh(value => value + 1)} className="mt-2 text-xs text-[var(--anka-info)] disabled:opacity-50">Refresh permitted versions</button>
+          {sourceError && <p role="alert" className="mt-2 text-xs text-[var(--anka-danger)]">{sourceError}</p>}
+          {sourceConversationId !== conversationId ? <p className="mt-2 text-xs text-[var(--anka-muted)]">Checking permitted versions…</p>
+            : sourceVersions.length === 0 ? <p className="mt-2 text-xs text-[var(--anka-muted)]">No permitted approved versions available.</p>
               : <ul className="mt-3 space-y-2">{sourceVersions.map(item => {
                 const selected = selectedSourceVersionIds.includes(item.artifact_version_id)
-                return <li key={item.artifact_version_id} className="rounded-lg border border-slate-800 p-3 text-xs text-slate-300">
+                return <li key={item.artifact_version_id} className="rounded-lg border border-[var(--anka-line)] p-3 text-xs text-[var(--anka-ink)]">
                   <span className="block font-medium">{item.title} · {item.artifact_type} · version {item.version_number}</span>
-                  <span className="mt-1 block text-slate-500">Approved {new Date(item.approved_at).toLocaleString()} · AI eligible</span>
+                  <span className="mt-1 block text-[var(--anka-muted)]">Approved {new Date(item.approved_at).toLocaleString()} · AI eligible</span>
                   <div className="mt-2 flex gap-3">
-                    <button type="button" disabled={sourceBusy || busy || historyBusy} onClick={() => previewExactSource(item.artifact_version_id)} aria-label={`Preview ${item.title} version ${item.version_number}`} className="text-sky-300 disabled:opacity-50">Preview exact version</button>
-                    {selected && <button type="button" disabled={busy || historyBusy} onClick={() => { setSelectedSourceVersionIds(ids => ids.filter(id => id !== item.artifact_version_id)); setSafe(false) }} className="text-amber-300">Remove</button>}
+                    <button type="button" disabled={sourceBusy || busy || historyBusy} onClick={() => previewExactSource(item.artifact_version_id)} aria-label={`Preview ${item.title} version ${item.version_number}`} className="text-[var(--anka-info)] disabled:opacity-50">Preview exact version</button>
+                    {selected && <button type="button" disabled={busy || historyBusy} onClick={() => { setSelectedSourceVersionIds(ids => ids.filter(id => id !== item.artifact_version_id)); setSafe(false) }} className="text-[var(--anka-warning)]">Remove</button>}
                   </div>
                 </li>
               })}</ul>}
-          {sourcePreview && sourceConversationId === conversationId && <div className="mt-3 rounded-lg border border-sky-800 p-3 text-xs text-slate-300">
+          {sourcePreview && sourceConversationId === conversationId && <div className="mt-3 rounded-lg border border-[var(--anka-info)] p-3 text-xs text-[var(--anka-ink)]">
             <p className="font-semibold">{sourcePreview.title} · {sourcePreview.artifact_type} · version {sourcePreview.version_number}</p>
-            <p className="mt-1 text-slate-500">Exact content size: {new TextEncoder().encode(JSON.stringify(sourcePreview.content)).length.toLocaleString()} bytes · AI eligible</p>
-            <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950 p-2">{JSON.stringify(sourcePreview.content, null, 2)}</pre>
+            <p className="mt-1 text-[var(--anka-muted)]">Exact content size: {new TextEncoder().encode(JSON.stringify(sourcePreview.content)).length.toLocaleString()} bytes · AI eligible</p>
+            <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--anka-surface-raised)] p-2">{JSON.stringify(sourcePreview.content, null, 2)}</pre>
             <button type="button" disabled={busy || historyBusy || (selectedSourceVersionIds.length >= 5 && !selectedSourceVersionIds.includes(sourcePreview.artifact_version_id))} onClick={() => {
               setSelectedSourceVersionIds(ids => ids.includes(sourcePreview.artifact_version_id) ? ids : [...ids, sourcePreview.artifact_version_id])
               setSafe(false)
-            }} className="mt-2 rounded border border-sky-700 px-3 py-1.5 text-sky-200 disabled:opacity-50">
+            }} className="mt-2 rounded border border-[var(--anka-info)] px-3 py-1.5 text-[var(--anka-info)] disabled:opacity-50">
               {selectedSourceVersionIds.includes(sourcePreview.artifact_version_id) ? 'Included for this turn' : 'Include this exact version'}
             </button>
           </div>}
-          <p className="mt-2 text-xs text-slate-500">{selectedSourceVersionIds.length} of 5 exact versions selected. Permission and approval are rechecked at send.</p>
+          <p className="mt-2 text-xs text-[var(--anka-muted)]">{selectedSourceVersionIds.length} of 5 exact versions selected. Permission and approval are rechecked at send.</p>
         </SourcePanel>}
 
-        {supportsSavedConversations && capabilities?.attachments?.supported && <SourcePanel className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+        {supportsSavedConversations && capabilities?.attachments?.supported && <SourcePanel className="rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-4">
           {presentation === 'workbench' && <summary>Source files · {selectedAttachmentIds.length} selected</summary>}
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Explicit source files</p>
-          <p className="mt-2 text-xs leading-5 text-slate-500">TXT, Markdown, and DOCX contribute validated text. PNG/JPEG are reference-only and are never sent to the model. PDF and scanned/OCR documents are unavailable. Choose up to 3 files: 5 MiB per file; DOCX 4 MiB. Extracted text is limited to 16,000 characters per file and 24,000 per turn; rejected limits never truncate content.</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Explicit source files</p>
+          <p className="mt-2 text-xs leading-5 text-[var(--anka-muted)]">TXT, Markdown, and DOCX contribute validated text. PNG/JPEG are reference-only and are never sent to the model. PDF and scanned/OCR documents are unavailable. Choose up to 3 files: 5 MiB per file; DOCX 4 MiB. Extracted text is limited to 16,000 characters per file and 24,000 per turn; rejected limits never truncate content.</p>
           <input
             key={conversationId}
             type="file" multiple
             accept=".txt,.md,.docx,.png,.jpg,.jpeg,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg"
             disabled={busy || historyBusy || attachmentBusy || !currentConversation || currentConversation.state !== 'active'}
-            className="mt-3 block w-full text-xs text-slate-400 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-800 file:px-3 file:py-2 file:text-slate-200"
+            className="mt-3 block w-full text-xs text-[var(--anka-muted)] file:mr-3 file:rounded-lg file:border-0 file:bg-[var(--anka-surface-raised)] file:px-3 file:py-2 file:text-[var(--anka-ink)]"
             onChange={event => {
               const selection = selectPendingDepartmentChatAttachments(event.target.files)
               setPendingFiles(selection.files)
@@ -1171,9 +1171,9 @@ export function ScopedDepartmentChat({
             }}
           />
           {pendingFiles.length > 0 && <div className="mt-3 space-y-3">
-            <p className="text-xs text-slate-300">{pendingFiles.map(file => file.name).join(', ')}</p>
+            <p className="text-xs text-[var(--anka-ink)]">{pendingFiles.map(file => file.name).join(', ')}</p>
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="text-xs text-slate-400">Classification
+              <label className="text-xs text-[var(--anka-muted)]">Classification
                 <select className={`${INPUT} mt-1 normal-case tracking-normal`} value={attachmentClassification} onChange={event => {
                   setAttachmentClassification(event.target.value)
                   if (event.target.value === 'restricted') { setAttachmentAiUse(false); setAttachmentShare(false) }
@@ -1182,80 +1182,80 @@ export function ScopedDepartmentChat({
                   <option value="confidential">Confidential</option><option value="restricted">Restricted</option>
                 </select>
               </label>
-              <label className="flex items-start gap-2 pt-6 text-xs text-slate-300"><input type="checkbox" checked={attachmentShare} disabled={attachmentClassification === 'restricted'} onChange={event => setAttachmentShare(event.target.checked)} />Share this source with current and future conversation recipients</label>
+              <label className="flex items-start gap-2 pt-6 text-xs text-[var(--anka-ink)]"><input type="checkbox" checked={attachmentShare} disabled={attachmentClassification === 'restricted'} onChange={event => setAttachmentShare(event.target.checked)} />Share this source with current and future conversation recipients</label>
             </div>
-            <label className="flex items-start gap-2 text-xs text-amber-200"><input type="checkbox" checked={attachmentAiUse} disabled={attachmentClassification === 'restricted'} onChange={event => setAttachmentAiUse(event.target.checked)} />I approve sending validated text from text-bearing files to the configured AI. Images remain reference-only.</label>
-            <button type="button" disabled={attachmentBusy || draftSaving} onClick={uploadPendingAttachments} className="rounded-lg border border-sky-700 px-3 py-2 text-xs font-semibold text-sky-200 disabled:opacity-50">{attachmentBusy ? 'Validating privately…' : 'Upload and validate'}</button>
+            <label className="flex items-start gap-2 text-xs text-[var(--anka-warning)]"><input type="checkbox" checked={attachmentAiUse} disabled={attachmentClassification === 'restricted'} onChange={event => setAttachmentAiUse(event.target.checked)} />I approve sending validated text from text-bearing files to the configured AI. Images remain reference-only.</label>
+            <button type="button" disabled={attachmentBusy || draftSaving} onClick={uploadPendingAttachments} className="rounded-lg border border-[var(--anka-info)] px-3 py-2 text-xs font-semibold text-[var(--anka-info)] disabled:opacity-50">{attachmentBusy ? 'Validating privately…' : 'Upload and validate'}</button>
           </div>}
           {attachments.length > 0 && <div className="mt-4 space-y-2">
             {attachments.map(item => {
               const ready = ['extracted', 'reference_only'].includes(item.status) && item.data_classification !== 'restricted'
                 && (!conversationHasRecipients || item.share_with_recipients)
               const selected = selectedAttachmentIds.includes(item.id)
-              return <label key={item.id} className={`flex items-start gap-3 rounded-lg border p-3 text-xs ${ready ? 'border-slate-800 text-slate-300' : 'border-slate-900 text-slate-500'}`}>
+              return <label key={item.id} className={`flex items-start gap-3 rounded-lg border p-3 text-xs ${ready ? 'border-[var(--anka-line)] text-[var(--anka-ink)]' : 'border-[var(--anka-surface-raised)] text-[var(--anka-muted)]'}`}>
                 <input type="checkbox" disabled={!ready || busy || attachmentBusy} checked={selected} onChange={() => setSelectedAttachmentIds(current => selected ? current.filter(id => id !== item.id) : current.length < 3 ? [...current, item.id] : current)} />
-                <span className="min-w-0"><span className="block truncate font-medium">{item.original_name}</span><span className="mt-1 block text-slate-500">{item.verified_mime || item.claimed_mime} · {Number.isFinite(item.byte_size) ? `${item.byte_size.toLocaleString()} bytes` : 'Size pending validation'}</span><span className="mt-1 block capitalize text-slate-500">{item.status.replaceAll('_', ' ')} · {item.data_classification} · {item.share_with_recipients ? 'source shared' : 'uploader only'} · {item.extraction_notice}</span></span>
+                <span className="min-w-0"><span className="block truncate font-medium">{item.original_name}</span><span className="mt-1 block text-[var(--anka-muted)]">{item.verified_mime || item.claimed_mime} · {Number.isFinite(item.byte_size) ? `${item.byte_size.toLocaleString()} bytes` : 'Size pending validation'}</span><span className="mt-1 block capitalize text-[var(--anka-muted)]">{item.status.replaceAll('_', ' ')} · {item.data_classification} · {item.share_with_recipients ? 'source shared' : 'uploader only'} · {item.extraction_notice}</span></span>
               </label>
             })}
           </div>}
-          <p className="mt-3 text-xs text-slate-500">Choose up to three files for this turn. Only checked files are linked to the request; rejected limits never truncate content. Revocation blocks later server reads and replies, but cannot recall copies someone already saved.</p>
+          <p className="mt-3 text-xs text-[var(--anka-muted)]">Choose up to three files for this turn. Only checked files are linked to the request; rejected limits never truncate content. Revocation blocks later server reads and replies, but cannot recall copies someone already saved.</p>
         </SourcePanel>}
 
-        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{isAnswerMode ? 'Message' : 'Draft request'}
+        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">{isAnswerMode ? 'Message' : 'Draft request'}
           <textarea ref={composerRef} required rows="10" className={`${INPUT} mt-2 normal-case tracking-normal`} value={prompt} onInput={event => setPrompt(event.currentTarget.value)} placeholder={isAnswerMode ? 'Ask a question or explore the work context. This will not create an official output.' : 'Describe the draft you need, the evidence to prioritize, known constraints, tone, and gaps the team should keep visible.'} />
         </label>
 
-        <label className="flex items-start gap-3 rounded-xl border border-amber-900/50 bg-amber-950/20 p-4 text-sm leading-6 text-amber-200">
+        <label className="flex items-start gap-3 rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] p-4 text-sm leading-6 text-[var(--anka-warning)]">
           <input required type="checkbox" className="mt-1" checked={safe} onChange={event => setSafe(event.target.checked)} />
           <span>I confirm this message, the previewed exact artifact versions, and the validated text from explicitly selected files are safe to send to the engagement-mapped {resolvedDepartmentLabel} model. Restricted sources are never included.</span>
         </label>
 
-        {supportsSavedConversations && currentConversation && <button type="button" disabled={busy || historyBusy || attachmentBusy || draftSaving || !prompt.trim()} onClick={saveUnsentDraft} className="w-full rounded-xl border border-sky-700 px-4 py-2.5 text-sm font-semibold text-sky-200 disabled:opacity-50">{draftSaving ? 'Saving draft…' : 'Save draft to this conversation'}</button>}
+        {supportsSavedConversations && currentConversation && <button type="button" disabled={busy || historyBusy || attachmentBusy || draftSaving || !prompt.trim()} onClick={saveUnsentDraft} className="w-full rounded-xl border border-[var(--anka-info)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-info)] disabled:opacity-50">{draftSaving ? 'Saving draft…' : 'Save draft to this conversation'}</button>}
         <button
           disabled={busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim() || !safe || proposalModelUnavailable || (isAnswerMode && !answerLocalChecksPass) || (supportsSavedConversations && (!currentConversation || currentConversation.state !== 'active' || !modelConfigurationId)) || (isWorkItemMode && !title.trim()) || (!isAnswerMode && !isWorkItemMode && !artifactTypes.includes(artifactType))}
           className={`${PRIMARY} w-full`}
         >
           {busy ? (isAnswerMode ? 'Processing answer…' : 'Generating safe preview…') : isAnswerMode ? 'Ask configured AI' : isWorkItemMode ? 'Preview draft work item' : 'Preview draft artifact'}
         </button>
-        {busy && isAnswerMode && <button type="button" onClick={() => answerObservation.current?.stop()} className="w-full rounded-xl border border-amber-700 px-4 py-2.5 text-sm font-semibold text-amber-200">Stop watching locally</button>}
+        {busy && isAnswerMode && <button type="button" onClick={() => answerObservation.current?.stop()} className="w-full rounded-xl border border-[var(--anka-warning)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-warning)]">Stop watching locally</button>}
       </div>
     </form>
-    <aside className="min-w-0 rounded-2xl border border-slate-800 bg-slate-900/70 p-4" aria-label="Context and output panel">
+    <aside className="min-w-0 rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4" aria-label="Context and output panel">
       <button ref={panelToggleRef} type="button" aria-expanded={contextExpanded} aria-controls={contextPanelId}
         onClick={() => {
           if (contextExpanded && panelBodyRef.current?.contains(document.activeElement)) panelToggleRef.current?.focus()
           setContextExpanded(value => !value)
         }}
-        className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-sky-500">
-        <span>Context and output</span><span className="text-xs text-sky-300">{contextExpanded ? 'Collapse' : 'Expand'}</span>
+        className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm font-semibold text-[var(--anka-ink)] focus:outline-none focus:ring-2 focus:ring-[var(--anka-focus)]">
+        <span>Context and output</span><span className="text-xs text-[var(--anka-info)]">{contextExpanded ? 'Collapse' : 'Expand'}</span>
       </button>
       <div ref={panelBodyRef} id={contextPanelId} hidden={!contextExpanded} className="mt-3 space-y-4">
       {result && <div><h3 ref={outputHeadingRef} tabIndex={-1} className="sr-only">Generated proposal preview</h3><ProposalPreview result={result} official={official} onOpenOfficial={openOfficial} busy={busy} onConfirm={() => decide('confirm')} onReject={() => decide('reject')} /></div>}
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Current context</p>
-        <p className="mt-2 font-semibold text-white">{engagement.brands?.name || engagement.name}</p>
-        <p className="mt-1 text-sm text-slate-400">{engagement.agency_clients?.name}</p>
+      <div className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--anka-muted)]">Current context</p>
+        <p className="mt-2 font-semibold text-[var(--anka-ink)]">{engagement.brands?.name || engagement.name}</p>
+        <p className="mt-1 text-sm text-[var(--anka-muted)]">{engagement.agency_clients?.name}</p>
       </div>
       {supportsSavedConversations && <VersionHistoryPanel messages={messages} engagement={engagement} />}
-      {supportsSavedConversations && <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-sm leading-6 text-slate-400">
-        <p className="font-semibold text-white">Configured AI</p>
-        {capabilities ? <><p className="mt-2">{MODEL_PROVIDER_LABELS[selectedProvider] || 'Provider unavailable'} · <span className="text-slate-200">{selectedModel?.model_id || capabilities.model_id}</span></p><p className="mt-1 text-xs text-slate-500">Selection is limited to verified, administrator-approved configurations for this engagement.</p></> : <p className="mt-2">{historyBusy ? 'Checking configuration…' : 'Configuration unavailable.'}</p>}
-        <p className="mt-3 text-xs text-amber-300">Private files: TXT/Markdown/DOCX validated text; PNG/JPEG reference-only. PDF, OCR, and vision input remain unavailable.</p><p className="mt-2 text-xs text-slate-500">Answers appear after the provider response is saved. “Stop watching” closes this view; the request may continue and incur cost. Reopen the conversation to check the saved result.</p>
+      {supportsSavedConversations && <div className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-5 text-sm leading-6 text-[var(--anka-muted)]">
+        <p className="font-semibold text-[var(--anka-ink)]">Configured AI</p>
+        {capabilities ? <><p className="mt-2">{MODEL_PROVIDER_LABELS[selectedProvider] || 'Provider unavailable'} · <span className="text-[var(--anka-ink)]">{selectedModel?.model_id || capabilities.model_id}</span></p><p className="mt-1 text-xs text-[var(--anka-muted)]">Selection is limited to verified, administrator-approved configurations for this engagement.</p></> : <p className="mt-2">{historyBusy ? 'Checking configuration…' : 'Configuration unavailable.'}</p>}
+        <p className="mt-3 text-xs text-[var(--anka-warning)]">Private files: TXT/Markdown/DOCX validated text; PNG/JPEG reference-only. PDF, OCR, and vision input remain unavailable.</p><p className="mt-2 text-xs text-[var(--anka-muted)]">Answers appear after the provider response is saved. “Stop watching” closes this view; the request may continue and incur cost. Reopen the conversation to check the saved result.</p>
       </div>}
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-sm leading-6 text-slate-400">
-        <p className="font-semibold text-white">Human control remains intact</p>
+      <div className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-5 text-sm leading-6 text-[var(--anka-muted)]">
+        <p className="font-semibold text-[var(--anka-ink)]">Human control remains intact</p>
         <p className="mt-2">The human user is recorded as the timeline actor. The model run is separately traceable. Approval remains available only through the normal exact-version manager action.</p>
       </div>
       </div>
     </aside>
   </div>
-  {externalNavigationBusy && navigationBlocker?.state === 'blocked' && <div role="status" className="rounded-xl border border-amber-600 p-4">Keep this page open while the media request is pending or unconfirmed. <button type="button" onClick={() => navigationBlocker.reset()}>Stay on this page</button></div>}
-  {pendingDraftSwitch && <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Unsent chat draft" onKeyDown={handleDraftDialogKey} className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-5"><section className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"><h2 className="text-xl font-semibold text-white">Keep this unsent work?</h2><p className="mt-2 text-sm text-slate-300">Before you {pendingDraftSwitch.label}, stay here, save text to the original conversation, or discard it. Exact source and file selections, model choice, and AI-use consent are never saved.</p>{error && <p role="alert" className="mt-3 text-sm text-red-300">{error}</p>}<div className="mt-6 flex flex-wrap justify-end gap-2"><button ref={stayButtonRef} type="button" disabled={draftSaving} onClick={closeDraftSwitch}>Stay</button><button ref={discardButtonRef} type="button" disabled={draftSaving || externalNavigationBusy} onClick={() => finishDraftSwitch(false)}>Discard and continue</button><button ref={saveButtonRef} type="button" disabled={draftSaving || externalNavigationBusy || !conversationId || !prompt.trim()} onClick={() => finishDraftSwitch(true)} className={PRIMARY}>{draftSaving ? 'Saving…' : 'Save to original and continue'}</button></div>{!prompt.trim() && <p className="mt-3 text-xs text-amber-300">Add a message to save a draft; source selections alone cannot be saved.</p>}</section></div>}
+  {externalNavigationBusy && navigationBlocker?.state === 'blocked' && <div role="status" className="rounded-xl border border-[var(--anka-warning)] p-4">Keep this page open while the media request is pending or unconfirmed. <button type="button" onClick={() => navigationBlocker.reset()}>Stay on this page</button></div>}
+  {pendingDraftSwitch && <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Unsent chat draft" onKeyDown={handleDraftDialogKey} className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--anka-ink)]/75 p-5"><section className="w-full max-w-lg rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-6 text-[var(--anka-ink)] shadow-2xl"><h2 className="text-xl font-semibold text-[var(--anka-ink)]">Keep this unsent work?</h2><p className="mt-2 text-sm text-[var(--anka-ink)]">Before you {pendingDraftSwitch.label}, stay here, save text to the original conversation, or discard it. Exact source and file selections, model choice, and AI-use consent are never saved.</p>{error && <p role="alert" className="mt-3 text-sm text-[var(--anka-danger)]">{error}</p>}<div className="mt-6 flex flex-wrap justify-end gap-2"><button ref={stayButtonRef} type="button" disabled={draftSaving} onClick={closeDraftSwitch}>Stay</button><button ref={discardButtonRef} type="button" disabled={draftSaving || externalNavigationBusy} onClick={() => finishDraftSwitch(false)}>Discard and continue</button><button ref={saveButtonRef} type="button" disabled={draftSaving || externalNavigationBusy || !conversationId || !prompt.trim()} onClick={() => finishDraftSwitch(true)} className={PRIMARY}>{draftSaving ? 'Saving…' : 'Save to original and continue'}</button></div>{!prompt.trim() && <p className="mt-3 text-xs text-[var(--anka-warning)]">Add a message to save a draft; source selections alone cannot be saved.</p>}</section></div>}
   </>
 }
 
 function ConversationHistory({ messages, userId, busy, onConfirm, onReject }) {
-  if (!messages.length) return <div className="mt-5 rounded-xl border border-dashed border-slate-800 p-6 text-center text-sm text-slate-500">This conversation has no messages yet.</div>
+  if (!messages.length) return <div className="mt-5 rounded-xl border border-dashed border-[var(--anka-line)] p-6 text-center text-sm text-[var(--anka-muted)]">This conversation has no messages yet.</div>
   return <section className="mt-5 space-y-3" aria-label="Saved conversation history">
     {messages.map(message => {
       const proposal = message.proposal ? {
@@ -1275,23 +1275,23 @@ function ConversationHistory({ messages, userId, busy, onConfirm, onReject }) {
           work_item_id: message.proposal.accepted_work_item_id,
         } : null,
       } : null
-      return <article key={message.id} className={`rounded-xl border p-4 ${message.role === 'user' ? 'ml-8 border-sky-900/60 bg-sky-950/20' : 'mr-8 border-slate-800 bg-slate-950/40'}`}>
+      return <article key={message.id} className={`rounded-xl border p-4 ${message.role === 'user' ? 'ml-8 border-[var(--anka-info)] bg-[var(--anka-surface-raised)]' : 'mr-8 border-[var(--anka-line)] bg-[var(--anka-canvas)]'}`}>
         <div className="flex items-center justify-between gap-3 text-xs">
-          <span className="font-semibold uppercase tracking-[0.12em] text-slate-400">{message.role === 'user' ? (message.author_id === userId ? 'You' : message.author?.full_name || message.author?.email || 'Internal contributor') : 'Configured assistant'}</span>
-          <span className="text-right text-slate-500"><time dateTime={message.created_at}>{new Date(message.created_at).toLocaleString()}</time><span className={`ml-2 ${message.status === 'failed' ? 'text-red-300' : ['pending', 'unknown'].includes(message.status) ? 'text-amber-300' : 'text-slate-500'}`}>{message.status}</span></span>
+          <span className="font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">{message.role === 'user' ? (message.author_id === userId ? 'You' : message.author?.full_name || message.author?.email || 'Internal contributor') : 'Configured assistant'}</span>
+          <span className="text-right text-[var(--anka-muted)]"><time dateTime={message.created_at}>{new Date(message.created_at).toLocaleString()}</time><span className={`ml-2 ${message.status === 'failed' ? 'text-[var(--anka-danger)]' : ['pending', 'unknown'].includes(message.status) ? 'text-[var(--anka-warning)]' : 'text-[var(--anka-muted)]'}`}>{message.status}</span></span>
         </div>
         {message.run && <RunMetadata run={message.run} />}
-        {message.role === 'user' && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-200">{message.body}</p>}
-        {message.role === 'assistant' && !proposal && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-200">{message.body}</p>}
+        {message.role === 'user' && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[var(--anka-ink)]">{message.body}</p>}
+        {message.role === 'assistant' && !proposal && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[var(--anka-ink)]">{message.body}</p>}
         {message.role === 'user' && message.attachments?.length > 0 && <div className="mt-3 space-y-2">
-          {message.attachments.map(source => <div key={source.attachment_id} className="rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2 text-xs text-slate-400">
-            <span className="font-medium text-slate-200">{source.original_name}</span>
+          {message.attachments.map(source => <div key={source.attachment_id} className="rounded-lg border border-[var(--anka-line)] bg-[var(--anka-canvas)] px-3 py-2 text-xs text-[var(--anka-muted)]">
+            <span className="font-medium text-[var(--anka-ink)]">{source.original_name}</span>
             <span className="ml-2">{source.extraction_kind === 'reference_only' ? 'reference only · not sent to AI' : source.provider_dispatched_at ? 'validated text · dispatch recorded' : 'validated text · not dispatched'}</span>
             <span className="mt-1 block">{source.data_classification} · SHA-256 {String(source.attachment_sha256_hex).slice(0, 12)}… · {source.extraction_notice}</span>
           </div>)}
         </div>}
-        {message.status === 'failed' && <p className="mt-2 text-xs text-red-300">This request failed safely. Start a new request to retry with the current configured model.</p>}
-        {message.status === 'unknown' && <p className="mt-2 text-xs text-amber-300">The provider outcome is unknown. Do not retry this request; a retry could duplicate work or cost.</p>}
+        {message.status === 'failed' && <p className="mt-2 text-xs text-[var(--anka-danger)]">This request failed safely. Start a new request to retry with the current configured model.</p>}
+        {message.status === 'unknown' && <p className="mt-2 text-xs text-[var(--anka-warning)]">The provider outcome is unknown. Do not retry this request; a retry could duplicate work or cost.</p>}
         {proposal && <ProposalPreview result={proposal} official={null} busy={busy} canDecide={proposal.proposer_id === userId} onConfirm={() => onConfirm(proposal)} onReject={() => onReject(proposal)} />}
       </article>
     })}
@@ -1308,7 +1308,7 @@ function RunMetadata({ run }) {
   const selected = run.selected_model
     ? `${run.selected_model.display_name || run.selected_model.model_id} / ${run.selected_model.model_id}`
     : null
-  return <dl aria-label={`Run metadata ${run.id}`} className="mt-3 grid gap-2 rounded-lg border border-slate-800 bg-slate-950/50 p-3 text-xs text-slate-400 sm:grid-cols-2">
+  return <dl aria-label={`Run metadata ${run.id}`} className="mt-3 grid gap-2 rounded-lg border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-3 text-xs text-[var(--anka-muted)] sm:grid-cols-2">
     <MetaDatum label="Run ID" value={run.id} />
     <MetaDatum label="Run recorded" value={run.created_at ? <time dateTime={run.created_at}>{new Date(run.created_at).toLocaleString()}</time> : 'Not recorded'} />
     <MetaDatum label="Selected model" value={metadataValue(selected)} />
@@ -1322,23 +1322,23 @@ function RunMetadata({ run }) {
 }
 
 function MetaDatum({ label, value }) {
-  return <div className="min-w-0"><dt className="font-semibold uppercase tracking-[0.1em] text-slate-500">{label}</dt><dd className="mt-1 break-words text-slate-300">{value}</dd></div>
+  return <div className="min-w-0"><dt className="font-semibold uppercase tracking-[0.1em] text-[var(--anka-muted)]">{label}</dt><dd className="mt-1 break-words text-[var(--anka-ink)]">{value}</dd></div>
 }
 
 function VersionHistoryPanel({ messages, engagement }) {
   const linkedVersions = linkedDepartmentChatVersions(messages)
     .map(version => ({ version, href: departmentChatVersionHistoryPath(engagement, version) }))
     .filter(item => item.href)
-  return <section aria-labelledby="department-chat-version-history-title" className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 text-sm leading-6 text-slate-400">
-    <h3 id="department-chat-version-history-title" className="font-semibold text-white">Linked exact versions</h3>
+  return <section aria-labelledby="department-chat-version-history-title" className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-5 text-sm leading-6 text-[var(--anka-muted)]">
+    <h3 id="department-chat-version-history-title" className="font-semibold text-[var(--anka-ink)]">Linked exact versions</h3>
     {linkedVersions.length ? <ul className="mt-3 space-y-3">{linkedVersions.map(({ version, href }) => {
       const label = `${version.title || version.artifact_type} / ${version.version_number ? `version ${version.version_number}` : 'exact version'} / ${version.artifact_version_id}`
-      return <li key={version.artifact_version_id} className="rounded-lg border border-slate-800 bg-slate-950/50 p-3">
-        <p className="break-words text-xs text-slate-300">{label}</p>
-        <a href={href} aria-label={`View version history for ${label}`} className="mt-2 inline-block text-xs font-semibold text-sky-300 underline">View version history</a>
+      return <li key={version.artifact_version_id} className="rounded-lg border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-3">
+        <p className="break-words text-xs text-[var(--anka-ink)]">{label}</p>
+        <a href={href} aria-label={`View version history for ${label}`} className="mt-2 inline-block text-xs font-semibold text-[var(--anka-info)] underline">View version history</a>
       </li>
-    })}</ul> : <p className="mt-2 text-xs text-slate-500">No currently authorized exact version is linked to this conversation.</p>}
-    <p className="mt-3 text-xs text-slate-500">Links open the existing specialist history surface. Access and exact version identity are checked again there.</p>
+    })}</ul> : <p className="mt-2 text-xs text-[var(--anka-muted)]">No currently authorized exact version is linked to this conversation.</p>}
+    <p className="mt-3 text-xs text-[var(--anka-muted)]">Links open the existing specialist history surface. Access and exact version identity are checked again there.</p>
   </section>
 }
 
@@ -1352,17 +1352,17 @@ function ProposalPreview({ result, official, onOpenOfficial, busy, canDecide = t
   const pending = result.status === 'pending' && new Date(result.expires_at).getTime() > now
   const accepted = result.status === 'accepted'
   const suggestionsOnly = result.proposal_kind === 'artifact_version' && result.target_key === 'campaign_brief'
-  return <div className="mt-5 rounded-xl border border-amber-900/60 bg-amber-950/25 p-4 text-sm text-amber-100">
+  return <div className="mt-5 rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] p-4 text-sm text-[var(--anka-warning)]">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><p className="font-semibold">{accepted ? 'Official unapproved record created' : 'Preview only'}</p><p className="mt-1 text-xs text-amber-300/80">{pending ? 'Expires ' + new Date(result.expires_at).toLocaleString() : 'Status: ' + result.status}</p></div>
-      {pending && canDecide && <div className="flex gap-2">{!suggestionsOnly && <button type="button" disabled={busy} onClick={onConfirm} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Confirm official draft</button>}<button type="button" disabled={busy} onClick={onReject} className="rounded-lg border border-amber-700 px-3 py-2 text-xs disabled:opacity-50">Reject</button></div>}
+      <div><p className="font-semibold">{accepted ? 'Official unapproved record created' : 'Preview only'}</p><p className="mt-1 text-xs text-[var(--anka-warning)]">{pending ? 'Expires ' + new Date(result.expires_at).toLocaleString() : 'Status: ' + result.status}</p></div>
+      {pending && canDecide && <div className="flex gap-2">{!suggestionsOnly && <button type="button" disabled={busy} onClick={onConfirm} className="rounded-lg bg-[var(--anka-success-soft)] px-3 py-2 text-xs font-semibold text-[var(--anka-success)] disabled:opacity-50">Confirm official draft</button>}<button type="button" disabled={busy} onClick={onReject} className="rounded-lg border border-[var(--anka-warning)] px-3 py-2 text-xs disabled:opacity-50">Reject</button></div>}
     </div>
-    {pending && suggestionsOnly && <p className="mt-3 text-xs text-amber-200">Campaign brief suggestions can only be applied selectively in the governed campaign brief editor.</p>}
-    {pending && !canDecide && <p className="mt-3 text-xs text-amber-200">Preview shared for review. Only its author can use the existing confirmation or rejection action.</p>}
-    {result.preview && <pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950/60 p-3 text-xs leading-5 text-slate-200">{JSON.stringify(result.preview, null, 2)}</pre>}
-    {result.decision?.replayed && <p className="mt-3 text-xs text-slate-400">This confirmation was already completed; the existing official record was returned.</p>}
-    {accepted && <p className="mt-3 text-xs text-emerald-300">Confirmation is not approval, release, publication, deployment, launch, or stage completion.</p>}
+    {pending && suggestionsOnly && <p className="mt-3 text-xs text-[var(--anka-warning)]">Campaign brief suggestions can only be applied selectively in the governed campaign brief editor.</p>}
+    {pending && !canDecide && <p className="mt-3 text-xs text-[var(--anka-warning)]">Preview shared for review. Only its author can use the existing confirmation or rejection action.</p>}
+    {result.preview && <pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-[var(--anka-canvas)] p-3 text-xs leading-5 text-[var(--anka-ink)]">{JSON.stringify(result.preview, null, 2)}</pre>}
+    {result.decision?.replayed && <p className="mt-3 text-xs text-[var(--anka-muted)]">This confirmation was already completed; the existing official record was returned.</p>}
+    {accepted && <p className="mt-3 text-xs text-[var(--anka-success)]">Confirmation is not approval, release, publication, deployment, launch, or stage completion.</p>}
     {accepted && onOpenOfficial && result.decision && <a className="mt-3 block underline" aria-disabled={busy} onClick={event => { if (busy) event.preventDefault(); else onOpenOfficial(event) }} href={'#wch-official-' + (result.decision.artifact_version_id || result.decision.work_item_id)}>Open official {result.decision.artifact_version_id ? 'artifact version' : 'work item'} · {result.decision.artifact_version_id || result.decision.work_item_id}</a>}
-    {official && <section id={'wch-official-' + official.id} className="mt-4 rounded-lg border border-emerald-700 p-3"><p className="font-semibold">Saved official record · {official.id}</p><pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(official.content || { title: official.title, description: official.description, status: official.status, work_item_type: official.work_item_type }, null, 2)}</pre></section>}
+    {official && <section id={'wch-official-' + official.id} className="mt-4 rounded-lg border border-[var(--anka-success)] p-3"><p className="font-semibold">Saved official record · {official.id}</p><pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(official.content || { title: official.title, description: official.description, status: official.status, work_item_type: official.work_item_type }, null, 2)}</pre></section>}
   </div>
 }

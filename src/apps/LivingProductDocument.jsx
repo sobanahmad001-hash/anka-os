@@ -172,7 +172,7 @@ function ScopedLivingProductDocument() {
                   {isAdmin && (
                     <button
                       onClick={handleEditStart}
-                      className="mt-4 text-[var(--anka-violet)] hover:text-[var(--anka-violet)] text-sm underline"
+                      className="mt-4 text-[var(--anka-violet)] hover:text-[var(--anka-ink)] text-sm underline"
                     >
                       Create the first version
                     </button>

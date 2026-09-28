@@ -30,7 +30,7 @@ export default function ContentArtifactChat({ engagement, projectId, onCreated, 
   }, [load, key, requestSignal])
   const targets = state?.key === key && state.status === 'ready' && !requestSignal?.aborted ? state.targets : null
   return <section aria-label="Content artifact chat" className="space-y-3">
-    {!targets && <p role="status" className="text-sm text-amber-200">{state?.key !== key || state.status === 'loading' ? 'Loading Content artifact tools. Ordinary chat remains available.' : 'Content artifact tools are unavailable for this context. Ordinary chat remains available.'}</p>}
+    {!targets && <p role="status" className="text-sm text-[var(--anka-warning)]">{state?.key !== key || state.status === 'loading' ? 'Loading Content artifact tools. Ordinary chat remains available.' : 'Content artifact tools are unavailable for this context. Ordinary chat remains available.'}</p>}
     <DepartmentChat {...conversationProps} engagement={engagement} departmentId="content" allowArtifactDraft={Boolean(targets)}
       artifactDefinitions={targets?.definitions || {}} artifactForType={targets?.artifactForType} stageForType={targets?.stageForType}
       onCreated={async (...args) => { if (current.current !== key || requestSignal?.aborted) return; await load(); if (current.current === key && !requestSignal?.aborted) onCreated?.(...args) }} />

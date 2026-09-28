@@ -337,7 +337,7 @@ function TextBlock({ value, empty }) {
 }
 
 function AssetRecord({ item }) {
-  return <div className="rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] p-3"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-medium text-[var(--anka-ink)]">{item.name}</p><p className="mt-1 text-xs text-[var(--anka-muted)]">{label(item.asset_kind)}{item.notes ? ` · ${item.notes}` : ''}</p></div>{item.source_url && <a href={item.source_url} target="_blank" rel="noreferrer" className="text-xs font-semibold text-[var(--anka-violet)] hover:text-[var(--anka-violet)] focus-visible:ring-2 focus-visible:ring-[var(--anka-focus)]">Open source ↗</a>}</div></div>
+  return <div className="rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] p-3"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-medium text-[var(--anka-ink)]">{item.name}</p><p className="mt-1 text-xs text-[var(--anka-muted)]">{label(item.asset_kind)}{item.notes ? ` · ${item.notes}` : ''}</p></div>{item.source_url && <a href={item.source_url} target="_blank" rel="noreferrer" className="text-xs font-semibold text-[var(--anka-violet)] hover:text-[var(--anka-ink)] focus-visible:ring-2 focus-visible:ring-[var(--anka-focus)]">Open source ↗</a>}</div></div>
 }
 
 function LifecycleFact({ term, value }) {

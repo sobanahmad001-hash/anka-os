@@ -7,8 +7,8 @@ import { contextChatRunner } from '../data/contextChatRunnerRepository.js'
 import { contextChatTitleFromMessage } from '../data/contextChatTitle.js'
 const PrivateDesignVideoTools = lazy(() => import('./PrivateDesignVideoTools.jsx'))
 
-const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-violet-500'
-const BUTTON = 'rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50'
+const INPUT = 'w-full rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] px-3 py-2.5 text-sm text-[var(--anka-ink)] placeholder:text-[var(--anka-muted)] outline-none focus:border-[var(--anka-focus)]'
+const BUTTON = 'rounded-xl bg-[var(--anka-violet)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-on-violet)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50'
 const PAGE_SIZE = 50
 const MODEL_READINESS_MESSAGES = {
   model_not_selected: 'Select an approved organization model to use AI.',
@@ -373,29 +373,29 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
       : 'Project conversations start private. You can choose active internal teammates to read and reply; AI replies remain creator-controlled.'
   const compact = workshopLayout && contextKind === 'department_private' && ['design', 'content', 'marketing'].includes(departmentId)
   const Navigation = compact ? 'details' : Fragment
-  const modelControls = isOwner && <div className={compact ? "private-composer-toolbar" : "mt-3 rounded-xl border border-slate-800 bg-slate-900/70 p-3"}>
-            <label htmlFor="organization-conversation-model" className="block text-xs font-semibold uppercase tracking-wide text-slate-400">Approved private conversation AI model</label>
+  const modelControls = isOwner && <div className={compact ? "private-composer-toolbar" : "mt-3 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-3"}>
+            <label htmlFor="organization-conversation-model" className="block text-xs font-semibold uppercase tracking-wide text-[var(--anka-muted)]">Approved private conversation AI model</label>
             <select id="organization-conversation-model" className={`${INPUT} mt-2`} value={selectedModelId}
               onChange={event => { setSelectedModelId(event.target.value); setAiUseConfirmed(false); setIncludeCanonicalContext(false) }} disabled={Boolean(aiBusyMessageId) || !modelOptions.length}>
               {!modelOptions.length && <option value="">No approved model available</option>}
               {modelOptions.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
             </select>
-            {workshopLayout && <p role="status" className="mt-2 text-xs text-slate-300">{!readiness ? 'Checking AI availability…' : localAiChecksPass ? 'AI configuration ready; your consent is required for each reply.' : 'AI unavailable; you can still save messages.'}</p>}
-            <details open={!workshopLayout} className="mt-2 text-xs text-slate-400"><summary>AI availability details</summary>
-            <p className="mt-2 text-xs text-slate-400">AI replies use the approved organization-level provider connection and are priced and recorded for the organization. {paidExecutionEnabled ? 'The service still rechecks approval, exact pricing, spend tracking and the original request before dispatch.' : 'AI execution is currently off; saved human messages remain available.'}</p>
-            {!readiness && <p className="mt-2 text-xs text-slate-400">Checking AI configuration…</p>}
-            {readiness?.spend_tracking_configured === false && <p className="mt-2 text-xs text-amber-300">Organization spend tracking is not configured.</p>}
-            {readiness?.spend_guard_mode === 'provider_managed' && <p className="mt-2 text-xs text-amber-300">Your provider-side spend limit is managed externally. Anka cannot verify or enforce it; each request is still priced and recorded.</p>}
-            {readiness?.model_status && readiness.model_status !== 'configured' && <p className="mt-2 text-xs text-amber-300">{MODEL_READINESS_MESSAGES[readiness.model_status] || 'Model readiness is unavailable.'}</p>}
-            {contextKind === 'project_team' && <p className="mt-2 text-xs text-slate-400">Teammate-authored messages are not sent to a provider. If a requested reply would include one, the request is blocked before reserving a spend record.</p>}
+            {workshopLayout && <p role="status" className="mt-2 text-xs text-[var(--anka-ink)]">{!readiness ? 'Checking AI availability…' : localAiChecksPass ? 'AI configuration ready; your consent is required for each reply.' : 'AI unavailable; you can still save messages.'}</p>}
+            <details open={!workshopLayout} className="mt-2 text-xs text-[var(--anka-muted)]"><summary>AI availability details</summary>
+            <p className="mt-2 text-xs text-[var(--anka-muted)]">AI replies use the approved organization-level provider connection and are priced and recorded for the organization. {paidExecutionEnabled ? 'The service still rechecks approval, exact pricing, spend tracking and the original request before dispatch.' : 'AI execution is currently off; saved human messages remain available.'}</p>
+            {!readiness && <p className="mt-2 text-xs text-[var(--anka-muted)]">Checking AI configuration…</p>}
+            {readiness?.spend_tracking_configured === false && <p className="mt-2 text-xs text-[var(--anka-warning)]">Organization spend tracking is not configured.</p>}
+            {readiness?.spend_guard_mode === 'provider_managed' && <p className="mt-2 text-xs text-[var(--anka-warning)]">Your provider-side spend limit is managed externally. Anka cannot verify or enforce it; each request is still priced and recorded.</p>}
+            {readiness?.model_status && readiness.model_status !== 'configured' && <p className="mt-2 text-xs text-[var(--anka-warning)]">{MODEL_READINESS_MESSAGES[readiness.model_status] || 'Model readiness is unavailable.'}</p>}
+            {contextKind === 'project_team' && <p className="mt-2 text-xs text-[var(--anka-muted)]">Teammate-authored messages are not sent to a provider. If a requested reply would include one, the request is blocked before reserving a spend record.</p>}
             </details>
-            <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-300">
+            <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-[var(--anka-ink)]">
               <input type="checkbox" className="mt-1" checked={aiUseConfirmed}
                 onChange={event => setAiUseConfirmed(event.target.checked)}
                 disabled={!localAiChecksPass || Boolean(aiBusyMessageId) || !selectedModelId} />
               <span>{compact ? <>I confirm this conversation's recent messages, including the message I selected, are safe to send to <strong>{selectedModel?.provider || 'the selected provider'} · {selectedModel?.label || 'no model selected'}</strong> for one organization-billed AI reply. No project records are included.</> : <>I confirm that this conversation's recent messages, including the message I selected, are safe to send to the selected provider for an AI reply. Records are included only if I select the separate OpenAI option below.</>}</span>
             </label>
-            {canIncludeCanonicalContext && <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-slate-300">
+            {canIncludeCanonicalContext && <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-[var(--anka-ink)]">
               <input type="checkbox" className="mt-1" checked={includeCanonicalContext}
                 onChange={event => setIncludeCanonicalContext(event.target.checked)}
                 disabled={!localAiChecksPass || Boolean(aiBusyMessageId)} />
@@ -403,13 +403,13 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
                 ? ' and this project’s name, description, status, health, scope, and exclusions' : ''}, plus a bounded sample of accessible project names, status and health, task and work-item titles, status, deadlines and assignee display names, sampled progress counts, and review-state counts. Record IDs, emails, contact details, descriptions of tasks or work items, files, transcripts, private memory, and teammate messages are excluded. The sample may be incomplete.</span>
             </label>}
           </div>
-  return <section className={compact ? "design-private-conversation" : "rounded-2xl border border-slate-800 bg-slate-900/70 p-5"} aria-label={label}>
+  return <section className={compact ? "design-private-conversation" : "rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-5"} aria-label={label}>
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><h2 className="text-lg font-semibold text-white">{label}</h2>
-        <p className="mt-1 text-sm text-slate-400">{description}</p></div>
+      <div><h2 className="text-lg font-semibold text-[var(--anka-ink)]">{label}</h2>
+        <p className="mt-1 text-sm text-[var(--anka-muted)]">{description}</p></div>
     </div>
-    {error && <p role="alert" className="mt-4 rounded-xl border border-red-900 bg-red-950/50 px-3 py-2 text-sm text-red-300">{error}</p>}
-    {aiNotice && <p role="status" className="mt-4 rounded-xl border border-amber-900 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">{aiNotice}</p>}
+    {error && <p role="alert" className="mt-4 rounded-xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] px-3 py-2 text-sm text-[var(--anka-danger)]">{error}</p>}
+    {aiNotice && <p role="status" className="mt-4 rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] px-3 py-2 text-sm text-[var(--anka-warning)]">{aiNotice}</p>}
     <div className={`mt-5 grid gap-4 ${hideConversationList ? '' : 'lg:grid-cols-[220px_minmax(0,1fr)]'}`}>
       <div className="space-y-3" aria-label="Conversation navigation">
     <Navigation {...(compact ? { className: 'private-new-conversation' } : {})}>
@@ -418,29 +418,29 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
       <input className={`${INPUT} min-w-52 flex-1`} aria-label="Optional conversation title" placeholder="Optional title; first message can title it"
         maxLength={160} value={title} onChange={event => setTitle(event.target.value)} />
       <button className={BUTTON} disabled={busy || loading || videoBusy}>New conversation</button>
-      <span className="self-center text-xs text-slate-500">Leave the title blank to use your first saved message.</span>
+      <span className="self-center text-xs text-[var(--anka-muted)]">Leave the title blank to use your first saved message.</span>
     </form>
     </Navigation>
       {!hideConversationList && <div className="space-y-2" aria-label="Saved conversations">
-        <h3 className="text-sm font-semibold text-slate-300">Recent conversations</h3>
+        <h3 className="text-sm font-semibold text-[var(--anka-ink)]">Recent conversations</h3>
         <input className={INPUT} aria-label="Search loaded conversations" placeholder="Search loaded conversations" value={conversationSearch} onChange={event => setConversationSearch(event.target.value)} />
-        {loading && <p className="text-sm text-slate-500">Loading conversations…</p>}
-        {!loading && !conversations.length && <p className="text-sm text-slate-500">No conversations yet.</p>}
-        {conversationSearch && !conversations.some(row => row.title.toLowerCase().includes(conversationSearch.toLowerCase())) && <p className="text-xs text-slate-400">No matching loaded conversations. Load older conversations to search more.</p>}
+        {loading && <p className="text-sm text-[var(--anka-muted)]">Loading conversations…</p>}
+        {!loading && !conversations.length && <p className="text-sm text-[var(--anka-muted)]">No conversations yet.</p>}
+        {conversationSearch && !conversations.some(row => row.title.toLowerCase().includes(conversationSearch.toLowerCase())) && <p className="text-xs text-[var(--anka-muted)]">No matching loaded conversations. Load older conversations to search more.</p>}
         {conversations.filter(row => row.title.toLowerCase().includes(conversationSearch.toLowerCase())).map(row => <button key={row.id} type="button" disabled={videoBusy} aria-pressed={row.id === conversationId} onClick={() => { if (videoBusy) return; drafts.current.set(conversationId, draft); setConversationId(row.id) }}
-          className={`w-full rounded-xl border p-3 text-left text-sm ${row.id === conversationId ? 'border-violet-500 bg-violet-950/30 text-white' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}>
+          className={`w-full rounded-xl border p-3 text-left text-sm ${row.id === conversationId ? 'border-[var(--anka-violet)] bg-[var(--anka-violet-soft)] text-[var(--anka-ink)]' : 'border-[var(--anka-line)] text-[var(--anka-ink)] hover:border-[var(--anka-muted)]'}`}>
           {row.title}</button>)}
         {hasMoreConversations && <button type="button" onClick={loadMoreConversations} disabled={listBusy || busy}
-          className="w-full rounded-xl border border-slate-700 px-3 py-2 text-xs font-semibold text-violet-300 disabled:opacity-50">
+          className="w-full rounded-xl border border-[var(--anka-line)] px-3 py-2 text-xs font-semibold text-[var(--anka-violet)] disabled:opacity-50">
           {listBusy ? 'Loading…' : 'Load older conversations'}
         </button>}
       </div>}
       </div>
-      <div className={compact ? 'private-conversation-body min-w-0' : 'min-h-64 min-w-0 rounded-xl border border-slate-800 bg-slate-950/50 p-4'}>
-        {!selected ? <p className="text-sm text-slate-500">Choose or create a conversation.</p> : <>
+      <div className={compact ? 'private-conversation-body min-w-0' : 'min-h-64 min-w-0 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-4'}>
+        {!selected ? <p className="text-sm text-[var(--anka-muted)]">Choose or create a conversation.</p> : <>
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <h3 className="font-semibold text-white">{selected.title}</h3>
-            {isOwner && <details className="text-xs text-slate-300">
+            <h3 className="font-semibold text-[var(--anka-ink)]">{selected.title}</h3>
+            {isOwner && <details className="text-xs text-[var(--anka-ink)]">
               <summary className="cursor-pointer">Rename conversation</summary>
               <form className="mt-2 flex gap-2" onSubmit={event => { event.preventDefault(); renameCurrentConversation() }}>
                 <input className={`${INPUT} min-w-40`} aria-label="Rename conversation" maxLength={160}
@@ -451,20 +451,20 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
               </form>
             </details>}
           </div>
-          {contextKind === 'project_team' && isOwner && <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
-            <h4 className="text-sm font-semibold text-white">Share this project conversation</h4>
-            <p className="mt-1 text-xs text-slate-400">Only selected active internal teammates can see all current and future messages and reply. Sharing does not grant AI use, approval, or project record changes. Revoking stops later reads and replies; it cannot recall copies already seen.</p>
+          {contextKind === 'project_team' && isOwner && <div className="mt-3 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-3">
+            <h4 className="text-sm font-semibold text-[var(--anka-ink)]">Share this project conversation</h4>
+            <p className="mt-1 text-xs text-[var(--anka-muted)]">Only selected active internal teammates can see all current and future messages and reply. Sharing does not grant AI use, approval, or project record changes. Revoking stops later reads and replies; it cannot recall copies already seen.</p>
             <div className="mt-3 max-h-40 space-y-2 overflow-auto">
-              {sharing.candidates.map(candidate => <label key={candidate.id} className="flex items-start gap-2 text-xs text-slate-300">
+              {sharing.candidates.map(candidate => <label key={candidate.id} className="flex items-start gap-2 text-xs text-[var(--anka-ink)]">
                 <input type="checkbox" checked={shareSelection.includes(candidate.id)}
                   onChange={event => setShareSelection(current => event.target.checked
                     ? [...current, candidate.id] : current.filter(id => id !== candidate.id))} />
                 <span>{candidate.full_name || candidate.email || candidate.id}</span>
               </label>)}
-              {!sharing.loaded && <p className="text-xs text-slate-500">Loading eligible teammates…</p>}
-              {sharing.loaded && !sharing.candidates.length && <p className="text-xs text-slate-500">No eligible teammates available.</p>}
+              {!sharing.loaded && <p className="text-xs text-[var(--anka-muted)]">Loading eligible teammates…</p>}
+              {sharing.loaded && !sharing.candidates.length && <p className="text-xs text-[var(--anka-muted)]">No eligible teammates available.</p>}
             </div>
-            <p className="mt-3 text-xs text-slate-400">Currently shared with {sharing.recipients.length} teammate{sharing.recipients.length === 1 ? '' : 's'}. New selection: {shareSelection.length
+            <p className="mt-3 text-xs text-[var(--anka-muted)]">Currently shared with {sharing.recipients.length} teammate{sharing.recipients.length === 1 ? '' : 's'}. New selection: {shareSelection.length
               ? sharing.candidates.filter(candidate => shareSelection.includes(candidate.id))
                 .map(candidate => candidate.full_name || candidate.email || candidate.id).join(', ')
               : 'Only you'}</p>
@@ -473,18 +473,18 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
           </div>}
           {!compact && modelControls}
           {hasOlder && <button type="button" disabled={olderBusy} onClick={loadOlder}
-            className="mt-3 text-xs font-semibold text-violet-300 disabled:opacity-50">Load older messages</button>}
+            className="mt-3 text-xs font-semibold text-[var(--anka-violet)] disabled:opacity-50">Load older messages</button>}
           <div className="mt-4 space-y-3" aria-live="polite">
-            {!messages.length && <p className="text-sm text-slate-500">No messages yet.</p>}
-            {messages.map(message => <div key={message.id} className="rounded-xl border border-slate-800 bg-slate-900 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-violet-300">{message.role === 'assistant' ? 'Anka AI' : message.author_id === user.id ? 'You' : 'Teammate'}</p>
-              <p className="mt-2 whitespace-pre-wrap text-sm text-slate-200">{message.body}</p>
+            {!messages.length && <p className="text-sm text-[var(--anka-muted)]">No messages yet.</p>}
+            {messages.map(message => <div key={message.id} className="rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--anka-violet)]">{message.role === 'assistant' ? 'Anka AI' : message.author_id === user.id ? 'You' : 'Teammate'}</p>
+              <p className="mt-2 whitespace-pre-wrap text-sm text-[var(--anka-ink)]">{message.body}</p>
               {isOwner && message.role === 'user' && message.author_id === user.id
                 && !messages.some(reply => reply.in_reply_to_message_id === message.id) && <div className="mt-3 flex flex-wrap gap-3">
-                  <button type="button" className="text-xs font-semibold text-violet-300 disabled:opacity-40"
+                  <button type="button" className="text-xs font-semibold text-[var(--anka-violet)] disabled:opacity-40"
                     disabled={!localAiChecksPass || !selectedModelId || !aiUseConfirmed || Boolean(aiBusyMessageId) || busy}
                     onClick={() => askAi(message)}>{aiBusyMessageId === message.id ? 'Checking…' : 'Ask Anka AI'}</button>
-                  <button type="button" className="text-xs text-slate-400 hover:text-slate-200 disabled:opacity-40"
+                  <button type="button" className="text-xs text-[var(--anka-muted)] hover:text-[var(--anka-ink)] disabled:opacity-40"
                     disabled={Boolean(aiBusyMessageId) || busy} onClick={() => askAi(message, true)}>Check for saved reply</button>
                 </div>}
             </div>)}
@@ -500,8 +500,8 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
           </div>}
           <div hidden={assetType !== 'text'}>
           {compact && modelControls}
-          <form onSubmit={sendMessage} className="mt-5 space-y-2 border-t border-slate-800 pt-4">
-            <label htmlFor="private-conversation-message" className="text-xs font-semibold uppercase tracking-wide text-slate-400">Your message</label>
+          <form onSubmit={sendMessage} className="mt-5 space-y-2 border-t border-[var(--anka-line)] pt-4">
+            <label htmlFor="private-conversation-message" className="text-xs font-semibold uppercase tracking-wide text-[var(--anka-muted)]">Your message</label>
             <textarea id="private-conversation-message" className={INPUT} rows={3} maxLength={8000}
               value={draft} disabled={busy} onChange={event => { setDraft(event.target.value); drafts.current.set(conversationId, event.target.value); pendingRequests.current.delete(conversationId) }}
               placeholder="Capture an idea, question, or direction for this private conversation." />
