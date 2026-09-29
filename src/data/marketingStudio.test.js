@@ -99,7 +99,7 @@ test('Google reporting reuses the encrypted OAuth store and remains externally r
 
 test('Marketing Studio is a distinct lazy route while the department queue remains intact', () => {
   assert.match(app, /const MarketingStudio = lazy/)
-  assert.match(app, /path="sphere\/marketing" element={<DepartmentWorkshop departmentId="marketing" \/>}/)
+  assert.match(app, /path="sphere\/marketing" element={<DepartmentWorkshop departmentId="marketing" key="marketing" \/>}/)
   assert.match(app, /path="sphere\/marketing\/studio" element={<MarketingStudio \/>}/)
   assert.match(navigation, /Marketing Workshop/)
   assert.doesNotMatch(navigation, /label: 'Marketing Studio'/)

@@ -48,7 +48,7 @@ const byText = (root, tag, text) => nodes(root, tag).find(node => node.textConte
 const count = (root, text) => root.textContent.split(text).length - 1
 const flush = () => act(async () => { await Promise.resolve(); await new Promise(resolve => setTimeout(resolve, 0)) })
 async function value(node, next) { const prior = node.value; node.value = next; node._valueTracker?.setValue(prior); await act(async () => { node.dispatchEvent(new E('input')); node.dispatchEvent(new E('change')) }) }
-async function authorize(root) { const box = nodes(root, 'input').find(node => node.parentNode?.textContent.includes('I confirm this message')); assert.ok(box); box.checked = true; await act(async () => { box.dispatchEvent(new E('click')); box.dispatchEvent(new E('change')) }) }
+async function authorize(root) { const box = nodes(root, 'input').find(node => node.parentNode?.textContent.includes('I confirm this message')); if (!box) return; box.checked = true; await act(async () => { box.dispatchEvent(new E('click')); box.dispatchEvent(new E('change')) }) }
 const conversation = id => ({ id, owner_id: 'user-1', title: id, state: 'active', access_role: 'owner', last_activity_at: '2026-09-12T00:00:00Z' })
 function repository(streams, savedBody = '', searches = []) {
   return {
@@ -74,7 +74,8 @@ function repository(streams, savedBody = '', searches = []) {
   }
 }
 function props(id, signal) { return { departmentId: 'content', departmentLabel: 'Content', engagement: { id, project_id: 'project-' + id, organization_id: 'organization-1', name: 'Engagement', agency_clients: { name: 'Client' } }, userId: 'user-1', organizationId: 'organization-1', requestSignal: signal, handleOrganizationAccessError() {} } }
-async function start(root) { await value(nodes(root, 'textarea')[0], 'Explain'); await authorize(root); const form = nodes(root, 'form').find(item => nodes(item, 'textarea').length); assert.ok(form); await act(async () => form.dispatchEvent(new E('submit'))); await flush() }
+async function acceptAnswer(root) { const button = byText(root, 'button', 'Allow and ask Anka AI'); if (button) { await act(async () => button.dispatchEvent(new E('click'))); await flush() } }
+async function start(root) { await value(nodes(root, 'textarea')[0], 'Explain'); if (nodes(root, 'input').some(node => node.parentNode?.textContent.includes('I confirm this message'))) await authorize(root); const form = nodes(root, 'form').find(item => nodes(item, 'textarea').length); assert.ok(form); await act(async () => form.dispatchEvent(new E('submit'))); await acceptAnswer(root); await flush() }
 async function setup(t) {
   const vite = await createServer({ server: { middlewareMode: true }, ssr: { noExternal: ['react-router-dom', 'react-router'] }, appType: 'custom', logLevel: 'silent', define: { 'import.meta.env.VITE_SUPABASE_URL': JSON.stringify('http://127.0.0.1:54321'), 'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify('local-test-anon-key') }, plugins: [{ name: 'department-chat-test-repository', enforce: 'pre', resolveId(source) { if (source === 'react-router-dom') return '\0department-chat-router-test'; if (source.endsWith('departmentChatRepository.js')) return '\0department-chat-test-repository' }, load(id) { if (id === '\0department-chat-router-test') return 'export const useBlocker = () => ({ state: "unblocked" })'; if (id === '\0department-chat-test-repository') return `export const departmentChat = new Proxy({}, { get(_target, key) { return (...args) => globalThis.__departmentChatTestRepository[key](...args) } })` } }] }); t.after(() => vite.close())
   const { ScopedDepartmentChat } = await vite.ssrLoadModule('/src/components/DepartmentChat.jsx')
@@ -111,9 +112,8 @@ test('Design workbench disclosures keep source selection and unsent draft mounte
   assert.equal(nodes(container, 'textarea')[0], composer)
   assert.equal(composer.value, 'Retain this unsent draft')
   const consent = nodes(container, 'input').find(node => node.parentNode?.textContent.includes('I confirm this message'))
-  assert.ok(consent)
-  assert.equal(details.contains(consent), false)
-  assert.equal(byText(container, 'button', 'Ask configured AI').disabled, true)
+  assert.equal(consent, undefined)
+  assert.equal(byText(container, 'button', 'Ask Anka AI').disabled, false)
   assert.equal(nodes(container, 'div').find(node => node.getAttribute('class')?.includes('design-chat-composer')).getAttribute('class').includes('xl:grid-cols'), false)
   await act(async () => root.unmount())
 })
@@ -232,9 +232,9 @@ test('P9B previews an exact permitted version before including it and clears sel
   await act(async () => byText(container, 'button', 'Include this exact version').dispatchEvent(new E('click')))
   assert.match(container.textContent, /1 of 5 exact versions selected/)
   await value(nodes(container, 'textarea')[0], 'Use the previewed version')
-  await authorize(container)
   const form = nodes(container, 'form').find(item => nodes(item, 'textarea').length)
   await act(async () => form.dispatchEvent(new E('submit')))
+  await acceptAnswer(container)
   await flush()
   assert.deepEqual(sent[0].selected_artifact_version_ids, [id])
   assert.match(container.textContent, /0 of 5 exact versions selected/)
@@ -286,6 +286,7 @@ for (const outcome of ['success', 'failure']) test('attachment ' + outcome + ' k
   t.after(() => { try { root.unmount() } catch {} })
   await act(async () => root.render(createElement(ScopedDepartmentChat, props('a', new AbortController().signal))))
   await flush()
+  await value(nodes(container, 'select').find(node => node.options?.some(option => option.value === 'work_item')), 'work_item')
   const input = nodes(container, 'input').find(node => node.type === 'file')
   input.files = [{ name: 'old.png', type: 'image/png', size: 10 }]
   await act(async () => input.dispatchEvent(new E('change')))
@@ -581,7 +582,6 @@ test('P9A saves unsent text only to its original conversation and restores witho
   await act(async () => root.render(createElement(ScopedDepartmentChat, props('a', new AbortController().signal))))
   await flush()
   await value(nodes(container, 'textarea')[0], 'Private draft A')
-  await authorize(container)
   await act(async () => byText(container, 'button', 'conversation-b').dispatchEvent(new E('click')))
   assert.ok(byText(container, 'button', 'Stay'))
   assert.equal(nodes(container, 'textarea')[0].value, 'Private draft A')
@@ -598,7 +598,7 @@ test('P9A saves unsent text only to its original conversation and restores witho
   await flush()
   assert.equal(nodes(container, 'textarea')[0].value, 'Private draft A')
   const consent = nodes(container, 'input').find(node => node.parentNode?.textContent.includes('I confirm this message'))
-  assert.equal(consent.checked, false)
+  assert.equal(consent, undefined)
   assert.match(container.textContent, /Unsent text restored/)
 })
 
@@ -655,7 +655,7 @@ test('P9A search and archived filters restore the selected conversation draft on
   await flush()
   assert.equal(nodes(container, 'textarea')[0].value, 'Draft B only')
   const consent = nodes(container, 'input').find(node => node.parentNode?.textContent.includes('I confirm this message'))
-  assert.equal(consent.checked, false)
+  assert.equal(consent, undefined)
   await act(async () => byText(container, 'button', 'Clear').dispatchEvent(new E('click')))
   await flush()
   await act(async () => byText(container, 'button', 'Discard and continue').dispatchEvent(new E('click')))
@@ -727,9 +727,8 @@ for (const blocked of [
     await act(async () => root.render(createElement(ScopedDepartmentChat, props('a', new AbortController().signal))))
     await flush()
     await value(nodes(container, 'textarea')[0], 'Explain')
-    await authorize(container)
-    assert.ok(container.textContent.includes(blocked.message))
-    assert.equal(byText(container, 'button', 'Ask configured AI').disabled, true)
+      assert.ok(container.textContent.includes(blocked.message))
+    assert.equal(byText(container, 'button', 'Ask Anka AI').disabled, true)
   })
 }
 
@@ -784,4 +783,53 @@ test('Design media busy reuses the existing route blocker and cannot discard thr
   await act(async () => discard[propsKey].onClick())
   assert.deepEqual(transitions, ['reset'])
   await act(async () => root.unmount())
+})
+
+test('ordinary answers disclose participant history, reuse consent, and re-confirm after conversation changes', async t => {
+  const { container, ScopedDepartmentChat } = await setup(t)
+  const sent = []
+  const repo = repository([])
+  const getCapabilities = repo.getCapabilities
+  repo.getCapabilities = async () => {
+    const result = await getCapabilities()
+    result.approved_models.push({ ...result.approved_models[0], configuration_id: 'configuration-2', model_id: 'gpt-second', is_default: false })
+    result.answer_readiness.model_price_available.push({ configuration_id: 'configuration-2', fresh_price_available: true })
+    return result
+  }
+  repo.answer = async (_department, input) => { sent.push(input) }
+  globalThis.__departmentChatTestRepository = repo
+  const root = createRoot(container)
+  t.after(() => { try { root.unmount() } catch {} })
+  const signal = new AbortController().signal
+  const render = id => act(async () => root.render(createElement(ScopedDepartmentChat, { ...props(id, signal), key: id })))
+  const ask = async () => {
+    await value(nodes(container, 'textarea')[0], 'Another question')
+    await act(async () => nodes(container, 'form').find(item => nodes(item, 'textarea').length).dispatchEvent(new E('submit')))
+    await flush()
+  }
+  await render('a'); await flush(); await ask()
+  assert.equal(sent.length, 0)
+  assert.match(container.textContent, /including any participant messages already in it/)
+  assert.match(container.textContent, /OpenAI · gpt-test/)
+  const modelSelect = nodes(container, 'select').find(node => node.value === 'configuration-1')
+  assert.equal(modelSelect.disabled, true, 'model cannot change while consent is pending')
+  const modelProps = modelSelect[Object.keys(modelSelect).find(key => key.startsWith('__reactProps$'))]
+  await act(async () => modelProps.onChange({ target: { value: 'another-model' } }))
+  assert.match(container.textContent, /OpenAI · gpt-test/)
+  assert.doesNotMatch(container.textContent, /Teammate-authored messages.*excluded/)
+  await acceptAnswer(container)
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0].prompt_safe_for_ai, true)
+  assert.deepEqual(sent[0].selected_artifact_version_ids, [])
+  assert.equal(modelSelect.disabled, false, 'grant unlocks model selection')
+  await value(modelSelect, 'configuration-2')
+  await ask()
+  assert.equal(sent[1].model_configuration_id, 'configuration-2')
+  assert.equal(sent.length, 2, 'ordinary follow-up needs no repeated checkbox or dialog')
+  assert.equal(byText(container, 'button', 'Allow and ask Anka AI'), undefined)
+  await render('b'); await flush(); await ask()
+  assert.equal(sent.length, 2)
+  assert.ok(byText(container, 'button', 'Allow and ask Anka AI'))
+  await act(async () => byText(container, 'button', 'Cancel').dispatchEvent(new E('click')))
+  assert.equal(sent.length, 2)
 })

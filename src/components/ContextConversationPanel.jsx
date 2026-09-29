@@ -1,3 +1,5 @@
+import TextAiConsent, { useTextAiConsent } from './TextAiConsent.jsx'
+import { textAiConsentKey } from '../data/textAiConsent.js'
 import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
@@ -56,7 +58,6 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   const [modelOptions, setModelOptions] = useState([])
   const [selectedModelId, setSelectedModelId] = useState('')
   const [readiness, setReadiness] = useState(null)
-  const [aiUseConfirmed, setAiUseConfirmed] = useState(false)
   const [includeCanonicalContext, setIncludeCanonicalContext] = useState(false)
   const [aiBusyMessageId, setAiBusyMessageId] = useState('')
   const [aiNotice, setAiNotice] = useState('')
@@ -138,7 +139,6 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   useEffect(() => {
     setDraft(drafts.current.get(conversationId) || '')
     setAssetType('text'); setVideoOpened(false); setVideoActivity(null)
-    setAiUseConfirmed(false)
     setIncludeCanonicalContext(false)
     setSharing({ candidates: [], recipients: [], loaded: false })
     setShareSelection([])
@@ -188,7 +188,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
         const options = (result.connections || [])
           .filter(connection => connection.organization_level && connection.status === 'verified')
           .flatMap(connection => (connection.context_model_configurations || []).map(model => ({
-            id: model.id, provider: connection.provider,
+            id: model.id, provider: connection.provider, connectionId: connection.id,
             label: `${connection.display_name || connection.provider} · ${model.model_id}`,
           })))
         setModelOptions(options)
@@ -268,14 +268,15 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
         && selected.title === 'New conversation'
       if (firstSavedMessage) await renameCurrentConversation(contextChatTitleFromMessage(content))
       setDraft('')
-      setAiUseConfirmed(false)
       await refresh(targetId)
     } catch (reason) { showError(reason) } finally { if (!signal.aborted) setBusy(false) }
   }
 
   async function askAi(message, recoverOnly = false) {
     if (aiBusyMessageId || busy) return
-    if (!recoverOnly && (!localAiChecksPass || !selectedModelId || !aiUseConfirmed)) return
+    if (!recoverOnly && (!localAiChecksPass || !selectedModelId || !isOwner || selected?.state !== 'active' || message.author_id !== user.id)) return
+    if (!recoverOnly && !await consent.confirm()) return
+    if (signal.aborted || activeConversation.current !== conversationId) return
     const targetId = conversationId
     const savedRequest = dispatchRequests.current.get(message.id)
     const approvedGrounding = includeCanonicalContext
@@ -287,7 +288,6 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
         includeCanonicalContext: approvedGrounding }
     if (!recoverOnly) {
       dispatchRequests.current.set(message.id, request)
-      setAiUseConfirmed(false)
       setIncludeCanonicalContext(false)
     }
     setAiBusyMessageId(message.id); setAiNotice(''); setError('')
@@ -308,7 +308,6 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
       setHasOlder(Boolean(latest.has_older))
       dispatchRequests.current.delete(message.id)
       setAiNotice('Audited reply saved in this private conversation.')
-      setAiUseConfirmed(false)
     } catch (reason) {
       if (signal.aborted || activeConversation.current !== targetId) return
       if (reason.outcome === 'charged_without_reply') {
@@ -365,6 +364,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
     && readiness?.model_status === 'configured'
   const canIncludeCanonicalContext = selectedModel?.provider === 'openai'
     && (contextKind === 'organization' || contextKind === 'project_team')
+  const consent = useTextAiConsent(textAiConsentKey({ userId: user.id, organizationId, departmentId, projectId, contextKind, conversationId, connectionId: selectedModel?.connectionId, provider: selectedModel?.provider, canonical: includeCanonicalContext, recipients: sharing.recipients.map(row => row.recipient_id || row.user_id || row.id) }))
   const isOwner = selected?.owner_id === user.id
   const description = contextKind === 'department_private'
     ? 'Only you can see these conversations. AI replies require an approved model, configured spend tracking, and enabled paid execution.'
@@ -376,11 +376,11 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
   const modelControls = isOwner && <div className={compact ? "private-composer-toolbar" : "mt-3 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-3"}>
             <label htmlFor="organization-conversation-model" className="block text-xs font-semibold uppercase tracking-wide text-[var(--anka-muted)]">Approved private conversation AI model</label>
             <select id="organization-conversation-model" className={`${INPUT} mt-2`} value={selectedModelId}
-              onChange={event => { setSelectedModelId(event.target.value); setAiUseConfirmed(false); setIncludeCanonicalContext(false) }} disabled={Boolean(aiBusyMessageId) || !modelOptions.length}>
+              onChange={event => { if (consent.dialog) return; setSelectedModelId(event.target.value); setIncludeCanonicalContext(false) }} disabled={Boolean(consent.dialog) || Boolean(aiBusyMessageId) || !modelOptions.length}>
               {!modelOptions.length && <option value="">No approved model available</option>}
               {modelOptions.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
             </select>
-            {workshopLayout && <p role="status" className="mt-2 text-xs text-[var(--anka-ink)]">{!readiness ? 'Checking AI availability…' : localAiChecksPass ? 'AI configuration ready; your consent is required for each reply.' : 'AI unavailable; you can still save messages.'}</p>}
+            {workshopLayout && <p role="status" className="mt-2 text-xs text-[var(--anka-ink)]">{!readiness ? 'Checking AI availability…' : localAiChecksPass ? 'AI configuration ready; sharing confirmation is requested when the scope changes.' : 'AI unavailable; you can still save messages.'}</p>}
             <details open={!workshopLayout} className="mt-2 text-xs text-[var(--anka-muted)]"><summary>AI availability details</summary>
             <p className="mt-2 text-xs text-[var(--anka-muted)]">AI replies use the approved organization-level provider connection and are priced and recorded for the organization. {paidExecutionEnabled ? 'The service still rechecks approval, exact pricing, spend tracking and the original request before dispatch.' : 'AI execution is currently off; saved human messages remain available.'}</p>
             {!readiness && <p className="mt-2 text-xs text-[var(--anka-muted)]">Checking AI configuration…</p>}
@@ -389,12 +389,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
             {readiness?.model_status && readiness.model_status !== 'configured' && <p className="mt-2 text-xs text-[var(--anka-warning)]">{MODEL_READINESS_MESSAGES[readiness.model_status] || 'Model readiness is unavailable.'}</p>}
             {contextKind === 'project_team' && <p className="mt-2 text-xs text-[var(--anka-muted)]">Teammate-authored messages are not sent to a provider. If a requested reply would include one, the request is blocked before reserving a spend record.</p>}
             </details>
-            <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-[var(--anka-ink)]">
-              <input type="checkbox" className="mt-1" checked={aiUseConfirmed}
-                onChange={event => setAiUseConfirmed(event.target.checked)}
-                disabled={!localAiChecksPass || Boolean(aiBusyMessageId) || !selectedModelId} />
-              <span>{compact ? <>I confirm this conversation's recent messages, including the message I selected, are safe to send to <strong>{selectedModel?.provider || 'the selected provider'} · {selectedModel?.label || 'no model selected'}</strong> for one organization-billed AI reply. No project records are included.</> : <>I confirm that this conversation's recent messages, including the message I selected, are safe to send to the selected provider for an AI reply. Records are included only if I select the separate OpenAI option below.</>}</span>
-            </label>
+            <p className="mt-3 text-xs">Provider: {selectedModel?.provider || 'Unavailable'} · {selectedModel?.label || 'No model selected'}. Organization-billed text replies; sharing confirmation is requested when needed.</p>
             {canIncludeCanonicalContext && <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-[var(--anka-ink)]">
               <input type="checkbox" className="mt-1" checked={includeCanonicalContext}
                 onChange={event => setIncludeCanonicalContext(event.target.checked)}
@@ -408,6 +403,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
       <div><h2 className="text-lg font-semibold text-[var(--anka-ink)]">{label}</h2>
         <p className="mt-1 text-sm text-[var(--anka-muted)]">{description}</p></div>
     </div>
+    {consent.dialog && <TextAiConsent {...consent.dialog} provider={selectedModel?.provider} model={selectedModel?.label} scope={`${contextKind} conversation`} canonical={includeCanonicalContext && canIncludeCanonicalContext} />}
     {error && <p role="alert" className="mt-4 rounded-xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] px-3 py-2 text-sm text-[var(--anka-danger)]">{error}</p>}
     {aiNotice && <p role="status" className="mt-4 rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] px-3 py-2 text-sm text-[var(--anka-warning)]">{aiNotice}</p>}
     <div className={`mt-5 grid gap-4 ${hideConversationList ? '' : 'lg:grid-cols-[220px_minmax(0,1fr)]'}`}>
@@ -482,7 +478,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
               {isOwner && message.role === 'user' && message.author_id === user.id
                 && !messages.some(reply => reply.in_reply_to_message_id === message.id) && <div className="mt-3 flex flex-wrap gap-3">
                   <button type="button" className="text-xs font-semibold text-[var(--anka-violet)] disabled:opacity-40"
-                    disabled={!localAiChecksPass || !selectedModelId || !aiUseConfirmed || Boolean(aiBusyMessageId) || busy}
+                    disabled={!localAiChecksPass || !selectedModelId || Boolean(aiBusyMessageId) || busy}
                     onClick={() => askAi(message)}>{aiBusyMessageId === message.id ? 'Checking…' : 'Ask Anka AI'}</button>
                   <button type="button" className="text-xs text-[var(--anka-muted)] hover:text-[var(--anka-ink)] disabled:opacity-40"
                     disabled={Boolean(aiBusyMessageId) || busy} onClick={() => askAi(message, true)}>Check for saved reply</button>

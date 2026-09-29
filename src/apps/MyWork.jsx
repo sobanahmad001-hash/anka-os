@@ -55,6 +55,8 @@ export default function MyWork({ initialTab = 'overview', title = 'My Work' }) {
   currentScope.current = { organizationId: activeOrganizationId, revision: scopeRevision }
   const [workspace, setWorkspace] = useState(null)
   const [searchParams, setSearchParams] = useSearchParams()
+  const workshopReturn = searchParams.get('workshopReturn') || ''
+  const safeWorkshopReturn = /^\/sphere\/(content|design|marketing)(?:\?|$)/.test(workshopReturn) && !workshopReturn.includes('\\') ? workshopReturn : ''
   const requestedTab = searchParams.get('tab')
   const activeTab = TABS.some(([id]) => id === requestedTab) ? requestedTab : initialTab
   const setActiveTab = (id) => {
@@ -216,7 +218,7 @@ export default function MyWork({ initialTab = 'overview', title = 'My Work' }) {
       <header className="border-b border-[var(--anka-line)] pb-5">
         <p className="workspace-eyebrow">Personal operating queue</p>
         <div className="mt-1 flex flex-wrap items-end justify-between gap-4">
-          <div><h1 className="workspace-title">{title}</h1><p className="mt-1 text-sm text-[var(--anka-muted)]">Personal readiness and supported actions across assignments, handoffs, exact-version review, and controlled release.</p></div>
+          <div>{safeWorkshopReturn && <Link to={safeWorkshopReturn}>Return to Workshop</Link>}<h1 className="workspace-title">{title}</h1><p className="mt-1 text-sm text-[var(--anka-muted)]">Personal readiness and supported actions across assignments, handoffs, exact-version review, and controlled release.</p></div>
           <div className="flex flex-wrap gap-3"><Metric label="Project Tasks" value={readiness.projectTasks.total} /><Metric label="Engagement Work Items" value={readiness.engagementWorkItems.total} /><Metric label="Awaiting review" value={readiness.internalReviews.total} /><Metric label="Ready to release" value={readiness.controlledReleases.total} /></div>
         </div>
       </header>
