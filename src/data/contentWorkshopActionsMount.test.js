@@ -37,6 +37,12 @@ test('mounted Content handoff requires confirmation, respects busy, and clears c
   assert.equal(button('Open editor'), undefined); assert.equal(navigations.length, 1)
   props = { ...props, unavailable: false }; await render()
   assert.equal(button('Open editor'), undefined)
+  await click('Open Content writer')
+  assert.ok(button('Open editor'))
+  props = { ...props, projectId: 'project-b', engagement: { ...props.engagement, id: 'engagement-b', project_id: 'project-b' }, services: [{ ...props.services[0], engagement_id: 'engagement-b' }] }
+  await render()
+  assert.equal(button('Open editor'), undefined, 'changing project and engagement clears pending output intent')
+  assert.equal(propsOf(button('Open Content writer')).disabled, false, 'replacement scope remains eligible')
   const parent = readFileSync(new URL('../apps/DepartmentWorkshop.jsx', import.meta.url), 'utf8')
   assert.match(parent, /departmentId === 'content' && <ContentWorkshopActions key=\{chatScopeKey\}/)
   assert.match(parent, /busy=\{chatNavigationBusy\}/)

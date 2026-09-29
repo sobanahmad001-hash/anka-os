@@ -47,6 +47,18 @@ test('mounted My Work preserves review deeplink but resets review targets and re
   await render()
   assert.match(env.container.textContent, /Internal quality review/)
   assert.match(env.container.textContent, /Organization A review/)
+  const returnTo = '/sphere/design?ctxOrg=org-a&ctxProject=project-a&ctxEngagement=eng-a&ctxWorkshopTab=chat'
+  params.set('workshopReturn', returnTo)
+  await render()
+  const returnLink = () => nodes(env.container).find(node => node.tagName === 'A' && node.textContent === 'Return to Workshop')
+  assert.equal(returnLink().getAttribute('href'), returnTo)
+  for (const unsafe of ['https://example.com', '//example.com', '/sphere/design/workshop', '/sphere/design\\evil']) {
+    params.set('workshopReturn', unsafe)
+    await render()
+    assert.equal(returnLink(), undefined)
+  }
+  params.set('workshopReturn', returnTo)
+  await render()
   const click = async text => {
     const node = nodes(env.container).find(node => node.tagName === 'BUTTON' && node.textContent === text)
     assert.ok(node, text)

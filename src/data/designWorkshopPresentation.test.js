@@ -7,9 +7,9 @@ import { createRoot } from 'react-dom/client'
 import { transformSync } from 'esbuild'
 import { mountedEnvironment, elements } from './testSupport/designVideoDom.js'
 const nativeRequire = createRequire(import.meta.url)
-const props = node => node[Object.keys(node).find(key => key.startsWith('__reactProps$'))]
+const props = node => node?.[Object.keys(node ?? {}).find(key => key.startsWith('__reactProps$'))] ?? {}
 
-test('Design history disclosure retains mounted search and chat draft, with scope visibility always present', async t => {
+test('Design history retains mounted search and chat draft during context navigation, with scope visibility always present', async t => {
   const env = mountedEnvironment(), previous = { document: globalThis.document, window: globalThis.window, IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT }
   Object.assign(globalThis, { document: env.document, window: env.window, IS_REACT_ACT_ENVIRONMENT: true })
   const source = readFileSync(new URL('../components/WorkshopChatWorkspace.jsx', import.meta.url), 'utf8')
@@ -23,14 +23,16 @@ test('Design history disclosure retains mounted search and chat draft, with scop
   const root = createRoot(env.container)
   t.after(async()=>{await act(async()=>root.unmount());Object.assign(globalThis,previous)})
   await act(async()=>root.render(React.createElement(Component,{presentation:'design',mode:'chat',departmentName:'Design',projectName:'Exact project',engagementName:'Exact engagement',conversationList:()=>React.createElement(HistoryComponent)},React.createElement('textarea',{'aria-label':'Unsent draft',defaultValue:'Keep this draft'}))))
-  const toggle = elements(env.container,'button').find(node=>node.textContent==='Conversations')
-  const disclosure = elements(env.container,'div').find(node=>props(node)?.id===props(toggle)['aria-controls'])
-  assert.equal(props(disclosure).hidden,true)
+  const history = elements(env.container,'div').find(node=>props(node).id)
+  assert.ok(history)
+  assert.notEqual(props(history).hidden,true)
   const search=elements(env.container,'input')[0], draft=elements(env.container,'textarea')[0]
-  await act(async()=>props(toggle).onClick())
   await act(async()=>props(search).onChange({target:{value:'Exact history'}}))
-  await act(async()=>props(toggle).onClick())
-  await act(async()=>props(toggle).onClick())
+  const context = elements(env.container,'select').find(node=>props(node)['aria-label']==='Conversation context')
+  await act(async()=>props(context).onChange({target:{value:'private'}}))
+  const cancel = elements(env.container,'button').find(node=>node.textContent==='Stay in current context')
+  assert.ok(cancel)
+  await act(async()=>props(cancel).onClick())
   assert.equal(mounts,1)
   assert.equal(elements(env.container,'input')[0].value,'Exact history')
   assert.equal(elements(env.container,'textarea')[0],draft)

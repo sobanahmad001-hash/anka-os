@@ -161,3 +161,38 @@ for (const kind of ['private', 'engagement']) test(`${kind} external selection c
   await act(async () => resolveOld({ conversation: rows('old'), messages: [{ id: 'old-answer', role: 'assistant', body: 'ABORTED_TRANSCRIPT' }] }))
   assert.doesNotMatch(container.textContent, /ABORTED_TRANSCRIPT/)
 })
+
+test('project history groups load exact engagement pages on demand and isolate search, denial and selection', async t => {
+  const requests = []
+  const second = { id: 'eng-2', project_id: 'project-2', organization_id: 'org', name: 'Second engagement' }
+  const row2 = { ...engagementRow('second'), engagement_id: second.id, project_id: second.project_id }
+  const repo = {
+    listContextConversations: async () => [privateRow()],
+    searchConversations: async (_department, input) => {
+      requests.push(input)
+      if (input.query === 'denied') throw new Error('Permission denied')
+      return { items: input.engagement_id === second.id ? [row2] : [engagementRow()] }
+    },
+  }
+  const { root, container, vite, signal } = await setup(t, repo)
+  const { default: List } = await vite.ssrLoadModule('/src/components/WorkshopConversationList.jsx')
+  const opened = []
+  await act(async () => root.render(createElement(List, { organizationId: 'org', actorId: 'actor', departmentId: 'design', engagements: [engagement, second], workstreams: [{ project_id: 'project', projects: { name: 'First project' } }, { project_id: 'project-2', projects: { name: 'Second project' } }], signal, onOpen: item => opened.push(item) })))
+  assert.equal(requests.length, 0, 'collapsed histories never eagerly load all projects')
+  assert.match(container.textContent, /Private · Only you/)
+  assert.match(container.textContent, /First project/)
+  assert.match(container.textContent, /Second project/)
+  await act(async () => props(elements(container, 'button').find(node => node.textContent === 'Second engagement')).onClick())
+  assert.equal(requests[0].project_id, second.project_id)
+  assert.equal(requests[0].engagement_id, second.id)
+  await act(async () => props(elements(container, 'button').find(node => node.textContent.includes('Engagement second'))).onClick())
+  assert.equal(opened[0].projectId, second.project_id)
+  assert.equal(opened[0].row.id, 'second')
+  const search = elements(container, 'input').find(node => props(node)['aria-label'] === 'Search engagement conversations')
+  await act(async () => props(search).onChange({ target: { value: 'denied' } }))
+  assert.equal(requests.at(-1).project_id, second.project_id)
+  assert.equal(requests.at(-1).query, 'denied')
+  assert.match(container.textContent, /Permission denied/)
+  assert.doesNotMatch(container.textContent, /Engagement second/)
+  assert.match(container.textContent, /Private same/, 'denial cannot erase the independent private group')
+})

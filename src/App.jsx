@@ -86,15 +86,15 @@ export default function App() {
         <Route path="sphere/reviews" element={<MyWork initialTab="review" title="Reviews & Delivery" />} />
         <Route path="sphere/planning" element={<PlanningWorkspace />} />
         <Route path="sphere/workspace/items/:recordKind/:recordId" element={<WorkItemDetail />} />
-        <Route path="sphere/content" element={<DepartmentWorkshop departmentId="content" />} />
+        <Route path="sphere/content" element={<DepartmentWorkshop departmentId="content" key="content" />} />
         <Route path="sphere/content/studio" element={<ContentStudio />} />
         <Route path="sphere/quick-tasks" element={<QuickTasksWorkspace />} />
         <Route path="sphere/content/requests/:requestId/figma-handoff" element={<FigmaHandoff />} />
         <Route path="sphere/artifacts/:artifactId" element={<ArtifactDetail />} />
-        <Route path="sphere/design" element={<DepartmentWorkshop departmentId="design" />} />
+        <Route path="sphere/design" element={<DepartmentWorkshop departmentId="design" key="design" />} />
         <Route path="sphere/design/workshop" element={<DesignWorkshop />} />
         <Route path="sphere/design/systems" element={<DesignSystems />} />
-        <Route path="sphere/marketing" element={<DepartmentWorkshop departmentId="marketing" />} />
+        <Route path="sphere/marketing" element={<DepartmentWorkshop departmentId="marketing" key="marketing" />} />
         <Route path="sphere/marketing/studio" element={<MarketingStudio />} />
         <Route path="sphere/marketing/seo" element={<TechnicalSeoTracking />} />
         <Route path="sphere/delivery" element={<DepartmentWorkshop departmentId="development" />} />

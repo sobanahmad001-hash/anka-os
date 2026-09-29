@@ -34,3 +34,15 @@ test('adapter rejects foreign scopes and propagates denied reads without fallbac
   await assert.rejects(readWorkshopConversationPage({ ...repo, listContextConversations: async () => [{ ...privateRow('a'), owner_id: 'other' }] }, scope, 'private'), /scope mismatch/)
   await assert.rejects(readWorkshopConversationPage({ ...repo, searchConversations: async () => ({ items: [{ ...engagementRow('a'), project_id: 'other' }] }) }, scope, 'engagement'), /scope mismatch/)
 })
+
+test('project groups require exact workspace organization, project and department service', async () => {
+  const { eligibleWorkshopEngagements, matchesWorkshopConversation } = await import('./workshopConversationList.js')
+  const engagements = ['a', 'b', 'wrong-department', 'inactive', 'foreign', 'no-project'].map(id => ({ id, project_id: id, organization_id: id === 'foreign' ? 'other' : 'org' }))
+  const workspace = { engagements, workstreams: engagements.filter(row => row.id !== 'no-project').map(row => ({ project_id: row.project_id })), services: engagements.map(row => ({ engagement_id: row.id, status: row.id === 'inactive' ? 'cancelled' : 'active', service_catalog: { department_id: row.id === 'wrong-department' ? 'content' : 'design' } })) }
+  assert.deepEqual(eligibleWorkshopEngagements(workspace, 'org', 'design').map(row => row.id), ['a', 'b'])
+  const scope = { organizationId: 'org', actorId: 'actor', departmentId: 'design', engagement: engagements[0] }
+  const item = { kind: 'engagement', engagementId: 'a', projectId: 'a', row: { id: 'conversation', engagement_id: 'a', project_id: 'a', department_id: 'design', organization_id: 'org' } }
+  assert.equal(matchesWorkshopConversation(item, scope), true)
+  for (const field of ['organization_id', 'project_id', 'engagement_id', 'department_id']) assert.equal(matchesWorkshopConversation({ ...item, row: { ...item.row, [field]: 'other' } }, scope), false, field)
+  assert.equal(matchesWorkshopConversation(item, { ...scope, signal: { aborted: true } }), false)
+})

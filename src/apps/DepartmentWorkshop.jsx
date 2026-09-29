@@ -1,3 +1,4 @@
+import { eligibleWorkshopEngagements, matchesWorkshopConversation } from '../data/workshopConversationList.js'
 import DesignChatTools from '../components/DesignChatTools.jsx'
 import MarketingArtifactChat from '../components/MarketingArtifactChat.jsx'
 import ContentArtifactChat from '../components/ContentArtifactChat.jsx'
@@ -211,12 +212,8 @@ export default function DepartmentWorkshop({ departmentId }) {
   const selectedWorkstream = workspace?.workstreams.find((workstream) => workstream.id === selectedWorkstreamId)
   const projectId = selectedWorkstream?.project_id
   const projectName = selectedWorkstream?.projects?.name || 'Project'
-  const chatEngagements = selectedWorkstream && departmentId !== 'development'
-    ? (workspace?.engagements || []).filter(engagement =>
-      engagement.organization_id === activeOrganizationId && engagement.project_id === projectId
-      && workspace.services.some(service => service.engagement_id === engagement.id
-        && ['planned', 'active'].includes(service.status)))
-    : []
+  const eligibleEngagements = departmentId === 'development' ? [] : eligibleWorkshopEngagements(workspace, activeOrganizationId, departmentId)
+  const chatEngagements = eligibleEngagements.filter(engagement => engagement.project_id === projectId)
   const chatEngagement = chatEngagements.find(engagement => engagement.id === selectedChatEngagementId)
   const chatScopeKey = JSON.stringify([user?.id, activeOrganizationId, scopeRevision, departmentId, projectId, chatEngagement?.id])
   const selectedConversation = chatSelection?.scopeKey === chatScopeKey ? chatSelection.item : null
@@ -430,21 +427,32 @@ export default function DepartmentWorkshop({ departmentId }) {
         {departmentId === 'development' ? <_WorkshopTabs departmentId={departmentId} activeTab={activeTab} onChange={setActiveTab} tabs={availableTabs} /> : (
           <nav aria-label="Workshop sections" className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-[var(--anka-line)] p-3">
             <button type="button" aria-pressed={['private', 'chat'].includes(activeTab)} disabled={navigationLocked} onClick={() => { if (navigationLocked) return; if (!['private', 'chat'].includes(activeTab)) setActiveTab('private') }} className="rounded-lg border border-[var(--anka-violet)] px-3 py-2 text-sm text-[var(--anka-violet)]">Chat</button>
-            <label className="min-w-0 flex-1 text-xs text-[var(--anka-muted)]">Work queue & tools
-              <select disabled={navigationLocked} aria-label="Work queue and tools" className={`${INPUT_CLASS} mt-1`} value={['private', 'chat'].includes(activeTab) ? '' : activeTab} onChange={event => { if (!navigationLocked && event.target.value) setActiveTab(event.target.value) }}>
-                <option value="">Choose a secondary workspace</option>
-                {WORKSHOP_TABS.map(([id, title]) => <option key={id} value={id}>{id === 'specialists' ? 'Specialist tools' : title}</option>)}
-              </select>
-            </label>
-            <button type="button" aria-pressed={activeTab === 'deliverables'} disabled={navigationLocked} onClick={() => { if (!navigationLocked) setActiveTab('deliverables') }} className="rounded-lg border border-[var(--anka-line)] px-3 py-2 text-sm">Assets & outputs</button>
-            <Link to="/sphere/my-work?tab=review" className="rounded-lg border border-[var(--anka-line)] px-3 py-2 text-sm">Reviews</Link>
+            <button type="button" aria-pressed={!['private', 'chat', 'deliverables'].includes(activeTab)} disabled={navigationLocked} onClick={() => { if (!navigationLocked) setActiveTab('tasks') }} className="rounded-lg border border-[var(--anka-line)] px-3 py-2 text-sm">Work</button>
+            <button type="button" aria-pressed={activeTab === 'deliverables'} disabled={navigationLocked} onClick={() => { if (!navigationLocked) setActiveTab('deliverables') }} className="rounded-lg border border-[var(--anka-line)] px-3 py-2 text-sm">Library</button>
+            <Link aria-disabled={navigationLocked} onClick={event => { if (navigationLocked) event.preventDefault() }} to={`/sphere/my-work?tab=review&workshopReturn=${encodeURIComponent(appendWorkshopNavigation(`/sphere/${departmentId}`, { organizationId: activeOrganizationId, projectId, engagementId: chatEngagement?.id, workshopTab: activeTab }))}`} className="rounded-lg border border-[var(--anka-line)] px-3 py-2 text-sm">Reviews</Link>
           </nav>
         )}
 
+        {departmentId !== 'development' && !['private', 'chat', 'deliverables'].includes(activeTab) && <label className="mt-3 block text-sm">Work queue and tools
+          <select disabled={navigationLocked} aria-label="Work queue and tools" className={INPUT_CLASS} value={activeTab} onChange={event => { if (!navigationLocked) setActiveTab(event.target.value) }}>
+            {WORKSHOP_TABS.filter(([id]) => id !== 'deliverables').map(([id, title]) => <option key={id} value={id}>{title}</option>)}
+          </select>
+        </label>}
+
         <div id={`${departmentId}-${activeTab}-panel`} role={departmentId === 'development' ? 'tabpanel' : 'region'} aria-label={departmentId === 'development' ? undefined : 'Workshop workspace'} aria-labelledby={departmentId === 'development' ? `${departmentId}-${activeTab}-tab` : undefined}>
         {['private', 'chat'].includes(activeTab) ? <WorkshopChatWorkspace key={chatScopeKey} presentation={departmentId === 'design' ? 'design' : undefined} mode={activeTab} navigationBusy={navigationLocked} onModeChange={mode => { if (navigationLocked) return; setChatSelection(null); setActiveTab(mode) }} departmentName={config.shortName} projectName={projectName} engagementName={chatEngagement?.name}
-          onConversationSelect={item => { if (navigationLocked) return; if (item.kind === 'engagement' && (item.engagementId !== chatEngagement?.id || item.projectId !== projectId)) return; setChatSelection(current => ({ scopeKey: chatScopeKey, item, revision: (current?.revision || 0) + 1 })); setActiveTab(item.kind === 'private' ? 'private' : 'chat') }}
-          conversationList={onOpen => <WorkshopConversationList organizationId={activeOrganizationId} actorId={user?.id} scopeRevision={scopeRevision} departmentId={departmentId} engagement={chatEngagement} signal={requestSignal} onOpen={onOpen} refreshKey={conversationListRevision} />}>
+          onConversationSelect={item => {
+            if (navigationLocked) return
+            const target = eligibleEngagements.find(row => row.id === item.engagementId && row.project_id === item.projectId)
+            if (!matchesWorkshopConversation(item, { organizationId: activeOrganizationId, actorId: user?.id, departmentId, engagement: target, signal: requestSignal })) return
+            const workstream = item.kind === 'engagement' && workspace.workstreams.find(row => row.project_id === target.project_id)
+            if (item.kind === 'engagement' && !workstream) return
+            const nextScope = item.kind === 'engagement' ? JSON.stringify([user?.id, activeOrganizationId, scopeRevision, departmentId, target.project_id, target.id]) : chatScopeKey
+            if (workstream) { setSelectedWorkstreamId(workstream.id); setSelectedChatEngagementId(target.id) }
+            setChatSelection(current => ({ scopeKey: nextScope, item, revision: (current?.revision || 0) + 1 }))
+            setActiveTab(item.kind === 'private' ? 'private' : 'chat')
+          }}
+          conversationList={onOpen => <WorkshopConversationList organizationId={activeOrganizationId} actorId={user?.id} scopeRevision={scopeRevision} departmentId={departmentId} engagements={eligibleEngagements} workstreams={workspace.workstreams} signal={requestSignal} onOpen={onOpen} refreshKey={conversationListRevision} />}>
         {activeTab === 'private' ? (
           <div className="mt-6 space-y-3">
             <p className="text-sm text-[var(--anka-muted)]">Explore privately with your {config.shortName} specialist. Selecting project chat opens separate engagement conversations; it does not share or move these messages. Use specialist tools for governed project outputs.</p>
@@ -460,7 +468,7 @@ export default function DepartmentWorkshop({ departmentId }) {
               <p>Use the Conversation context selector above: choose Project / engagement, then confirm Switch context after saving unsaved text. Choose an eligible client engagement with an active or planned {config.shortName} service. This opens a separate history; it does not share or move this private conversation.</p>
               <p>Available draft types come from that engagement’s existing {config.shortName} tools and your access. Previewing a proposal does not create an official record; use the existing explicit review and confirmation controls.</p>
               {departmentId === 'marketing' && <p>Campaign brief suggestions are applied selectively in the governed editor, not confirmed as an official draft from chat.</p>}
-              <p>Private exploration remains text conversation here. Project draft tools are not enabled in this private context. Model approval, provider disclosure, per-reply consent and spend checks still apply.</p>
+              <p>Private exploration remains text conversation here. Project draft tools are not enabled in this private context. Model approval, provider disclosure, scope-specific sharing confirmation and spend checks still apply.</p>
             </details>}
           </div>
         ) : (
@@ -481,8 +489,9 @@ export default function DepartmentWorkshop({ departmentId }) {
                 </select>
               </label> : <p className="mt-4 text-sm text-[var(--anka-warning)]">No eligible engagement is available in this workstream. Select an active workstream and activate this department's service on its engagement.</p>}
             </ContextSetup>
-            {chatEngagement && <div className={departmentId === 'design' ? 'design-workbench-grid' : 'space-y-4'}>
-              <div className="min-w-0">{departmentId === 'content' ? <ContentArtifactChat key={selectedConversationRevision} projectId={projectId} engagement={chatEngagement} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} /> : departmentId === 'marketing' ? <MarketingArtifactChat key={selectedConversationRevision} projectId={projectId} engagement={chatEngagement} activeServiceId={contextValidation.context?.activeServiceId || undefined} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} /> : <DepartmentChat key={selectedConversationRevision} presentation={departmentId === 'design' ? 'workbench' : undefined} departmentId={departmentId} engagement={chatEngagement} allowArtifactDraft={false} externalNavigationBusy={designNavigationBusy} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} />}</div>
+            {chatEngagement && <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.8fr)]">
+              <div className="min-w-0">{departmentId === 'content' ? <ContentArtifactChat presentation="workbench" key={selectedConversationRevision} projectId={projectId} engagement={chatEngagement} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} /> : departmentId === 'marketing' ? <MarketingArtifactChat presentation="workbench" key={selectedConversationRevision} projectId={projectId} engagement={chatEngagement} activeServiceId={contextValidation.context?.activeServiceId || undefined} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} /> : <DepartmentChat key={selectedConversationRevision} presentation={departmentId === 'design' ? 'workbench' : undefined} departmentId={departmentId} engagement={chatEngagement} allowArtifactDraft={false} externalNavigationBusy={designNavigationBusy} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} />}</div>
+              <details className="rounded-xl border border-[var(--anka-line)] p-3"><summary>Work editor & preview</summary>
               {departmentId === 'design' && <DesignChatTools key={designPaneKey} presentation="workbench" engagement={chatEngagement} onNavigationBusyChange={reportDesignNavigationBusy} />}
               {departmentId === 'content' && <ContentWorkshopActions key={chatScopeKey} organizationId={activeOrganizationId} projectId={projectId} engagement={chatEngagement} services={workspace.services} unavailable={Boolean(error) || loading || requestSignal?.aborted} busy={chatNavigationBusy} />}
               <ProjectContext aria-label="Selected project context" className="design-project-reference space-y-4 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4 text-sm">
@@ -493,6 +502,7 @@ export default function DepartmentWorkshop({ departmentId }) {
                 <Link className="block text-[var(--anka-violet)]" to={`/sphere/workspace/projects/${encodeURIComponent(projectId)}?tab=outputs`}>Assets, outputs & review evidence</Link>
                 <p className="text-xs leading-5 text-[var(--anka-muted)]">Select exact references and supported private attachments in this conversation. Output previews stay drafts until the existing governed action is completed; switching context does not publish private exploration.</p>
               </ProjectContext>
+              </details>
             </div>}
           </section>
         )}

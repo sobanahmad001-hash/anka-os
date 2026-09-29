@@ -1,3 +1,5 @@
+import TextAiConsent, { useTextAiConsent } from './TextAiConsent.jsx'
+import { textAiConsentKey } from '../data/textAiConsent.js'
 import { restrictArtifactTypes } from '../data/departmentChatArtifactTypes.js'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useBlocker } from 'react-router-dom'
@@ -833,6 +835,10 @@ export function ScopedDepartmentChat({
       setError('Artifact and work-item previews currently require an approved OpenAI model. Choose one or switch to a conversational answer.')
       return
     }
+    if (isAnswerMode) {
+      if (!answerLocalChecksPass || !selectedModel || !currentConversation || currentConversation.state !== 'active') return
+      if (!await consent.confirm() || requestSignal?.aborted) return
+    } else if (!safe) return
     const isCurrent = completion.current.begin()
     if (!isCurrent()) return
     const targetConversationId = conversationId
@@ -846,7 +852,7 @@ export function ScopedDepartmentChat({
       engagement_id: engagement.id,
       model_configuration_id: modelConfigurationId,
       prompt,
-      prompt_safe_for_ai: safe,
+      prompt_safe_for_ai: isAnswerMode || safe,
     }
     setBusy(true)
     setError('')
@@ -969,6 +975,7 @@ export function ScopedDepartmentChat({
   const requiresContentLanguage = departmentId === 'content' && ['discovery', 'vision', 'audience'].includes(artifactType)
   const currentConversation = conversations.find(item => item.id === conversationId) || null
   const isConversationOwner = currentConversation?.owner_id === userId
+  const consent = useTextAiConsent(textAiConsentKey({ userId, organizationId, departmentId, projectId, engagementId: engagement.id, contextKind: 'engagement', conversationId, connectionId: selectedModel?.connector_connection_id || capabilities?.connector_connection_id, provider: selectedProvider, recipients: (sharing.recipients || []).map(row => row.recipient_id), sources: selectedSourceVersionIds, selectedAttachmentIds }))
   const conversationHasRecipients = Boolean(currentConversation && (!isConversationOwner || (sharing.recipients || []).length > 0))
 
   async function openOfficial(event) {
@@ -1021,7 +1028,7 @@ export function ScopedDepartmentChat({
       {supportsSavedConversations && hideConversationList && <button type="button" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)} className="mb-4 rounded-lg bg-[var(--anka-violet)] px-3 py-2 text-sm text-[var(--anka-on-violet)]">New engagement conversation</button>}
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--anka-info)]">{presentationLabel} · {departmentId}</p>
-        <h2 className="mt-2 text-2xl font-semibold text-[var(--anka-ink)]">{presentation === 'workbench' ? 'Discuss the direction' : 'Ask, explore, or prepare a governed proposal'}</h2>
+        <h2 className="mt-2 text-2xl font-semibold text-[var(--anka-ink)]">{presentation === 'workbench' ? 'Discuss the work' : 'Ask, explore, or prepare a governed proposal'}</h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--anka-muted)]">Ordinary answers stay conversational and create no official record. Artifact and work-item modes remain explicit governed proposals requiring separate confirmation.</p>
         {supportsSavedConversations && <p className="mt-2 text-xs leading-5 text-[var(--anka-muted)]">Work context: canonical client engagement. Saved conversations are creator-private until explicitly shared with eligible internal contributors. Standalone private-project and internal-project chat modes are unavailable here.</p>}
       </div>
@@ -1058,8 +1065,9 @@ export function ScopedDepartmentChat({
           <select
             className={`${INPUT} mt-2 normal-case tracking-normal`}
             value={modelConfigurationId}
-            disabled={busy || historyBusy || !(capabilities.approved_models || []).length}
+            disabled={Boolean(consent.dialog) || busy || historyBusy || !(capabilities.approved_models || []).length}
             onChange={event => {
+              if (consent.dialog) return
               setModelConfigurationId(event.target.value)
               setResult(null)
               setOfficial(null)
@@ -1155,6 +1163,7 @@ export function ScopedDepartmentChat({
 
         {supportsSavedConversations && capabilities?.attachments?.supported && <SourcePanel className="rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-4">
           {presentation === 'workbench' && <summary>Source files · {selectedAttachmentIds.length} selected</summary>}
+          {isAnswerMode && <p className="text-xs text-[var(--anka-muted)]">Ordinary engagement answers send your prompt, existing conversation history (including participant messages), selected approved artifact versions, and validated text from explicitly selected TXT/MD/DOCX files.</p>}
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Explicit source files</p>
           <p className="mt-2 text-xs leading-5 text-[var(--anka-muted)]">TXT, Markdown, and DOCX contribute validated text. PNG/JPEG are reference-only and are never sent to the model. PDF and scanned/OCR documents are unavailable. Choose up to 3 files: 5 MiB per file; DOCX 4 MiB. Extracted text is limited to 16,000 characters per file and 24,000 per turn; rejected limits never truncate content.</p>
           <input
@@ -1205,17 +1214,18 @@ export function ScopedDepartmentChat({
           <textarea ref={composerRef} required rows="10" className={`${INPUT} mt-2 normal-case tracking-normal`} value={prompt} onInput={event => setPrompt(event.currentTarget.value)} placeholder={isAnswerMode ? 'Ask a question or explore the work context. This will not create an official output.' : 'Describe the draft you need, the evidence to prioritize, known constraints, tone, and gaps the team should keep visible.'} />
         </label>
 
-        <label className="flex items-start gap-3 rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] p-4 text-sm leading-6 text-[var(--anka-warning)]">
+        {!isAnswerMode && <label className="flex items-start gap-3 rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] p-4 text-sm leading-6 text-[var(--anka-warning)]">
           <input required type="checkbox" className="mt-1" checked={safe} onChange={event => setSafe(event.target.checked)} />
           <span>I confirm this message, the previewed exact artifact versions, and the validated text from explicitly selected files are safe to send to the engagement-mapped {resolvedDepartmentLabel} model. Restricted sources are never included.</span>
-        </label>
+        </label>}
+        {consent.dialog && <TextAiConsent {...consent.dialog} provider={MODEL_PROVIDER_LABELS[selectedProvider] || selectedProvider} model={selectedModel?.model_id} engagementHistory scope={`${resolvedDepartmentLabel} · ${engagement.name} · this conversation`} sources={selectedSourceVersionIds.length > 0} selectedAttachmentIds={selectedAttachmentIds} />}
 
         {supportsSavedConversations && currentConversation && <button type="button" disabled={busy || historyBusy || attachmentBusy || draftSaving || !prompt.trim()} onClick={saveUnsentDraft} className="w-full rounded-xl border border-[var(--anka-info)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-info)] disabled:opacity-50">{draftSaving ? 'Saving draft…' : 'Save draft to this conversation'}</button>}
         <button
-          disabled={busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim() || !safe || proposalModelUnavailable || (isAnswerMode && !answerLocalChecksPass) || (supportsSavedConversations && (!currentConversation || currentConversation.state !== 'active' || !modelConfigurationId)) || (isWorkItemMode && !title.trim()) || (!isAnswerMode && !isWorkItemMode && !artifactTypes.includes(artifactType))}
+          disabled={busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim() || (!isAnswerMode && !safe) || proposalModelUnavailable || (isAnswerMode && !answerLocalChecksPass) || (supportsSavedConversations && (!currentConversation || currentConversation.state !== 'active' || !modelConfigurationId)) || (isWorkItemMode && !title.trim()) || (!isAnswerMode && !isWorkItemMode && !artifactTypes.includes(artifactType))}
           className={`${PRIMARY} w-full`}
         >
-          {busy ? (isAnswerMode ? 'Processing answer…' : 'Generating safe preview…') : isAnswerMode ? 'Ask configured AI' : isWorkItemMode ? 'Preview draft work item' : 'Preview draft artifact'}
+          {busy ? (isAnswerMode ? 'Processing answer…' : 'Generating safe preview…') : isAnswerMode ? 'Ask Anka AI' : isWorkItemMode ? 'Preview draft work item' : 'Preview draft artifact'}
         </button>
         {busy && isAnswerMode && <button type="button" onClick={() => answerObservation.current?.stop()} className="w-full rounded-xl border border-[var(--anka-warning)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-warning)]">Stop watching locally</button>}
       </div>
@@ -1240,7 +1250,7 @@ export function ScopedDepartmentChat({
       {supportsSavedConversations && <div className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-5 text-sm leading-6 text-[var(--anka-muted)]">
         <p className="font-semibold text-[var(--anka-ink)]">Configured AI</p>
         {capabilities ? <><p className="mt-2">{MODEL_PROVIDER_LABELS[selectedProvider] || 'Provider unavailable'} · <span className="text-[var(--anka-ink)]">{selectedModel?.model_id || capabilities.model_id}</span></p><p className="mt-1 text-xs text-[var(--anka-muted)]">Selection is limited to verified, administrator-approved configurations for this engagement.</p></> : <p className="mt-2">{historyBusy ? 'Checking configuration…' : 'Configuration unavailable.'}</p>}
-        <p className="mt-3 text-xs text-[var(--anka-warning)]">Private files: TXT/Markdown/DOCX validated text; PNG/JPEG reference-only. PDF, OCR, and vision input remain unavailable.</p><p className="mt-2 text-xs text-[var(--anka-muted)]">Answers appear after the provider response is saved. “Stop watching” closes this view; the request may continue and incur cost. Reopen the conversation to check the saved result.</p>
+        <p className="mt-3 text-xs text-[var(--anka-warning)]">Ordinary text replies exclude private files. Governed proposals retain their separate, explicit source controls. PDF, OCR, and vision input remain unavailable.</p><p className="mt-2 text-xs text-[var(--anka-muted)]">Answers appear after the provider response is saved. “Stop watching” closes this view; the request may continue and incur cost. Reopen the conversation to check the saved result.</p>
       </div>}
       <div className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-5 text-sm leading-6 text-[var(--anka-muted)]">
         <p className="font-semibold text-[var(--anka-ink)]">Human control remains intact</p>

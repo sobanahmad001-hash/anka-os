@@ -21,7 +21,7 @@ test('all four department routes use one canonical workshop', async () => {
   ]) {
     assert.match(
       appSource,
-      new RegExp(`path="sphere/${path}" element={<DepartmentWorkshop departmentId="${department}" \\/>}`)
+      new RegExp(`path="sphere/${path}" element={<DepartmentWorkshop departmentId="${department}"(?: key="${department}")? \\/>}`)
     )
   }
 
@@ -33,4 +33,13 @@ test('all four department routes use one canonical workshop', async () => {
   assert.match(navigationSource, /Marketing Workshop/)
   assert.match(navigationSource, /Coordination/)
   assert.match(navigationSource, /label: 'Development delivery'/)
+})
+
+
+test('switching Workshops mounts fresh department state without changing Development routing', async () => {
+  const app = await readFile(appUrl, 'utf8')
+  for (const department of ['content', 'design', 'marketing']) {
+    assert.ok(app.includes(`<DepartmentWorkshop departmentId="${department}" key="${department}" />`))
+  }
+  assert.ok(app.includes('path="sphere/delivery" element={<DepartmentWorkshop departmentId="development" />}'))
 })
