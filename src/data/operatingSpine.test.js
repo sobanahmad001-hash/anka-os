@@ -148,7 +148,7 @@ function readOnlyPipelineClient(visibleRows) {
   const client = {
     from(table) {
       const query = {
-        select() { return query },
+        select(columns) { calls.push({ table, operator: 'select', columns }); return query },
         eq(column, value) { calls.push({ table, operator: 'eq', column, value }); return query },
         in(column, values) { calls.push({ table, operator: 'in', column, values }); return query },
         is(column, value) { calls.push({ table, operator: 'is', column, value }); return query },
