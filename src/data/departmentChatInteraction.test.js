@@ -113,7 +113,7 @@ test('Design workbench disclosures keep source selection and unsent draft mounte
   assert.equal(composer.value, 'Retain this unsent draft')
   const consent = nodes(container, 'input').find(node => node.parentNode?.textContent.includes('I confirm this message'))
   assert.equal(consent, undefined)
-  assert.equal(byText(container, 'button', 'Ask Anka AI').disabled, false)
+  assert.equal(byText(container, 'button', 'Send').disabled, false)
   assert.equal(nodes(container, 'div').find(node => node.getAttribute('class')?.includes('design-chat-composer')).getAttribute('class').includes('xl:grid-cols'), false)
   await act(async () => root.unmount())
 })

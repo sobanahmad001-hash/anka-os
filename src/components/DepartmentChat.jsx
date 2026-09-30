@@ -1,3 +1,4 @@
+import './departmentChatWorkbench.css'
 import TextAiConsent, { useTextAiConsent } from './TextAiConsent.jsx'
 import { textAiConsentKey } from '../data/textAiConsent.js'
 import { restrictArtifactTypes } from '../data/departmentChatArtifactTypes.js'
@@ -54,6 +55,7 @@ export function ScopedDepartmentChat({
   onComposerDirtyChange,
   selectOrganization,
 }) {
+  const submissionFlight = useRef(false)
   const completion = useRef(null)
   const requestedConversation = useRef(initialConversation).current
   const answerObservation = useRef(null)
@@ -137,6 +139,15 @@ export function ScopedDepartmentChat({
   const [sourceBusy, setSourceBusy] = useState(false)
   const [sourceError, setSourceError] = useState('')
   const [sourceRefresh, setSourceRefresh] = useState(0)
+  const compactWorkbench = presentation === 'workbench'
+  const workbenchRef = useRef(null)
+  useLayoutEffect(() => {
+    if (!compactWorkbench || !workbenchRef.current || !workbenchRef.current.style?.setProperty || !workbenchRef.current.getBoundingClientRect) return
+    const panel = workbenchRef.current
+    const measure = () => panel.style.setProperty('--department-chat-height', Math.max(260, (globalThis.innerHeight || globalThis.window?.innerHeight || 900) - panel.getBoundingClientRect().top - 88) + 'px')
+    measure(); globalThis.addEventListener?.('resize', measure); globalThis.addEventListener?.('scroll', measure, true)
+    return () => { globalThis.removeEventListener?.('resize', measure); globalThis.removeEventListener?.('scroll', measure, true) }
+  }, [compactWorkbench])
   const [contextExpanded, setContextExpanded] = useState(() => presentation !== 'workbench' && (!globalThis.window?.matchMedia || globalThis.window.matchMedia('(min-width: 1280px)').matches))
 
   const [pendingDraftSwitch, setPendingDraftSwitch] = useState(null)
@@ -828,6 +839,13 @@ export function ScopedDepartmentChat({
 
   async function submit(event) {
     event.preventDefault()
+    if (submissionFlight.current) return
+    submissionFlight.current = true
+    try { await submitRequest(event) } finally { submissionFlight.current = false }
+  }
+
+  async function submitRequest(event) {
+    event.preventDefault()
     if (busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim()) return
     if (proposalMode === 'artifact' && !artifactTypes.includes(artifactType)) { setError('This artifact tool is unavailable in this chat.'); return }
     if (!allowArtifactDraft && proposalMode === 'artifact') { setError('Open the specialist Studio to draft an artifact.'); return }
@@ -995,7 +1013,8 @@ export function ScopedDepartmentChat({
   }
 
   const SourcePanel = presentation === 'workbench' ? 'details' : 'section'
-  return <><div className={presentation === 'workbench' ? 'design-chat-composer grid min-w-0 gap-4' : `grid gap-6 ${supportsSavedConversations ? hideConversationList ? 'xl:grid-cols-[minmax(0,1fr)_320px]' : 'xl:grid-cols-[260px_minmax(0,1fr)_320px]' : 'xl:grid-cols-[minmax(0,1fr)_360px]'}`}>
+  const ConversationControls = compactWorkbench ? 'details' : 'div'
+  return <><div ref={workbenchRef} className={presentation === 'workbench' ? 'department-chat-workbench design-chat-composer grid min-w-0 gap-3' : `grid gap-6 ${supportsSavedConversations ? hideConversationList ? 'xl:grid-cols-[minmax(0,1fr)_320px]' : 'xl:grid-cols-[260px_minmax(0,1fr)_320px]' : 'xl:grid-cols-[minmax(0,1fr)_360px]'}`}>
     {supportsSavedConversations && !hideConversationList && <aside className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4">
       <div className="flex items-center justify-between gap-3">
         <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--anka-muted)]">Conversations</p><p className="mt-1 text-xs text-[var(--anka-success)]">Private to you or deliberately shared</p></div>
@@ -1024,20 +1043,23 @@ export function ScopedDepartmentChat({
         {nextConversationCursor && <button type="button" disabled={busy || historyBusy} onClick={() => loadMoreConversations().catch(reason => setError(reason.message))} className="w-full rounded-lg border border-[var(--anka-line)] px-3 py-2 text-xs font-semibold text-[var(--anka-ink)] disabled:opacity-50">Load more</button>}
       </div>
     </aside>}
-    <form onSubmit={submit} className="min-w-0 rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4 sm:p-6">
-      {supportsSavedConversations && hideConversationList && <button type="button" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)} className="mb-4 rounded-lg bg-[var(--anka-violet)] px-3 py-2 text-sm text-[var(--anka-on-violet)]">New engagement conversation</button>}
+    <form onSubmit={submit} className={(compactWorkbench ? 'department-chat-main ' : '') + "min-w-0 rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4 sm:p-6"}>
+      {supportsSavedConversations && hideConversationList && !compactWorkbench && <button type="button" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)} className="mb-4 rounded-lg bg-[var(--anka-violet)] px-3 py-2 text-sm text-[var(--anka-on-violet)]">New engagement conversation</button>}
+      {compactWorkbench ? <header className="department-chat-heading"><div><h2>{resolvedDepartmentLabel} · Chat</h2><p>{currentConversation?.title || 'Choose or start a conversation'} · {!currentConversation ? 'Private draft' : isConversationOwner ? sharing.recipients?.length ? 'Shared with selected teammates' : 'Private' : 'Shared with you'}</p></div>{supportsSavedConversations && hideConversationList && <button type="button" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)}>New chat</button>}</header> : <>
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--anka-info)]">{presentationLabel} · {departmentId}</p>
         <h2 className="mt-2 text-2xl font-semibold text-[var(--anka-ink)]">{presentation === 'workbench' ? 'Discuss the work' : 'Ask, explore, or prepare a governed proposal'}</h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--anka-muted)]">Ordinary answers stay conversational and create no official record. Artifact and work-item modes remain explicit governed proposals requiring separate confirmation.</p>
         {supportsSavedConversations && <p className="mt-2 text-xs leading-5 text-[var(--anka-muted)]">Work context: canonical client engagement. Saved conversations are creator-private until explicitly shared with eligible internal contributors. Standalone private-project and internal-project chat modes are unavailable here.</p>}
       </div>
+      </>}
       {error && <div className="mt-5 rounded-xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] p-3 text-sm text-[var(--anka-danger)]">{error}</div>}
       {draftNotice && <div className="mt-5 rounded-xl border border-[var(--anka-info)] bg-[var(--anka-surface-raised)] p-3 text-sm text-[var(--anka-info)]">{draftNotice}</div>}
       {observationNotice && <div className="mt-5 rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] p-3 text-sm text-[var(--anka-warning)]">{observationNotice}</div>}
       {answerState.text && <div className="mt-5 rounded-xl border border-[var(--anka-info)] bg-[var(--anka-surface-raised)] p-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-info)]">{answerState.durable ? 'Saved answer' : 'Live partial · not yet durable'}</p><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[var(--anka-ink)]">{answerState.text}</p></div>}
       {supportsSavedConversations && !projectId && <div className="mt-5 rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] p-3 text-sm text-[var(--anka-warning)]">Saved chat requires a canonical project-owned engagement.</div>}
-      {supportsSavedConversations && currentConversation && <div className="mt-5 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-4">
+      {supportsSavedConversations && currentConversation && <ConversationControls className="department-chat-controls mt-5 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-4">
+        {compactWorkbench && <summary>Conversation details and sharing</summary>}
         <div className="flex flex-wrap items-end gap-3">
           <label className="min-w-0 flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Conversation title
             <input maxLength="160" readOnly={!isConversationOwner} disabled={busy || historyBusy} className={`${INPUT} mt-2 normal-case tracking-normal`} value={conversationTitle} onChange={event => setConversationTitle(event.target.value)} />
@@ -1058,10 +1080,10 @@ export function ScopedDepartmentChat({
           <button type="button" disabled={busy || historyBusy} onClick={() => saveSharing().catch(reason => setError(reason.message))} className="mt-3 rounded-lg border border-[var(--anka-info)] px-3 py-2 text-xs font-semibold text-[var(--anka-info)] disabled:opacity-50">Save sharing</button>
           <p className="mt-2 text-xs text-[var(--anka-muted)]">Removing a person revokes later reads and replies immediately. Sharing never grants approval or execution power.</p>
         </div>}
-      </div>}
-      {supportsSavedConversations && <ConversationHistory messages={messages} userId={userId} busy={busy} onConfirm={proposal => decide('confirm', proposal)} onReject={proposal => decide('reject', proposal)} />}
-      <div className="mt-6 space-y-5">
-        {supportsSavedConversations && capabilities && <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Approved model
+      </ConversationControls>}
+      <div className={compactWorkbench ? 'department-chat-messages' : undefined} aria-label="Engagement chat messages">{supportsSavedConversations && <ConversationHistory messages={messages} userId={userId} busy={busy} onConfirm={proposal => decide('confirm', proposal)} onReject={proposal => decide('reject', proposal)} />}</div>
+      <div className={compactWorkbench ? 'department-chat-footer' : 'mt-6 space-y-5'}>
+        {supportsSavedConversations && capabilities && <label className="department-chat-model block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Approved model
           <select
             className={`${INPUT} mt-2 normal-case tracking-normal`}
             value={modelConfigurationId}
@@ -1077,11 +1099,11 @@ export function ScopedDepartmentChat({
           >
             {(capabilities.approved_models || []).map(model => <option key={model.configuration_id} value={model.configuration_id}>{MODEL_PROVIDER_LABELS[model.provider || capabilities.provider] || 'Provider unavailable'} · {model.display_name || model.model_id}{model.is_default ? ' · default' : ''}</option>)}
           </select>
-          <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-muted)]">Only administrator-approved models verified through this engagement's connector are available. A revoked or stale choice is rejected before dispatch without fallback.</span>
+          <span hidden={compactWorkbench} className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-muted)]">Only administrator-approved models verified through this engagement's connector are available. A revoked or stale choice is rejected before dispatch without fallback.</span>
           {isAnswerMode && answerReadiness && <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-warning)]">{!answerReadiness.paid_execution_enabled ? 'Workshop AI answers are currently off.' : !answerReadiness.spend_tracking_configured ? 'Organization spend tracking is not configured.' : !selectedPriceReady ? 'A fresh verified price for this exact model is unavailable.' : answerReadiness.spend_guard_mode === 'provider_managed' ? 'Provider-side spend limits are managed externally and cannot be verified or enforced by Anka. Each request is still priced and recorded.' : 'Local checks passed; the service will recheck before dispatch.'}</span>}
           {isAnswerMode && !answerReadiness && <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-warning)]">Workshop answer readiness is unavailable.</span>}
         </label>}
-        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Task mode
+        <label className="department-chat-mode block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Task mode
           <select disabled={busy || historyBusy} className={`${INPUT} mt-2 normal-case tracking-normal`} value={proposalMode} onChange={event => setProposalMode(event.target.value)}>
             {supportsSavedConversations && <option value="answer">Conversational answer</option>}
             {allowArtifactDraft && artifactTypes.length > 0 && <option value="artifact">Artifact draft</option>}
@@ -1210,8 +1232,8 @@ export function ScopedDepartmentChat({
           <p className="mt-3 text-xs text-[var(--anka-muted)]">Choose up to three files for this turn. Only checked files are linked to the request; rejected limits never truncate content. Revocation blocks later server reads and replies, but cannot recall copies someone already saved.</p>
         </SourcePanel>}
 
-        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">{isAnswerMode ? 'Message' : 'Draft request'}
-          <textarea ref={composerRef} required rows="10" className={`${INPUT} mt-2 normal-case tracking-normal`} value={prompt} onInput={event => setPrompt(event.currentTarget.value)} placeholder={isAnswerMode ? 'Ask a question or explore the work context. This will not create an official output.' : 'Describe the draft you need, the evidence to prioritize, known constraints, tone, and gaps the team should keep visible.'} />
+        <label className="department-chat-prompt block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]"><span className={compactWorkbench ? 'sr-only' : undefined}>{isAnswerMode ? 'Message' : 'Draft request'}</span>
+          <textarea ref={composerRef} required rows={compactWorkbench ? 3 : 10} className={`${INPUT} mt-2 normal-case tracking-normal`} value={prompt} onInput={event => setPrompt(event.currentTarget.value)} placeholder={isAnswerMode ? 'Ask a question or explore the work context. This will not create an official output.' : 'Describe the draft you need, the evidence to prioritize, known constraints, tone, and gaps the team should keep visible.'} />
         </label>
 
         {!isAnswerMode && <label className="flex items-start gap-3 rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] p-4 text-sm leading-6 text-[var(--anka-warning)]">
@@ -1223,9 +1245,9 @@ export function ScopedDepartmentChat({
         {supportsSavedConversations && currentConversation && <button type="button" disabled={busy || historyBusy || attachmentBusy || draftSaving || !prompt.trim()} onClick={saveUnsentDraft} className="w-full rounded-xl border border-[var(--anka-info)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-info)] disabled:opacity-50">{draftSaving ? 'Saving draft…' : 'Save draft to this conversation'}</button>}
         <button
           disabled={busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim() || (!isAnswerMode && !safe) || proposalModelUnavailable || (isAnswerMode && !answerLocalChecksPass) || (supportsSavedConversations && (!currentConversation || currentConversation.state !== 'active' || !modelConfigurationId)) || (isWorkItemMode && !title.trim()) || (!isAnswerMode && !isWorkItemMode && !artifactTypes.includes(artifactType))}
-          className={`${PRIMARY} w-full`}
+          className={`${PRIMARY} w-full department-chat-submit`}
         >
-          {busy ? (isAnswerMode ? 'Processing answer…' : 'Generating safe preview…') : isAnswerMode ? 'Ask Anka AI' : isWorkItemMode ? 'Preview draft work item' : 'Preview draft artifact'}
+          {busy ? (isAnswerMode ? 'Processing answer…' : 'Generating safe preview…') : isAnswerMode ? compactWorkbench ? 'Send' : 'Ask Anka AI' : isWorkItemMode ? 'Preview draft work item' : 'Preview draft artifact'}
         </button>
         {busy && isAnswerMode && <button type="button" onClick={() => answerObservation.current?.stop()} className="w-full rounded-xl border border-[var(--anka-warning)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-warning)]">Stop watching locally</button>}
       </div>

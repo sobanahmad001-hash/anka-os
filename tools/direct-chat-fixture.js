@@ -62,15 +62,25 @@ export function createDirectChatFixture({ surface = 'content', state = 'empty', 
   }
   const engagementConversation = { id: 'a0000000-0000-4000-8000-000000000021', organization_id: organizationId, department_id: 'content', project_id: projectId, engagement_id: fixture.engagements[0].id, owner_id: actor, title: 'Page brief · separate project history', state: 'active', access_role: 'owner' }
   fixture.engagementMessages = []
+  fixture.engagementTurns = []
+  fixture.allowEngagementAnswer = false
   fixture.chat = {
-    getCapabilities: async () => ({ provider: 'openai', default_model_configuration_id: modelId, approved_models: [{ configuration_id: modelId, provider: 'openai', model_id: 'Approved text · offline fixture', display_name: 'Offline configuration' }], answer_readiness: { paid_execution_enabled: false, spend_tracking_configured: false, model_price_available: [] }, attachments: { supported: false } }),
+    getCapabilities: async () => ({ provider: 'openai', default_model_configuration_id: modelId, approved_models: [{ configuration_id: modelId, provider: 'openai', model_id: 'Approved text · offline fixture', display_name: 'Offline configuration' }], answer_readiness: { paid_execution_enabled: fixture.allowEngagementAnswer, spend_tracking_configured: fixture.allowEngagementAnswer, model_price_available: fixture.allowEngagementAnswer ? [{ configuration_id: modelId, fresh_price_available: true }] : [] }, attachments: { supported: false } }),
     getConversation: async (_department, input) => { if (input.conversation_id !== engagementConversation.id || input.engagement_id !== fixture.engagements[0].id || input.project_id !== projectId) throw failure('Foreign engagement fixture request', 403); return { conversation: engagementConversation, messages: fixture.engagementMessages, sharing: { can_manage: false, recipients: [] } } },
     listAttachments: async () => [], listSourceVersions: async () => [], getUnsentDraft: async () => null,
     discardUnsentDraft: async () => ({}),
     saveUnsentDraft: async () => { throw failure('Draft persistence is not exercised in this fixture.', 409) },
-    answer: async () => { throw failure('No provider execution is allowed in this fixture.', 403) },
+    answer: async (_department, input, scope, { onEvent }) => {
+      if (!fixture.allowEngagementAnswer || scope.organizationId !== organizationId || scope.signal.aborted || input.engagement_id !== fixture.engagements[0].id || input.project_id !== projectId || input.conversation_id !== engagementConversation.id) throw failure('Foreign or disabled offline answer request', 403)
+      if (fixture.engagementTurns.some(turn => turn.client_request_id === input.client_request_id)) throw failure('Duplicate offline request identity', 409)
+      fixture.engagementTurns.push(structuredClone(input))
+      onEvent({ type: 'started' })
+      const answer = 'OFFLINE SAVED ANSWER · ' + input.prompt
+      fixture.engagementMessages.push({ id: crypto.randomUUID(), role: 'user', body: input.prompt, author_id: actor, status: 'completed', created_at: new Date().toISOString() }, { id: crypto.randomUUID(), role: 'assistant', body: answer, status: 'completed', created_at: new Date().toISOString() })
+      onEvent({ type: 'completed', answer })
+    },
 
-    searchConversations: async (_department, input) => ({ items: 'Page brief · separate project history'.toLowerCase().includes((input.query || '').toLowerCase()) ? [{ id: 'a0000000-0000-4000-8000-000000000021', organization_id: organizationId, department_id: 'content', project_id: input.project_id, engagement_id: input.engagement_id, title: 'Page brief · separate project history', state: 'active', access_role: 'owner' }] : [], next_cursor: null }),
+    searchConversations: async (_department, input) => ({ items: 'Page brief · separate project history'.toLowerCase().includes((input.query || '').toLowerCase()) ? [{ id: 'a0000000-0000-4000-8000-000000000021', organization_id: organizationId, department_id: 'content', project_id: input.project_id, engagement_id: input.engagement_id, title: 'Page brief · separate project history', state: 'active', access_role: 'owner', owner_id: actor }] : [], next_cursor: null }),
     listContextConversations: async input => data.rows.filter(row => row.context_kind === input.context_kind && (row.project_id || '') === (input.project_id || '') && (row.department_id || '') === (input.department_id || '')).slice(input.offset || 0, (input.offset || 0) + 51),
     getContextConversation: async input => {
       const row = data.rows.find(item => item.id === input.conversation_id)

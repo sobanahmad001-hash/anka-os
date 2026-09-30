@@ -36,6 +36,9 @@ async function writerAssertions(browser) {
     await page.goto(`${base}?panel=writer&surface=content&state=empty&theme=${theme}`)
     const chatComposer = page.getByRole('textbox', { name: /^Message/ })
     await chatComposer.waitFor()
+    const composerBounds = await chatComposer.boundingBox()
+    assert(composerBounds && composerBounds.y >= 0 && composerBounds.y + composerBounds.height <= height, 'Shared engagement composer extends below viewport')
+    assert(await page.locator('.department-chat-messages').evaluate(node => node.getBoundingClientRect().height >= 80))
     await chatComposer.fill('Keep this unsent engagement message')
     await page.getByRole('button', { name: 'Open Content writer beside chat', exact: true }).click()
     const pane = page.getByRole(width <= 900 ? 'dialog' : 'complementary', { name: 'Canonical Content side editor', exact: true })
@@ -94,6 +97,7 @@ async function writerAssertions(browser) {
     if (width > 900) await pane.getByRole('button', { name: 'Back to chat', exact: true }).click()
     assert.equal(await chatComposer.inputValue(), 'Keep this unsent engagement message')
     results.at(-1).actualEngagementComposerPreserved = true
+    results.at(-1).sharedChatComposerWithinViewport = true
     await context.close()
     console.log('VERIFY canonical writer', width, height, theme)
   }
@@ -104,6 +108,37 @@ async function writerAssertions(browser) {
   await fs.writeFile(path.join(output, 'b3-content-writer-browser-evidence.json'), JSON.stringify({ source: 'tools/check-direct-chat-browser.cjs --writer', scope: 'Actual engagement Chat and canonical side writer/shell; isolated backend metadata and canonical save fixture. No provider request, production write or installed acceptance. Chat send and remote draft persistence are not exercised.', results }, null, 2))
   }
   console.log(JSON.stringify({ writerCasesPassed: results.length }))
+}
+
+async function sharedChatAssertions(browser) {
+ const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+ const page = await context.newPage(); page.setDefaultTimeout(15000)
+ const errors=[], blocked=[]; page.on('pageerror',error=>errors.push(error.message))
+ await page.route('**/*',route=>{ const url=new URL(route.request().url()); if(url.hostname==='127.0.0.1'&&url.port==='5188')return route.continue(); blocked.push(url.origin); return route.abort() })
+ await page.goto(`${base}?panel=writer&answer=fixture&surface=content&state=empty&theme=light`)
+ const composer=page.getByRole('textbox',{name:/^Message/})
+ const form=page.locator('.department-chat-main')
+ await composer.fill('First offline question')
+ await form.evaluate(node=>{ node.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})); node.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})) })
+ await page.getByRole('dialog',{name:'Confirm AI data sharing',exact:true}).waitFor()
+ await page.getByRole('button',{name:'Allow and ask Anka AI',exact:true}).click()
+ await page.waitForFunction(()=>globalThis.__directChatPreview.fixture.engagementMessages.length===2 && document.querySelector('.department-chat-prompt textarea')?.value==='')
+ await composer.fill('Follow-up offline question')
+ await form.evaluate(node=>{ node.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})); node.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})) })
+ await page.waitForFunction(()=>globalThis.__directChatPreview.fixture.engagementMessages.length===4 && document.querySelector('.department-chat-prompt textarea')?.value==='')
+ assert.equal(await page.getByRole('dialog',{name:'Confirm AI data sharing',exact:true}).count(),0)
+ const turns=await page.evaluate(()=>globalThis.__directChatPreview.fixture.engagementTurns)
+ assert.equal(turns.length,2); assert.notEqual(turns[0].client_request_id,turns[1].client_request_id)
+ assert.equal(turns[0].prompt,'First offline question'); assert.equal(turns[1].prompt,'Follow-up offline question')
+ await composer.fill('Keep unsent after saved answers')
+ await page.getByRole('link',{name:'Home',exact:true}).click()
+ const draft=page.getByRole('dialog',{name:'Unsent chat draft',exact:true}); await draft.waitFor()
+ await draft.getByRole('button',{name:'Stay',exact:true}).click()
+ assert.equal(await composer.inputValue(),'Keep unsent after saved answers')
+ assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
+ const file=path.join(output,'b3-content-writer-browser-evidence.json'), evidence=JSON.parse(await fs.readFile(file,'utf8'))
+ evidence.sharedChat={scope:'Actual compact workbench in one existing saved conversation, mock answer persistence only; fresh-chat atomic creation and live provider acceptance not exercised',firstAndFollowupSingleFlight:true,oneConsentForUnchangedScope:true,distinctDurableRequestIds:true,savedMessages:4,routeStayPreservesUnsentDraft:true,providerCalls:0,productionWrites:0,pageErrors:errors,blockedRemoteRequests:blocked}
+ await fs.writeFile(file,JSON.stringify(evidence,null,2));await context.close();console.log('VERIFY actual shared Chat: two local turns, duplicate submissions suppressed, consent reused, route draft preserved')
 }
 
 ;(async () => {
@@ -120,6 +155,7 @@ async function writerAssertions(browser) {
     ['content', 'empty', 'system', 320, 900],
   ]
   try {
+    if (process.argv.includes('--shared-chat')) { await sharedChatAssertions(browser); return }
     if (process.argv.includes('--writer') || process.argv.includes('--writer-recovery')) { await writerAssertions(browser); return }
     for (const [surface, state, theme, width, height] of cases) {
       const context = await browser.newContext({ viewport: { width, height }, colorScheme: 'light' })

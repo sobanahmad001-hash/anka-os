@@ -95,5 +95,5 @@ test('engagement chat optional presentation label preserves its default and cont
   assert.match(workbench, /<details[^>]*aria-label="Exact artifact sources"/)
   assert.match(workbench, /References · 0 selected/)
   assert.doesNotMatch(workbench, /I confirm this message/)
-  assert.match(workbench, /Ask Anka AI/)
+  assert.match(workbench, /Send/)
 })

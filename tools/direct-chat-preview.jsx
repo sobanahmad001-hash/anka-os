@@ -20,6 +20,7 @@ const storageKey = `anka-offline-b1-fixture:${surface}:${state}`
 let stored
 try { stored = JSON.parse(sessionStorage.getItem(storageKey)) } catch { /* Empty fixture. */ }
 const fixture = createDirectChatFixture({ surface, state, stored, persist: data => { sessionStorage.setItem(storageKey, JSON.stringify(data)); window.dispatchEvent(new Event('fixture-counters')) } })
+fixture.allowEngagementAnswer = params.get('answer') === 'fixture'
 const scope = fixture.scope
 if (!stored && ['failed', 'uncertain'].includes(state)) writeDirectChatRecovery(directChatRecoveryKey(actor, organizationId, scope.context_kind, scope.project_id, scope.department_id), { conversation_id: threadId, client_request_id: requestId, dispatch_request_id: dispatchId, message_id: humanId })
 const membership = { organizationId, organization: { id: organizationId, name: 'Anka preview' }, role: 'operations_admin', departmentId: 'content', departmentIds: ['content'] }
