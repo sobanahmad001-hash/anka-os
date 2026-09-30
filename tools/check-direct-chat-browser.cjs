@@ -105,7 +105,9 @@ async function writerAssertions(browser) {
     const file = path.join(output, 'b3-content-writer-browser-evidence.json')
     const existing = JSON.parse(await fs.readFile(file, 'utf8')); existing.recoveryResults = results; await fs.writeFile(file, JSON.stringify(existing, null, 2))
   } else {
-  await fs.writeFile(path.join(output, 'b3-content-writer-browser-evidence.json'), JSON.stringify({ source: 'tools/check-direct-chat-browser.cjs --writer', scope: 'Actual engagement Chat and canonical side writer/shell; isolated backend metadata and canonical save fixture. No provider request, production write or installed acceptance. Chat send and remote draft persistence are not exercised.', results }, null, 2))
+  const file = path.join(output, 'b3-content-writer-browser-evidence.json')
+  let existing = {}; try { existing = JSON.parse(await fs.readFile(file, 'utf8')) } catch { /* First evidence write. */ }
+  await fs.writeFile(file, JSON.stringify({ ...existing, source: 'tools/check-direct-chat-browser.cjs --writer', scope: 'Actual engagement Chat and canonical side writer/shell; isolated backend metadata and canonical save fixture. No provider request, production write or installed acceptance. Chat send is separately mocked and labelled in sharedChat.', results }, null, 2))
   }
   console.log(JSON.stringify({ writerCasesPassed: results.length }))
 }
