@@ -181,7 +181,7 @@ function ServiceScopePanel({ project, organizationId, membership, scopeRevision,
             {canManage && <div className="flex flex-wrap gap-2">
               {scope.status === 'proposed' && <button type="button" disabled={saving || project.status !== 'active'} onClick={() => run('activate', scope)} className="rounded-lg border border-violet-400/30 px-3 py-1.5 text-xs text-violet-200 disabled:opacity-40">Activate service</button>}
               {scope.status === 'active' && ['pause', 'complete', 'cancel'].map(action => <button type="button" key={action} disabled={saving} onClick={() => beginReview(scope, action)} className="rounded-lg border border-amber-400/30 px-3 py-1.5 text-xs text-amber-200 disabled:opacity-40">{title(action)}…</button>)}
-              {['on_hold', 'cancelled'].includes(scope.status) && <button type="button" disabled={saving || project.status !== 'active'} onClick={() => run('resume', scope)} className="rounded-lg border border-violet-400/30 px-3 py-1.5 text-xs text-violet-200 disabled:opacity-40">Resume service</button>}
+              {['on_hold', 'cancelled'].includes(scope.status) && <button type="button" disabled={saving || project.status !== 'active'} onClick={() => beginReview(scope, 'resume')} className="rounded-lg border border-violet-400/30 px-3 py-1.5 text-xs text-violet-200 disabled:opacity-40">Resume service</button>}
             </div>}</div>
           {scope.scope_statement && <p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">{scope.scope_statement}</p>}
           {scope.exclusions && <p className="mt-2 text-xs text-slate-400">Exclusions: {scope.exclusions}</p>}

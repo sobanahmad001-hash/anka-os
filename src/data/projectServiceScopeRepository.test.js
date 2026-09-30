@@ -55,3 +55,18 @@ test('service proposal rejects a mismatched result', async () => {
   await assert.rejects(repository.change({ organizationId: org, projectId: project, requestId: request,
     action: 'add', serviceId: service, quantity: 1 }), /did not match/)
 })
+
+test('resume refuses absent acknowledgement and carries the exact impact revision', async () => {
+  const calls = []
+  const repository = createProjectServiceScopeRepository({ rpc(name, args) {
+    calls.push({ name, args })
+    return Promise.resolve({ data: { organization_id: org, project_id: project, request_id: request, scope_id: scope, revision: 4 } })
+  } })
+  const command = { organizationId: org, projectId: project, requestId: request, action: 'resume', scopeId: scope, expectedRevision: 3 }
+  await assert.rejects(repository.change(command), /Review and acknowledge/)
+  assert.equal(calls.length, 0)
+  await repository.change({ ...command, impactToken: 'reviewed-resume', impactAcknowledged: true })
+  assert.equal(calls[0].args.p_expected_revision, 3)
+  assert.equal(calls[0].args.p_impact_token, 'reviewed-resume')
+  assert.equal(calls[0].args.p_impact_acknowledged, true)
+})

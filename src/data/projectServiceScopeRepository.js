@@ -32,7 +32,7 @@ export function createProjectServiceScopeRepository(client) {
         : !uuid(input.scopeId) || !Number.isInteger(input.expectedRevision)) {
         throw new TypeError('Valid service selection or revision required')
       }
-      if (['pause', 'complete', 'cancel'].includes(action) && (!input.impactAcknowledged || !input.impactToken)) {
+      if (['pause', 'resume', 'complete', 'cancel'].includes(action) && (!input.impactAcknowledged || !input.impactToken)) {
         throw new TypeError('Review and acknowledge the current project-wide impact first')
       }
       const { data, error, status } = await client.rpc('change_project_service_scope', {
