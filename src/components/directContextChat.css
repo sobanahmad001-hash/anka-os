@@ -82,3 +82,5 @@
 
 .direct-chat-composer textarea { min-height: 60px; margin: 0 0 8px; }
 .direct-chat-toolbar :is(button, select) { padding-block: 6px; }
+
+.direct-chat-video { scroll-margin-top: 112px; }

@@ -4,7 +4,7 @@ import { useBlocker } from 'react-router-dom'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 
 // Uses the saved owner-private conversation only; no project or chat history is supplied.
-export default function PrivateDesignVideoTools({ conversationId, beforeGenerate, onNavigationBusyChange }) {
+export default function PrivateDesignVideoTools({ conversationId, beforeGenerate, onNavigationBusyChange, onDraftDirtyChange }) {
   const { activeOrganizationId } = useOrganization()
   const [busy, setBusy] = useState(false)
   const blocker = useBlocker(busy)
@@ -26,6 +26,6 @@ export default function PrivateDesignVideoTools({ conversationId, beforeGenerate
     <h3>Video · Higgsfield Seedance 2.5</h3>
     {blocker.state === 'blocked' && <p role="alert">A private video request or draft copy needs recovery before leaving. <button type="button" onClick={() => blocker.reset()}>Stay and recover</button></p>}
     <DesignVideoCapabilities privateConversationId={conversationId} presentation="workbench"
-      beforeGenerate={beforeGenerate} onNavigationBusyChange={reportBusy} />
+      beforeGenerate={beforeGenerate} onNavigationBusyChange={reportBusy} onDraftDirtyChange={onDraftDirtyChange} />
   </section>
 }

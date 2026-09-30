@@ -14,7 +14,7 @@ export const allowlist = { connections: [{ id: 'preview-connection', provider: '
 const failure = (message, status) => Object.assign(new Error(message), { status })
 
 export function createDirectChatFixture({ surface = 'content', state = 'empty', stored, persist = () => {} } = {}) {
-  const scope = surface === 'organization' ? { context_kind: 'organization', project_id: null, department_id: null } : surface === 'marketing' ? { context_kind: 'department_private', department_id: 'marketing', project_id: null } : surface === 'project' ? { context_kind: 'project_team', project_id: projectId, department_id: null } : { context_kind: 'department_private', department_id: 'content', project_id: null }
+  const scope = surface === 'organization' ? { context_kind: 'organization', project_id: null, department_id: null } : ['marketing', 'design'].includes(surface) ? { context_kind: 'department_private', department_id: surface, project_id: null } : surface === 'project' ? { context_kind: 'project_team', project_id: projectId, department_id: null } : { context_kind: 'department_private', department_id: 'content', project_id: null }
   const seeded = state !== 'empty'
   const conversation = { id: threadId, ...scope, organization_id: organizationId, engagement_id: null, owner_id: actor, title: 'A clear introduction', state: 'active' }
   const human = { id: humanId, conversation_id: threadId, client_request_id: requestId, author_id: actor, role: 'user', body: 'Write a clear introduction for our project.', status: 'completed', sequence: 1 }
@@ -22,6 +22,12 @@ export function createDirectChatFixture({ surface = 'content', state = 'empty', 
     body: 'OFFLINE FIXTURE · No provider call\n\nA clear introduction starts with the people we serve and the problem we help them solve. This saved reply is illustrative preview content.' }
   const data = stored || { rows: seeded ? [conversation] : [], messages: seeded ? [human, ...(['populated', 'output-open'].includes(state) ? [assistant] : [])] : [], counters: { created: 0, messages: 0, run: 0, recover: 0 } }
   const fixture = { data, scope, readiness: ready, runFailure: false, createUncertain: false, recoveryAvailable: !['failed', 'uncertain'].includes(state), beforeStart: null, beforeRun: null }
+  fixture.videoReads = []; fixture.videoQuotes = []; fixture.videoGenerationCalls = 0
+  fixture.designWorkshop = {
+    listPrivateVideoJobs: async id => { if (!data.rows.some(row => row.id === id && row.department_id === 'design' && row.owner_id === actor)) throw failure('Foreign private video fixture',403); fixture.videoReads.push(id); return [] },
+    getPrivateVideoQuote: async input => { fixture.videoQuotes.push(structuredClone(input)); return { paid_execution_enabled: false, spend_tracking_configured: false, spend_guard_mode: null, quote: null } },
+    generatePrivateVideo: async () => { fixture.videoGenerationCalls++; throw failure('Generation disabled in offline fixture',403) },
+  }
   fixture.engagements = [{ id: 'a0000000-0000-4000-8000-000000000020', organization_id: organizationId, project_id: projectId, name: 'Website Content' }]
   fixture.workstreams = [{ project_id: projectId, projects: { name: 'Launch project' } }]
   const save = () => persist(data)

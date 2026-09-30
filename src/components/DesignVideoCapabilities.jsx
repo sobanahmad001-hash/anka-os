@@ -9,15 +9,15 @@ import DesignVideoPromotion from './DesignVideoPromotion.jsx'
 const JOB_PAGE_SIZE = 50
 const UNSETTLED_VIDEO_STATUSES = new Set(['queued', 'claimed', 'provider_pending', 'provider_completed', 'outcome_unknown'])
 
-export default function DesignVideoCapabilities({ directionVersionId, privateConversationId, beforeGenerate, onNavigationBusyChange, presentation }) {
+export default function DesignVideoCapabilities({ directionVersionId, privateConversationId, beforeGenerate, onNavigationBusyChange, onDraftDirtyChange, presentation }) {
   const { activeOrganizationId, scopeRevision } = useOrganization()
   return <ScopedDesignVideoCapabilities
     key={`${activeOrganizationId}:${scopeRevision}:${directionVersionId || ''}:${privateConversationId || ''}`}
-    directionVersionId={directionVersionId} privateConversationId={privateConversationId} beforeGenerate={beforeGenerate} onNavigationBusyChange={onNavigationBusyChange} presentation={presentation} />
+    directionVersionId={directionVersionId} privateConversationId={privateConversationId} beforeGenerate={beforeGenerate} onNavigationBusyChange={onNavigationBusyChange} onDraftDirtyChange={onDraftDirtyChange} presentation={presentation} />
 }
 
 // eslint-disable-next-line no-unused-vars -- This config does not count JSX component references.
-function ScopedDesignVideoCapabilities({ directionVersionId: projectDirectionVersionId, privateConversationId, beforeGenerate, onNavigationBusyChange, presentation }) {
+function ScopedDesignVideoCapabilities({ directionVersionId: projectDirectionVersionId, privateConversationId, beforeGenerate, onNavigationBusyChange, onDraftDirtyChange, presentation }) {
   const { activeOrganizationId, requestSignal, scopeRevision } = useOrganization()
   const privateMode = Boolean(privateConversationId)
   // One real anchor only. A private conversation is never a fabricated project direction.
@@ -48,6 +48,7 @@ function ScopedDesignVideoCapabilities({ directionVersionId: projectDirectionVer
   const [connectionId, setConnectionId] = useState('')
   const [connectionError, setConnectionError] = useState('')
   const [prompt, setPrompt] = useState('')
+  useEffect(() => { onDraftDirtyChange?.(Boolean(prompt.trim())); return () => onDraftDirtyChange?.(false) }, [prompt, onDraftDirtyChange])
   const [spendConfirmed, setSpendConfirmed] = useState(false)
   const [submitBusy, setSubmitBusy] = useState(false)
   const [submitNotice, setSubmitNotice] = useState('')
@@ -284,7 +285,7 @@ function ScopedDesignVideoCapabilities({ directionVersionId: projectDirectionVer
     <form onSubmit={submitVideo} className="mt-3 space-y-3 rounded-lg border border-white/10 p-3">
       <p className="font-semibold text-slate-200">Prepare one exact video request</p>
       <label className="block">Prompt
-        <textarea className="mt-1 w-full rounded bg-slate-900 p-2 text-white" rows="4" maxLength={12000}
+        <textarea aria-label="Video prompt" className="mt-1 w-full rounded bg-slate-900 p-2 text-white" rows="4" maxLength={12000}
           value={prompt} disabled={submitBusy || Boolean(pendingRequest)} onChange={event => {
             setPrompt(event.target.value); setSpendConfirmed(false)
             submission.current = { signature: '', operationKey: '' }

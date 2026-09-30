@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import TextAiConsent, { useTextAiConsent } from './TextAiConsent.jsx'
 import { textAiConsentKey } from '../data/textAiConsent.js'
 import { departmentChat } from '../data/departmentChatRepository.js'
@@ -8,6 +8,8 @@ import { clearDirectChatRecovery, directChatRecoveryKey, readDirectChatRecovery,
 import { clearDirectChatDraft, readDirectChatDraft, writeDirectChatDraft } from '../data/directChatDraft.js'
 import { WorkshopChatHistoryContext } from '../context/WorkshopChatHistoryContext.jsx'
 import './directContextChat.css'
+const PrivateDesignVideoTools = lazy(() => import('./PrivateDesignVideoTools.jsx'))
+function VideoWorkbenchReady({ onReady }) { useEffect(onReady, [onReady]); return null }
 
 export default function DirectContextChat({ contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError, initialConversation, onConversationListChange, onNavigationBusyChange, onDraftDirtyChange }) {
   const workshopHistory = useContext(WorkshopChatHistoryContext)
@@ -40,6 +42,14 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   const [sharing, setSharing] = useState(null)
   const [recipients, setRecipients] = useState([])
   const [shareOpen, setShareOpen] = useState(false)
+  const [videoOpen, setVideoOpen] = useState(false)
+  const [videoOpened, setVideoOpened] = useState(false)
+  const [videoBusy, setVideoBusy] = useState(false)
+  const [videoDirty, setVideoDirty] = useState(false)
+  const videoLock = useRef(false), videoPane = useRef(null), videoButton = useRef(null), activePrivateConversation = useRef(null), videoVisible = useRef(false)
+  activePrivateConversation.current = selected
+  videoVisible.current = videoOpen
+  const privateDesign = contextKind === 'department_private' && departmentId === 'design'
   const [hasOlder, setHasOlder] = useState(false)
   const [offset, setOffset] = useState(0)
   const [hasMore, setHasMore] = useState(false)
@@ -57,6 +67,19 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   const outputClose = useRef(null)
   const current = () => alive.current && !signal.aborted
   const owner = !selected || selected.owner_id === actorId
+  const reportVideoBusy = useCallback(value => { videoLock.current = Boolean(value); setVideoBusy(Boolean(value)) }, [])
+  const checkPrivateVideoContext = useCallback(async exactId => {
+    if (!alive.current || signal.aborted || contextKind !== 'department_private' || departmentId !== 'design' || activePrivateConversation.current?.id !== exactId || lock.current || pendingRef.current) throw new Error('Private video context changed')
+    const result = await departmentChat.getContextConversation({ conversation_id: exactId }, { organizationId, signal })
+    const row = result.conversation
+    if (!alive.current || signal.aborted || activePrivateConversation.current?.id !== exactId || lock.current || pendingRef.current || row?.id !== exactId || row.owner_id !== actorId || row.organization_id !== organizationId || row.context_kind !== 'department_private' || row.department_id !== 'design' || row.project_id || row.engagement_id || row.state !== 'active') throw new Error('Private video context is unavailable')
+  }, [signal, contextKind, departmentId, organizationId, actorId])
+  const focusVideoPane = useCallback(() => {
+    if (!videoOpen) return
+    videoPane.current?.querySelector?.('button')?.focus?.({ preventScroll: true })
+    videoPane.current?.scrollIntoView?.({ block: 'start', behavior: 'instant' })
+  }, [videoOpen])
+
   const model = models.find(row => row.id === modelId)
   const ready = readiness?.model_configuration_id === modelId && readiness?.paid_execution_enabled === true
     && readiness?.spend_tracking_configured === true && readiness?.model_status === 'configured'
@@ -105,7 +128,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     setError(reason.message || 'Chat request failed')
   }
   async function exclusive(action) {
-    if (lock.current || !current()) return
+    if (lock.current || videoLock.current || !current()) return
     lock.current = true; setBusy(true); setError('')
     try { await action() } catch (reason) { report(reason) }
     finally { lock.current = false; if (current()) setBusy(false) }
@@ -126,11 +149,11 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     outputClose.current?.focus()
     return () => previous?.focus?.()
   }, [outputId])
-  useEffect(() => { onDraftDirtyChange?.(Boolean(draft.trim())); return () => onDraftDirtyChange?.(false) }, [draft,onDraftDirtyChange])
+  useEffect(() => { onDraftDirtyChange?.(Boolean(draft.trim()) || videoDirty); return () => onDraftDirtyChange?.(false) }, [draft,videoDirty,onDraftDirtyChange])
   useEffect(() => {
-    onNavigationBusyChange?.(busy || Boolean(pending))
+    onNavigationBusyChange?.(busy || Boolean(pending) || videoBusy)
     return () => onNavigationBusyChange?.(false)
-  }, [busy, pending, onNavigationBusyChange])
+  }, [busy, pending, videoBusy, onNavigationBusyChange])
   useEffect(() => {
     let active = true
     if (!hasExternalHistory) departmentChat.listContextConversations(scope, requestScope).then(result => {
@@ -186,7 +209,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   useEffect(() => {
     const root = rootRef.current
     if (!globalThis.innerHeight || !root?.getBoundingClientRect) return
-    const fit = () => root.style.setProperty('--direct-chat-height', `${Math.max(360, Math.min(760, innerHeight - root.getBoundingClientRect().top - 16))}px`)
+    const fit = () => { if (videoVisible.current) return; root.style.setProperty('--direct-chat-height', `${Math.max(360, Math.min(760, innerHeight - root.getBoundingClientRect().top - 16))}px`) }
     fit(); globalThis.addEventListener('resize', fit)
     const observer = globalThis.ResizeObserver ? new ResizeObserver(fit) : null
     observer?.observe(root.parentElement)
@@ -215,10 +238,12 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
   }
   async function openConversation(row) {
-    if (lock.current || pendingRef.current) return
+    if (lock.current || videoLock.current || pendingRef.current) return
+    if (videoDirty) { setError('Clear the unsent video prompt before opening another chat.'); return }
     await exclusive(async () => {
       const token = ++revision.current
       drafts.current.set(selected?.id || newId, draft)
+      setVideoOpen(false); setVideoOpened(false)
       setMessages([]); setSelected(null); setDraft(''); setNewId(crypto.randomUUID()); setOutputId(''); setSharing(null); setShareOpen(false); setCanonical(false)
       const result = await read(row.id)
       if (!current() || token !== revision.current) return
@@ -226,9 +251,11 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     })
   }
   function newChat() {
-    if (lock.current || pendingRef.current) return
+    if (lock.current || videoLock.current || pendingRef.current) return
+    if (videoDirty) { setError('Clear the unsent video prompt before starting a new chat.'); return }
     clearDirectChatDraft(recoveryKey)
     drafts.current.set(selected?.id || newId, draft)
+    setVideoOpen(false); setVideoOpened(false)
     revision.current++; setNewId(crypto.randomUUID()); setSelected(null); setMessages([]); setDraft('')
     setOutputId(''); setCanonical(false); setSharing(null); setShareOpen(false); setHistoryOpen(false); setNotice(''); setError('')
   }
@@ -323,17 +350,17 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     })
   }
   const output = messages.find(row => row.id === outputId && row.role === 'assistant' && row.status === 'completed')
-  return <section ref={rootRef} className={`direct-chat ${historyOpen ? 'history-open' : ''} ${output ? 'output-open' : ''}`} aria-label={label} onKeyDown={event => {
+  return <><section ref={rootRef} className={`direct-chat ${historyOpen ? 'history-open' : ''} ${output ? 'output-open' : ''}`} aria-label={label} onKeyDown={event => {
     if (event.key === 'Escape' && !consent.dialog) { setHistoryOpen(false); setOutputId(''); setShareOpen(false); setDetailsOpen(false) }
   }}>
     <header className="direct-chat-header" inert={drawerOpen ? true : undefined}><div><h2>{label}</h2><p>{selected?.title || 'New chat'} · {contextKind === 'department_private' ? 'Only you' : sharing?.recipients.length ? 'Shared with selected teammates' : 'Private unless explicitly shared'}</p></div>
-      <div className="direct-chat-actions"><button type="button" ref={historyButtonRef} aria-expanded={historyOpen} onClick={() => { setOutputId(''); setHistoryOpen(!historyOpen) }}>History</button>{!historyOpen && <button type="button" disabled={busy || Boolean(pending)} onClick={newChat}>New chat</button>}<button type="button" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>Details</button>
-        {selected && owner && contextKind === 'project_team' && <button type="button" disabled={busy} onClick={loadSharing}>Share</button>}</div>
+      <div className="direct-chat-actions">{privateDesign && <button ref={videoButton} type="button" disabled={busy || videoBusy || Boolean(pending) || !selected || !owner || selected.state !== 'active'} title={!selected ? "Send a message to save this private chat before opening video tools." : undefined} aria-expanded={videoOpen} onClick={() => { if (lock.current || videoLock.current || pendingRef.current) return; setVideoOpen(!videoOpen); setVideoOpened(true) }}>Video tools</button>}<button type="button" ref={historyButtonRef} aria-expanded={historyOpen} onClick={() => { setOutputId(''); setHistoryOpen(!historyOpen) }}>History</button>{!historyOpen && <button type="button" disabled={busy || videoBusy || Boolean(pending)} onClick={newChat}>New chat</button>}<button type="button" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>Details</button>
+        {selected && owner && contextKind === 'project_team' && <button type="button" disabled={busy || videoBusy} onClick={loadSharing}>Share</button>}</div>
     </header>
     {consent.dialog && <TextAiConsent {...consent.dialog} provider={model?.provider} model={`${model?.connectionName} · ${model?.label}`} scope={`${contextKind} conversation`} canonical={canonical && canCanonical} />}
     {error && <p role="alert" className="direct-chat-error">{error}</p>}
     {notice && !pending && <p role="status" className="direct-chat-notice">{notice}</p>}
-    {pending && <div className="direct-chat-notice direct-chat-recovery"><p>Check this send before sending again. Recovery never requests another AI reply.</p><button type="button" disabled={busy} onClick={recover}>Check recovery</button></div>}
+    {pending && <div className="direct-chat-notice direct-chat-recovery"><p>Check this send before sending again. Recovery never requests another AI reply.</p><button type="button" disabled={busy || videoBusy} onClick={recover}>Check recovery</button></div>}
     {detailsOpen && <aside className="direct-chat-details" aria-label="Chat details">
       <p>Attachments are unavailable in this chat. Drafts stay only in this browser tab for up to one hour, including refresh; successful Send clears the draft. Closing this tab ends local draft recovery.</p>
       <p>AI replies are organization-billed. The service rechecks model approval, exact pricing, spend tracking and access before dispatch.</p>
@@ -342,45 +369,51 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
       {readiness?.spend_tracking_configured === false && <p>Organization spend tracking is not configured.</p>}
       {readiness?.spend_guard_mode === 'provider_managed' && <p>Your provider-side spend limit is managed externally. Anka cannot verify or enforce it; each request is still priced and recorded.</p>}
       {contextKind === 'project_team' && <p>Shared collaborators can reply as humans. Only the owner can request AI. Teammate-authored messages are not sent to a provider; a request that would include one is blocked.</p>}
-      {owner && canCanonical && <label><input type="checkbox" checked={canonical} disabled={busy || !ready} onChange={event => setCanonical(event.target.checked)} />For this reply, also send OpenAI the current organization name and this project’s name, description, status, health, scope, and exclusions, plus a bounded sample of accessible project names, status and health, task and work-item titles, status, deadlines and assignee display names, sampled progress counts, and review-state counts. Record IDs, emails, contact details, descriptions of tasks or work items, files, transcripts, private memory, and teammate messages are excluded. The sample may be incomplete.</label>}
+      {owner && canCanonical && <label><input type="checkbox" checked={canonical} disabled={busy || videoBusy || !ready} onChange={event => setCanonical(event.target.checked)} />For this reply, also send OpenAI the current organization name and this project’s name, description, status, health, scope, and exclusions, plus a bounded sample of accessible project names, status and health, task and work-item titles, status, deadlines and assignee display names, sampled progress counts, and review-state counts. Record IDs, emails, contact details, descriptions of tasks or work items, files, transcripts, private memory, and teammate messages are excluded. The sample may be incomplete.</label>}
       {selected && owner && <form onSubmit={event => { event.preventDefault(); exclusive(async () => {
         const updated = await departmentChat.renameContextConversation({ conversation_id: selected.id, title: rename.trim() }, requestScope)
         if (!current()) return
         setSelected(updated); setRows(previous => previous.map(row => row.id === updated.id ? updated : row)); onConversationListChange?.()
-      }) }}><label>Rename chat<input aria-label="Rename chat" maxLength={160} value={rename} onChange={event => setRename(event.target.value)} /></label><button disabled={busy || !rename.trim()}>Save name</button></form>}
+      }) }}><label>Rename chat<input aria-label="Rename chat" maxLength={160} value={rename} onChange={event => setRename(event.target.value)} /></label><button disabled={busy || videoBusy || !rename.trim()}>Save name</button></form>}
     </aside>}
     {shareOpen && sharing && <aside className="direct-chat-details" aria-label="Share chat"><h3>Share this project conversation</h3><p>Only selected active internal teammates can see all current and future messages and reply. Sharing does not grant AI use, approval, or project record changes. Revoking stops later reads and replies; it cannot recall copies already seen.</p>
-      {sharing.candidates.map(row => <label key={row.id}><input type="checkbox" disabled={busy} checked={recipients.includes(row.id)} onChange={event => setRecipients(previous => event.target.checked ? [...previous, row.id] : previous.filter(id => id !== row.id))} />{row.full_name || row.id}</label>)}
-      <button type="button" disabled={busy} onClick={() => exclusive(async () => {
+      {sharing.candidates.map(row => <label key={row.id}><input type="checkbox" disabled={busy || videoBusy} checked={recipients.includes(row.id)} onChange={event => setRecipients(previous => event.target.checked ? [...previous, row.id] : previous.filter(id => id !== row.id))} />{row.full_name || row.id}</label>)}
+      <button type="button" disabled={busy || videoBusy} onClick={() => exclusive(async () => {
         await departmentChat.setProjectContextSharing({ conversation_id: selected.id, recipient_ids: recipients }, requestScope)
         if (!current()) return
         const result = await departmentChat.getProjectContextSharing({ conversation_id: selected.id }, requestScope)
         if (current()) { setSharing(result); setShareOpen(false) }
       })}>Save sharing</button><button type="button" onClick={() => setShareOpen(false)}>Close sharing</button></aside>}
     <div className="direct-chat-layout">
-      {historyOpen && <aside ref={historyOpen && mobileDrawer ? drawerRef : undefined} className="direct-chat-history" role={mobileDrawer ? 'dialog' : undefined} aria-modal={mobileDrawer ? true : undefined} aria-label="Chat history" onKeyDown={drawerKeyDown}>{mobileDrawer && <button ref={historyClose} type="button" onClick={() => setHistoryOpen(false)}>Close history</button>}<button type="button" disabled={busy || Boolean(pending)} onClick={newChat}>New chat</button>{workshopHistory ? workshopHistory.render(item => { if (!lock.current && !pendingRef.current) workshopHistory.onOpen(item); if (mobileDrawer) setHistoryOpen(false) }) : <><label>Search loaded chats<input aria-label="Search loaded chats" value={search} onChange={event => setSearch(event.target.value)} /></label>
-        {rows.filter(row => row.title.toLowerCase().includes(search.toLowerCase())).map(row => <button type="button" key={row.id} disabled={busy || Boolean(pending)} aria-pressed={selected?.id === row.id} onClick={() => openConversation(row)}>{row.title}</button>)}
-        {historyLoading ? <p role="status">Loading history…</p> : !rows.length && <p>No saved chats yet.</p>}{hasMore && <button type="button" disabled={busy} onClick={() => exclusive(async () => {
+      {historyOpen && <aside ref={historyOpen && mobileDrawer ? drawerRef : undefined} className="direct-chat-history" role={mobileDrawer ? 'dialog' : undefined} aria-modal={mobileDrawer ? true : undefined} aria-label="Chat history" onKeyDown={drawerKeyDown}>{mobileDrawer && <button ref={historyClose} type="button" onClick={() => setHistoryOpen(false)}>Close history</button>}<button type="button" disabled={busy || videoBusy || Boolean(pending)} onClick={newChat}>New chat</button>{workshopHistory ? workshopHistory.render(item => { if (!lock.current && !videoLock.current && !pendingRef.current) workshopHistory.onOpen(item); if (mobileDrawer) setHistoryOpen(false) }) : <><label>Search loaded chats<input aria-label="Search loaded chats" value={search} onChange={event => setSearch(event.target.value)} /></label>
+        {rows.filter(row => row.title.toLowerCase().includes(search.toLowerCase())).map(row => <button type="button" key={row.id} disabled={busy || videoBusy || Boolean(pending)} aria-pressed={selected?.id === row.id} onClick={() => openConversation(row)}>{row.title}</button>)}
+        {historyLoading ? <p role="status">Loading history…</p> : !rows.length && <p>No saved chats yet.</p>}{hasMore && <button type="button" disabled={busy || videoBusy} onClick={() => exclusive(async () => {
           const result = await departmentChat.listContextConversations({ ...scope, offset }, requestScope)
           if (!current()) return
           setRows(previous => [...previous, ...result.slice(0, 50).filter(validConversation).filter(row => !previous.some(item => item.id === row.id))]); setOffset(offset + Math.min(result.length, 50)); setHasMore(result.length > 50)
         })}>Load older chats</button>}</>}</aside>}
       <div className="direct-chat-main" inert={drawerOpen ? true : undefined}><div className="direct-chat-messages" aria-label="Chat messages" aria-busy={busy}><div className="direct-chat-message-stream">
         {!messages.length && <div className="direct-chat-empty"><h3>What would you like to work on?</h3><p>Start with a message. This chat is saved when you send.</p></div>}
-        {hasOlder && <button type="button" disabled={busy} onClick={() => exclusive(async () => {
+        {hasOlder && <button type="button" disabled={busy || videoBusy} onClick={() => exclusive(async () => {
           const result = await departmentChat.getContextConversation({ conversation_id: selected.id, before_sequence: messages[0].sequence }, requestScope)
           if (!current()) return
           if (!validConversation(result.conversation) || result.conversation.id !== selected.id) throw new Error('Conversation context changed')
           setMessages(previous => [...result.messages, ...previous]); setHasOlder(result.has_older)
         })}>Load older messages</button>}
         {messages.map(message => <article key={message.id} className={`direct-chat-message ${message.role}`}><strong>{message.role === 'assistant' ? 'Anka AI' : message.author_id === actorId ? 'You' : 'Teammate'}</strong><p>{message.body}</p>{message.role === 'assistant' && message.status === 'completed' && <button type="button" onClick={event => { replyButtonRef.current = event.currentTarget; if (mobileDrawer) setHistoryOpen(false); setOutputId(message.id) }}>Open reply</button>}</article>)}
-      </div></div><form className="direct-chat-composer" onSubmit={send} aria-label="Chat composer"><label className="direct-chat-draft-label"><span className="sr-only">Message</span><textarea aria-label="Message" placeholder="Ask or explore an idea…" value={draft} maxLength={8000} disabled={busy || Boolean(pending)} onChange={event => { if (pendingRef.current) return; const text = event.target.value; setDraft(text); try { writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: selected?.id || null, text, attempt: attempt.current }) } catch { setError('Draft recovery is unavailable in this tab. Keep this page open until your message is saved.') } }} /></label>
+      </div></div><form className="direct-chat-composer" onSubmit={send} aria-label="Chat composer"><label className="direct-chat-draft-label"><span className="sr-only">Message</span><textarea aria-label="Message" placeholder="Ask or explore an idea…" value={draft} maxLength={8000} disabled={busy || videoBusy || Boolean(pending)} onChange={event => { if (pendingRef.current) return; const text = event.target.value; setDraft(text); try { writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: selected?.id || null, text, attempt: attempt.current }) } catch { setError('Draft recovery is unavailable in this tab. Keep this page open until your message is saved.') } }} /></label>
         <div className="direct-chat-toolbar"><label>Work type<select aria-label="Work type" value="text" disabled><option value="text">Text</option></select></label>
-          {owner && <label>Model<select aria-label="Approved model" value={modelId} disabled={busy || !models.length} onChange={event => { setModelId(event.target.value); setCanonical(false) }}>{!models.length && <option value="">Unavailable</option>}{models.map(row => <option key={row.id} value={row.id}>{row.label}</option>)}</select></label>}
-          <button type="submit" className="direct-chat-send" disabled={busy || Boolean(pending) || !draft.trim() || Boolean(selected && selected.state !== 'active')}>{busy ? 'Working…' : owner && ready ? 'Send' : 'Save message'}</button></div>
+          {owner && <label>Model<select aria-label="Approved model" value={modelId} disabled={busy || videoBusy || !models.length} onChange={event => { setModelId(event.target.value); setCanonical(false) }}>{!models.length && <option value="">Unavailable</option>}{models.map(row => <option key={row.id} value={row.id}>{row.label}</option>)}</select></label>}
+          <button type="submit" className="direct-chat-send" disabled={busy || videoBusy || Boolean(pending) || !draft.trim() || Boolean(selected && selected.state !== 'active')}>{busy ? 'Working…' : owner && ready ? 'Send' : 'Save message'}</button></div>
         <p>{owner ? !readiness ? 'Checking AI availability. Human messages can still be saved.' : ready ? `${model?.provider} · Organization-billed replies` : 'AI unavailable. Sending saves a human message only.' : 'Shared chat · Human replies only'} · Attachments unavailable</p>
       </form></div>
       {output && <aside ref={outputId && mobileDrawer ? drawerRef : undefined} className="direct-chat-output" role={mobileDrawer ? 'dialog' : undefined} aria-modal={mobileDrawer ? true : undefined} onKeyDown={drawerKeyDown} aria-label="Saved reply output" data-source-message-id={output.id}><div><h3>Saved reply</h3><button ref={outputClose} type="button" onClick={() => setOutputId('')}>Close output</button></div><p>{output.body}</p><small>Saved conversation reply · Read-only preview</small></aside>}
     </div>
   </section>
+    {privateDesign && videoOpened && selected && owner && <section ref={videoPane} hidden={!videoOpen} className="direct-chat-video workspace-card p-4 mt-3" aria-label="Private video workbench">
+      <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">Private video · {selected.title}</h3><button type="button" disabled={videoBusy} onClick={() => { if (videoLock.current) return; setVideoOpen(false); videoButton.current?.focus() }}>Back to chat</button></div>
+      <p className="mt-2 text-xs text-[var(--anka-muted)]">Generate is a separate explicit action. Eligibility, verified pricing, spend, consent and private job recovery still apply. A project copy remains a separate authorized draft.</p>
+      <Suspense fallback={<p role="status">Loading private video tools…</p>}><VideoWorkbenchReady onReady={focusVideoPane} /><PrivateDesignVideoTools key={selected.id} conversationId={selected.id} beforeGenerate={checkPrivateVideoContext} onNavigationBusyChange={reportVideoBusy} onDraftDirtyChange={setVideoDirty} /></Suspense>
+    </section>}
+  </>
 }

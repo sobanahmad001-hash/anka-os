@@ -143,6 +143,61 @@ async function sharedChatAssertions(browser) {
  await fs.writeFile(file,JSON.stringify(evidence,null,2));await context.close();console.log('VERIFY actual shared Chat: two local turns, duplicate submissions suppressed, consent reused, route draft preserved')
 }
 
+async function designBridgeAssertions(browser) {
+ const results=[]
+ for (const [width,height,theme] of [[1440,900,'light'],[390,900,'dark']]) {
+  const context=await browser.newContext({viewport:{width,height}}), page=await context.newPage();page.setDefaultTimeout(15000)
+  const errors=[],blocked=[];page.on('pageerror',error=>errors.push(error.message))
+  await page.route('**/*',route=>{const url=new URL(route.request().url());if(url.hostname==='127.0.0.1'&&url.port==='5188')return route.continue();blocked.push(url.origin);return route.abort()})
+  await page.goto(`${base}?surface=design&state=empty&theme=${theme}`)
+  const message=page.getByRole('textbox',{name:'Message',exact:true}), videoButton=page.getByRole('button',{name:'Video tools',exact:true})
+  await message.waitFor();assert(await videoButton.isDisabled());assert.equal(await page.getByRole('region',{name:'Private Design video tools',exact:true}).count(),0)
+  await message.fill('Private Design exploration')
+  await page.getByRole('button',{name:'Send',exact:true}).click()
+  await page.getByRole('button',{name:'Allow and ask Anka AI',exact:true}).click()
+  await page.waitForFunction(()=>globalThis.__directChatPreview.fixture.data.counters.run===1)
+  await videoButton.click()
+  const workbench=page.getByRole('region',{name:'Private video workbench',exact:true})
+  await workbench.getByRole('heading',{name:'Video · Higgsfield Seedance 2.5',exact:true}).waitFor()
+  await workbench.getByText('No video jobs recorded for this private conversation.',{exact:true}).waitFor()
+  assert(await workbench.getByRole('button',{name:'Generate one video',exact:true}).isDisabled())
+  assert(await workbench.getByRole('button',{name:'Back to chat',exact:true}).evaluate(node => node === document.activeElement))
+  const openingBounds=await workbench.getByRole('button',{name:'Back to chat',exact:true}).boundingBox();assert(openingBounds && openingBounds.y>=100 && openingBounds.y<300,`Video return control not visible near opening: ${JSON.stringify(openingBounds)}`)
+  const openScreenshot=`b3-design-private-video-open-${theme}-${width}x${height}.png`
+  await page.screenshot({path:path.join(output,openScreenshot)})
+  await workbench.getByRole('textbox',{name:'Video prompt',exact:true}).fill('Unsent private video brief')
+  await workbench.getByRole('button',{name:'Check exact quote',exact:true}).click()
+  await page.waitForFunction(()=>globalThis.__directChatPreview.fixture.videoQuotes.length===1)
+  assert(await workbench.getByRole('button',{name:'Generate one video',exact:true}).isDisabled())
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.fixture.videoGenerationCalls),0)
+  const screenshot=`b3-design-private-video-${theme}-${width}x${height}.png`
+  await page.screenshot({path:path.join(output,screenshot)})
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth))
+  await workbench.getByRole('button',{name:'Back to chat',exact:true}).click()
+  assert.equal(await workbench.isVisible(),false)
+  assert(await videoButton.evaluate(node=>node===document.activeElement))
+  await page.getByRole('combobox',{name:'Conversation context',exact:true}).selectOption('chat')
+  await page.getByRole('button',{name:'Stay in current context',exact:true}).click()
+  await videoButton.click()
+  assert.equal(await workbench.getByRole('textbox',{name:'Video prompt',exact:true}).inputValue(),'Unsent private video brief')
+  await workbench.getByRole('textbox',{name:'Video prompt',exact:true}).fill('')
+  await workbench.getByRole('button',{name:'Back to chat',exact:true}).click()
+  await message.fill('Text follow-up stays separate')
+  await page.getByRole('button',{name:'Send',exact:true}).click()
+  await page.waitForFunction(()=>globalThis.__directChatPreview.fixture.data.counters.run===2)
+  const evidence=await page.evaluate(()=>{const f=globalThis.__directChatPreview.fixture;return {counters:f.data.counters,conversationId:f.data.rows[0].id,videoReads:f.videoReads,videoQuotes:f.videoQuotes,generationCalls:f.videoGenerationCalls}})
+  assert.equal(evidence.counters.created,1);assert.equal(evidence.counters.messages,2);assert.equal(evidence.generationCalls,0)
+  assert.deepEqual([...new Set(evidence.videoReads)],[evidence.conversationId]);assert.equal(evidence.videoQuotes[0].private_conversation_id,evidence.conversationId)
+  for(const key of ['project_id','engagement_id','messages','history','attachments'])assert(!(key in evidence.videoQuotes[0]))
+  assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
+  results.push({viewport:{width,height},theme,screenshot,openScreenshot,actualPrivateVideoUi:true,onePrivateChatTwoTextSends:true,explicitSeparateVideoTools:true,videoBriefPreservedOnCloseAndStay:true,exactPrivateAnchor:true,quoteOnlyGenerationDisabled:true,generationCalls:0,noHorizontalOverflow:true,pageErrors:errors,blockedRemoteRequests:blocked})
+  await context.close();console.log('VERIFY Design private bridge',width,height,theme)
+ }
+ const file=path.join(output,'b3-content-writer-browser-evidence.json'),existing=JSON.parse(await fs.readFile(file,'utf8'))
+ existing.designPrivateBridge={scope:'Actual Direct Chat, shared shell, PrivateDesignVideoTools and DesignVideoCapabilities against isolated localhost repositories. Quote makes no provider call; no verified Higgsfield connection and paid execution disabled. Actual generation, signed preview and project promotion are not accepted by this browser check.',results}
+ await fs.writeFile(file,JSON.stringify(existing,null,2));console.log(JSON.stringify({designBridgeCasesPassed:results.length}))
+}
+
 async function widerDirectAssertions(browser){
  const results=[]
  for(const surface of ['organization','marketing']){
@@ -268,6 +323,7 @@ async function engagementFirstSendAssertions(browser) {
     ['content', 'empty', 'system', 320, 900],
   ]
   try {
+    if (process.argv.includes('--design-bridge')) {await designBridgeAssertions(browser);return}
     if (process.argv.includes('--wider-direct')) {await widerDirectAssertions(browser);return}
     if (process.argv.includes('--engagement-first-send')) { await engagementFirstSendAssertions(browser); return }
     if (process.argv.includes('--shared-chat')) { await sharedChatAssertions(browser); return }

@@ -40,7 +40,7 @@ async function mount(t, options = {}) {
       if (id === '\0direct-chat') return 'export const departmentChat = new Proxy({}, {get: (_, key) => (...args) => globalThis.__directChatTest.fixture.chat[key](...args)})'
       if (id === '\0direct-runner') return 'export const contextChatRunner = new Proxy({}, {get: (_, key) => (...args) => globalThis.__directChatTest.fixture.runner[key](...args)})'
       if (id === '\0direct-integrations') return 'export const integrations = { listModelAllowlist: async () => globalThis.__directChatTest.allowlist }'
-      if (id === '\0direct-video') return 'export default function Unused() { return null }'
+      if (id === '\0direct-video') return `import {createElement} from 'react'; export default function VideoBridgeProbe(props){globalThis.__directChatTest.video = props; return createElement('span',null,'Offline video bridge probe')}`
     },
   }] })
   const { default: Panel } = await vite.ssrLoadModule('/src/components/ContextConversationPanel.jsx')
@@ -283,4 +283,55 @@ test('unsettled AI recovery retains the original draft across refresh and disabl
   assert.equal(ui.named('Message').value, 'Keep uncertain original')
   assert.equal(ui.button('New chat').disabled, true)
   assert.equal(ui.fixture.data.counters.run, 1)
+})
+
+
+test('Design video bridge uses exact owner-private saved chat, preserves draft, and blocks Chat/navigation while video is unsettled', async t => {
+  const ui = await mount(t, { surface: 'design' })
+  assert.equal(ui.button('Video tools').disabled, true)
+  assert.equal(globalThis.__directChatTest.video, undefined)
+  await ui.type('Design exploration'); await ui.send(); await ui.consent()
+  await ui.click('Video tools'); await act(async () => { for (let i=0;i<30 && !globalThis.__directChatTest.video;i++) await new Promise(resolve=>setTimeout(resolve,20)) })
+  const video = globalThis.__directChatTest.video, id = ui.fixture.data.rows[0].id
+  assert.equal(video.conversationId, id)
+  await video.beforeGenerate(id)
+  await assert.rejects(video.beforeGenerate(crypto.randomUUID()), /context changed/)
+  await act(async () => video.onDraftDirtyChange(true))
+  await ui.click('Back to chat')
+  assert.equal(props(ui.named('Private video workbench')).hidden, true)
+  await ui.click('New chat')
+  assert.match(ui.environment.container.textContent, /Clear the unsent video prompt/)
+  assert.equal(ui.fixture.data.rows.length, 1)
+  await ui.click('Video tools')
+  assert.equal(globalThis.__directChatTest.video.conversationId, id)
+  await act(async () => video.onDraftDirtyChange(false))
+  await ui.type('Do not send during video recovery')
+  await act(async () => { video.onNavigationBusyChange(true); props(ui.named('Chat composer')).onSubmit({preventDefault(){}}); props(ui.button('New chat')).onClick() })
+  assert.equal(ui.named('Message').disabled, true)
+  assert.equal(ui.button('Video tools').disabled, true)
+  assert.equal(ui.button('Back to chat').disabled, true)
+  assert.equal(ui.fixture.data.counters.messages, 1)
+  assert.equal(ui.fixture.data.counters.run, 1)
+  await act(async () => video.onNavigationBusyChange(false))
+  await ui.click('New chat')
+  await assert.rejects(video.beforeGenerate(id), /context changed/)
+})
+
+test('Design video guard denies changed org/owner/private scope/archive and late authority replies', async t => {
+  const ui = await mount(t, { surface: 'design', state: 'populated', initial: true })
+  await ui.click('Video tools'); await act(async () => { for (let i=0;i<30 && !globalThis.__directChatTest.video;i++) await new Promise(resolve=>setTimeout(resolve,20)) })
+  const video = globalThis.__directChatTest.video, row = ui.fixture.data.rows[0], original = { ...row }
+  for (const patch of [{organization_id:'foreign'},{owner_id:'foreign'},{context_kind:'project_team'},{department_id:'content'},{project_id:projectId},{engagement_id:crypto.randomUUID()},{state:'archived'}]) {
+    Object.assign(row, patch)
+    await assert.rejects(video.beforeGenerate(row.id), /unavailable/)
+    Object.assign(row, original)
+  }
+  const gate=defer(), get=ui.fixture.chat.getContextConversation
+  ui.fixture.chat.getContextConversation = async input => { await gate.promise; return get(input) }
+  const checking=video.beforeGenerate(row.id)
+  await ui.render({ contextKind:'project_team', projectId, departmentId:'' })
+  gate.resolve()
+  await assert.rejects(checking, /unavailable/)
+  await assert.rejects(video.beforeGenerate(row.id), /context changed/)
+  assert.equal(ui.fixture.data.counters.run,0)
 })
