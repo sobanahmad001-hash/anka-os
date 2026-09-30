@@ -134,7 +134,7 @@ export default function Header({ sidebarCollapsed = false, onToggleSidebar }) {
 
       {/* Right side */}
       <div className="shell-header-actions ml-auto flex items-center gap-2">
-        <AppearanceSelector />
+        <AppearanceSelector compact />
 
         <label className="min-w-0">
           <span className="sr-only">Active organization</span>

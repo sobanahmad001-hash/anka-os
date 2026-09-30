@@ -79,3 +79,6 @@
   .direct-chat-empty h3 { font-size: 18px; margin-bottom: 6px; }
   .direct-chat-empty p { font-size: 13px; }
 }
+
+.direct-chat-composer textarea { min-height: 60px; margin: 0 0 8px; }
+.direct-chat-toolbar :is(button, select) { padding-block: 6px; }

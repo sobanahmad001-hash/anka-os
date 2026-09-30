@@ -43,7 +43,7 @@ export function createDirectChatFixture({ surface = 'content', state = 'empty', 
     return { status: 'completed', message }
   }
   fixture.chat = {
-    searchConversations: async (_department, input) => ({ items: [{ id: 'a0000000-0000-4000-8000-000000000021', organization_id: organizationId, department_id: 'content', project_id: input.project_id, engagement_id: input.engagement_id, title: 'Page brief · separate project history', state: 'active', access_role: 'owner' }], next_cursor: null }),
+    searchConversations: async (_department, input) => ({ items: 'Page brief · separate project history'.toLowerCase().includes((input.query || '').toLowerCase()) ? [{ id: 'a0000000-0000-4000-8000-000000000021', organization_id: organizationId, department_id: 'content', project_id: input.project_id, engagement_id: input.engagement_id, title: 'Page brief · separate project history', state: 'active', access_role: 'owner' }] : [], next_cursor: null }),
     listContextConversations: async input => data.rows.filter(row => row.context_kind === input.context_kind && (row.project_id || '') === (input.project_id || '') && (row.department_id || '') === (input.department_id || '')).slice(input.offset || 0, (input.offset || 0) + 51),
     getContextConversation: async input => {
       const row = data.rows.find(item => item.id === input.conversation_id)

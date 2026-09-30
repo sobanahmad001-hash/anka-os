@@ -170,11 +170,11 @@ export default function ProjectEngagementWorkspace() {
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
           {tab === 'work' && <WorkViews workspace={workspace} navigate={navigate} searchParams={searchParams} setSearchParams={setSearchParams} />}
           {tab === 'discussion' && <div className="space-y-4">
-            <div className="workspace-card p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--anka-violet)]">{project.name} · Chat</p>
+            <div className={projectChatMode === 'team' ? 'workspace-card p-4' : ''}>
+              {projectChatMode === 'team' && <p className="text-xs font-semibold uppercase tracking-wide text-[var(--anka-violet)]">{project.name} · Chat</p>}
               {projectChatMode === 'team' && <><h2 className="mt-1 text-lg font-semibold">Talk with your project team</h2>
               <p className="mt-1 text-sm leading-5 text-[var(--anka-muted)]">Project activity and private AI conversations are separate. Team messages use the project discussion permissions; AI conversations start private; each owner can choose active internal teammates to share a conversation with.</p></>}
-              <nav aria-label="Project chat views" className="mt-4 flex flex-wrap gap-2">
+              <nav aria-label="Project chat views" className={`flex flex-wrap gap-2 ${projectChatMode === 'team' ? 'mt-4' : ''}`}>
                 <button type="button" aria-pressed={projectChatMode === 'team'} onClick={() => setProjectChatMode('team')} className={`rounded-xl border px-4 py-2 text-sm ${projectChatMode === 'team' ? 'border-[var(--anka-violet)] bg-[var(--anka-violet-soft)] text-[var(--anka-violet)]' : 'border-[var(--anka-line)] text-[var(--anka-muted)]'}`}>Team discussion · shared</button>
                 <button type="button" aria-pressed={projectChatMode === 'private'} onClick={() => setProjectChatMode('private')} className={`rounded-xl border px-4 py-2 text-sm ${projectChatMode === 'private' ? 'border-[var(--anka-violet)] bg-[var(--anka-violet-soft)] text-[var(--anka-violet)]' : 'border-[var(--anka-line)] text-[var(--anka-muted)]'}`}>AI conversations</button>
               </nav>
