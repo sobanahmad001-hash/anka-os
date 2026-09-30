@@ -143,6 +143,74 @@ async function sharedChatAssertions(browser) {
  await fs.writeFile(file,JSON.stringify(evidence,null,2));await context.close();console.log('VERIFY actual shared Chat: two local turns, duplicate submissions suppressed, consent reused, route draft preserved')
 }
 
+async function engagementFirstSendAssertions(browser) {
+ const results=[]
+ for (const [width,theme,uncertain] of [[1440,'light',false],[390,'dark',false],[1440,'dark',true]]) {
+  const context=await browser.newContext({viewport:{width,height:900}}),page=await context.newPage()
+  page.setDefaultTimeout(15000);const errors=[],blocked=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.route('**/*',route=>{const url=new URL(route.request().url());if(url.hostname==='127.0.0.1'&&url.port==='5188')return route.continue();blocked.push(url.origin);return route.abort()})
+  await page.goto(`${base}?panel=writer&answer=fixture&surface=content&state=empty&theme=${theme}`)
+  const composer=page.getByRole('textbox',{name:/^Message/}),form=page.locator('.department-chat-main')
+  await page.getByRole('button',{name:'New chat',exact:true}).click()
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.fixture.engagementConversations.length),1)
+  await composer.fill('Fresh local first direction')
+  const metrics=await form.evaluate(node=>({form:node.getBoundingClientRect().toJSON(),footer:node.querySelector('.department-chat-footer').getBoundingClientRect().toJSON(),send:node.querySelector('.department-chat-submit').getBoundingClientRect().toJSON(),overflow:document.documentElement.scrollWidth>innerWidth}))
+  assert(!metrics.overflow);assert(metrics.footer.bottom<=metrics.form.bottom+1);assert(metrics.form.bottom<=900);assert(metrics.send.bottom<=metrics.form.bottom+1)
+  await page.screenshot({path:path.join(output,`b3-engagement-new-${theme}-${width}x900.png`)})
+  if(uncertain)await page.evaluate(()=>{const f=globalThis.__directChatPreview.fixture;f.engagementAnswerUncertain=true;f.engagementReadUnavailable=true})
+  await form.evaluate(node=>{node.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));node.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))})
+  if(width===1440&&!uncertain)await page.evaluate(()=>{
+   globalThis.__savedStorageSetItem=Storage.prototype.setItem
+   Storage.prototype.setItem=function(key,value){if(key.startsWith('anka:engagement-first-send:'))throw new Error('Offline storage denied');return globalThis.__savedStorageSetItem.call(this,key,value)}
+  })
+  await page.getByRole('button',{name:'Allow and ask Anka AI',exact:true}).click()
+  if(width===1440&&!uncertain){
+   await page.getByText('First Send recovery storage is unavailable. No request was sent.',{exact:true}).waitFor()
+   assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.fixture.engagementTurns.length),0)
+   await page.evaluate(()=>{Storage.prototype.setItem=globalThis.__savedStorageSetItem;globalThis.__directChatPreview.fixture.firstSendNoReservation=true})
+   await form.evaluate(node=>node.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})))
+   await page.getByText('Offline reservation denied before saving',{exact:true}).waitFor()
+   assert.equal(await composer.inputValue(),'Fresh local first direction')
+   assert.equal(await page.getByRole('button',{name:'Recover first Send',exact:true}).count(),0)
+   assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.fixture.engagementConversations.length),1)
+   await page.evaluate(()=>globalThis.__directChatPreview.fixture.firstSendNoReservation=false)
+   await form.evaluate(node=>{node.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));node.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))})
+  }
+  await page.waitForFunction(()=>globalThis.__directChatPreview.fixture.engagementTurns.length===1)
+  if(uncertain){
+   await page.getByRole('button',{name:'Recover first Send',exact:true}).waitFor()
+   assert.equal(await page.getByRole('button',{name:'Send',exact:true}).isDisabled(),true)
+   await page.reload()
+   await page.getByRole('button',{name:'Recover first Send',exact:true}).click()
+   await page.getByText('Recovered the saved first Send. No provider request was dispatched by recovery.',{exact:true}).waitFor()
+  } else await page.waitForFunction(()=>document.querySelector('.department-chat-prompt textarea')?.value==='')
+  const before=await page.evaluate(()=>globalThis.__directChatPreview.fixture.engagementTurns)
+  assert.equal(before.length,1);assert.equal(before[0].start_new,true)
+  assert.deepEqual(before[0].attachment_ids,[]);assert.deepEqual(before[0].selected_artifact_version_ids,[])
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.fixture.engagementConversations.length),2)
+  assert.equal(await page.getByRole('button',{name:'Recover first Send',exact:true}).count(),0)
+  assert.equal(await page.evaluate(()=>Object.keys(sessionStorage).filter(key=>key.startsWith('anka:engagement-first-send:')).length),0)
+  await composer.fill('Fresh local follow-up')
+  await form.evaluate(node=>{node.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));node.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))})
+  if(uncertain)await page.getByRole('button',{name:'Allow and ask Anka AI',exact:true}).click()
+  await page.waitForFunction(()=>globalThis.__directChatPreview.fixture.engagementTurns.length===2&&document.querySelector('.department-chat-prompt textarea')?.value==='')
+  const turns=await page.evaluate(()=>globalThis.__directChatPreview.fixture.engagementTurns)
+  assert.equal(turns[1].start_new,undefined);assert.equal(turns[0].conversation_id,turns[1].conversation_id);assert.notEqual(turns[0].client_request_id,turns[1].client_request_id)
+  assert.equal(await page.getByRole('dialog',{name:'Confirm AI data sharing',exact:true}).count(),0)
+  assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
+  assert.equal(await page.getByText('OFFLINE SAVED ANSWER · Fresh local follow-up',{exact:true}).count(),1)
+  const savedMetrics=await form.evaluate(node=>({form:node.getBoundingClientRect().toJSON(),send:node.querySelector('.department-chat-submit').getBoundingClientRect().toJSON()}))
+  assert(savedMetrics.send.bottom<=savedMetrics.form.bottom+1);assert(savedMetrics.send.height>25)
+  await page.screenshot({path:path.join(output,`b3-engagement-saved-${theme}-${width}x900.png`)})
+  results.push({viewport:{width,height:900},theme,lostResponseAndReloadRecovery:uncertain,storageDeniedSendsNothingAndConfirmedRollbackAllowsCorrection:width===1440&&!uncertain,newDraftCreatesZeroRecords:true,oneFirstSendAndOneFollowup:true,firstSendUsesNoInheritedFilesOrSources:true,sameConversationDistinctRequests:true,providerCalls:0,productionWrites:0,pageErrors:errors,blockedRemoteRequests:blocked})
+  await context.close()
+ }
+ const file=path.join(output,'b3-content-writer-browser-evidence.json'), evidence=JSON.parse(await fs.readFile(file,'utf8'))
+ evidence.engagementFirstSend={scope:'Actual workbench with isolated mock backend; native SQL and Edge security checked separately; no live provider acceptance',results}
+ await fs.writeFile(file,JSON.stringify(evidence,null,2));console.log(JSON.stringify({engagementFirstSendCases:results.length,results}))
+}
+
 ;(async () => {
   await fs.mkdir(output, { recursive: true })
   const browser = await chromium.launch({ channel: 'msedge', headless: true })
@@ -157,6 +225,7 @@ async function sharedChatAssertions(browser) {
     ['content', 'empty', 'system', 320, 900],
   ]
   try {
+    if (process.argv.includes('--engagement-first-send')) { await engagementFirstSendAssertions(browser); return }
     if (process.argv.includes('--shared-chat')) { await sharedChatAssertions(browser); return }
     if (process.argv.includes('--writer') || process.argv.includes('--writer-recovery')) { await writerAssertions(browser); return }
     for (const [surface, state, theme, width, height] of cases) {

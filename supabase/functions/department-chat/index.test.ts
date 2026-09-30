@@ -256,7 +256,7 @@ function selectedOrganizationFixture() {
       if (name === 'assert_department_chat_model_dispatch' && modelDispatchError) {
         return { data: null, error: modelDispatchError }
       }
-      if (name === 'begin_department_chat_turn_with_attachments' && beginError) return { data: null, error: beginError }
+      if (['begin_department_chat_turn_with_attachments','start_engagement_chat_turn'].includes(name) && beginError) return { data: null, error: beginError }
       if (name === 'reserve_workshop_chat_budget') return { data: { status: 'reserved', reservation_id: 'reservation-B' }, error: null }
       if (name === 'claim_workshop_chat_dispatch') return { data: {
         status: 'claimed', must_not_submit: false, claim_id: 'claim-B',
@@ -380,7 +380,7 @@ function selectedOrganizationFixture() {
         }
         return { data: { status: 'pending', proposal_id: proposalId, ai_run_id: runId }, error: null }
       }
-      return { data: name === 'begin_department_chat_turn_with_attachments' ? {
+      return { data: ['begin_department_chat_turn_with_attachments','start_engagement_chat_turn'].includes(name) ? {
           message: { id: 'message-B', status: 'pending' }, replayed: beginReplay,
         }
         : name === 'complete_department_chat_answer' ? {
@@ -1780,4 +1780,41 @@ Deno.test('private chat readiness reports selected model credential and price wi
     if (previousPrice === undefined) fixture.readinessEnv.delete(priceName)
     else fixture.readinessEnv.set(priceName, previousPrice)
   }
+})
+
+Deno.test('atomic engagement first Send uses authenticated scope once and replay never dispatches', async () => {
+  const fixture = selectedOrganizationFixture()
+  enableSavedAnswerFixture(fixture)
+  fixture.setBeginReplay(true)
+  const response = await fixture.request({ ...answerRequest, start_new: true, actor_id: 'forged', owner_id: 'forged' })
+  assertEquals(response.status, 409)
+  const reservations = fixture.rpcCalls.filter(call => call.name === 'start_engagement_chat_turn')
+  assertEquals(reservations.length, 1)
+  assertEquals(reservations[0].args.p_actor_id, 'actor')
+  assertEquals(reservations[0].args.p_organization_id, 'B')
+  assertEquals(reservations[0].args.p_project_id, 'project-B')
+  assertEquals(reservations[0].args.p_attachment_ids, undefined)
+  assertEquals(fixture.rpcCalls.some(call => call.name === 'begin_department_chat_turn_with_attachments' || call.name === 'assert_department_chat_model_dispatch'), false)
+  assertEquals(fixture.providerCalls(), 0)
+})
+Deno.test('atomic engagement first Send rejects inherited files sources and foreign project before reservation', async () => {
+  for (const fields of [{ attachment_ids: ['10000000-0000-4000-8000-000000000001'] }, { selected_artifact_version_ids: ['10000000-0000-4000-8000-000000000001'] }, { project_id: 'project-A' }, { action: 'propose_work_item' }, { prompt: 'x'.repeat(8001) }, { attachment_ids: 'unscoped' }]) {
+    const fixture = selectedOrganizationFixture()
+    enableSavedAnswerFixture(fixture)
+    const response = await fixture.request({ ...answerRequest, start_new: true, ...fields })
+    assertEquals(response.status >= 400, true)
+    assertEquals(fixture.rpcCalls.some(call => call.name === 'start_engagement_chat_turn'), false)
+    assertEquals(fixture.providerCalls(), 0)
+  }
+})
+
+Deno.test('atomic first Send reports only confirmed no-reservation errors as safe to correct', async () => {
+ for (const code of ['42501','42883','23505','']) {
+  const fixture = selectedOrganizationFixture(); enableSavedAnswerFixture(fixture)
+  fixture.setBeginError({ code, message: 'Reservation denied or response unavailable' })
+  const response = await fixture.request({ ...answerRequest, start_new: true })
+  const body = await response.json()
+  assertEquals(body.outcome, ['42501','42883'].includes(code) ? 'not_reserved' : code === '23505' ? 'idempotency_conflict' : undefined)
+  assertEquals(fixture.providerCalls(),0)
+ }
 })

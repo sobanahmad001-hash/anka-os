@@ -61,22 +61,33 @@ export function createDirectChatFixture({ surface = 'content', state = 'empty', 
     copyContentWriterVersion: async () => { throw failure('Copy is not exercised by this isolated writer fixture.', 409) },
   }
   const engagementConversation = { id: 'a0000000-0000-4000-8000-000000000021', organization_id: organizationId, department_id: 'content', project_id: projectId, engagement_id: fixture.engagements[0].id, owner_id: actor, title: 'Page brief · separate project history', state: 'active', access_role: 'owner' }
-  fixture.engagementMessages = []
-  fixture.engagementTurns = []
+  fixture.engagementConversations = data.engagementConversations || [engagementConversation]
+  fixture.engagementMessages = data.engagementMessages || []
+  fixture.engagementReadUnavailable = false
+  fixture.engagementAnswerUncertain = false
+  fixture.engagementTurns = data.engagementTurns || []
   fixture.allowEngagementAnswer = false
   fixture.chat = {
     getCapabilities: async () => ({ provider: 'openai', default_model_configuration_id: modelId, approved_models: [{ configuration_id: modelId, provider: 'openai', model_id: 'Approved text · offline fixture', display_name: 'Offline configuration' }], answer_readiness: { paid_execution_enabled: fixture.allowEngagementAnswer, spend_tracking_configured: fixture.allowEngagementAnswer, model_price_available: fixture.allowEngagementAnswer ? [{ configuration_id: modelId, fresh_price_available: true }] : [] }, attachments: { supported: false } }),
-    getConversation: async (_department, input) => { if (input.conversation_id !== engagementConversation.id || input.engagement_id !== fixture.engagements[0].id || input.project_id !== projectId) throw failure('Foreign engagement fixture request', 403); return { conversation: engagementConversation, messages: fixture.engagementMessages, sharing: { can_manage: false, recipients: [] } } },
+    getConversation: async (_department, input) => { if (fixture.engagementReadUnavailable) throw failure('Offline recovery temporarily unavailable',503); const row = fixture.engagementConversations.find(row => row.id === input.conversation_id); if (!row || input.engagement_id !== fixture.engagements[0].id || input.project_id !== projectId) throw failure('Foreign engagement fixture request', 404); return { conversation: row, messages: fixture.engagementMessages.filter(message => message.conversation_id === row.id), sharing: { can_manage: false, recipients: [] } } },
     listAttachments: async () => [], listSourceVersions: async () => [], getUnsentDraft: async () => null,
     discardUnsentDraft: async () => ({}),
     saveUnsentDraft: async () => { throw failure('Draft persistence is not exercised in this fixture.', 409) },
     answer: async (_department, input, scope, { onEvent }) => {
-      if (!fixture.allowEngagementAnswer || scope.organizationId !== organizationId || scope.signal.aborted || input.engagement_id !== fixture.engagements[0].id || input.project_id !== projectId || input.conversation_id !== engagementConversation.id) throw failure('Foreign or disabled offline answer request', 403)
+      if (!fixture.allowEngagementAnswer || scope.organizationId !== organizationId || scope.signal.aborted || input.engagement_id !== fixture.engagements[0].id || input.project_id !== projectId || (!input.start_new && !fixture.engagementConversations.some(row => row.id === input.conversation_id))) throw failure('Foreign or disabled offline answer request', 403)
+      if (input.start_new && fixture.firstSendNoReservation) throw Object.assign(failure('Offline reservation denied before saving',400),{outcome:'not_reserved'})
+      if (input.start_new) {
+        if (fixture.engagementConversations.some(row => row.id === input.conversation_id) || input.attachment_ids?.length || input.selected_artifact_version_ids?.length) throw failure('Unsafe offline first Send',409)
+        fixture.engagementConversations.push({ ...engagementConversation, id: input.conversation_id, title: contextChatTitleFromMessage(input.prompt) })
+      }
       if (fixture.engagementTurns.some(turn => turn.client_request_id === input.client_request_id)) throw failure('Duplicate offline request identity', 409)
       fixture.engagementTurns.push(structuredClone(input))
       onEvent({ type: 'started' })
       const answer = 'OFFLINE SAVED ANSWER · ' + input.prompt
-      fixture.engagementMessages.push({ id: crypto.randomUUID(), role: 'user', body: input.prompt, author_id: actor, status: 'completed', created_at: new Date().toISOString() }, { id: crypto.randomUUID(), role: 'assistant', body: answer, status: 'completed', created_at: new Date().toISOString() })
+      const nextSequence = fixture.engagementMessages.filter(message => message.conversation_id === input.conversation_id).length + 1
+      fixture.engagementMessages.push({ id: crypto.randomUUID(), conversation_id: input.conversation_id, client_request_id: input.client_request_id, sequence: nextSequence, role: 'user', body: input.prompt, author_id: actor, status: 'completed', created_at: new Date().toISOString() }, { id: crypto.randomUUID(), conversation_id: input.conversation_id, sequence: nextSequence + 1, role: 'assistant', body: answer, status: 'completed', created_at: new Date().toISOString() })
+      data.engagementConversations = fixture.engagementConversations; data.engagementMessages = fixture.engagementMessages; data.engagementTurns = fixture.engagementTurns; save()
+      if (fixture.engagementAnswerUncertain) throw failure('Offline first Send response lost',503)
       onEvent({ type: 'completed', answer })
     },
 

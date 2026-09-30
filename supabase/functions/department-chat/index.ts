@@ -2079,8 +2079,10 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
     messageId: string
   } | null = null
   let previewAttempt = false
+  let firstSendReservationState: 'none' | 'attempted' | 'reserved' | null = null
   try {
     const body = await request.json() as Json
+    if (body.start_new === true) firstSendReservationState = 'none'
     const { userClient, admin, user, membership, organizationId } = await requireContext(request, body.organization_id, dependencies.clients)
     auditContext = { admin, actorId: user.id, organizationId }
     const action = text(body.action, 60)
@@ -2167,13 +2169,20 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
       if (!SAVED_CONVERSATION_DEPARTMENTS.has(departmentId)) {
         throw Object.assign(new Error('Saved conversations are not available for this department'), { status: 409 })
       }
-      const conversation = await requireConversationContext(admin, body, user.id, organizationId, true)
-      selectedDepartmentChatSourceIds(body.selected_artifact_version_ids)
+      const starting = body.start_new === true
+      if (starting && action !== 'answer') throw Object.assign(new Error('First Send requires conversational answer mode'), { status: 400 })
+      if (starting && (typeof body.prompt !== 'string' || !body.prompt.trim() || body.prompt.length > 8000 || (body.attachment_ids !== undefined && !Array.isArray(body.attachment_ids)))) throw Object.assign(new Error('First message must be 1–8000 characters with an explicit attachment list'), { status: 400 })
+      const scope = starting ? await validateConversationEngagement(admin, body, organizationId, dependencies.proposal || {}) : null
+      const conversation = starting ? { id: text(body.conversation_id, 80), project_id: scope!.projectId, engagement_id: scope!.engagementId, department_id: scope!.departmentId }
+        : await requireConversationContext(admin, body, user.id, organizationId, true)
+      const selectedSources = selectedDepartmentChatSourceIds(body.selected_artifact_version_ids)
       const clientRequestId = text(body.client_request_id, 80)
       if (!clientRequestId) throw Object.assign(new Error('client_request_id is required'), { status: 400 })
       const attachmentIds = Array.isArray(body.attachment_ids)
         ? body.attachment_ids.map(value => text(value, 80)).filter(Boolean) : []
-      const { data: turn, error: turnError } = await admin.rpc('begin_department_chat_turn_with_attachments', {
+      if (starting && (attachmentIds.length || selectedSources.length)) throw Object.assign(new Error('Save the first turn before selecting exact sources or uploading files'), { status: 400 })
+      if (starting) firstSendReservationState = 'attempted'
+      const { data: turn, error: turnError } = await admin.rpc(starting ? 'start_engagement_chat_turn' : 'begin_department_chat_turn_with_attachments', {
         p_conversation_id: conversation.id,
         p_organization_id: organizationId,
         p_project_id: conversation.project_id,
@@ -2182,9 +2191,10 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
         p_actor_id: user.id,
         p_client_request_id: clientRequestId,
         p_prompt: text(body.prompt, 8000),
-        p_attachment_ids: attachmentIds,
+        ...(!starting ? { p_attachment_ids: attachmentIds } : {}),
       })
       if (turnError) {
+        if (starting && ['22023', '42501', '23514', '42883'].includes(turnError.code)) firstSendReservationState = 'none'
         if (turnError.code === '23505') {
           throw Object.assign(new Error('client_request_id conflicts with a different request payload.'), {
             status: 409, outcome: 'idempotency_conflict',
@@ -2192,6 +2202,7 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
         }
         throw turnError
       }
+      if (starting) firstSendReservationState = 'reserved'
       if (turn?.replayed) {
         throw Object.assign(new Error(
           turn?.message?.status === 'pending'
@@ -2253,7 +2264,7 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
       }
     }
     const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : 400
-    const outcome = error && typeof error === 'object' && 'outcome' in error ? error.outcome : undefined
+    const outcome = error && typeof error === 'object' && 'outcome' in error ? error.outcome : firstSendReservationState === 'none' ? 'not_reserved' : undefined
     return response({ error: error instanceof Error ? error.message : 'Unexpected Department Chat error', outcome },
       Number.isFinite(status) ? status : 400)
   }
