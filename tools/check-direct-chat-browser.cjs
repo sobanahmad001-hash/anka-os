@@ -143,6 +143,42 @@ async function sharedChatAssertions(browser) {
  await fs.writeFile(file,JSON.stringify(evidence,null,2));await context.close();console.log('VERIFY actual shared Chat: two local turns, duplicate submissions suppressed, consent reused, route draft preserved')
 }
 
+async function videoBriefPrototypeAssertions(browser) {
+ const results=[]
+ for(const [width,height,theme] of [[1440,900,'light'],[390,900,'dark']]){
+  const context=await browser.newContext({viewport:{width,height}}),page=await context.newPage();page.setDefaultTimeout(15000)
+  const errors=[],blocked=[];page.on('pageerror',error=>errors.push(error.message));await page.route('**/*',route=>{const url=new URL(route.request().url());if(url.hostname==='127.0.0.1'&&url.port==='5188')return route.continue();blocked.push(url.origin);return route.abort()})
+  await page.goto(`${base}?panel=video-brief&surface=design&state=populated&theme=${theme}`)
+  const pane=page.getByRole('region',{name:'Versioned video brief',exact:true}),preview=page.getByRole('button',{name:'Preview complete video brief',exact:true})
+  await pane.waitFor();assert(await preview.isDisabled())
+  const fields={'Purpose':'Explain the launch','Audience':'Returning clients','Channel / placement':'Organic social','Source assets / reuse plan':'None — text-to-video only','Script / storyboard':'Show the product, then three benefits','Brand constraints':'No unlicensed marks','Required text':'Launch date: 10 October'}
+  for(const [name,value] of Object.entries(fields))await pane.getByRole('textbox',{name,exact:true}).fill(value)
+  await preview.click();assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.fixture.briefWrites),0)
+  const review=page.getByRole('region',{name:'Confirm exact video brief',exact:true});await review.waitFor()
+  assert((await review.innerText()).includes('Launch date: 10 October'))
+  assert(await review.evaluate(node=>node.contains(document.activeElement)))
+  const screenshot=`b3-video-brief-prototype-${theme}-${width}x${height}.png`;await page.screenshot({path:path.join(output,screenshot)})
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth))
+  const confirm=page.getByRole('button',{name:'Confirm video brief version',exact:true})
+  await confirm.evaluate(node=>{node.click();node.click()})
+  await pane.getByText('Exact brief v1 confirmed.',{exact:false}).waitFor()
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.fixture.briefWrites),1)
+  await pane.getByRole('textbox',{name:'Required text',exact:true}).fill('Launch date: 18 October')
+  assert.equal(await pane.getByText('Exact brief v1 confirmed.',{exact:false}).count(),0)
+  await preview.click();await page.evaluate(()=>{globalThis.__directChatPreview.fixture.briefLostResponse=true});await confirm.click()
+  await pane.getByText('Original confirmation response lost',{exact:false}).waitFor();assert(await preview.isDisabled())
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.fixture.briefWrites),2)
+  await page.getByRole('button',{name:'Check saved brief',exact:true}).click()
+  await pane.getByText('Exact brief v2 confirmed.',{exact:false}).waitFor()
+  const evidence=await page.evaluate(()=>{const f=globalThis.__directChatPreview.fixture;return {writes:f.briefWrites,versions:f.data.videoBriefVersions.map(v=>({id:v.id,parent:v.parent_version_id,text:v.content.video_brief.required_text})),reads:f.briefReads,generationCalls:f.videoGenerationCalls}})
+  assert.equal(evidence.writes,2);assert.equal(evidence.versions[0].text,'Launch date: 10 October');assert.equal(evidence.versions[1].text,'Launch date: 18 October');assert.equal(evidence.versions[1].parent,evidence.versions[0].id);assert.equal(evidence.generationCalls,0);assert(evidence.reads.at(-1).operation_key)
+  assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
+  results.push({viewport:{width,height},theme,screenshot,allBriefFieldsExplicit:true,previewWrites:0,firstDoubleConfirmWrites:1,editInvalidatesConfirmation:true,twoIntentionalMockVersions:true,exactParentSourceRetained:true,lostResponseRecoveryReadOnly:true,generationCalls:0,pageErrors:errors,blockedRemoteRequests:blocked})
+  await context.close();console.log('VERIFY video brief prototype',width,height,theme)
+ }
+ const file=path.join(output,'b3-content-writer-browser-evidence.json'),existing=JSON.parse(await fs.readFile(file,'utf8'));existing.videoBriefPrototype={scope:'Standalone real DesignVideoBriefEditor; saved canonical versions and recovery are fixture-only. No native database, installed contract, Generate integration or provider acceptance.',results};await fs.writeFile(file,JSON.stringify(existing,null,2))
+}
+
 async function designBridgeAssertions(browser) {
  const results=[]
  for (const [width,height,theme] of [[1440,900,'light'],[390,900,'dark']]) {
@@ -323,6 +359,7 @@ async function engagementFirstSendAssertions(browser) {
     ['content', 'empty', 'system', 320, 900],
   ]
   try {
+    if (process.argv.includes('--video-brief')) {await videoBriefPrototypeAssertions(browser);return}
     if (process.argv.includes('--design-bridge')) {await designBridgeAssertions(browser);return}
     if (process.argv.includes('--wider-direct')) {await widerDirectAssertions(browser);return}
     if (process.argv.includes('--engagement-first-send')) { await engagementFirstSendAssertions(browser); return }

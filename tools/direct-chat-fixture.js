@@ -1,4 +1,5 @@
 // Isolated, provider-free fixture. This module is never imported by production.
+import { videoBriefCreativeContent } from '../supabase/functions/_shared/designVideoBrief.js'
 import { contextChatTitleFromMessage } from '../src/data/contextChatTitle.js'
 export const actor = 'a0000000-0000-4000-8000-000000000001'
 export const organizationId = 'a0000000-0000-4000-8000-000000000002'
@@ -23,7 +24,27 @@ export function createDirectChatFixture({ surface = 'content', state = 'empty', 
   const data = stored || { rows: seeded ? [conversation] : [], messages: seeded ? [human, ...(['populated', 'output-open'].includes(state) ? [assistant] : [])] : [], counters: { created: 0, messages: 0, run: 0, recover: 0 } }
   const fixture = { data, scope, readiness: ready, runFailure: false, createUncertain: false, recoveryAvailable: !['failed', 'uncertain'].includes(state), beforeStart: null, beforeRun: null }
   fixture.videoReads = []; fixture.videoQuotes = []; fixture.videoGenerationCalls = 0
+  fixture.briefWrites = 0; fixture.briefReads = []; fixture.briefLostResponse = false
+  data.videoBriefVersions ||= []; data.videoBriefRoot ||= null
   fixture.designWorkshop = {
+    getVideoBrief: async input => {
+      if (input.private_conversation_id !== threadId || input.direction_version_id || scope.department_id !== 'design') throw failure('Foreign video brief fixture',403)
+      fixture.briefReads.push(structuredClone(input))
+      const version = input.operation_key ? data.videoBriefVersions.find(row=>row.operation_key===input.operation_key) : data.videoBriefVersions.at(-1)
+      return version ? {brief:structuredClone(data.videoBriefRoot),version:structuredClone(version)} : {}
+    },
+    confirmVideoBrief: async input => {
+      if (input.private_conversation_id !== threadId || input.direction_version_id || scope.department_id !== 'design') throw failure('Foreign video brief confirmation',403)
+      const existing = data.videoBriefVersions.find(row=>row.operation_key===input.operation_key)
+      if(existing) { if(JSON.stringify(existing.fixture_input)!==JSON.stringify(input))throw failure('Changed fixture brief operation',409);return {brief:structuredClone(data.videoBriefRoot),version:structuredClone(existing)} }
+      if((input.creative_brief_id||null)!==(data.videoBriefRoot?.id||null) || input.expected_revision!==(data.videoBriefRoot?.revision||0))throw failure('Stale exact fixture brief revision',409)
+      const id=crypto.randomUUID(),parent=data.videoBriefVersions.at(-1)
+      data.videoBriefRoot={id:data.videoBriefRoot?.id||crypto.randomUUID(),organization_id:organizationId,created_by:actor,visibility:'private',revision:(data.videoBriefRoot?.revision||0)+2,frozen_version_id:id}
+      const version={id,creative_brief_id:data.videoBriefRoot.id,organization_id:organizationId,created_by:actor,version_number:data.videoBriefVersions.length+1,parent_version_id:parent?.id||null,operation_key:input.operation_key,fixture_input:structuredClone(input),validation_snapshot:{valid:true,video_confirmation:{action:'confirm_video_brief',actor_id:actor,expected_revision:input.expected_revision,requested_root_id:input.creative_brief_id}},content:videoBriefCreativeContent(input.video_brief,{private_conversation_id:threadId})}
+      data.videoBriefVersions.push(version);fixture.briefWrites++;save()
+      if(fixture.briefLostResponse)throw failure('Original confirmation response lost · fixture',503)
+      return {brief:structuredClone(data.videoBriefRoot),version:structuredClone(version)}
+    },
     listPrivateVideoJobs: async id => { if (!data.rows.some(row => row.id === id && row.department_id === 'design' && row.owner_id === actor)) throw failure('Foreign private video fixture',403); fixture.videoReads.push(id); return [] },
     getPrivateVideoQuote: async input => { fixture.videoQuotes.push(structuredClone(input)); return { paid_execution_enabled: false, spend_tracking_configured: false, spend_guard_mode: null, quote: null } },
     generatePrivateVideo: async () => { fixture.videoGenerationCalls++; throw failure('Generation disabled in offline fixture',403) },

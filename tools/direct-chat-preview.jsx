@@ -6,6 +6,8 @@ import { ThemeProvider, useTheme } from '../src/hooks/useTheme.jsx'
 import WorkshopChatWorkspace from '../src/components/WorkshopChatWorkspace.jsx'
 import WorkshopConversationList from '../src/components/WorkshopConversationList.jsx'
 import ContentArtifactChat from '../src/components/ContentArtifactChat.jsx'
+import DesignVideoBriefEditor from '../src/components/DesignVideoBriefEditor.jsx'
+import {emptyVideoBrief} from '../supabase/functions/_shared/designVideoBrief.js'
 import ContextConversationPanel from '../src/components/ContextConversationPanel.jsx'
 import { actor, organizationId, threadId, requestId, dispatchId, humanId, createDirectChatFixture } from './direct-chat-fixture.js'
 import { clearDirectChatDraft } from '../src/data/directChatDraft.js'
@@ -35,6 +37,7 @@ function Preview() {
   const [draftDirty, setDraftDirty] = useState(false)
   const [conversationListRevision, setConversationListRevision] = useState(0)
   const [mode, setMode] = useState('private')
+  const [briefScript, setBriefScript] = useState(''), [briefSettings,setBriefSettings] = useState(emptyVideoBrief), [confirmedBrief,setConfirmedBrief] = useState(null)
   const [engagementSelection, setEngagementSelection] = useState(null)
   const [mobile, setMobile] = useState(params.get('size') === 'mobile')
   const [counters, setCounters] = useState({ ...fixture.data.counters })
@@ -53,6 +56,7 @@ function Preview() {
     observer.observe(document.getElementById('preview-chat'), { childList: true, subtree: true })
     return () => observer.disconnect()
   }, [])
+  if (params.get('panel') === 'video-brief') return <div className="workspace-page design-workshop"><h1 className="workspace-title">Confirmed video brief · local prototype</h1><p>No provider requests or production writes. Canonical saving/recovery uses an isolated fixture; database and Generate integration remain unverified.</p><DesignVideoBriefEditor studio={fixture.designWorkshop} context={{private_conversation_id:threadId}} actorId={actor} organizationId={organizationId} settings={briefSettings} script={briefScript} onScriptChange={setBriefScript} onRestoreSettings={setBriefSettings} onConfirmed={setConfirmedBrief} onNavigationBusyChange={setNavigationBusy} onDraftDirtyChange={setDraftDirty} /><p role="status">{confirmedBrief ? 'Exact mocked version confirmed; no generation performed.' : navigationBusy ? 'Original confirmation needs settlement.' : 'Prepare the exact video brief.'}</p></div>
   if (params.get('panel') === 'writer') return <div className="workspace-page"><h1 className="workspace-title">Content Workshop</h1><details className="text-xs text-[var(--anka-muted)]"><summary>Offline verification fixture</summary><p>No provider calls or production writes. Actual shared shell, grouped history and engagement Chat.</p></details><WorkshopChatWorkspace compactChat draftDirty={draftDirty} mode="chat" departmentName="Content" projectName="Website Content" engagementName={fixture.contentWorkspace.engagement.name} navigationBusy={navigationBusy} onModeChange={setMode} onConversationSelect={setEngagementSelection} conversationList={onOpen => <WorkshopConversationList activeEngagementId={fixture.engagements[0].id} compact navigationBusy={navigationBusy} refreshKey={conversationListRevision} organizationId={organizationId} actorId={actor} scopeRevision={1} departmentId="content" engagements={fixture.engagements} workstreams={fixture.workstreams} signal={globalThis.__directChatPreview.organization.requestSignal} onOpen={onOpen} />}><ContentArtifactChat sideEditor hideConversationList projectId={fixture.engagements[0].project_id} engagement={fixture.contentWorkspace.engagement} presentation="workbench" onNavigationBusyChange={setNavigationBusy} onDraftDirtyChange={setDraftDirty} onConversationListChange={() => setConversationListRevision(value=>value+1)} /></WorkshopChatWorkspace></div>
   return <div className="workspace-page" style={{ maxWidth: 1500, margin: 'auto' }}>
     <h1 className="workspace-title">{surface === 'project' ? 'Launch project · Chat' : surface === 'design' ? 'Design Workshop · Chat' : 'Content Workshop · Chat'}</h1><p className="text-sm text-[var(--anka-muted)]">Offline fixture · No provider calls</p><details className="preview-controls"><summary>Preview controls · test fixtures</summary>
