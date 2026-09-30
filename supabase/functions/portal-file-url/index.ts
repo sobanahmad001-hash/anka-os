@@ -37,14 +37,18 @@ serve(async request => {
       .eq('id', fileId).single()
     if (fileError || !file || file.archived_at) return json({ error: 'File not found' }, 404)
 
+    const { data: project, error: projectError } = await adminClient.from('projects')
+      .select('id, organization_id, archived_at, portal_visible').eq('id', file.project_id).single()
+    if (projectError || !project) return json({ error: 'Project file access denied' }, 403)
+
     const [{ data: team }, { data: clientAccess }] = await Promise.all([
       adminClient.from('organization_memberships').select('id')
-        .eq('user_id', user.id).eq('member_kind', 'team').eq('status', 'active').limit(1),
+        .eq('organization_id', project.organization_id).eq('user_id', user.id).eq('member_kind', 'team').eq('status', 'active').limit(1),
       adminClient.from('project_client_access').select('id, client_contacts!inner(auth_user_id, status)')
         .eq('project_id', file.project_id).eq('status', 'active')
         .eq('client_contacts.auth_user_id', user.id).eq('client_contacts.status', 'active').limit(1),
     ])
-    if (!team?.length && !clientAccess?.length) return json({ error: 'Project file access denied' }, 403)
+    if (!team?.length && (project.archived_at || !project.portal_visible || !clientAccess?.length)) return json({ error: 'Project file access denied' }, 403)
 
     const { data: portalItem } = await adminClient.from('client_portal_items').select('id')
       .eq('project_id', file.project_id).eq('source_type', 'deliverable_version')

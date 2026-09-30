@@ -27,7 +27,7 @@ export default function ProjectDraftActivation({ project, organizationId, member
     return () => { generation.current += 1 }
   }, [isAdmin, organizationId, project?.id, requestSignal, scopeRevision, user?.id])
 
-  if (project?.status !== 'planning') return null
+  if (project?.status !== 'planning' || project.archived_at) return null
   if (!isAdmin && !isBoundManager) return checking ? <p className="text-xs text-slate-500">Checking activation authority…</p> : null
 
   const activate = async () => {
