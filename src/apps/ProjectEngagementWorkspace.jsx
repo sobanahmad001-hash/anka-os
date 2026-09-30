@@ -5,6 +5,7 @@ import { projectEngagementWorkspace } from '../data/projectEngagementWorkspace'
 import RetainerPlanningPanel from '../components/RetainerPlanningPanel'
 import ProjectPlanningPanel from '../components/ProjectPlanningPanel.jsx'
 import ProjectDraftActivation from './ProjectDraftActivation.jsx'
+import ProjectLifecyclePanel from './ProjectLifecyclePanel.jsx'
 import ProjectServiceScopePanel from './ProjectServiceScopePanel.jsx'
 import ProjectManagerAssignment from './ProjectManagerAssignment.jsx'
 import ProjectDiscussionPanel from './ProjectDiscussionPanel.jsx'
@@ -143,7 +144,9 @@ export default function ProjectEngagementWorkspace() {
           <div className="flex flex-wrap items-center gap-2">{identity.hasEngagement && workspace.engagement?.id && <Link to={`/sphere/engagements?engagement=${encodeURIComponent(workspace.engagement.id)}&tab=pipeline&project=${encodeURIComponent(projectId)}`} className="rounded-xl border border-[var(--anka-violet)] px-4 py-2 text-sm text-[var(--anka-violet)]">Open Pipeline</Link>}<button type="button" onClick={load} disabled={loading} className="workspace-button hover:bg-[var(--anka-surface-raised)] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={project.status} /><ProjectDraftActivation project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onActivated={load} onAccessError={handleOrganizationAccessError} /></div>
         </header>
 
-        {tab !== 'discussion' && <ProjectManagerAssignment project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onAssigned={load} onAccessError={handleOrganizationAccessError} />}
+        <ProjectLifecyclePanel key={`${activeOrganizationId}:${project.id}:${scopeRevision}`} project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={(result) => { setWorkspace(current => current ? { ...current, project: { ...current.project, archived_at: result.archived_at } } : current); load() }} onDeleted={() => navigate('/sphere/portfolio')} />
+
+        {!project.archived_at && tab !== 'discussion' && <ProjectManagerAssignment project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onAssigned={load} onAccessError={handleOrganizationAccessError} />}
 
         {error && <div role="alert" className="mt-5 rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] p-4 text-sm text-[var(--anka-warning)]"><p className="font-medium">Refresh failed; showing previously loaded data.</p><p className="mt-1 text-xs text-[var(--anka-warning)]">{error}{loadedAt ? ` · Loaded ${loadedAt.toLocaleTimeString()}` : ''}</p></div>}
         {tab === 'overview' && <section aria-label="Workspace summary" className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">

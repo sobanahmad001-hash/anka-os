@@ -6,6 +6,7 @@ import { portfolioWorkspace } from '../data/portfolioWorkspace'
 import { canShowAuthorityAdministration } from '../data/authorityAdministration.js'
 import ProjectDraftSetupPanel from './ProjectDraftSetupPanel.jsx'
 import ProjectRequestPanel from './ProjectRequestPanel.jsx'
+import ProjectLifecycleAdminList from './ProjectLifecycleAdminList.jsx'
 
 const label = (value) => value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
 const metric = (title, value, note) => ({ title, value, note })
@@ -90,6 +91,8 @@ export default function PortfolioWorkspace({ initialOwnerKind = 'all' }) {
         {showSetup && canShowAuthorityAdministration(activeMembership) && <ProjectDraftSetupPanel organizationId={activeOrganizationId} scopeRevision={scopeRevision} requestSignal={requestSignal} initialType="project" onCreated={(result) => navigate(`/sphere/workspace/projects/${result.project_id}?tab=services`)} onCancel={() => setShowSetup(false)} onAccessError={handleOrganizationAccessError} />}
 
         {!organizationLoading && !selectionRequired && activeOrganizationId && <ProjectRequestPanel organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={handleOrganizationAccessError} />}
+
+        {!organizationLoading && !selectionRequired && activeOrganizationId && canShowAuthorityAdministration(activeMembership) && <ProjectLifecycleAdminList key={`${activeOrganizationId}:${scopeRevision}`} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={load} />}
 
         {error && <div role="alert" className="mt-6 rounded-2xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] p-4 text-sm text-[var(--anka-danger)]">{error}</div>}
         {loading && !snapshot && <div className="mt-8 workspace-card p-10 text-center text-sm text-[var(--anka-muted)]">Loading live portfolio data…</div>}
