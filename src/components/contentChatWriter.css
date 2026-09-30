@@ -1,0 +1,21 @@
+/* Only the opt-in engagement side editor; the standalone writer remains unchanged. */
+.content-chat-with-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, .9fr); align-items: start; gap: 16px; }
+.content-chat-writer { min-width: 0; max-height: calc(100dvh - 140px); overflow: auto; border: 1px solid var(--anka-line); border-radius: 12px; padding: 16px; background: var(--anka-surface); color: var(--anka-ink); }
+.content-chat-writer-body > div { display: flex; flex-direction: column; margin-top: 16px; }
+.content-chat-writer :is(form, article, section, div)[class*="bg-slate-"] { background: var(--anka-canvas); }
+.content-chat-writer :is(input, select, textarea, button)[class*="bg-slate-"] { background: var(--anka-surface); }
+.content-chat-writer [class*="border-slate-"] { border-color: var(--anka-line); }
+.content-chat-writer [class*="text-white"], .content-chat-writer [class*="text-slate-200"], .content-chat-writer [class*="text-slate-300"] { color: var(--anka-ink); }
+.content-chat-writer [class*="text-slate-400"], .content-chat-writer [class*="text-slate-500"], .content-chat-writer [class*="text-slate-600"] { color: var(--anka-muted); }
+.content-chat-writer :is(input, select, textarea) { max-width: 100%; }
+.content-chat-writer :focus-visible { outline: 2px solid var(--anka-focus); outline-offset: 2px; }
+@media (max-width: 1199px) { .content-chat-with-editor { grid-template-columns: minmax(0, 1fr); } .content-chat-writer { max-height: 75dvh; } }
+
+.content-chat-writer [class*="bg-amber-600"] { background: var(--anka-violet); color: var(--anka-on-violet); }
+.content-chat-writer [class*="bg-amber-950"] { background: var(--anka-warning-soft); }
+.content-chat-writer [class*="text-amber-"] { color: var(--anka-warning); }
+.content-chat-writer [class~="border-amber-500/40"], .content-chat-writer [class~="border-amber-500/30"], .content-chat-writer [class~="border-amber-900/50"] { border-color: var(--anka-warning); }
+.content-chat-writer :is(input, select, textarea):focus { border-color: var(--anka-focus); }
+.content-chat-writer [class*="bg-emerald-950"] { background: var(--anka-success-soft); }
+.content-chat-writer [class*="text-emerald-"] { color: var(--anka-success); }
+.content-chat-writer [class*="text-red-"] { color: var(--anka-danger); }

@@ -23,6 +23,52 @@ async function drawerAssertions(page, label, opener) {
   assert(await opener.evaluate(node => document.activeElement === node), 'Escape did not restore opener focus')
   return { initialFocus: true, shiftTabContained: true, tabContained: true, escapeClosed: true, openerFocusRestored: true }
 }
+async function writerAssertions(browser) {
+  const results = []
+  for (const [width, height, theme] of [[1440,900,'light'],[1440,900,'dark'],[390,900,'light'],[390,900,'dark']]) {
+    const context = await browser.newContext({ viewport: { width, height } })
+    const page = await context.newPage(); page.setDefaultTimeout(15000)
+    const errors = [], blocked = []
+    page.on('pageerror', error => errors.push(error.message))
+    page.on('dialog', dialog => dialog.accept())
+    await page.route('**/*', route => { const url = new URL(route.request().url()); if (url.hostname === '127.0.0.1' && url.port === '5188') return route.continue(); blocked.push(url.origin); return route.abort() })
+    await page.goto(`${base}?panel=writer&surface=content&state=empty&theme=${theme}`)
+    await page.getByRole('button', { name: 'Open Content writer beside chat', exact: true }).click()
+    const pane = page.getByRole('complementary', { name: 'Canonical Content side editor', exact: true })
+    await pane.getByRole('heading', { name: 'Content writer · canonical versions', exact: true }).waitFor()
+    assert(await pane.evaluate(node => node.contains(document.activeElement)))
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+    const openScreenshot = `b3-content-writer-open-${theme}-${width}x${height}.png`
+    await page.screenshot({ path: path.join(output, openScreenshot) })
+    await pane.getByRole('combobox', { name: 'Saved writer output', exact: true }).selectOption({ label: 'Existing article · v1' })
+    const body = pane.getByLabel(/Draft text/)
+    assert.equal(await body.inputValue(), 'Keep alpha and omega.')
+    await body.evaluate(node => { node.focus(); node.setSelectionRange(5,10) })
+    await pane.getByRole('button', { name: 'Use selected text', exact: true }).click()
+    await pane.getByLabel(/Replacement/).fill('beta')
+    await pane.getByRole('button', { name: 'Apply to working draft', exact: true }).click()
+    assert.equal(await body.inputValue(), 'Keep beta and omega.')
+    assert.equal(await page.evaluate(() => globalThis.__directChatPreview.fixture.writerWrites), 0)
+    await pane.getByRole('button', { name: 'Preview draft', exact: true }).click()
+    const saveScreenshot = `b3-content-writer-save-preview-${theme}-${width}x${height}.png`
+    await pane.getByRole('button', { name: 'Confirm unapproved draft', exact: true }).scrollIntoViewIfNeeded()
+    await page.screenshot({ path: path.join(output, saveScreenshot) })
+    await pane.getByRole('button', { name: 'Confirm unapproved draft', exact: true }).click()
+    await page.waitForFunction(() => globalThis.__directChatPreview.fixture.writerWrites === 1)
+    const canonical = await page.evaluate(() => ({ writes: globalThis.__directChatPreview.fixture.writerWrites, versions: globalThis.__directChatPreview.fixture.contentWorkspace.versions.map(version => ({ id: version.id, parent: version.parent_version_id, number: version.version_number, body: version.content.body })) }))
+    assert.equal(canonical.versions.length, 2)
+    assert.equal(canonical.versions[0].body, 'Keep alpha and omega.')
+    assert.equal(canonical.versions[1].parent, canonical.versions[0].id)
+    assert.equal(canonical.versions[1].body, 'Keep beta and omega.')
+    assert.deepEqual(errors, []); assert.deepEqual(blocked, [])
+    results.push({ viewport: { width, height }, theme, focusMovedToPane: true, noHorizontalOverflow: true, boundedReplacementPreservesOtherText: true, previewDoesNotWrite: true, oneExactParentImmutableSave: true, sourceVersionUnchanged: true, writerWrites: canonical.writes, pageErrors: errors, blockedRemoteRequests: blocked, screenshots: [openScreenshot, saveScreenshot] })
+    await context.close()
+    console.log('VERIFY canonical writer', width, height, theme)
+  }
+  await fs.writeFile(path.join(output, 'b3-content-writer-browser-evidence.json'), JSON.stringify({ source: 'tools/check-direct-chat-browser.cjs --writer', scope: 'Actual canonical side writer and shell; isolated backend fixture and explicit legacy messaging placeholder. No production writes/providers/installed acceptance.', results }, null, 2))
+  console.log(JSON.stringify({ writerCasesPassed: results.length }))
+}
+
 ;(async () => {
   await fs.mkdir(output, { recursive: true })
   const browser = await chromium.launch({ channel: 'msedge', headless: true })
@@ -37,6 +83,7 @@ async function drawerAssertions(page, label, opener) {
     ['content', 'empty', 'system', 320, 900],
   ]
   try {
+    if (process.argv.includes('--writer')) { await writerAssertions(browser); return }
     for (const [surface, state, theme, width, height] of cases) {
       const context = await browser.newContext({ viewport: { width, height }, colorScheme: 'light' })
       const page = await context.newPage()
