@@ -6,10 +6,12 @@ import { ThemeProvider, useTheme } from '../src/hooks/useTheme.jsx'
 import WorkshopChatWorkspace from '../src/components/WorkshopChatWorkspace.jsx'
 import WorkshopConversationList from '../src/components/WorkshopConversationList.jsx'
 import ContentArtifactChat from '../src/components/ContentArtifactChat.jsx'
+import ProjectPipelineConfigurationPanel from '../src/components/ProjectPipelineConfigurationPanel.jsx'
+import PipelineRunIntentPanel from '../src/components/PipelineRunIntentPanel.jsx'
 import DesignVideoBriefEditor from '../src/components/DesignVideoBriefEditor.jsx'
 import {emptyVideoBrief} from '../supabase/functions/_shared/designVideoBrief.js'
 import ContextConversationPanel from '../src/components/ContextConversationPanel.jsx'
-import { actor, organizationId, threadId, requestId, dispatchId, humanId, createDirectChatFixture } from './direct-chat-fixture.js'
+import { actor, organizationId, threadId, requestId, dispatchId, humanId, createDirectChatFixture, createPipelinePreviewFixture } from './direct-chat-fixture.js'
 import { clearDirectChatDraft } from '../src/data/directChatDraft.js'
 import { directChatRecoveryKey, writeDirectChatRecovery } from '../src/data/directChatRecovery.js'
 import { browserStorage, writeThemePreference } from '../src/data/themePreference.js'
@@ -27,7 +29,7 @@ const scope = fixture.scope
 if (!stored && ['failed', 'uncertain'].includes(state)) writeDirectChatRecovery(directChatRecoveryKey(actor, organizationId, scope.context_kind, scope.project_id, scope.department_id), { conversation_id: threadId, client_request_id: requestId, dispatch_request_id: dispatchId, message_id: humanId })
 const membership = { organizationId, organization: { id: organizationId, name: 'Anka preview' }, role: 'operations_admin', departmentId: 'content', departmentIds: ['content'] }
 if (params.has('theme')) writeThemePreference(browserStorage(), actor, params.get('theme'))
-globalThis.__directChatPreview = { fixture, organization: { activeOrganizationId: organizationId, memberships: [membership], activeMembership: membership, selectionRequired: false, loading: false, error: null, selectOrganization: () => {}, scopeRevision: 1, requestSignal: new AbortController().signal, handleOrganizationAccessError: () => {} } }
+globalThis.__directChatPreview = { fixture, pipeline:createPipelinePreviewFixture(), organization: { activeOrganizationId: organizationId, memberships: [membership], activeMembership: membership, selectionRequired: false, loading: false, error: null, selectOrganization: () => {}, scopeRevision: 1, requestSignal: new AbortController().signal, handleOrganizationAccessError: () => {} } }
 
 function Preview() {
   const { theme, setTheme } = useTheme()
@@ -56,6 +58,7 @@ function Preview() {
     observer.observe(document.getElementById('preview-chat'), { childList: true, subtree: true })
     return () => observer.disconnect()
   }, [])
+  if (params.get('panel') === 'pipelines') return <div className="workspace-page"><h1 className="workspace-title">Project pipelines</h1><p className="workspace-description">Provider-free local fixture · synthetic published sources · no production writes</p><div className="mt-5 space-y-5"><ProjectPipelineConfigurationPanel organizationId={organizationId} engagement={{...fixture.engagements[0],status:'active'}} services={[]} membership={membership} /><PipelineRunIntentPanel organizationId={organizationId} engagement={{...fixture.engagements[0],status:'active'}} assets={[]} membership={membership} /></div></div>
   if (params.get('panel') === 'video-brief') return <div className="workspace-page design-workshop"><h1 className="workspace-title">Confirmed video brief · local prototype</h1><p>No provider requests or production writes. Canonical saving/recovery uses an isolated fixture; database and Generate integration remain unverified.</p><DesignVideoBriefEditor studio={fixture.designWorkshop} context={{private_conversation_id:threadId}} actorId={actor} organizationId={organizationId} settings={briefSettings} script={briefScript} onScriptChange={setBriefScript} onRestoreSettings={setBriefSettings} onConfirmed={setConfirmedBrief} onNavigationBusyChange={setNavigationBusy} onDraftDirtyChange={setDraftDirty} /><p role="status">{confirmedBrief ? 'Exact mocked version confirmed; no generation performed.' : navigationBusy ? 'Original confirmation needs settlement.' : 'Prepare the exact video brief.'}</p></div>
   if (params.get('panel') === 'writer') return <div className="workspace-page"><h1 className="workspace-title">Content Workshop</h1><details className="text-xs text-[var(--anka-muted)]"><summary>Offline verification fixture</summary><p>No provider calls or production writes. Actual shared shell, grouped history and engagement Chat.</p></details><WorkshopChatWorkspace compactChat draftDirty={draftDirty} mode="chat" departmentName="Content" projectName="Website Content" engagementName={fixture.contentWorkspace.engagement.name} navigationBusy={navigationBusy} onModeChange={setMode} onConversationSelect={setEngagementSelection} conversationList={onOpen => <WorkshopConversationList activeEngagementId={fixture.engagements[0].id} compact navigationBusy={navigationBusy} refreshKey={conversationListRevision} organizationId={organizationId} actorId={actor} scopeRevision={1} departmentId="content" engagements={fixture.engagements} workstreams={fixture.workstreams} signal={globalThis.__directChatPreview.organization.requestSignal} onOpen={onOpen} />}><ContentArtifactChat sideEditor hideConversationList projectId={fixture.engagements[0].project_id} engagement={fixture.contentWorkspace.engagement} presentation="workbench" onNavigationBusyChange={setNavigationBusy} onDraftDirtyChange={setDraftDirty} onConversationListChange={() => setConversationListRevision(value=>value+1)} /></WorkshopChatWorkspace></div>
   return <div className="workspace-page" style={{ maxWidth: 1500, margin: 'auto' }}>

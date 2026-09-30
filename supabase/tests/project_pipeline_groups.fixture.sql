@@ -1,0 +1,25 @@
+-- Existing synthetic localhost identity only. No users or provider data are created.
+insert into public.departments(id,name,organization_id) values('marketing','Marketing','99999999-9999-4999-8999-999999999901') on conflict(id) do nothing;
+insert into public.service_catalog(id,organization_id,department_id,slug,name,is_active) values('99999999-9999-4999-8999-999999997001','99999999-9999-4999-8999-999999999901','marketing','pipeline_native_marketing','Native Marketing fixture',true) on conflict(id) do nothing;
+insert into public.engagement_services(id,organization_id,engagement_id,service_id,status,owner_id,activated_by) values('99999999-9999-4999-8999-999999997002','99999999-9999-4999-8999-999999999901','99999999-9999-4999-8999-999999999975','99999999-9999-4999-8999-999999997001','active','99999999-9999-4999-8999-999999999902','99999999-9999-4999-8999-999999999902') on conflict(id) do nothing;
+insert into public.project_department_participation(organization_id,project_id,department_id,status,created_by)
+select '99999999-9999-4999-8999-999999999901','99999999-9999-4999-8999-999999999974',d,'active','99999999-9999-4999-8999-999999999902' from (values('content'),('marketing')) desired(d)
+where not exists(select 1 from public.project_department_participation p where p.organization_id='99999999-9999-4999-8999-999999999901' and p.project_id='99999999-9999-4999-8999-999999999974' and p.department_id=d and p.status='active');
+-- Seed immutable published-source fixtures; unchanged actual author/reviewer/publication gates are not bypassed in the product.
+insert into public.pipeline_templates(id,organization_id,slug,created_by) values
+('99999999-9999-4999-8999-999999997010','99999999-9999-4999-8999-999999999901','native_website','99999999-9999-4999-8999-999999999902'),
+('99999999-9999-4999-8999-999999997020','99999999-9999-4999-8999-999999999901','native_marketing','99999999-9999-4999-8999-999999999902') on conflict(id) do nothing;
+insert into public.pipeline_template_versions(id,organization_id,pipeline_template_id,version_number,name,service_selection_sha256,created_by) values
+('99999999-9999-4999-8999-999999997011','99999999-9999-4999-8999-999999999901','99999999-9999-4999-8999-999999997010',1,'Native Website',repeat('a',64),'99999999-9999-4999-8999-999999999902'),
+('99999999-9999-4999-8999-999999997021','99999999-9999-4999-8999-999999999901','99999999-9999-4999-8999-999999997020',1,'Native Marketing',repeat('b',64),'99999999-9999-4999-8999-999999999902') on conflict(id) do nothing;
+insert into public.pipeline_template_publications(id,organization_id,pipeline_template_id,pipeline_template_version_id,publication_number,published_rule_manifest,published_rule_sha256,published_by) values
+('99999999-9999-4999-8999-999999997012','99999999-9999-4999-8999-999999999901','99999999-9999-4999-8999-999999997010','99999999-9999-4999-8999-999999997011',1,'{}',repeat('c',64),'99999999-9999-4999-8999-999999999902'),
+('99999999-9999-4999-8999-999999997022','99999999-9999-4999-8999-999999999901','99999999-9999-4999-8999-999999997020','99999999-9999-4999-8999-999999997021',1,'{}',repeat('d',64),'99999999-9999-4999-8999-999999999902') on conflict(id) do nothing;
+insert into public.pipeline_execution_definitions(id,organization_id,preset_publication_id,version_number,request_id,request_sha256,name,steps,steps_sha256,created_by)
+select id,'99999999-9999-4999-8999-999999999901',preset,1,id,repeat('e',64),name,steps,encode(pg_catalog.sha256(convert_to(steps::text,'UTF8')),'hex'),'99999999-9999-4999-8999-999999999902' from (values
+('99999999-9999-4999-8999-999999997013'::uuid,'99999999-9999-4999-8999-999999997012'::uuid,'Native Website','[{"key":"website_brief","label":"Website brief","kind":"human","department_id":"content","service_id":"99999999-9999-4999-8999-999999999976","depends_on":[]}]'::jsonb),
+('99999999-9999-4999-8999-999999997023'::uuid,'99999999-9999-4999-8999-999999997022'::uuid,'Native Marketing','[{"key":"marketing_plan","label":"Marketing plan","kind":"human","department_id":"marketing","service_id":"99999999-9999-4999-8999-999999997001","depends_on":[]}]'::jsonb)) f(id,preset,name,steps) on conflict(id) do nothing;
+insert into public.pipeline_execution_publications(id,organization_id,definition_id,published_by) values
+('99999999-9999-4999-8999-999999997014','99999999-9999-4999-8999-999999999901','99999999-9999-4999-8999-999999997013','99999999-9999-4999-8999-999999999902'),
+('99999999-9999-4999-8999-999999997024','99999999-9999-4999-8999-999999999901','99999999-9999-4999-8999-999999997023','99999999-9999-4999-8999-999999999902') on conflict(id) do nothing;
+insert into public.engagement_pipeline_origins(engagement_id,organization_id,pipeline_template_id,pipeline_template_version_id,original_selection_sha256,final_selection_sha256,preview_rule_sha256,created_by) values('99999999-9999-4999-8999-999999999975','99999999-9999-4999-8999-999999999901','99999999-9999-4999-8999-999999997010','99999999-9999-4999-8999-999999997011',repeat('a',64),repeat('a',64),repeat('c',64),'99999999-9999-4999-8999-999999999902') on conflict(engagement_id) do nothing;

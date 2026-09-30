@@ -345,7 +345,43 @@ async function engagementFirstSendAssertions(browser) {
  await fs.writeFile(file,JSON.stringify(evidence,null,2));console.log(JSON.stringify({engagementFirstSendCases:results.length,results}))
 }
 
-;(async () => {
+;async function pipelineGroupAssertions(browser) {
+ const results=[]
+ for (const [width,height,theme] of [[1440,900,'light'],[390,900,'dark']]) {
+  const context=await browser.newContext({viewport:{width,height}}),page=await context.newPage();page.setDefaultTimeout(15000)
+  const errors=[],blocked=[];page.on('pageerror',error=>errors.push(error.message))
+  await page.route('**/*',route=>{const url=new URL(route.request().url());if(url.hostname==='127.0.0.1' && url.port==='5188')return route.continue();blocked.push(url.origin);return route.abort()})
+  await page.goto(`${base}?panel=pipelines&theme=${theme}`)
+  const panel=page.getByRole('region',{name:'Project pipeline configuration',exact:true}),choice=page.getByRole('combobox',{name:'Pipeline selection',exact:true})
+  await choice.waitFor();await page.waitForFunction(()=>!document.body.textContent.includes('Loading project configurations'))
+  const identities=await page.evaluate(()=>({website:globalThis.__directChatPreview.pipeline.website,marketing:globalThis.__directChatPreview.pipeline.marketing}))
+  await choice.selectOption(identities.website);assert.match(await panel.textContent(),/Active revision 2 · page_brief/);assert.doesNotMatch(await panel.textContent(),/Revision 3 · activated/)
+  await choice.selectOption(identities.marketing);assert.match(await panel.textContent(),/Active revision 3 · campaign_plan/);assert.doesNotMatch(await panel.textContent(),/Revision 2 · activated/)
+  await choice.selectOption('');assert.match(await panel.textContent(),/Active revision 9 · original_brief/)
+  await panel.getByText('Create an independent pipeline',{exact:true}).click()
+  await page.getByRole('textbox',{name:'Pipeline name',exact:true}).fill('Second website')
+  await page.getByRole('combobox',{name:'Independent pipeline preset',exact:true}).selectOption({label:'Website delivery · execution v1'})
+  await page.getByRole('button',{name:'Review pipeline creation',exact:true}).click()
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.pipeline.calls.length),0)
+  await page.getByRole('button',{name:'Confirm independent pipeline',exact:true}).scrollIntoViewIfNeeded()
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth))
+  const reviewScreenshot=`b2-pipeline-review-${theme}-${width}x${height}.png`;await page.screenshot({path:path.join(output,reviewScreenshot)})
+  await page.getByRole('button',{name:'Confirm independent pipeline',exact:true}).click();await page.waitForFunction(()=>document.body.textContent.includes('Choose steps and review activation separately'))
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.pipeline.calls.length),1)
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.pipeline.runCalls.length),0)
+  const runChoice=page.getByRole('combobox',{name:'Run pipeline',exact:true});await runChoice.selectOption(identities.marketing)
+  const run=page.getByRole('button',{name:'Request manual run review',exact:true});await run.scrollIntoViewIfNeeded();assert.equal(await run.isEnabled(),true)
+  const runScreenshot=`b2-pipeline-run-${theme}-${width}x${height}.png`;await page.screenshot({path:path.join(output,runScreenshot)})
+  await run.click();await page.waitForFunction(()=>globalThis.__directChatPreview.pipeline.runCalls.length===1)
+  await page.getByText('Pipeline: Launch campaign',{exact:true}).waitFor()
+  const call=await page.evaluate(()=>globalThis.__directChatPreview.pipeline.runCalls[0]);assert.equal(call.pipelineGroupId,identities.marketing)
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
+  results.push({viewport:{width,height},theme,independentWebsiteMarketingLegacy:true,reviewZeroWrites:true,creationOneCommandNoRun:true,runOneExactGroupReviewRequest:true,noHorizontalOverflow:true,pageErrors:errors,blockedRemoteRequests:blocked,screenshots:[reviewScreenshot,runScreenshot]})
+  await context.close()
+ }
+ const packet=path.join(output,'b2-service-native-evidence.json');const evidence=JSON.parse(await fs.readFile(packet,'utf8'));evidence.independentPipelineGroups.browser={source:'tools/check-direct-chat-browser.cjs --pipeline-groups',scope:'Actual configuration/run panels in existing Layout; provider-free synthetic published sources; no publisher journey or production writes',results};await fs.writeFile(packet,JSON.stringify(evidence,null,2)+'\n');console.log(JSON.stringify({pipelineGroupsPassed:results.length,evidence:packet}))
+}
+(async () => {
   await fs.mkdir(output, { recursive: true })
   const browser = await chromium.launch({ channel: 'msedge', headless: true })
   const results = []
@@ -359,6 +395,7 @@ async function engagementFirstSendAssertions(browser) {
     ['content', 'empty', 'system', 320, 900],
   ]
   try {
+    if (process.argv.includes('--pipeline-groups')) {await pipelineGroupAssertions(browser);return}
     if (process.argv.includes('--video-brief')) {await videoBriefPrototypeAssertions(browser);return}
     if (process.argv.includes('--design-bridge')) {await designBridgeAssertions(browser);return}
     if (process.argv.includes('--wider-direct')) {await widerDirectAssertions(browser);return}

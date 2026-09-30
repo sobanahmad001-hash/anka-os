@@ -7,6 +7,8 @@ const config = { root, cacheDir: '/tmp/anka-direct-chat-preview-vite-cache', ser
   load(id) {
     const path = id.replaceAll('\\', '/').split('?')[0]
     if (path.endsWith('/src/data/contentStudioRepository.js')) return 'export const contentStudio = {forOrganization: () => ({load: (...args) => globalThis.__directChatPreview.fixture.contentStudio.load(...args),saveArtifact: (...args) => globalThis.__directChatPreview.fixture.contentStudio.saveArtifact(...args),copyContentWriterVersion: (...args) => globalThis.__directChatPreview.fixture.contentStudio.copyContentWriterVersion(...args)})}'
+    if (path.endsWith('/src/data/projectPipelineConfigurations.js')) return 'export const projectPipelineConfigurations = new Proxy({}, {get:(_,key)=>(...args)=>globalThis.__directChatPreview.pipeline.repository[key](...args)})'
+    if (path.endsWith('/src/data/pipelineRunIntents.js')) return 'export const pipelineRunIntents = new Proxy({}, {get:(_,key)=>(...args)=>globalThis.__directChatPreview.pipeline.runRepository[key](...args)})'
     if (path.endsWith('/src/context/AuthContext.jsx')) return `import { actor } from '/tools/direct-chat-fixture.js'; export const useAuth = () => ({user:{id:actor},profile:{full_name:'Preview member',role:'admin'},signOut:()=>{}});`
     if (path.endsWith('/src/context/OrganizationContext.jsx')) return `export const useOrganization = () => globalThis.__directChatPreview.organization;`
     if (path.endsWith('/src/data/departmentChatRepository.js')) return `export const departmentChat = new Proxy({}, {get: (_, key) => (...args) => globalThis.__directChatPreview.fixture.chat[key](...args)});`
