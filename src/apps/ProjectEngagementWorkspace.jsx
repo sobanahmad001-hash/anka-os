@@ -81,14 +81,17 @@ export default function ProjectEngagementWorkspace() {
   }, [activeOrganizationId, handleOrganizationAccessError, organizationLoading, requestSignal, scopeRevision, selectionRequired, projectId])
 
   useEffect(() => {
-    setWorkspace(null)
+    // A read-generation refresh must not unmount service proposals for this project.
+    // Organization/actor access transitions are also gated by OrganizationProvider.
+    setWorkspace(current => current?.project.id === projectId
+      && current?.project.organization_id === activeOrganizationId ? current : null)
     setError('')
     setFailureKind('')
     setLoadedAt(null)
     setLoading(true)
     load()
     return () => { requestGeneration.current += 1 }
-  }, [load])
+  }, [load, activeOrganizationId, projectId])
   useEffect(() => {
     if (!workspace || !focusedRecord) return
     globalThis.document?.getElementById(`work-record-${focusedRecord.kind}-${focusedRecord.id}`)?.focus()
