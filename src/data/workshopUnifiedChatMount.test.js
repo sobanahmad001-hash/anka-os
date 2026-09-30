@@ -97,3 +97,29 @@ test('engagement chat optional presentation label preserves its default and cont
   assert.doesNotMatch(workbench, /I confirm this message/)
   assert.match(workbench, /Send/)
 })
+
+test('compact Workshop switches clean context directly and preserves dirty context until explicit confirmation', async t => {
+ const environment=mountedEnvironment()
+ const globals={document:environment.document,window:environment.window,Node:environment.window.Node,HTMLElement:environment.window.HTMLElement,IS_REACT_ACT_ENVIRONMENT:true}
+ const previous=Object.fromEntries(Object.keys(globals).map(key=>[key,globalThis[key]]));Object.assign(globalThis,globals)
+ const vite=await createServer({server:{middlewareMode:true},appType:'custom',logLevel:'silent'})
+ const {default:Shell}=await vite.ssrLoadModule('/src/components/WorkshopChatWorkspace.jsx')
+ const root=createRoot(environment.container);t.after(async()=>{await act(async()=>root.unmount());await vite.close();Object.assign(globalThis,previous)})
+ const modes=[],selections=[],row={kind:'engagement',row:{id:'exact',title:'Exact thread'}}
+ const props=node=>node[Object.keys(node).find(key=>key.startsWith('__reactProps$'))]
+ const button=text=>elements(environment.container,'button').find(node=>node.textContent===text)
+ const render=async(dirty,busy=false)=>act(async()=>root.render(createElement(Shell,{mode:'chat',compactChat:true,draftDirty:dirty,navigationBusy:busy,departmentName:'Content',onModeChange:mode=>modes.push(mode),onConversationSelect:item=>selections.push(item),conversationList:open=>createElement('button',{onClick:()=>open(row)},'Open exact')},createElement('p',null,'Current mounted chat'))))
+ await render(false)
+ await act(async()=>props(elements(environment.container,'select')[0]).onChange({target:{value:'private'}}))
+ assert.deepEqual(modes,['private']);assert.equal(button('Switch context'),undefined)
+ await act(async()=>props(button('Open exact')).onClick());assert.deepEqual(selections,[row])
+ await render(true)
+ await act(async()=>props(elements(environment.container,'select')[0]).onChange({target:{value:'private'}}))
+ assert.deepEqual(modes,['private']);assert.match(environment.container.textContent,/Current mounted chat/)
+ await act(async()=>props(button('Stay in current context')).onClick());assert.deepEqual(modes,['private'])
+ await act(async()=>props(button('Open exact')).onClick());assert.deepEqual(selections,[row])
+ await render(true,true)
+ await act(async()=>props(button('Switch context')).onClick());assert.deepEqual(selections,[row])
+ await render(true,false)
+ await act(async()=>props(button('Switch context')).onClick());assert.deepEqual(selections,[row,row])
+})

@@ -9,11 +9,11 @@
 .department-chat-controls summary { cursor: pointer; }
 .department-chat-messages { min-height: 80px; flex: 1; overflow-y: auto; overflow-x: hidden; }
 .department-chat-messages > section { margin-top: 0; }
-.department-chat-footer { flex-shrink: 1; min-height: 0; max-height: 55vh; overflow: hidden; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--anka-line); padding-top: 8px; }
+.department-chat-footer { flex-shrink: 1; min-height: 0; max-height: 42vh; overflow: hidden; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--anka-line); padding-top: 8px; }
 .department-chat-footer-body { min-height: 0; overflow: auto; display: flex; flex-wrap: wrap; align-items: start; gap: 8px; }
 .department-chat-footer-body > * { width: 100%; }
 .department-chat-footer-actions { flex-shrink: 0; display: grid; gap: 8px; }
-.department-chat-footer-body > :is(.department-chat-model,.department-chat-mode) { width: calc(50% - 4px); min-width: 0; font-size: .65rem; }
+.department-chat-footer-body > :is(.department-chat-model,.department-chat-mode) { width: calc(40% - 10px); min-width: 0; font-size: .65rem; }
 .department-chat-footer :is(input,select,textarea) { max-width: 100%; }
 .department-chat-footer select { padding: 6px 8px; margin-top: 4px; }
 .department-chat-footer-body > details { padding: 8px 10px; font-size: .75rem; }
@@ -22,3 +22,9 @@
 .department-chat-footer-actions > button { padding: 7px 12px; }
 .department-chat-submit { font-size: .875rem; }
 @media (max-width: 900px) { .department-chat-workbench .department-chat-main { padding: 10px; } .department-chat-heading p { max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } }
+
+.department-chat-workbench .department-chat-footer-body > details:not([open]) { padding-block: 5px; }
+.department-chat-workbench .department-chat-prompt textarea { padding: 8px 10px; }
+
+.department-chat-workbench .department-chat-footer-body > details:not([open]) { width:20%; min-width:60px; align-self:center; padding-inline:6px; border-color:var(--anka-line); }
+.department-chat-workbench .department-chat-footer-body > details:not([open]) > summary {white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}

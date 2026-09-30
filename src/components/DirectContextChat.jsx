@@ -9,7 +9,7 @@ import { clearDirectChatDraft, readDirectChatDraft, writeDirectChatDraft } from 
 import { WorkshopChatHistoryContext } from '../context/WorkshopChatHistoryContext.jsx'
 import './directContextChat.css'
 
-export default function DirectContextChat({ contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError, initialConversation, onConversationListChange, onNavigationBusyChange }) {
+export default function DirectContextChat({ contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError, initialConversation, onConversationListChange, onNavigationBusyChange, onDraftDirtyChange }) {
   const workshopHistory = useContext(WorkshopChatHistoryContext)
   const hasExternalHistory = Boolean(workshopHistory)
   const actorId = user.id
@@ -126,6 +126,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     outputClose.current?.focus()
     return () => previous?.focus?.()
   }, [outputId])
+  useEffect(() => { onDraftDirtyChange?.(Boolean(draft.trim())); return () => onDraftDirtyChange?.(false) }, [draft,onDraftDirtyChange])
   useEffect(() => {
     onNavigationBusyChange?.(busy || Boolean(pending))
     return () => onNavigationBusyChange?.(false)

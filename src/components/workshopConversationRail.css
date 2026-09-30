@@ -1,0 +1,10 @@
+.workshop-conversation-topbar {display:flex;align-items:start;justify-content:space-between;gap:8px;margin-bottom:12px;}
+.workshop-conversation-topbar header {min-width:0;}
+.workshop-history-toggle { padding:6px 10px; margin-bottom:0;flex-shrink:0; border:1px solid var(--anka-line); border-radius:8px; font-size:.875rem; color:var(--anka-ink); }
+.workshop-conversation-layout { display:grid; min-width:0; gap:12px; align-items:start; }
+.workshop-conversation-layout.history-open { grid-template-columns:220px minmax(0,1fr); }
+.workshop-conversation-rail { max-height:var(--workshop-history-height,75vh); overflow:auto; min-width:0; }
+.workshop-conversation-rail.mobile-history { position:fixed; inset:0; z-index:80; max-height:none; height:100dvh; background:var(--anka-surface); padding:12px; }
+.workshop-history-heading { display:flex; justify-content:space-between; align-items:center; padding:8px 4px 16px; color:var(--anka-ink); }
+.workshop-history-heading button { padding:6px 10px; border:1px solid var(--anka-line); border-radius:8px; }
+@media(max-width:900px){.workshop-conversation-layout.history-open {grid-template-columns:minmax(0,1fr);}}

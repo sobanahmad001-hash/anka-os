@@ -21,7 +21,7 @@ const MODEL_READINESS_MESSAGES = {
   price_unavailable: 'A fresh verified price for this exact model is unavailable.',
 }
 
-export default function ContextConversationPanel({ contextKind, departmentId = '', projectId = '', label = 'Conversation', workshopLayout = false, initialConversation = null, hideConversationList = false, onConversationListChange, onNavigationBusyChange, directSend = false }) {
+export default function ContextConversationPanel({ contextKind, departmentId = '', projectId = '', label = 'Conversation', workshopLayout = false, initialConversation = null, hideConversationList = false, onConversationListChange, onNavigationBusyChange, onDraftDirtyChange, directSend = false }) {
   const { user } = useAuth()
   const { activeOrganizationId, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
   if (!user?.id || !activeOrganizationId || requestSignal.aborted) return null
@@ -29,7 +29,7 @@ export default function ContextConversationPanel({ contextKind, departmentId = '
   if (directSend) return <DirectContextChat key={identity} contextKind={contextKind} departmentId={departmentId}
     projectId={projectId} label={label} organizationId={activeOrganizationId} user={user} signal={requestSignal}
     onAccessError={handleOrganizationAccessError} initialConversation={initialConversation}
-    onConversationListChange={onConversationListChange} onNavigationBusyChange={onNavigationBusyChange} />
+    onConversationListChange={onConversationListChange} onNavigationBusyChange={onNavigationBusyChange} onDraftDirtyChange={onDraftDirtyChange} />
   return <ScopedContextConversation key={identity} contextKind={contextKind} departmentId={departmentId}
     projectId={projectId} label={label} organizationId={activeOrganizationId} user={user} signal={requestSignal}
     onAccessError={handleOrganizationAccessError} workshopLayout={workshopLayout} initialConversation={initialConversation} hideConversationList={hideConversationList} onConversationListChange={onConversationListChange} onNavigationBusyChange={onNavigationBusyChange} />

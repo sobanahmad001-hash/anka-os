@@ -143,6 +143,28 @@ async function sharedChatAssertions(browser) {
  await fs.writeFile(file,JSON.stringify(evidence,null,2));await context.close();console.log('VERIFY actual shared Chat: two local turns, duplicate submissions suppressed, consent reused, route draft preserved')
 }
 
+async function widerDirectAssertions(browser){
+ const results=[]
+ for(const surface of ['organization','marketing']){
+  const context=await browser.newContext({viewport:{width:1440,height:900}}),page=await context.newPage();page.setDefaultTimeout(15000)
+  const errors=[],blocked=[];page.on('pageerror',e=>errors.push(e.message));await page.route('**/*',route=>{const url=new URL(route.request().url());if(url.hostname==='127.0.0.1'&&url.port==='5188')return route.continue();blocked.push(url.origin);return route.abort()})
+  await page.goto(`${base}?surface=${surface}&state=empty&theme=light`)
+  const input=page.getByRole('textbox',{name:'Message',exact:true});await input.fill('Scoped '+surface+' first message')
+  await page.getByRole('button',{name:'Send',exact:true}).click();await page.getByRole('button',{name:'Allow and ask Anka AI',exact:true}).click()
+  await page.waitForFunction(()=>globalThis.__directChatPreview.fixture.data.counters.run===1&&document.querySelector('.direct-chat-composer textarea').value==='')
+  await input.fill('Scoped '+surface+' follow-up');await page.getByRole('button',{name:'Send',exact:true}).click()
+  await page.waitForFunction(()=>globalThis.__directChatPreview.fixture.data.counters.run===2)
+  await page.reload();await input.waitFor();await page.getByRole('button',{name:new RegExp('Scoped '+surface+' first message')}).click();await page.waitForFunction(()=>document.querySelectorAll('.direct-chat-messages article').length>=2)
+  const data=await page.evaluate(()=>globalThis.__directChatPreview.fixture.data)
+  assert.equal(data.counters.created,1);assert.equal(data.counters.messages,2);assert.equal(data.counters.run,2)
+  const row=data.rows.find(row=>row.context_kind===(surface==='organization'?'organization':'department_private'))
+  assert.equal(row.project_id,null);assert.equal(row.department_id,surface==='organization'?null:'marketing')
+  assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
+  results.push({surface,oneConversation:true,twoDistinctMessagesAndMockRuns:true,reloadDispatchesNothing:true,scope:row.context_kind,projectId:row.project_id,departmentId:row.department_id,providerCalls:0,productionWrites:0,pageErrors:errors,blockedRemoteRequests:blocked});await context.close()
+ }
+ const file=path.join(output,'b3-content-writer-browser-evidence.json'),evidence=JSON.parse(await fs.readFile(file,'utf8'));evidence.widerDirectChat={scope:'Actual shared DirectContextChat organization and Marketing-private paths with isolated backend; application bindings checked separately',results};await fs.writeFile(file,JSON.stringify(evidence,null,2));console.log(JSON.stringify({widerDirectCases:results}))
+}
+
 async function engagementFirstSendAssertions(browser) {
  const results=[]
  for (const [width,theme,uncertain] of [[1440,'light',false],[390,'dark',false],[1440,'dark',true]]) {
@@ -200,10 +222,31 @@ async function engagementFirstSendAssertions(browser) {
   assert.equal(await page.getByRole('dialog',{name:'Confirm AI data sharing',exact:true}).count(),0)
   assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
   assert.equal(await page.getByText('OFFLINE SAVED ANSWER · Fresh local follow-up',{exact:true}).count(),1)
+  const transcript=await page.locator('.department-chat-messages').boundingBox()
+  assert(transcript.height >= (width>900?180:140),'Transcript must have primary readable space: '+width+' '+transcript.height)
+  const optionalSave=page.getByRole('button',{name:'Save draft to this conversation',exact:true})
+  assert.equal(await optionalSave.isVisible(),false)
+  await page.getByText('Conversation details and sharing',{exact:true}).click()
+  assert.equal(await optionalSave.isVisible(),true)
+  await page.getByText('Optional: save unsent text for later without asking AI. Send already saves each submitted message.',{exact:true}).waitFor()
+  await page.getByText('Conversation details and sharing',{exact:true}).click()
+  let historyDrawer=null
+  if(width<901){
+   const history=page.getByRole('button',{name:'History',exact:true})
+   await history.click();historyDrawer=await drawerAssertions(page,'Workshop history',history)
+  }else{
+   assert.equal(await page.locator('.workshop-conversation-rail').isVisible(),true)
+   const search=page.getByRole('textbox',{name:'Search engagement conversations',exact:true})
+   await search.fill('Fresh local first')
+   await page.waitForFunction(()=>![...document.querySelectorAll('.workshop-conversation-rail button')].some(node=>node.textContent.includes('Page brief · separate project history')))
+   await search.fill('')
+   await page.getByRole('button',{name:/Page brief · separate project history/}).waitFor()
+  }
+
   const savedMetrics=await form.evaluate(node=>({form:node.getBoundingClientRect().toJSON(),send:node.querySelector('.department-chat-submit').getBoundingClientRect().toJSON()}))
   assert(savedMetrics.send.bottom<=savedMetrics.form.bottom+1);assert(savedMetrics.send.height>25)
   await page.screenshot({path:path.join(output,`b3-engagement-saved-${theme}-${width}x900.png`)})
-  results.push({viewport:{width,height:900},theme,lostResponseAndReloadRecovery:uncertain,storageDeniedSendsNothingAndConfirmedRollbackAllowsCorrection:width===1440&&!uncertain,newDraftCreatesZeroRecords:true,oneFirstSendAndOneFollowup:true,firstSendUsesNoInheritedFilesOrSources:true,sameConversationDistinctRequests:true,providerCalls:0,productionWrites:0,pageErrors:errors,blockedRemoteRequests:blocked})
+  results.push({viewport:{width,height:900},theme,lostResponseAndReloadRecovery:uncertain,storageDeniedSendsNothingAndConfirmedRollbackAllowsCorrection:width===1440&&!uncertain,newDraftCreatesZeroRecords:true,oneFirstSendAndOneFollowup:true,firstSendUsesNoInheritedFilesOrSources:true,sameConversationDistinctRequests:true,transcriptHeight:transcript.height,secondarySaveHiddenByDefault:true,desktopGroupedHistory:width>900,mobileHistoryDrawer:historyDrawer,providerCalls:0,productionWrites:0,pageErrors:errors,blockedRemoteRequests:blocked})
   await context.close()
  }
  const file=path.join(output,'b3-content-writer-browser-evidence.json'), evidence=JSON.parse(await fs.readFile(file,'utf8'))
@@ -225,6 +268,7 @@ async function engagementFirstSendAssertions(browser) {
     ['content', 'empty', 'system', 320, 900],
   ]
   try {
+    if (process.argv.includes('--wider-direct')) {await widerDirectAssertions(browser);return}
     if (process.argv.includes('--engagement-first-send')) { await engagementFirstSendAssertions(browser); return }
     if (process.argv.includes('--shared-chat')) { await sharedChatAssertions(browser); return }
     if (process.argv.includes('--writer') || process.argv.includes('--writer-recovery')) { await writerAssertions(browser); return }

@@ -7,8 +7,9 @@ export default function WorkshopConversationList(props) {
   return <ExactConversationList {...props} />
 }
 
-function ProjectConversationGroups({ engagements, workstreams, ...props }) {
-  const [expanded, setExpanded] = useState({})
+function ProjectConversationGroups({ engagements, workstreams, activeEngagementId, ...props }) {
+  const [expanded, setExpanded] = useState(() => activeEngagementId ? { [activeEngagementId]: true } : {})
+  useEffect(() => { if (activeEngagementId) setExpanded(state => ({ ...state, [activeEngagementId]: true })) }, [activeEngagementId])
   const projects = [...new Set(engagements.map(row => row.project_id))]
   return <aside aria-label="Workshop saved conversations" className="space-y-3">
     <h3 className="font-semibold">Saved conversations</h3>

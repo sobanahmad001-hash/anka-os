@@ -254,9 +254,9 @@ function ScopedAnkaAssistant() {
         </div>
       </div>
       {chatScope === 'organization'
-        ? <ContextConversationPanel contextKind="organization" label="Organization chat" />
+        ? <ContextConversationPanel directSend contextKind="organization" label="Organization chat" />
         : projects.some(project => project.id === chatProjectId)
-          ? <ContextConversationPanel contextKind="project_team" projectId={chatProjectId} label="Project chat" />
+          ? <ContextConversationPanel directSend contextKind="project_team" projectId={chatProjectId} label="Project chat" />
           : <p className="rounded-xl border border-[var(--anka-line)] p-5 text-sm text-[var(--anka-muted)]">Choose an accessible project to view its conversations.</p>}
       {result && <AssistantRunCard result={result} capability={result.capability || capability}
         projectName={projects.find(project => project.id === result.runContext?.projectId)?.name || 'Organization work'}

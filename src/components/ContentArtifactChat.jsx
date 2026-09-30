@@ -60,9 +60,9 @@ export default function ContentArtifactChat({ engagement, projectId, onCreated, 
   }
   closeRef.current = closeEditor
   useLayoutEffect(() => {
-    if (!editorOpen || !hasWorkspace || mobileEditor || !paneRef.current) return
+    if (!editorOpen || !hasWorkspace || mobileEditor || !paneRef.current?.getBoundingClientRect || !paneRef.current.style?.setProperty) return
     const pane = paneRef.current
-    const measure = () => pane.style.setProperty('--content-editor-height', Math.max(120, innerHeight - pane.getBoundingClientRect().top - 16) + 'px')
+    const measure = () => pane.style.setProperty('--content-editor-height', Math.max(120, (globalThis.innerHeight || globalThis.window?.innerHeight || 900) - pane.getBoundingClientRect().top - 16) + 'px')
     measure()
     globalThis.addEventListener?.('resize', measure)
     globalThis.addEventListener?.('scroll', measure, true)
@@ -113,7 +113,7 @@ export default function ContentArtifactChat({ engagement, projectId, onCreated, 
   return <section aria-label="Content artifact chat" className="space-y-3">
     {!targets && <p role="status" className="text-sm text-[var(--anka-warning)]">{state?.key !== key || state.status === 'loading' ? 'Loading Content artifact tools. Ordinary chat remains available.' : 'Content artifact tools are unavailable for this context. Ordinary chat remains available.'}</p>}
     {sideEditor && <div className="flex flex-wrap items-center justify-between gap-3">
-      <p className="text-xs text-[var(--anka-muted)]">Versioned Content writer outputs have their own editor. Conversation replies and legacy proposals are not transferred.</p>
+      <details className="text-xs text-[var(--anka-muted)]"><summary>Writer details</summary><p>Versioned Content writer outputs have their own editor. Conversation replies and legacy proposals are not transferred.</p></details>
       <button ref={openerRef} hidden={editorOpen} type="button" disabled={!workspace || chatBusy || editorState.saving} aria-expanded={editorOpen} aria-controls="content-chat-writer" onClick={() => editorOpen ? closeEditor() : setEditorOpen(true)} className="rounded-lg border border-[var(--anka-line)] px-3 py-2 text-sm disabled:opacity-50">{editorOpen ? 'Close Content writer' : 'Open Content writer beside chat'}</button>
     </div>}
     <div className={sideEditor && editorOpen ? 'content-chat-with-editor' : undefined}>

@@ -14,7 +14,7 @@ export const allowlist = { connections: [{ id: 'preview-connection', provider: '
 const failure = (message, status) => Object.assign(new Error(message), { status })
 
 export function createDirectChatFixture({ surface = 'content', state = 'empty', stored, persist = () => {} } = {}) {
-  const scope = surface === 'project' ? { context_kind: 'project_team', project_id: projectId, department_id: null } : { context_kind: 'department_private', department_id: 'content', project_id: null }
+  const scope = surface === 'organization' ? { context_kind: 'organization', project_id: null, department_id: null } : surface === 'marketing' ? { context_kind: 'department_private', department_id: 'marketing', project_id: null } : surface === 'project' ? { context_kind: 'project_team', project_id: projectId, department_id: null } : { context_kind: 'department_private', department_id: 'content', project_id: null }
   const seeded = state !== 'empty'
   const conversation = { id: threadId, ...scope, organization_id: organizationId, engagement_id: null, owner_id: actor, title: 'A clear introduction', state: 'active' }
   const human = { id: humanId, conversation_id: threadId, client_request_id: requestId, author_id: actor, role: 'user', body: 'Write a clear introduction for our project.', status: 'completed', sequence: 1 }
@@ -91,7 +91,7 @@ export function createDirectChatFixture({ surface = 'content', state = 'empty', 
       onEvent({ type: 'completed', answer })
     },
 
-    searchConversations: async (_department, input) => ({ items: 'Page brief · separate project history'.toLowerCase().includes((input.query || '').toLowerCase()) ? [{ id: 'a0000000-0000-4000-8000-000000000021', organization_id: organizationId, department_id: 'content', project_id: input.project_id, engagement_id: input.engagement_id, title: 'Page brief · separate project history', state: 'active', access_role: 'owner', owner_id: actor }] : [], next_cursor: null }),
+    searchConversations: async (_department, input) => ({ items: fixture.engagementConversations.filter(row => row.title.toLowerCase().includes((input.query || '').toLowerCase())), next_cursor: null }),
     listContextConversations: async input => data.rows.filter(row => row.context_kind === input.context_kind && (row.project_id || '') === (input.project_id || '') && (row.department_id || '') === (input.department_id || '')).slice(input.offset || 0, (input.offset || 0) + 51),
     getContextConversation: async input => {
       const row = data.rows.find(item => item.id === input.conversation_id)
