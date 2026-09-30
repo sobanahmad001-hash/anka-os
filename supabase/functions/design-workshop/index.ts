@@ -1,3 +1,4 @@
+import {confirmVideoBrief,getVideoBrief,videoBriefContext} from './videoBriefs.ts'
 import { Buffer } from 'node:buffer'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { PNG } from 'npm:pngjs@7.0.0'
@@ -239,6 +240,12 @@ async function callerDeliveryPackageRoot(userClient: Client, artifactId: string)
 export async function designWorkshopScope(userClient: Client, body: Json): Promise<ServerOrganizationScope> {
   const action = text(body.action, 80)
   const requestedOrganizationId = text(body.organization_id, 80) || null
+  if (['get_video_brief','confirm_video_brief'].includes(action)) {
+    const briefContext=videoBriefContext(body)
+    if(briefContext.private_conversation_id) return {root:null,requestedOrganizationId:requestedOrganizationId || ''}
+    const root=await callerVersionRoot(userClient,String(briefContext.direction_version_id))
+    return {root:{kind:'engagement',id:root.engagementId},requestedOrganizationId}
+  }
   if (action === 'create_page_flow' || action === 'create_session') return {
     root: { kind: 'engagement', id: requiredActionId(body.engagement_id, 'Engagement') }, requestedOrganizationId,
   }
@@ -2048,6 +2055,8 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
     const actions: Record<string, () => Promise<unknown>> = {
       create_page_flow: () => createPageFlow(admin, body, user.id),
       create_session: () => createSession(admin, body, user.id),
+      get_video_brief:()=>getVideoBrief(admin,body,user.id),
+      confirm_video_brief:()=>confirmVideoBrief(admin,body,user.id),
       validate_creative_brief: async () => validateCreativeBrief(body.content),
       save_creative_brief: () => saveCreativeBrief(admin, userClient, body, user.id),
       freeze_creative_brief: () => freezeCreativeBrief(admin, body, user.id, userClient),
@@ -2099,7 +2108,7 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
   } catch (error) {
     console.error('Design Workshop failure', error)
     const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : 400
-    return response({ error: error instanceof Error ? error.message : 'Design Workshop failed' },
+    return response({ error: error instanceof Error ? error.message : 'Design Workshop failed', ...((error as any)?.rollback_verified===true && (error as any)?.code ? {code:(error as any).code,rollback_verified:true} : {}) },
       Number.isFinite(status) ? status : 400)
   }
 }

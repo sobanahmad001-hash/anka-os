@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { VIDEO_BRIEF_FIELDS, emptyVideoBrief, normalizeVideoBrief, requireVideoBriefVersion, validateVideoBrief, videoBriefCreativeContent, videoBriefSignature } from '../../supabase/functions/_shared/designVideoBrief.js'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { VIDEO_BRIEF_FIELDS, emptyVideoBrief, normalizeVideoBrief, requireVideoBriefVersion, requireVideoBriefHistoryVersion, validateVideoBrief, videoBriefCreativeContent, videoBriefSignature } from '../../supabase/functions/_shared/designVideoBrief.js'
+
+import { clearVideoBriefDraft, exactVideoBriefAttempt, readVideoBriefDraft, videoBriefScopeKey, writeVideoBriefDraft } from '../data/designVideoBriefDraft.js'
 
 // Provider-free preparation/confirmation. Generate remains a separate guarded action.
 export default function DesignVideoBriefEditor({ studio, context, actorId, organizationId, settings, script, onScriptChange, onRestoreSettings, onConfirmed, onNavigationBusyChange, onDraftDirtyChange }) {
@@ -7,51 +9,64 @@ export default function DesignVideoBriefEditor({ studio, context, actorId, organ
   const [busy, setBusy] = useState(false), [pending, setPending] = useState(null), [notice, setNotice] = useState(''), [loading, setLoading] = useState(true), [historyChecked, setHistoryChecked] = useState(false)
   const alive = useRef(true), flight = useRef(false), attempt = useRef(null), reviewRef = useRef(null), previewButton = useRef(null)
   const scopeKey = JSON.stringify(context)
+  const draftKey=videoBriefScopeKey(actorId,organizationId,context)
   const recoveryKey = `anka-video-brief-recovery:${actorId}:${organizationId}:${scopeKey}`
-  const draft = { ...fields, ...Object.fromEntries(['mode','duration_seconds','aspect_ratio','resolution','output_format','generate_audio'].map(key => [key,settings[key]])), script_storyboard: script }, signature = videoBriefSignature(draft)
+  const retained=useRef(null),draftReady=useRef(false)
+  const draft = useMemo(()=>({ ...fields, ...Object.fromEntries(['mode','duration_seconds','aspect_ratio','resolution','output_format','generate_audio'].map(key => [key,settings[key]])), script_storyboard: script }),[fields,settings,script]), signature = videoBriefSignature(draft)
   const valid = validateVideoBrief(draft)
   useEffect(() => { if (!preview) return; reviewRef.current?.querySelector?.('button')?.focus?.({preventScroll:true}); reviewRef.current?.scrollIntoView?.({block:'start',behavior:'instant'}) }, [preview])
   let confirmed = null
-  try { if (saved) confirmed = requireVideoBriefVersion({ ...saved, organizationId, actorId, context, draft }) } catch { /* Changed drafts require another explicit confirmation. */ }
+  try { if (saved && historyChecked && !pending && !busy) confirmed = requireVideoBriefVersion({ ...saved, organizationId, actorId, context, draft }) } catch { /* Changed drafts require another explicit confirmation. */ }
   const confirmedId = confirmed?.id || ''
   const onConfirmedRef = useRef(onConfirmed); onConfirmedRef.current = onConfirmed
   useEffect(() => { onConfirmedRef.current?.(confirmedId ? saved : null) }, [confirmedId, signature, saved])
   useEffect(() => { onNavigationBusyChange?.(busy || Boolean(pending)); return () => onNavigationBusyChange?.(false) }, [busy, pending, onNavigationBusyChange])
   const draftDirty = !confirmedId && VIDEO_BRIEF_FIELDS.some(([key]) => Boolean(draft[key]?.trim()))
   useEffect(() => { onDraftDirtyChange?.(draftDirty); return () => onDraftDirtyChange?.(false) }, [draftDirty, onDraftDirtyChange])
-  const restore = useCallback(result => {
+  const applyDraft=useCallback(next=>{setFields(next);onScriptChange(next.script_storyboard);onRestoreSettings(next)},[onScriptChange,onRestoreSettings])
+  const restore = useCallback((result,{preserveDraft=false,allowHistory=false}={}) => {
     const next = result?.version?.content?.video_brief
     if (!next) return false
     const exact = normalizeVideoBrief(next)
-    requireVideoBriefVersion({ ...result, organizationId, actorId, context: JSON.parse(scopeKey), draft: exact })
-    setSaved(result); setFields(exact); onScriptChange(exact.script_storyboard); onRestoreSettings(exact)
+    const inspect=allowHistory ? requireVideoBriefHistoryVersion : requireVideoBriefVersion
+    inspect({ ...result, organizationId, actorId, context: JSON.parse(scopeKey), draft: exact })
+    setSaved(result); if (!preserveDraft) applyDraft(exact)
     return true
-  }, [organizationId, actorId, scopeKey, onScriptChange, onRestoreSettings])
+  }, [organizationId, actorId, scopeKey, applyDraft])
   useEffect(() => {
     alive.current = true
     let active = true, operationKey = null
+    draftReady.current=false
+    try {retained.current=readVideoBriefDraft(sessionStorage,draftKey);if (retained.current) applyDraft(retained.current)} catch {setNotice('Stored working draft is unavailable. Saved history will be checked.')}
     try {
       const record = JSON.parse(sessionStorage.getItem(recoveryKey) || 'null')
-      if (record && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(record.operation_key)) { operationKey = record.operation_key; setPending(record) }
-    } catch { setNotice('Brief recovery storage is unavailable. Keep this view open.') }
+      if (record && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(record.operation_key)) { operationKey = record.operation_key; setPending(record);try {attempt.current=exactVideoBriefAttempt(record,JSON.parse(scopeKey))} catch {attempt.current=null} }
+      else if (record) {setPending({operation_key:null});setNotice('Recovery identity is unreadable. No new confirmation or generation is enabled.')}
+    } catch { setPending({operation_key:null});setNotice('Brief recovery storage is unavailable. Keep this view open.') }
     if (!studio?.getVideoBrief) { setLoading(false); setNotice('Saved video briefs are unavailable. Generation requires an exact confirmed version.'); return () => { active = false; alive.current = false } }
     studio.getVideoBrief({ ...JSON.parse(scopeKey), ...(operationKey ? { operation_key: operationKey } : {}) }).then(result => {
       if (!active) return
       setHistoryChecked(true)
-      if (restore(result) && operationKey) { sessionStorage.removeItem(recoveryKey); setPending(null); setNotice('Original brief confirmation recovered. No new confirmation or generation was sent.') }
+      if (operationKey && result?.version && result.version.operation_key!==operationKey) throw new Error('Saved history returned a different original operation; new confirmation remains blocked.')
+      if (operationKey && result?.version && attempt.current) requireVideoBriefHistoryVersion({...result,organizationId,actorId,context:JSON.parse(scopeKey),draft:attempt.current.video_brief})
+      if (restore(result,{preserveDraft:Boolean(retained.current) && !operationKey,allowHistory:Boolean(operationKey)}) && operationKey) { sessionStorage.removeItem(recoveryKey); setPending(null); setNotice(result.brief.frozen_version_id!==result.version.id ? 'Original confirmation is settled but superseded. This historical version cannot Generate; review the current working draft separately.' : 'Original brief confirmation recovered. No new confirmation or generation was sent.') }
       else if (operationKey) setNotice('The original confirmation is not visible yet. Check recovery before confirming or generating.')
-    }).catch(() => { if (active) setNotice('Saved brief history could not be checked. Confirming and generating remain unavailable until recovery succeeds.') }).finally(() => { if (active) setLoading(false) })
+      else if (retained.current) setNotice('Working draft restored for this actor and context. Review and confirm it before Generate.')
+    }).catch(() => { if (active) {setHistoryChecked(false);setNotice('Saved brief history could not be checked. Confirming and generating remain unavailable until recovery succeeds.')} }).finally(() => { if (active) {draftReady.current=true;setLoading(false)} })
     return () => { active = false; alive.current = false }
-  }, [studio, scopeKey, recoveryKey, restore])
+  }, [studio, scopeKey, recoveryKey, draftKey, restore, applyDraft,organizationId,actorId])
+  useEffect(()=>{if (!draftReady.current || loading || pending || !alive.current) return;try {if (confirmedId) {clearVideoBriefDraft(sessionStorage,draftKey);retained.current=null}else {writeVideoBriefDraft(sessionStorage,draftKey,draft);retained.current=structuredClone(draft)}} catch {setNotice('Working draft could not be retained for refresh. Keep this view open; no confirmation was sent.')}},[draft,loading,pending,confirmedId,draftKey])
   async function recover() {
-    if (flight.current || !studio?.getVideoBrief) return
+    if (flight.current || !studio?.getVideoBrief || pending && !pending.operation_key) return
     flight.current = true; setBusy(true)
     try {
       const result = await studio.getVideoBrief({ ...context, ...(pending ? { operation_key: pending.operation_key } : {}) })
       if (!alive.current) return
+      if (pending && result?.version && result.version.operation_key!==pending.operation_key) throw new Error('Original operation does not match saved history.')
+      if (pending && result?.version && attempt.current) requireVideoBriefHistoryVersion({...result,organizationId,actorId,context,draft:attempt.current.video_brief})
       if (pending && !result?.version) throw new Error('Original confirmation is not visible yet. No new write or generation was sent.')
-      if (result?.version) restore(result)
-      sessionStorage.removeItem(recoveryKey); setPending(null); attempt.current = null; setHistoryChecked(true); setLoading(false); setNotice('Saved brief inspected. No new confirmation or generation was sent.')
+      if (result?.version) restore(result,{preserveDraft:!pending && Boolean(retained.current),allowHistory:Boolean(pending)})
+      sessionStorage.removeItem(recoveryKey); setPending(null); attempt.current = null; setHistoryChecked(true); setLoading(false); setNotice(result?.version && result.brief.frozen_version_id!==result.version.id ? 'Original confirmation is settled but superseded. This historical version cannot Generate; review the working draft separately.' : 'Saved brief inspected. No new confirmation or generation was sent.')
     } catch (error) { if (alive.current) setNotice(error.message || 'Brief recovery remains unavailable.') }
     finally { flight.current = false; if (alive.current) setBusy(false) }
   }
@@ -59,30 +74,49 @@ export default function DesignVideoBriefEditor({ studio, context, actorId, organ
     if (flight.current || pending || loading || !historyChecked || !preview || preview.signature !== signature || !studio?.confirmVideoBrief) return
     flight.current = true; setBusy(true); setNotice('')
     try {
-      const operationKey = crypto.randomUUID(), record = { operation_key: operationKey }
+      const operationKey = crypto.randomUUID()
+      const input = { ...context, creative_brief_id: saved?.brief?.id || null, expected_revision: saved?.brief?.revision || 0, operation_key: operationKey, video_brief: structuredClone(preview.draft) }
+      const record={operation_key:operationKey,input}
+      exactVideoBriefAttempt(record,context)
       sessionStorage.setItem(recoveryKey, JSON.stringify(record))
       if (sessionStorage.getItem(recoveryKey) !== JSON.stringify(record)) throw new Error('Scoped confirmation recovery must be available before saving.')
-      const input = { ...context, creative_brief_id: saved?.brief?.id || null, expected_revision: saved?.brief?.revision || 0, operation_key: operationKey, video_brief: structuredClone(preview.draft) }
       attempt.current = input; setPending(record)
       const result = await studio.confirmVideoBrief(input)
       if (!alive.current) return
+      if(result?.version?.operation_key!==operationKey) throw new Error('Saved confirmation has a different operation key')
       requireVideoBriefVersion({ ...result, organizationId, actorId, context, draft: preview.draft })
       setSaved(result); setPreview(null); setPending(null); attempt.current = null; sessionStorage.removeItem(recoveryKey)
+      clearVideoBriefDraft(sessionStorage,draftKey)
       setNotice(`Confirmed canonical video brief v${result.version.version_number}. No video was generated.`)
-    } catch (error) { if (alive.current) setNotice(error.message || 'Confirmation outcome is uncertain. Check the original saved version before proceeding.') }
+    } catch (error) { if (alive.current) {if(error.knownRollback){setPending(null);attempt.current=null;sessionStorage.removeItem(recoveryKey);setHistoryChecked(false);setPreview(null)}setNotice(error.message || 'Confirmation outcome is uncertain. Check the original saved version before proceeding.')} }
     finally { flight.current = false; if (alive.current) setBusy(false) }
+  }
+  async function retryOriginal() {
+    if (flight.current || !pending || !attempt.current || !studio?.confirmVideoBrief) return
+    flight.current=true;setBusy(true)
+    try {
+      const input=exactVideoBriefAttempt(pending,context)
+      const result=await studio.confirmVideoBrief(input)
+      if (!alive.current) return
+      if(result?.version?.operation_key!==input.operation_key) throw new Error('Original confirmation has a different operation key')
+      requireVideoBriefHistoryVersion({...result,organizationId,actorId,context,draft:input.video_brief})
+      restore(result,{allowHistory:true});setPreview(null);setPending(null);attempt.current=null;sessionStorage.removeItem(recoveryKey);clearVideoBriefDraft(sessionStorage,draftKey);setHistoryChecked(true)
+      setNotice(result.brief.frozen_version_id!==result.version.id ? 'Original exact confirmation is settled but superseded. Generate requires a currently confirmed version.' : 'Original exact confirmation recovered with the same operation key. No video was generated.')
+    } catch (error) {if (alive.current) setNotice(error.message || 'Original confirmation remains unresolved. New operations stay blocked.')}
+    finally {flight.current=false;if(alive.current)setBusy(false)}
   }
   return <section className="design-tools-workbench design-video-brief" aria-label="Versioned video brief">
     <h3>Video brief · {saved ? `v${saved.version.version_number}` : 'unsaved'}</h3>
     <p>Complete unknowns before confirming. For assets or required text, write an explicit “None” when applicable. Reference uploads and clip/template editing are unavailable here; no media is regenerated while preparing a brief.</p>
     <fieldset disabled={busy || Boolean(pending) || loading} className="grid gap-3 mt-3 md:grid-cols-2">
-      {VIDEO_BRIEF_FIELDS.map(([key,label,maxLength]) => <label className={key === 'script_storyboard' ? 'block md:col-span-2' : 'block'} key={key}>{label}<textarea aria-label={label} rows={key === 'script_storyboard' ? 4 : 2} maxLength={maxLength} className="mt-1 w-full rounded bg-slate-900 p-2" value={draft[key]} onChange={event => { setPreview(null); if (key === 'script_storyboard') onScriptChange(event.target.value); else setFields(previous => ({ ...previous, [key]: event.target.value })) }} /></label>)}
+      {VIDEO_BRIEF_FIELDS.map(([key,label,maxLength]) => <label className={key === 'script_storyboard' ? 'block md:col-span-2' : 'block'} key={key}>{label}<textarea aria-label={label} rows={key === 'script_storyboard' ? 4 : 2} maxLength={maxLength} className="mt-1 w-full rounded bg-[var(--anka-surface)] text-[var(--anka-ink)] border border-[var(--anka-line)] p-2" value={draft[key]} onChange={event => { setPreview(null); if (key === 'script_storyboard') onScriptChange(event.target.value); else setFields(previous => ({ ...previous, [key]: event.target.value })) }} /></label>)}
     </fieldset>
-    {!valid.valid && <p className="mt-2 text-amber-300">{[...valid.missing.map(label => `${label} is required`), ...valid.errors].join(' · ')}</p>}
+    {!valid.valid && <p className="mt-2 text-[var(--anka-warning)]">{[...valid.missing.map(label => `${label} is required`), ...valid.errors].join(' · ')}</p>}
     <button ref={previewButton} className="mt-3 rounded border border-[var(--anka-line)] px-3 py-2" type="button" disabled={!valid.valid || busy || Boolean(pending) || loading || !historyChecked} onClick={() => { const content=videoBriefCreativeContent(draft,context); setPreview({ draft:structuredClone(draft),signature,content }) }}>Preview complete video brief</button>
     {preview && preview.signature === signature && <section ref={reviewRef} style={{scrollMarginTop:112}} aria-label="Confirm exact video brief" className="mt-3 rounded border p-3"><h3>Review this exact version</h3><p>{preview.draft.mode} · {preview.draft.duration_seconds}s · {preview.draft.resolution} · {preview.draft.aspect_ratio} · {preview.draft.output_format} · Audio {preview.draft.generate_audio ? 'on' : 'off'}</p><pre className="whitespace-pre-wrap">{preview.content.instructions}</pre><p>Confirm saves one immutable owner-private canonical brief version. It does not generate media, copy to a project, approve or deliver anything. Generate later sends this complete prompt and exact settings through the separately approved connection and quote.</p><button className="rounded bg-[var(--anka-violet)] text-[var(--anka-on-violet)] px-3 py-2" type="button" disabled={busy || Boolean(pending)} onClick={confirm}>Confirm video brief version</button><button type="button" disabled={busy || Boolean(pending)} onClick={() => { setPreview(null); previewButton.current?.focus?.() }}>Keep editing brief</button></section>}
     {confirmedId && <p role="status">Exact brief v{saved.version.version_number} confirmed. Changing any field or setting requires a new confirmation.</p>}
     {(pending || notice || loading) && <p role="status">{loading ? 'Checking saved brief…' : notice || 'Checking the original confirmation…'}</p>}
+    {pending && attempt.current && <button type="button" disabled={busy || loading} onClick={retryOriginal}>Retry original brief confirmation</button>}
     {(pending || notice && !confirmedId) && <button type="button" disabled={busy} onClick={recover}>Check saved brief</button>}
   </section>
 }

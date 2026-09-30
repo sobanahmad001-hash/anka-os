@@ -261,6 +261,8 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
     private_conversation_id: privateConversationId,
     ...(cursor ? { before_created_at: cursor.created_at, before_id: cursor.id } : {}),
   }),
+  getVideoBrief: input => invoke('get_video_brief',input),
+  confirmVideoBrief: input => invoke('confirm_video_brief',input),
   getVideoQuote: input => getDesignVideoQuote(client, organizationId, input, signal),
   listVideoJobs: (directionVersionId, cursor = null) => invoke('list_video_jobs', {
     direction_version_id: directionVersionId,

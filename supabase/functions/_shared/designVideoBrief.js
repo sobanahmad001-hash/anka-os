@@ -55,11 +55,11 @@ export function videoBriefCreativeContent(value, context, title = '') {
     video_context: { ...context }, video_provider: 'higgsfield', video_model_id: VIDEO_BRIEF_MODEL }
 }
 // Inspect one explicitly chosen immutable version. Never adopt a newer saved version silently.
-export function requireVideoBriefVersion({ version, brief: root, organizationId, actorId, context, draft }) {
+function inspectVideoBriefVersion({ version, brief: root, organizationId, actorId, context, draft }, requireCurrent) {
   if (![version?.id, root?.id, organizationId, actorId].every(id => typeof id === 'string' && UUID.test(id)) || version.organization_id !== organizationId || root.organization_id !== organizationId
     || version.creative_brief_id !== root.id || root.created_by !== actorId || root.visibility !== 'private'
     || root.engagement_id || root.brand_id || root.engagement_service_id || root.project_task_id || root.engagement_work_item_id
-    || root.frozen_version_id !== version.id || version.created_by !== actorId || version.validation_snapshot?.valid !== true
+    || (requireCurrent && root.frozen_version_id !== version.id) || version.created_by !== actorId || version.validation_snapshot?.valid !== true
     || version.validation_snapshot?.video_confirmation?.action !== 'confirm_video_brief'
     || version.validation_snapshot?.video_confirmation?.actor_id !== actorId
     || !Number.isInteger(version.validation_snapshot?.video_confirmation?.expected_revision)
@@ -71,3 +71,7 @@ export function requireVideoBriefVersion({ version, brief: root, organizationId,
     || Object.keys(expected).some(key => exact(version.content[key]) !== exact(expected[key]))) throw new Error('The selected video brief differs from the confirmed settings or context')
   return version
 }
+
+export function requireVideoBriefVersion(input) {return inspectVideoBriefVersion(input,true)}
+// Read-only settlement of an exact historic confirmation never grants Generate eligibility.
+export function requireVideoBriefHistoryVersion(input) {return inspectVideoBriefVersion(input,false)}

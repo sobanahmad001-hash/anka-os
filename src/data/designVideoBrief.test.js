@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { emptyVideoBrief, normalizeVideoBrief, validateVideoBrief, videoBriefCreativeContent, videoBriefPrompt, requireVideoBriefVersion } from '../../supabase/functions/_shared/designVideoBrief.js'
+import { emptyVideoBrief, normalizeVideoBrief, validateVideoBrief, videoBriefCreativeContent, videoBriefPrompt, requireVideoBriefVersion, requireVideoBriefHistoryVersion } from '../../supabase/functions/_shared/designVideoBrief.js'
+import {exactVideoBriefAttempt,readVideoBriefDraft,writeVideoBriefDraft,videoBriefScopeKey,VIDEO_DRAFT_TTL_MS} from './designVideoBriefDraft.js'
 const org='a0000000-0000-4000-8000-000000000002',actor='a0000000-0000-4000-8000-000000000001',context={private_conversation_id:'a0000000-0000-4000-8000-000000000005'}
 const draft={...emptyVideoBrief(),purpose:'Explain the launch',audience:'Returning customers',channel:'Organic social',assets:'Use approved clips when available; reference uploads are unavailable here',script_storyboard:'Open with the product, then show three benefits',brand_constraints:'Use the approved palette; no unlicensed marks',required_text:'Launch date: 10 October'}
 function saved() { const root={id:'a0000000-0000-4000-8000-000000000030',organization_id:org,created_by:actor,visibility:'private',frozen_version_id:'a0000000-0000-4000-8000-000000000031'}; const version={id:'a0000000-0000-4000-8000-000000000031',organization_id:org,created_by:actor,creative_brief_id:'a0000000-0000-4000-8000-000000000030',validation_snapshot:{valid:true,video_confirmation:{action:'confirm_video_brief',actor_id:actor,expected_revision:0,requested_root_id:null}},content:videoBriefCreativeContent(draft,context,'Launch film')};return {root,version} }
@@ -35,4 +36,24 @@ test('confirmed immutable version rejects cross-org/owner/root, official context
  for(const patch of [{duration_seconds:4},{aspect_ratio:'9:16'},{required_text:'A different date'},{generate_audio:true}])assert.throws(()=>validate(root,version,{...draft,...patch}),/differs/)
  assert.throws(()=>validate(root,version,draft,{direction_version_id:context.private_conversation_id}),/differs/)
  assert.throws(()=>validate(root,{...version,content:{...version.content,history:'private text'}}),/differs/)
+})
+
+test('current brief draft is bounded, actor/context scoped, one-hour retained and contains no history or credentials',()=>{
+ const map=new Map(),storage={getItem:key=>map.get(key)||null,setItem:(key,value)=>map.set(key,value),removeItem:key=>map.delete(key)},key=videoBriefScopeKey(actor,org,context)
+ writeVideoBriefDraft(storage,key,{...emptyVideoBrief(),purpose:'Keep my partial draft'},100);assert.equal(readVideoBriefDraft(storage,key,101).purpose,'Keep my partial draft')
+ assert.equal(readVideoBriefDraft(storage,videoBriefScopeKey(org,actor,context),101),null)
+ assert.throws(()=>writeVideoBriefDraft(storage,key,{...draft,messages:['private history']},100),/unexpected/);assert.throws(()=>writeVideoBriefDraft(storage,key,{...draft,script_storyboard:'x'.repeat(5001)},100),/bounds/)
+ assert.equal(readVideoBriefDraft(storage,key,100+VIDEO_DRAFT_TTL_MS),null);assert.equal(map.size,0)
+ assert.throws(()=>videoBriefScopeKey(actor,org,{...context,direction_version_id:context.private_conversation_id}),/exact/)
+ const operation='a0000000-0000-4000-8000-000000000050',input={...context,creative_brief_id:null,expected_revision:0,operation_key:operation,video_brief:draft},record={operation_key:operation,input}
+ assert.deepEqual(exactVideoBriefAttempt(record,context),input)
+ for (const patch of [{operation_key:'different'},{input:{...input,messages:[]}},{input:{...input,expected_revision:-1}},{input:{...input,video_brief:{...draft,purpose:''}}},{input:{...input,private_conversation_id:operation}}]) assert.throws(()=>exactVideoBriefAttempt({...record,...patch},context),/Original/)
+})
+
+test('an exact superseded confirmation can settle read-only recovery but cannot grant generation eligibility',()=>{
+ const {root,version}=saved(),superseded={...root,frozen_version_id:'a0000000-0000-4000-8000-000000000090'}
+ const input={brief:superseded,version,organizationId:org,actorId:actor,context,draft}
+ assert.equal(requireVideoBriefHistoryVersion(input),version);assert.throws(()=>requireVideoBriefVersion(input),/exact confirmed/)
+ assert.throws(()=>requireVideoBriefHistoryVersion({...input,actorId:org}),/exact confirmed/)
+ assert.throws(()=>requireVideoBriefHistoryVersion({...input,draft:{...draft,purpose:'changed'}}),/differs/)
 })

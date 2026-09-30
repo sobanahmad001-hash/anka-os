@@ -4,10 +4,9 @@ export async function invokeDesignFunction(client, functionName, organizationId,
     body: { action, ...input, organization_id: organizationId },
     signal,
   })
-  if (error) throw Object.assign(new Error(error.message || fallbackMessage), {
-    cause: error,
-    status: error.status || error.statusCode || error.context?.status,
-  })
-  if (data?.error) throw new Error(data.error)
+  let details=data
+  if(error && action==='confirm_video_brief' && error.context?.clone) {try {details=await error.context.clone().json()} catch { /* Unknown outcomes remain blocked. */ }}
+  const knownRollback=action==='confirm_video_brief' && details?.rollback_verified===true && ['22023','42501','40001','55000'].includes(details.code)
+  if (error || data?.error) throw Object.assign(new Error(details?.error || error?.message || fallbackMessage), {cause:error,status:error?.status || error?.statusCode || error?.context?.status,code:details?.code,knownRollback})
   return data?.data
 }
