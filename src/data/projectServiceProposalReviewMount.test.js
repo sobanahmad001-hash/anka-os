@@ -18,7 +18,7 @@ test('mounted service proposals require exact-value review, preserve uncertain r
   Object.assign(globalThis, { document: env.document, window: env.window, IS_REACT_ACT_ENVIRONMENT: true })
   const calls = []
   let failBeta = true
-  const snapshot = { catalog: [{ id: 'alpha', name: 'Website design', department_id: 'design' }, { id: 'beta', name: 'Article content', department_id: 'content' }], scopes: [], members: [{ id: 'owner', name: 'Existing owner' }], impact: {} }
+  const snapshot = { catalog: [{ id: 'alpha', name: 'Website design', unit: 'page', recurrence: 'one-time', department_id: 'design' }, { id: 'beta', name: 'Article content', unit: 'article', recurrence: 'monthly', department_id: 'content' }], scopes: [], members: [{ id: 'owner', name: 'Existing owner' }], impact: {} }
   const compiled = transformSync(readFileSync(new URL('../apps/ProjectServiceScopePanel.jsx', import.meta.url), 'utf8'), { loader: 'jsx', format: 'cjs', jsxFactory: 'React.createElement' }).code
   const module = { exports: {} }
   const require = name => {
@@ -59,6 +59,8 @@ test('mounted service proposals require exact-value review, preserve uncertain r
   assert.equal(calls.length, 2)
   assert.deepEqual(calls.map(command => command.action), ['add', 'add'])
   assert.equal(calls[0].quantity, 3)
+  assert.equal(calls[0].unit, 'page')
+  assert.equal(calls[1].recurrence, 'monthly')
   assert.equal(calls[1].quantity, 1)
   assert.match(env.container.textContent, /Response uncertain/)
   const original = calls[1]

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { canManageProjectServices, createProjectServiceProposalQueue, projectServiceProposalContextKey, submitProjectServiceProposals } from './projectServiceProposalQueue.js'
 
 const items = ['design', 'content', 'development'].map((serviceId, index) => ({ serviceId,
-  scopeStatement: `Scope ${index}`, exclusions: `Excluded ${index}`, quantity: index + 1,
+  unit: `unit-${index}`, recurrence: `period-${index}`, scopeStatement: `Scope ${index}`, exclusions: `Excluded ${index}`, quantity: index + 1,
   ownerId: `owner-${index}`, startDate: '2026-10-01', targetDate: `2026-10-0${index + 2}` }))
 const options = overrides => {
   let id = 0
@@ -47,7 +47,7 @@ test('partial failure continues, retains original payload and request ID on repe
     ['content', 'failed'], ['development', 'saving'], ['development', 'succeeded']])
   assert.deepEqual([...queue.succeeded], ['design', 'development'])
   const original = calls[1]
-  const edited = items.map(item => ({ ...item, quantity: 999, scopeStatement: 'Changed' }))
+  const edited = items.map(item => ({ ...item, quantity: 999, scopeStatement: 'Changed', unit: 'edited unit', recurrence: 'edited recurrence' }))
   await queue.submit({ ...submitOptions, items: edited })
   assert.equal(calls[3], original)
   fail = false

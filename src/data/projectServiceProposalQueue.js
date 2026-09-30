@@ -59,7 +59,7 @@ export function createProjectServiceProposalQueue() {
             if (!requestId) throw new Error('A secure request ID is unavailable.')
             command = Object.freeze({ organizationId, projectId, requestId, action: 'add',
               serviceId: item.serviceId, scopeStatement: item.scopeStatement, exclusions: item.exclusions,
-              quantity: Number(item.quantity), ownerId: item.ownerId,
+              quantity: Number(item.quantity), unit: item.unit, recurrence: item.recurrence, ownerId: item.ownerId,
               startDate: item.startDate, targetDate: item.targetDate })
             commands.set(item.serviceId, command)
           }
