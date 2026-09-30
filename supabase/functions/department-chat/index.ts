@@ -2100,7 +2100,7 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
     if (action === 'reject_proposal') {
       return response({ data: await rejectProposal(admin, text(body.proposal_id, 80), user.id, membership) })
     }
-    if (['create_context_conversation', 'list_context_conversations', 'get_context_conversation',
+    if (['start_context_conversation', 'create_context_conversation', 'list_context_conversations', 'get_context_conversation',
       'append_context_human_message', 'rename_context_conversation', 'get_project_context_sharing',
       'set_project_context_sharing'].includes(action)) {
       return response({ data: await contextChatAction(action, admin, body, user.id, organizationId, membership) })

@@ -17,6 +17,19 @@ const actions = {
   officialRead: repo => repo.getOfficialRecord('org', { work_item_id: 'item' }),
 }
 
+test('direct start keeps exact client identities and uses selected organization and signal', async () => {
+  const calls = [], signal = new AbortController().signal
+  const repo = createDepartmentChatRepository({ functions: { invoke: async (name, options) => {
+    calls.push({ name, ...options }); return { data: { data: { conversation: { owner_id: 'actor' }, message: { id: 'saved' } } } }
+  } } })
+  const input = { context_kind: 'department_private', department_id: 'content', conversation_id: 'thread', client_request_id: 'request', message: 'First text', organization_id: 'foreign', action: 'injected' }
+  const result = await repo.startContextConversation(input, { organizationId: 'selected', signal })
+  assert.deepEqual(calls[0].body, { ...input, action: 'start_context_conversation', organization_id: 'selected' })
+  assert.equal(calls[0].signal, signal)
+  assert.equal(result.conversation.owner_id, 'actor')
+  assert.equal(result.message.id, 'saved')
+})
+
 test('all WCH actions carry the selected organization and exact current abort signal', async () => {
   const calls = []
   const controller = new AbortController()

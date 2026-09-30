@@ -7,6 +7,7 @@ import { departmentChat } from '../data/departmentChatRepository.js'
 import { integrations } from '../data/integrationRepository.js'
 import { contextChatRunner } from '../data/contextChatRunnerRepository.js'
 import { contextChatTitleFromMessage } from '../data/contextChatTitle.js'
+import DirectContextChat from './DirectContextChat.jsx'
 const PrivateDesignVideoTools = lazy(() => import('./PrivateDesignVideoTools.jsx'))
 
 const INPUT = 'w-full rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] px-3 py-2.5 text-sm text-[var(--anka-ink)] placeholder:text-[var(--anka-muted)] outline-none focus:border-[var(--anka-focus)]'
@@ -20,11 +21,15 @@ const MODEL_READINESS_MESSAGES = {
   price_unavailable: 'A fresh verified price for this exact model is unavailable.',
 }
 
-export default function ContextConversationPanel({ contextKind, departmentId = '', projectId = '', label = 'Conversation', workshopLayout = false, initialConversation = null, hideConversationList = false, onConversationListChange, onNavigationBusyChange }) {
+export default function ContextConversationPanel({ contextKind, departmentId = '', projectId = '', label = 'Conversation', workshopLayout = false, initialConversation = null, hideConversationList = false, onConversationListChange, onNavigationBusyChange, directSend = false }) {
   const { user } = useAuth()
   const { activeOrganizationId, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
   if (!user?.id || !activeOrganizationId || requestSignal.aborted) return null
   const identity = [user.id, activeOrganizationId, scopeRevision, contextKind, departmentId, projectId, initialConversation?.id || ''].join(':')
+  if (directSend) return <DirectContextChat key={identity} contextKind={contextKind} departmentId={departmentId}
+    projectId={projectId} label={label} organizationId={activeOrganizationId} user={user} signal={requestSignal}
+    onAccessError={handleOrganizationAccessError} initialConversation={initialConversation}
+    onConversationListChange={onConversationListChange} onNavigationBusyChange={onNavigationBusyChange} />
   return <ScopedContextConversation key={identity} contextKind={contextKind} departmentId={departmentId}
     projectId={projectId} label={label} organizationId={activeOrganizationId} user={user} signal={requestSignal}
     onAccessError={handleOrganizationAccessError} workshopLayout={workshopLayout} initialConversation={initialConversation} hideConversationList={hideConversationList} onConversationListChange={onConversationListChange} onNavigationBusyChange={onNavigationBusyChange} />

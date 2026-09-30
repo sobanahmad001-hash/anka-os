@@ -1,0 +1,81 @@
+.direct-chat { position: relative; min-width: 0; color: var(--anka-ink); background: var(--anka-surface); border: 1px solid var(--anka-line); border-radius: 16px; overflow: clip; }
+.direct-chat * { box-sizing: border-box; min-width: 0; }
+.direct-chat button, .direct-chat input, .direct-chat select, .direct-chat textarea { font: inherit; color: inherit; border: 1px solid var(--anka-line); border-radius: 8px; background: var(--anka-canvas); padding: 8px 12px; max-width: 100%; }
+.direct-chat button { cursor: pointer; }
+.direct-chat button:disabled { opacity: .5; cursor: not-allowed; }
+.direct-chat :focus-visible { outline: 2px solid var(--anka-focus); outline-offset: 2px; }
+.direct-chat h2, .direct-chat h3, .direct-chat p { margin: 0; }
+.direct-chat-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px; border-bottom: 1px solid var(--anka-line); }
+.direct-chat-header h2 { font-weight: 650; }
+.direct-chat-header p, .direct-chat-composer p, .direct-chat small { color: var(--anka-muted); font-size: 12px; }
+.direct-chat-actions, .direct-chat-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; }
+.direct-chat-layout { display: flex; align-items: stretch; min-height: 480px; }
+.direct-chat-main { flex: 1; display: flex; flex-direction: column; }
+.direct-chat-messages { flex: 1; padding: 24px; max-height: 60vh; overflow: auto; }
+.direct-chat-empty { padding: 64px 0; text-align: center; color: var(--anka-muted); }
+.direct-chat-empty h3 { color: var(--anka-ink); font-size: 22px; margin-bottom: 8px; }
+.direct-chat-message { padding: 16px; margin: 0 0 16px; border-radius: 12px; background: var(--anka-canvas); overflow-wrap: anywhere; }
+.direct-chat-message p, .direct-chat-output p { white-space: pre-wrap; margin: 8px 0; }
+.direct-chat-message.assistant { border-left: 3px solid var(--anka-violet); }
+.direct-chat-composer { position: sticky; bottom: 0; z-index: 1; padding: 16px; background: var(--anka-surface); border-top: 1px solid var(--anka-line); }
+.direct-chat-composer textarea { display: block; width: 100%; resize: vertical; min-height: 90px; margin: 4px 0 12px; }
+.direct-chat label { display: grid; gap: 4px; font-size: 13px; }
+.direct-chat-toolbar label { flex: 1; max-width: 220px; }
+.direct-chat .direct-chat-send { margin-left: auto; background: var(--anka-violet); color: var(--anka-on-violet); font-weight: 650; }
+.direct-chat-composer p { margin-top: 10px; }
+.direct-chat-history { width: 230px; flex-shrink: 0; padding: 16px; border-right: 1px solid var(--anka-line); display: flex; flex-direction: column; gap: 12px; overflow: auto; max-height: 75vh; }
+.direct-chat-history button { text-align: left; overflow-wrap: anywhere; }
+.direct-chat-history [aria-pressed=true] { border-color: var(--anka-violet); }
+.direct-chat-output { width: 34%; padding: 20px; border-left: 1px solid var(--anka-line); background: var(--anka-canvas); overflow: auto; overflow-wrap: anywhere; max-height: 80vh; }
+.direct-chat-output h3 { font-weight: 650; }
+.direct-chat-output button { margin: 10px 0; }
+.direct-chat-details, .direct-chat-notice, .direct-chat-error { padding: 12px 16px; border-bottom: 1px solid var(--anka-line); font-size: 13px; }
+.direct-chat-details { display: grid; gap: 12px; }
+.direct-chat-details input[type=checkbox] { width: 18px; height: 18px; }
+.direct-chat-details form { display: flex; align-items: end; gap: 8px; }
+.direct-chat-error { color: var(--anka-danger); background: var(--anka-danger-soft); }
+@media (max-width: 900px) { .direct-chat-history, .direct-chat-output { position: absolute; z-index: 3; inset: 0; width: 100%; max-height: 100%; background: var(--anka-surface); } }
+@media (max-width: 480px) { .direct-chat-header, .direct-chat-composer, .direct-chat-messages { padding: 12px; } .direct-chat-toolbar label { max-width: 140px; } .direct-chat-layout { min-height: 440px; } }
+
+@media (max-width: 480px) {
+  .direct-chat-toolbar { display: grid; grid-template-columns: 85px minmax(0, 1fr); }
+  .direct-chat-toolbar label { max-width: none; }
+  .direct-chat-toolbar select { width: 100%; }
+  .direct-chat-toolbar .direct-chat-send { grid-column: 1 / -1; width: 100%; margin: 0; }
+}
+
+@media (max-width: 900px) {
+  .direct-chat-history, .direct-chat-output { position: fixed; z-index: 50; inset: 72px 12px 12px; width: auto; max-height: none; border: 1px solid var(--anka-line); border-radius: 12px; box-shadow: 0 12px 48px #0004; }
+}
+@media (max-width: 480px) {
+  .direct-chat-toolbar label:last-of-type { grid-row: 1; grid-column: 1 / -1; }
+  .direct-chat-toolbar label:first-of-type { grid-row: 2; grid-column: 1; }
+  .direct-chat-toolbar .direct-chat-send { grid-row: 2; grid-column: 2; }
+}
+
+.direct-chat { display: flex; flex-direction: column; height: var(--direct-chat-height, 680px); }
+.direct-chat-header { flex-shrink: 0; }
+.direct-chat-layout { flex: 1; min-height: 0; overflow: hidden; }
+.direct-chat-main { min-height: 0; }
+.direct-chat-messages { min-height: 0; max-height: none; padding: 16px; }
+.direct-chat-composer { position: relative; flex-shrink: 0; padding: 12px 16px; }
+.direct-chat-composer textarea { min-height: 68px; }
+.direct-chat-history, .direct-chat-output { max-height: none; }
+.direct-chat-details { max-height: min(240px, 35vh); flex-shrink: 0; overflow: auto; }
+.direct-workshop-context { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 4px 0; }
+.direct-workshop-context details[open] { width: 100%; }
+.direct-workshop-context summary { cursor: pointer; }
+@media (max-width: 480px) { .direct-chat-composer { padding: 12px; } }
+
+.direct-chat-messages { padding: 0; }
+.direct-chat-message-stream { padding: 16px; }
+.direct-chat-recovery { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; flex-shrink: 0; }
+.direct-chat-recovery p { flex: 1; min-width: 170px; }
+.direct-chat-error, .direct-chat-notice { flex-shrink: 0; }
+@media (max-width: 480px) { .direct-chat-message-stream { padding: 12px; } }
+
+@media (max-width: 480px) {
+  .direct-chat-empty { padding: 8px 0; }
+  .direct-chat-empty h3 { font-size: 18px; margin-bottom: 6px; }
+  .direct-chat-empty p { font-size: 13px; }
+}
