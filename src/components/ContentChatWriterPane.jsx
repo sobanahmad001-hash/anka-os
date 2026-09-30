@@ -45,7 +45,7 @@ export default function ContentChatWriterPane({ workspace, studio, refresh, refr
   if (!allowed) return <p role="status">Content writer is unavailable in this context.</p>
   return <section className="content-chat-writer-body">
     <h3 ref={heading} tabIndex={-1} className="font-semibold">Content writer · canonical versions</h3>
-    <p className="mt-2 text-xs text-[var(--anka-muted)]">Select a saved writer output to edit its exact version. Selected-text replacement changes only the working draft; Preview and Confirm save a new unapproved version. Conversation replies are not imported. Legacy proposals remain in their existing governed editor.</p>
+    <p className="mt-2 text-xs text-[var(--anka-muted)]">Edit an exact saved version or a new text draft. Preview the destination before confirming an unapproved version.</p>
     {error && <p role="alert" className="mt-3 text-sm text-[var(--anka-danger)]">{error}</p>}
     {notice && <p role="status" className="mt-3 text-sm text-[var(--anka-success)]">{notice}</p>}
     {uncertain && <p role="alert" className="mt-3 text-sm text-[var(--anka-warning)]">The save outcome needs review. Refresh the saved outputs and inspect the latest version. Close and reopen this editor before another save; no automatic retry is sent.</p>}

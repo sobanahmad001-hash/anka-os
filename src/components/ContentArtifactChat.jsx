@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import DepartmentChat from './DepartmentChat.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { contentStudio } from '../data/contentStudioRepository.js'
@@ -12,6 +12,8 @@ export default function ContentArtifactChat({ engagement, projectId, onCreated, 
   const generation = useRef(0)
   const [state, setState] = useState(null)
   const [editorOpen, setEditorOpen] = useState(false)
+  const [mobileEditor, setMobileEditor] = useState(() => globalThis.matchMedia?.('(max-width: 900px)').matches ?? false)
+  const paneRef = useRef(null), openerRef = useRef(null), closeRef = useRef(null)
   const [chatBusy, setChatBusy] = useState(false)
   const [editorState, setEditorState] = useState({ dirty: false, saving: false })
   const editorBusy = editorOpen && (editorState.dirty || editorState.saving)
@@ -47,23 +49,80 @@ export default function ContentArtifactChat({ engagement, projectId, onCreated, 
   }, [load, key, requestSignal])
   const targets = state?.key === key && state.status === 'ready' && !requestSignal?.aborted ? state.targets : null
   const workspace = state?.key === key && !requestSignal?.aborted ? state.workspace : null
+  const hasWorkspace = Boolean(workspace)
+  useEffect(() => {
+    if (editorOpen && !hasWorkspace) { setEditorOpen(false); setEditorState({ dirty: false, saving: false }) }
+  }, [editorOpen, hasWorkspace])
   const closeEditor = () => {
     if (editorState.saving) return
     if (editorState.dirty && !globalThis.confirm('Discard unsaved Content writer edits and close the side editor?')) return
     setEditorOpen(false); setEditorState({ dirty: false, saving: false })
   }
+  closeRef.current = closeEditor
+  useLayoutEffect(() => {
+    if (!editorOpen || !hasWorkspace || mobileEditor || !paneRef.current) return
+    const pane = paneRef.current
+    const measure = () => pane.style.setProperty('--content-editor-height', Math.max(120, innerHeight - pane.getBoundingClientRect().top - 16) + 'px')
+    measure()
+    globalThis.addEventListener?.('resize', measure)
+    globalThis.addEventListener?.('scroll', measure, true)
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null
+    observer?.observe(pane)
+    return () => { globalThis.removeEventListener?.('resize', measure); globalThis.removeEventListener?.('scroll', measure, true); observer?.disconnect() }
+  }, [editorOpen, hasWorkspace, mobileEditor])
+  useLayoutEffect(() => {
+    if (editorOpen && hasWorkspace && mobileEditor && paneRef.current && !paneRef.current.contains(document.activeElement)) paneRef.current.querySelector('button')?.focus()
+  })
+  useEffect(() => {
+    const media = globalThis.matchMedia?.('(max-width: 900px)')
+    if (!media) return
+    const changed = () => setMobileEditor(media.matches)
+    media.addEventListener('change', changed)
+    return () => media.removeEventListener('change', changed)
+  }, [])
+  useEffect(() => {
+    if (!editorOpen || !hasWorkspace || mobileEditor) return
+    const opener = openerRef.current
+    return () => { if (opener?.isConnected) opener.focus() }
+  }, [editorOpen, hasWorkspace, mobileEditor])
+  useEffect(() => {
+    if (!editorOpen || !hasWorkspace || !mobileEditor || !paneRef.current) return
+    const opener = openerRef.current
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    // Inert all sibling branches, preserving this dialog's ancestor chain.
+    const changed = []
+    let branch = paneRef.current
+    while (branch?.parentElement && branch !== document.body) {
+      for (const node of branch.parentElement.children) if (node !== branch) {
+        changed.push([node, node.inert]); node.inert = true
+      }
+      branch = branch.parentElement
+    }
+    return () => { document.body.style.overflow = previousOverflow; for (const [node, value] of changed) node.inert = value; if (opener?.isConnected) opener.focus() }
+  }, [editorOpen, hasWorkspace, mobileEditor])
+  const drawerKeyDown = event => {
+    if (!mobileEditor) return
+    if (event.key === 'Escape') { event.preventDefault(); closeRef.current?.(); return }
+    if (event.key !== 'Tab') return
+    const nodes = [...paneRef.current.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]')].filter(node => node.getClientRects().length)
+    const first = nodes[0], last = nodes.at(-1), active = document.activeElement
+    if (event.shiftKey && (active === first || !nodes.includes(active))) { event.preventDefault(); last?.focus() }
+    else if (!event.shiftKey && (active === last || !nodes.includes(active))) { event.preventDefault(); first?.focus() }
+  }
   return <section aria-label="Content artifact chat" className="space-y-3">
     {!targets && <p role="status" className="text-sm text-[var(--anka-warning)]">{state?.key !== key || state.status === 'loading' ? 'Loading Content artifact tools. Ordinary chat remains available.' : 'Content artifact tools are unavailable for this context. Ordinary chat remains available.'}</p>}
     {sideEditor && <div className="flex flex-wrap items-center justify-between gap-3">
       <p className="text-xs text-[var(--anka-muted)]">Versioned Content writer outputs have their own editor. Conversation replies and legacy proposals are not transferred.</p>
-      <button type="button" disabled={!workspace || chatBusy || editorState.saving} aria-expanded={editorOpen} aria-controls="content-chat-writer" onClick={() => editorOpen ? closeEditor() : setEditorOpen(true)} className="rounded-lg border border-[var(--anka-line)] px-3 py-2 text-sm disabled:opacity-50">{editorOpen ? 'Close Content writer' : 'Open Content writer beside chat'}</button>
+      <button ref={openerRef} hidden={editorOpen} type="button" disabled={!workspace || chatBusy || editorState.saving} aria-expanded={editorOpen} aria-controls="content-chat-writer" onClick={() => editorOpen ? closeEditor() : setEditorOpen(true)} className="rounded-lg border border-[var(--anka-line)] px-3 py-2 text-sm disabled:opacity-50">{editorOpen ? 'Close Content writer' : 'Open Content writer beside chat'}</button>
     </div>}
     <div className={sideEditor && editorOpen ? 'content-chat-with-editor' : undefined}>
       <div className="min-w-0"><DepartmentChat {...conversationProps} engagement={engagement} departmentId="content" allowArtifactDraft={Boolean(targets)}
         externalNavigationBusy={Boolean(conversationProps.externalNavigationBusy || editorState.saving)} onNavigationBusyChange={setChatBusy}
         artifactDefinitions={targets?.definitions || {}} artifactForType={targets?.artifactForType} stageForType={targets?.stageForType}
         onCreated={async (...args) => { if (current.current !== key || requestSignal?.aborted) return; await load(); if (current.current === key && !requestSignal?.aborted) onCreated?.(...args) }} /></div>
-      {sideEditor && editorOpen && workspace && <aside id="content-chat-writer" className="content-chat-writer" aria-label="Canonical Content side editor">
+      {sideEditor && editorOpen && workspace && <aside ref={paneRef} id="content-chat-writer" className="content-chat-writer" role={mobileEditor ? 'dialog' : undefined} aria-modal={mobileEditor ? true : undefined} onKeyDown={drawerKeyDown} aria-label="Canonical Content side editor">
+        <div className="content-chat-writer-toolbar"><strong>Content editor</strong><button type="button" disabled={editorState.saving} onClick={closeEditor}>Back to chat</button></div>
         <Suspense fallback={<p role="status">Loading Content writer…</p>}><ContentChatWriterPane key={key} workspace={workspace} studio={studio} refresh={load} refreshing={Boolean(state.refreshing)} stale={state.status !== 'ready'} onStateChange={setEditorState} /></Suspense>
       </aside>}
     </div>

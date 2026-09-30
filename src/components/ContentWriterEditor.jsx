@@ -192,6 +192,11 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
 
   const error = key => attempted && issues[key]
   const qualityError = key => (attempted || qualityAttempted) && qualityIssues[key]
+  const draftEditor = <>
+        <Field label="Draft text" error={error('body')}><textarea ref={bodyRef} rows={compactLabels ? 8 : 12} className={INPUT} value={form.body} onChange={event => setField('body', event.target.value)} /></Field>
+        <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4"><p className="text-sm font-semibold text-white">Rewrite selected text manually</p><p className="mt-1 text-xs text-slate-500">Select text in the draft above, then preview a replacement. Only that selection changes, and nothing is saved until you confirm a draft version.</p><button type="button" onClick={selectForRewrite} className={`${SECONDARY} mt-3`}>Use selected text</button>{rewriteError && <p role="alert" className="mt-2 text-xs text-red-300">{rewriteError}</p>}{rewrite && <div className="mt-4 space-y-3"><p className="whitespace-pre-wrap text-xs text-slate-400">Selected: {rewrite.selection.selectedText}</p><label className="block text-xs font-semibold text-slate-400">Replacement<textarea rows="4" className={`${INPUT} mt-2`} value={rewrite.replacement} onChange={event => { setRewrite(current => ({ ...current, replacement: event.target.value })); setRewriteError('') }} /></label>{replacementPreview && <div aria-label="Selected rewrite preview" className="rounded-lg border border-amber-900/50 bg-amber-950/20 p-3 text-xs text-slate-200"><p className="font-semibold text-amber-300">Preview of selected text only</p><p className="mt-2 whitespace-pre-wrap">Before: {replacementPreview.before}</p><p className="mt-2 whitespace-pre-wrap">After: {replacementPreview.replacement}</p></div>}{replacementIssue && <p className="text-xs text-amber-300">{replacementIssue}</p>}<div className="flex gap-2"><button type="button" className={SECONDARY} onClick={() => { setRewrite(null); setRewriteError('') }}>Discard replacement</button><button type="button" className={PRIMARY} disabled={!replacementPreview} onClick={applyRewrite}>Apply to working draft</button></div></div>}</div>
+        <p className="text-xs text-slate-500" aria-live="polite">{counts.words} words · {counts.characters} characters. Counts are factual and do not imply quality or approval.</p>
+  </>
   return <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
     {compactLabels && <label className="block text-sm">Saved writer output
       <select aria-label="Saved writer output" className={INPUT + ' mt-2'} value={continuation?.artifactId || ''} disabled={saving || stale} onChange={event => { const item = outputs.find(output => output.artifact.id === event.target.value); if (item) continueOutput(item.artifact, item.latest); else resetDraft() }}>
@@ -200,16 +205,17 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
       </select>
       {staleContinuation && currentOutput && <button type="button" disabled={saving || stale} className={SECONDARY + ' mt-2'} onClick={() => continueOutput(currentOutput.artifact, currentOutput.latest)}>Open latest saved version</button>}
     </label>}
-    <form onSubmit={buildPreview} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">{compactLabels ? 'Content writer · manual text' : 'Content B05 · manual writer'}</p>
-      <h2 className="mt-1 text-2xl font-semibold">{compactLabels ? 'Content editor' : 'Production writer'}</h2>
-      <p className="mt-2 text-sm leading-6 text-slate-400">{compactLabels ? 'Edit or replace selected text, preview the destination, then confirm a new unapproved version.' : 'Prepare one text draft, inspect its exact destination, then confirm an unapproved immutable version. Generation jobs, multiple variants, and publishing are not enabled in this slice. Manual selected-text replacement previews before it changes this working draft.'}</p>
+    <form hidden={compactLabels && Boolean(preview)} onSubmit={buildPreview} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+      {!compactLabels && <><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Content B05 · manual writer</p><h2 className="mt-1 text-2xl font-semibold">Production writer</h2><p className="mt-2 text-sm leading-6 text-slate-400">Prepare one text draft, inspect its exact destination, then confirm an unapproved immutable version. Generation jobs, multiple variants, and publishing are not enabled in this slice. Manual selected-text replacement previews before it changes this working draft.</p></>}
+      {compactLabels && <div className="content-writer-document">{draftEditor}</div>}
       {stale && <p role="alert" className="mt-4 text-sm text-amber-300">The saved output list could not be refreshed. Retry before saving a new version.</p>}
       {continuation && <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-950/20 p-4 text-sm text-amber-100">Continuing exact version {continuation.versionNumber}. Saving appends a new unapproved version; the earlier version and its approval remain unchanged.
         {staleContinuation && <p role="alert" className="mt-2 text-red-300">A newer version is available. Reopen the latest output before previewing or saving.</p>}
         <button type="button" className="mt-3 block text-xs font-semibold underline" onClick={() => resetDraft()}>Start a new draft instead</button>
       </div>}
       {attempted && Object.keys(issues).length > 0 && <div role="alert" className="mt-5 rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">Resolve the labelled fields before previewing this draft.</div>}
+      <details className="content-writer-metadata" open={!compactLabels || attempted || qualityAttempted || undefined}>
+        {compactLabels && <summary className="mt-4 cursor-pointer text-sm">Title, destination and content settings · {form.working_title || 'Untitled draft'}</summary>}
       <div className="mt-6 space-y-5">
         <Field label="Output type" error={error('output_type')}><select className={INPUT} value={form.output_type} onChange={event => selectOutputType(event.target.value)}>{CONTENT_WRITER_OUTPUT_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
         <Field label="Working title" error={error('working_title')}><input className={INPUT} maxLength="160" value={form.working_title} onChange={event => setField('working_title', event.target.value)} /></Field>
@@ -223,9 +229,7 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
           <Field label="Language" error={error('language')}><input className={INPUT} value={form.language} onChange={event => setField('language', event.target.value)} /></Field>
           <Field label="Tone override (optional)"><input className={INPUT} value={form.tone} onChange={event => setField('tone', event.target.value)} /></Field>
         </div>
-        <Field label="Draft text" error={error('body')}><textarea ref={bodyRef} rows="12" className={INPUT} value={form.body} onChange={event => setField('body', event.target.value)} /></Field>
-        <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4"><p className="text-sm font-semibold text-white">Rewrite selected text manually</p><p className="mt-1 text-xs text-slate-500">Select text in the draft above, then preview a replacement. Only that selection changes, and nothing is saved until you confirm a draft version.</p><button type="button" onClick={selectForRewrite} className={`${SECONDARY} mt-3`}>Use selected text</button>{rewriteError && <p role="alert" className="mt-2 text-xs text-red-300">{rewriteError}</p>}{rewrite && <div className="mt-4 space-y-3"><p className="whitespace-pre-wrap text-xs text-slate-400">Selected: {rewrite.selection.selectedText}</p><label className="block text-xs font-semibold text-slate-400">Replacement<textarea rows="4" className={`${INPUT} mt-2`} value={rewrite.replacement} onChange={event => { setRewrite(current => ({ ...current, replacement: event.target.value })); setRewriteError('') }} /></label>{replacementPreview && <div aria-label="Selected rewrite preview" className="rounded-lg border border-amber-900/50 bg-amber-950/20 p-3 text-xs text-slate-200"><p className="font-semibold text-amber-300">Preview of selected text only</p><p className="mt-2 whitespace-pre-wrap">Before: {replacementPreview.before}</p><p className="mt-2 whitespace-pre-wrap">After: {replacementPreview.replacement}</p></div>}{replacementIssue && <p className="text-xs text-amber-300">{replacementIssue}</p>}<div className="flex gap-2"><button type="button" className={SECONDARY} onClick={() => { setRewrite(null); setRewriteError('') }}>Discard replacement</button><button type="button" className={PRIMARY} disabled={!replacementPreview} onClick={applyRewrite}>Apply to working draft</button></div></div>}</div>
-        <p className="text-xs text-slate-500" aria-live="polite">{counts.words} words · {counts.characters} characters. Counts are factual and do not imply quality or approval.</p>
+        {!compactLabels && draftEditor}
         <Field label="Selected call to action (optional, checked against draft)"><textarea rows="2" className={INPUT} value={form.cta} onChange={event => setField('cta', event.target.value)} /></Field>
         <Field label="Excluded phrases (optional, one per line)"><textarea rows="3" className={INPUT} value={form.exclusions} onChange={event => setField('exclusions', event.target.value)} /></Field>
         <section className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
@@ -244,7 +248,8 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
           </div>
         </section>
       </div>
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-slate-800 pt-5"><p className="text-xs text-slate-500">Variant 1 only · cost estimate unavailable because no provider job is being started.</p><div className="flex gap-2"><button type="button" onClick={runQualityChecks} className={SECONDARY}>Check content</button><button disabled={saving || stale || staleContinuation} className={PRIMARY}>{preview ? 'Refresh preview' : 'Preview draft'}</button></div></div>
+      </details>
+      <div className="content-writer-actions mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-slate-800 pt-5">{!compactLabels && <p className="text-xs text-slate-500">Variant 1 only · cost estimate unavailable because no provider job is being started.</p>}<div className="flex gap-2"><button type="button" onClick={runQualityChecks} className={SECONDARY}>Check content</button><button disabled={saving || stale || staleContinuation} className={PRIMARY}>{preview ? 'Refresh preview' : 'Preview draft'}</button></div></div>
     </form>
     <section className="space-y-5">
       {checkReport && <article className="rounded-2xl border border-slate-700 bg-slate-900/70 p-5">
@@ -257,9 +262,10 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
         <h3 className="mt-2 text-xl font-semibold">{preview.content.working_title}</h3>
         <dl className="mt-5 grid gap-3 text-sm"><PreviewRow label="Type" value={preview.content.output_type.replaceAll('_', ' ')} /><PreviewRow label="Destination" value={preview.destinationLabel} /><PreviewRow label="Language" value={preview.content.language} /><PreviewRow label="Tone" value={preview.content.tone || 'No request override'} /><PreviewRow label="Effect" value={continuation ? `Append unapproved version after exact v${continuation.versionNumber}` : "Create one unapproved immutable Content artifact version"} /></dl>
         <div className="mt-5 max-h-80 overflow-y-auto whitespace-pre-wrap rounded-xl border border-slate-800 bg-slate-950/70 p-4 text-sm leading-6 text-slate-200">{preview.content.body}</div>
+        {compactLabels && <button type="button" disabled={saving} onClick={() => setPreview(null)} className={SECONDARY + ' mt-4'}>Back to editing</button>}
         <button type="button" disabled={saving || stale || staleContinuation} onClick={confirmDraft} className={`${PRIMARY} mt-5 w-full`}>{saving ? 'Saving…' : 'Confirm unapproved draft'}</button>
       </article> : <div className="rounded-2xl border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500">Complete the required fields to preview the exact output and destination before anything is saved.</div>}
-      <article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+      <details open={!compactLabels || undefined}><summary className="cursor-pointer text-sm">Saved versions and copy options</summary><article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
         <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">Saved writer outputs</h3><button type="button" className={SECONDARY} disabled={refreshing || saving} onClick={onRefresh}>{refreshing ? 'Refreshing…' : 'Refresh outputs'}</button></div>
         <p className="mt-1 text-xs text-slate-500">Exact writer versions stay visible here without replacing legacy page-content tracking. Copy makes a new unapproved root; it never transfers approval or review comments.</p>
         {copiedResult && <div className="mt-4 rounded-xl border border-emerald-700/50 bg-emerald-950/20 p-4 text-sm text-emerald-100"><p>The new unapproved copy is saved as its own writer output.</p><button type="button" className="mt-2 text-xs font-semibold underline disabled:opacity-50" disabled={saving || stale || !outputs.some(item => item.artifact.id === copiedResult.artifact_id && item.latest.id === copiedResult.version_id)} onClick={() => { const item = outputs.find(item => item.artifact.id === copiedResult.artifact_id && item.latest.id === copiedResult.version_id); if (item) continueOutput(item.artifact, item.latest) }}>Open copied draft in writer</button></div>}
@@ -282,7 +288,7 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
             <div className="mt-3 flex flex-wrap gap-4"><button type="button" disabled={saving} onClick={() => continueOutput(artifact, latest)} className="text-xs font-semibold text-amber-300 underline">Continue from exact v{latest.version_number}</button><button type="button" disabled={saving || stale} onClick={() => previewCopy(artifact, latest)} className="text-xs font-semibold text-amber-300 underline">Copy exact v{latest.version_number} into new draft</button></div>
           </div>
         })}</div> : <p className="mt-4 text-sm text-slate-500">No writer outputs saved yet.</p>}
-      </article>
+      </article></details>
     </section>
   </div>
 }
