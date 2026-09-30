@@ -44,6 +44,7 @@ export function createDirectChatFixture({ surface = 'content', state = 'empty', 
   }
   // Canonical writer example reuses this fixture's existing synthetic scope.
   fixture.writerWrites = 0
+  fixture.writerUncertainAfterSave = false
   fixture.contentWorkspace = { engagement: { ...fixture.engagements[0], brand_id: modelId }, stages: [], approvals: [], copyRoots: [], organizationSettings: { default_language: 'English' },
     contentServices: [{ id: modelId, organization_id: organizationId, engagement_id: fixture.engagements[0].id, status: 'active', service_catalog: { department_id: 'content', is_active: true } }],
     artifacts: [{ id: requestId, organization_id: organizationId, engagement_id: fixture.engagements[0].id, artifact_type: 'content', title: 'Existing article' }],
@@ -55,11 +56,20 @@ export function createDirectChatFixture({ surface = 'content', state = 'empty', 
       if (input.engagement_id !== fixture.engagements[0].id || input.artifact_id !== requestId || input.expected_parent_version_id !== source.id) throw failure('Exact canonical source changed · fixture', 409)
       const version = { ...source, id: crypto.randomUUID(), parent_version_id: source.id, version_number: source.version_number + 1, content: structuredClone(input.content) }
       fixture.contentWorkspace = { ...fixture.contentWorkspace, versions: [...fixture.contentWorkspace.versions, version] }
-      fixture.writerWrites++; return { version_id: version.id }
+      fixture.writerWrites++; if (fixture.writerUncertainAfterSave) throw failure('Saved response unavailable · offline fixture', 503); return { version_id: version.id }
     },
     copyContentWriterVersion: async () => { throw failure('Copy is not exercised by this isolated writer fixture.', 409) },
   }
+  const engagementConversation = { id: 'a0000000-0000-4000-8000-000000000021', organization_id: organizationId, department_id: 'content', project_id: projectId, engagement_id: fixture.engagements[0].id, owner_id: actor, title: 'Page brief · separate project history', state: 'active', access_role: 'owner' }
+  fixture.engagementMessages = []
   fixture.chat = {
+    getCapabilities: async () => ({ provider: 'openai', default_model_configuration_id: modelId, approved_models: [{ configuration_id: modelId, provider: 'openai', model_id: 'Approved text · offline fixture', display_name: 'Offline configuration' }], answer_readiness: { paid_execution_enabled: false, spend_tracking_configured: false, model_price_available: [] }, attachments: { supported: false } }),
+    getConversation: async (_department, input) => { if (input.conversation_id !== engagementConversation.id || input.engagement_id !== fixture.engagements[0].id || input.project_id !== projectId) throw failure('Foreign engagement fixture request', 403); return { conversation: engagementConversation, messages: fixture.engagementMessages, sharing: { can_manage: false, recipients: [] } } },
+    listAttachments: async () => [], listSourceVersions: async () => [], getUnsentDraft: async () => null,
+    discardUnsentDraft: async () => ({}),
+    saveUnsentDraft: async () => { throw failure('Draft persistence is not exercised in this fixture.', 409) },
+    answer: async () => { throw failure('No provider execution is allowed in this fixture.', 403) },
+
     searchConversations: async (_department, input) => ({ items: 'Page brief · separate project history'.toLowerCase().includes((input.query || '').toLowerCase()) ? [{ id: 'a0000000-0000-4000-8000-000000000021', organization_id: organizationId, department_id: 'content', project_id: input.project_id, engagement_id: input.engagement_id, title: 'Page brief · separate project history', state: 'active', access_role: 'owner' }] : [], next_cursor: null }),
     listContextConversations: async input => data.rows.filter(row => row.context_kind === input.context_kind && (row.project_id || '') === (input.project_id || '') && (row.department_id || '') === (input.department_id || '')).slice(input.offset || 0, (input.offset || 0) + 51),
     getContextConversation: async input => {

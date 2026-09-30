@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import Layout from '../src/components/Layout.jsx'
 import { ThemeProvider, useTheme } from '../src/hooks/useTheme.jsx'
 import WorkshopChatWorkspace from '../src/components/WorkshopChatWorkspace.jsx'
@@ -51,7 +51,7 @@ function Preview() {
     observer.observe(document.getElementById('preview-chat'), { childList: true, subtree: true })
     return () => observer.disconnect()
   }, [])
-  if (params.get('panel') === 'writer') return <div className="workspace-page"><h1 className="workspace-title">Content · canonical side editor</h1><p className="text-sm text-[var(--anka-muted)]">Offline fixture · No provider or production write · Legacy messaging not exercised</p><ContentArtifactChat sideEditor projectId={fixture.engagements[0].project_id} engagement={fixture.contentWorkspace.engagement} presentation="workbench" /></div>
+  if (params.get('panel') === 'writer') return <div className="workspace-page"><h1 className="workspace-title">Content · canonical side editor</h1><p className="text-sm text-[var(--anka-muted)]">Offline fixture · No provider or production write · Actual engagement Chat · isolated backend responses</p><ContentArtifactChat sideEditor hideConversationList projectId={fixture.engagements[0].project_id} engagement={fixture.contentWorkspace.engagement} presentation="workbench" /></div>
   return <div className="workspace-page" style={{ maxWidth: 1500, margin: 'auto' }}>
     <h1 className="workspace-title">{surface === 'project' ? 'Launch project · Chat' : 'Content Workshop · Chat'}</h1><p className="text-sm text-[var(--anka-muted)]">Offline fixture · No provider calls</p><details className="preview-controls"><summary>Preview controls · test fixtures</summary>
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, margin: '20px 0' }}>
@@ -68,4 +68,5 @@ function Preview() {
     </div>
   </div>
 }
-createRoot(document.getElementById('root')).render(<MemoryRouter initialEntries={['/sphere/workspace']}><ThemeProvider><Routes><Route element={<Layout />}><Route path="*" element={<Preview />} /></Route></Routes></ThemeProvider></MemoryRouter>)
+const router = createMemoryRouter([{ element: <Layout />, children: [{ path: '*', element: <Preview /> }] }], { initialEntries: ['/sphere/workspace'] })
+createRoot(document.getElementById('root')).render(<ThemeProvider><RouterProvider router={router} /></ThemeProvider>)

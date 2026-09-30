@@ -25,7 +25,8 @@ async function drawerAssertions(page, label, opener) {
 }
 async function writerAssertions(browser) {
   const results = []
-  for (const [width, height, theme] of [[1440,900,'light'],[1440,900,'dark'],[390,900,'light'],[390,900,'dark']]) {
+  const recoveryOnly = process.argv.includes('--writer-recovery')
+  for (const [width, height, theme] of (recoveryOnly ? [[1440,900,'dark']] : [[1440,900,'light'],[1440,900,'dark'],[390,900,'light'],[390,900,'dark']])) {
     const context = await browser.newContext({ viewport: { width, height } })
     const page = await context.newPage(); page.setDefaultTimeout(15000)
     const errors = [], blocked = []
@@ -33,6 +34,9 @@ async function writerAssertions(browser) {
     page.on('dialog', dialog => dialog.accept())
     await page.route('**/*', route => { const url = new URL(route.request().url()); if (url.hostname === '127.0.0.1' && url.port === '5188') return route.continue(); blocked.push(url.origin); return route.abort() })
     await page.goto(`${base}?panel=writer&surface=content&state=empty&theme=${theme}`)
+    const chatComposer = page.getByRole('textbox', { name: /^Message/ })
+    await chatComposer.waitFor()
+    await chatComposer.fill('Keep this unsent engagement message')
     await page.getByRole('button', { name: 'Open Content writer beside chat', exact: true }).click()
     const pane = page.getByRole(width <= 900 ? 'dialog' : 'complementary', { name: 'Canonical Content side editor', exact: true })
     await pane.getByRole('heading', { name: 'Content writer · canonical versions', exact: true }).waitFor()
@@ -42,7 +46,7 @@ async function writerAssertions(browser) {
     assert(draftBounds && draftBounds.y >= 0 && draftBounds.y + 40 < height, 'Editable text not visible on opening')
     assert(await pane.getByRole('button', { name: 'Back to chat', exact: true }).isVisible())
     const openScreenshot = `b3-content-writer-open-${theme}-${width}x${height}.png`
-    await page.screenshot({ path: path.join(output, openScreenshot) })
+    if (!recoveryOnly) await page.screenshot({ path: path.join(output, openScreenshot) })
     await pane.getByRole('combobox', { name: 'Saved writer output', exact: true }).selectOption({ label: 'Existing article · v1' })
     const body = pane.getByLabel(/Draft text/)
     assert.equal(await body.inputValue(), 'Keep alpha and omega.')
@@ -55,7 +59,7 @@ async function writerAssertions(browser) {
     await pane.getByRole('button', { name: 'Preview draft', exact: true }).click()
     const saveScreenshot = `b3-content-writer-save-preview-${theme}-${width}x${height}.png`
     await pane.getByRole('button', { name: 'Confirm unapproved draft', exact: true }).scrollIntoViewIfNeeded()
-    await page.screenshot({ path: path.join(output, saveScreenshot) })
+    if (!recoveryOnly) await page.screenshot({ path: path.join(output, saveScreenshot) })
     await pane.getByRole('button', { name: 'Confirm unapproved draft', exact: true }).click()
     await page.waitForFunction(() => globalThis.__directChatPreview.fixture.writerWrites === 1)
     const canonical = await page.evaluate(() => ({ writes: globalThis.__directChatPreview.fixture.writerWrites, versions: globalThis.__directChatPreview.fixture.contentWorkspace.versions.map(version => ({ id: version.id, parent: version.parent_version_id, number: version.version_number, body: version.content.body })) }))
@@ -65,12 +69,40 @@ async function writerAssertions(browser) {
     assert.equal(canonical.versions[1].body, 'Keep beta and omega.')
     assert.deepEqual(errors, []); assert.deepEqual(blocked, [])
     results.push({ viewport: { width, height }, theme, focusMovedToPane: true, editableTextVisibleOnOpen: true, persistentReturnControl: true, noHorizontalOverflow: true, boundedReplacementPreservesOtherText: true, previewDoesNotWrite: true, oneExactParentImmutableSave: true, sourceVersionUnchanged: true, writerWrites: canonical.writes, pageErrors: errors, blockedRemoteRequests: blocked, screenshots: [openScreenshot, saveScreenshot] })
-    await page.waitForFunction(() => document.querySelector('textarea')?.value === '')
+    await page.waitForFunction(() => document.querySelector('.content-chat-writer textarea')?.value === '')
+    if (recoveryOnly) {
+      await pane.getByRole('combobox', { name: 'Saved writer output', exact: true }).selectOption({ label: 'Existing article · v2' })
+      await body.fill('Keep gamma and omega.')
+      await page.evaluate(() => { globalThis.__directChatPreview.fixture.writerUncertainAfterSave = true })
+      await pane.getByRole('button', { name: 'Preview draft', exact: true }).click()
+      await pane.getByRole('button', { name: 'Confirm unapproved draft', exact: true }).click()
+      await pane.getByText('The save outcome needs review.', { exact: false }).waitFor()
+      assert(await pane.getByRole('button', { name: 'Confirm unapproved draft', exact: true }).isDisabled())
+      assert.equal(await page.evaluate(() => globalThis.__directChatPreview.fixture.writerWrites), 2)
+      await pane.getByText('Saved versions and copy options', { exact: true }).click()
+      await pane.getByRole('button', { name: 'Refresh outputs', exact: true }).click()
+      await pane.getByRole('button', { name: 'Continue from exact v3', exact: true }).waitFor()
+      await pane.getByRole('button', { name: 'Back to chat', exact: true }).click()
+      assert.equal(await chatComposer.inputValue(), 'Keep this unsent engagement message')
+      await page.getByRole('button', { name: 'Open Content writer beside chat', exact: true }).click()
+      await pane.getByRole('combobox', { name: 'Saved writer output', exact: true }).selectOption({ label: 'Existing article · v3' })
+      assert.equal(await pane.getByLabel(/Draft text/).inputValue(), 'Keep gamma and omega.')
+      assert.equal(await page.evaluate(() => globalThis.__directChatPreview.fixture.writerWrites), 2)
+      results.at(-1).uncertainSaveRecovery = { committedVersionInspected: true, blindRetryBlocked: true, twoIntentionalWrites: true, editorReopenedAtExactLatest: true, chatDraftPreserved: true }
+    }
     if (width <= 900) results.at(-1).editorDrawer = await drawerAssertions(page, 'Canonical Content side editor', page.getByRole('button', { name: 'Open Content writer beside chat', exact: true }))
+    if (width > 900) await pane.getByRole('button', { name: 'Back to chat', exact: true }).click()
+    assert.equal(await chatComposer.inputValue(), 'Keep this unsent engagement message')
+    results.at(-1).actualEngagementComposerPreserved = true
     await context.close()
     console.log('VERIFY canonical writer', width, height, theme)
   }
-  await fs.writeFile(path.join(output, 'b3-content-writer-browser-evidence.json'), JSON.stringify({ source: 'tools/check-direct-chat-browser.cjs --writer', scope: 'Actual canonical side writer and shell; isolated backend fixture and explicit legacy messaging placeholder. No production writes/providers/installed acceptance.', results }, null, 2))
+  if (recoveryOnly) {
+    const file = path.join(output, 'b3-content-writer-browser-evidence.json')
+    const existing = JSON.parse(await fs.readFile(file, 'utf8')); existing.recoveryResults = results; await fs.writeFile(file, JSON.stringify(existing, null, 2))
+  } else {
+  await fs.writeFile(path.join(output, 'b3-content-writer-browser-evidence.json'), JSON.stringify({ source: 'tools/check-direct-chat-browser.cjs --writer', scope: 'Actual engagement Chat and canonical side writer/shell; isolated backend metadata and canonical save fixture. No provider request, production write or installed acceptance. Chat send and remote draft persistence are not exercised.', results }, null, 2))
+  }
   console.log(JSON.stringify({ writerCasesPassed: results.length }))
 }
 
@@ -88,7 +120,7 @@ async function writerAssertions(browser) {
     ['content', 'empty', 'system', 320, 900],
   ]
   try {
-    if (process.argv.includes('--writer')) { await writerAssertions(browser); return }
+    if (process.argv.includes('--writer') || process.argv.includes('--writer-recovery')) { await writerAssertions(browser); return }
     for (const [surface, state, theme, width, height] of cases) {
       const context = await browser.newContext({ viewport: { width, height }, colorScheme: 'light' })
       const page = await context.newPage()
