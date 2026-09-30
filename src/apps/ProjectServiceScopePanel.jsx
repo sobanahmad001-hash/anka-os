@@ -1,15 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { canShowAuthorityAdministration } from '../data/authorityAdministration.js'
 import { projectDraftRepository } from '../data/projectDraftRepository.js'
+import { canManageProjectServices, createProjectServiceProposalQueue, projectServiceProposalContextKey, submitProjectServiceProposals } from '../data/projectServiceProposalQueue.js'
 import { projectServiceScopeRepository } from '../data/projectServiceScopeRepository.js'
 
 const inputClass = 'mt-1 w-full rounded-lg border border-white/10 bg-[#111622] px-3 py-2 text-sm text-white'
 const blank = { serviceId: '', scopeStatement: '', exclusions: '', quantity: 1, ownerId: '', startDate: '', targetDate: '' }
 const title = value => value.replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
 
-export default function ProjectServiceScopePanel({ project, organizationId, membership, scopeRevision, requestSignal, onChanged, onAccessError }) {
+export default function ProjectServiceScopePanel(props) {
   const { user } = useAuth()
+  const contextKey = projectServiceProposalContextKey({ ...props, actorId: user?.id })
+  return <ServiceScopePanel key={contextKey} {...props} user={user} />
+}
+
+function ServiceScopePanel({ project, organizationId, membership, scopeRevision, requestSignal, onChanged, onAccessError, user }) {
   const admin = canShowAuthorityAdministration(membership)
   const [snapshot, setSnapshot] = useState(null)
   const [canManage, setCanManage] = useState(admin)
@@ -17,11 +23,27 @@ export default function ProjectServiceScopePanel({ project, organizationId, memb
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
-  const [form, setForm] = useState(blank)
+  const [forms, setForms] = useState({})
+  const [results, setResults] = useState({})
+  const [queue, setQueue] = useState(createProjectServiceProposalQueue)
+  const dispatching = useRef(false)
   const [review, setReview] = useState(null)
   const [acknowledged, setAcknowledged] = useState(false)
   const pending = useRef(null)
   const generation = useRef(0)
+
+  const authorization = useRef({ revision: 0, allowed: admin, mounted: false })
+  const dispatchScope = useRef(null)
+  // Context-key unmounts invalidate mutations before another service can dispatch.
+  useLayoutEffect(() => {
+    authorization.current.mounted = true
+    const context = authorization.current
+    return () => { context.mounted = false; context.revision += 1 }
+  }, [])
+  useLayoutEffect(() => {
+    dispatchScope.current = { requestSignal, scopeRevision, ready: false }
+    return () => { dispatchScope.current = null; generation.current += 1 }
+  }, [requestSignal, scopeRevision])
 
   const refresh = useCallback(async current => {
     const data = await projectServiceScopeRepository.snapshot(organizationId, project.id, { signal: requestSignal })
@@ -30,14 +52,30 @@ export default function ProjectServiceScopePanel({ project, organizationId, memb
 
   useEffect(() => {
     const current = ++generation.current
-    setSnapshot(null); setCanManage(admin); setForm(blank); setReview(null); setAcknowledged(false)
-    setError(''); setNotice(''); setLoading(true); pending.current = null
+    setReview(null); setAcknowledged(false)
+    setError(''); setNotice(''); setLoading(true)
+    if (dispatchScope.current) dispatchScope.current.ready = false
     Promise.all([
       projectServiceScopeRepository.snapshot(organizationId, project.id, { signal: requestSignal }),
-      admin || !user?.id ? Promise.resolve(admin) : projectDraftRepository.hasOwnManagerBinding(
-        organizationId, project.id, user.id, { signal: requestSignal }),
-    ]).then(([data, manager]) => {
-      if (current === generation.current && !requestSignal?.aborted) { setSnapshot(data); setCanManage(manager) }
+      canManageProjectServices({ organizationId, projectId: project.id, actorId: user?.id, membership,
+        hasOwnManagerBinding: projectDraftRepository.hasOwnManagerBinding, signal: requestSignal }).then(manager => {
+        // Apply a denial immediately, even while the independent snapshot is pending.
+        if (current === generation.current && !requestSignal?.aborted) {
+          if (authorization.current.allowed !== manager) {
+            authorization.current.revision += 1
+            authorization.current.allowed = manager
+            setQueue(createProjectServiceProposalQueue()); setForms({}); setResults({})
+            setSaving(false); pending.current = null
+          }
+          setCanManage(manager)
+        }
+        return manager
+      }),
+    ]).then(([data]) => {
+      if (current === generation.current && !requestSignal?.aborted) {
+        dispatchScope.current.ready = true
+        setSnapshot(data)
+      }
     }).catch(cause => {
       if (current === generation.current && cause?.name !== 'AbortError') {
         onAccessError?.(cause, { membershipMismatch: cause.status === 403 })
@@ -45,10 +83,10 @@ export default function ProjectServiceScopePanel({ project, organizationId, memb
       }
     }).finally(() => { if (current === generation.current) setLoading(false) })
     return () => { generation.current += 1 }
-  }, [admin, organizationId, project.id, requestSignal, scopeRevision, user?.id, onAccessError])
+  }, [admin, membership, organizationId, project.id, requestSignal, scopeRevision, user?.id, onAccessError])
 
   const run = async (action, scope, extra = {}) => {
-    if (saving) return
+    if (saving || dispatching.current || loading || !canManage || !dispatchScope.current?.ready || requestSignal?.aborted) return
     const current = generation.current
     const identity = JSON.stringify({ action, scopeId: scope?.id || null, revision: scope?.revision || null, extra })
     if (pending.current?.identity !== identity) pending.current = { identity, id: globalThis.crypto?.randomUUID?.() }
@@ -59,7 +97,7 @@ export default function ProjectServiceScopePanel({ project, organizationId, memb
         requestId: pending.current.id, action, scopeId: scope?.id, expectedRevision: scope?.revision, ...extra })
       await refresh(current)
       if (current === generation.current) {
-        pending.current = null; setForm(blank); setReview(null); setAcknowledged(false)
+        pending.current = null; setReview(null); setAcknowledged(false)
         setNotice(`Service scope ${action === 'add' ? 'proposed' : action === 'cancel' ? 'cancelled' : action + 'd'}.`)
         onChanged?.()
       }
@@ -68,7 +106,33 @@ export default function ProjectServiceScopePanel({ project, organizationId, memb
         onAccessError?.(cause, { membershipMismatch: cause.status === 403 })
         setError(cause.status === 409 ? `${cause.message} Refresh the impact review before retrying.` : cause.message)
       }
-    } finally { if (current === generation.current) setSaving(false) }
+    } finally { if (authorization.current.mounted) setSaving(false) }
+  }
+
+  const submitProposals = async event => {
+    event.preventDefault()
+    if (saving || dispatching.current || loading || !canManage || !dispatchScope.current?.ready || requestSignal?.aborted) return
+    const current = generation.current
+    const revision = authorization.current.revision
+    const scope = dispatchScope.current
+    const isCurrent = () => authorization.current.mounted && revision === authorization.current.revision
+    const canDispatch = () => isCurrent() && authorization.current.allowed
+      && dispatchScope.current === scope && scope?.ready && !requestSignal?.aborted
+    dispatching.current = true
+    setError(''); setNotice('')
+    try {
+      await submitProjectServiceProposals({ queue, items: Object.values(forms), organizationId, projectId: project.id,
+        change: command => projectServiceScopeRepository.change(command), isCurrent, canDispatch,
+        refresh: () => refresh(current), onChanged, onError: setError, onSaving: setSaving,
+        onResult: (serviceId, result) => {
+          setResults(values => ({ ...values, [serviceId]: result }))
+          if (result.status === 'succeeded') {
+            setForms(values => { const next = { ...values }; delete next[serviceId]; return next })
+          }
+          if (result.error) onAccessError?.(result.error, { membershipMismatch: result.error.status === 403 })
+        },
+      })
+    } finally { dispatching.current = false }
   }
 
   const beginReview = async (scope, action) => {
@@ -85,7 +149,7 @@ export default function ProjectServiceScopePanel({ project, organizationId, memb
     }
   }
   const selectedReview = snapshot?.scopes.find(scope => scope.id === review?.scopeId)
-  const available = snapshot?.catalog.filter(service => !snapshot.scopes.some(scope => scope.service_id === service.id)) || []
+  const available = snapshot?.catalog.filter(service => !queue.succeeded.has(service.id) && !snapshot.scopes.some(scope => scope.service_id === service.id)) || []
   return <section aria-label="Selected services" className="space-y-5">
     <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5">
       <h2 className="font-semibold">Selected services · scope</h2>
@@ -109,18 +173,38 @@ export default function ProjectServiceScopePanel({ project, organizationId, memb
         </article>
       }) : <p className="text-sm text-slate-500">No services selected yet.</p>}</div>}
     </div>
-    {snapshot && canManage && available.length > 0 && <form onSubmit={event => { event.preventDefault(); run('add', null, { serviceId: form.serviceId,
-      scopeStatement: form.scopeStatement, exclusions: form.exclusions, quantity: Number(form.quantity),
-      ownerId: form.ownerId, startDate: form.startDate, targetDate: form.targetDate }) }} className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5">
-      <h2 className="font-semibold">Propose a service</h2>
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <label className="text-xs text-slate-400">Catalogue service<select required className={inputClass} value={form.serviceId} onChange={event => { setForm(value => ({ ...value, serviceId: event.target.value })); pending.current = null }}><option value="">Select service</option>{[...new Set(available.map(service => service.department_id || 'other'))].map(department => <optgroup key={department} label={title(department)}>{available.filter(service => (service.department_id || 'other') === department).map(service => <option key={service.id} value={service.id}>{service.name}</option>)}</optgroup>)}</select></label>
-        <label className="text-xs text-slate-400">Owner<select className={inputClass} value={form.ownerId} onChange={event => setForm(value => ({ ...value, ownerId: event.target.value }))}><option value="">Unassigned</option>{snapshot.members.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
-        <label className="text-xs text-slate-400">Quantity<input required min="1" type="number" className={inputClass} value={form.quantity} onChange={event => setForm(value => ({ ...value, quantity: event.target.value }))} /></label>
-        <div className="grid grid-cols-2 gap-3"><label className="text-xs text-slate-400">Start<input type="date" className={inputClass} value={form.startDate} onChange={event => setForm(value => ({ ...value, startDate: event.target.value }))} /></label><label className="text-xs text-slate-400">Target<input type="date" min={form.startDate || undefined} className={inputClass} value={form.targetDate} onChange={event => setForm(value => ({ ...value, targetDate: event.target.value }))} /></label></div>
-        <label className="text-xs text-slate-400 md:col-span-2">Included scope<textarea className={inputClass} rows={3} value={form.scopeStatement} onChange={event => setForm(value => ({ ...value, scopeStatement: event.target.value }))} /></label>
-        <label className="text-xs text-slate-400 md:col-span-2">Exclusions<textarea className={inputClass} rows={2} value={form.exclusions} onChange={event => setForm(value => ({ ...value, exclusions: event.target.value }))} /></label>
-      </div><button type="submit" disabled={saving || !form.serviceId} className="mt-4 rounded-lg bg-violet-500 px-4 py-2 text-sm font-semibold disabled:opacity-40">{saving ? 'Saving…' : 'Save proposal'}</button>
+    {snapshot && canManage && (available.length > 0 || Object.keys(forms).length > 0 || Object.keys(results).length > 0) && <form onSubmit={submitProposals} className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5">
+      <h2 className="font-semibold">Propose services</h2>
+      <p className="mt-2 text-sm text-slate-400">Each service saves independently, in sequence. Partial success is possible; a failed save does not stop the others. Proposals do not activate services.</p>
+      <div className="mt-4 space-y-4">{[...new Set(available.map(service => service.department_id || 'other'))].map(department => <fieldset key={department} disabled={saving} className="rounded-xl border border-white/10 p-4">
+        <legend className="px-1 text-xs font-semibold uppercase text-violet-300">{title(department)}</legend>
+        <div className="flex flex-wrap gap-4">{available.filter(service => (service.department_id || 'other') === department).map(service => <label key={service.id} className="flex items-center gap-2 text-sm text-slate-300">
+          <input type="checkbox" checked={Boolean(forms[service.id])} disabled={Boolean(results[service.id])} onChange={event => {
+            const checked = event.target.checked
+            setForms(values => { const next = { ...values }; if (checked) next[service.id] = { ...blank, serviceId: service.id }; else delete next[service.id]; return next })
+          }} />{service.name}
+        </label>)}</div>
+      </fieldset>)}</div>
+      {Object.values(forms).map(form => {
+        const service = snapshot.catalog.find(row => row.id === form.serviceId)
+        const update = field => event => setForms(values => ({ ...values, [form.serviceId]: { ...values[form.serviceId], [field]: event.target.value } }))
+        return <fieldset key={form.serviceId} disabled={saving || Boolean(results[form.serviceId])} className="mt-4 rounded-xl border border-white/10 p-4">
+          <legend className="px-1 text-sm font-medium">{service?.name || 'Selected service'}</legend>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="text-xs text-slate-400">Owner<select className={inputClass} value={form.ownerId} onChange={update('ownerId')}><option value="">Unassigned</option>{snapshot.members.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
+            <label className="text-xs text-slate-400">Quantity<input required min="1" step="1" type="number" className={inputClass} value={form.quantity} onChange={update('quantity')} /></label>
+            <label className="text-xs text-slate-400">Start<input type="date" className={inputClass} value={form.startDate} onChange={update('startDate')} /></label>
+            <label className="text-xs text-slate-400">Target<input type="date" min={form.startDate || undefined} className={inputClass} value={form.targetDate} onChange={update('targetDate')} /></label>
+            <label className="text-xs text-slate-400 md:col-span-2">Included scope<textarea className={inputClass} rows={3} value={form.scopeStatement} onChange={update('scopeStatement')} /></label>
+            <label className="text-xs text-slate-400 md:col-span-2">Exclusions<textarea className={inputClass} rows={2} value={form.exclusions} onChange={update('exclusions')} /></label>
+          </div>
+        </fieldset>
+      })}
+      <div aria-live="polite" className="mt-4 space-y-2">{Object.entries(results).map(([serviceId, result]) => <p key={serviceId} className={`text-sm ${result.status === 'succeeded' ? 'text-emerald-200' : result.status === 'failed' ? 'text-rose-200' : 'text-slate-400'}`}>
+        {snapshot.catalog.find(service => service.id === serviceId)?.name || 'Selected service'}: {result.status === 'succeeded' ? 'Proposal saved.' : result.status === 'failed' ? `Save failed or could not be confirmed: ${result.error?.message || 'Unknown error'}. Retry uses the same request ID and original values to avoid duplicate proposals.` : 'Saving…'}
+      </p>)}</div>
+      {Object.values(results).some(result => result.status === 'failed') && <p className="mt-3 text-xs text-slate-400">Attempted service values remain visible and are locked for safe retry because a failed response may still have saved.</p>}
+      <button type="submit" disabled={saving || !Object.keys(forms).length} className="mt-4 rounded-lg bg-violet-500 px-4 py-2 text-sm font-semibold disabled:opacity-40">{saving ? 'Saving…' : Object.values(results).some(result => result.status === 'failed') ? 'Retry failed / save selected proposals' : 'Save selected proposals'}</button>
     </form>}
     {selectedReview && <div role="dialog" aria-modal="false" aria-label="Service impact review" className="rounded-2xl border border-amber-400/30 bg-amber-500/[0.07] p-5">
       <h2 className="font-semibold">Review impact before {review.action}</h2>
