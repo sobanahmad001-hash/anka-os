@@ -7,6 +7,31 @@ const { chromium } = require(process.argv[2] || 'playwright')
 const output = process.argv[3]
 assert(output, 'An evidence output directory is required')
 const base = 'http://127.0.0.1:5188/tools/direct-chat-preview.html'
+async function campaignPlanAssertions(browser){
+ const results=[]
+ for(const [width,height,theme] of [[1440,900,'light'],[390,900,'dark']]){
+  const context=await browser.newContext({viewport:{width,height}}),page=await context.newPage();page.setDefaultTimeout(15000);const errors=[],blocked=[],shots=[]
+  page.on('pageerror',e=>errors.push(e.message));await page.route('**/*',route=>{const u=new URL(route.request().url());if(u.hostname==='127.0.0.1'&&u.port==='5188')return route.continue();blocked.push(u.origin);return route.abort()})
+  await page.goto(`${base}?panel=campaign-planning&planEditor=1&theme=${theme}`);await page.getByText('Campaign assets and calendar · Launch marketing',{exact:true}).click()
+  const panel=page.getByRole('region',{name:'Campaign assets and calendar',exact:true}),editor=page.getByRole('region',{name:'Canonical campaign plan editor',exact:true}),f=await page.evaluate(()=>{const c=globalThis.__directChatPreview.campaign;return {campaignId:c.campaignId,planId:c.planId,serviceId:c.serviceId,actor:globalThis.__directChatPreview.fixture.scope.actorId||'a0000000-0000-4000-8000-000000000001',messageId:c.message.version_id,measurementId:c.measurement.version_id}})
+  const click=name=>panel.getByRole('button',{name,exact:true}).click(),choose=(name,value)=>panel.getByLabel(name,{exact:true}).selectOption(value)
+  const shot=async(region,name)=>{await region.scrollIntoViewIfNeeded();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));const file=`b5-campaign-plan-${name}-${theme}-${width}x${height}.png`;await page.screenshot({path:path.join(output,file)});shots.push(file)}
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.campaign.reads.length),0)
+  await click('Find campaigns');await choose('Exact campaign',f.campaignId);await click('Load exact plan versions');await choose('Exact campaign plan version',f.planId);await choose('Marketing service',f.serviceId)
+  await click('Load selected plan for editing');assert.equal(await editor.getByLabel('Planning budget',{exact:true}).inputValue(),'0');assert.equal(await editor.getByLabel('Creative format 1',{exact:true}).inputValue(),'Article');await shot(editor,'editing')
+  await editor.getByLabel('Plan title',{exact:true}).fill('Reviewed launch plan');await click('Load campaign owners');const ownerId=await page.evaluate(()=>globalThis.__directChatPreview.campaign.repository.plans.candidates({kind:'owner'}).then(v=>v.items[0].id));await choose('Campaign owner',ownerId)
+  await click('Load audience strategies');await editor.getByLabel('Strategy Approved product-team audience · v1',{exact:true}).check();await click('Load approved messages');await choose('Approved campaign message',f.messageId);await click('Load measurement plans');await choose('Approved measurement plan',f.measurementId)
+  await click('Review canonical plan draft');const review=page.getByRole('region',{name:'Review canonical plan draft',exact:true});assert.match(await review.textContent(),/budget 0 USD/);assert.match(await review.textContent(),/Approved product-team audience · v1/);assert.match(await review.textContent(),/Creative 1: Article · Website blog · deadline 2026-10-10/);assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.campaign.calls.length),0);assert.equal(await panel.getByRole('button',{name:'Find campaigns',exact:true}).isDisabled(),true);await shot(review,'review')
+  await page.evaluate(()=>globalThis.__directChatPreview.campaign.setLost());await review.getByRole('button',{name:'Confirm canonical plan draft',exact:true}).click();await page.getByRole('region',{name:'Recover original plan command',exact:true}).waitFor();const request=await page.evaluate(()=>globalThis.__directChatPreview.campaign.calls[0].requestId);const callsBefore=await page.evaluate(()=>globalThis.__directChatPreview.campaign.calls.length)
+  await page.evaluate(()=>window.__originalPlanFixture=globalThis.__directChatPreview.campaign)
+  // Remount the real scoped host through the fixture's request signal, preserving only its original UUID.
+  await page.evaluate(()=>{globalThis.__directChatPreview.organization.requestSignal=new AbortController().signal;window.dispatchEvent(new Event('fixture-counters'))})
+  await click('Check original plan operation');assert.match(await page.getByRole('region',{name:'Original saved campaign plan',exact:true}).textContent(),new RegExp(request));assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.campaign.calls.length),callsBefore);assert.equal(callsBefore,1);await shot(page.getByRole('region',{name:'Original saved campaign plan',exact:true}),'recovery')
+  assert.deepEqual(errors,[]);assert.deepEqual(blocked,[]);results.push({width,height,theme,screenshots:shots,exactCanonicalSource:true,zeroBudgetRetained:true,reviewZeroWrite:true,originalUuidRecoveryNoRedispatch:true,syntheticConfirmationOnly:true,horizontalOverflow:false,pageErrors:errors,blockedRemoteRequests:blocked});await context.close()
+ }
+ const evidence=path.join(output,'b2-service-native-evidence.json'),packet=JSON.parse(await fs.readFile(evidence,'utf8'));packet.campaignPlanning.planCommands.ui={source:'tools/check-direct-chat-browser.cjs --campaign-plan',scope:'Actual Layout/theme and canonical editor; provider-free synthetic actors/receipts only, no distinct-human/provider/production acceptance',cases:results};await fs.writeFile(evidence,JSON.stringify(packet,null,2)+'\n');console.log(JSON.stringify({passed:results.length,evidence}))
+}
+
 async function campaignPlanningAssertions(browser){
  const results=[]
  for(const [width,height,theme] of [[1440,900,'light'],[390,900,'dark']]){
@@ -663,6 +688,7 @@ async function pipelineInputAssertions(browser){
     ['content', 'empty', 'system', 320, 900],
   ]
   try {
+    if(process.argv.includes('--campaign-plan')){await campaignPlanAssertions(browser);return}
     if(process.argv.includes('--campaign-planning')){await campaignPlanningAssertions(browser);return}
     if(process.argv.includes('--reporting-bindings')){await reportingBindingsAssertions(browser);return}
     if(process.argv.includes('--stage-inputs')){await pipelineInputAssertions(browser);return}

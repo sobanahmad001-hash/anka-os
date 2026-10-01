@@ -1,0 +1,33 @@
+-- Synthetic existing-actor fixtures in one rollback. No users/providers/production writes.
+begin;
+set local lock_timeout='5s';set local statement_timeout='90s';
+select set_config('request.jwt.claim.sub','99999999-9999-4999-8999-999999999902',true);
+create function pg_temp.check_true(ok boolean,label text) returns void language plpgsql as $$begin if ok is distinct from true then raise exception 'FAIL %',label;end if;raise notice 'PASS %',label;end $$;
+create function pg_temp.expect_error(query text,code text,label text) returns void language plpgsql as $$begin begin execute query;exception when others then if sqlstate=code then raise notice 'PASS %',label;return;end if;raise exception 'FAIL % expected % got %: %',label,code,sqlstate,sqlerrm;end;raise exception 'FAIL % did not reject',label;end $$;
+insert into public.artifacts select (jsonb_populate_record(null::public.artifacts,to_jsonb(a)||jsonb_build_object('id','99999999-9999-4999-8999-999999997300','artifact_type','audience','title','Synthetic approved campaign audience'))).* from public.artifacts a where id='99999999-9999-4999-8999-999999997140';
+insert into public.artifact_versions select (jsonb_populate_record(null::public.artifact_versions,to_jsonb(v)||jsonb_build_object('id','99999999-9999-4999-8999-999999997301','artifact_id','99999999-9999-4999-8999-999999997300','content',jsonb_build_object('audience','Synthetic campaign audience'),'content_checksum',encode(sha256(convert_to(jsonb_build_object('audience','Synthetic campaign audience')::text,'UTF8')),'hex')))).* from public.artifact_versions v where id='99999999-9999-4999-8999-999999997141';
+insert into public.artifact_approvals select (jsonb_populate_record(null::public.artifact_approvals,to_jsonb(v)||jsonb_build_object('id','99999999-9999-4999-8999-999999997302','artifact_id','99999999-9999-4999-8999-999999997300','artifact_version_id','99999999-9999-4999-8999-999999997301'))).* from public.artifact_approvals v where id='99999999-9999-4999-8999-999999997142';
+do $$declare org uuid:='99999999-9999-4999-8999-999999999901';project uuid:='99999999-9999-4999-8999-999999999974';eng uuid:='99999999-9999-4999-8999-999999999975';r jsonb;begin
+ r:=public.list_project_campaign_plan_candidates(org,project,eng,'owner');perform pg_temp.check_true(r->>'kind'='owner' and r->>'total'='1' and r#>>'{items,0,id}'='99999999-9999-4999-8999-999999999902','Existing active Team owner selected without synthesized users');
+ r:=public.list_project_campaign_plan_candidates(org,project,eng,'strategy');perform pg_temp.check_true(r->>'total'='1' and r#>>'{items,0,source,version_id}'='99999999-9999-4999-8999-999999997301' and r#>>'{items,0,source,approval,approval_id}'='99999999-9999-4999-8999-999999997302','Only exact approved same-project strategy and original approval listed');
+ r:=public.list_project_campaign_plan_candidates(org,project,eng,'strategy','no match');perform pg_temp.check_true(r->>'total'='1' and r->>'matching'='0' and r->'items'='[]','Whole and filtered source totals stay independent');
+ r:=public.list_project_campaign_plan_candidates(org,project,eng,'strategy','',1,1);perform pg_temp.check_true(r->>'total'='1' and r->'items'='[]' and r->>'has_more'='false','Explicit bounded offset does not substitute another source');
+ r:=public.list_project_campaign_plan_candidates(org,project,eng,'measurement');perform pg_temp.check_true(r->'items'='[]','Missing exact measurement source stays empty rather than invented');
+ perform pg_temp.expect_error(format('select public.list_project_campaign_plan_candidates(%L,%L,%L,%L)',org,project,eng,'unsupported'),'22023','Unscoped source categories rejected');
+ perform pg_temp.expect_error(format('select public.list_project_campaign_plan_candidates(%L,%L,%L,%L,%L)',org,project,eng,'owner',repeat('q',121)),'22023','Search length bound enforced');
+ perform pg_temp.expect_error(format('select public.list_project_campaign_plan_candidates(%L,%L,%L,%L,%L,%L,%L)',org,project,eng,'owner','',0,51),'22023','Limit beyond 50 rejected');
+ perform pg_temp.expect_error(format('select public.list_project_campaign_plan_candidates(%L,%L,%L,%L,%L,%L,%L)',org,project,eng,'owner','',-1,25),'22023','Negative offset rejected');
+ perform pg_temp.expect_error(format('select public.list_project_campaign_plan_candidates(%L,%L,%L,%L)',org,project,'99999999-9999-4999-8999-999999997399','strategy'),'42501','Foreign/unknown engagement cannot broaden source scope');
+ update public.engagements set status='on_hold' where id=eng;
+ r:=public.list_project_campaign_plan_candidates(org,project,eng,'strategy');perform pg_temp.check_true(r->>'total'='1' and r#>>'{items,0,available}'='false' and r#>'{items,0,source}'='null','Withdrawn source context keeps count with explicit unavailable descriptor');
+ update public.organization_memberships set status='revoked' where organization_id=org and user_id='99999999-9999-4999-8999-999999999902';
+ perform pg_temp.expect_error(format('select public.list_project_campaign_plan_candidates(%L,%L,%L,%L)',org,project,eng,'owner'),'42501','Every read rechecks current Team membership');
+ update public.organization_memberships set status='active' where organization_id=org and user_id='99999999-9999-4999-8999-999999999902';
+end $$;
+set local role authenticated;
+select pg_temp.check_true(public.list_project_campaign_plan_candidates('99999999-9999-4999-8999-999999999901','99999999-9999-4999-8999-999999999974','99999999-9999-4999-8999-999999999975','owner')->>'total'='1','Authenticated bounded owner API works');
+reset role;set local role anon;
+select pg_temp.expect_error('select public.list_project_campaign_plan_candidates(null,null,null,null)','42501','Anonymous candidate API denied');
+reset role;set local role service_role;
+select pg_temp.expect_error('select public.list_project_campaign_plan_candidates(null,null,null,null)','42501','Service role candidate API denied');
+reset role;rollback;
