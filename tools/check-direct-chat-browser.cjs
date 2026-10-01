@@ -7,6 +7,43 @@ const { chromium } = require(process.argv[2] || 'playwright')
 const output = process.argv[3]
 assert(output, 'An evidence output directory is required')
 const base = 'http://127.0.0.1:5188/tools/direct-chat-preview.html'
+async function reportingBindingsAssertions(browser){
+ const results=[]
+ for(const [width,height,theme] of [[1440,900,'light'],[390,900,'dark']]){
+  const context=await browser.newContext({viewport:{width,height}}),page=await context.newPage();page.setDefaultTimeout(15000)
+  const errors=[],blocked=[];page.on('pageerror',error=>errors.push(error.message));await page.route('**/*',route=>{const url=new URL(route.request().url());if(url.hostname==='127.0.0.1'&&url.port==='5188')return route.continue();blocked.push(url.origin);return route.abort()})
+  await page.goto(`${base}?panel=reporting-bindings&theme=${theme}`)
+  await page.getByText('Project reporting resources · Launch marketing',{exact:true}).click()
+  const panel=page.getByRole('region',{name:'Project reporting resources',exact:true})
+  await panel.getByRole('button',{name:'Find mapped resources',exact:true}).click()
+  assert.match(await panel.textContent(),/1–25 of 26 matches/)
+  const key=await page.evaluate(()=>{const r=globalThis.__directChatPreview.reporting.candidates[1];return JSON.stringify([r.connection_id,r.resource_kind,r.resource_key])})
+  await panel.getByLabel('Mapped reporting resource',{exact:true}).selectOption(key)
+  await panel.getByRole('button',{name:'Review reporting binding',exact:true}).click()
+  const review=page.getByRole('region',{name:'Review exact reporting binding',exact:true});await review.waitFor();assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.reporting.calls.length),0)
+  await review.scrollIntoViewIfNeeded();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth))
+  const reviewShot=`b2-reporting-resource-review-${theme}-${width}x${height}.png`;await page.screenshot({path:path.join(output,reviewShot)})
+  await review.getByRole('button',{name:'Confirm reporting binding',exact:true}).click();await panel.getByText('Reporting binding revision saved. Provider verification is still required before reporting.',{exact:true}).waitFor()
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.reporting.calls.length),1)
+  await panel.getByRole('button',{name:'Load project bindings',exact:true}).click()
+  let meta=panel.getByRole('article').filter({hasText:'Facebook page'});assert.match(await meta.textContent(),/Observed reporting permission is missing/)
+  await meta.scrollIntoViewIfNeeded();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth))
+  const pendingShot=`b2-reporting-resource-pending-${theme}-${width}x${height}.png`;await page.screenshot({path:path.join(output,pendingShot)})
+  for(const state of ['paused','revoked']){
+   meta=panel.getByRole('article').filter({hasText:'Facebook page'});await meta.getByRole('button',{name:'Review binding',exact:true}).click()
+   await panel.getByLabel('Reporting binding state',{exact:true}).selectOption(state)
+   await panel.getByRole('button',{name:'Review reporting binding',exact:true}).click()
+   await page.getByRole('region',{name:'Review exact reporting binding',exact:true}).getByRole('button',{name:'Confirm reporting binding',exact:true}).click()
+   await panel.getByText('Reporting binding revision saved. Provider verification is still required before reporting.',{exact:true}).waitFor();await panel.getByRole('button',{name:'Load project bindings',exact:true}).click()
+  }
+  meta=panel.getByRole('article').filter({hasText:'Facebook page'});assert.match(await meta.textContent(),/Reporting is revoked/);await meta.getByRole('button',{name:'Binding history',exact:true}).click()
+  const history=panel.getByRole('region',{name:'Reporting binding history',exact:true});await history.waitFor();assert.match(await history.textContent(),/3 revisions/);assert.match(await history.textContent(),/Revision 1 · enabled/);await history.scrollIntoViewIfNeeded();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth))
+  const historyShot=`b2-reporting-resource-history-${theme}-${width}x${height}.png`;await page.screenshot({path:path.join(output,historyShot)})
+  const calls=await page.evaluate(()=>globalThis.__directChatPreview.reporting.calls);assert.equal(calls.length,3);assert.equal(calls[1].input.binding_id,calls[2].input.binding_id);assert.equal(calls[1].input.expected_revision,1);assert.equal(calls[2].input.expected_revision,2);assert.ok(calls.every(value=>JSON.stringify(value.input.permitted_operations)==='["reporting_read"]'))
+  assert.deepEqual(errors,[]);assert.deepEqual(blocked,[]);results.push({viewport:{width,height},theme,screenshots:[reviewShot,pendingShot,historyShot],reviewZeroWrites:true,oneReviewedNewBinding:true,explicitPauseRevoke:true,originalRevisionHistory:true,metaObservedGrantPending:true,reportingOnly:true,horizontalOverflow:false,pageErrors:errors,blockedRemoteRequests:blocked});await context.close()
+ }
+ const evidence=path.join(output,'b2-service-native-evidence.json'),packet=JSON.parse(await fs.readFile(evidence,'utf8'));packet.projectResources.ui={source:'tools/check-direct-chat-browser.cjs --reporting-bindings',scope:'Actual Layout, provider-free synthetic fixture; no real OAuth/provider/human acceptance',cases:results};await fs.writeFile(evidence,JSON.stringify(packet,null,2)+'\n');console.log(JSON.stringify({passed:results.length,evidence}))
+}
 async function drawerAssertions(page, label, opener) {
   const drawer = page.getByRole('dialog', { name: label, exact: true })
   await drawer.waitFor()
@@ -538,6 +575,7 @@ async function pipelineInputAssertions(browser){
     ['content', 'empty', 'system', 320, 900],
   ]
   try {
+    if(process.argv.includes('--reporting-bindings')){await reportingBindingsAssertions(browser);return}
     if(process.argv.includes('--stage-inputs')){await pipelineInputAssertions(browser);return}
     if(process.argv.includes('--stage-definitions')){await pipelineDefinitionAssertions(browser);return}
     if(process.argv.includes('--stage-fulfilment')){await pipelineGroupAssertions(browser,true);return}

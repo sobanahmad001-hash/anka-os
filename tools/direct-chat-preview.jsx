@@ -1,3 +1,4 @@
+import _ProjectReportingBindingsPanel from '../src/components/ProjectReportingBindingsPanel.jsx'
 import _ProjectWebsitePagesPanel from '../src/components/ProjectWebsitePagesPanel.jsx'
 import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -13,7 +14,7 @@ import PipelineRunIntentPanel from '../src/components/PipelineRunIntentPanel.jsx
 import DesignVideoBriefEditor from '../src/components/DesignVideoBriefEditor.jsx'
 import {emptyVideoBrief} from '../supabase/functions/_shared/designVideoBrief.js'
 import ContextConversationPanel from '../src/components/ContextConversationPanel.jsx'
-import { actor, organizationId, threadId, requestId, dispatchId, humanId, createDirectChatFixture, createPipelinePreviewFixture, createWebsitePagePreviewFixture } from './direct-chat-fixture.js'
+import { actor, organizationId, threadId, requestId, dispatchId, humanId, createDirectChatFixture, createPipelinePreviewFixture, createWebsitePagePreviewFixture,createReportingBindingsPreviewFixture } from './direct-chat-fixture.js'
 import { clearDirectChatDraft } from '../src/data/directChatDraft.js'
 import { directChatRecoveryKey, writeDirectChatRecovery } from '../src/data/directChatRecovery.js'
 import { browserStorage, writeThemePreference } from '../src/data/themePreference.js'
@@ -34,6 +35,7 @@ if (params.has('theme')) writeThemePreference(browserStorage(), actor, params.ge
 globalThis.__directChatPreview = { fixture, pipeline:createPipelinePreviewFixture({declared:params.get('stage-contracts')==='1'}), organization: { activeOrganizationId: organizationId, memberships: [membership], activeMembership: membership, selectionRequired: false, loading: false, error: null, selectOrganization: () => {}, scopeRevision: 1, requestSignal: new AbortController().signal, handleOrganizationAccessError: () => {} } }
 
 
+globalThis.__directChatPreview.reporting=createReportingBindingsPreviewFixture()
 globalThis.__directChatPreview.website=createWebsitePagePreviewFixture()
 if(params.get('panel')==='website-pages')globalThis.__directChatPreview.pipeline.repository.listStageArtifacts=globalThis.__directChatPreview.website.sourceRepository.listStageArtifacts
 
@@ -69,6 +71,7 @@ function Preview() {
     observer.observe(document.getElementById('preview-chat'), { childList: true, subtree: true })
     return () => observer.disconnect()
   }, [])
+  if(params.get('panel')==='reporting-bindings'){const r=globalThis.__directChatPreview.reporting;return <div className="workspace-page"><h1 className="workspace-title">Project reporting resources</h1><p className="text-sm text-[var(--anka-muted)]">Provider-free local fixture · no OAuth or production changes</p><_ProjectReportingBindingsPanel organizationId={organizationId} engagement={{id:r.engagementId,project_id:r.projectId}} group={r.group} membership={membership} signal={globalThis.__directChatPreview.organization.requestSignal}/></div>}
   if(params.get('panel')==='website-pages'){const w=globalThis.__directChatPreview.website;return <div className="workspace-page"><h1 className="workspace-title">Website pipeline</h1><p className="text-sm text-[var(--anka-muted)]">Provider-free local fixture · synthetic approved architecture · no production writes</p><_ProjectWebsitePagesPanel organizationId={organizationId} engagement={{id:w.engagementId,project_id:w.projectId}} group={w.group} membership={membership} signal={globalThis.__directChatPreview.organization.requestSignal} /></div>}
   if (params.get('panel') === 'pipelines') return <div className="workspace-page"><h1 className="workspace-title">Project pipelines</h1><p className="workspace-description">Provider-free local fixture · synthetic published sources · no production writes</p><div className="mt-5 space-y-5"><ProjectPipelineConfigurationPanel organizationId={organizationId} engagement={{...fixture.engagements[0],status:'active'}} services={globalThis.__directChatPreview.pipeline.services} membership={membership} /><PipelineRunIntentPanel organizationId={organizationId} engagement={{...fixture.engagements[0],status:'active'}} assets={[]} membership={membership} /></div></div>
   if (params.get('panel') === 'video-brief') return <div className="workspace-page design-workshop"><h1 className="workspace-title">Confirmed video brief · local prototype</h1><p>No provider requests or production writes. Canonical saving/recovery uses an isolated fixture; database and Generate integration remain unverified.</p><DesignVideoBriefEditor studio={fixture.designWorkshop} context={{private_conversation_id:threadId}} actorId={actor} organizationId={organizationId} settings={briefSettings} script={briefScript} onScriptChange={setBriefScript} onRestoreSettings={setBriefSettings} onConfirmed={setConfirmedBrief} onNavigationBusyChange={setNavigationBusy} onDraftDirtyChange={setDraftDirty} /><p role="status">{confirmedBrief ? 'Exact mocked version confirmed; no generation performed.' : navigationBusy ? 'Original confirmation needs settlement.' : 'Prepare the exact video brief.'}</p></div>
