@@ -7,6 +7,24 @@ const { chromium } = require(process.argv[2] || 'playwright')
 const output = process.argv[3]
 assert(output, 'An evidence output directory is required')
 const base = 'http://127.0.0.1:5188/tools/direct-chat-preview.html'
+async function websiteBulkAssertions(browser){
+ const results=[]
+ for(const [width,theme] of [[1440,'light'],[390,'dark']]){
+  const context=await browser.newContext({viewport:{width,height:900}}),page=await context.newPage();page.setDefaultTimeout(15000)
+  const errors=[],blocked=[],screenshots=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text())})
+  await page.route('**/*',route=>{const u=new URL(route.request().url());if(u.hostname==='127.0.0.1'&&u.port==='5188')return route.continue();blocked.push(u.origin);return route.abort()})
+  const open=async()=>{await page.goto(`${base}?panel=website-pages&theme=${theme}`);await page.getByRole('button',{name:'Find approved architectures',exact:true}).waitFor();await page.evaluate(()=>{globalThis.__directChatPreview.website.rows[1].page_id='a0000000-0000-4000-8000-000000000299'});await page.getByRole('button',{name:'Find approved architectures',exact:true}).click();const version=await page.evaluate(()=>globalThis.__directChatPreview.website.versionId);await page.getByLabel('Website approved architecture',{exact:true}).selectOption(version);await page.getByLabel('Select Welcome',{exact:true}).check();await page.getByLabel('Select Service page 2',{exact:true}).check();await page.getByRole('button',{name:'Change selected pages',exact:true}).click();await page.getByLabel('Bulk page template',{exact:true}).fill('Shared service landing');await page.getByRole('button',{name:'Preview bulk changes',exact:true}).click()}
+  const shot=async label=>{await page.getByRole('region',{name:'Bulk Website page changes',exact:true}).scrollIntoViewIfNeeded();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));const name=`p05-bulk-${label}-${theme}-${width}x900.png`;await page.screenshot({path:path.join(output,name)});screenshots.push(name)}
+  await open();await page.getByText('Template: Landing → Shared service landing',{exact:true}).waitFor();assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.website.calls.length),0);await shot('preview')
+  await page.evaluate(()=>{const f=globalThis.__directChatPreview.website,original=f.repository.saveOperations;f.originalBulkSave=original;f.repository.saveOperations=async input=>{if(input.pageId===f.rows[1].page_id)throw Object.assign(new Error('Second page changed; review its current version.'),{knownRollback:true});return original(input)}})
+  await page.getByRole('button',{name:'Confirm reviewed page changes',exact:true}).click();await page.getByText('Service page 2 · failed',{exact:true}).waitFor();assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.website.calls.length),1);await shot('partial')
+  await page.evaluate(()=>{const f=globalThis.__directChatPreview.website;f.repository.saveOperations=f.originalBulkSave});await page.getByRole('button',{name:'Review remaining pages',exact:true}).click();await page.getByRole('button',{name:'Confirm reviewed page changes',exact:true}).click();await page.getByText('2 saved · 0 unchanged · 0 remaining.',{exact:false}).waitFor();assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.website.calls.length),2);assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.website.calls.filter(c=>c.pageId===globalThis.__directChatPreview.website.rows[0].page_id).length),1);await shot('complete')
+  await open();await page.evaluate(()=>globalThis.__directChatPreview.website.setLost(true));await page.getByRole('button',{name:'Confirm reviewed page changes',exact:true}).click();await page.getByText('Welcome · uncertain',{exact:true}).waitFor();assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.website.calls.length),1);assert(await page.getByRole('button',{name:'Review remaining pages',exact:true}).isDisabled());await shot('recovery');await page.getByRole('button',{name:'Check original operation',exact:true}).click();await page.getByText('Recovered the original confirmed operation. No command was repeated.',{exact:true}).waitFor();assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.website.calls.length),1)
+  assert.deepEqual(errors,[]);assert.deepEqual(blocked,[]);results.push({width,height:900,theme,previewWrites:0,partialFailureIdentified:true,successfulPagesNeverRepeated:true,originalUuidRecovery:true,pageErrors:errors,blockedRemoteRequests:blocked,screenshots});await context.close()
+ }
+ const packet=path.join(output,'b2-service-native-evidence.json'),evidence=JSON.parse(await fs.readFile(packet,'utf8'));evidence.pageIdentity.bulkOperations={...evidence.pageIdentity.bulkOperations,browser:{source:'tools/check-direct-chat-browser.cjs --website-bulk',scope:'Actual Website bulk panel and Layout with isolated existing per-page native-operation fixture; no production/provider acceptance',results}};await fs.writeFile(packet,JSON.stringify(evidence,null,2)+'\n');console.log(JSON.stringify({websiteBulkPassed:results.length,evidence:packet}))
+}
+
 async function projectNavigationAssertions(browser){
  const results=[]
  for(const [width,height,theme] of [[1440,900,'light'],[390,900,'dark']]){
@@ -766,6 +784,7 @@ async function pipelineInputAssertions(browser){
     ['content', 'empty', 'system', 320, 900],
   ]
   try {
+    if(process.argv.includes('--website-bulk')){await websiteBulkAssertions(browser);return}
     if(process.argv.includes('--project-navigation')){await projectNavigationAssertions(browser);return}
     if(process.argv.includes('--stored-reporting')){await storedReportingAssertions(browser);return}
     if(process.argv.includes('--campaign-deliverables')){await campaignDeliverableAssertions(browser);return}
