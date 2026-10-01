@@ -816,6 +816,14 @@ async function pipelineInputAssertions(browser){
       assert(metrics.messages.height >= 150, 'Too little readable message space')
       if (width < 768) assert(metrics.header.height <= 110, 'Mobile shell header is too tall')
       assert.equal(await page.locator('.direct-chat button').filter({ hasText: /^New chat$/ }).count(), 1)
+      if(surface==='content'&&state==='populated'){
+        const title=await page.evaluate(()=>globalThis.__directChatPreview.fixture.data.rows[0].title)
+        const composer=page.locator('.direct-chat textarea').first();await composer.fill('Keep this unsent scoped draft')
+        await page.getByRole('button').filter({hasText:title}).first().click()
+        const decision=page.getByRole('group',{name:'Confirm conversation context switch',exact:true});await decision.waitFor()
+        assert.equal(await composer.inputValue(),'Keep this unsent scoped draft');await decision.getByRole('button',{name:'Stay in current context',exact:true}).click();assert.equal(await composer.inputValue(),'Keep this unsent scoped draft')
+        await composer.fill('')
+      }
       const screenshot = `b3-refinement-${surface}-${state}-${theme}-${width}x${height}.png`
       await page.screenshot({ path: path.join(output, screenshot) })
       const result = { surface, state, theme, viewport: { width, height }, ...metrics, screenshot, singleCreationControl: true }

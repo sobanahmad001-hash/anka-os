@@ -1,5 +1,5 @@
 import WorkshopConversationRail from './WorkshopConversationRail.jsx'
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { WorkshopChatHistoryContext } from '../context/WorkshopChatHistoryContext.jsx'
 import './designWorkshopPresentation.css'
 
@@ -10,17 +10,20 @@ export default function WorkshopChatWorkspace({ mode, onModeChange, departmentNa
   const historyId = useId()
   const [pendingMode, setPendingMode] = useState(null)
   const [pendingConversation, setPendingConversation] = useState(null)
+  const alive=useRef(true),current=useRef(null)
+  current.current={mode,onModeChange,onConversationSelect,draftDirty,navigationBusy,pendingMode,pendingConversation}
+  useEffect(()=>{alive.current=true;return ()=>{alive.current=false}},[])
   const cancel = () => { setPendingMode(null); setPendingConversation(null) }
   const privateMode = mode === 'private'
   const requestMode = next => {
-    if (navigationBusy) return
-    if (next === mode) { cancel(); return }
-    if (draftDirty === false) { onModeChange(next); cancel(); return }
+    if (!alive.current || current.current.navigationBusy) return
+    if (next === current.current.mode) { cancel(); return }
+    if (current.current.draftDirty === false) { current.current.onModeChange(next); cancel(); return }
     setPendingConversation(null); setPendingMode(next)
   }
   const requestConversation = item => {
-    if (navigationBusy) return
-    if (draftDirty === false) { onConversationSelect(item); cancel(); return }
+    if (!alive.current || current.current.navigationBusy) return
+    if (current.current.draftDirty === false) { current.current.onConversationSelect(item); cancel(); return }
     setPendingConversation(item); setPendingMode(item.kind === 'private' ? 'private' : 'chat')
   }
   const scopeHeader = <header className={compact ? 'direct-workshop-context' : 'rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4'}>
@@ -47,7 +50,7 @@ export default function WorkshopChatWorkspace({ mode, onModeChange, departmentNa
         {navigationBusy && <p role="status" className="mt-2 text-sm text-[var(--anka-warning)]">The current conversation has an operation in progress. Wait for it to finish before switching.</p>}
         <div className="mt-3 flex flex-wrap gap-3">
           <button type="button" onClick={cancel} className="rounded-lg border border-[var(--anka-line)] px-3 py-2 text-sm">Stay in current context</button>
-          <button type="button" disabled={navigationBusy} onClick={() => { if (navigationBusy) return; if (pendingConversation) onConversationSelect(pendingConversation); else onModeChange(pendingMode); cancel() }} className="rounded-lg bg-[var(--anka-violet)] text-[var(--anka-on-violet)] px-3 py-2 text-sm disabled:opacity-50">Switch context</button>
+          <button type="button" disabled={navigationBusy} onClick={() => { if (!alive.current || current.current.navigationBusy || current.current.pendingMode!==pendingMode || current.current.pendingConversation!==pendingConversation) return; if (pendingConversation) current.current.onConversationSelect(pendingConversation); else current.current.onModeChange(pendingMode); cancel() }} className="rounded-lg bg-[var(--anka-violet)] text-[var(--anka-on-violet)] px-3 py-2 text-sm disabled:opacity-50">Switch context</button>
         </div>
       </div>}
     </header>

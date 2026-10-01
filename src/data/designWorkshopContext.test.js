@@ -202,5 +202,5 @@ test('B01 screen uses the shared P9 consumer and keeps organization-scoped reque
   assert.match(repository, /scopedFrom\('work_items'\)/)
   assert.match(repository, /\.eq\('organization_id', organizationId\)/)
   assert.match(request, /organization_id: organizationId/)
-  assert.match(request, /error\.status \|\| error\.statusCode \|\| error\.context\?\.status/)
+  assert.match(request, /error\?\.status \|\| error\?\.statusCode \|\| error\?\.context\?\.status/)
 })

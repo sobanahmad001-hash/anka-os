@@ -13,13 +13,13 @@ const nativeRequire = createRequire(import.meta.url)
 const props = node => node[Object.keys(node).find(key => key.startsWith('__reactProps$'))]
 test('actual inline image controls preserve exact uncertain identity, idle mounting and stale-scope dispatch guards', async t => {
   const env = mountedEnvironment()
-  const names = ['document', 'window', 'IS_REACT_ACT_ENVIRONMENT', 'fetch']
+  const names = ['document', 'window', 'IS_REACT_ACT_ENVIRONMENT', 'fetch', 'sessionStorage']
   const previous = Object.fromEntries(names.map(name => [name, globalThis[name]]))
-  Object.assign(globalThis, { document: env.document, window: env.window, IS_REACT_ACT_ENVIRONMENT: true, fetch: () => { throw new Error('Network forbidden') } })
-  let context = { activeOrganizationId: 'org-a', activeMembership: { departmentId: 'design' }, scopeRevision: 1, requestSignal: new AbortController().signal }
-  let data = workspace(), fail = true, delayedLoad = null
+  Object.assign(globalThis, { document: env.document, window: env.window, IS_REACT_ACT_ENVIRONMENT: true, fetch: () => { throw new Error('Network forbidden') }, sessionStorage:{getItem:()=>null,setItem:()=>{},removeItem:()=>{}} })
+  let context = { activeOrganizationId: 'a0000000-0000-4000-8000-000000000001', activeMembership: { departmentId: 'design' }, scopeRevision: 1, requestSignal: new AbortController().signal }
+  let data = JSON.parse(JSON.stringify(workspace()).replaceAll('org-a','a0000000-0000-4000-8000-000000000001').replaceAll('version-a','a0000000-0000-4000-8000-000000000003')), fail = true, delayedLoad = null
   data.mediaAssets = [
-    { id: 'image-a', design_direction_version_id: 'version-a', media_type: 'image', status: 'ready', signed_url: 'https://offline.invalid/exact-image', prompt: 'Exact saved image' },
+    { id: 'image-a', design_direction_version_id: 'a0000000-0000-4000-8000-000000000003', media_type: 'image', status: 'ready', signed_url: 'https://offline.invalid/exact-image', prompt: 'Exact saved image' },
     { id: 'image-other', design_direction_version_id: 'version-other', media_type: 'image', status: 'ready', signed_url: 'https://offline.invalid/other', prompt: 'Other version image' },
   ]
   const calls = [], navigation = []
@@ -34,6 +34,7 @@ test('actual inline image controls preserve exact uncertain identity, idle mount
     const compiled = transformSync(source, { loader: 'jsx', format: 'cjs', jsxFactory: 'React.createElement' }).code
     const module = { exports: {} }
     const require = path => {
+      if (path.includes('AuthContext')) return {useAuth:()=>({user:{id:'a0000000-0000-4000-8000-000000000005'}})}
       if (path.includes('OrganizationContext')) return { useOrganization: () => context }
       if (path.includes('designWorkshopRepository')) return { designWorkshop: { forOrganization: () => studio } }
       if (path.includes('designWorkshopContext')) return { designCapabilities: membership => ({ executeGeneration: membership?.departmentId === 'design' }) }
@@ -57,7 +58,7 @@ test('actual inline image controls preserve exact uncertain identity, idle mount
   await render()
   assert.equal(calls.length, 0)
   assert.equal(elements(env.container, 'textarea').length, 0)
-  await act(async () => props(select()).onChange({ target: { value: 'version-a' } }))
+  await act(async () => props(select()).onChange({ target: { value: 'a0000000-0000-4000-8000-000000000003' } }))
   await click(button('Image'))
   assert.equal(calls.length, 0)
   const outputSelect = elements(env.container, 'select').find(node => props(node)['aria-label'] === 'Saved image preview')
@@ -68,7 +69,7 @@ test('actual inline image controls preserve exact uncertain identity, idle mount
   assert.equal(calls.length, 0, 'preview selection never generates')
   await click(button('Generate image'))
   assert.equal(calls.length, 1)
-  assert.deepEqual(calls[0].slice(0, 3), ['version-a', 'model-a', 'Exact original prompt'])
+  assert.deepEqual(calls[0].slice(0, 3), ['a0000000-0000-4000-8000-000000000003', 'model-a', 'Exact original prompt'])
   assert.equal(navigation.at(-1), true)
   assert.equal(props(select()).disabled, true)
   assert.equal(props(elements(env.container, 'textarea')[0]).disabled, true)
@@ -84,14 +85,14 @@ test('actual inline image controls preserve exact uncertain identity, idle mount
   let resolve
   delayedLoad = { promise: new Promise(done => { resolve = done }) }
   await act(async () => { void props(button('Generate image')).onClick() })
-  context = { ...context, activeOrganizationId: 'org-b', scopeRevision: 2, requestSignal: new AbortController().signal }
+  context = { ...context, activeOrganizationId: 'a0000000-0000-4000-8000-000000000002', scopeRevision: 2, requestSignal: new AbortController().signal }
   await render()
   await act(async () => resolve(data))
   assert.equal(calls.length, 2, 'old exact scope must not dispatch after fresh load resolves')
   assert.equal(elements(env.container, 'option').length, 1, 'cross-org versions are not listed')
-  delayedLoad = null; context = { ...context, activeOrganizationId: 'org-a', scopeRevision: 3 }
+  delayedLoad = null; context = { ...context, activeOrganizationId: 'a0000000-0000-4000-8000-000000000001', scopeRevision: 3 }
   await render()
-  await act(async () => props(select()).onChange({ target: { value: 'version-a' } }))
+  await act(async () => props(select()).onChange({ target: { value: 'a0000000-0000-4000-8000-000000000003' } }))
   await click(button('Image'))
   data = { ...data, designServices: [] }
   await click(button('Generate image'))

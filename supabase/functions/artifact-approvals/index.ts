@@ -48,6 +48,7 @@ async function requireContext(request: Request) {
   const secretKey = namedKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY')
   if (!supabaseUrl || !publishableKey || !secretKey) throw new Error('Function environment is incomplete')
   const userClient = createClient(supabaseUrl, publishableKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
     global: { headers: { Authorization: authorization } },
   })
   const admin = createClient(supabaseUrl, secretKey, {

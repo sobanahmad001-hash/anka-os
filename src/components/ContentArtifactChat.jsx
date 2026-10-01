@@ -47,7 +47,7 @@ export default function ContentArtifactChat({ engagement, projectId, onCreated, 
     load()
     return () => { generation.current += 1; requestSignal?.removeEventListener('abort', abort) }
   }, [load, key, requestSignal])
-  const targets = state?.key === key && state.status === 'ready' && !requestSignal?.aborted ? state.targets : null
+  const targets = state?.key === key && state.status === 'ready' && !state.refreshing && !requestSignal?.aborted ? state.targets : null
   const workspace = state?.key === key && !requestSignal?.aborted ? state.workspace : null
   const hasWorkspace = Boolean(workspace)
   useEffect(() => {
