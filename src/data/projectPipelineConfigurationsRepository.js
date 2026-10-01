@@ -40,7 +40,7 @@ export function createProjectPipelineConfigurationsRepository(supabase) {
   return Object.freeze({
     async list(organizationId, engagementId, { signal } = {}) {
       const org = id(organizationId, 'Organization'), engagement = id(engagementId, 'Engagement')
-      const [origin, presets, definitions, publications, configurations, activations, groups] = await Promise.all([
+      const [origin, presets, definitions, publications, configurations, activations, groups, stageReviews] = await Promise.all([
         result(supabase.from('engagement_pipeline_origins').select('pipeline_template_version_id').eq('organization_id', org).eq('engagement_id', engagement).maybeSingle(), signal),
         result(supabase.from('pipeline_template_publications').select('id,pipeline_template_version_id').eq('organization_id', org), signal),
         result(supabase.from('pipeline_execution_definitions').select('id,name,version_number,preset_publication_id,steps').eq('organization_id', org), signal),
@@ -48,20 +48,23 @@ export function createProjectPipelineConfigurationsRepository(supabase) {
         result(supabase.from('project_pipeline_configurations').select('*').eq('organization_id', org).eq('engagement_id', engagement).order('revision', { ascending: false }), signal),
         result(supabase.from('project_pipeline_activations').select('*').eq('organization_id', org).eq('engagement_id', engagement).order('activation_number', { ascending: false }), signal),
         result(supabase.from('project_pipeline_groups').select('*').eq('organization_id', org).eq('engagement_id', engagement).order('created_at', { ascending: true }), signal),
+        result(supabase.from('project_pipeline_stage_reviews').select('id,configuration_id,decisions,resolved_artifacts,review_sha256').eq('organization_id',org).eq('engagement_id',engagement),signal),
       ])
       const valid = new Set(presets.filter(row => row.pipeline_template_version_id === origin?.pipeline_template_version_id).map(row => row.id))
       const byId = new Map(definitions.filter(row => valid.has(row.preset_publication_id)).map(row => [row.id, row]))
       const publishedPresets = new Set(presets.map(row => row.id))
       const publishedById = new Map(definitions.filter(row => publishedPresets.has(row.preset_publication_id)).map(row => [row.id,row]))
       return { available: publications.filter(row => byId.has(row.definition_id)).map(row => ({ ...row, definition: byId.get(row.definition_id) })),
-        publishedDefinitions: publications.filter(row => publishedById.has(row.definition_id)).map(row => ({ ...row,definition:publishedById.get(row.definition_id) })), configurations, activations, groups }
+        publishedDefinitions: publications.filter(row => publishedById.has(row.definition_id)).map(row => ({ ...row,definition:publishedById.get(row.definition_id) })), configurations:configurations.map(row=>({...row,stage_review:stageReviews.find(review=>review.configuration_id===row.id)||null})), activations, groups }
 
     },
-    create({ organizationId, engagementId, definitionPublicationId, pipelineGroupId = null, requestId, selectedSteps, maxAiCostMicrousd }, { signal } = {}) {
+    create({ organizationId, engagementId, definitionPublicationId, pipelineGroupId = null, requestId, selectedSteps, stageDecisions, maxAiCostMicrousd }, { signal } = {}) {
       if (!Array.isArray(selectedSteps) || !selectedSteps.length || selectedSteps.length > 50) throw new TypeError('Choose 1–50 steps')
       if (!Number.isSafeInteger(maxAiCostMicrousd) || maxAiCostMicrousd < 0) throw new TypeError('Invalid local AI limit')
+      if(stageDecisions!==undefined){if(!Array.isArray(stageDecisions) || stageDecisions.length<1 || stageDecisions.length>50)throw new TypeError('Review every published stage');return result(supabase.rpc('create_reviewed_project_pipeline_configuration',{p_organization_id:id(organizationId,'Organization'),p_engagement_id:id(engagementId,'Engagement'),p_definition_publication_id:id(definitionPublicationId,'Published definition'),p_pipeline_group_id:pipelineGroupId ? id(pipelineGroupId,'Pipeline group') : null,p_request_id:id(requestId,'Request'),p_stage_decisions:stageDecisions,p_max_ai_cost_microusd:maxAiCostMicrousd}),signal)}
       return result(supabase.rpc(pipelineGroupId ? 'create_project_pipeline_group_configuration' : 'create_project_pipeline_configuration', { ...(pipelineGroupId ? {p_pipeline_group_id:id(pipelineGroupId,'Pipeline group')} : {}), p_organization_id: id(organizationId, 'Organization'), p_engagement_id: id(engagementId, 'Engagement'), p_definition_publication_id: id(definitionPublicationId, 'Published definition'), p_request_id: id(requestId, 'Request'), p_selected_steps: selectedSteps, p_max_ai_cost_microusd: maxAiCostMicrousd }), signal)
     },
+    listStageArtifacts(organizationId,engagementId,{query='',offset=0,signal}={}) {if(typeof query!=='string' || query.length>120 || !Number.isSafeInteger(offset) || offset<0 || offset>10000)throw new TypeError('Bounded project artifact search required');return result(supabase.rpc('list_project_pipeline_stage_artifacts',{p_organization_id:id(organizationId,'Organization'),p_engagement_id:id(engagementId,'Engagement'),p_query:query,p_offset:offset,p_limit:25}),signal)},
     listGroups(organizationId,engagementId,{signal}={}) { return result(supabase.from('project_pipeline_groups').select('*').eq('organization_id',id(organizationId,'Organization')).eq('engagement_id',id(engagementId,'Engagement')).order('created_at',{ascending:true}),signal) },
     createGroup({ organizationId, engagementId, presetPublicationId, kind, name, requestId }, { signal } = {}) {
       const exactName = typeof name === 'string' ? name.trim() : ''

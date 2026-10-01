@@ -68,3 +68,12 @@ test('group creation requires explicit bounded kind/name/published preset and st
  for(const change of [{kind:'legacy'},{name:''},{name:'x'.repeat(81)},{presetPublicationId:'inferred'}]) assert.throws(()=>repo.createGroup({...input,...change}))
  assert.equal(calls.length,0);await repo.createGroup(input);assert.deepEqual(calls[0],{name:'create_project_pipeline_group',args:{p_organization_id:A,p_engagement_id:B,p_preset_publication_id:C,p_kind:'website',p_name:'Website',p_request_id:group}})
 })
+
+test('reviewed decisions bind one native group or Legacy receipt, and source search is project-scoped and bounded',async()=>{
+ const calls=[],repo=createProjectPipelineConfigurationsRepository({from(){throw new Error('No background reads')},rpc(name,payload){calls.push({name,payload});return Promise.resolve({data:{configuration_id:A},error:null})}})
+ const decisions=[{key:'brief',action:'run',quantity:1,inputs:[{key:'audience',value:'Reviewed audience'}]}]
+ await repo.create({organizationId:A,engagementId:B,definitionPublicationId:C,requestId:A,selectedSteps:[{key:'brief',quantity:1}],stageDecisions:decisions,maxAiCostMicrousd:0})
+ assert.equal(calls[0].name,'create_reviewed_project_pipeline_configuration');assert.equal(calls[0].payload.p_pipeline_group_id,null);assert.deepEqual(calls[0].payload.p_stage_decisions,decisions);assert.equal('p_selected_steps' in calls[0].payload,false)
+ await repo.listStageArtifacts(A,B,{query:A,offset:25});assert.deepEqual(calls[1],{name:'list_project_pipeline_stage_artifacts',payload:{p_organization_id:A,p_engagement_id:B,p_query:A,p_offset:25,p_limit:25}})
+ assert.throws(()=>repo.listStageArtifacts(A,B,{offset:10001}),/Bounded/);assert.equal(calls.length,2)
+})

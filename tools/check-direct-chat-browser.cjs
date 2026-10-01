@@ -358,13 +358,13 @@ async function engagementFirstSendAssertions(browser) {
  await fs.writeFile(file,JSON.stringify(evidence,null,2));console.log(JSON.stringify({engagementFirstSendCases:results.length,results}))
 }
 
-;async function pipelineGroupAssertions(browser) {
+;async function pipelineGroupAssertions(browser,declared=false) {
  const results=[]
  for (const [width,height,theme] of [[1440,900,'light'],[390,900,'dark']]) {
   const context=await browser.newContext({viewport:{width,height}}),page=await context.newPage();page.setDefaultTimeout(15000)
   const errors=[],blocked=[];page.on('pageerror',error=>errors.push(error.message))
   await page.route('**/*',route=>{const url=new URL(route.request().url());if(url.hostname==='127.0.0.1' && url.port==='5188')return route.continue();blocked.push(url.origin);return route.abort()})
-  await page.goto(`${base}?panel=pipelines&theme=${theme}`)
+  await page.goto(`${base}?panel=pipelines&theme=${theme}${declared ? '&stage-contracts=1' : ''}`)
   const panel=page.getByRole('region',{name:'Project pipeline configuration',exact:true}),choice=page.getByRole('combobox',{name:'Pipeline selection',exact:true})
   await choice.waitFor();await page.waitForFunction(()=>!document.body.textContent.includes('Loading project configurations'))
   const identities=await page.evaluate(()=>({website:globalThis.__directChatPreview.pipeline.website,marketing:globalThis.__directChatPreview.pipeline.marketing}))
@@ -383,14 +383,22 @@ async function engagementFirstSendAssertions(browser) {
   assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.pipeline.calls.length),1)
   assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.pipeline.runCalls.length),0)
   await panel.getByRole('combobox',{name:'Published execution definition',exact:true}).selectOption({label:'Website delivery · v1'})
-  await panel.getByRole('spinbutton',{name:'Page brief quantity',exact:true}).fill('1');await panel.getByRole('spinbutton',{name:'Page copy quantity',exact:true}).fill('3')
+  if(declared){
+   await panel.getByRole('combobox',{name:'Page brief decision',exact:true}).selectOption('reuse');await panel.getByRole('combobox',{name:'Page copy decision',exact:true}).selectOption('run');await panel.getByRole('spinbutton',{name:'Page copy quantity',exact:true}).fill('3')
+   await panel.getByRole('combobox',{name:'Additional proof decision',exact:true}).selectOption('omit');await panel.getByRole('textbox',{name:'Additional proof omission reason',exact:true}).fill('Existing approved article supplies the evidence')
+   await panel.getByRole('button',{name:'Preview stages before creation',exact:true}).click();assert.equal(await panel.getByRole('button',{name:'Confirm draft revision',exact:true}).isEnabled(),false);assert.match(await panel.textContent(),/Missing or incompatible input/);assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.pipeline.configCalls.length),0)
+   await panel.getByRole('button',{name:'Find approved versions',exact:true}).click();const exactVersion=await page.evaluate(()=>globalThis.__directChatPreview.pipeline.artifact.artifact_version_id)
+   await panel.getByRole('combobox',{name:'Page brief approved version',exact:true}).selectOption(exactVersion);await panel.getByRole('combobox',{name:'Page copy input Approved source article',exact:true}).selectOption(exactVersion)
+  }else {await panel.getByRole('spinbutton',{name:'Page brief quantity',exact:true}).fill('1');await panel.getByRole('spinbutton',{name:'Page copy quantity',exact:true}).fill('3')}
+
   await panel.getByRole('button',{name:'Preview stages before creation',exact:true}).click()
   const stageReview=panel.getByRole('region',{name:'Review pipeline stages',exact:true});await stageReview.waitFor()
   assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.pipeline.configCalls.length),0)
-  assert.match(await stageReview.textContent(),/Dependencies: page_brief/);assert.match(await stageReview.textContent(),/Output: not specified/);assert.match(await stageReview.textContent(),/Required inputs: not specified/)
-  const stageScreenshot=`b2-pipeline-stages-${theme}-${width}x${height}.png`;await stageReview.scrollIntoViewIfNeeded();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:path.join(output,stageScreenshot)})
+  assert.match(await stageReview.textContent(),/Dependencies: page_brief/);if(declared){assert.match(await stageReview.textContent(),/Approved launch source · exact v2/);assert.match(await stageReview.textContent(),/Reason: Existing approved article supplies the evidence/);assert.match(await stageReview.textContent(),/Output: Page copy/)}else {assert.match(await stageReview.textContent(),/Output: not specified/);assert.match(await stageReview.textContent(),/Required inputs: not specified/)}
+  const stageScreenshot=`b2-pipeline-${declared ? 'stage-fulfilment' : 'stages'}-${theme}-${width}x${height}.png`;await stageReview.scrollIntoViewIfNeeded();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:path.join(output,stageScreenshot)})
   await panel.getByRole('button',{name:'Confirm draft revision',exact:true}).click();await page.waitForFunction(()=>globalThis.__directChatPreview.pipeline.configCalls.length===1)
   const exactConfiguration=await page.evaluate(()=>globalThis.__directChatPreview.pipeline.configCalls[0]);assert.deepEqual(exactConfiguration.selectedSteps,[{key:'page_brief',quantity:1},{key:'page_copy',quantity:3}]);assert.equal(exactConfiguration.maxAiCostMicrousd,0);assert.notEqual(exactConfiguration.pipelineGroupId,identities.website)
+  if(declared){const version=await page.evaluate(()=>globalThis.__directChatPreview.pipeline.artifact.artifact_version_id);assert.deepEqual(exactConfiguration.stageDecisions,[{key:'page_brief',action:'reuse',artifact_version_id:version},{key:'page_copy',action:'run',quantity:3,inputs:[{key:'article',artifact_version_id:version}]},{key:'extra_proof',action:'omit',reason:'Existing approved article supplies the evidence'}]);assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.pipeline.artifact.version_number),2)}
   const runChoice=page.getByRole('combobox',{name:'Run pipeline',exact:true});await runChoice.selectOption(identities.marketing)
   const run=page.getByRole('button',{name:'Request manual run review',exact:true});await run.scrollIntoViewIfNeeded();assert.equal(await run.isEnabled(),true)
   const runScreenshot=`b2-pipeline-run-${theme}-${width}x${height}.png`;await page.screenshot({path:path.join(output,runScreenshot)})
@@ -398,11 +406,36 @@ async function engagementFirstSendAssertions(browser) {
   await page.getByText('Pipeline: Launch campaign',{exact:true}).waitFor()
   const call=await page.evaluate(()=>globalThis.__directChatPreview.pipeline.runCalls[0]);assert.equal(call.pipelineGroupId,identities.marketing)
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
-  results.push({viewport:{width,height},theme,independentWebsiteMarketingLegacy:true,reviewZeroWrites:true,creationOneCommandNoRun:true,stageReviewZeroWrites:true,stageConfirmationOneExactDraft:true,publishedMetadataGapsExplicit:true,runOneExactGroupReviewRequest:true,noHorizontalOverflow:true,pageErrors:errors,blockedRemoteRequests:blocked,screenshots:[reviewScreenshot,stageScreenshot,runScreenshot]})
+  results.push({viewport:{width,height},theme,independentWebsiteMarketingLegacy:true,reviewZeroWrites:true,creationOneCommandNoRun:true,stageReviewZeroWrites:true,stageConfirmationOneExactDraft:true,publishedMetadataGapsExplicit:!declared,declaredOutputsAndMissingInputs:declared,exactApprovedVersionReuse:declared,optionalOmissionReason:declared,noNewSourceVersion:declared,runOneExactGroupReviewRequest:true,noHorizontalOverflow:true,pageErrors:errors,blockedRemoteRequests:blocked,screenshots:[reviewScreenshot,stageScreenshot,runScreenshot]})
   await context.close()
  }
- const packet=path.join(output,'b2-service-native-evidence.json');const evidence=JSON.parse(await fs.readFile(packet,'utf8'));evidence.independentPipelineGroups.browser={source:'tools/check-direct-chat-browser.cjs --pipeline-groups',scope:'Actual configuration/run panels in existing Layout; provider-free synthetic published sources; no publisher journey or production writes',results};await fs.writeFile(packet,JSON.stringify(evidence,null,2)+'\n');console.log(JSON.stringify({pipelineGroupsPassed:results.length,evidence:packet}))
+ const packet=path.join(output,'b2-service-native-evidence.json');const evidence=JSON.parse(await fs.readFile(packet,'utf8'));const target=declared ? (evidence.stageFulfilment ||= {}) : evidence.independentPipelineGroups;target.browser={source:'tools/check-direct-chat-browser.cjs '+(declared ? '--stage-fulfilment' : '--pipeline-groups'),scope:'Actual configuration/run panels in existing Layout; provider-free synthetic published sources; no publisher journey or production writes',results};await fs.writeFile(packet,JSON.stringify(evidence,null,2)+'\n');console.log(JSON.stringify({pipelineGroupsPassed:results.length,evidence:packet}))
 }
+
+async function pipelineDefinitionAssertions(browser){
+ const results=[]
+ for(const [width,theme] of [[1440,'light'],[390,'dark']]){
+  const context=await browser.newContext({viewport:{width,height:900},colorScheme:theme}),page=await context.newPage(),errors=[],blocked=[]
+  page.on('pageerror',error=>errors.push(error.message));await page.route('**/*',route=>{const u=new URL(route.request().url());if(u.hostname==='127.0.0.1' && u.port==='5188')return route.continue();blocked.push(u.origin);return route.abort()})
+  await page.goto(`${base}?panel=definitions&theme=${theme}`)
+  const pipeline=await page.evaluate(()=>globalThis.__directChatPreview.pipeline.definitionCatalog.publications[0].id)
+  await page.getByLabel('Definition published preset',{exact:true}).selectOption(pipeline);await page.getByLabel('Execution version name',{exact:true}).fill('Website stages')
+  await page.getByLabel('Step 1 key',{exact:true}).fill('article');await page.getByLabel('Step 1 label',{exact:true}).fill('Launch article');await page.getByLabel('Step 1 service',{exact:true}).selectOption(pipeline)
+  await page.getByLabel('Step 1 declare output and inputs',{exact:true}).check();await page.getByLabel('Step 1 expected output',{exact:true}).fill('Approved launch article');await page.getByLabel('Step 1 allow approved source',{exact:true}).check();await page.getByLabel('Step 1 exact output type',{exact:true}).fill('blog_article');await page.getByLabel('Step 1 optional stage',{exact:true}).check()
+  await page.getByRole('button',{name:'Add required input',exact:true}).click();await page.getByLabel('Input key',{exact:true}).fill('audience');await page.getByLabel('Input label',{exact:true}).fill('Target audience')
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.pipeline.definitionCalls.length),0)
+  await page.getByLabel('Step 1 expected output',{exact:true}).scrollIntoViewIfNeeded()
+  const screenshot=`b2-pipeline-definition-${theme}-${width}x900.png`;await page.screenshot({path:path.join(output,screenshot)})
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false)
+  await page.getByRole('button',{name:'Save draft version',exact:true}).click();await page.getByRole('status').filter({hasText:/Execution definition v1 saved/}).waitFor()
+  const calls=await page.evaluate(()=>globalThis.__directChatPreview.pipeline.definitionCalls)
+  assert.equal(calls.length,1);assert.deepEqual(calls[0].steps[0].stage_contract,{optional:true,output_label:'Approved launch article',reuse_allowed:true,artifact_type:'content',output_type:'blog_article',required_inputs:[{key:'audience',label:'Target audience',kind:'manual'}]})
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.pipeline.definitionRecords.approvals.length+globalThis.__directChatPreview.pipeline.definitionRecords.publications.length),0);assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
+  results.push({theme,viewport:{width,height:900},explicitTypedMetadata:true,unsavedZeroWrites:true,oneExactImmutableDraft:true,noImplicitApprovalOrPublication:true,noHorizontalOverflow:true,pageErrors:errors,blockedRemoteRequests:blocked,screenshot});await context.close()
+ }
+ const packet=path.join(output,'b2-service-native-evidence.json'),evidence=JSON.parse(await fs.readFile(packet,'utf8'));evidence.publishedStageContracts.browser={source:'tools/check-direct-chat-browser.cjs --stage-definitions',scope:'Actual definition author in existing Layout; synthetic local fixture; no distinct-human publication acceptance',results};await fs.writeFile(packet,JSON.stringify(evidence,null,2)+'\n');console.log(JSON.stringify({stageDefinitionsPassed:results.length,evidence:packet}))
+}
+
 (async () => {
   await fs.mkdir(output, { recursive: true })
   const browser = await chromium.launch({ channel: 'msedge', headless: true })
@@ -417,6 +450,8 @@ async function engagementFirstSendAssertions(browser) {
     ['content', 'empty', 'system', 320, 900],
   ]
   try {
+    if(process.argv.includes('--stage-definitions')){await pipelineDefinitionAssertions(browser);return}
+    if(process.argv.includes('--stage-fulfilment')){await pipelineGroupAssertions(browser,true);return}
     if (process.argv.includes('--pipeline-groups')) {await pipelineGroupAssertions(browser);return}
     if (process.argv.includes('--video-brief')) {await videoBriefPrototypeAssertions(browser);return}
     if (process.argv.includes('--design-bridge')) {await designBridgeAssertions(browser);return}
