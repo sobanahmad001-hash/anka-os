@@ -63,3 +63,8 @@ test('a substituted recovery operation stays blocked even if its business brief 
  assert.equal(ui.writes.length,1);assert.equal(ui.confirmed.at(-1),null);assert.equal(props(ui.button('Preview complete video brief')).disabled,true);assert.match(ui.env.container.textContent,/Original operation does not match/)
  assert.equal([...ui.storage.keys()].some(key=>key.startsWith('anka-video-brief-recovery:')),true)
 })
+
+test('retained confirmation callbacks cannot create another operation after an unknown outcome',async t=>{
+ const ui=await mount(t,{afterSaveError:true});await ui.prepare();const old=props(ui.button('Confirm video brief version')).onClick;await act(async()=>old());assert.equal(ui.writes.length,1)
+ await act(async()=>old());assert.equal(ui.writes.length,1);assert.equal(props(ui.button('Preview complete video brief')).disabled,true)
+})

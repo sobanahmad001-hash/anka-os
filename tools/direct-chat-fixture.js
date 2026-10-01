@@ -28,19 +28,20 @@ export function createDirectChatFixture({ surface = 'content', state = 'empty', 
   data.videoBriefVersions ||= []; data.videoBriefRoot ||= null
   fixture.designWorkshop = {
     getVideoBrief: async input => {
-      if (input.private_conversation_id !== threadId || input.direction_version_id || scope.department_id !== 'design') throw failure('Foreign video brief fixture',403)
+      if (!data.rows.some(row => row.id === input.private_conversation_id && row.department_id === 'design' && row.owner_id === actor && row.organization_id === organizationId) || input.direction_version_id || scope.department_id !== 'design') throw failure('Foreign video brief fixture',403)
       fixture.briefReads.push(structuredClone(input))
-      const version = input.operation_key ? data.videoBriefVersions.find(row=>row.operation_key===input.operation_key) : data.videoBriefVersions.at(-1)
+      const scopedVersions = data.videoBriefVersions.filter(row => row.content.video_context.private_conversation_id === input.private_conversation_id)
+      const version = input.operation_key ? scopedVersions.find(row=>row.operation_key===input.operation_key) : scopedVersions.at(-1)
       return version ? {brief:structuredClone(data.videoBriefRoot),version:structuredClone(version)} : {}
     },
     confirmVideoBrief: async input => {
-      if (input.private_conversation_id !== threadId || input.direction_version_id || scope.department_id !== 'design') throw failure('Foreign video brief confirmation',403)
+      if (!data.rows.some(row => row.id === input.private_conversation_id && row.department_id === 'design' && row.owner_id === actor && row.organization_id === organizationId) || input.direction_version_id || scope.department_id !== 'design') throw failure('Foreign video brief confirmation',403)
       const existing = data.videoBriefVersions.find(row=>row.operation_key===input.operation_key)
       if(existing) { if(JSON.stringify(existing.fixture_input)!==JSON.stringify(input))throw failure('Changed fixture brief operation',409);return {brief:structuredClone(data.videoBriefRoot),version:structuredClone(existing)} }
       if((input.creative_brief_id||null)!==(data.videoBriefRoot?.id||null) || input.expected_revision!==(data.videoBriefRoot?.revision||0))throw failure('Stale exact fixture brief revision',409)
       const id=crypto.randomUUID(),parent=data.videoBriefVersions.at(-1)
       data.videoBriefRoot={id:data.videoBriefRoot?.id||crypto.randomUUID(),organization_id:organizationId,created_by:actor,visibility:'private',revision:(data.videoBriefRoot?.revision||0)+2,frozen_version_id:id}
-      const version={id,creative_brief_id:data.videoBriefRoot.id,organization_id:organizationId,created_by:actor,version_number:data.videoBriefVersions.length+1,parent_version_id:parent?.id||null,operation_key:input.operation_key,fixture_input:structuredClone(input),validation_snapshot:{valid:true,video_confirmation:{action:'confirm_video_brief',actor_id:actor,expected_revision:input.expected_revision,requested_root_id:input.creative_brief_id}},content:videoBriefCreativeContent(input.video_brief,{private_conversation_id:threadId})}
+      const version={id,creative_brief_id:data.videoBriefRoot.id,organization_id:organizationId,created_by:actor,version_number:data.videoBriefVersions.length+1,parent_version_id:parent?.id||null,operation_key:input.operation_key,fixture_input:structuredClone(input),validation_snapshot:{valid:true,video_confirmation:{action:'confirm_video_brief',actor_id:actor,expected_revision:input.expected_revision,requested_root_id:input.creative_brief_id}},content:videoBriefCreativeContent(input.video_brief,{private_conversation_id:input.private_conversation_id})}
       data.videoBriefVersions.push(version);fixture.briefWrites++;save()
       if(fixture.briefLostResponse)throw failure('Original confirmation response lost · fixture',503)
       return {brief:structuredClone(data.videoBriefRoot),version:structuredClone(version)}

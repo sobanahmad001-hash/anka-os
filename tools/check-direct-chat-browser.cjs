@@ -172,11 +172,15 @@ async function videoBriefPrototypeAssertions(browser) {
   await pane.getByText('Exact brief v2 confirmed.',{exact:false}).waitFor()
   const evidence=await page.evaluate(()=>{const f=globalThis.__directChatPreview.fixture;return {writes:f.briefWrites,versions:f.data.videoBriefVersions.map(v=>({id:v.id,parent:v.parent_version_id,text:v.content.video_brief.required_text})),reads:f.briefReads,generationCalls:f.videoGenerationCalls}})
   assert.equal(evidence.writes,2);assert.equal(evidence.versions[0].text,'Launch date: 10 October');assert.equal(evidence.versions[1].text,'Launch date: 18 October');assert.equal(evidence.versions[1].parent,evidence.versions[0].id);assert.equal(evidence.generationCalls,0);assert(evidence.reads.at(-1).operation_key)
+  await pane.getByRole('textbox',{name:'Purpose',exact:true}).fill('Keep my unsaved refreshed brief')
+  await page.reload();await pane.waitFor();await page.waitForFunction(()=>document.querySelector('[aria-label="Purpose"]')?.value==='Keep my unsaved refreshed brief')
+  assert.equal(await pane.getByRole('textbox',{name:'Required text',exact:true}).inputValue(),'Launch date: 18 October');assert.equal(await pane.getByText('Exact brief v2 confirmed.',{exact:false}).count(),0)
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.fixture.data.videoBriefVersions.length),2);assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.fixture.videoGenerationCalls),0)
   assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
-  results.push({viewport:{width,height},theme,screenshot,allBriefFieldsExplicit:true,previewWrites:0,firstDoubleConfirmWrites:1,editInvalidatesConfirmation:true,twoIntentionalMockVersions:true,exactParentSourceRetained:true,lostResponseRecoveryReadOnly:true,generationCalls:0,pageErrors:errors,blockedRemoteRequests:blocked})
+  results.push({viewport:{width,height},theme,screenshot,currentDraftSurvivesRefresh:true,noNewVersionOnRefresh:true,allBriefFieldsExplicit:true,previewWrites:0,firstDoubleConfirmWrites:1,editInvalidatesConfirmation:true,twoIntentionalMockVersions:true,exactParentSourceRetained:true,lostResponseRecoveryReadOnly:true,generationCalls:0,pageErrors:errors,blockedRemoteRequests:blocked})
   await context.close();console.log('VERIFY video brief prototype',width,height,theme)
  }
- const file=path.join(output,'b3-content-writer-browser-evidence.json'),existing=JSON.parse(await fs.readFile(file,'utf8'));existing.videoBriefPrototype={scope:'Standalone real DesignVideoBriefEditor; saved canonical versions and recovery are fixture-only. No native database, installed contract, Generate integration or provider acceptance.',results};await fs.writeFile(file,JSON.stringify(existing,null,2))
+ const file=path.join(output,'b3-content-writer-browser-evidence.json'),existing=JSON.parse(await fs.readFile(file,'utf8'));existing.videoBriefPrototype={...existing.videoBriefPrototype,scope:'Standalone real DesignVideoBriefEditor; saved canonical versions and recovery are fixture-only. No native database, installed contract, Generate integration or provider acceptance.',results};await fs.writeFile(file,JSON.stringify(existing,null,2))
 }
 
 async function designBridgeAssertions(browser) {
@@ -201,7 +205,7 @@ async function designBridgeAssertions(browser) {
   const openingBounds=await workbench.getByRole('button',{name:'Back to chat',exact:true}).boundingBox();assert(openingBounds && openingBounds.y>=100 && openingBounds.y<300,`Video return control not visible near opening: ${JSON.stringify(openingBounds)}`)
   const openScreenshot=`b3-design-private-video-open-${theme}-${width}x${height}.png`
   await page.screenshot({path:path.join(output,openScreenshot)})
-  await workbench.getByRole('textbox',{name:'Video prompt',exact:true}).fill('Unsent private video brief')
+  await workbench.getByRole('textbox',{name:'Script / storyboard',exact:true}).fill('Unsent private video brief')
   await workbench.getByRole('button',{name:'Check exact quote',exact:true}).click()
   await page.waitForFunction(()=>globalThis.__directChatPreview.fixture.videoQuotes.length===1)
   assert(await workbench.getByRole('button',{name:'Generate one video',exact:true}).isDisabled())
@@ -215,8 +219,8 @@ async function designBridgeAssertions(browser) {
   await page.getByRole('combobox',{name:'Conversation context',exact:true}).selectOption('chat')
   await page.getByRole('button',{name:'Stay in current context',exact:true}).click()
   await videoButton.click()
-  assert.equal(await workbench.getByRole('textbox',{name:'Video prompt',exact:true}).inputValue(),'Unsent private video brief')
-  await workbench.getByRole('textbox',{name:'Video prompt',exact:true}).fill('')
+  assert.equal(await workbench.getByRole('textbox',{name:'Script / storyboard',exact:true}).inputValue(),'Unsent private video brief')
+  await workbench.getByRole('textbox',{name:'Script / storyboard',exact:true}).fill('')
   await workbench.getByRole('button',{name:'Back to chat',exact:true}).click()
   await message.fill('Text follow-up stays separate')
   await page.getByRole('button',{name:'Send',exact:true}).click()
@@ -225,8 +229,17 @@ async function designBridgeAssertions(browser) {
   assert.equal(evidence.counters.created,1);assert.equal(evidence.counters.messages,2);assert.equal(evidence.generationCalls,0)
   assert.deepEqual([...new Set(evidence.videoReads)],[evidence.conversationId]);assert.equal(evidence.videoQuotes[0].private_conversation_id,evidence.conversationId)
   for(const key of ['project_id','engagement_id','messages','history','attachments'])assert(!(key in evidence.videoQuotes[0]))
-  assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
-  results.push({viewport:{width,height},theme,screenshot,openScreenshot,actualPrivateVideoUi:true,onePrivateChatTwoTextSends:true,explicitSeparateVideoTools:true,videoBriefPreservedOnCloseAndStay:true,exactPrivateAnchor:true,quoteOnlyGenerationDisabled:true,generationCalls:0,noHorizontalOverflow:true,pageErrors:errors,blockedRemoteRequests:blocked})
+  await videoButton.click()
+  const brief=workbench.getByRole('region',{name:'Versioned video brief',exact:true}),business={'Purpose':'Explain the private launch','Audience':'Returning clients','Channel / placement':'Organic social','Source assets / reuse plan':'None — text-to-video only','Script / storyboard':'Product then three benefits','Brand constraints':'No unlicensed marks','Required text':'Launch date: 10 October'}
+  for(const [name,value] of Object.entries(business))await brief.getByRole('textbox',{name,exact:true}).fill(value)
+  await brief.getByRole('button',{name:'Preview complete video brief',exact:true}).click();assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.fixture.briefWrites),0)
+  await brief.getByRole('button',{name:'Confirm video brief version',exact:true}).click();await brief.getByText('Exact brief v1 confirmed.',{exact:false}).waitFor()
+  const providerPrompt=workbench.getByRole('textbox',{name:'Video prompt',exact:true});assert.equal(await providerPrompt.getAttribute('readonly'),'');assert((await providerPrompt.inputValue()).includes('Required text:\nLaunch date: 10 October'))
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.fixture.briefWrites),1);assert(await workbench.getByRole('button',{name:'Generate one video',exact:true}).isDisabled());assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.fixture.videoGenerationCalls),0)
+  await providerPrompt.scrollIntoViewIfNeeded();const confirmedScreenshot=`b3-design-confirmed-brief-${theme}-${width}x${height}.png`;await page.screenshot({path:path.join(output,confirmedScreenshot)})
+  await brief.getByRole('textbox',{name:'Required text',exact:true}).fill('Launch date: 18 October');assert.equal(await brief.getByText('Exact brief v1 confirmed.',{exact:false}).count(),0);assert.equal(await providerPrompt.inputValue(),'');assert(await workbench.getByRole('button',{name:'Generate one video',exact:true}).isDisabled());assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.fixture.data.videoBriefVersions.length),1)
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
+  results.push({viewport:{width,height},theme,screenshot,openScreenshot,confirmedScreenshot,actualCanonicalBriefEditorIntegrated:true,completePromptReadOnly:true,previewZeroWrites:true,oneImmutableMockConfirmation:true,editInvalidatesGenerate:true,noGenerationOnConfirmation:true,actualPrivateVideoUi:true,onePrivateChatTwoTextSends:true,explicitSeparateVideoTools:true,videoBriefPreservedOnCloseAndStay:true,exactPrivateAnchor:true,quoteOnlyGenerationDisabled:true,generationCalls:0,noHorizontalOverflow:true,pageErrors:errors,blockedRemoteRequests:blocked})
   await context.close();console.log('VERIFY Design private bridge',width,height,theme)
  }
  const file=path.join(output,'b3-content-writer-browser-evidence.json'),existing=JSON.parse(await fs.readFile(file,'utf8'))

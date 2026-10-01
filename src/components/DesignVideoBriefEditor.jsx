@@ -4,9 +4,11 @@ import { VIDEO_BRIEF_FIELDS, emptyVideoBrief, normalizeVideoBrief, requireVideoB
 import { clearVideoBriefDraft, exactVideoBriefAttempt, readVideoBriefDraft, videoBriefScopeKey, writeVideoBriefDraft } from '../data/designVideoBriefDraft.js'
 
 // Provider-free preparation/confirmation. Generate remains a separate guarded action.
-export default function DesignVideoBriefEditor({ studio, context, actorId, organizationId, settings, script, onScriptChange, onRestoreSettings, onConfirmed, onNavigationBusyChange, onDraftDirtyChange }) {
+export default function DesignVideoBriefEditor({ studio, context, actorId, organizationId, settings, script, onScriptChange, onRestoreSettings, onConfirmed, onNavigationBusyChange, onDraftDirtyChange, disabled=false }) {
   const [fields, setFields] = useState(emptyVideoBrief), [saved, setSaved] = useState(null), [preview, setPreview] = useState(null)
   const [busy, setBusy] = useState(false), [pending, setPending] = useState(null), [notice, setNotice] = useState(''), [loading, setLoading] = useState(true), [historyChecked, setHistoryChecked] = useState(false)
+  const pendingRef=useRef(pending);pendingRef.current=pending
+  const externalBusy=useRef(disabled);externalBusy.current=disabled
   const alive = useRef(true), flight = useRef(false), attempt = useRef(null), reviewRef = useRef(null), previewButton = useRef(null)
   const scopeKey = JSON.stringify(context)
   const draftKey=videoBriefScopeKey(actorId,organizationId,context)
@@ -14,6 +16,9 @@ export default function DesignVideoBriefEditor({ studio, context, actorId, organ
   const retained=useRef(null),draftReady=useRef(false)
   const draft = useMemo(()=>({ ...fields, ...Object.fromEntries(['mode','duration_seconds','aspect_ratio','resolution','output_format','generate_audio'].map(key => [key,settings[key]])), script_storyboard: script }),[fields,settings,script]), signature = videoBriefSignature(draft)
   const valid = validateVideoBrief(draft)
+  const signatureRef=useRef(signature);signatureRef.current=signature
+  const locked=disabled || busy || Boolean(pending) || loading
+  const previewBlocked=useRef(false);previewBlocked.current=locked || !historyChecked || !valid.valid
   useEffect(() => { if (!preview) return; reviewRef.current?.querySelector?.('button')?.focus?.({preventScroll:true}); reviewRef.current?.scrollIntoView?.({block:'start',behavior:'instant'}) }, [preview])
   let confirmed = null
   try { if (saved && historyChecked && !pending && !busy) confirmed = requireVideoBriefVersion({ ...saved, organizationId, actorId, context, draft }) } catch { /* Changed drafts require another explicit confirmation. */ }
@@ -57,7 +62,7 @@ export default function DesignVideoBriefEditor({ studio, context, actorId, organ
   }, [studio, scopeKey, recoveryKey, draftKey, restore, applyDraft,organizationId,actorId])
   useEffect(()=>{if (!draftReady.current || loading || pending || !alive.current) return;try {if (confirmedId) {clearVideoBriefDraft(sessionStorage,draftKey);retained.current=null}else {writeVideoBriefDraft(sessionStorage,draftKey,draft);retained.current=structuredClone(draft)}} catch {setNotice('Working draft could not be retained for refresh. Keep this view open; no confirmation was sent.')}},[draft,loading,pending,confirmedId,draftKey])
   async function recover() {
-    if (flight.current || !studio?.getVideoBrief || pending && !pending.operation_key) return
+    if (!alive.current || externalBusy.current || flight.current || !studio?.getVideoBrief || pendingRef.current && !pendingRef.current.operation_key) return
     flight.current = true; setBusy(true)
     try {
       const result = await studio.getVideoBrief({ ...context, ...(pending ? { operation_key: pending.operation_key } : {}) })
@@ -71,7 +76,7 @@ export default function DesignVideoBriefEditor({ studio, context, actorId, organ
     finally { flight.current = false; if (alive.current) setBusy(false) }
   }
   async function confirm() {
-    if (flight.current || pending || loading || !historyChecked || !preview || preview.signature !== signature || !studio?.confirmVideoBrief) return
+    if (!alive.current || externalBusy.current || flight.current || pendingRef.current || loading || !historyChecked || !preview || preview.signature !== signatureRef.current || !studio?.confirmVideoBrief) return
     flight.current = true; setBusy(true); setNotice('')
     try {
       const operationKey = crypto.randomUUID()
@@ -92,7 +97,7 @@ export default function DesignVideoBriefEditor({ studio, context, actorId, organ
     finally { flight.current = false; if (alive.current) setBusy(false) }
   }
   async function retryOriginal() {
-    if (flight.current || !pending || !attempt.current || !studio?.confirmVideoBrief) return
+    if (!alive.current || externalBusy.current || flight.current || !pendingRef.current || !attempt.current || !studio?.confirmVideoBrief) return
     flight.current=true;setBusy(true)
     try {
       const input=exactVideoBriefAttempt(pending,context)
@@ -108,15 +113,15 @@ export default function DesignVideoBriefEditor({ studio, context, actorId, organ
   return <section className="design-tools-workbench design-video-brief" aria-label="Versioned video brief">
     <h3>Video brief · {saved ? `v${saved.version.version_number}` : 'unsaved'}</h3>
     <p>Complete unknowns before confirming. For assets or required text, write an explicit “None” when applicable. Reference uploads and clip/template editing are unavailable here; no media is regenerated while preparing a brief.</p>
-    <fieldset disabled={busy || Boolean(pending) || loading} className="grid gap-3 mt-3 md:grid-cols-2">
-      {VIDEO_BRIEF_FIELDS.map(([key,label,maxLength]) => <label className={key === 'script_storyboard' ? 'block md:col-span-2' : 'block'} key={key}>{label}<textarea aria-label={label} rows={key === 'script_storyboard' ? 4 : 2} maxLength={maxLength} className="mt-1 w-full rounded bg-[var(--anka-surface)] text-[var(--anka-ink)] border border-[var(--anka-line)] p-2" value={draft[key]} onChange={event => { setPreview(null); if (key === 'script_storyboard') onScriptChange(event.target.value); else setFields(previous => ({ ...previous, [key]: event.target.value })) }} /></label>)}
+    <fieldset disabled={locked} className="grid gap-3 mt-3 md:grid-cols-2">
+      {VIDEO_BRIEF_FIELDS.map(([key,label,maxLength]) => <label className={key === 'script_storyboard' ? 'block md:col-span-2' : 'block'} key={key}>{label}<textarea aria-label={label} rows={key === 'script_storyboard' ? 4 : 2} maxLength={maxLength} className="mt-1 w-full rounded bg-[var(--anka-surface)] text-[var(--anka-ink)] border border-[var(--anka-line)] p-2" value={draft[key]} onChange={event => { if(externalBusy.current || flight.current || pendingRef.current || !alive.current)return;setPreview(null); if (key === 'script_storyboard') onScriptChange(event.target.value); else setFields(previous => ({ ...previous, [key]: event.target.value })) }} /></label>)}
     </fieldset>
     {!valid.valid && <p className="mt-2 text-[var(--anka-warning)]">{[...valid.missing.map(label => `${label} is required`), ...valid.errors].join(' · ')}</p>}
-    <button ref={previewButton} className="mt-3 rounded border border-[var(--anka-line)] px-3 py-2" type="button" disabled={!valid.valid || busy || Boolean(pending) || loading || !historyChecked} onClick={() => { const content=videoBriefCreativeContent(draft,context); setPreview({ draft:structuredClone(draft),signature,content }) }}>Preview complete video brief</button>
-    {preview && preview.signature === signature && <section ref={reviewRef} style={{scrollMarginTop:112}} aria-label="Confirm exact video brief" className="mt-3 rounded border p-3"><h3>Review this exact version</h3><p>{preview.draft.mode} · {preview.draft.duration_seconds}s · {preview.draft.resolution} · {preview.draft.aspect_ratio} · {preview.draft.output_format} · Audio {preview.draft.generate_audio ? 'on' : 'off'}</p><pre className="whitespace-pre-wrap">{preview.content.instructions}</pre><p>Confirm saves one immutable owner-private canonical brief version. It does not generate media, copy to a project, approve or deliver anything. Generate later sends this complete prompt and exact settings through the separately approved connection and quote.</p><button className="rounded bg-[var(--anka-violet)] text-[var(--anka-on-violet)] px-3 py-2" type="button" disabled={busy || Boolean(pending)} onClick={confirm}>Confirm video brief version</button><button type="button" disabled={busy || Boolean(pending)} onClick={() => { setPreview(null); previewButton.current?.focus?.() }}>Keep editing brief</button></section>}
+    <button ref={previewButton} className="mt-3 rounded border border-[var(--anka-line)] px-3 py-2" type="button" disabled={locked || !valid.valid || !historyChecked} onClick={() => {if(previewBlocked.current || !alive.current)return;const content=videoBriefCreativeContent(draft,context); setPreview({ draft:structuredClone(draft),signature,content }) }}>Preview complete video brief</button>
+    {preview && preview.signature === signature && <section ref={reviewRef} style={{scrollMarginTop:112}} aria-label="Confirm exact video brief" className="mt-3 rounded border p-3"><h3>Review this exact version</h3><p>{preview.draft.mode} · {preview.draft.duration_seconds}s · {preview.draft.resolution} · {preview.draft.aspect_ratio} · {preview.draft.output_format} · Audio {preview.draft.generate_audio ? 'on' : 'off'}</p><pre className="whitespace-pre-wrap">{preview.content.instructions}</pre><p>Confirm saves one immutable owner-private canonical brief version. It does not generate media, copy to a project, approve or deliver anything. Generate later sends this complete prompt and exact settings through the separately approved connection and quote.</p><button className="rounded bg-[var(--anka-violet)] text-[var(--anka-on-violet)] px-3 py-2" type="button" disabled={locked} onClick={confirm}>Confirm video brief version</button><button type="button" disabled={locked} onClick={() => { setPreview(null); previewButton.current?.focus?.() }}>Keep editing brief</button></section>}
     {confirmedId && <p role="status">Exact brief v{saved.version.version_number} confirmed. Changing any field or setting requires a new confirmation.</p>}
     {(pending || notice || loading) && <p role="status">{loading ? 'Checking saved brief…' : notice || 'Checking the original confirmation…'}</p>}
-    {pending && attempt.current && <button type="button" disabled={busy || loading} onClick={retryOriginal}>Retry original brief confirmation</button>}
-    {(pending || notice && !confirmedId) && <button type="button" disabled={busy} onClick={recover}>Check saved brief</button>}
+    {pending && attempt.current && <button type="button" disabled={disabled || busy || loading} onClick={retryOriginal}>Retry original brief confirmation</button>}
+    {(pending || notice && !confirmedId) && <button type="button" disabled={disabled || busy || loading} onClick={recover}>Check saved brief</button>}
   </section>
 }

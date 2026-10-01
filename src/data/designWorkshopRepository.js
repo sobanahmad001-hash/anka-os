@@ -268,6 +268,7 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
     direction_version_id: directionVersionId,
     ...(cursor ? { before_created_at: cursor.created_at, before_id: cursor.id } : {}),
   }),
+  getVideoJobBrief:jobId=>invoke('get_video_job_brief',{job_id:jobId}),
   getVideoJob: jobId => invoke('get_video_job', { job_id: jobId }),
   previewVideoPromotion: input => invoke('preview_video_promotion', input),
   promotePrivateVideo: input => invoke('promote_private_video', input),

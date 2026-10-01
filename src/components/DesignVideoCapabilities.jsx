@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {useAuth} from '../context/AuthContext.jsx'
+import DesignVideoBriefEditor from './DesignVideoBriefEditor.jsx'
+import {videoBriefPrompt} from '../../supabase/functions/_shared/designVideoBrief.js'
 import { SEEDANCE, videoResolutionOptions } from '../data/designMediaCapabilities.js'
 import { canSubmitVideo, videoQuoteDisplay } from '../data/designVideoQuoteTransport.js'
 import { designWorkshop } from '../data/designWorkshopRepository.js'
@@ -11,14 +14,16 @@ const UNSETTLED_VIDEO_STATUSES = new Set(['queued', 'claimed', 'provider_pending
 
 export default function DesignVideoCapabilities({ directionVersionId, privateConversationId, beforeGenerate, onNavigationBusyChange, onDraftDirtyChange, presentation }) {
   const { activeOrganizationId, scopeRevision } = useOrganization()
+  const {user}=useAuth()
   return <ScopedDesignVideoCapabilities
-    key={`${activeOrganizationId}:${scopeRevision}:${directionVersionId || ''}:${privateConversationId || ''}`}
+    key={`${user?.id}:${activeOrganizationId}:${scopeRevision}:${directionVersionId || ''}:${privateConversationId || ''}`}
     directionVersionId={directionVersionId} privateConversationId={privateConversationId} beforeGenerate={beforeGenerate} onNavigationBusyChange={onNavigationBusyChange} onDraftDirtyChange={onDraftDirtyChange} presentation={presentation} />
 }
 
 // eslint-disable-next-line no-unused-vars -- This config does not count JSX component references.
 function ScopedDesignVideoCapabilities({ directionVersionId: projectDirectionVersionId, privateConversationId, beforeGenerate, onNavigationBusyChange, onDraftDirtyChange, presentation }) {
   const { activeOrganizationId, requestSignal, scopeRevision } = useOrganization()
+  const {user}=useAuth()
   const privateMode = Boolean(privateConversationId)
   // One real anchor only. A private conversation is never a fabricated project direction.
   const directionVersionId = privateMode ? (projectDirectionVersionId ? '' : privateConversationId) : projectDirectionVersionId
@@ -48,7 +53,12 @@ function ScopedDesignVideoCapabilities({ directionVersionId: projectDirectionVer
   const [connectionId, setConnectionId] = useState('')
   const [connectionError, setConnectionError] = useState('')
   const [prompt, setPrompt] = useState('')
-  useEffect(() => { onDraftDirtyChange?.(Boolean(prompt.trim())); return () => onDraftDirtyChange?.(false) }, [prompt, onDraftDirtyChange])
+  const [confirmedBrief,setConfirmedBrief]=useState(null),[briefBusy,setBriefBusy]=useState(false),[briefDirty,setBriefDirty]=useState(false),[jobBriefs,setJobBriefs]=useState({})
+  useEffect(() => {onDraftDirtyChange?.(briefDirty);return ()=>onDraftDirtyChange?.(false)},[briefDirty,onDraftDirtyChange])
+  const briefSettings=useMemo(()=>({mode,duration_seconds:duration,resolution,aspect_ratio:aspectRatio,output_format:format,generate_audio:audio}),[mode,duration,resolution,aspectRatio,format,audio])
+  const briefContext=useMemo(()=>privateMode ? {private_conversation_id:privateConversationId} : {direction_version_id:directionVersionId},[privateMode,privateConversationId,directionVersionId])
+  const restoreBriefSettings=useCallback(value=>{setMode(value.mode);setResolution(value.resolution);setDuration(value.duration_seconds);setAspectRatio(value.aspect_ratio);setFormat(value.output_format);setAudio(value.generate_audio)},[])
+  const completePrompt=confirmedBrief ? videoBriefPrompt(confirmedBrief.version.content.video_brief) : ''
   const [spendConfirmed, setSpendConfirmed] = useState(false)
   const [submitBusy, setSubmitBusy] = useState(false)
   const [submitNotice, setSubmitNotice] = useState('')
@@ -67,12 +77,12 @@ function ScopedDesignVideoCapabilities({ directionVersionId: projectDirectionVer
   const [promotionBusy, setPromotionBusy] = useState({})
   const privateUnsettled = Boolean(privateConversationId && jobs.some(job => UNSETTLED_VIDEO_STATUSES.has(job.status)))
   const reportPromotion = useCallback((busy, jobId) => setPromotionBusy(current => current[jobId] === busy ? current : { ...current, [jobId]: busy }), [])
-  useEffect(() => { onNavigationBusyChange?.(Boolean(submitBusy || jobsBusy || pendingRequest || privateUnsettled || Object.values(promotionBusy).some(Boolean))) }, [submitBusy, jobsBusy, pendingRequest, privateUnsettled, promotionBusy, onNavigationBusyChange])
+  useEffect(() => { onNavigationBusyChange?.(Boolean(briefBusy || submitBusy || jobsBusy || pendingRequest || privateUnsettled || Object.values(promotionBusy).some(Boolean))) }, [briefBusy,submitBusy, jobsBusy, pendingRequest, privateUnsettled, promotionBusy, onNavigationBusyChange])
   useEffect(() => () => { sequence.current++; jobsSequence.current++ }, [])
   useEffect(() => {
     let active = true
     setConnections([]); setConnectionId(''); setConnectionError('')
-    setPrompt(''); setResult(null); setSubmitNotice(''); setSubmitBusy(false)
+    setResult(null); setSubmitNotice(''); setSubmitBusy(false)
     setSpendConfirmed(false); submission.current = { signature: '', operationKey: '' }
     if (!activeOrganizationId || requestSignal?.aborted) return
     integrations.listForOrganization(activeOrganizationId, null, { signal: requestSignal })
@@ -115,9 +125,12 @@ function ScopedDesignVideoCapabilities({ directionVersionId: projectDirectionVer
   const paidExecutionEnabled = current?.data?.paid_execution_enabled === true
   const selectedConnection = connections.find(connection => connection.id === connectionId)
   const hasUnsettledJob = jobs.some(job => UNSETTLED_VIDEO_STATUSES.has(job.status))
-  const canSubmit = Boolean(studio && directionVersionId && jobsLoaded && !hasUnsettledJob && !pendingRequest && !submitBusy && !jobsBusy
+  const canSubmit = Boolean(confirmedBrief && !briefBusy && studio && directionVersionId && jobsLoaded && !hasUnsettledJob && !pendingRequest && !submitBusy && !jobsBusy
     && !requestSignal?.aborted && canSubmitVideo({ display, connection: selectedConnection,
-      prompt, supported, spendConfirmed }))
+      prompt:completePrompt, supported, spendConfirmed }))
+  useEffect(()=>{if(!pendingRequest && !submitInFlight.current){setSpendConfirmed(false);submission.current={signature:'',operationKey:''}}},[confirmedBrief?.version.id,completePrompt,pendingRequest])
+  const intentKey=JSON.stringify([key,connectionId,display?.quoteId,confirmedBrief?.version.id,completePrompt])
+  const submitGuard=useRef(null);submitGuard.current={canSubmit,intentKey}
   const expires = current?.data?.quote?.valid_until
   useEffect(() => {
     const delay = Date.parse(expires) - Date.now()
@@ -126,7 +139,7 @@ function ScopedDesignVideoCapabilities({ directionVersionId: projectDirectionVer
     return () => clearTimeout(timer)
   }, [expires])
   function edit(setter, value) {
-    if (submitInFlight.current || pendingRequest) return
+    if (submitInFlight.current || pendingRequest || briefBusy) return
     sequence.current++; setResult(null); setSpendConfirmed(false)
     submission.current = { signature: '', operationKey: '' }
     setter(value)
@@ -145,11 +158,12 @@ function ScopedDesignVideoCapabilities({ directionVersionId: projectDirectionVer
   }
   async function submitVideo(event, reconcile = false) {
     event.preventDefault()
-    if ((!canSubmit && !(reconcile && pendingRequest && studio && !requestSignal?.aborted)) || submitInFlight.current) return
+    if (((!submitGuard.current.canSubmit || submitGuard.current.intentKey!==intentKey) && !(reconcile && pendingRequest && studio && !requestSignal?.aborted)) || submitInFlight.current) return
     submitInFlight.current = true
-    const exactPrompt = prompt.trim()
+    const exactPrompt = reconcile && pendingRequest ? pendingRequest.prompt : completePrompt
+    const exactBriefVersionId=reconcile && pendingRequest ? pendingRequest.creative_brief_version_id : confirmedBrief?.version.id
     const signature = JSON.stringify([activeOrganizationId, directionVersionId, mode,
-      input, connectionId, display?.quoteId, exactPrompt])
+      input, connectionId, display?.quoteId, exactBriefVersionId,exactPrompt])
     const operationKey = submission.current.signature === signature
       ? submission.current.operationKey : crypto.randomUUID()
     submission.current = { signature, operationKey }
@@ -158,7 +172,7 @@ function ScopedDesignVideoCapabilities({ directionVersionId: projectDirectionVer
     try {
       if (!privateMode || !reconcile) await beforeGenerate?.(directionVersionId)
       if (requestSignal?.aborted || jobsSequence.current !== attempt) return
-      const exactRequest = pendingRequest || { ...input, mode, prompt: exactPrompt,
+      const exactRequest = pendingRequest || { ...input, mode, prompt: exactPrompt,creative_brief_version_id:exactBriefVersionId,
         connector_connection_id: connectionId, quote_id: display.quoteId,
         operation_key: operationKey }
       setPendingRequest(exactRequest)
@@ -202,7 +216,8 @@ function ScopedDesignVideoCapabilities({ directionVersionId: projectDirectionVer
     const currentScope = () => jobsSequence.current === attempt && !requestSignal?.aborted
     setJobsBusy(job.id); setJobsError('')
     try {
-      if (action === 'preview') {
+      if(action==='brief'){const binding=await studio.getVideoJobBrief(job.id);if(currentScope())setJobBriefs(current=>({...current,[job.id]:binding}))}
+      else if (action === 'preview') {
         const signed = await studio.signVideoOutput(job.id)
         if (currentScope()) setPreview({ jobId: job.id, url: signed.signed_url, expiresAt: Date.now() + 60000 })
       } else {
@@ -241,7 +256,7 @@ function ScopedDesignVideoCapabilities({ directionVersionId: projectDirectionVer
   }, [preview])
   const connectionPicker = <label className="block">Verified organization video connection
         <select className="mt-1 w-full rounded bg-slate-900 p-2" value={connectionId}
-          disabled={submitBusy || Boolean(pendingRequest)} onChange={event => {
+          disabled={briefBusy || submitBusy || Boolean(pendingRequest)} onChange={event => {
             setConnectionId(event.target.value); setSpendConfirmed(false)
             submission.current = { signature: '', operationKey: '' }
           }}>
@@ -258,7 +273,7 @@ function ScopedDesignVideoCapabilities({ directionVersionId: projectDirectionVer
     </section>}
     <p className="mt-2">Higgsfield Seedance 2.5 supports 480p and 720p. Google media is not configured. Maximum USD $2 per generated video; this limit does not authorize spending.</p>
     {privateMode && connectionPicker}
-    <fieldset disabled={submitBusy || Boolean(pendingRequest)} className="mt-3 flex flex-wrap gap-3">
+    <fieldset disabled={briefBusy || submitBusy || Boolean(pendingRequest)} className="mt-3 flex flex-wrap gap-3">
       <label>Mode <select className="rounded bg-slate-900 p-2" value={mode} onChange={event => { edit(setMode, event.target.value); setResolution('') }}>
         <option value="explore">Explore</option><option value="production">Production</option>
       </select></label>
@@ -282,20 +297,19 @@ function ScopedDesignVideoCapabilities({ directionVersionId: projectDirectionVer
       </> : <p>No current quote checked for these settings.</p>}
       <p>{paidExecutionEnabled ? 'Paid execution is enabled on the server; a verified connection, spend tracking, exact quote, and explicit confirmation are still required.' : 'Paid execution is disabled. Checking a quote makes no provider request.'}</p>
     </div>
+    {studio && user?.id && directionVersionId && <DesignVideoBriefEditor studio={studio} context={briefContext} actorId={user.id} organizationId={activeOrganizationId} settings={briefSettings} script={prompt} onScriptChange={setPrompt} onRestoreSettings={restoreBriefSettings} onConfirmed={setConfirmedBrief} onNavigationBusyChange={setBriefBusy} onDraftDirtyChange={setBriefDirty} disabled={submitBusy || Boolean(pendingRequest) || Boolean(jobsBusy)} />}
     <form onSubmit={submitVideo} className="mt-3 space-y-3 rounded-lg border border-white/10 p-3">
       <p className="font-semibold text-slate-200">Prepare one exact video request</p>
-      <label className="block">Prompt
+      <label className="block">Confirmed complete provider prompt
         <textarea aria-label="Video prompt" className="mt-1 w-full rounded bg-slate-900 p-2 text-white" rows="4" maxLength={12000}
-          value={prompt} disabled={submitBusy || Boolean(pendingRequest)} onChange={event => {
-            setPrompt(event.target.value); setSpendConfirmed(false)
-            submission.current = { signature: '', operationKey: '' }
-          }} />
+          value={completePrompt} readOnly />
       </label>
+      {!confirmedBrief && <p role="status">Generate requires the exact currently confirmed video brief. Complete the fields and preview above.</p>}
       {!privateMode && connectionPicker}
       {connectionError && <p role="alert" className="text-amber-300">{connectionError}</p>}
       {!connections.length && !connectionError && <p>No verified organization-only Higgsfield connection is available.</p>}
       <label className="flex items-start gap-2"><input type="checkbox" checked={spendConfirmed}
-        disabled={submitBusy || !display?.paidExecutionEnabled || display?.status !== 'quoted'
+        disabled={briefBusy || submitBusy || !confirmedBrief || !display?.paidExecutionEnabled || display?.status !== 'quoted'
           || display?.spendTrackingMissing !== false || !selectedConnection}
         onChange={event => setSpendConfirmed(event.target.checked)} />
         <span>I approve sending this video prompt and exact settings to Higgsfield Seedance 2.5 through {selectedConnection?.display_name || 'the selected video connection'} for one request with a maximum charge of USD ${display?.status === 'quoted' ? display.maximum : '—'}. {display?.spendGuardMode === 'local_monthly_cap' ? 'The organization monthly cap also applies.' : display?.spendGuardMode === 'provider_managed' ? 'Your provider-side limit is managed externally and is not verified by Anka.' : 'Organization spend tracking is required.'}</span>
@@ -315,6 +329,8 @@ function ScopedDesignVideoCapabilities({ directionVersionId: projectDirectionVer
       {jobs.map(job => <div key={job.id} className="mt-2 rounded-lg border border-white/10 p-2">
         <p className="font-medium text-slate-200">{job.mode} · {job.duration_seconds}s · {job.resolution} · {job.status.replaceAll('_', ' ')}</p>
         <p className="mt-1">Started {new Date(job.created_at).toLocaleString()}</p>
+        {jobBriefs[job.id] && <p>{jobBriefs[job.id].creative_brief_version_id ? `Exact brief version ${jobBriefs[job.id].creative_brief_version_id}` : 'Historical job · no confirmed brief binding recorded'}</p>}
+        {studio?.getVideoJobBrief && <button type="button" disabled={Boolean(jobsBusy)} onClick={()=>actOnJob(job,'brief')}>Inspect exact brief version</button>}
         {job.status === 'outcome_unknown' && <p className="mt-1 text-amber-300">The provider outcome needs manual reconciliation. This request will not be submitted again.</p>}
         {job.status === 'provider_completed' && <p className="mt-1">The provider completed the original request. Save its checked output to private storage.</p>}
         <div className="mt-2 flex flex-wrap gap-2">

@@ -33,3 +33,21 @@ export async function confirmVideoBrief(admin:any,body:Json,actorId:string) {
  if(error)failure(error)
  return data
 }
+
+export async function getVideoJobBrief(admin:any,body:Json,actorId:string) {
+ if(Object.keys(body).some(key=>!['action','organization_id','job_id'].includes(key)))throw Object.assign(new Error('Exact video job only is required'),{status:400})
+ const {data,error}=await admin.rpc('get_design_video_job_brief_binding',{p_organization_id:identity(admin.organizationId,'Organization'),p_job_id:identity(body.job_id,'Original video job'),p_actor_id:identity(actorId,'Current actor')})
+ if(error)failure(error)
+ return data
+}
+
+// Provider-free reservation boundary: only the server-owned actor and explicit exact request are forwarded.
+export async function reserveConfirmedVideoJob(admin:any,body:Json,actorId:string) {
+ const context=scope(admin,body,actorId)
+ const {data,error}=await admin.rpc('create_confirmed_design_video_job',{...context,
+  p_creative_brief_version_id:identity(body.creative_brief_version_id,'Confirmed video brief version'),
+  p_connector_connection_id:identity(body.connector_connection_id,'Video connection'),p_quote_id:identity(body.quote_id,'Exact quote'),p_operation_key:identity(body.operation_key,'Original video operation'),
+  p_prompt:body.prompt,p_mode:body.mode,p_duration_seconds:body.duration_seconds,p_resolution:body.resolution,p_aspect_ratio:body.aspect_ratio,p_output_format:body.output_format,p_generate_audio:body.generate_audio})
+ if(error || !data?.job_id || !data?.request_checksum || data.creative_brief_version_id!==body.creative_brief_version_id || typeof data.brief_checksum!=='string' || !/^[0-9a-f]{64}$/.test(data.brief_checksum)) throw Object.assign(new Error('Exact confirmed video job could not be recorded'),{status:503})
+ return data
+}

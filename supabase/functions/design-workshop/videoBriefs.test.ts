@@ -1,6 +1,6 @@
 import {designWorkshopScope,hasWorkshopAuthority} from './index.ts'
 import {assertEquals,assertRejects,assertThrows} from 'jsr:@std/assert@1.0.14'
-import {confirmVideoBrief,getVideoBrief,videoBriefContext} from './videoBriefs.ts'
+import {confirmVideoBrief,getVideoBrief,getVideoJobBrief,reserveConfirmedVideoJob,videoBriefContext} from './videoBriefs.ts'
 import {emptyVideoBrief} from '../_shared/designVideoBrief.js'
 const org='a0000000-0000-4000-8000-000000000001',actor='a0000000-0000-4000-8000-000000000002',conversation='a0000000-0000-4000-8000-000000000003',operation='a0000000-0000-4000-8000-000000000004'
 const brief={...emptyVideoBrief(),purpose:'Explain launch',audience:'Clients',channel:'Organic social',assets:'None',script_storyboard:'Product then benefits',brand_constraints:'No unlicensed marks',required_text:'None'}
@@ -35,4 +35,14 @@ Deno.test('canonical video actions preserve Design team gates and caller-readabl
   assertEquals(await designWorkshopScope(client,{action,organization_id:org,direction_version_id:conversation}),{root:{kind:'engagement',id:'engagement'},requestedOrganizationId:org})
   rows.design_directions.organization_id=actor;await assertRejects(()=>designWorkshopScope(client,{action,organization_id:org,direction_version_id:conversation}))
  }
+})
+
+Deno.test('Generate reservation pins an exact canonical version and forwards no client actor/history; job binding reads remain scoped',async()=>{
+ const calls:any[]=[],version='a0000000-0000-4000-8000-000000000021',job='a0000000-0000-4000-8000-000000000022'
+ const admin={organizationId:org,rpc:async(name:string,args:any)=>{calls.push({name,args});return {data:name==='create_confirmed_design_video_job' ? {job_id:job,request_checksum:'a'.repeat(64),creative_brief_version_id:version,brief_checksum:'b'.repeat(64)} : {creative_brief_version_id:version,brief_checksum:'b'.repeat(64)},error:null}}}
+ const input={private_conversation_id:conversation,creative_brief_version_id:version,connector_connection_id:operation,quote_id:operation,operation_key:operation,prompt:'Exact full canonical prompt',mode:'explore',duration_seconds:5,resolution:'720p',aspect_ratio:'16:9',output_format:'mp4',generate_audio:false,actor_id:'spoof',history:['never forward'],attachments:['never forward']}
+ await reserveConfirmedVideoJob(admin,input,actor);assertEquals(calls[0].name,'create_confirmed_design_video_job');assertEquals(calls[0].args.p_actor_id,actor);assertEquals(calls[0].args.p_organization_id,org);assertEquals(calls[0].args.p_creative_brief_version_id,version);assertEquals(calls[0].args.history,undefined);assertEquals(calls[0].args.attachments,undefined);assertEquals(calls[0].args.actor_id,undefined)
+ await getVideoJobBrief(admin,{job_id:job},actor);assertEquals(calls[1],{name:'get_design_video_job_brief_binding',args:{p_organization_id:org,p_job_id:job,p_actor_id:actor}})
+ await assertRejects(()=>reserveConfirmedVideoJob(admin,{...input,creative_brief_version_id:undefined},actor));assertEquals(calls.length,2)
+ const wrong={...admin,rpc:async()=>({data:{job_id:job,request_checksum:'a'.repeat(64),creative_brief_version_id:operation,brief_checksum:'b'.repeat(64)},error:null})};await assertRejects(()=>reserveConfirmedVideoJob(wrong,input,actor))
 })
