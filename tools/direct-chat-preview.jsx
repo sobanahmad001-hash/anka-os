@@ -15,7 +15,7 @@ import PipelineRunIntentPanel from '../src/components/PipelineRunIntentPanel.jsx
 import DesignVideoBriefEditor from '../src/components/DesignVideoBriefEditor.jsx'
 import {emptyVideoBrief} from '../supabase/functions/_shared/designVideoBrief.js'
 import ContextConversationPanel from '../src/components/ContextConversationPanel.jsx'
-import { actor, organizationId, threadId, requestId, dispatchId, humanId, createDirectChatFixture, createPipelinePreviewFixture, createWebsitePagePreviewFixture,createReportingBindingsPreviewFixture,createCampaignPlanningPreviewFixture,createCampaignPlanPreviewFixture,createMarketingOpportunityPreviewFixture,createCampaignDeliverablePreviewFixture } from './direct-chat-fixture.js'
+import { actor, organizationId, threadId, requestId, dispatchId, humanId, createDirectChatFixture, createPipelinePreviewFixture, createWebsitePagePreviewFixture,createReportingBindingsPreviewFixture,createCampaignPlanningPreviewFixture,createCampaignPlanPreviewFixture,createMarketingOpportunityPreviewFixture,createCampaignDeliverablePreviewFixture,createStoredReportingPreviewFixture } from './direct-chat-fixture.js'
 import { clearDirectChatDraft } from '../src/data/directChatDraft.js'
 import { directChatRecoveryKey, writeDirectChatRecovery } from '../src/data/directChatRecovery.js'
 import { browserStorage, writeThemePreference } from '../src/data/themePreference.js'
@@ -37,7 +37,7 @@ globalThis.__directChatPreview = { fixture, pipeline:createPipelinePreviewFixtur
 
 
 globalThis.__directChatPreview.campaign=params.get('deliveryPlan')==='1'?createCampaignDeliverablePreviewFixture():params.get('opportunities')==='1'?createMarketingOpportunityPreviewFixture():params.get('planEditor')==='1'?createCampaignPlanPreviewFixture():createCampaignPlanningPreviewFixture()
-globalThis.__directChatPreview.reporting=createReportingBindingsPreviewFixture()
+globalThis.__directChatPreview.reporting=params.get('storedReport')==='1'?createStoredReportingPreviewFixture():createReportingBindingsPreviewFixture()
 globalThis.__directChatPreview.website=createWebsitePagePreviewFixture({siteFindings:params.get('siteFindings')==='1'})
 if(params.get('panel')==='website-pages')globalThis.__directChatPreview.pipeline.repository.listStageArtifacts=globalThis.__directChatPreview.website.sourceRepository.listStageArtifacts
 
