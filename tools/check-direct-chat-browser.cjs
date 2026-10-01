@@ -83,6 +83,25 @@ async function drawerAssertions(page, label, opener) {
   assert(await opener.evaluate(node => document.activeElement === node), 'Escape did not restore opener focus')
   return { initialFocus: true, shiftTabContained: true, tabContained: true, escapeClosed: true, openerFocusRestored: true }
 }
+async function websiteSiteFindingsAssertions(browser){
+ const results=[]
+ for(const [width,theme] of [[1440,'light'],[390,'dark']]){
+  const context=await browser.newContext({viewport:{width,height:900},colorScheme:theme}),page=await context.newPage(),errors=[],blocked=[];page.setDefaultTimeout(15000)
+  page.on('pageerror',error=>errors.push(error.message));await page.route('**/*',route=>{const u=new URL(route.request().url());if(u.hostname==='127.0.0.1'&&u.port==='5188')return route.continue();blocked.push(u.origin);return route.abort()})
+  await page.goto(`${base}?panel=website-pages&siteFindings=1&theme=${theme}`);await page.getByRole('button',{name:'Find approved architectures',exact:true}).click();const version=await page.evaluate(()=>globalThis.__directChatPreview.website.versionId);await page.getByLabel('Website approved architecture',{exact:true}).selectOption(version)
+  const panel=page.getByRole('region',{name:'Website site findings',exact:true}),screenshots=[];assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.website.siteFindingsRepository.calls.length),0)
+  await panel.getByRole('button',{name:'Load site findings',exact:true}).click();await panel.getByText('1–25 of 26 findings · 26 total',{exact:true}).waitFor();assert.match(await panel.textContent(),/Planned pages101/);assert.match(await panel.textContent(),/Registered pages2/);assert.match(await panel.textContent(),/Pages with manual checks2/);assert.match(await panel.textContent(),/Registered pages without checks0/)
+  async function capture(kind,locator){await locator.scrollIntoViewIfNeeded();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));const filename=`b4-website-site-findings-${kind}-${theme}-${width}x900.png`;await page.screenshot({path:path.join(output,filename)});screenshots.push(filename)}
+  await capture('overview',panel.getByRole('heading',{name:'Site findings · manual page evidence',exact:true}));await panel.getByRole('button',{name:'Next site findings',exact:true}).click();await panel.getByText('26–26 of 26 findings · 26 total',{exact:true}).waitFor();assert.match(await panel.textContent(),/Service page 2/);await capture('page',panel.locator('article').first())
+  await panel.getByRole('button',{name:'Previous site findings',exact:true}).click();await panel.getByRole('button',{name:'Open page evidence',exact:true}).first().click();const seo=page.getByRole('region',{name:'Website page SEO observations',exact:true});await seo.getByRole('heading',{name:'SEO observations · Welcome',exact:true}).waitFor();assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.website.seoRepository.calls.length),0)
+  await seo.getByRole('button',{name:'Load manual check history',exact:true}).click();const history=seo.getByRole('region',{name:'Manual page check history',exact:true});await history.getByText('Retained manual site findings in the original page history',{exact:true}).waitFor();assert.match(await history.textContent(),/Manual finding 1/);assert.match(await history.textContent(),/Implementation changed/);await capture('history',history.locator('article').first());await seo.getByRole('button',{name:'Close SEO observations',exact:true}).click()
+  await panel.getByLabel('Site finding search',{exact:true}).fill('no matching finding');await panel.getByRole('button',{name:'Load site findings',exact:true}).click();await panel.getByText('No manual findings match this view. Missing provider measurements remain unknown.',{exact:true}).waitFor();await panel.getByLabel('Site finding search',{exact:true}).fill('');await page.evaluate(()=>globalThis.__directChatPreview.website.siteFindingsRepository.setUnavailable());await panel.getByRole('button',{name:'Load site findings',exact:true}).click();await panel.getByText('Unknown',{exact:true}).waitFor();assert.match(await panel.textContent(),/Retained manual findings remain visible/)
+  const stats=await page.evaluate(()=>({pageWrites:globalThis.__directChatPreview.website.calls.length,checkWrites:globalThis.__directChatPreview.website.versionChecksRepository.calls.filter(c=>c.kind==='confirm').length,overflow:document.documentElement.scrollWidth>innerWidth}));assert.deepEqual(stats,{pageWrites:0,checkWrites:0,overflow:false});assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
+  results.push({theme,viewport:{width,height:900},zeroInitialReads:true,coverageCountersIndependent:true,boundedPagination:true,canonicalPageAndOriginalCheckDrillDown:true,retainedHistoryConsistent:true,emptyFilterAndUnavailableSourceDistinct:true,noProviderRequestsOrWrites:true,noHorizontalOverflow:true,pageErrors:errors,blockedRemoteRequests:blocked,screenshots});await context.close()
+ }
+ const packet=path.join(output,'b2-service-native-evidence.json'),evidence=JSON.parse(await fs.readFile(packet,'utf8'));evidence.pageIdentity.siteFindings.browser={source:'tools/check-direct-chat-browser.cjs --website-site-findings',scope:'Actual site/manual-page-history views in shared Layout; common synthetic page/check fixtures; no human/provider/production acceptance',results};await fs.writeFile(packet,JSON.stringify(evidence,null,2)+'\n');console.log(JSON.stringify({websiteSiteFindingsPassed:results.length,evidence:packet}))
+}
+
 async function websiteManualCheckAssertions(browser){
  const results=[]
  for(const [width,theme] of [[1440,'light'],[390,'dark']]){
@@ -655,6 +674,7 @@ async function pipelineInputAssertions(browser){
     if (process.argv.includes('--wider-direct')) {await widerDirectAssertions(browser);return}
     if (process.argv.includes('--engagement-first-send')) { await engagementFirstSendAssertions(browser); return }
     if (process.argv.includes('--shared-chat')) { await sharedChatAssertions(browser); return }
+    if(process.argv.includes('--website-site-findings')){await websiteSiteFindingsAssertions(browser);return}
     if(process.argv.includes('--website-manual-check')){await websiteManualCheckAssertions(browser);return}
     if(process.argv.includes('--website-seo')){await websiteSeoAssertions(browser);return}
     if(process.argv.includes('--website-editor')){await websiteEditorAssertions(browser);return}

@@ -1,3 +1,4 @@
+import _WebsiteSiteFindingsPanel from './WebsiteSiteFindingsPanel.jsx'
 import _WebsitePageSeoObservationsPanel from './WebsitePageSeoObservationsPanel.jsx'
 import {useEffect,useRef,useState} from 'react'
 import _WebsitePageEditor from './WebsitePageEditor.jsx'
@@ -88,6 +89,7 @@ function ScopedWebsitePages({organizationId,engagement,group,actorId,signal}){
    {sourcePage.offset>0 && <button type="button" className="workspace-button" onClick={()=>findSources(Math.max(0,sourcePage.offset-25))}>Previous architecture results</button>}{sourcePage.has_more && <button type="button" className="workspace-button" onClick={()=>findSources(sourcePage.offset+25)}>Next architecture results</button>}
   </fieldset>
   {busy && <p role="status" className="text-xs text-[var(--anka-muted)]">Checking exact current project records…</p>}
+  {versionId && <_WebsiteSiteFindingsPanel key={versionId} organizationId={organizationId} projectId={engagement.project_id} engagementId={engagement.id} architectureVersionId={versionId} signal={signal} disabled={isLocked} onOpenPage={(row,selectedVersion)=>{if(locked()||selectedVersion!==latest.current.versionId||row.organization_id!==organizationId||row.project_id!==engagement.project_id||row.engagement_id!==engagement.id||!UUID.test(row.page_id||''))return;setSeo({row:{page_id:row.page_id,source:{title:row.page_title}},versionId:selectedVersion});setReview(null);setHistory(null)}}/>}
   {seo && <_WebsitePageSeoObservationsPanel key={seo.row.page_id+':'+seo.versionId} organizationId={organizationId} projectId={engagement.project_id} engagementId={engagement.id} pageId={seo.row.page_id} architectureVersionId={seo.versionId} pageTitle={seo.row.source.title} actorId={actorId} signal={signal} onNavigationBusyChange={value=>{if(allowed()&&latest.current.seo===seo){latest.current.seoBlocked=value;setSeoBlocked(value)}}} onClose={()=>{if(allowed()&&!latest.current.seoBlocked&&latest.current.seo===seo){latest.current.seo=null;setSeo(null)}}}/> }
   {editor && <_WebsitePageEditor key={editor.page.id} context={editor} disabled={busy || Boolean(pending)} isActive={editorActive} onLookup={lookupEditor} onConfirm={confirmEditor} onClose={()=>{if(editorActive(editor))setEditor(null)}} />}
   {data && <>

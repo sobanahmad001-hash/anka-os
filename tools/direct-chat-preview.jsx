@@ -38,7 +38,7 @@ globalThis.__directChatPreview = { fixture, pipeline:createPipelinePreviewFixtur
 
 globalThis.__directChatPreview.campaign=createCampaignPlanningPreviewFixture()
 globalThis.__directChatPreview.reporting=createReportingBindingsPreviewFixture()
-globalThis.__directChatPreview.website=createWebsitePagePreviewFixture()
+globalThis.__directChatPreview.website=createWebsitePagePreviewFixture({siteFindings:params.get('siteFindings')==='1'})
 if(params.get('panel')==='website-pages')globalThis.__directChatPreview.pipeline.repository.listStageArtifacts=globalThis.__directChatPreview.website.sourceRepository.listStageArtifacts
 
 if(params.get('panel')==='stage-inputs'){
