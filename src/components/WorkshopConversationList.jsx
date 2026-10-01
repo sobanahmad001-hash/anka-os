@@ -7,8 +7,9 @@ export default function WorkshopConversationList(props) {
   return <ExactConversationList {...props} />
 }
 
-function ProjectConversationGroups({ engagements, workstreams, ...props }) {
-  const [expanded, setExpanded] = useState({})
+function ProjectConversationGroups({ engagements, workstreams, activeEngagementId, ...props }) {
+  const [expanded, setExpanded] = useState(() => activeEngagementId ? { [activeEngagementId]: true } : {})
+  useEffect(() => { if (activeEngagementId) setExpanded(state => ({ ...state, [activeEngagementId]: true })) }, [activeEngagementId])
   const projects = [...new Set(engagements.map(row => row.project_id))]
   return <aside aria-label="Workshop saved conversations" className="space-y-3">
     <h3 className="font-semibold">Saved conversations</h3>
@@ -28,7 +29,7 @@ function ExactConversationList(props) {
   return <ScopedWorkshopConversationList key={identity} {...props} />
 }
 
-function ScopedWorkshopConversationList({ organizationId, actorId, scopeRevision: _scopeRevision, departmentId, engagement, engagementOnly = false, signal, onOpen, refreshKey = 0 }) {
+function ScopedWorkshopConversationList({ organizationId, actorId, scopeRevision: _scopeRevision, departmentId, engagement, engagementOnly = false, signal, onOpen, refreshKey = 0, compact = false, navigationBusy = false }) {
   const [query, setQuery] = useState('')
   const serverQuery = engagementOnly ? query : ''
   const scope = useMemo(() => ({ organizationId, actorId, departmentId, engagement, signal, query: serverQuery }), [organizationId, actorId, departmentId, engagement, signal, serverQuery])
@@ -69,18 +70,18 @@ function ScopedWorkshopConversationList({ organizationId, actorId, scopeRevision
     .sort((a, b) => String(b.row.last_activity_at || '').localeCompare(String(a.row.last_activity_at || '')) || a.key.localeCompare(b.key))
   const visible = items.filter(item => matchesWorkshopConversation(item, scope)).filter(item => engagementOnly || String(item.row.title || '').toLowerCase().includes(query.toLowerCase()))
   return <aside aria-label="Workshop saved conversations" className="min-w-0 space-y-3 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4">
-    <h3 className="font-semibold">Saved conversations</h3>
-    <p className="text-xs text-[var(--anka-muted)]">{engagementOnly ? engagement.name : engagement ? `Private exploration + ${engagement.name}` : 'Private exploration · Only you'}. Histories stay separate.</p>
+    {!compact && <h3 className="font-semibold">Saved conversations</h3>}
+    {!compact && <p className="text-xs text-[var(--anka-muted)]">{engagementOnly ? engagement.name : engagement ? `Private exploration + ${engagement.name}` : 'Private exploration · Only you'}. Histories stay separate.</p>}
     <input aria-label={engagementOnly ? "Search engagement conversations" : "Search loaded conversation titles"} placeholder={engagementOnly ? "Search this engagement" : "Search loaded titles"} value={query} onChange={event => setQuery(event.target.value)} className="w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-2 text-sm" />
-    <p className="text-xs text-[var(--anka-muted)]">{items.length} loaded · {visible.length} {engagementOnly ? 'matching conversations' : 'matching loaded titles'}. Not a total across projects.</p>
-    <button type="button" onClick={() => setReload(value => value + 1)} className="text-sm text-[var(--anka-violet)]">Refresh saved conversations</button>
+    {!compact && <p className="text-xs text-[var(--anka-muted)]">{items.length} loaded · {visible.length} {engagementOnly ? 'matching conversations' : 'matching loaded titles'}. Not a total across projects.</p>}
+    <button type="button" onClick={() => setReload(value => value + 1)} className="text-sm text-[var(--anka-violet)]" aria-label="Refresh saved conversations">{compact ? 'Refresh' : 'Refresh saved conversations'}</button>
     {Object.entries(pages).map(([kind, page]) => <div key={kind}>
       <p className="text-xs text-[var(--anka-muted)]">{kind}: {page.items.length} loaded</p>
       {page.busy && <p role="status" className="text-xs">Loading {kind} conversations…</p>}
       {page.error && <p role="alert" className="text-xs text-[var(--anka-warning)]">{kind}: {page.error}. Refresh to retry.</p>}
       {page.next != null && <button type="button" disabled={page.busy} onClick={() => more(kind)} className="text-xs text-[var(--anka-violet)]">Load more {kind} conversations</button>}
     </div>)}
-    <ul className="space-y-2">{visible.map(item => <li key={item.key}><button type="button" onClick={() => { if (matchesWorkshopConversation(item, scope)) onOpen(item) }} className="w-full rounded-lg border border-[var(--anka-line)] p-3 text-left text-sm">
+    <ul className="space-y-2">{visible.map(item => <li key={item.key}><button type="button" disabled={navigationBusy} onClick={() => { if (matchesWorkshopConversation(item, scope)) onOpen(item) }} className="w-full rounded-lg border border-[var(--anka-line)] p-3 text-left text-sm">
       <span className="block break-words font-medium">{item.row.title || 'Untitled conversation'}</span>
       <span className="mt-1 block text-xs text-[var(--anka-muted)]">{item.kind === 'private' ? 'Private exploration · Only you' : `${engagement.name} · ${item.row.access_role === 'recipient' ? 'Shared with you' : 'Yours · sharing managed in conversation'}`} · {item.row.state || 'active'}</span>
     </button></li>)}</ul>

@@ -1,3 +1,4 @@
+import _ProjectScopedPipelineView from '../components/ProjectScopedPipelineView.jsx'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -14,14 +15,14 @@ import _ProjectReviewEvidencePanel from './ProjectReviewEvidencePanel.jsx'
 import { appendWorkshopNavigation, parseWorkshopNavigation } from '../data/workshopNavigation.js'
 
 const TABS = [
-  ['overview', 'Overview'], ['work', 'Work'], ['discussion', 'Chat'],
+  ['discussion', 'Chat'], ['overview', 'Overview'], ['work', 'Work'],
   ['services', 'Services & Pipelines'], ['outputs', 'Files & Outputs'],
   ['reviews', 'Reviews & Delivery'], ['activity', 'Activity'],
 ]
-const WORK_TABS = [['work', 'All work'], ['project-tasks', 'Project Tasks'], ['engagement-work', 'Engagement Work Items'], ['planning', 'Schedule & Planning']]
+const WORK_TABS = [['work', 'All work'], ['website-work','Website'], ['marketing-work','Marketing'], ['project-tasks', 'Project Tasks'], ['engagement-work', 'Engagement Work Items'], ['planning', 'Schedule & Planning']]
 const SERVICES_TABS = [['services', 'Scope & Services'], ['journey', 'Journey']]
 const primaryTab = id => WORK_TABS.some(([key]) => key === id) || id === 'retainer-planning'
-  ? 'work' : id === 'journey' ? 'services' : id
+  ? 'work' : id === 'journey' ? 'services' : id==='resources' ? 'overview' : id
 const label = (value) => value ? value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) : 'Unknown'
 const date = (value) => value ? new Date(`${value.slice(0, 10)}T00:00:00Z`).toLocaleDateString() : 'Not set'
 const loadFailureKind = (cause) => cause?.membershipMismatch || [401, 403].includes(Number(cause?.status))
@@ -35,23 +36,39 @@ export default function ProjectEngagementWorkspace() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const requestedTab = searchParams.get('tab') ?? 'discussion'
-  const tab = [...TABS, ...WORK_TABS, ...SERVICES_TABS, ['retainer-planning']].some(([id]) => id === requestedTab) ? requestedTab : 'overview'
+  const tab = [...TABS, ...WORK_TABS, ...SERVICES_TABS, ['retainer-planning'], ['resources']].some(([id]) => id === requestedTab) ? requestedTab : 'overview'
   const focusedRecord = parseWorkshopNavigation(searchParams).workRecord
-  const selectTab = (id) => {
+  const allowLeavingCurrentView=()=>{if(navCurrent.current.owner!==navigationOwner)return false;if(navCurrent.current.busy)return false;return !navCurrent.current.dirty||Boolean(globalThis.confirm?.('Leave the current chat draft? Keep working to finish it first.'))}
+  const selectTab = (id,resourceGroupId='') => {
+    if(id===tab && (id!=='resources'||!resourceGroupId||resourceGroupId===searchParams.get('resourceGroupId')))return true
+    if(navCurrent.current.owner===navigationOwner && navCurrent.current.busy)return false
+    if(navCurrent.current.owner===navigationOwner && navCurrent.current.dirty && !globalThis.confirm?.('Leave the current chat draft? Keep working to finish it first.'))return false
     const next = new URLSearchParams(searchParams)
     next.set('tab', id)
+    if(id==='resources'&&resourceGroupId)next.set('resourceGroupId',resourceGroupId)
+    else if(id!=='resources')next.delete('resourceGroupId')
     setSearchParams(next, { replace: true })
+    return true
   }
   const { activeOrganizationId, activeMembership, selectionRequired, loading: organizationLoading, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
+  const navigationOwner=[activeOrganizationId,projectId,scopeRevision].join(':')
+  const navCurrent=useRef({owner:navigationOwner,busy:false,dirty:false})
+  if(navCurrent.current.owner!==navigationOwner)navCurrent.current={owner:navigationOwner,busy:false,dirty:false}
+  const [navigationBusy,setNavigationBusy]=useState({owner:navigationOwner,value:false})
+  const reportNavigationBusy=useCallback(value=>{if(navCurrent.current.owner===navigationOwner){navCurrent.current.busy=Boolean(value);setNavigationBusy({owner:navigationOwner,value:Boolean(value)})}},[navigationOwner])
+  const reportDraftDirty=useCallback(value=>{if(navCurrent.current.owner===navigationOwner)navCurrent.current.dirty=Boolean(value)},[navigationOwner])
   const currentRequest = useRef(null)
   currentRequest.current = { organizationId: activeOrganizationId, revision: scopeRevision, recordId: projectId }
   const requestGeneration = useRef(0)
-  const [workspace, setWorkspace] = useState(null)
+  const [loadedWorkspace, setWorkspace] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [failureKind, setFailureKind] = useState('')
   const [loadedAt, setLoadedAt] = useState(null)
   const [projectChatMode, setProjectChatMode] = useState('team')
+  const workspace=loadedWorkspace?.project.id===projectId && loadedWorkspace?.project.organization_id===activeOrganizationId ? loadedWorkspace : null
+  const reportChatBusy=useCallback(value=>{if(projectChatMode==='private')reportNavigationBusy(value)},[projectChatMode,reportNavigationBusy])
+  const reportChatDirty=useCallback(value=>{if(projectChatMode==='private')reportDraftDirty(value)},[projectChatMode,reportDraftDirty])
 
   const load = useCallback(async () => {
     if (organizationLoading || selectionRequired || !activeOrganizationId || requestSignal?.aborted) return
@@ -120,20 +137,22 @@ export default function ProjectEngagementWorkspace() {
     && (project.engagement_type === 'retainer' || workspace.engagement?.engagement_type === 'retainer')
   const tabs = TABS
   const selectedPrimaryTab = primaryTab(tab)
-  const subTabs = selectedPrimaryTab === 'work' ? [...WORK_TABS, ...(showRetainerPlanning ? [['retainer-planning', 'Recurring Planning']] : [])] : selectedPrimaryTab === 'services' ? SERVICES_TABS : []
+  const subTabs = selectedPrimaryTab === 'work' ? [...WORK_TABS.filter(([id])=>id!=='website-work'&&id!=='marketing-work'||(workspace.pipelineGroups||[]).some(group=>group.kind===(id==='website-work'?'website':'marketing'))), ...(showRetainerPlanning ? [['retainer-planning', 'Recurring Planning']] : [])] : selectedPrimaryTab === 'services' ? SERVICES_TABS : []
+  const isNavigationBusy=navigationBusy.owner===navigationOwner&&navigationBusy.value
   const onTabKeyDown = (event, index) => {
+    if(isNavigationBusy)return
     const keys = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: tabs.length - 1 }
     if (!(event.key in keys)) return
     event.preventDefault()
     const nextIndex = (keys[event.key] + tabs.length) % tabs.length
     const nextTab = tabs[nextIndex][0]
-    selectTab(nextTab)
+    if(selectTab(nextTab)===false)return
     globalThis.requestAnimationFrame?.(() => globalThis.document?.getElementById(`project-tab-${nextTab}`)?.focus())
   }
   return (
     <main className="workspace-page">
       <div className="workspace-container">
-        <button type="button" onClick={() => navigate('/sphere/portfolio')} className="text-sm font-medium text-[var(--anka-muted)] hover:text-[var(--anka-ink)]">← Portfolio Workspace</button>
+        <button type="button" onClick={() => {if(allowLeavingCurrentView())navigate('/sphere/portfolio')}} className="text-sm font-medium text-[var(--anka-muted)] hover:text-[var(--anka-ink)]">← Portfolio Workspace</button>
         <header className="mt-5 flex flex-wrap items-start justify-between gap-5">
           <div className="max-w-4xl">
             <div className="flex flex-wrap items-center gap-2 text-xs"><Pill>{identity.workType}</Pill><Pill>{label(project.engagement_type)}</Pill>{identity.hasEngagement && <Pill>Engagement connected</Pill>}</div>
@@ -141,7 +160,7 @@ export default function ProjectEngagementWorkspace() {
             <p className={`mt-2 text-sm text-[var(--anka-muted)] ${tab === 'discussion' ? 'sr-only' : ''}`}>{[identity.clientName, identity.brandName].filter(Boolean).join(' · ') || (identity.workType === 'Internal Work' ? 'Internal project; no client identity is required.' : 'No client or brand identity is attached.')}</p>
             <p className={`mt-3 max-w-3xl text-sm leading-6 text-[var(--anka-muted)] ${tab === 'discussion' ? 'sr-only' : ''}`}>{project.description || project.scope_statement || 'No project description recorded.'}</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">{identity.hasEngagement && workspace.engagement?.id && <Link to={`/sphere/engagements?engagement=${encodeURIComponent(workspace.engagement.id)}&tab=pipeline&project=${encodeURIComponent(projectId)}`} className="rounded-xl border border-[var(--anka-violet)] px-4 py-2 text-sm text-[var(--anka-violet)]">Open Pipeline</Link>}<button type="button" onClick={load} disabled={loading} className="workspace-button hover:bg-[var(--anka-surface-raised)] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={project.status} /><ProjectDraftActivation project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onActivated={load} onAccessError={handleOrganizationAccessError} /></div>
+          <div className="flex flex-wrap items-center gap-2">{identity.hasEngagement && workspace.engagement?.id && <Link to={`/sphere/engagements?engagement=${encodeURIComponent(workspace.engagement.id)}&tab=pipeline&project=${encodeURIComponent(projectId)}`} onClick={event=>{if(!allowLeavingCurrentView())event.preventDefault()}} className="rounded-xl border border-[var(--anka-violet)] px-4 py-2 text-sm text-[var(--anka-violet)]">Open Pipeline</Link>}<button type="button" onClick={load} disabled={loading||isNavigationBusy} className="workspace-button hover:bg-[var(--anka-surface-raised)] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={project.status} /><ProjectDraftActivation project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onActivated={load} onAccessError={handleOrganizationAccessError} /></div>
         </header>
 
         <ProjectLifecyclePanel key={`${activeOrganizationId}:${project.id}:${scopeRevision}`} project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={(result) => { setWorkspace(current => current ? { ...current, project: { ...current.project, archived_at: result.archived_at } } : current); load() }} onDeleted={() => navigate('/sphere/portfolio')} />
@@ -160,7 +179,7 @@ export default function ProjectEngagementWorkspace() {
         </section>}
 
         <nav role="tablist" aria-label="Project workspace sections" className="mt-7 flex gap-1 overflow-x-auto border-b border-[var(--anka-line)]">
-          {tabs.map(([id, title], index) => <button type="button" role="tab" id={`project-tab-${id}`} aria-selected={selectedPrimaryTab === id} aria-controls="project-workspace-panel" tabIndex={selectedPrimaryTab === id ? 0 : -1} key={id} onClick={() => selectTab(id)} onKeyDown={(event) => onTabKeyDown(event, index)} className={`whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium focus-visible:ring-2 focus-visible:ring-[var(--anka-focus)] ${selectedPrimaryTab === id ? 'border-[var(--anka-violet)] text-[var(--anka-ink)]' : 'border-transparent text-[var(--anka-muted)] hover:text-[var(--anka-ink)]'}`}>{title}</button>)}
+          {tabs.map(([id, title], index) => <button type="button" role="tab" disabled={isNavigationBusy} id={`project-tab-${id}`} aria-selected={selectedPrimaryTab === id} aria-controls="project-workspace-panel" tabIndex={selectedPrimaryTab === id ? 0 : -1} key={id} onClick={() => selectTab(id)} onKeyDown={(event) => onTabKeyDown(event, index)} className={`whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium focus-visible:ring-2 focus-visible:ring-[var(--anka-focus)] ${selectedPrimaryTab === id ? 'border-[var(--anka-violet)] text-[var(--anka-ink)]' : 'border-transparent text-[var(--anka-muted)] hover:text-[var(--anka-ink)]'}`}>{title}</button>)}
         </nav>
 
         {subTabs.length > 0 && <nav aria-label={`${selectedPrimaryTab === 'work' ? 'Work' : 'Services'} views`} className="mt-4 flex flex-wrap gap-2">{subTabs.map(([id, title]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => selectTab(id)} className={`rounded-lg border px-3 py-2 text-sm ${tab === id ? 'border-[var(--anka-violet)] bg-[var(--anka-violet-soft)] text-[var(--anka-violet)]' : 'border-[var(--anka-line)] text-[var(--anka-muted)]'}`}>{title}</button>)}</nav>}
@@ -168,22 +187,23 @@ export default function ProjectEngagementWorkspace() {
           {tab === 'overview' && <Overview workspace={workspace} />}
           {tab === 'services' && <ServicesAndScope workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={load} onAccessError={handleOrganizationAccessError} />}
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
+          {['website-work','marketing-work','resources'].includes(tab)&&<_ProjectScopedPipelineView key={[navigationOwner,tab,searchParams.get('resourceGroupId')||''].join(':')} workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} signal={requestSignal} kind={tab==='website-work'?'website':tab==='marketing-work'?'marketing':undefined} resources={tab==='resources'} initialGroupId={tab==='resources'?searchParams.get('resourceGroupId')||'':''} onOpenResources={groupId=>selectTab('resources',groupId)} onNavigationBusyChange={reportNavigationBusy}/>}
           {tab === 'work' && <WorkViews workspace={workspace} navigate={navigate} searchParams={searchParams} setSearchParams={setSearchParams} />}
           {tab === 'discussion' && <div className="space-y-4">
-            <div className="workspace-card p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--anka-violet)]">{project.name} · Chat</p>
-              <h2 className="mt-1 text-lg font-semibold">Talk with your project team</h2>
-              <p className="mt-1 text-sm leading-5 text-[var(--anka-muted)]">Project activity and private AI conversations are separate. Team messages use the project discussion permissions; AI conversations start private; each owner can choose active internal teammates to share a conversation with.</p>
-              <nav aria-label="Project chat views" className="mt-4 flex flex-wrap gap-2">
-                <button type="button" aria-pressed={projectChatMode === 'team'} onClick={() => setProjectChatMode('team')} className={`rounded-xl border px-4 py-2 text-sm ${projectChatMode === 'team' ? 'border-[var(--anka-violet)] bg-[var(--anka-violet-soft)] text-[var(--anka-violet)]' : 'border-[var(--anka-line)] text-[var(--anka-muted)]'}`}>Team discussion · shared</button>
-                <button type="button" aria-pressed={projectChatMode === 'private'} onClick={() => setProjectChatMode('private')} className={`rounded-xl border px-4 py-2 text-sm ${projectChatMode === 'private' ? 'border-[var(--anka-violet)] bg-[var(--anka-violet-soft)] text-[var(--anka-violet)]' : 'border-[var(--anka-line)] text-[var(--anka-muted)]'}`}>AI conversations</button>
+            <div className={projectChatMode === 'team' ? 'workspace-card p-4' : ''}>
+              {projectChatMode === 'team' && <p className="text-xs font-semibold uppercase tracking-wide text-[var(--anka-violet)]">{project.name} · Chat</p>}
+              {projectChatMode === 'team' && <><h2 className="mt-1 text-lg font-semibold">Talk with your project team</h2>
+              <p className="mt-1 text-sm leading-5 text-[var(--anka-muted)]">Project activity and private AI conversations are separate. Team messages use the project discussion permissions; AI conversations start private; each owner can choose active internal teammates to share a conversation with.</p></>}
+              <nav aria-label="Project chat views" className={`flex flex-wrap gap-2 ${projectChatMode === 'team' ? 'mt-4' : ''}`}>
+                <button type="button" aria-pressed={projectChatMode === 'team'} disabled={isNavigationBusy} onClick={() => {if(!navCurrent.current.busy)setProjectChatMode('team')}} className={`rounded-xl border px-4 py-2 text-sm ${projectChatMode === 'team' ? 'border-[var(--anka-violet)] bg-[var(--anka-violet-soft)] text-[var(--anka-violet)]' : 'border-[var(--anka-line)] text-[var(--anka-muted)]'}`}>Team discussion · shared</button>
+                <button type="button" aria-pressed={projectChatMode === 'private'} disabled={isNavigationBusy} onClick={() => {if(!navCurrent.current.busy)setProjectChatMode('private')}} className={`rounded-xl border px-4 py-2 text-sm ${projectChatMode === 'private' ? 'border-[var(--anka-violet)] bg-[var(--anka-violet-soft)] text-[var(--anka-violet)]' : 'border-[var(--anka-line)] text-[var(--anka-muted)]'}`}>AI conversations</button>
               </nav>
             </div>
             <section hidden={projectChatMode !== 'team'} aria-label="Shared project team discussion">
               <ProjectDiscussionPanel organizationId={activeOrganizationId} projectId={project.id} tasks={workspace.projectTasks} workstreams={workspace.workstreams} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={handleOrganizationAccessError} onApplied={load} />
             </section>
             <section hidden={projectChatMode !== 'private'} aria-label="Project AI conversations">
-              <ContextConversationPanel contextKind="project_team" projectId={project.id} label="Project AI conversations" />
+              <ContextConversationPanel directSend contextKind="project_team" projectId={project.id} label={`${project.name} · Project AI`} onNavigationBusyChange={reportChatBusy} onDraftDirtyChange={reportChatDirty} />
             </section>
           </div>}
           {tab === 'project-tasks' && <ProjectTasks rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
@@ -201,7 +221,7 @@ export default function ProjectEngagementWorkspace() {
 
 function Overview({ workspace }) {
   const { project, context } = workspace
-  return <div className="grid gap-5 xl:grid-cols-[1.3fr_1fr]"><div className="space-y-5"><Panel title="Project brief" description="The canonical project brief and optional engagement objective remain separate records."><Link to={`/sphere/workspace/projects/${encodeURIComponent(project.id)}/document`} className="mb-4 inline-block text-sm text-[var(--anka-violet)]">Open Living Project Document & version history</Link><TextBlock value={context.brief} empty="No project brief recorded." />{context.objective && <div className="mt-4 border-t border-[var(--anka-line)] pt-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Engagement objective</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--anka-ink)]">{context.objective}</p></div>}</Panel><Panel title="Scope and exclusions"><TextBlock value={context.scope} empty="No scope statement recorded." /><div className="mt-4 border-t border-[var(--anka-line)] pt-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Explicit exclusions</p><TextBlock value={context.exclusions} empty="No exclusions recorded." /></div></Panel><Panel title="Existing assets" description="Supplied engagement context is shown as recorded; missing upstream artifacts are not inferred."><RecordList rows={workspace.existingAssets} empty={workspace.identity.hasEngagement ? 'No existing assets were supplied.' : 'No engagement extension; supplied engagement assets do not apply.'} render={(item) => <AssetRecord key={item.id} item={item} />} /></Panel><Panel title="Milestones"><RecordList rows={workspace.milestones} empty="No milestones recorded." render={(item) => <Record key={item.id} title={item.name} note={`Target ${date(item.target_date)} · ${item.owner.name}`} status={item.status} attention={item.overdue || item.status === 'at_risk'} />} /></Panel></div><div className="space-y-5"><Panel title="Client and brand context"><Record title={context.client?.company || context.client?.name || (workspace.identity.workType === 'Internal Work' ? 'Internal Work' : 'No canonical client')} note={context.client ? [context.client.industry, context.client.status].filter(Boolean).map(label).join(' · ') || 'Canonical client' : 'No client identity is attached to this project.'} /><Record title={context.brand?.name || 'No brand extension'} note={context.brand?.description || 'Brand context is available only through a valid engagement extension.'} /></Panel><Panel title="Ownership"><Record title={context.projectOwner.name} note={`Project owner · ${date(project.start_date)} to ${date(project.due_date)}`} /><Record title={context.engagementOwner?.name || 'No separate engagement lead'} note={workspace.identity.hasEngagement ? 'Operating engagement lead' : 'The canonical project remains the workspace root.'} /></Panel><Panel title="Active workstreams"><RecordList rows={workspace.workstreams} empty="No workstreams recorded." render={(item) => <Record key={item.id} title={item.name} note={`${label(item.department_id)} · ${item.owner.name}`} status={item.status} />} /></Panel><Panel title="Attention signals"><RecordList rows={workspace.attentionSignals} empty="No current attention signals." render={(item) => <p key={item} className="rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] px-3 py-2 text-sm text-[var(--anka-warning)]">{item}</p>} /></Panel></div></div>
+  return <div className="grid gap-5 xl:grid-cols-[1.3fr_1fr]"><div className="space-y-5"><Panel title="Resources & Connections" description="Existing project-bound reporting resources; current permission is checked before use."><Link to={`/sphere/workspace/projects/${encodeURIComponent(project.id)}?tab=resources`} className="text-sm text-[var(--anka-violet)]">Open Resources & Connections</Link></Panel><Panel title="Project brief" description="The canonical project brief and optional engagement objective remain separate records."><Link to={`/sphere/workspace/projects/${encodeURIComponent(project.id)}/document`} className="mb-4 inline-block text-sm text-[var(--anka-violet)]">Open Living Project Document & version history</Link><TextBlock value={context.brief} empty="No project brief recorded." />{context.objective && <div className="mt-4 border-t border-[var(--anka-line)] pt-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Engagement objective</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--anka-ink)]">{context.objective}</p></div>}</Panel><Panel title="Scope and exclusions"><TextBlock value={context.scope} empty="No scope statement recorded." /><div className="mt-4 border-t border-[var(--anka-line)] pt-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Explicit exclusions</p><TextBlock value={context.exclusions} empty="No exclusions recorded." /></div></Panel><Panel title="Existing assets" description="Supplied engagement context is shown as recorded; missing upstream artifacts are not inferred."><RecordList rows={workspace.existingAssets} empty={workspace.identity.hasEngagement ? 'No existing assets were supplied.' : 'No engagement extension; supplied engagement assets do not apply.'} render={(item) => <AssetRecord key={item.id} item={item} />} /></Panel><Panel title="Milestones"><RecordList rows={workspace.milestones} empty="No milestones recorded." render={(item) => <Record key={item.id} title={item.name} note={`Target ${date(item.target_date)} · ${item.owner.name}`} status={item.status} attention={item.overdue || item.status === 'at_risk'} />} /></Panel></div><div className="space-y-5"><Panel title="Client and brand context"><Record title={context.client?.company || context.client?.name || (workspace.identity.workType === 'Internal Work' ? 'Internal Work' : 'No canonical client')} note={context.client ? [context.client.industry, context.client.status].filter(Boolean).map(label).join(' · ') || 'Canonical client' : 'No client identity is attached to this project.'} /><Record title={context.brand?.name || 'No brand extension'} note={context.brand?.description || 'Brand context is available only through a valid engagement extension.'} /></Panel><Panel title="Ownership"><Record title={context.projectOwner.name} note={`Project owner · ${date(project.start_date)} to ${date(project.due_date)}`} /><Record title={context.engagementOwner?.name || 'No separate engagement lead'} note={workspace.identity.hasEngagement ? 'Operating engagement lead' : 'The canonical project remains the workspace root.'} /></Panel><Panel title="Active workstreams"><RecordList rows={workspace.workstreams} empty="No workstreams recorded." render={(item) => <Record key={item.id} title={item.name} note={`${label(item.department_id)} · ${item.owner.name}`} status={item.status} />} /></Panel><Panel title="Attention signals"><RecordList rows={workspace.attentionSignals} empty="No current attention signals." render={(item) => <p key={item} className="rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] px-3 py-2 text-sm text-[var(--anka-warning)]">{item}</p>} /></Panel></div></div>
 }
 
 function ServicesAndScope({ workspace, organizationId, membership, scopeRevision, requestSignal, onChanged, onAccessError }) {

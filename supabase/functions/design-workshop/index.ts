@@ -1,3 +1,4 @@
+import {confirmVideoBrief,getVideoBrief,getVideoJobBrief,reserveConfirmedVideoJob,videoBriefContext} from './videoBriefs.ts'
 import { Buffer } from 'node:buffer'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { PNG } from 'npm:pngjs@7.0.0'
@@ -239,6 +240,12 @@ async function callerDeliveryPackageRoot(userClient: Client, artifactId: string)
 export async function designWorkshopScope(userClient: Client, body: Json): Promise<ServerOrganizationScope> {
   const action = text(body.action, 80)
   const requestedOrganizationId = text(body.organization_id, 80) || null
+  if (['get_video_brief','confirm_video_brief'].includes(action)) {
+    const briefContext=videoBriefContext(body)
+    if(briefContext.private_conversation_id) return {root:null,requestedOrganizationId:requestedOrganizationId || ''}
+    const root=await callerVersionRoot(userClient,String(briefContext.direction_version_id))
+    return {root:{kind:'engagement',id:root.engagementId},requestedOrganizationId}
+  }
   if (action === 'create_page_flow' || action === 'create_session') return {
     root: { kind: 'engagement', id: requiredActionId(body.engagement_id, 'Engagement') }, requestedOrganizationId,
   }
@@ -299,7 +306,7 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
   if (['generate_private_image', 'get_private_image_job', 'reconcile_private_image_request', 'sign_private_image_job'].includes(action)) {
     return { root: null, requestedOrganizationId: requestedOrganizationId || '' }
   }
-  if (['get_video_job', 'poll_video_job', 'ingest_video_output', 'sign_video_output'].includes(action)) {
+  if (['get_video_job', 'get_video_job_brief', 'poll_video_job', 'ingest_video_output', 'sign_video_output'].includes(action)) {
     return { root: null, requestedOrganizationId: requestedOrganizationId || '' }
   }
   if (action === 'list_experiment_reviewers') {
@@ -1943,7 +1950,8 @@ export async function generateDesignVideo(admin: ScopedClient, body: Json, actor
   const operationKey = requiredActionId(body.operation_key, 'Operation key')
   const connectionId = requiredActionId(body.connector_connection_id, 'Design video connection')
   const quoteId = requiredActionId(body.quote_id, 'Video price quote')
-  if (![operationKey, connectionId, quoteId].every(value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))) {
+  const briefVersionId=requiredActionId(body.creative_brief_version_id,'Confirmed canonical video brief version')
+  if (![operationKey, connectionId, quoteId,briefVersionId].every(value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))) {
     throw Object.assign(new Error('Stable video request identities are required'), { status: 400 })
   }
   const prompt = text(body.prompt, 12001)
@@ -1973,19 +1981,7 @@ export async function generateDesignVideo(admin: ScopedClient, body: Json, actor
   // isolated client makes no provider request. SQL rechecks connector mapping.
   const { createHiggsfieldClient } = await import('npm:@higgsfield/client@0.2.6/v2')
   const adapter = createDesignMediaAdapter(createHiggsfieldClient, credential)
-  const identity = { p_organization_id: admin.organizationId,
-    ...videoContext(body),
-    p_actor_id: actorId }
-  const { data: created, error: createError } = await admin.rpc(body.private_conversation_id ? 'create_private_design_video_job' : 'create_design_video_job', {
-    ...identity, p_connector_connection_id: connectionId, p_quote_id: quoteId,
-    p_operation_key: operationKey, p_prompt: prompt, p_mode: mode,
-    p_duration_seconds: body.duration_seconds, p_resolution: body.resolution,
-    p_aspect_ratio: body.aspect_ratio, p_output_format: body.output_format,
-    p_generate_audio: body.generate_audio,
-  })
-  if (createError || !created?.job_id || !created?.request_checksum) {
-    throw Object.assign(new Error('Video job could not be recorded'), { status: 503 })
-  }
+  const created=await reserveConfirmedVideoJob(admin,{...body,prompt,mode,operation_key:operationKey,connector_connection_id:connectionId,quote_id:quoteId,creative_brief_version_id:briefVersionId},actorId)
   if (created.idempotent_replay === true && created.status !== 'queued') {
     return getDesignVideoJob(admin, { job_id: created.job_id }, actorId)
   }
@@ -2048,6 +2044,8 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
     const actions: Record<string, () => Promise<unknown>> = {
       create_page_flow: () => createPageFlow(admin, body, user.id),
       create_session: () => createSession(admin, body, user.id),
+      get_video_brief:()=>getVideoBrief(admin,body,user.id),
+      confirm_video_brief:()=>confirmVideoBrief(admin,body,user.id),
       validate_creative_brief: async () => validateCreativeBrief(body.content),
       save_creative_brief: () => saveCreativeBrief(admin, userClient, body, user.id),
       freeze_creative_brief: () => freezeCreativeBrief(admin, body, user.id, userClient),
@@ -2071,6 +2069,7 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       create_video_placeholder: () => createVideoPlaceholder(admin, userClient, body, user.id),
       get_video_quote: () => getDesignVideoQuote(admin, body, user.id),
       get_private_video_quote: () => getDesignVideoQuote(admin, body, user.id),
+      get_video_job_brief:()=>getVideoJobBrief(admin,body,user.id),
       get_video_job: () => getDesignVideoJob(admin, body, user.id),
       list_video_jobs: () => listDesignVideoJobs(admin, body, user.id),
       list_private_video_jobs: () => listDesignVideoJobs(admin, body, user.id),
@@ -2099,7 +2098,7 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
   } catch (error) {
     console.error('Design Workshop failure', error)
     const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : 400
-    return response({ error: error instanceof Error ? error.message : 'Design Workshop failed' },
+    return response({ error: error instanceof Error ? error.message : 'Design Workshop failed', ...((error as any)?.rollback_verified===true && (error as any)?.code ? {code:(error as any).code,rollback_verified:true} : {}) },
       Number.isFinite(status) ? status : 400)
   }
 }

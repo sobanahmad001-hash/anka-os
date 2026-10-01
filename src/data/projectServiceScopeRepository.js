@@ -32,10 +32,12 @@ export function createProjectServiceScopeRepository(client) {
         : !uuid(input.scopeId) || !Number.isInteger(input.expectedRevision)) {
         throw new TypeError('Valid service selection or revision required')
       }
-      if (['pause', 'complete', 'cancel'].includes(action) && (!input.impactAcknowledged || !input.impactToken)) {
+      if (['pause', 'resume', 'complete', 'cancel'].includes(action) && (!input.impactAcknowledged || !input.impactToken)) {
         throw new TypeError('Review and acknowledge the current project-wide impact first')
       }
-      const { data, error, status } = await client.rpc('change_project_service_scope', {
+      if (action === 'add' && (typeof input.unit !== 'string' || !input.unit.trim() || input.unit.trim().length > 80
+        || typeof input.recurrence !== 'string' || !input.recurrence.trim() || input.recurrence.trim().length > 120)) throw new TypeError('Explicit service unit and recurrence required')
+      const legacyArgs = {
         p_organization_id: organizationId, p_project_id: projectId, p_request_id: requestId,
         p_action: action, p_scope_id: input.scopeId || null, p_service_id: input.serviceId || null,
         p_scope_statement: input.scopeStatement || '', p_exclusions: input.exclusions || '',
@@ -43,7 +45,13 @@ export function createProjectServiceScopeRepository(client) {
         p_start_date: input.startDate || null, p_target_date: input.targetDate || null,
         p_expected_revision: input.expectedRevision ?? null,
         p_impact_token: input.impactToken || null, p_impact_acknowledged: Boolean(input.impactAcknowledged),
-      })
+      }
+      const { data, error, status } = await client.rpc(action === 'add' ? 'propose_workspace_service_scope' : 'change_project_service_scope', action === 'add' ? {
+        p_organization_id: organizationId, p_project_id: projectId, p_request_id: requestId, p_service_id: input.serviceId,
+        p_details: { unit: input.unit.trim(), recurrence: input.recurrence.trim(), scope_statement: input.scopeStatement || '',
+          exclusions: input.exclusions || '', quantity: input.quantity, owner_id: input.ownerId || null,
+          start_date: input.startDate || null, target_date: input.targetDate || null },
+      } : legacyArgs)
       if (error) throw failure(error, status)
       if (data?.organization_id !== organizationId || data.project_id !== projectId
         || data.request_id !== requestId || !uuid(data.scope_id) || !Number.isInteger(data.revision)) {

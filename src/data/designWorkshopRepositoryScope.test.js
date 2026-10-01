@@ -30,3 +30,12 @@ test('an already-stale Design scope makes no function request', async () => {
   await assert.rejects(invokeDesignFunction(client, 'design-workshop', 'org-1', 'create_page_flow', { flow_name: 'Launch' }, { signal: controller.signal }), error => error.name === 'AbortError')
   assert.equal(calls, 0)
 })
+
+test('canonical brief transport releases edits only after an explicitly verified atomic rollback',async()=>{
+ const context=new Response(JSON.stringify({error:'Changed exact revision',code:'40001',rollback_verified:true}),{status:409})
+ const client={functions:{invoke:async()=>({data:null,error:{message:'Edge HTTP error',context}})}}
+ try {await invokeDesignFunction(client,'design-workshop','org','confirm_video_brief',{})} catch(error){assert.equal(error.knownRollback,true);assert.equal(error.code,'40001');assert.equal(error.message,'Changed exact revision')}
+ const unknown={functions:{invoke:async()=>({data:null,error:{message:'Lost response',context:new Response('unknown',{status:503})}})}}
+ try {await invokeDesignFunction(unknown,'design-workshop','org','confirm_video_brief',{})} catch(error){assert.equal(error.knownRollback,false)}
+ try {await invokeDesignFunction(client,'design-workshop','org','generate_video',{})} catch(error){assert.equal(error.knownRollback,false)}
+})

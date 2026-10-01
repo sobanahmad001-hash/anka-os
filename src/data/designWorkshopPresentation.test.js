@@ -12,11 +12,14 @@ const props = node => node?.[Object.keys(node ?? {}).find(key => key.startsWith(
 test('Design history retains mounted search and chat draft during context navigation, with scope visibility always present', async t => {
   const env = mountedEnvironment(), previous = { document: globalThis.document, window: globalThis.window, IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT }
   Object.assign(globalThis, { document: env.document, window: env.window, IS_REACT_ACT_ENVIRONMENT: true })
-  const source = readFileSync(new URL('../components/WorkshopChatWorkspace.jsx', import.meta.url), 'utf8')
-  const compiled = transformSync(source, { loader: 'jsx', format: 'cjs', jsxFactory: 'React.createElement' }).code
-  const module = { exports: {} }
-  new Function('require','module','exports','React',compiled)(name=>name.endsWith('.css')?{}:nativeRequire(name),module,module.exports,React)
-  const Component = module.exports.default
+  const modules=new Map()
+  function load(url){
+    if(modules.has(url.href))return modules.get(url.href)
+    const compiled=transformSync(readFileSync(url,'utf8'),{loader:'jsx',format:'cjs',jsxFactory:'React.createElement'}).code,module={exports:{}}
+    const require=name=>name.endsWith('.css')?{}:name.startsWith('.')&&name.endsWith('.jsx')?load(new URL(name,url)):nativeRequire(name)
+    new Function('require','module','exports','React',compiled)(require,module,module.exports,React);modules.set(url.href,module.exports);return module.exports
+  }
+  const Component=load(new URL('../components/WorkshopChatWorkspace.jsx',import.meta.url)).default
   let mounts = 0
   // Use createElement so this Node test itself does not require a JSX loader.
   const HistoryComponent = () => { const [query,setQuery] = useState(''); useEffect(()=>{mounts++},[]); return React.createElement('input', { 'aria-label':'Fixture search', value:query, onChange:event=>setQuery(event.target.value) }) }

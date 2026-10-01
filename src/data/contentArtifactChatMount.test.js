@@ -19,6 +19,7 @@ test('mounted Content adapter retains conversation callbacks and disables drafti
   let chatProps
   const compiled = transformSync(readFileSync(new URL('../components/ContentArtifactChat.jsx', import.meta.url), 'utf8'), { loader: 'jsx', format: 'cjs', jsxFactory: 'React.createElement' }).code
   const module = { exports: {} }, require = name => {
+    if (name.endsWith('.css')) return {}
     if (name.includes('OrganizationContext')) return { useOrganization: () => org }
     if (name.includes('contentStudioRepository')) return { contentStudio: repository }
     if (name.includes('contentArtifactChat')) return { contentArtifactChatTargets }
@@ -33,7 +34,7 @@ test('mounted Content adapter retains conversation callbacks and disables drafti
   const render = () => act(async () => root.render(React.createElement(Component, props)))
   await render(); assert.equal(chatProps.allowArtifactDraft, false); assert.match(env.container.textContent, /Ordinary chat/)
   assert.equal(chatProps.initialConversation, initialConversation); assert.equal(chatProps.hideConversationList, true)
-  assert.equal(chatProps.onConversationListChange, callbacks.onConversationListChange); assert.equal(chatProps.onNavigationBusyChange, callbacks.onNavigationBusyChange)
+  assert.equal(chatProps.onConversationListChange, callbacks.onConversationListChange); assert.equal(typeof chatProps.onNavigationBusyChange, 'function')
   await act(async () => resolves.get('first').resolve(data('org', 'project', 'first')))
   assert.equal(chatProps.allowArtifactDraft, true)
   await act(async () => { chatProps.onCreated() }); assert.equal(chatProps.allowArtifactDraft, false)

@@ -1,0 +1,31 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import {createProjectWebsitePagesRepository} from './projectWebsitePagesRepository.js'
+const id=n=>`a0000000-0000-4000-8000-${String(n).padStart(12,'0')}`
+const base={organizationId:id(1),projectId:id(2),architectureVersionId:id(3),pageId:id(4),requestId:id(5)},operations={planned_url:'https://EXAMPLE.invalid/home',recorded_live_url:null,redirect_url:null,publication_state:'in_progress',template:null,work_item_id:id(6),implementation_notes:'Implement the exact approved page',qa_evidence:''}
+function fixture(reply={data:{ok:true},error:null}){const calls=[];return {calls,repo:createProjectWebsitePagesRepository({from(){throw Error('Direct tables not permitted')},rpc(name,args){calls.push({name,args});return Promise.resolve(reply)}})}}
+test('preview and reads use exact project/version filters and make no write command',async()=>{
+ const {repo,calls}=fixture();await repo.preview({...base,pageKeys:['page:1','page:2']});await repo.list({...base,search:'welcome',publicationState:'published',parentPageKey:'page:1',offset:75});await repo.history({...base});await repo.recover({...base});assert.deepEqual(calls.map(c=>c.name),['preview_project_website_pages','list_project_website_pages','get_project_website_page_history','get_project_website_page_operation']);for(const {args} of calls){assert.equal(args.p_organization_id,base.organizationId);assert.equal(args.p_project_id,base.projectId)}assert.equal(calls[1].args.p_architecture_version_id,base.architectureVersionId);assert.equal(calls[1].args.p_offset,75);assert.equal(calls[1].args.p_limit,25);assert.equal(calls[1].args.p_publication_state,'published');assert.equal(calls[3].args.p_request_id,base.requestId)
+})
+test('registration requires exact reviewed checksum and explicit confirmation before one atomic call',async()=>{
+ const {repo,calls}=fixture(),input={...base,pageKeys:['page:1'],reviewSha256:'a'.repeat(64)};assert.throws(()=>repo.register(input),/confirm/);assert.throws(()=>repo.register({...input,confirmed:true,reviewSha256:'latest'}),/checksum/);assert.equal(calls.length,0);await repo.register({...input,confirmed:true});assert.equal(calls.length,1);assert.equal(calls[0].name,'register_project_website_pages');assert.deepEqual(calls[0].args.p_page_keys,['page:1']);assert.equal(calls[0].args.p_review_sha256,'a'.repeat(64));assert.equal(calls[0].args.p_request_id,base.requestId)
+})
+test('operation save is exact source/revision scoped and never forwards assignment fields',async()=>{
+ const {repo,calls}=fixture();assert.throws(()=>repo.saveOperations({...base,confirmed:true,expectedRevision:0,operations:{...operations,owner_id:id(7)}}));assert.throws(()=>repo.saveOperations({...base,confirmed:true,expectedRevision:-1,operations}));assert.equal(calls.length,0);await repo.saveOperations({...base,confirmed:true,expectedRevision:2,operations});assert.equal(calls[0].args.p_expected_revision,2);assert.equal(calls[0].args.p_architecture_version_id,base.architectureVersionId);assert.equal(calls[0].args.p_operations.work_item_id,id(6));assert.equal(calls[0].args.p_operations.planned_url,'https://example.invalid/home');assert.equal('owner_id' in calls[0].args.p_operations,false);assert.equal(operations.planned_url,'https://EXAMPLE.invalid/home')
+})
+test('explicit SEO linking and unlinking keep source and optimistic link identity',async()=>{
+ const {repo,calls}=fixture();await repo.linkSeo({...base,confirmed:true,trackedPageId:id(8),expectedLinkNumber:0});await repo.linkSeo({...base,confirmed:true,trackedPageId:null,expectedLinkNumber:1});assert.deepEqual(calls.map(c=>c.name),['link_project_website_page_seo','link_project_website_page_seo']);assert.equal(calls[0].args.p_tracked_page_id,id(8));assert.equal(calls[1].args.p_tracked_page_id,null);assert.equal(calls[0].args.p_architecture_version_id,base.architectureVersionId);assert.equal(calls[1].args.p_expected_link_number,1)
+})
+test('invalid foreign/inferred IDs, paging, keys and filters fail before transport',()=>{
+ const {repo,calls}=fixture();for(const value of [{...base,projectId:'by title'},{...base,architectureVersionId:'latest'},{...base,limit:101},{...base,offset:10001},{...base,publicationState:'automatically-published'}])assert.throws(()=>repo.list(value));for(const pageKeys of [[],['page:1','page:1'],['bad\nkey'],Array.from({length:151},(_,n)=>'page:'+n)])assert.throws(()=>repo.preview({...base,pageKeys}));assert.equal(calls.length,0)
+})
+test('native rejection is known rollback while network/abort ambiguity keeps original operation recovery',async()=>{
+ const known=fixture({data:null,error:{message:'Scope revoked',code:'42501'}});await assert.rejects(()=>known.repo.saveOperations({...base,confirmed:true,expectedRevision:0,operations}),error=>error.code==='42501' && error.knownRollback===true);const ambiguous=fixture({data:null,error:{message:'Lost response',code:'FETCH_ERROR'}});await assert.rejects(()=>ambiguous.repo.register({...base,confirmed:true,pageKeys:['page:1'],reviewSha256:'a'.repeat(64)}),error=>error.knownRollback===false);assert.equal(ambiguous.calls[0].args.p_request_id,base.requestId)
+})
+test('abort signal is forwarded to bounded read transport',async()=>{
+ const signal=new AbortController().signal;let received;const repo=createProjectWebsitePagesRepository({rpc(){return {abortSignal(value){received=value;return Promise.resolve({data:{pages:[]},error:null})}}}});assert.deepEqual(await repo.list(base,{signal}),{pages:[]});assert.equal(received,signal)
+})
+
+test('editor lookup uses exact registered page/source scope and bounded existing-resource search without mutations',async()=>{
+ const {repo,calls}=fixture();for(const change of [{query:'x'.repeat(121)},{workOffset:10001},{seoOffset:-1},{limit:51},{pageId:'by title'}])assert.throws(()=>repo.editor({...base,...change}));assert.equal(calls.length,0);await repo.editor({...base,query:'home',workOffset:25,seoOffset:50});assert.equal(calls.length,1);assert.equal(calls[0].name,'get_project_website_page_editor');assert.deepEqual(calls[0].args,{p_organization_id:base.organizationId,p_project_id:base.projectId,p_page_id:base.pageId,p_architecture_version_id:base.architectureVersionId,p_query:'home',p_work_offset:25,p_seo_offset:50,p_limit:25})
+})

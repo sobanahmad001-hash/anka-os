@@ -8,7 +8,7 @@ function requiredId(value, label) {
 async function dataOrThrow(query, signal) {
   if (signal && typeof query.abortSignal === 'function') query = query.abortSignal(signal)
   const { data, error } = await query
-  if (error) throw new Error(error.message || 'Pipeline run request failed')
+  if (error) throw Object.assign(new Error(error.message || 'Pipeline run request failed'),{code:error.code,knownRollback:['22023','42501','40001','55000'].includes(error.code)})
   return data
 }
 
@@ -18,7 +18,7 @@ export function createPipelineRunIntentsRepository(supabase) {
     async list(organizationId, engagementId, { signal } = {}) {
       const organization = requiredId(organizationId, 'Organization')
       const rows = await dataOrThrow(supabase.from('pipeline_run_intents')
-        .select('id, request_id, status, input_sha256, input_manifest, requested_at, requested_by, project_activation_id, selected_steps_sha256')
+        .select('id, request_id, status, input_sha256, input_manifest, requested_at, requested_by, project_activation_id, selected_steps_sha256, pipeline_group_id')
         .eq('organization_id', organization)
         .eq('engagement_id', requiredId(engagementId, 'Engagement'))
         .order('requested_at', { ascending: false }).limit(20), signal)
@@ -32,7 +32,7 @@ export function createPipelineRunIntentsRepository(supabase) {
           .select('id, run_intent_id, work_manifest, work_sha256, planned_at, planned_by')
           .eq('organization_id', organization).in('run_intent_id', ids), signal),
         dataOrThrow(supabase.from('ai_execution_jobs')
-          .select('id, run_intent_id, run_plan_id, status, blocked_reason, input_sha256, created_at, steps:ai_execution_job_steps(id, ordinal, work_item_id, department_id, status, input_sha256), configured_steps:ai_execution_configured_steps(id, ordinal, step_key, instance_number, definition_step, status, input_sha256, progress:ai_execution_step_progress(status, state_version, started_by, completed_by), output:ai_execution_step_outputs(id, output_sha256, provider, model_id, measured_cost_microusd, review:ai_execution_step_output_reviews(id, decision, reviewed_by, evidence))), input_approval:ai_execution_input_approvals(id, approved_by, approved_at)')
+          .select('id, run_intent_id, run_plan_id, status, blocked_reason, input_sha256, created_at, steps:ai_execution_job_steps(id, ordinal, work_item_id, department_id, status, input_sha256), configured_steps:ai_execution_configured_steps(id, ordinal, step_key, instance_number, definition_step, status, input_sha256, reused_artifact_version_id, reuse_approval_id, progress:ai_execution_step_progress(status, state_version, started_by, completed_by), output:ai_execution_step_outputs(id, output_sha256, provider, model_id, measured_cost_microusd, review:ai_execution_step_output_reviews(id, decision, reviewed_by, evidence))), input_approval:ai_execution_input_approvals(id, approved_by, approved_at)')
           .eq('organization_id', organization).in('run_intent_id', ids), signal),
       ])
       const reviewByIntent = new Map((reviews || []).map(review => [review.run_intent_id, review]))
@@ -43,6 +43,9 @@ export function createPipelineRunIntentsRepository(supabase) {
         plan: planByIntent.get(row.id) || null,
         job: jobByIntent.get(row.id) || null,
       }))
+    },
+    findRequest({organizationId,engagementId,actorId,requestId},{signal}={}) {
+      return dataOrThrow(supabase.from('pipeline_run_intents').select('id,request_id,requested_by,pipeline_group_id,status').eq('organization_id',requiredId(organizationId,'Organization')).eq('engagement_id',requiredId(engagementId,'Engagement')).eq('requested_by',requiredId(actorId,'Actor')).eq('request_id',requiredId(requestId,'Request')).maybeSingle(),signal)
     },
     approveInputs({ organizationId, jobId, requestId, acknowledged }, { signal } = {}) {
       if (acknowledged !== true) throw new TypeError('Explicit AI-use acknowledgement is required')
@@ -114,11 +117,12 @@ export function createPipelineRunIntentsRepository(supabase) {
         p_evidence: normalizedEvidence,
       }), signal)
     },
-    start({ organizationId, engagementId, requestId, assetIds = [] }, { signal } = {}) {
+    start({ organizationId, engagementId, requestId, pipelineGroupId = null, assetIds = [] }, { signal } = {}) {
       if (!Array.isArray(assetIds) || assetIds.length > 20 || new Set(assetIds).size !== assetIds.length) {
         throw new TypeError('Choose at most 20 unique assets')
       }
-      return dataOrThrow(supabase.rpc('start_pipeline_run_intent', {
+      return dataOrThrow(supabase.rpc(pipelineGroupId ? 'start_project_pipeline_group_run' : 'start_pipeline_run_intent', {
+        ...(pipelineGroupId ? {p_pipeline_group_id:requiredId(pipelineGroupId,'Pipeline group')} : {}),
         p_organization_id: requiredId(organizationId, 'Organization'),
         p_engagement_id: requiredId(engagementId, 'Engagement'),
         p_request_id: requiredId(requestId, 'Request'),

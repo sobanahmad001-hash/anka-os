@@ -286,3 +286,12 @@ test('N6 confirmed refusal release sends exact attempt and evidence', async () =
     p_evidence: 'All routes refused',
   }]])
 })
+
+test('explicit independent run binds one group while Legacy transport stays unchanged',async()=>{
+ const calls=[],repo=createPipelineRunIntentsRepository({from(){throw Error('unexpected')},rpc(name,args){calls.push({name,args});return Promise.resolve({data:{run_intent_id:ID},error:null})}})
+ const input={organizationId:ID,engagementId:OTHER,requestId:ID,assetIds:[]}
+ await repo.start(input);await repo.start({...input,pipelineGroupId:OTHER})
+ assert.equal(calls[0].name,'start_pipeline_run_intent');assert.equal('p_pipeline_group_id' in calls[0].args,false)
+ assert.equal(calls[1].name,'start_project_pipeline_group_run');assert.equal(calls[1].args.p_pipeline_group_id,OTHER);assert.equal(calls[1].args.p_request_id,ID);assert.deepEqual(calls[1].args.p_asset_ids,[])
+ assert.throws(()=>repo.start({...input,pipelineGroupId:'latest'}),/UUID/);assert.equal(calls.length,2)
+})

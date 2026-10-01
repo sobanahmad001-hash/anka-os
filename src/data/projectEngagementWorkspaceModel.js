@@ -182,6 +182,8 @@ export function buildProjectEngagementWorkspace(snapshot, options = {}) {
     workItemDependencies: (snapshot.workItemDependencies || []).filter(item => sameOrg(item, project) && workItemIds.has(item.work_item_id) && workItemIds.has(item.depends_on_work_item_id)),
     teamMembers: [...membershipKeys].map(id => ({ id, name: owner(id).name })),
     services,
+    pipelineGroups: (snapshot.pipelineGroupsState || 'available')==='available' && engagement ? (snapshot.pipelineGroups || []).filter(item=>sameProject(item,project) && item.engagement_id===engagement.id && ['website','marketing'].includes(item.kind)) : [],
+    pipelineGroupsState: snapshot.pipelineGroupsState || (engagement ? 'available' : 'not_applicable'),
     activeServices,
     existingAssets,
     pipelineOrigin,

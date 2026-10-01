@@ -53,5 +53,33 @@ test('service proposal rejects a mismatched result', async () => {
     organization_id: org, project_id: service, request_id: request, scope_id: scope, revision: 1,
   } }) })
   await assert.rejects(repository.change({ organizationId: org, projectId: project, requestId: request,
-    action: 'add', serviceId: service, quantity: 1 }), /did not match/)
+    action: 'add', serviceId: service, quantity: 1, unit: 'article', recurrence: 'monthly' }), /did not match/)
+})
+
+test('resume refuses absent acknowledgement and carries the exact impact revision', async () => {
+  const calls = []
+  const repository = createProjectServiceScopeRepository({ rpc(name, args) {
+    calls.push({ name, args })
+    return Promise.resolve({ data: { organization_id: org, project_id: project, request_id: request, scope_id: scope, revision: 4 } })
+  } })
+  const command = { organizationId: org, projectId: project, requestId: request, action: 'resume', scopeId: scope, expectedRevision: 3 }
+  await assert.rejects(repository.change(command), /Review and acknowledge/)
+  assert.equal(calls.length, 0)
+  await repository.change({ ...command, impactToken: 'reviewed-resume', impactAcknowledged: true })
+  assert.equal(calls[0].args.p_expected_revision, 3)
+  assert.equal(calls[0].args.p_impact_token, 'reviewed-resume')
+  assert.equal(calls[0].args.p_impact_acknowledged, true)
+})
+
+test('new scope details are explicit, bounded and sent in one immutable proposal command', async () => {
+ const calls=[]
+ const repository=createProjectServiceScopeRepository({rpc(name,args){calls.push({name,args});return Promise.resolve({data:{organization_id:org,project_id:project,request_id:request,scope_id:scope,revision:1,unit:'article',recurrence:'4 per month'}})}})
+ const command={organizationId:org,projectId:project,requestId:request,action:'add',serviceId:service,quantity:4,unit:' article ',recurrence:' 4 per month ',scopeStatement:'Editorial plan'}
+ await assert.rejects(repository.change({...command,unit:''}),/Explicit service/)
+ assert.equal(calls.length,0)
+ await repository.change(command)
+ assert.equal(calls.length,1)
+ assert.equal(calls[0].name,'propose_workspace_service_scope')
+ assert.deepEqual(calls[0].args.p_details,{unit:'article',recurrence:'4 per month',scope_statement:'Editorial plan',exclusions:'',quantity:4,owner_id:null,start_date:null,target_date:null})
+ assert.equal(calls[0].args.p_request_id,request)
 })

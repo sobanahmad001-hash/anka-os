@@ -1,4 +1,4 @@
-import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
+import type { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { isContextChatUuid, validateContextChatListOffset, validateContextChatMessage, validateContextChatScope } from './contextChatScope.mjs'
 
 type Client = ReturnType<typeof createClient<any>>
@@ -52,6 +52,22 @@ export async function contextChatAction(
   organizationId: string, membership: Json,
 ) {
   const activeMembership = { ...membership, user_id: actorId }
+  if (action === 'start_context_conversation') {
+    const scope = validateContextChatScope(body)
+    const id = string(body.conversation_id)
+    const requestId = string(body.client_request_id)
+    if (!isContextChatUuid(id) || !isContextChatUuid(requestId)) throw fail('Conversation and message request UUIDs are required')
+    const message = validateContextChatMessage(body.message)
+    await requireScopeAccess(admin, organizationId, activeMembership, scope)
+    const columns = 'id, organization_id, context_kind, project_id, engagement_id, department_id, owner_id, title, state, next_sequence, last_activity_at, created_at'
+    const saved = await admin.rpc('start_context_chat_human_message', {
+      p_conversation_id: id, p_organization_id: organizationId, p_actor_id: actorId,
+      p_context_kind: scope.context_kind, p_project_id: scope.project_id, p_department_id: scope.department_id,
+      p_request_id: requestId, p_body: message,
+    })
+    if (saved.error) throw saved.error
+    return saved.data
+  }
   if (action === 'create_context_conversation' || action === 'list_context_conversations') {
     const scope = validateContextChatScope(body)
     await requireScopeAccess(admin, organizationId, activeMembership, scope)

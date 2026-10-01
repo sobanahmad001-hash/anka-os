@@ -1,0 +1,22 @@
+"""Identity-checked bounded manual plan-candidates QA; no users/provider/production calls."""
+import argparse,hashlib,json,re,subprocess
+from pathlib import Path
+p=argparse.ArgumentParser();p.add_argument('--psql',required=True);p.add_argument('--repo',required=True);p.add_argument('--evidence',required=True);p.add_argument('--install-empty-candidate',action='store_true');a=p.parse_args();repo=Path(a.repo)
+cmd=[a.psql,'-X','-w','-h','127.0.0.1','-p','55462','-U','postgres','-d','anka_b1_firstsend_20260930','-qAt','-v','ON_ERROR_STOP=1']
+def run(sql):
+ r=subprocess.run(cmd,input=sql,text=True,encoding='utf-8',capture_output=True,timeout=100)
+ if r.returncode:raise RuntimeError(r.stderr)
+ return r
+identity=run("select current_database()||'|'||current_user||'|'||current_setting('data_directory');").stdout.strip();assert identity=='anka_b1_firstsend_20260930|postgres|G:/AnkaSphereN1LocalChecks/anka-schema-4453dd840a1a4131820f3d529a5378b9/data',identity
+names=['marketing_campaigns','marketing_campaign_plan_versions','project_campaign_plan_links','project_campaign_plan_commands','engagement_services','service_catalog','tasks','work_items','artifacts','artifact_approval_requests','profiles'];
+functions=['public.list_project_campaign_plan_candidates(uuid,uuid,uuid,text,text,integer,integer)']
+state="select json_build_object('functions',(select json_agg(json_build_object('name',n.nspname||'.'||p.proname,'body',md5(pg_get_functiondef(p.oid)),'acl',p.proacl::text,'definer',p.prosecdef,'searchPath',p.proconfig) order by n.nspname,p.proname) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.proname in ('list_project_campaign_plan_candidates')),'users',(select count(*) from auth.users),'authority',(select md5(jsonb_agg(to_jsonb(m) order by id)::text) from public.organization_memberships m),'projects',(select md5(jsonb_agg(to_jsonb(p) order by id)::text) from public.projects p),'engagements',(select md5(jsonb_agg(to_jsonb(p) order by id)::text) from public.engagements p),'sourceAudit',json_build_array((select md5(jsonb_agg(to_jsonb(v) order by id)::text) from public.artifact_versions v),(select md5(jsonb_agg(to_jsonb(v) order by id)::text) from public.artifact_approvals v)),'pageAudit',json_build_array("+','.join("(select md5(coalesce(jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text)::text,'[]')) from public."+n+" t)" for n in names)+"));"
+migration=repo/'supabase/migrations/20261001023000_project_campaign_plan_candidates.sql';source=migration.read_text(encoding='utf-8');body=re.sub(r'(?im)^begin;\s*','',source,count=1);body=re.sub(r'(?im)^commit;\s*$','',body)
+drop=''.join('drop function '+f+';' for f in functions)
+if a.install_empty_candidate:
+ assert run("select count(*) from pg_proc where proname in ('list_project_campaign_plan_candidates');").stdout.strip()=='0','Only install previously absent read-only candidate functions'
+ run(source);print('Read-only project Plan candidate functions installed in identity-checked isolated clone',flush=True)
+prior=json.loads(run(state).stdout)
+replay=json.loads(run('begin;'+drop+body+state+'rollback;').stdout.strip());assert replay==prior,'Final source/ACL catalog replay differs';assert json.loads(run(state).stdout)==prior;print('Complete Plan candidate function/security replay PASS',flush=True)
+behavior=run((repo/'supabase/tests/project_campaign_plan_candidates.behavior.sql').read_text(encoding='utf-8'));count=behavior.stderr.count('PASS ');print(behavior.stderr,flush=True);assert count>=15,count;assert json.loads(run(state).stdout)==prior,'Plan candidate reads leaked canonical history, authority or users';print('Plan candidate read rollback behavior PASS',count,flush=True)
+packet=Path(a.evidence);e=json.loads(packet.read_text(encoding='utf-8'));n=e.setdefault('campaignPlanning',{}).setdefault('planCandidates',{});n.update({'migration':migration.name,'migrationSha256':hashlib.sha256(migration.read_bytes()).hexdigest(),'databaseIdentity':identity,'completeMigrationReplay':True,'catalogSecurityMatches':True,'behaviorPassCount':count,'historyAndAuthorityRestored':True,'scope':'Bounded existing active Team owners and exact approved campaign message/measurement/audience strategy descriptors; no latest source, content copies, users or provider calls.','remaining':'Actual plan editor and wider B2-B7 production/provider/human acceptance pending.'});packet.write_text(json.dumps(e,indent=2)+'\n',encoding='utf-8')

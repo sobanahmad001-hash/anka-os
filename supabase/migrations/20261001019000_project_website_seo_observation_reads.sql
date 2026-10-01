@@ -1,0 +1,84 @@
+-- B4 bounded project SEO reads over the explicit AD1 page bridge.
+-- Existing brand-level visibility/writers/history remain unchanged; no provider calls.
+begin;
+set local lock_timeout='5s';set local statement_timeout='120s';
+do $$begin
+ if md5(replace(pg_get_functiondef('private.website_read_authorized(uuid,uuid)'::regprocedure),chr(13),'')) is distinct from '339ae8372edf7afa3115655da7a2255f'
+ or md5(replace(pg_get_functiondef('private.website_approved_source(uuid,uuid,uuid)'::regprocedure),chr(13),'')) is distinct from '8fbd479e8c1a8ab7b665196d1d1987a4'
+ or md5(replace(pg_get_functiondef('private.project_reporting_context(uuid,uuid,uuid,text,uuid,text,text)'::regprocedure),chr(13),'')) is distinct from '51a3895ccca2b26cee458e0a58890a55' then raise exception 'Exact Website read/source prerequisites changed' using errcode='55000';end if;
+end $$;
+create function private.website_seo_context(p_org uuid,p_project uuid,p_page uuid,p_version uuid,p_binding uuid)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare page public.project_website_pages%rowtype;revision public.project_website_page_revisions%rowtype;link public.project_website_page_seo_links%rowtype;tracked public.tracked_pages%rowtype;source jsonb;planned jsonb;state text:='available';archived boolean;audit public.tracked_page_audits%rowtype;reasons jsonb:='[]'::jsonb;result jsonb;binding public.project_reporting_bindings%rowtype;binding_revision public.project_reporting_binding_revisions%rowtype;resource_context jsonb;reporting_reason text:='reporting_binding_missing';
+begin
+ perform private.website_read_authorized(p_org,p_project);
+ if p_page is null or p_version is null then raise exception 'Choose an exact page and architecture version' using errcode='22023';end if;
+ select * into page from public.project_website_pages where id=p_page and organization_id=p_org and project_id=p_project for share;
+ if not found then raise exception 'Exact current-project Website page required' using errcode='42501';end if;
+ perform 1 from public.artifact_versions v join public.artifacts a on a.id=v.artifact_id and a.organization_id=v.organization_id where v.id=p_version and v.organization_id=p_org and a.id=page.architecture_artifact_id and a.project_id=p_project and a.brand_id=page.brand_id and a.engagement_id=page.engagement_id for share of v,a;
+ if not found then raise exception 'Exact original architecture root and same-project version required' using errcode='42501';end if;
+ select archived_at is not null into archived from public.projects where id=p_project and organization_id=p_org;
+ if archived then state:='archived';else
+ begin source:=private.website_approved_source(p_org,p_project,p_version);
+ select value into planned from jsonb_array_elements(source->'pages') where value->>'page_key'=page.page_key;
+ if planned is null then state:='page_absent_from_version';end if;
+ exception when sqlstate '42501' or sqlstate '55000' or sqlstate '22023' then state:='approved_source_unavailable';end;
+ end if;
+ select * into revision from public.project_website_page_revisions where page_id=page.id and organization_id=p_org and project_id=p_project order by revision_number desc limit 1;
+ select * into link from public.project_website_page_seo_links where page_id=page.id and organization_id=p_org and project_id=p_project and brand_id=page.brand_id order by link_number desc limit 1;
+ if link.tracked_page_id is not null then
+ select * into tracked from public.tracked_pages where id=link.tracked_page_id and organization_id=p_org and brand_id=page.brand_id for share;
+ if not found then raise exception 'Explicit current page observation bridge unavailable' using errcode='42501';end if;
+ select * into audit from public.tracked_page_audits where tracked_page_id=tracked.id and organization_id=p_org order by audit_date desc,created_at desc,id desc limit 1;
+ else reasons:=reasons||jsonb_build_array('tracked_page_unlinked');end if;
+ if state<>'available' then reasons:=reasons||jsonb_build_array(state);end if;
+ if p_binding is not null then
+ select * into binding from public.project_reporting_bindings where id=p_binding and organization_id=p_org and project_id=p_project and engagement_id=page.engagement_id and brand_id=page.brand_id and resource_kind='gsc_site';
+ if not found then raise exception 'Choose an exact same-page engagement GSC reporting binding' using errcode='42501';end if;
+ select * into binding_revision from public.project_reporting_binding_revisions where binding_id=binding.id and organization_id=p_org and project_id=p_project order by revision_number desc limit 1;
+ begin resource_context:=private.project_reporting_context(p_org,p_project,page.engagement_id,binding.department_id,binding.connection_id,binding.resource_kind,binding.resource_key);
+ reporting_reason:=case when binding_revision.state<>'enabled' then 'reporting_binding_stopped' when resource_context->>'context_checksum' is distinct from binding_revision.context_checksum then 'reporting_binding_context_changed' when resource_context->>'reporting_scope_granted' is distinct from 'true' then 'observed_reporting_grant_missing' when resource_context->>'provider_resource_verified' is distinct from 'true' then 'resource_access_verification_pending' else 'legacy_resource_provenance_unknown' end;
+ exception when sqlstate '42501' or sqlstate '22023' then reporting_reason:='reporting_binding_context_unavailable';end;
+ end if;
+ -- Legacy query/audit rows do not pin a resource/credential/mapping receipt.
+ -- Current bindings cannot retroactively establish those historical identities.
+ if audit.source_type='search_console' then reasons:=reasons||jsonb_build_array('legacy_resource_provenance_unknown',reporting_reason);end if;
+ if audit.id is null then reasons:=reasons||jsonb_build_array('no_stored_page_observation');else
+ -- Legacy audits contain no exact architecture/implementation version receipt.
+ reasons:=reasons||jsonb_build_array('legacy_observation_not_version_bound');
+ if revision.created_at is not null and audit.created_at<revision.created_at then reasons:=reasons||jsonb_build_array('implementation_changed_after_observation');end if;
+ if tracked.updated_at is not null and audit.created_at<tracked.updated_at then reasons:=reasons||jsonb_build_array('tracked_page_changed_after_observation');end if;
+ if revision.recorded_live_url is not null and revision.recorded_live_url is distinct from tracked.page_url then reasons:=reasons||jsonb_build_array('recorded_live_url_differs_from_tracked_page');end if;
+ if link.architecture_version_id is distinct from p_version then reasons:=reasons||jsonb_build_array('architecture_version_differs_from_seo_link');end if;
+ end if;
+ result:=jsonb_build_object('organization_id',p_org,'project_id',p_project,'engagement_id',page.engagement_id,'brand_id',page.brand_id,'page_id',page.id,'page_key',page.page_key,'initial_path',page.initial_path,'architecture_version_id',p_version,'source_state',state,'planned_page',planned,'implementation',case when revision.id is null then null else jsonb_build_object('revision_number',revision.revision_number,'architecture_version_id',revision.architecture_version_id,'planned_path',revision.planned_path,'recorded_live_url',revision.recorded_live_url,'publication_state',revision.publication_state,'changed_at',revision.created_at,'changed_by',revision.created_by,'work_item_id',revision.work_item_id) end,'seo_link',case when link.id is null then null else jsonb_build_object('id',link.id,'link_number',link.link_number,'tracked_page_id',link.tracked_page_id,'architecture_version_id',link.architecture_version_id,'created_at',link.created_at,'created_by',link.created_by) end,'tracked_page',case when tracked.id is null then null else jsonb_build_object('id',tracked.id,'page_url',tracked.page_url,'page_type',tracked.page_type,'updated_at',tracked.updated_at) end,'latest_audit',case when audit.id is null then null else jsonb_build_object('id',audit.id,'audit_date',audit.audit_date,'retrieved_at',audit.created_at,'created_by',audit.created_by,'source_type',audit.source_type,'source_connection_id',audit.source_connection_id,'indexed',case when audit.source_type='manual' then audit.indexed end,'index_status',case when audit.source_type='manual' then audit.index_status end,'schema_valid',case when audit.source_type='manual' then audit.schema_valid end,'issues',case when audit.source_type='manual' then to_jsonb(audit.issues) else null end,'core_web_vitals_mobile',case when audit.source_type='manual' then audit.core_web_vitals_mobile end,'core_web_vitals_desktop',case when audit.source_type='manual' then audit.core_web_vitals_desktop end,'version_binding','unknown','period_start',null,'period_end',null,'reporting_time_zone',null,'provider_resource',null) end,'reporting_binding_id',p_binding,'reporting_reason',reporting_reason,'provider_observations_ready',false,'legacy_provider_metrics_withheld',true,'recheck_required',true,'recheck_reasons',reasons,'provider_request_made',false);
+ if octet_length(result::text)>131072 then raise exception 'SEO page context exceeds whole bounded response' using errcode='22023';end if;return result;
+end $$;
+create function public.list_project_website_page_seo_observations(p_organization_id uuid,p_project_id uuid,p_page_id uuid,p_architecture_version_id uuid,p_category text,p_keyword_id uuid default null,p_query text default '',p_start_date date default null,p_end_date date default null,p_offset integer default 0,p_limit integer default 25,p_reporting_binding_id uuid default null)
+returns jsonb language plpgsql security definer set search_path='' as $$
+declare context jsonb;tracked uuid;items jsonb;total bigint:=0;matching bigint:=0;result jsonb;begin
+ if p_category is null or p_category not in ('page_audits','planned_targets','query_observations') or p_query is null or length(p_query)>120 or p_query~'[[:cntrl:]]' or p_offset is null or p_offset not between 0 and 10000 or p_limit is null or p_limit not between 1 and 50 or (p_start_date is null)<>(p_end_date is null) or (p_start_date is not null and (not isfinite(p_start_date) or not isfinite(p_end_date) or p_end_date<p_start_date or p_end_date-p_start_date>92)) or (p_keyword_id is not null and p_category<>'query_observations') then raise exception 'Choose bounded exact SEO category/search/date paging' using errcode='22023';end if;
+ context:=private.website_seo_context(p_organization_id,p_project_id,p_page_id,p_architecture_version_id,p_reporting_binding_id);tracked:=(context#>>'{tracked_page,id}')::uuid;
+ if tracked is null and p_keyword_id is not null then raise exception 'An exact keyword requires a current explicit tracked page link' using errcode='42501';end if;
+ if tracked is null then items:='[]';
+ elsif p_category='page_audits' then
+ select count(*) into total from public.tracked_page_audits where organization_id=p_organization_id and tracked_page_id=tracked;
+ select count(*) into matching from public.tracked_page_audits where organization_id=p_organization_id and tracked_page_id=tracked and (p_start_date is null or audit_date between p_start_date and p_end_date) and (p_query='' or strpos(lower(coalesce(notes,'')||' '||array_to_string(issues,' ')),lower(p_query))>0);
+ select coalesce(jsonb_agg(to_jsonb(row) order by row.audit_date desc,row.created_at desc,row.id),'[]'::jsonb) into items from(select id,organization_id,tracked_page_id,audit_date,case when source_type='manual' then indexed end indexed,case when source_type='manual' then index_status end index_status,case when source_type='manual' then core_web_vitals_mobile end core_web_vitals_mobile,case when source_type='manual' then core_web_vitals_desktop end core_web_vitals_desktop,case when source_type='manual' then schema_valid end schema_valid,case when source_type='manual' then to_jsonb(issues) end issues,case when source_type='manual' then notes end notes,source_type,source_connection_id,created_by,created_at,'unknown'::text version_binding,null::date period_start,null::date period_end,null::text reporting_time_zone,null::text provider_resource from public.tracked_page_audits where organization_id=p_organization_id and tracked_page_id=tracked and (p_start_date is null or audit_date between p_start_date and p_end_date) and (p_query='' or strpos(lower(coalesce(notes,'')||' '||array_to_string(issues,' ')),lower(p_query))>0) order by audit_date desc,created_at desc,id limit p_limit offset p_offset) row;
+ elsif p_category='planned_targets' then
+ if p_start_date is not null then raise exception 'Planned targets are not dated provider observations' using errcode='22023';end if;
+ select count(*) into total from public.tracked_keywords where organization_id=p_organization_id and brand_id=(context->>'brand_id')::uuid and tracked_page_id=tracked;
+ select count(*) into matching from public.tracked_keywords where organization_id=p_organization_id and brand_id=(context->>'brand_id')::uuid and tracked_page_id=tracked and (p_query='' or strpos(lower(keyword),lower(p_query))>0);
+ select coalesce(jsonb_agg(to_jsonb(row) order by row.keyword,row.id),'[]'::jsonb) into items from(select id,organization_id,brand_id,tracked_page_id,keyword,target_rank_tier,active,source_artifact_id,created_by,created_at,'planned_target'::text record_kind,null::uuid exact_source_version_id from public.tracked_keywords where organization_id=p_organization_id and brand_id=(context->>'brand_id')::uuid and tracked_page_id=tracked and (p_query='' or strpos(lower(keyword),lower(p_query))>0) order by keyword,id limit p_limit offset p_offset) row;
+ else
+ if p_keyword_id is not null then perform 1 from public.tracked_keywords where id=p_keyword_id and organization_id=p_organization_id and brand_id=(context->>'brand_id')::uuid and tracked_page_id=tracked;if not found then raise exception 'Exact same-page planned keyword required' using errcode='42501';end if;end if;
+ select count(*) into total from public.keyword_rank_snapshots s join public.tracked_keywords k on k.id=s.tracked_keyword_id and k.organization_id=s.organization_id where s.organization_id=p_organization_id and k.brand_id=(context->>'brand_id')::uuid and k.tracked_page_id=tracked and (p_keyword_id is null or k.id=p_keyword_id);
+ select count(*) into matching from public.keyword_rank_snapshots s join public.tracked_keywords k on k.id=s.tracked_keyword_id and k.organization_id=s.organization_id where s.organization_id=p_organization_id and k.brand_id=(context->>'brand_id')::uuid and k.tracked_page_id=tracked and (p_keyword_id is null or k.id=p_keyword_id) and (p_start_date is null or s.snapshot_date between p_start_date and p_end_date) and (p_query='' or strpos(lower(k.keyword),lower(p_query))>0);
+ select coalesce(jsonb_agg(to_jsonb(row) order by row.snapshot_date desc,row.fetched_at desc,row.id),'[]'::jsonb) into items from(select s.id,s.organization_id,k.tracked_page_id,s.tracked_keyword_id,k.keyword query,s.snapshot_date,null::numeric position,null::integer search_console_clicks,null::integer search_console_impressions,s.fetched_at,'legacy_resource_provenance_unknown'::text metrics_withheld_reason,'query_observation'::text record_kind,'legacy_search_console_keyword_snapshot'::text source_contract,null::date period_start,null::date period_end,null::text reporting_time_zone,null::text device,null::text country,null::text search_engine_resource,null::date data_through,null::uuid source_connection_id,null::uuid exact_source_version_id from public.keyword_rank_snapshots s join public.tracked_keywords k on k.id=s.tracked_keyword_id and k.organization_id=s.organization_id where s.organization_id=p_organization_id and k.brand_id=(context->>'brand_id')::uuid and k.tracked_page_id=tracked and (p_keyword_id is null or k.id=p_keyword_id) and (p_start_date is null or s.snapshot_date between p_start_date and p_end_date) and (p_query='' or strpos(lower(k.keyword),lower(p_query))>0) order by s.snapshot_date desc,s.fetched_at desc,s.id limit p_limit offset p_offset) row;
+ end if;
+ result:=jsonb_build_object('context',context,'category',p_category,'items',items,'total',total,'matching',matching,'offset',p_offset,'has_more',p_offset+jsonb_array_length(items)<matching,'collection_start_date',p_start_date,'collection_end_date',p_end_date,'provider_period_known',false,'provider_request_made',false);
+ if octet_length(result::text)>131072 then raise exception 'SEO observations exceed whole bounded response' using errcode='22023';end if;return result;
+end $$;
+revoke all on function private.website_seo_context(uuid,uuid,uuid,uuid,uuid),public.list_project_website_page_seo_observations(uuid,uuid,uuid,uuid,text,uuid,text,date,date,integer,integer,uuid) from public,anon,authenticated,service_role;
+grant execute on function public.list_project_website_page_seo_observations(uuid,uuid,uuid,uuid,text,uuid,text,date,date,integer,integer,uuid) to authenticated;
+commit;

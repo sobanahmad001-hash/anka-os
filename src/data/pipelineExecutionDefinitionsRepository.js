@@ -1,3 +1,4 @@
+import {normalizePipelineStageContract} from './pipelineStageContracts.js'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const KINDS = new Set(['human', 'ai_assisted', 'automatic', 'approval_gate'])
 
@@ -9,7 +10,7 @@ function id(value, label) {
 async function dataOrThrow(query, signal) {
   if (signal && typeof query.abortSignal === 'function') query = query.abortSignal(signal)
   const { data, error } = await query
-  if (error) throw new Error(error.message || 'Execution definition request failed')
+  if (error) throw Object.assign(new Error(error.message || 'Execution definition request failed'), {code:error.code})
   return data
 }
 
@@ -33,7 +34,8 @@ export function normalizeExecutionSteps(steps) {
     }
     const service = id(step.service_id, `Step ${index + 1} service`)
     previous.add(key)
-    return { key, label, kind, department_id: department, service_id: service, depends_on: dependencies }
+    if(step.stage_contract!==undefined && step.kind==='approval_gate' && step.stage_contract.reuse_allowed)throw new TypeError('An approval gate cannot be replaced by artifact reuse')
+    return { key, label, kind, department_id: department, service_id: service, depends_on: dependencies, ...(step.stage_contract===undefined ? {} : {stage_contract:normalizePipelineStageContract(step.stage_contract)}) }
   })
 }
 

@@ -1,0 +1,110 @@
+begin;
+-- Isolate only the three owned candidate tables inside rollback; all retained audits are restored.
+truncate public.project_reporting_binding_revisions,public.project_reporting_binding_commands,public.project_reporting_bindings;
+set local lock_timeout='5s';set local statement_timeout='90s';
+select set_config('request.jwt.claim.sub','99999999-9999-4999-8999-999999999902',true);
+-- Clone-only absent legacy activity tenant default; complete harness verifies exact rollback restoration.
+alter table public.activity_events alter column organization_id set default '99999999-9999-4999-8999-999999999901'::uuid;
+-- Reuse the established project -> canonical client <- agency-client -> engagement/brand fixture.
+insert into public.integration_connections(id,organization_id,provider,display_name,status,public_config,created_by) values
+('99999999-9999-4999-8999-999999997210','99999999-9999-4999-8999-999999999901','google_analytics','Synthetic reporting GA4','verified','{"property_id":"123456","granted_scopes":["untrusted_public_scope"]}','99999999-9999-4999-8999-999999999902'),
+('99999999-9999-4999-8999-999999997211','99999999-9999-4999-8999-999999999901','meta','Synthetic reporting Meta','verified','{"facebook_page_id":"567890123","instagram_account_id":"678901234","granted_scopes":["pages_read_engagement","read_insights"]}','99999999-9999-4999-8999-999999999902'),
+('99999999-9999-4999-8999-999999997212','99999999-9999-4999-8999-999999999901','google_search_console','Synthetic reporting GSC','configured','{"site_url":"sc-domain:example.invalid"}','99999999-9999-4999-8999-999999999902');
+insert into public.integration_connection_engagements(connection_id,organization_id,engagement_id,department_id,created_by)
+select id,organization_id,'99999999-9999-4999-8999-999999999975','marketing','99999999-9999-4999-8999-999999999902' from public.integration_connections where id in ('99999999-9999-4999-8999-999999997210','99999999-9999-4999-8999-999999997211','99999999-9999-4999-8999-999999997212');
+-- Metadata-only encrypted placeholders never decrypted or sent to a provider.
+insert into public.integration_oauth_credentials(connection_id,organization_id,provider,access_token_ciphertext,access_token_iv,refresh_token_ciphertext,refresh_token_iv,granted_scopes,access_token_expires_at) values('99999999-9999-4999-8999-999999997210','99999999-9999-4999-8999-999999999901','google_analytics','local-metadata-only','local-metadata-only','local-metadata-only','local-metadata-only',array['https://www.googleapis.com/auth/analytics.readonly'],now()+interval '1 hour');
+insert into public.meta_connections(id,organization_id,integration_connection_id,brand_id,facebook_page_id,instagram_account_id,access_token_ciphertext,access_token_iv,token_expires_at,connected_by) values('99999999-9999-4999-8999-999999997213','99999999-9999-4999-8999-999999999901','99999999-9999-4999-8999-999999997211','99999999-9999-4999-8999-999999999973','567890123','678901234','local-metadata-only','local-metadata-only',now()+interval '1 hour','99999999-9999-4999-8999-999999999902');
+create function pg_temp.check_true(ok boolean,label text) returns void language plpgsql as $$begin if ok is distinct from true then raise exception 'FAIL %',label;end if;raise notice 'PASS %',label;end $$;
+create function pg_temp.expect_error(query text,code text,label text) returns void language plpgsql as $$begin begin execute query;exception when others then if sqlstate=code then raise notice 'PASS %',label;return;end if;raise exception 'FAIL % expected % got %: %',label,code,sqlstate,sqlerrm;end;raise exception 'FAIL % did not reject',label;end $$;
+do $$declare org uuid:='99999999-9999-4999-8999-999999999901';project uuid:='99999999-9999-4999-8999-999999999974';request uuid:='99999999-9999-4999-8999-999999997220';input jsonb:='{"binding_id":null,"expected_revision":0,"engagement_id":"99999999-9999-4999-8999-999999999975","department_id":"marketing","connection_id":"99999999-9999-4999-8999-999999997210","resource_kind":"ga4_property","resource_key":"123456","permitted_operations":["reporting_read"],"state":"enabled"}';review jsonb;saved jsonb;next_input jsonb;listing jsonb;ctx jsonb;old_setting timestamptz;
+begin
+ review:=public.preview_project_reporting_binding(org,project,input);
+ perform pg_temp.check_true((select count(*) from public.project_reporting_bindings)=0 and (select count(*) from public.project_reporting_binding_commands)=0,'Exact resource review makes zero writes');
+ perform pg_temp.check_true(review#>>'{context,grant_provenance}'='observed' and review#>>'{context,reporting_scope_granted}'='true' and review#>>'{context,provider_resource_verified}'='false','Observed Google scope remains separate from unverified resource access');
+ perform pg_temp.check_true(position('ciphertext' in review::text)=0 and position('local-metadata-only' in review::text)=0 and position('public_config' in review::text)=0 and position('secret_name' in review::text)=0,'Read-safe review returns no credential bytes/raw config');
+ saved:=public.confirm_project_reporting_binding(org,project,input,review->>'review_sha256',request);
+ perform pg_temp.check_true(saved->>'revision_number'='1' and saved->>'reporting_ready'='false' and saved->>'external_write_authorized'='false','One exact reporting-only pending binding registered');
+ perform pg_temp.check_true(public.confirm_project_reporting_binding(org,project,input,review->>'review_sha256',request)->>'replayed'='true' and (select count(*) from public.project_reporting_binding_commands)=1,'Original UUID replay preserves one receipt/revision');
+ perform pg_temp.expect_error(format('select public.confirm_project_reporting_binding(%L,%L,%L::jsonb,%L,%L)',org,project,input||'{"resource_key":"654321"}',review->>'review_sha256',request),'23505','Changed resource under original UUID rejected');
+ perform pg_temp.check_true(public.get_project_reporting_binding_operation(org,project,request)#>>'{result,binding_id}'=saved->>'binding_id' and public.get_project_reporting_binding_operation(org,project,'99999999-9999-4999-8999-999999997229') is null,'Recovery uses original UUID only with no latest fallback');
+ listing:=public.list_project_reporting_bindings(org,project);
+ perform pg_temp.check_true(listing->>'total'='1' and listing#>>'{items,0,reason}'='resource_access_verification_pending','Observed grants alone keep provider access pending');
+ perform pg_temp.expect_error(format('select public.preview_project_reporting_binding(%L,%L,%L::jsonb)',org,project,input),'40001','Existing binding requires exact identity/current revision');
+ next_input:=input||jsonb_build_object('binding_id',saved->>'binding_id','expected_revision',1);
+ review:=public.preview_project_reporting_binding(org,project,next_input);
+ update public.integration_connections set public_config=public_config||'{"property_id":"654321"}' where id='99999999-9999-4999-8999-999999997210';
+ perform pg_temp.expect_error(format('select public.confirm_project_reporting_binding(%L,%L,%L::jsonb,%L,%L)',org,project,next_input,review->>'review_sha256','99999999-9999-4999-8999-999999997221'),'42501','Changed selected resource blocks stale confirmed binding');
+ perform pg_temp.check_true(public.list_project_reporting_bindings(org,project)#>>'{items,0,reason}'='binding_context_changed','Selected resource changes remain explicit unavailable state');
+ update public.integration_connections set public_config=public_config||'{"property_id":"123456"}' where id='99999999-9999-4999-8999-999999997210';
+ update public.integration_connections set public_config=public_config-'property_id' where id='99999999-9999-4999-8999-999999997210';
+ perform pg_temp.expect_error(format('select public.preview_project_reporting_binding(%L,%L,%L::jsonb)',org,project,next_input),'42501','Missing selected resource cannot bypass native confirmation through SQL null');
+ update public.integration_connections set public_config=public_config||'{"property_id":"123456"}' where id='99999999-9999-4999-8999-999999997210';
+ perform pg_temp.expect_error('select private.reporting_resource_provider(''gsc_site'',''https://user:password@example.invalid/'')','22023','Native resource parser rejects credential-bearing URL');
+ perform pg_temp.expect_error('select private.reporting_resource_provider(''gsc_site'',''https://example.invalid/?token=secret'')','22023','Native resource parser rejects query/fragment credentials');
+ perform pg_temp.expect_error('select private.reporting_resource_provider(''ga4_property'',''properties/123456'')','22023','Native resource identity rejects implicit provider normalization');
+
+ review:=public.preview_project_reporting_binding(org,project,next_input);
+ update public.integration_oauth_credentials set granted_scopes=array[]::text[] where connection_id='99999999-9999-4999-8999-999999997210';
+ perform pg_temp.expect_error(format('select public.confirm_project_reporting_binding(%L,%L,%L::jsonb,%L,%L)',org,project,next_input,review->>'review_sha256','99999999-9999-4999-8999-999999997222'),'40001','Observed grant revocation invalidates exact reviewed context');
+ update public.integration_oauth_credentials set granted_scopes=array['https://www.googleapis.com/auth/analytics.readonly'] where connection_id='99999999-9999-4999-8999-999999997210';
+ delete from public.integration_connection_engagements where connection_id='99999999-9999-4999-8999-999999997210';
+ perform pg_temp.check_true(public.list_project_reporting_bindings(org,project)#>>'{items,0,reason}'='binding_context_unavailable','Removed existing mapping keeps immutable history unavailable');
+ perform pg_temp.expect_error(format('select public.preview_project_reporting_binding(%L,%L,%L::jsonb)',org,project,next_input),'42501','Missing current mapping cannot enable a binding');
+ next_input:=next_input||'{"state":"revoked"}';review:=public.preview_project_reporting_binding(org,project,next_input);
+ perform pg_temp.check_true(public.confirm_project_reporting_binding(org,project,next_input,review->>'review_sha256','99999999-9999-4999-8999-999999997223')->>'state'='revoked','Revocation still succeeds after mapping removal');
+ insert into public.integration_connection_engagements(connection_id,organization_id,engagement_id,department_id,created_by,created_at) values('99999999-9999-4999-8999-999999997210',org,'99999999-9999-4999-8999-999999999975','marketing',auth.uid(),now()+interval '1 second');
+ perform pg_temp.check_true(public.list_project_reporting_bindings(org,project)#>>'{items,0,reason}'='binding_revoked','Recreated mapping cannot silently reactivate revoked binding');
+ next_input:=next_input||'{"expected_revision":2,"state":"enabled"}';review:=public.preview_project_reporting_binding(org,project,next_input);
+ select created_at into old_setting from public.integration_connection_engagements where connection_id='99999999-9999-4999-8999-999999997210';
+ update public.integration_connection_engagements set created_at=created_at+interval '1 second' where connection_id='99999999-9999-4999-8999-999999997210';
+ perform pg_temp.expect_error(format('select public.confirm_project_reporting_binding(%L,%L,%L::jsonb,%L,%L)',org,project,next_input,review->>'review_sha256','99999999-9999-4999-8999-999999997224'),'40001','Recreated mapping identity invalidates stale review');
+ update public.integration_connection_engagements set created_at=old_setting where connection_id='99999999-9999-4999-8999-999999997210';
+ review:=public.preview_project_reporting_binding(org,project,next_input);saved:=public.confirm_project_reporting_binding(org,project,next_input,review->>'review_sha256','99999999-9999-4999-8999-999999997225');
+ perform pg_temp.check_true(saved->>'revision_number'='3' and (select count(*) from public.project_reporting_binding_revisions)=3,'Explicit reenable appends history instead of mutating original ownership');
+ perform pg_temp.expect_error(format('select public.preview_project_reporting_binding(%L,%L,%L::jsonb)',org,project,next_input),'40001','Competing stale revision rejected');
+ ctx:=private.project_reporting_context(org,project,'99999999-9999-4999-8999-999999999975','marketing','99999999-9999-4999-8999-999999997211','meta_facebook_page','567890123');
+ perform pg_temp.check_true(ctx->>'credential_state'='available' and ctx->>'grant_provenance'='unobserved' and ctx->>'reporting_scope_granted'='false' and ctx->>'provider_resource_verified'='false','Requested Meta scope constants never imply observed grants/resource capability');
+ review:=public.preview_project_reporting_binding(org,project,input||'{"connection_id":"99999999-9999-4999-8999-999999997211","resource_kind":"meta_facebook_page","resource_key":"567890123"}');
+ perform public.confirm_project_reporting_binding(org,project,review->'input',review->>'review_sha256','99999999-9999-4999-8999-999999997226');
+ perform pg_temp.check_true(public.list_project_reporting_bindings(org,project,'meta')#>>'{items,0,reason}'='observed_reporting_grant_missing','Meta pending grant is an explicit local acceptance state');
+ update public.integration_oauth_credentials set access_token_expires_at=now()-interval '1 second' where connection_id='99999999-9999-4999-8999-999999997210';
+ perform pg_temp.check_true(private.project_reporting_context(org,project,'99999999-9999-4999-8999-999999999975','marketing','99999999-9999-4999-8999-999999997210','ga4_property','123456')->>'credential_state'='expired','Expired server credential cannot report available');
+ update public.meta_connections set token_expires_at=null where id='99999999-9999-4999-8999-999999997213';
+ perform pg_temp.check_true(private.project_reporting_context(org,project,'99999999-9999-4999-8999-999999999975','marketing','99999999-9999-4999-8999-999999997211','meta_facebook_page','567890123')->>'credential_state'='expiry_unknown','Unknown Meta expiry is explicit rather than assumed live');
+ perform pg_temp.expect_error(format('update public.projects set client_id=%L where id=%L','99999999-9999-4999-8999-999999999972',project),'23514','Canonical project gate prevents client ownership substitution');
+ perform pg_temp.expect_error(format('select private.project_reporting_context(%L,%L,%L,%L,%L,%L,%L)',org,'99999999-9999-4999-8999-999999997216','99999999-9999-4999-8999-999999999975','marketing','99999999-9999-4999-8999-999999997210','ga4_property','123456'),'42501','Another project cannot borrow this engagement even under the same brand');
+ listing:=public.list_project_reporting_bindings(org,project,'meta',0,1);
+ perform pg_temp.check_true(listing->>'total'='2' and listing->>'matching'='1' and jsonb_array_length(listing->'items')=1 and listing->>'has_more'='false','Bounded list keeps whole and filtered counts independent');
+ listing:=public.list_project_reporting_resource_candidates(org,project,'99999999-9999-4999-8999-999999999975','marketing','Synthetic reporting ',0,1);
+ perform pg_temp.check_true((listing->>'total')::int>=4 and jsonb_array_length(listing->'items')=1 and listing->>'has_more'='true','Resource candidates are explicitly scoped and bounded with whole counters');
+ perform pg_temp.check_true(position('ciphertext' in listing::text)=0 and position('local-metadata-only' in listing::text)=0 and position('granted_scopes' in listing::text)=0,'Candidate lookup returns selected identities and grant booleans only');
+ listing:=public.get_project_reporting_binding_history(org,project,(saved->>'binding_id')::uuid,0,2);
+ perform pg_temp.check_true(listing->>'total'='3' and jsonb_array_length(listing->'items')=2 and listing->>'has_more'='true' and listing#>>'{items,0,revision_number}'='3','Immutable binding history is bounded and preserves exact revisions');
+ perform pg_temp.expect_error(format('select public.get_project_reporting_binding_history(%L,%L,%L)',org,project,'99999999-9999-4999-8999-999999997299'),'42501','Another or missing binding cannot read history');
+ perform pg_temp.expect_error(format('select public.list_project_reporting_bindings(%L,%L,%L,0,51)',org,project,''),'22023','Unbounded list rejected');
+ perform pg_temp.expect_error(format('select public.preview_project_reporting_binding(%L,%L,%L::jsonb)',org,project,input||'{"access_token":"pasted"}'),'22023','Pasted credentials/unknown input rejected');
+ perform pg_temp.expect_error(format('select public.preview_project_reporting_binding(%L,%L,%L::jsonb)',org,project,input||'{"permitted_operations":["reporting_read","publish"]}'),'22023','Reporting permission never expands to publishing');
+ perform pg_temp.expect_error(format('select public.preview_project_reporting_binding(%L,%L,%L::jsonb)',org,project,input||'{"permitted_operations":["spend"]}'),'22023','Ads/spend operations rejected');
+ perform pg_temp.expect_error(format('update public.project_reporting_bindings set resource_key=%L where id=%L','654321',saved->>'binding_id'),'55000','Original resource identity cannot mutate');
+ perform pg_temp.expect_error('delete from public.project_reporting_binding_revisions','55000','Immutable binding revision history retained');
+ perform pg_temp.expect_error('delete from public.project_reporting_binding_commands','55000','Original command receipts immutable');
+ update public.integration_connections set archived_at=now() where id='99999999-9999-4999-8999-999999997210';
+ perform pg_temp.expect_error(format('select public.preview_project_reporting_binding(%L,%L,%L::jsonb)',org,project,next_input||'{"expected_revision":3}'),'42501','Archived connector cannot enable reporting');
+ update public.projects set archived_at=now() where id=project;
+ perform pg_temp.check_true(public.list_project_reporting_bindings(org,project)->>'total'='2','Archived project retains bounded history reads for current Team');
+ perform pg_temp.expect_error(format('select public.preview_project_reporting_binding(%L,%L,%L::jsonb)',org,project,next_input||'{"expected_revision":3}'),'42501','Archived project rejects new binding writes');
+end $$;
+set local role authenticated;
+select pg_temp.check_true((public.list_project_reporting_bindings('99999999-9999-4999-8999-999999999901','99999999-9999-4999-8999-999999999974')->>'total')='2','Actual authenticated role uses bounded project RPC');
+select pg_temp.expect_error('select * from public.project_reporting_bindings','42501','Authenticated direct business table reads denied');
+select pg_temp.expect_error('select * from public.project_reporting_binding_commands','42501','Authenticated cannot read other actor receipts directly');
+select pg_temp.expect_error('select access_token_ciphertext from public.integration_oauth_credentials','42501','Server credential byte access remains denied');
+reset role;
+select set_config('request.jwt.claim.sub','99999999-9999-4999-8999-999999997299',true);
+select pg_temp.expect_error('select public.list_project_reporting_bindings(''99999999-9999-4999-8999-999999999901'',''99999999-9999-4999-8999-999999999974'')','42501','Unknown actor cannot read project resources');
+select set_config('request.jwt.claim.sub','99999999-9999-4999-8999-999999999902',true);
+update public.organization_memberships set status='revoked' where organization_id='99999999-9999-4999-8999-999999999901' and user_id='99999999-9999-4999-8999-999999999902';
+select pg_temp.expect_error('select public.list_project_reporting_bindings(''99999999-9999-4999-8999-999999999901'',''99999999-9999-4999-8999-999999999974'')','42501','Revoked membership blocks current resource reads');
+select pg_temp.check_true(not has_function_privilege('anon','public.list_project_reporting_bindings(uuid,uuid,text,integer,integer)','execute') and not has_function_privilege('service_role','public.confirm_project_reporting_binding(uuid,uuid,jsonb,text,uuid)','execute'),'Anon/service role cannot bypass user resource commands');
+rollback;

@@ -1,0 +1,65 @@
+-- Approved owned-local clone only; every row and helper in this behavior suite rolls back.
+begin;set local lock_timeout='5s';set local statement_timeout='30s';
+\ir design_video_job_brief.fixture.sql
+create function pg_temp.check_true(ok boolean,label text) returns void language plpgsql as $$begin if ok is distinct from true then raise exception 'FAIL %',label;end if;raise notice 'PASS %',label;end;$$;
+create function pg_temp.expect_error(command text,wanted text,label text) returns void language plpgsql as $$begin begin execute command;exception when others then if sqlstate<>wanted then raise exception 'FAIL % expected %, got %: %',label,wanted,sqlstate,sqlerrm;end if;raise notice 'PASS %',label;return;end;raise exception 'FAIL % unexpectedly succeeded',label;end;$$;
+create function pg_temp.fail_binding() returns trigger language plpgsql as $$begin raise exception 'forced binding rollback' using errcode='P0001';end;$$;
+do $$declare org uuid:='99999999-9999-4999-8999-999999999901';actor uuid:='99999999-9999-4999-8999-999999999902';conv uuid:=gen_random_uuid();conv2 uuid:=gen_random_uuid();conv3 uuid:=gen_random_uuid();
+ source jsonb;v jsonb;confirmed jsonb;next_version jsonb;version_id uuid;root uuid;job jsonb;again jsonb;op uuid:=gen_random_uuid();bad_op uuid:=gen_random_uuid();legacy_op uuid:=gen_random_uuid();connector uuid:=current_setting('qa.video.connector')::uuid;quote uuid:=current_setting('qa.video.quote')::uuid;
+ command text;job_count integer;binding_count integer;session_id uuid:=gen_random_uuid();direction_root uuid:=gen_random_uuid();direction uuid:=gen_random_uuid();
+begin
+ v:='{"purpose":"Synthetic video binding QA","audience":"Local test only","channel":"Website","assets":"None","script_storyboard":"Product then benefits","brand_constraints":"No unlicensed marks","required_text":"None","mode":"explore","duration_seconds":5,"aspect_ratio":"16:9","resolution":"720p","output_format":"mp4","generate_audio":false}';
+ insert into public.department_chat_conversations(id,organization_id,owner_id,department_id,context_kind,title) values(conv,org,actor,'design','department_private','Native exact binding'),(conv2,org,actor,'design','department_private','Native rollback binding'),(conv3,org,actor,'design','department_private','Native legacy binding');
+ confirmed:=public.confirm_design_video_brief(org,actor,conv,null,null,0,gen_random_uuid(),v);version_id:=(confirmed->'version'->>'id')::uuid;root:=(confirmed->'brief'->>'id')::uuid;source:=confirmed->'version'->'content';
+ perform pg_temp.check_true(has_function_privilege('service_role','public.create_confirmed_design_video_job(uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,text,text,integer,text,text,text,boolean)','EXECUTE') and not has_function_privilege('authenticated','public.create_confirmed_design_video_job(uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,text,text,integer,text,text,text,boolean)','EXECUTE'),'service-only confirmed reservation');
+ perform pg_temp.check_true(not has_function_privilege('service_role','public.create_private_design_video_job(uuid,uuid,uuid,uuid,uuid,text,text,text,integer,text,text,text,boolean)','EXECUTE') and not has_function_privilege('service_role','public.create_design_video_job(uuid,uuid,uuid,uuid,uuid,text,text,text,integer,text,text,text,boolean)','EXECUTE'),'old unbound service reservation is closed');
+ perform pg_temp.check_true(not has_table_privilege('authenticated','private.design_video_job_brief_bindings','SELECT') and not has_table_privilege('service_role','private.design_video_job_brief_bindings','INSERT'),'private binding has no direct reads or writes');
+ command:=format('select public.create_confirmed_design_video_job(%L,%L,%L,null,%L,%L,%L,%L,%L,%L,5,%L,%L,%L,false)',org,actor,conv,version_id,connector,quote,op,source->>'instructions','explore','720p','16:9','mp4');
+ perform pg_temp.expect_error(replace(command,quote_literal(version_id::text),'null'),'22023','missing exact brief denied');
+ perform pg_temp.expect_error(replace(command,quote_literal(source->>'instructions'),quote_literal('A changed prompt')),'22023','changed prompt denied before job creation');
+ perform pg_temp.expect_error(replace(command,quote_literal('720p'),quote_literal('480p')),'22023','changed exact settings denied');
+ perform pg_temp.expect_error(replace(command,quote_literal(conv::text),quote_literal(conv2::text)),'22023','same-owner foreign conversation version denied');
+ job:=public.create_confirmed_design_video_job(org,actor,conv,null,version_id,connector,quote,op,source->>'instructions','explore',5,'720p','16:9','mp4',false);
+ perform pg_temp.check_true(job->>'creative_brief_version_id'=version_id::text and exists(select 1 from private.design_video_job_brief_bindings b join private.design_video_generation_jobs j on j.id=b.job_id and j.organization_id=b.organization_id where b.job_id=(job->>'job_id')::uuid and b.creative_brief_version_id=version_id and b.requested_by=actor and b.operation_key=op and b.job_request_checksum=j.request_checksum and b.brief_checksum=encode(sha256(convert_to(source::text,'UTF8')),'hex')),'one canonical job binds exact immutable brief and checksums');
+ again:=public.create_confirmed_design_video_job(org,actor,conv,null,version_id,connector,quote,op,source->>'instructions','explore',5,'720p','16:9','mp4',false);
+ perform pg_temp.check_true(again->>'job_id'=job->>'job_id' and again->>'idempotent_replay'='true','exact original operation replays without another job');
+ perform pg_temp.check_true(public.get_design_video_job_brief_binding(org,(job->>'job_id')::uuid,actor)->>'creative_brief_version_id'=version_id::text,'scoped exact job reader returns immutable brief version');
+ perform pg_temp.expect_error(format('update private.design_video_job_brief_bindings set brief_checksum=repeat(''0'',64) where job_id=%L',job->>'job_id'),'55000','binding cannot mutate');
+ perform pg_temp.expect_error(format('delete from private.design_video_job_brief_bindings where job_id=%L',job->>'job_id'),'55000','binding cannot delete');
+ next_version:=public.confirm_design_video_brief(org,actor,conv,null,root,(confirmed->'brief'->>'revision')::integer,gen_random_uuid(),v);
+ perform pg_temp.expect_error(replace(command,quote_literal(version_id::text),quote_literal(next_version->'version'->>'id')),'23505','identical prompt with different immutable version cannot reuse original request');
+ again:=public.create_confirmed_design_video_job(org,actor,conv,null,version_id,connector,quote,op,source->>'instructions','explore',5,'720p','16:9','mp4',false);
+ perform pg_temp.check_true(again->>'creative_brief_version_id'=version_id::text and again->>'idempotent_replay'='true','superseded brief stays pinned on exact original replay');
+ perform pg_temp.expect_error(replace(command,quote_literal(op::text),quote_literal(bad_op::text)),'42501','new request cannot use superseded confirmation');
+ confirmed:=public.confirm_design_video_brief(org,actor,conv2,null,null,0,gen_random_uuid(),v);source:=confirmed->'version'->'content';
+ select count(*) into job_count from private.design_video_generation_jobs;select count(*) into binding_count from private.design_video_job_brief_bindings;
+ create trigger qa_forced_job_binding_failure before insert on private.design_video_job_brief_bindings for each row execute function pg_temp.fail_binding();
+ perform pg_temp.expect_error(format('select public.create_confirmed_design_video_job(%L,%L,%L,null,%L,%L,%L,%L,%L,''explore'',5,''720p'',''16:9'',''mp4'',false)',org,actor,conv2,confirmed->'version'->>'id',connector,quote,bad_op,source->>'instructions'),'P0001','forced binding failure rolls back canonical reservation');
+ perform pg_temp.check_true((select count(*)=job_count from private.design_video_generation_jobs) and (select count(*)=binding_count from private.design_video_job_brief_bindings),'forced failure leaves neither job nor binding');
+ drop trigger qa_forced_job_binding_failure on private.design_video_job_brief_bindings;
+ confirmed:=public.confirm_design_video_brief(org,actor,conv3,null,null,0,gen_random_uuid(),v);
+ again:=public.create_private_design_video_job(org,conv3,actor,connector,quote,legacy_op::text,source->>'instructions','explore',5,'720p','16:9','mp4',false);
+ perform pg_temp.expect_error(format('select public.create_confirmed_design_video_job(%L,%L,%L,null,%L,%L,%L,%L,%L,''explore'',5,''720p'',''16:9'',''mp4'',false)',org,actor,conv3,confirmed->'version'->>'id',connector,quote,legacy_op,source->>'instructions'),'23505','historical unbound operation cannot silently adopt a brief');
+ perform pg_temp.check_true(public.get_design_video_job_brief_binding(org,(again->>'job_id')::uuid,actor)->'creative_brief_version_id'='null'::jsonb,'historical unbound job remains inspectable and unchanged');
+ update public.department_chat_conversations set state='archived',archived_at=clock_timestamp() where id=conv;
+ perform pg_temp.expect_error(command,'42501','archived private conversation denies exact replay');
+ update public.department_chat_conversations set state='active',archived_at=null where id=conv;
+ update public.organization_memberships set status='revoked' where organization_id=org and user_id=actor;
+ perform pg_temp.expect_error(command,'42501','revoked current Design membership denies exact replay');
+ update public.organization_memberships set status='active' where organization_id=org and user_id=actor;
+ insert into public.design_workshop_sessions(id,organization_id,engagement_id,brand_id,engagement_service_id,output_family,output_brief,designer_instructions,context_manifest,context_checksum,status,created_by)
+ values(session_id,org,'99999999-9999-4999-8999-999999999975','99999999-9999-4999-8999-999999999973','99999999-9999-4999-8999-999999998906','video_motion','{}','Local QA','{}',repeat('a',64),'ready',actor);
+ insert into public.design_directions(id,organization_id,session_id,direction_slot) values(direction_root,org,session_id,1);
+ insert into public.design_direction_versions(id,organization_id,direction_id,version_number,content,content_checksum,distinctness_signature,created_by) values(direction,org,direction_root,1,'{}',repeat('b',64),repeat('c',64),actor);
+ confirmed:=public.confirm_design_video_brief(org,actor,null,direction,null,0,gen_random_uuid(),v);source:=confirmed->'version'->'content';op:=gen_random_uuid();
+ command:=format('select public.create_confirmed_design_video_job(%L,%L,null,%L,%L,%L,%L,%L,%L,''explore'',5,''720p'',''16:9'',''mp4'',false)',org,actor,direction,confirmed->'version'->>'id',connector,quote,op,source->>'instructions');
+ job:=public.create_confirmed_design_video_job(org,actor,null,direction,(confirmed->'version'->>'id')::uuid,connector,quote,op,source->>'instructions','explore',5,'720p','16:9','mp4',false);
+ perform pg_temp.check_true(job->>'creative_brief_version_id'=confirmed->'version'->>'id' and exists(select 1 from private.design_video_generation_jobs where id=(job->>'job_id')::uuid and direction_version_id=direction and private_conversation_id is null),'official direction binds its private exact brief to canonical job');
+ perform pg_temp.check_true(public.get_design_video_job_brief_binding(org,(job->>'job_id')::uuid,actor)->>'creative_brief_version_id'=confirmed->'version'->>'id','official exact binding reader retains actor scope');
+ perform pg_temp.expect_error(format('select public.create_confirmed_design_video_job(%L,%L,%L,%L,%L,%L,%L,%L,%L,''explore'',5,''720p'',''16:9'',''mp4'',false)',org,actor,conv,direction,confirmed->'version'->>'id',connector,quote,gen_random_uuid(),source->>'instructions'),'22023','private and official anchors cannot combine');
+ update public.engagement_services set status='on_hold' where id='99999999-9999-4999-8999-999999998906';perform pg_temp.expect_error(command,'42501','on-hold Design service denies official replay');
+ update public.engagement_services set status='active' where id='99999999-9999-4999-8999-999999998906';
+ update public.projects set archived_at=clock_timestamp() where id='99999999-9999-4999-8999-999999999974';perform pg_temp.expect_error(command,'42501','archived official project denies replay');
+
+end;$$;
+rollback;

@@ -1,3 +1,5 @@
+import { engagementFirstSendKey, readEngagementFirstSend, saveEngagementFirstSend, clearEngagementFirstSend } from '../data/engagementChatFirstSend.js'
+import './departmentChatWorkbench.css'
 import TextAiConsent, { useTextAiConsent } from './TextAiConsent.jsx'
 import { textAiConsentKey } from '../data/textAiConsent.js'
 import { restrictArtifactTypes } from '../data/departmentChatArtifactTypes.js'
@@ -23,6 +25,8 @@ export default function DepartmentChat(props) {
   const { activeOrganizationId, scopeRevision, requestSignal, handleOrganizationAccessError, selectOrganization } = useOrganization()
   const [composerDirty, setComposerDirty] = useState(false)
   const navigationBlocker = useBlocker(composerDirty || Boolean(props.externalNavigationBusy))
+  const reportDraftDirty = props.onDraftDirtyChange
+  useEffect(() => { reportDraftDirty?.(composerDirty); return () => reportDraftDirty?.(false) }, [composerDirty, reportDraftDirty])
   const identity = JSON.stringify([user?.id, activeOrganizationId, scopeRevision, props.engagement?.id, props.departmentId, props.initialConversation?.id || ''])
   if (!user?.id || !activeOrganizationId || requestSignal?.aborted
     || props.engagement?.organization_id !== activeOrganizationId) return null
@@ -54,6 +58,8 @@ export function ScopedDepartmentChat({
   onComposerDirtyChange,
   selectOrganization,
 }) {
+  const submissionFlight = useRef(false)
+  const firstSendAttempt = useRef(null)
   const completion = useRef(null)
   const requestedConversation = useRef(initialConversation).current
   const answerObservation = useRef(null)
@@ -137,6 +143,24 @@ export function ScopedDepartmentChat({
   const [sourceBusy, setSourceBusy] = useState(false)
   const [sourceError, setSourceError] = useState('')
   const [sourceRefresh, setSourceRefresh] = useState(0)
+  const compactWorkbench = presentation === 'workbench'
+  const atomicFirstSend = compactWorkbench && supportsSavedConversations
+  const firstSendKey = engagementFirstSendKey({ userId, organizationId, projectId, engagementId: engagement.id, departmentId })
+  const [pendingFirstSend, setPendingFirstSend] = useState(() => atomicFirstSend ? readEngagementFirstSend(firstSendKey) : null)
+  const [draftConversation, setDraftConversation] = useState(false)
+  const initialFirstSend = useRef(pendingFirstSend).current
+  firstSendAttempt.current = pendingFirstSend || firstSendAttempt.current
+  const workbenchRef = useRef(null)
+  const messageViewport = useRef(null)
+  const lastMessageId = messages.at(-1)?.id
+  useLayoutEffect(() => { if (compactWorkbench && messageViewport.current && lastMessageId) messageViewport.current.scrollTop = messageViewport.current.scrollHeight }, [compactWorkbench,lastMessageId])
+  useLayoutEffect(() => {
+    if (!compactWorkbench || !workbenchRef.current || !workbenchRef.current.style?.setProperty || !workbenchRef.current.getBoundingClientRect) return
+    const panel = workbenchRef.current
+    const measure = () => panel.style.setProperty('--department-chat-height', Math.max(260, (globalThis.innerHeight || globalThis.window?.innerHeight || 900) - panel.getBoundingClientRect().top - 88) + 'px')
+    measure(); globalThis.addEventListener?.('resize', measure); globalThis.addEventListener?.('scroll', measure, true)
+    return () => { globalThis.removeEventListener?.('resize', measure); globalThis.removeEventListener?.('scroll', measure, true) }
+  }, [compactWorkbench])
   const [contextExpanded, setContextExpanded] = useState(() => presentation !== 'workbench' && (!globalThis.window?.matchMedia || globalThis.window.matchMedia('(min-width: 1280px)').matches))
 
   const [pendingDraftSwitch, setPendingDraftSwitch] = useState(null)
@@ -281,7 +305,7 @@ export function ScopedDepartmentChat({
   }
 
   async function saveUnsentDraft() {
-    if (!conversationId || !prompt.trim() || busy || historyBusy || attachmentBusy || draftSaving) return false
+    if (!conversationId || draftConversation || !prompt.trim() || busy || historyBusy || attachmentBusy || draftSaving) return false
     setDraftSaving(true)
     setError('')
     try {
@@ -308,7 +332,7 @@ export function ScopedDepartmentChat({
     const pending = pendingDraftSwitch
     if (save) {
       if (!await saveUnsentDraft()) return
-    } else if (conversationId) {
+    } else if (conversationId && !draftConversation) {
       setDraftSaving(true)
       try {
         await departmentChat.discardUnsentDraft(departmentId, {
@@ -393,7 +417,7 @@ export function ScopedDepartmentChat({
     setSourcePreview(null)
     setSourceError('')
     setSourceBusy(false)
-    if (!supportsSavedConversations || !conversationId || !projectId) return
+    if (!supportsSavedConversations || !conversationId || !projectId || draftConversation) return
     let active = true
     departmentChat.listSourceVersions(departmentId, {
       conversation_id: conversationId, engagement_id: engagement.id, project_id: projectId,
@@ -408,7 +432,7 @@ export function ScopedDepartmentChat({
         failure => setSourceError(failure.message || 'Exact sources are unavailable.'))
     })
     return () => { active = false; sourceGeneration.current += 1 }
-  }, [conversationId, departmentId, engagement.id, projectId, requestScope, requestSignal, supportsSavedConversations, handleOrganizationAccessError, sourceRefresh])
+  }, [conversationId, departmentId, engagement.id, projectId, requestScope, requestSignal, supportsSavedConversations, handleOrganizationAccessError, sourceRefresh, draftConversation])
 
   async function previewExactSource(id) {
     if (sourceBusy || busy || historyBusy || sourceConversationId !== conversationId) return
@@ -433,7 +457,7 @@ export function ScopedDepartmentChat({
     }
   }
 
-  async function loadConversation(id = conversationId, isCurrent = () => true, restoreDraft = false) {
+  async function loadConversation(id = conversationId, isCurrent = () => true, restoreDraft = false, answeredRequestId = '') {
     if (!id || !projectId) {
       setMessages([])
       setAttachments([])
@@ -451,6 +475,10 @@ export function ScopedDepartmentChat({
     }, requestScope)
     if (!isCurrent()) return null
     setMessages(data.messages || [])
+    if (compactWorkbench && answeredRequestId) {
+      const sent = (data.messages || []).find(message => message.role === 'user' && message.client_request_id === answeredRequestId)
+      if (sent && (data.messages || []).some(message => message.role === 'assistant' && message.status === 'completed' && message.sequence === sent.sequence + 1)) setAnswerState({ status: 'idle', text: '', durable: false })
+    }
     await loadAttachments(id, isCurrent)
     if (!isCurrent()) return null
     setSharing(data.sharing || { can_manage: false, recipients: [] })
@@ -468,7 +496,17 @@ export function ScopedDepartmentChat({
       setShareCandidates([])
     }
     setConversationTitle(data.conversation?.title || '')
-    setConversations(current => current.map(item => item.id === id ? data.conversation : item))
+    setConversations(current => current.some(item => item.id === id) ? current.map(item => item.id === id ? data.conversation : item) : [data.conversation, ...current])
+    const savedAttempt = firstSendAttempt.current
+    if (savedAttempt?.conversationId === id && (data.messages || []).some(message => message.role === 'user' && message.author_id === userId && message.client_request_id === savedAttempt.requestId)) {
+      clearEngagementFirstSend(firstSendKey)
+      firstSendAttempt.current = null
+      setPendingFirstSend(null)
+      setDraftConversation(false)
+      setPrompt('')
+      setObservationNotice('The first Send is saved. Reload its durable status before repeating that request.')
+      onConversationListChange?.()
+    }
     if (restoreDraft && isCurrent()) await restoreUnsentDraft(id, isCurrent)
     return data
   }
@@ -499,8 +537,9 @@ export function ScopedDepartmentChat({
       setNextConversationCursor(conversationResult.value.next_cursor || null)
       setCapabilities(capabilityResult.status === 'fulfilled' ? capabilityResult.value : null)
       if (capabilityResult.status === 'rejected') setError(capabilityResult.reason?.message || 'Configured AI is unavailable.')
-      const selected = requestedConversation || rows[0] || null
-      setConversationId(selected?.id || '')
+      const selected = requestedConversation || (!initialFirstSend ? rows[0] : null) || null
+      if (!selected && atomicFirstSend) { setConversationId(initialFirstSend?.conversationId || crypto.randomUUID()); setDraftConversation(true) }
+      if (selected || !atomicFirstSend) setConversationId(selected?.id || '')
       setConversationTitle(selected?.title || '')
       if (selected) {
         const data = await departmentChat.getConversation(departmentId, {
@@ -541,6 +580,18 @@ export function ScopedDepartmentChat({
   }, [departmentId, engagement.id, handleOrganizationAccessError, organizationId, projectId, requestScope, supportsSavedConversations, requestedConversation])
 
   async function createConversation() {
+    if (atomicFirstSend) {
+      if (pendingFirstSend) { setError('Recover the earlier first Send before starting another chat.'); return }
+      if (submissionFlight.current || busy || historyBusy || requestSignal?.aborted) return
+      completion.current.begin()
+      clearComposer()
+      setConversationId(crypto.randomUUID()); setDraftConversation(true); setConversationTitle('')
+      setMessages([]); setAttachments([]); setSharing({ can_manage: false, recipients: [] })
+      setShareCandidates([]); setRecipientIds([]); setResult(null); setOfficial(null)
+      setAnswerState({ status: 'idle', text: '', durable: false }); setObservationNotice(''); setError('')
+      composerRef.current?.focus()
+      return
+    }
     const isCurrent = completion.current.begin()
     if (!isCurrent()) return
     setHistoryBusy(true)
@@ -598,11 +649,29 @@ export function ScopedDepartmentChat({
     }
   }
 
+  async function recoverFirstSend() {
+    if (!pendingFirstSend || submissionFlight.current || busy || historyBusy || requestSignal?.aborted) return
+    const isCurrent = completion.current.begin()
+    if (!isCurrent()) return
+    setHistoryBusy(true); setError('')
+    try {
+      const data = await loadConversation(pendingFirstSend.conversationId, isCurrent)
+      if (!isCurrent()) return
+      if (!(data?.messages || []).some(message => message.role === 'user' && message.author_id === userId && message.client_request_id === pendingFirstSend.requestId)) throw new Error('The first Send is not yet confirmed. Recovery does not dispatch the provider. Try recovery again later.')
+      setConversationId(pendingFirstSend.conversationId)
+      setDraftConversation(false); clearComposer()
+      setObservationNotice('Recovered the saved first Send. No provider request was dispatched by recovery.')
+    } catch (reason) {
+      handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message || 'Recovery is unavailable. The earlier request may still be running.'))
+    } finally { if (isCurrent()) setHistoryBusy(false) }
+  }
+
   async function selectConversation(id) {
     if (id === conversationId && attachmentBusy) return
     const isCurrent = completion.current.begin()
     if (!isCurrent()) return
     setConversationId(id)
+    setDraftConversation(false)
     setAttachmentBusy(false)
     setConversationTitle(conversations.find(item => item.id === id)?.title || '')
     setHistoryBusy(true)
@@ -828,7 +897,15 @@ export function ScopedDepartmentChat({
 
   async function submit(event) {
     event.preventDefault()
-    if (busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim()) return
+    if (submissionFlight.current) return
+    submissionFlight.current = true
+    try { await submitRequest(event) } finally { submissionFlight.current = false }
+  }
+
+  async function submitRequest(event) {
+    event.preventDefault()
+    if (busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim() || (draftConversation && (pendingFirstSend || proposalMode !== 'answer'))) return
+    if (prompt.length > 8000) { setError('Keep the message within 8,000 characters. No request was sent.'); return }
     if (proposalMode === 'artifact' && !artifactTypes.includes(artifactType)) { setError('This artifact tool is unavailable in this chat.'); return }
     if (!allowArtifactDraft && proposalMode === 'artifact') { setError('Open the specialist Studio to draft an artifact.'); return }
     if (supportsSavedConversations && proposalMode !== 'answer' && selectedProvider !== 'openai') {
@@ -836,14 +913,19 @@ export function ScopedDepartmentChat({
       return
     }
     if (isAnswerMode) {
-      if (!answerLocalChecksPass || !selectedModel || !currentConversation || currentConversation.state !== 'active') return
+      if (!answerLocalChecksPass || !selectedModel || (draftConversation ? Boolean(pendingFirstSend) : !currentConversation || currentConversation.state !== 'active')) return
       if (!await consent.confirm() || requestSignal?.aborted) return
     } else if (!safe) return
     const isCurrent = completion.current.begin()
     if (!isCurrent()) return
     const targetConversationId = conversationId
     const clientRequestId = supportsSavedConversations ? crypto.randomUUID() : undefined
+    if (draftConversation) {
+      try { firstSendAttempt.current = saveEngagementFirstSend(firstSendKey, { conversationId: targetConversationId, requestId: clientRequestId }); setPendingFirstSend(firstSendAttempt.current) }
+      catch (reason) { setError(reason.message); return }
+    }
     const common = {
+      ...(draftConversation ? { start_new: true } : {}),
       conversation_id: supportsSavedConversations ? targetConversationId : undefined,
       client_request_id: clientRequestId,
       attachment_ids: supportsSavedConversations ? selectedAttachmentIds : undefined,
@@ -905,7 +987,7 @@ export function ScopedDepartmentChat({
       setSelectedSourceVersionIds([])
       setSourcePreview(null)
       setDraftNotice('')
-      if (supportsSavedConversations && targetConversationId) {
+      if (supportsSavedConversations && targetConversationId && !draftConversation) {
         try {
           await departmentChat.discardUnsentDraft(departmentId, {
             conversation_id: targetConversationId, engagement_id: engagement.id, project_id: projectId,
@@ -914,7 +996,7 @@ export function ScopedDepartmentChat({
           if (isCurrent()) setDraftNotice('Sent successfully, but the earlier saved draft could not be cleared. Discard it before sending another request.')
         }
       }
-      if (supportsSavedConversations) await loadConversation(targetConversationId, isCurrent)
+      if (supportsSavedConversations) await loadConversation(targetConversationId, isCurrent, false, proposalMode === 'answer' ? clientRequestId : '')
     } catch (reason) {
       if (observation?.stoppedLocally()) {
         if (isCurrent()) {
@@ -922,8 +1004,11 @@ export function ScopedDepartmentChat({
           try { await loadConversation(targetConversationId, isCurrent) } catch { /* Keep the truthful local-stop notice. */ }
         }
       } else {
+        if (draftConversation && reason?.outcome === 'not_reserved' && isCurrent()) {
+          clearEngagementFirstSend(firstSendKey); firstSendAttempt.current = null; setPendingFirstSend(null)
+        }
         handleCurrentChatFailure(isCurrent, reason, handleOrganizationAccessError, failure => setError(failure.message))
-        if (supportsSavedConversations && isCurrent()) {
+        if (supportsSavedConversations && isCurrent() && reason?.outcome !== 'not_reserved') {
           try { await loadConversation(targetConversationId, isCurrent) } catch { /* Preserve the original request error. */ }
         }
       }
@@ -995,7 +1080,8 @@ export function ScopedDepartmentChat({
   }
 
   const SourcePanel = presentation === 'workbench' ? 'details' : 'section'
-  return <><div className={presentation === 'workbench' ? 'design-chat-composer grid min-w-0 gap-4' : `grid gap-6 ${supportsSavedConversations ? hideConversationList ? 'xl:grid-cols-[minmax(0,1fr)_320px]' : 'xl:grid-cols-[260px_minmax(0,1fr)_320px]' : 'xl:grid-cols-[minmax(0,1fr)_360px]'}`}>
+  const ConversationControls = compactWorkbench ? 'details' : 'div'
+  return <><div ref={workbenchRef} className={presentation === 'workbench' ? 'department-chat-workbench design-chat-composer grid min-w-0 gap-3' : `grid gap-6 ${supportsSavedConversations ? hideConversationList ? 'xl:grid-cols-[minmax(0,1fr)_320px]' : 'xl:grid-cols-[260px_minmax(0,1fr)_320px]' : 'xl:grid-cols-[minmax(0,1fr)_360px]'}`}>
     {supportsSavedConversations && !hideConversationList && <aside className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4">
       <div className="flex items-center justify-between gap-3">
         <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--anka-muted)]">Conversations</p><p className="mt-1 text-xs text-[var(--anka-success)]">Private to you or deliberately shared</p></div>
@@ -1024,20 +1110,24 @@ export function ScopedDepartmentChat({
         {nextConversationCursor && <button type="button" disabled={busy || historyBusy} onClick={() => loadMoreConversations().catch(reason => setError(reason.message))} className="w-full rounded-lg border border-[var(--anka-line)] px-3 py-2 text-xs font-semibold text-[var(--anka-ink)] disabled:opacity-50">Load more</button>}
       </div>
     </aside>}
-    <form onSubmit={submit} className="min-w-0 rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4 sm:p-6">
-      {supportsSavedConversations && hideConversationList && <button type="button" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)} className="mb-4 rounded-lg bg-[var(--anka-violet)] px-3 py-2 text-sm text-[var(--anka-on-violet)]">New engagement conversation</button>}
+    <form onSubmit={submit} className={(compactWorkbench ? 'department-chat-main ' : '') + "min-w-0 rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4 sm:p-6"}>
+      {atomicFirstSend && pendingFirstSend && <div role="status" className="rounded-xl border border-[var(--anka-warning)] p-3 text-sm text-[var(--anka-ink)]"><p>Check the earlier first Send before submitting it again.</p><button type="button" disabled={busy || historyBusy} onClick={recoverFirstSend} className="mt-2 font-semibold text-[var(--anka-info)]">Recover first Send</button></div>}
+      {supportsSavedConversations && hideConversationList && !compactWorkbench && <button type="button" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)} className="mb-4 rounded-lg bg-[var(--anka-violet)] px-3 py-2 text-sm text-[var(--anka-on-violet)]">New engagement conversation</button>}
+      {compactWorkbench ? <header className="department-chat-heading"><div><h2>{resolvedDepartmentLabel} · Chat</h2><p>{currentConversation?.title || (draftConversation ? 'New chat' : 'Choose or start a conversation')} · {!currentConversation ? 'Private draft' : isConversationOwner ? sharing.recipients?.length ? 'Shared with selected teammates' : 'Private' : 'Shared with you'}</p></div>{supportsSavedConversations && hideConversationList && <button type="button" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)}>New chat</button>}</header> : <>
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--anka-info)]">{presentationLabel} · {departmentId}</p>
         <h2 className="mt-2 text-2xl font-semibold text-[var(--anka-ink)]">{presentation === 'workbench' ? 'Discuss the work' : 'Ask, explore, or prepare a governed proposal'}</h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--anka-muted)]">Ordinary answers stay conversational and create no official record. Artifact and work-item modes remain explicit governed proposals requiring separate confirmation.</p>
         {supportsSavedConversations && <p className="mt-2 text-xs leading-5 text-[var(--anka-muted)]">Work context: canonical client engagement. Saved conversations are creator-private until explicitly shared with eligible internal contributors. Standalone private-project and internal-project chat modes are unavailable here.</p>}
       </div>
+      </>}
       {error && <div className="mt-5 rounded-xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] p-3 text-sm text-[var(--anka-danger)]">{error}</div>}
       {draftNotice && <div className="mt-5 rounded-xl border border-[var(--anka-info)] bg-[var(--anka-surface-raised)] p-3 text-sm text-[var(--anka-info)]">{draftNotice}</div>}
       {observationNotice && <div className="mt-5 rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] p-3 text-sm text-[var(--anka-warning)]">{observationNotice}</div>}
       {answerState.text && <div className="mt-5 rounded-xl border border-[var(--anka-info)] bg-[var(--anka-surface-raised)] p-4"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-info)]">{answerState.durable ? 'Saved answer' : 'Live partial · not yet durable'}</p><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[var(--anka-ink)]">{answerState.text}</p></div>}
       {supportsSavedConversations && !projectId && <div className="mt-5 rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] p-3 text-sm text-[var(--anka-warning)]">Saved chat requires a canonical project-owned engagement.</div>}
-      {supportsSavedConversations && currentConversation && <div className="mt-5 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-4">
+      {supportsSavedConversations && currentConversation && <ConversationControls className="department-chat-controls mt-5 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-4">
+        {compactWorkbench && <summary>Conversation details and sharing</summary>}
         <div className="flex flex-wrap items-end gap-3">
           <label className="min-w-0 flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Conversation title
             <input maxLength="160" readOnly={!isConversationOwner} disabled={busy || historyBusy} className={`${INPUT} mt-2 normal-case tracking-normal`} value={conversationTitle} onChange={event => setConversationTitle(event.target.value)} />
@@ -1058,10 +1148,13 @@ export function ScopedDepartmentChat({
           <button type="button" disabled={busy || historyBusy} onClick={() => saveSharing().catch(reason => setError(reason.message))} className="mt-3 rounded-lg border border-[var(--anka-info)] px-3 py-2 text-xs font-semibold text-[var(--anka-info)] disabled:opacity-50">Save sharing</button>
           <p className="mt-2 text-xs text-[var(--anka-muted)]">Removing a person revokes later reads and replies immediately. Sharing never grants approval or execution power.</p>
         </div>}
-      </div>}
-      {supportsSavedConversations && <ConversationHistory messages={messages} userId={userId} busy={busy} onConfirm={proposal => decide('confirm', proposal)} onReject={proposal => decide('reject', proposal)} />}
-      <div className="mt-6 space-y-5">
-        {supportsSavedConversations && capabilities && <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Approved model
+        {compactWorkbench && supportsSavedConversations && currentConversation && <button type="button" disabled={busy || historyBusy || attachmentBusy || draftSaving || !prompt.trim()} onClick={saveUnsentDraft} className="w-full rounded-xl border border-[var(--anka-info)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-info)] disabled:opacity-50">{draftSaving ? 'Saving draft…' : 'Save draft to this conversation'}</button>}
+        {compactWorkbench && <p className="mt-2 text-xs text-[var(--anka-muted)]">Optional: save unsent text for later without asking AI. Send already saves each submitted message.</p>}
+      </ConversationControls>}
+      <div ref={messageViewport} className={compactWorkbench ? 'department-chat-messages' : undefined} aria-label="Engagement chat messages">{supportsSavedConversations && <ConversationHistory draftConversation={draftConversation} messages={messages} userId={userId} busy={busy} onConfirm={proposal => decide('confirm', proposal)} onReject={proposal => decide('reject', proposal)} />}</div>
+      <div className={compactWorkbench ? 'department-chat-footer' : 'mt-6 space-y-5'}>
+        <div className={compactWorkbench ? 'department-chat-footer-body' : 'space-y-5'}>
+        {supportsSavedConversations && capabilities && <label className="department-chat-model block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]"><span className={compactWorkbench ? 'sr-only' : undefined}>Approved model</span>
           <select
             className={`${INPUT} mt-2 normal-case tracking-normal`}
             value={modelConfigurationId}
@@ -1077,11 +1170,11 @@ export function ScopedDepartmentChat({
           >
             {(capabilities.approved_models || []).map(model => <option key={model.configuration_id} value={model.configuration_id}>{MODEL_PROVIDER_LABELS[model.provider || capabilities.provider] || 'Provider unavailable'} · {model.display_name || model.model_id}{model.is_default ? ' · default' : ''}</option>)}
           </select>
-          <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-muted)]">Only administrator-approved models verified through this engagement's connector are available. A revoked or stale choice is rejected before dispatch without fallback.</span>
-          {isAnswerMode && answerReadiness && <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-warning)]">{!answerReadiness.paid_execution_enabled ? 'Workshop AI answers are currently off.' : !answerReadiness.spend_tracking_configured ? 'Organization spend tracking is not configured.' : !selectedPriceReady ? 'A fresh verified price for this exact model is unavailable.' : answerReadiness.spend_guard_mode === 'provider_managed' ? 'Provider-side spend limits are managed externally and cannot be verified or enforced by Anka. Each request is still priced and recorded.' : 'Local checks passed; the service will recheck before dispatch.'}</span>}
+          <span hidden={compactWorkbench} className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-muted)]">Only administrator-approved models verified through this engagement's connector are available. A revoked or stale choice is rejected before dispatch without fallback.</span>
+          {isAnswerMode && answerReadiness && (!compactWorkbench || !answerLocalChecksPass || answerReadiness.spend_guard_mode === 'provider_managed') && <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-warning)]">{!answerReadiness.paid_execution_enabled ? 'Workshop AI answers are currently off.' : !answerReadiness.spend_tracking_configured ? 'Organization spend tracking is not configured.' : !selectedPriceReady ? 'A fresh verified price for this exact model is unavailable.' : answerReadiness.spend_guard_mode === 'provider_managed' ? 'Provider-side spend limits are managed externally and cannot be verified or enforced by Anka. Each request is still priced and recorded.' : 'Local checks passed; the service will recheck before dispatch.'}</span>}
           {isAnswerMode && !answerReadiness && <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-warning)]">Workshop answer readiness is unavailable.</span>}
         </label>}
-        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Task mode
+        <label className="department-chat-mode block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]"><span className={compactWorkbench ? 'sr-only' : undefined}>Task mode</span>
           <select disabled={busy || historyBusy} className={`${INPUT} mt-2 normal-case tracking-normal`} value={proposalMode} onChange={event => setProposalMode(event.target.value)}>
             {supportsSavedConversations && <option value="answer">Conversational answer</option>}
             {allowArtifactDraft && artifactTypes.length > 0 && <option value="artifact">Artifact draft</option>}
@@ -1210,8 +1303,8 @@ export function ScopedDepartmentChat({
           <p className="mt-3 text-xs text-[var(--anka-muted)]">Choose up to three files for this turn. Only checked files are linked to the request; rejected limits never truncate content. Revocation blocks later server reads and replies, but cannot recall copies someone already saved.</p>
         </SourcePanel>}
 
-        <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">{isAnswerMode ? 'Message' : 'Draft request'}
-          <textarea ref={composerRef} required rows="10" className={`${INPUT} mt-2 normal-case tracking-normal`} value={prompt} onInput={event => setPrompt(event.currentTarget.value)} placeholder={isAnswerMode ? 'Ask a question or explore the work context. This will not create an official output.' : 'Describe the draft you need, the evidence to prioritize, known constraints, tone, and gaps the team should keep visible.'} />
+        <label className="department-chat-prompt block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]"><span className={compactWorkbench ? 'sr-only' : undefined}>{isAnswerMode ? 'Message' : 'Draft request'}</span>
+          <textarea ref={composerRef} required maxLength={8000} rows={compactWorkbench ? 2 : 10} className={`${INPUT} mt-2 normal-case tracking-normal`} value={prompt} onInput={event => setPrompt(event.currentTarget.value)} placeholder={isAnswerMode ? 'Ask a question or explore the work context. This will not create an official output.' : 'Describe the draft you need, the evidence to prioritize, known constraints, tone, and gaps the team should keep visible.'} />
         </label>
 
         {!isAnswerMode && <label className="flex items-start gap-3 rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] p-4 text-sm leading-6 text-[var(--anka-warning)]">
@@ -1220,14 +1313,17 @@ export function ScopedDepartmentChat({
         </label>}
         {consent.dialog && <TextAiConsent {...consent.dialog} provider={MODEL_PROVIDER_LABELS[selectedProvider] || selectedProvider} model={selectedModel?.model_id} engagementHistory scope={`${resolvedDepartmentLabel} · ${engagement.name} · this conversation`} sources={selectedSourceVersionIds.length > 0} selectedAttachmentIds={selectedAttachmentIds} />}
 
-        {supportsSavedConversations && currentConversation && <button type="button" disabled={busy || historyBusy || attachmentBusy || draftSaving || !prompt.trim()} onClick={saveUnsentDraft} className="w-full rounded-xl border border-[var(--anka-info)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-info)] disabled:opacity-50">{draftSaving ? 'Saving draft…' : 'Save draft to this conversation'}</button>}
+        </div>
+        <div className={compactWorkbench ? 'department-chat-footer-actions' : 'space-y-5'}>
+        {!compactWorkbench && supportsSavedConversations && currentConversation && <button type="button" disabled={busy || historyBusy || attachmentBusy || draftSaving || !prompt.trim()} onClick={saveUnsentDraft} className="w-full rounded-xl border border-[var(--anka-info)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-info)] disabled:opacity-50">{draftSaving ? 'Saving draft…' : 'Save draft to this conversation'}</button>}
         <button
-          disabled={busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim() || (!isAnswerMode && !safe) || proposalModelUnavailable || (isAnswerMode && !answerLocalChecksPass) || (supportsSavedConversations && (!currentConversation || currentConversation.state !== 'active' || !modelConfigurationId)) || (isWorkItemMode && !title.trim()) || (!isAnswerMode && !isWorkItemMode && !artifactTypes.includes(artifactType))}
-          className={`${PRIMARY} w-full`}
+          disabled={busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim() || (!isAnswerMode && !safe) || proposalModelUnavailable || (isAnswerMode && !answerLocalChecksPass) || (supportsSavedConversations && (!modelConfigurationId || (draftConversation ? Boolean(pendingFirstSend) || !isAnswerMode : !currentConversation || currentConversation.state !== 'active'))) || (isWorkItemMode && !title.trim()) || (!isAnswerMode && !isWorkItemMode && !artifactTypes.includes(artifactType))}
+          className={`${PRIMARY} w-full department-chat-submit`}
         >
-          {busy ? (isAnswerMode ? 'Processing answer…' : 'Generating safe preview…') : isAnswerMode ? 'Ask Anka AI' : isWorkItemMode ? 'Preview draft work item' : 'Preview draft artifact'}
+          {busy ? (isAnswerMode ? 'Processing answer…' : 'Generating safe preview…') : isAnswerMode ? compactWorkbench ? 'Send' : 'Ask Anka AI' : isWorkItemMode ? 'Preview draft work item' : 'Preview draft artifact'}
         </button>
         {busy && isAnswerMode && <button type="button" onClick={() => answerObservation.current?.stop()} className="w-full rounded-xl border border-[var(--anka-warning)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-warning)]">Stop watching locally</button>}
+        </div>
       </div>
     </form>
     <aside className="min-w-0 rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4" aria-label="Context and output panel">
@@ -1260,12 +1356,12 @@ export function ScopedDepartmentChat({
     </aside>
   </div>
   {externalNavigationBusy && navigationBlocker?.state === 'blocked' && <div role="status" className="rounded-xl border border-[var(--anka-warning)] p-4">Keep this page open while the media request is pending or unconfirmed. <button type="button" onClick={() => navigationBlocker.reset()}>Stay on this page</button></div>}
-  {pendingDraftSwitch && <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Unsent chat draft" onKeyDown={handleDraftDialogKey} className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--anka-ink)]/75 p-5"><section className="w-full max-w-lg rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-6 text-[var(--anka-ink)] shadow-2xl"><h2 className="text-xl font-semibold text-[var(--anka-ink)]">Keep this unsent work?</h2><p className="mt-2 text-sm text-[var(--anka-ink)]">Before you {pendingDraftSwitch.label}, stay here, save text to the original conversation, or discard it. Exact source and file selections, model choice, and AI-use consent are never saved.</p>{error && <p role="alert" className="mt-3 text-sm text-[var(--anka-danger)]">{error}</p>}<div className="mt-6 flex flex-wrap justify-end gap-2"><button ref={stayButtonRef} type="button" disabled={draftSaving} onClick={closeDraftSwitch}>Stay</button><button ref={discardButtonRef} type="button" disabled={draftSaving || externalNavigationBusy} onClick={() => finishDraftSwitch(false)}>Discard and continue</button><button ref={saveButtonRef} type="button" disabled={draftSaving || externalNavigationBusy || !conversationId || !prompt.trim()} onClick={() => finishDraftSwitch(true)} className={PRIMARY}>{draftSaving ? 'Saving…' : 'Save to original and continue'}</button></div>{!prompt.trim() && <p className="mt-3 text-xs text-[var(--anka-warning)]">Add a message to save a draft; source selections alone cannot be saved.</p>}</section></div>}
+  {pendingDraftSwitch && <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Unsent chat draft" onKeyDown={handleDraftDialogKey} className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--anka-ink)]/75 p-5"><section className="w-full max-w-lg rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-6 text-[var(--anka-ink)] shadow-2xl"><h2 className="text-xl font-semibold text-[var(--anka-ink)]">Keep this unsent work?</h2><p className="mt-2 text-sm text-[var(--anka-ink)]">Before you {pendingDraftSwitch.label}, {draftConversation ? 'stay here or discard this local draft. A new chat is saved on its first Send.' : 'stay here, save text to the original conversation, or discard it. Exact source and file selections, model choice, and AI-use consent are never saved.'}</p>{error && <p role="alert" className="mt-3 text-sm text-[var(--anka-danger)]">{error}</p>}<div className="mt-6 flex flex-wrap justify-end gap-2"><button ref={stayButtonRef} type="button" disabled={draftSaving} onClick={closeDraftSwitch}>Stay</button><button ref={discardButtonRef} type="button" disabled={draftSaving || externalNavigationBusy} onClick={() => finishDraftSwitch(false)}>Discard and continue</button>{!draftConversation && <button ref={saveButtonRef} type="button" disabled={draftConversation || draftSaving || externalNavigationBusy || !conversationId || !prompt.trim()} onClick={() => finishDraftSwitch(true)} className={PRIMARY}>{draftSaving ? 'Saving…' : 'Save to original and continue'}</button>}</div>{!prompt.trim() && <p className="mt-3 text-xs text-[var(--anka-warning)]">Add a message to save a draft; source selections alone cannot be saved.</p>}</section></div>}
   </>
 }
 
-function ConversationHistory({ messages, userId, busy, onConfirm, onReject }) {
-  if (!messages.length) return <div className="mt-5 rounded-xl border border-dashed border-[var(--anka-line)] p-6 text-center text-sm text-[var(--anka-muted)]">This conversation has no messages yet.</div>
+function ConversationHistory({ messages, userId, busy, onConfirm, onReject, draftConversation = false }) {
+  if (!messages.length) return <div className="mt-5 rounded-xl border border-dashed border-[var(--anka-line)] p-6 text-center text-sm text-[var(--anka-muted)]">{draftConversation ? 'Start with a message. This chat is saved on first Send.' : 'This conversation has no messages yet.'}</div>
   return <section className="mt-5 space-y-3" aria-label="Saved conversation history">
     {messages.map(message => {
       const proposal = message.proposal ? {
