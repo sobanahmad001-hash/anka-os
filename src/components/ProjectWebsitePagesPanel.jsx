@@ -15,7 +15,7 @@ export default function ProjectWebsitePagesPanel(props){
  return <ScopedWebsitePages key={[user?.id,props.organizationId,props.engagement.project_id,props.engagement.id,props.group.id,requestScope.current.revision,props.membership?.role,props.membership?.departmentId,props.membership?.status,props.membership?.memberKind].join(':')} {...props} actorId={user?.id} />
 }
 // eslint-disable-next-line no-unused-vars -- JSX component is consumed above.
-function ScopedWebsitePages({organizationId,engagement,group,actorId,signal}){
+function ScopedWebsitePages({organizationId,engagement,group,actorId,signal,onNavigationBusyChange}){
  const scope={organizationId,projectId:engagement.project_id},recoveryKey=`anka:website-page-operation:${actorId}:${organizationId}:${engagement.project_id}:v1`
  const [pending,setPending]=useState(()=>{try{const v=JSON.parse(sessionStorage.getItem(recoveryKey)||'null');return v && UUID.test(v.requestId || '') ? v : v ? {requestId:''} : null}catch{return {requestId:''}}})
  const [query,setQuery]=useState(''),[sources,setSources]=useState([]),[sourcePage,setSourcePage]=useState({offset:0,has_more:false}),[versionId,setVersionId]=useState('')
@@ -79,6 +79,7 @@ function ScopedWebsitePages({organizationId,engagement,group,actorId,signal}){
   }catch(cause){if(allowed()){if(cause.knownRollback){sessionStorage.removeItem(recoveryKey);latest.current.pending=null;setPending(null)}setError(cause.message)}}finally{flight.current=false;if(allowed())setWorking(false)}
  }
  const isLocked=busy || Boolean(pending) || Boolean(editor) || seoBlocked,count=data?.counts,source=sources.find(row=>row.artifact_version_id===versionId)
+ useEffect(()=>{onNavigationBusyChange?.(isLocked);return()=>onNavigationBusyChange?.(false)},[isLocked,onNavigationBusyChange])
  return <section aria-label="Website pages" className="mt-5 space-y-4 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4 text-[var(--anka-ink)]">
   <header><h3 className="font-semibold">Website pages · {group.name}</h3><p className="mt-1 text-xs text-[var(--anka-muted)]">Choose an approved architecture version. Page identities stay stable across approved revisions; recording a live URL never publishes a website.</p></header>
   {error && <p role="alert" className="text-sm text-[var(--anka-danger)]">{error}</p>}{notice && <p role="status" className="text-sm text-[var(--anka-success)]">{notice}</p>}

@@ -35,7 +35,13 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
   const [notice, setNotice] = useState('')
   let view
   try {view=pipelineGroupView(records,groupId)} catch (failure) {view={available:[],configurations:[],activations:[],error:failure.message}}
-  const locked=busy || Boolean(pending) || Boolean(view.error)
+  const [childState,setChildState]=useState({groupId:'',website:false,marketing:false,resources:false})
+  const childScope=useRef(childState)
+  if(childScope.current.groupId!==groupId)childScope.current={groupId,website:false,marketing:false,resources:false}
+  const childBlocked=childState.groupId===groupId&&(childState.website||childState.marketing||childState.resources)
+  const nativeLocked=busy || Boolean(pending) || Boolean(view.error)
+  const locked=nativeLocked || childBlocked
+
   const createRequest = useRef('')
   const activationRequest = useRef('')
   // Exact project-manager bindings are checked by the RPC, not inferred from an organization role.
@@ -49,7 +55,12 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
   const aiSelected = eligibleSteps.some(step => (quantities[step.key] || stageActions[step.key]==='reuse') && ['ai_assisted', 'automatic'].includes(step.kind))
   const reviewSignature=JSON.stringify([actorId,organizationId,engagement.id,groupId,publicationId,publication?.definition,quantities,stageActions,omissionReasons,stageValues,stageArtifacts,cost,services,membership])
   const currentReviewSignature=useRef('');currentReviewSignature.current=reviewSignature
-  const commandState=useRef(null);commandState.current={pending,locked,loading,preview,acknowledged,reviewSignature,groupSignature:JSON.stringify([groupName.trim(),groupKind,groupPreset]),configIds:view.configurations.map(row=>row.id)}
+  const commandState=useRef(null);commandState.current={pending,locked,nativeLocked,busy,loading,preview,acknowledged,reviewSignature,groupSignature:JSON.stringify([groupName.trim(),groupKind,groupPreset]),configIds:view.configurations.map(row=>row.id)}
+
+  const reportChildBusy=useCallback((slot,value)=>{const current=childScope.current;if(!scopeActive.current||signal?.aborted||current.groupId!==groupId||current[slot]===Boolean(value))return;const next={...current,[slot]:Boolean(value)};childScope.current=next;setChildState(next);if(commandState.current)commandState.current.locked=commandState.current.nativeLocked||next.website||next.marketing||next.resources},[groupId,signal])
+  const reportWebsiteBusy=useCallback(value=>reportChildBusy('website',value),[reportChildBusy])
+  const reportMarketingBusy=useCallback(value=>reportChildBusy('marketing',value),[reportChildBusy])
+  const reportResourcesBusy=useCallback(value=>reportChildBusy('resources',value),[reportChildBusy])
 
   const refresh = useCallback(async () => {
     setCreationReview(null);setPreview(null); setAcknowledged(false); activationRequest.current = ''
@@ -210,7 +221,7 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
     <div className="flex items-start justify-between gap-3"><div>
       <h2 id="project-config-heading" className="font-semibold">Project pipeline configuration</h2>
       <p className="mt-1 text-xs text-[var(--anka-muted)]">Exact project managers and owner/admin may choose steps, review impact, and activate a draft. This does not start AI work.</p>
-    </div><button type="button" onClick={refresh} disabled={busy} className="text-xs text-[var(--anka-violet)] disabled:opacity-40">Refresh</button></div>
+    </div><button type="button" onClick={()=>{const child=childScope.current;if(!flight.current&&!commandState.current.busy&&!child.website&&!child.marketing&&!child.resources&&!signal?.aborted&&scopeActive.current)void refresh()}} disabled={busy||childBlocked} className="text-xs text-[var(--anka-violet)] disabled:opacity-40">Refresh</button></div>
     {view.error && <p role="alert">{view.error}. No other pipeline was selected.</p>}
     {error && <p role="alert" className="mt-3 text-sm text-[var(--anka-danger)]">{error}</p>}
     {pending && <p role="status" className="mt-3 text-[var(--anka-warning)]">The original command needs history reconciliation. Refresh inspects its exact request; editing and new commands stay blocked.</p>}
@@ -289,9 +300,9 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
         <button type="button" className="workspace-button" disabled={!groupPreset || !groupName.trim()} onClick={()=>setGroupReview({name:groupName.trim(),kind:groupKind,preset:groupPreset})}>Review pipeline creation</button>
         {groupReview && <section aria-label="Review independent pipeline" className="rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] p-3 space-y-2"><p>{groupReview.name} · {groupReview.kind==='website' ? 'Website' : 'Marketing'} · {presets.find(row=>row.preset_publication_id===groupReview.preset)?.name}</p><p>Preserves Legacy and other pipelines. Creates no work, activation, publication or provider request. Services and steps are selected in a separate draft.</p><button type="button" className="workspace-button workspace-button-primary" onClick={createGroup}>Confirm independent pipeline</button></section>}
       </fieldset></details>}
-      {view.group?.kind==='website' && engagement.project_id && <_ProjectWebsitePagesPanel organizationId={organizationId} engagement={engagement} group={view.group} membership={membership} signal={signal} />}
-      {view.group?.kind==='marketing' && engagement.project_id && <_ProjectCampaignPlanningPanel organizationId={organizationId} engagement={engagement} group={view.group} membership={membership} signal={signal} /> }
-      {['website','marketing'].includes(view.group?.kind) && engagement.project_id && <_ProjectReportingBindingsPanel organizationId={organizationId} engagement={engagement} group={view.group} membership={membership} signal={signal} />}
+      {view.group?.kind==='website' && engagement.project_id && <_ProjectWebsitePagesPanel onNavigationBusyChange={reportWebsiteBusy} organizationId={organizationId} engagement={engagement} group={view.group} membership={membership} signal={signal} />}
+      {view.group?.kind==='marketing' && engagement.project_id && <_ProjectCampaignPlanningPanel onNavigationBusyChange={reportMarketingBusy} organizationId={organizationId} engagement={engagement} group={view.group} membership={membership} signal={signal} /> }
+      {['website','marketing'].includes(view.group?.kind) && engagement.project_id && <_ProjectReportingBindingsPanel onNavigationBusyChange={reportResourcesBusy} organizationId={organizationId} engagement={engagement} group={view.group} membership={membership} signal={signal} />}
       {!view.available.length && <p className="mt-4 text-xs text-[var(--anka-muted)]">This project has no matching published execution definition yet.</p>}
     </>}
   </section>

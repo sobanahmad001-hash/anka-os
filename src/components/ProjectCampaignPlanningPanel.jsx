@@ -21,13 +21,14 @@ export default function ProjectCampaignPlanningPanel(props){
  return <ScopedCampaignPlanning key={[user?.id,props.organizationId,props.engagement.project_id,props.engagement.id,props.group.id,props.group.kind,props.membership?.role,props.membership?.departmentId,props.membership?.status,props.membership?.memberKind,requestScope.current.revision].join(':')} {...props} actorId={user?.id}/>
 }
 // eslint-disable-next-line no-unused-vars -- JSX consumes this scoped component.
-function ScopedCampaignPlanning({organizationId,engagement,group,actorId,signal}){
+function ScopedCampaignPlanning({organizationId,engagement,group,actorId,signal,onNavigationBusyChange}){
  const scope={organizationId,projectId:engagement.project_id},lookupScope={...scope,engagementId:engagement.id},key=`anka:campaign-planning-operation:${actorId}:${organizationId}:${engagement.project_id}:v1`
  const [form,setForm]=useState(initial),[search,setSearch]=useState({campaign:'',source:'',work:'',asset:''}),[filter,setFilter]=useState({allCampaigns:false,channel:'',mode:'',state:'',accountId:'',query:'',startAt:'',endAt:''}),[records,setRecords]=useState({}),[review,setReview]=useState(null),[pending,setPending]=useState(()=>{try{const saved=JSON.parse(sessionStorage.getItem(key)||'null');return !saved?null:UUID.test(saved.requestId||'')&&['assets','placements'].includes(saved.kind)?saved:{kind:'unreadable',requestId:''}}catch{return {kind:'unreadable',requestId:''}}}),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[expanded,setExpanded]=useState(false),[planBlocked,setPlanBlocked]=useState(false),[outreachBlocked,setOutreachBlocked]=useState(false),[deliveryBlocked,setDeliveryBlocked]=useState(false)
  const alive=useRef(true),flight=useRef(false),current=useRef(null)
  current.current={form,search,filter,records,review,pending,busy,signal,planBlocked,outreachBlocked,deliveryBlocked}
  const active=()=>alive.current&&!current.current.signal?.aborted
  const locked=()=>!active()||flight.current||current.current.busy||Boolean(current.current.pending)||current.current.planBlocked||current.current.outreachBlocked||current.current.deliveryBlocked
+ useEffect(()=>{onNavigationBusyChange?.(busy||Boolean(pending)||planBlocked||outreachBlocked||deliveryBlocked);return()=>onNavigationBusyChange?.(false)},[busy,pending,planBlocked,outreachBlocked,deliveryBlocked,onNavigationBusyChange])
  useEffect(()=>()=>{alive.current=false},[])
  const put=(field,value,setter)=>{current.current[field]=value;setter(value)}
  const clearReview=()=>{put('review',null,setReview);setNotice('')}

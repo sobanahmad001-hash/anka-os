@@ -63,9 +63,10 @@ assertProjectId(projectId)
     supabase.from('artifact_approvals').select('id, organization_id, artifact_id, artifact_version_id, engagement_id, decision, notes, approved_by, approved_at').eq('organization_id', organizationId).abortSignal(signal).eq('engagement_id', engagementId).eq('organization_id', org).order('approved_at', { ascending: false }),
     supabase.from('engagement_events').select('id, organization_id, engagement_id, event_type, actor_id, payload, occurred_at').eq('organization_id', organizationId).abortSignal(signal).eq('engagement_id', engagementId).eq('organization_id', org).order('occurred_at', { ascending: false }).limit(100),
     supabase.from('engagement_pipeline_origins').select('engagement_id, organization_id, pipeline_template_id, pipeline_template_version_id, was_customized, customization_provenance, created_at').eq('organization_id', organizationId).abortSignal(signal).eq('engagement_id', engagementId).eq('organization_id', org).maybeSingle(),
-  ] : Array.from({ length: 11 }, () => Promise.resolve(EMPTY))
+    supabase.from('project_pipeline_groups').select('id, organization_id, project_id, engagement_id, kind, name, created_at').eq('organization_id', organizationId).abortSignal(signal).eq('project_id',projectId).eq('engagement_id',engagementId).order('created_at').order('id').limit(101),
+  ] : Array.from({ length: 12 }, () => Promise.resolve(EMPTY))
 
-  const [brand, services, stages, stageDependencies, prerequisites, engagementAssets, workItems, artifacts, artifactApprovals, engagementActivity, pipelineOriginResult] = await Promise.all(extensionQueries)
+  const [brand, services, stages, stageDependencies, prerequisites, engagementAssets, workItems, artifacts, artifactApprovals, engagementActivity, pipelineOriginResult, pipelineGroupsResult] = await Promise.all(extensionQueries)
   const taskIds = rows(tasks, 'Project Tasks').map(item => item.id)
   const workItemIds = rows(workItems, 'Engagement Work Items').map(item => item.id)
   const [taskDependencies, workItemDependencies] = await Promise.all([
@@ -97,6 +98,8 @@ assertProjectId(projectId)
     taskDependencies: rows(taskDependencies, 'Project Task dependencies'),
     workItemDependencies: rows(workItemDependencies, 'Engagement Work Item dependencies'),
     artifacts: artifactRows, artifactVersions: rows(artifactVersions, 'artifact versions'), artifactApprovals: rows(artifactApprovals, 'artifact approvals'), engagementActivity: rows(engagementActivity, 'engagement activity'),
+    pipelineGroups: pipelineGroupsResult.error ? [] : rows(pipelineGroupsResult,'project pipeline groups'),
+    pipelineGroupsState: !engagementId ? 'not_applicable' : pipelineGroupsResult.error ? 'unavailable' : (pipelineGroupsResult.data || []).length>100 ? 'limited' : 'available',
     pipelineOrigin,
     pipelineVersion,
     pipelineTemplate: row(pipelineTemplateResult, 'pipeline template'),

@@ -46,11 +46,12 @@ test('mounted project defaults to Chat, preserves explicit tabs and rejects late
   const selected = () => propsOf(nodes(env.container).find(node => propsOf(node)?.role === 'tabpanel'))?.['aria-labelledby']
   await render()
   assert.equal(selected(), 'project-tab-discussion')
+  assert.deepEqual(nodes(env.container).filter(node=>propsOf(node)?.role==='tab').map(node=>node.textContent),['Chat','Overview','Work','Services & Pipelines','Files & Outputs','Reviews & Delivery','Activity'])
   assert.match(env.container.textContent, /ProjectDiscussionPanel.jsx:org-a:project-a/)
   assert.match(env.container.textContent, /ContextConversationPanel.jsx::project-a:project_team/)
   for (const [tab, primary] of [['overview', 'overview'], ['discussion', 'discussion'], ['work', 'work'],
     ['project-tasks', 'work'], ['engagement-work', 'work'], ['planning', 'work'], ['retainer-planning', 'work'],
-    ['services', 'services'], ['journey', 'services'], ['outputs', 'outputs'], ['reviews', 'reviews'], ['activity', 'activity'],
+    ['website-work','work'],['marketing-work','work'],['resources','overview'],['services', 'services'], ['journey', 'services'], ['outputs', 'outputs'], ['reviews', 'reviews'], ['activity', 'activity'],
     ['unknown', 'overview'], ['', 'overview']]) {
     params = new URLSearchParams({ tab }); await render()
     assert.equal(selected(), `project-tab-${primary}`, tab)

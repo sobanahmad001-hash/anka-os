@@ -1,3 +1,4 @@
+import _ProjectEngagementWorkspace from '../src/apps/ProjectEngagementWorkspace.jsx'
 import _ProjectCampaignPlanningPanel from '../src/components/ProjectCampaignPlanningPanel.jsx'
 import _ProjectReportingBindingsPanel from '../src/components/ProjectReportingBindingsPanel.jsx'
 import _ProjectWebsitePagesPanel from '../src/components/ProjectWebsitePagesPanel.jsx'
@@ -15,7 +16,7 @@ import PipelineRunIntentPanel from '../src/components/PipelineRunIntentPanel.jsx
 import DesignVideoBriefEditor from '../src/components/DesignVideoBriefEditor.jsx'
 import {emptyVideoBrief} from '../supabase/functions/_shared/designVideoBrief.js'
 import ContextConversationPanel from '../src/components/ContextConversationPanel.jsx'
-import { actor, organizationId, threadId, requestId, dispatchId, humanId, createDirectChatFixture, createPipelinePreviewFixture, createWebsitePagePreviewFixture,createReportingBindingsPreviewFixture,createCampaignPlanningPreviewFixture,createCampaignPlanPreviewFixture,createMarketingOpportunityPreviewFixture,createCampaignDeliverablePreviewFixture,createStoredReportingPreviewFixture } from './direct-chat-fixture.js'
+import { actor, organizationId, threadId, requestId, dispatchId, humanId, createDirectChatFixture, createPipelinePreviewFixture, createWebsitePagePreviewFixture,createReportingBindingsPreviewFixture,createCampaignPlanningPreviewFixture,createCampaignPlanPreviewFixture,createMarketingOpportunityPreviewFixture,createCampaignDeliverablePreviewFixture,createStoredReportingPreviewFixture,createProjectNavigationPreviewFixture } from './direct-chat-fixture.js'
 import { clearDirectChatDraft } from '../src/data/directChatDraft.js'
 import { directChatRecoveryKey, writeDirectChatRecovery } from '../src/data/directChatRecovery.js'
 import { browserStorage, writeThemePreference } from '../src/data/themePreference.js'
@@ -39,7 +40,8 @@ globalThis.__directChatPreview = { fixture, pipeline:createPipelinePreviewFixtur
 globalThis.__directChatPreview.campaign=params.get('deliveryPlan')==='1'?createCampaignDeliverablePreviewFixture():params.get('opportunities')==='1'?createMarketingOpportunityPreviewFixture():params.get('planEditor')==='1'?createCampaignPlanPreviewFixture():createCampaignPlanningPreviewFixture()
 globalThis.__directChatPreview.reporting=params.get('storedReport')==='1'?createStoredReportingPreviewFixture():createReportingBindingsPreviewFixture()
 globalThis.__directChatPreview.website=createWebsitePagePreviewFixture({siteFindings:params.get('siteFindings')==='1'})
-if(params.get('panel')==='website-pages')globalThis.__directChatPreview.pipeline.repository.listStageArtifacts=globalThis.__directChatPreview.website.sourceRepository.listStageArtifacts
+if(params.get('panel')==='project-navigation'){const n=createProjectNavigationPreviewFixture(scope.project_id);Object.assign(globalThis.__directChatPreview,n);globalThis.__directChatPreview.projectWorkspace=n.workspace}
+if(['website-pages','project-navigation'].includes(params.get('panel')))globalThis.__directChatPreview.pipeline.repository.listStageArtifacts=globalThis.__directChatPreview.website.sourceRepository.listStageArtifacts
 
 if(params.get('panel')==='stage-inputs'){
  const p=globalThis.__directChatPreview.pipeline,ref={...p.artifact,ai_use_allowed:true},definition={kind:'ai_assisted',department_id:'content',service_id:p.definitionCatalog.publications[0].id,label:'Page copy'}
@@ -73,6 +75,7 @@ function Preview() {
     observer.observe(document.getElementById('preview-chat'), { childList: true, subtree: true })
     return () => observer.disconnect()
   }, [])
+  if(params.get('panel')==='project-navigation')return <_ProjectEngagementWorkspace/>
   if(params.get('panel')==='campaign-planning'){const c=globalThis.__directChatPreview.campaign;return <div className="workspace-page"><h1 className="workspace-title">Marketing pipeline</h1><p className="text-sm text-[var(--anka-muted)]">Provider-free local fixture · existing canonical source and work references</p><_ProjectCampaignPlanningPanel organizationId={organizationId} engagement={{id:c.engagementId,project_id:c.projectId}} group={c.group} membership={membership} signal={globalThis.__directChatPreview.organization.requestSignal}/></div>}
   if(params.get('panel')==='reporting-bindings'){const r=globalThis.__directChatPreview.reporting;return <div className="workspace-page"><h1 className="workspace-title">Project reporting resources</h1><p className="text-sm text-[var(--anka-muted)]">Provider-free local fixture · no OAuth or production changes</p><_ProjectReportingBindingsPanel organizationId={organizationId} engagement={{id:r.engagementId,project_id:r.projectId}} group={r.group} membership={membership} signal={globalThis.__directChatPreview.organization.requestSignal}/></div>}
   if(params.get('panel')==='website-pages'){const w=globalThis.__directChatPreview.website;return <div className="workspace-page"><h1 className="workspace-title">Website pipeline</h1><p className="text-sm text-[var(--anka-muted)]">Provider-free local fixture · synthetic approved architecture · no production writes</p><_ProjectWebsitePagesPanel organizationId={organizationId} engagement={{id:w.engagementId,project_id:w.projectId}} group={w.group} membership={membership} signal={globalThis.__directChatPreview.organization.requestSignal} /></div>}
@@ -97,5 +100,7 @@ function Preview() {
     </div>
   </div>
 }
-const router = createMemoryRouter([{ element: <Layout />, children: [{ path: '*', element: <Preview /> }] }], { initialEntries: ['/sphere/workspace'] })
+const projectNavigation=params.get('panel')==='project-navigation'
+const router = createMemoryRouter([{ element: <Layout />, children: [{ path: projectNavigation?'/sphere/workspace/projects/:projectId':'*', element: <Preview /> }] }], { initialEntries: [projectNavigation?'/sphere/workspace/projects/'+scope.project_id+'?'+params.toString():'/sphere/workspace'] })
+globalThis.__directChatPreview.router=router
 createRoot(document.getElementById('root')).render(<ThemeProvider><RouterProvider router={router} /></ThemeProvider>)
