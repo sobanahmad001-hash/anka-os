@@ -1,3 +1,4 @@
+import _ProjectWebsitePagesPanel from './ProjectWebsitePagesPanel.jsx'
 import {inspectPipelineStagePlan} from '../data/pipelineStageContracts.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -286,6 +287,7 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
         <button type="button" className="workspace-button" disabled={!groupPreset || !groupName.trim()} onClick={()=>setGroupReview({name:groupName.trim(),kind:groupKind,preset:groupPreset})}>Review pipeline creation</button>
         {groupReview && <section aria-label="Review independent pipeline" className="rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] p-3 space-y-2"><p>{groupReview.name} · {groupReview.kind==='website' ? 'Website' : 'Marketing'} · {presets.find(row=>row.preset_publication_id===groupReview.preset)?.name}</p><p>Preserves Legacy and other pipelines. Creates no work, activation, publication or provider request. Services and steps are selected in a separate draft.</p><button type="button" className="workspace-button workspace-button-primary" onClick={createGroup}>Confirm independent pipeline</button></section>}
       </fieldset></details>}
+      {view.group?.kind==='website' && engagement.project_id && <_ProjectWebsitePagesPanel organizationId={organizationId} engagement={engagement} group={view.group} membership={membership} signal={signal} />}
       {!view.available.length && <p className="mt-4 text-xs text-[var(--anka-muted)]">This project has no matching published execution definition yet.</p>}
     </>}
   </section>

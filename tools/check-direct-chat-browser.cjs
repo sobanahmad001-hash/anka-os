@@ -23,6 +23,37 @@ async function drawerAssertions(page, label, opener) {
   assert(await opener.evaluate(node => document.activeElement === node), 'Escape did not restore opener focus')
   return { initialFocus: true, shiftTabContained: true, tabContained: true, escapeClosed: true, openerFocusRestored: true }
 }
+async function websitePageAssertions(browser){
+ const results=[]
+ for(const [width,height,theme] of [[1440,900,'light'],[390,900,'dark']]){
+  const context=await browser.newContext({viewport:{width,height}}),page=await context.newPage();page.setDefaultTimeout(15000)
+  const errors=[],blocked=[];page.on('pageerror',error=>errors.push(error.message));await page.route('**/*',route=>{const url=new URL(route.request().url());if(url.hostname==='127.0.0.1' && url.port==='5188')return route.continue();blocked.push(url.origin);return route.abort()})
+  await page.goto(`${base}?panel=website-pages&theme=${theme}`)
+  await page.getByRole('button',{name:'Find approved architectures',exact:true}).click()
+  const version=await page.evaluate(()=>globalThis.__directChatPreview.website.versionId)
+  await page.getByRole('combobox',{name:'Website approved architecture',exact:true}).selectOption(version)
+  await page.getByText('1–25 of 101 matching pages',{exact:true}).waitFor()
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Website view overflows the screen')
+  const overview=`b4-website-pages-${theme}-${width}x${height}.png`;await page.screenshot({path:path.join(output,overview)})
+  await page.getByRole('button',{name:'Next pages',exact:true}).click();await page.getByText('26–50 of 101 matching pages',{exact:true}).waitFor()
+  await page.getByRole('combobox',{name:'Website publication filter',exact:true}).selectOption('published');await page.getByText('1–1 of 1 matching pages',{exact:true}).waitFor()
+  await page.getByRole('button',{name:'History',exact:true}).click();await page.getByRole('region',{name:'Website page history',exact:true}).getByText('Original path: /home',{exact:true}).waitFor()
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.website.calls.length),0)
+  await page.getByRole('button',{name:'Close history',exact:true}).click()
+  await page.getByRole('button',{name:'Review all 101 pages',exact:true}).click()
+  const review=page.getByRole('region',{name:'Review Website page registration',exact:true});await review.getByRole('heading',{name:'Review 101 exact page identities',exact:true}).waitFor()
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.website.calls.length),0)
+  const confirm=review.getByRole('button',{name:'Confirm page identities',exact:true});await confirm.scrollIntoViewIfNeeded()
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth))
+  const reviewed=`b4-website-registration-review-${theme}-${width}x${height}.png`;await page.screenshot({path:path.join(output,reviewed)})
+  await confirm.click();await page.getByText('101 page identities confirmed. Canonical work and assignments are preserved.',{exact:true}).waitFor()
+  const writes=await page.evaluate(()=>({count:globalThis.__directChatPreview.website.calls.length,size:globalThis.__directChatPreview.website.calls[0].pageKeys.length,firstOriginalPath:globalThis.__directChatPreview.website.rows[0].initial_path}))
+  assert.deepEqual(writes,{count:1,size:101,firstOriginalPath:'home'});assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
+  results.push({theme,viewport:{width,height},sourcePages:101,boundedPaging:true,statusFilterKeepsWholeCounts:true,immutableRenameHistory:true,reviewZeroWrites:true,oneAtomic101PageConfirmation:true,noHorizontalOverflow:true,pageErrors:errors,blockedRemoteRequests:blocked,screenshots:[overview,reviewed]});await context.close()
+ }
+ const packetPath=path.join(output,'b2-service-native-evidence.json'),packet=JSON.parse(await fs.readFile(packetPath,'utf8'));packet.pageIdentity.ui={...(packet.pageIdentity.ui||{}),browser:{source:'tools/check-direct-chat-browser.cjs --website-pages',scope:'Actual Layout/theme with isolated synthetic approved source; no production/provider or human acceptance',results}};await fs.writeFile(packetPath,JSON.stringify(packet,null,2)+'\n');console.log(JSON.stringify({passed:results.length,evidence:packetPath}))
+}
+
 async function writerAssertions(browser) {
   const results = []
   const recoveryOnly = process.argv.includes('--writer-recovery')
@@ -476,6 +507,7 @@ async function pipelineInputAssertions(browser){
     if (process.argv.includes('--wider-direct')) {await widerDirectAssertions(browser);return}
     if (process.argv.includes('--engagement-first-send')) { await engagementFirstSendAssertions(browser); return }
     if (process.argv.includes('--shared-chat')) { await sharedChatAssertions(browser); return }
+    if(process.argv.includes('--website-pages')){await websitePageAssertions(browser);return}
     if (process.argv.includes('--writer') || process.argv.includes('--writer-recovery')) { await writerAssertions(browser); return }
     for (const [surface, state, theme, width, height] of cases) {
       const context = await browser.newContext({ viewport: { width, height }, colorScheme: 'light' })
