@@ -19,11 +19,11 @@ function ScopedWebsitePages({organizationId,engagement,group,actorId,signal}){
  const [pending,setPending]=useState(()=>{try{const v=JSON.parse(sessionStorage.getItem(recoveryKey)||'null');return v && UUID.test(v.requestId || '') ? v : v ? {requestId:''} : null}catch{return {requestId:''}}})
  const [query,setQuery]=useState(''),[sources,setSources]=useState([]),[sourcePage,setSourcePage]=useState({offset:0,has_more:false}),[versionId,setVersionId]=useState('')
  const [search,setSearch]=useState(''),[stateFilter,setStateFilter]=useState(''),[parentFilter,setParentFilter]=useState(''),[offset,setOffset]=useState(0),[data,setData]=useState(null)
- const [selected,setSelected]=useState([]),[review,setReview]=useState(null),[history,setHistory]=useState(null),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[editor,setEditor]=useState(null),[seo,setSeo]=useState(null)
+ const [selected,setSelected]=useState([]),[review,setReview]=useState(null),[history,setHistory]=useState(null),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[editor,setEditor]=useState(null),[seo,setSeo]=useState(null),[seoBlocked,setSeoBlocked]=useState(false)
  const alive=useRef(true),flight=useRef(false),sequence=useRef(0),latest=useRef(null)
- latest.current={versionId,search,stateFilter,parentFilter,offset,pending,busy,signal,review,selected,data,query,editor,seo}
+ latest.current={versionId,search,stateFilter,parentFilter,offset,pending,busy,signal,review,selected,data,query,editor,seo,seoBlocked}
  const allowed=()=>alive.current && !latest.current.signal?.aborted
- const locked=()=>Boolean(latest.current.editor) || !allowed() || flight.current || latest.current.busy || Boolean(latest.current.pending)
+ const locked=()=>Boolean(latest.current.editor) || latest.current.seoBlocked || !allowed() || flight.current || latest.current.busy || Boolean(latest.current.pending)
  const setWorking=value=>{latest.current.busy=value;setBusy(value)}
  useEffect(()=>()=>{alive.current=false;sequence.current+=1},[])
  async function findSources(pageOffset=0){
@@ -77,7 +77,7 @@ function ScopedWebsitePages({organizationId,engagement,group,actorId,signal}){
    if(allowed()){sessionStorage.removeItem(recoveryKey);latest.current.pending=null;setPending(null);setEditor(null);setNotice(snapshot.kind==='saveOperations' ? 'Page implementation revision saved. Canonical work and original path are preserved.' : 'Explicit SEO observation link saved. Historical links are preserved.');await load()}
   }catch(cause){if(allowed()){if(cause.knownRollback){sessionStorage.removeItem(recoveryKey);latest.current.pending=null;setPending(null)}setError(cause.message)}}finally{flight.current=false;if(allowed())setWorking(false)}
  }
- const isLocked=busy || Boolean(pending) || Boolean(editor),count=data?.counts,source=sources.find(row=>row.artifact_version_id===versionId)
+ const isLocked=busy || Boolean(pending) || Boolean(editor) || seoBlocked,count=data?.counts,source=sources.find(row=>row.artifact_version_id===versionId)
  return <section aria-label="Website pages" className="mt-5 space-y-4 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4 text-[var(--anka-ink)]">
   <header><h3 className="font-semibold">Website pages · {group.name}</h3><p className="mt-1 text-xs text-[var(--anka-muted)]">Choose an approved architecture version. Page identities stay stable across approved revisions; recording a live URL never publishes a website.</p></header>
   {error && <p role="alert" className="text-sm text-[var(--anka-danger)]">{error}</p>}{notice && <p role="status" className="text-sm text-[var(--anka-success)]">{notice}</p>}
@@ -88,7 +88,7 @@ function ScopedWebsitePages({organizationId,engagement,group,actorId,signal}){
    {sourcePage.offset>0 && <button type="button" className="workspace-button" onClick={()=>findSources(Math.max(0,sourcePage.offset-25))}>Previous architecture results</button>}{sourcePage.has_more && <button type="button" className="workspace-button" onClick={()=>findSources(sourcePage.offset+25)}>Next architecture results</button>}
   </fieldset>
   {busy && <p role="status" className="text-xs text-[var(--anka-muted)]">Checking exact current project records…</p>}
-  {seo && <_WebsitePageSeoObservationsPanel key={seo.row.page_id+':'+seo.versionId} organizationId={organizationId} projectId={engagement.project_id} engagementId={engagement.id} pageId={seo.row.page_id} architectureVersionId={seo.versionId} pageTitle={seo.row.source.title} signal={signal} onClose={()=>{if(allowed()&&latest.current.seo===seo){latest.current.seo=null;setSeo(null)}}}/> }
+  {seo && <_WebsitePageSeoObservationsPanel key={seo.row.page_id+':'+seo.versionId} organizationId={organizationId} projectId={engagement.project_id} engagementId={engagement.id} pageId={seo.row.page_id} architectureVersionId={seo.versionId} pageTitle={seo.row.source.title} actorId={actorId} signal={signal} onNavigationBusyChange={value=>{if(allowed()&&latest.current.seo===seo){latest.current.seoBlocked=value;setSeoBlocked(value)}}} onClose={()=>{if(allowed()&&!latest.current.seoBlocked&&latest.current.seo===seo){latest.current.seo=null;setSeo(null)}}}/> }
   {editor && <_WebsitePageEditor key={editor.page.id} context={editor} disabled={busy || Boolean(pending)} isActive={editorActive} onLookup={lookupEditor} onConfirm={confirmEditor} onClose={()=>{if(editorActive(editor))setEditor(null)}} />}
   {data && <>
    <details className="text-xs text-[var(--anka-muted)]"><summary>{source?.title || 'Selected architecture'} · approved v{data.reference.version_number}</summary><p className="mt-1 break-all">Exact version {data.reference.artifact_version_id} · approval {data.reference.approval_id}</p></details>
