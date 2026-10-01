@@ -6,10 +6,13 @@ import {createServer} from 'vite'
 import {mountedEnvironment,elements} from './testSupport/designVideoDom.js'
 const org='a0000000-0000-4000-8000-000000000001',actor='a0000000-0000-4000-8000-000000000002',engagement='a0000000-0000-4000-8000-000000000003',website='a0000000-0000-4000-8000-000000000004',marketing='a0000000-0000-4000-8000-000000000005',preset='a0000000-0000-4000-8000-000000000006'
 const props=node=>node?.[Object.keys(node).find(key=>key.startsWith('__reactProps$'))]
-async function mount(t,{lost=false,initialStorage=new Map(),panel='configuration',hideRecent=false}={}) {
+async function mount(t,{lost=false,initialStorage=new Map(),panel='configuration',hideRecent=false,stages=false}={}) {
  const records={available:[],publishedDefinitions:[{id:'a0000000-0000-4000-8000-000000000007',definition:{name:'Published Website',version_number:1,preset_publication_id:preset,steps:[]}}],groups:[{id:website,name:'Website',kind:'website',preset_publication_id:preset},{id:marketing,name:'Marketing',kind:'marketing',preset_publication_id:preset}],configurations:[{id:'legacy',revision:9,selected_steps:[{key:'Legacy',quantity:1}],max_ai_cost_microusd:0},{id:'web',pipeline_group_id:website,revision:10,group_revision:2,selected_steps:[{key:'Website',quantity:1}],max_ai_cost_microusd:0},{id:'mkt',pipeline_group_id:marketing,revision:11,group_revision:3,selected_steps:[{key:'Marketing',quantity:1}],max_ai_cost_microusd:0}],activations:[{configuration_id:'mkt',pipeline_group_id:marketing,activation_number:11,group_activation_number:3},{configuration_id:'legacy',activation_number:9},{configuration_id:'web',pipeline_group_id:website,activation_number:10,group_activation_number:2}]}
+ if(stages)records.publishedDefinitions[0].definition.steps=[{key:'brief',label:'Project brief',kind:'human',department_id:'content',service_id:preset,depends_on:[]},{key:'draft',label:'Draft copy',kind:'human',department_id:'content',service_id:preset,depends_on:['brief']}]
+ const configCalls=[]
  const calls=[],reads=[];let release=null,gate=null
  const repository={list:async(...args)=>{reads.push(args);return structuredClone(records)},createGroup:async input=>{calls.push(structuredClone(input));if(gate)await gate;const group={id:'a0000000-0000-4000-8000-000000000008',preset_publication_id:input.presetPublicationId,created_by:actor,kind:input.kind,name:input.name,request_id:input.requestId};records.groups.push(group);if(lost)throw new Error('Lost original response');return {group}}}
+ repository.create=async input=>{configCalls.push(structuredClone(input));if(gate)await gate;const row={id:'a0000000-0000-4000-8000-000000000021',configured_by:actor,request_id:input.requestId,pipeline_group_id:input.pipelineGroupId,group_revision:3,revision:12,selected_steps:input.selectedSteps,max_ai_cost_microusd:input.maxAiCostMicrousd};records.configurations.push(row);if(lost)throw new Error('Lost original configuration response');return row}
  const runRows=[],runCalls=[],runReads=[]
  const runRepository={list:async()=>hideRecent ? [] : structuredClone(runRows),findRequest:async input=>{runReads.push(input);return runRows.find(row=>row.request_id===input.requestId && row.requested_by===input.actorId)||null},start:async input=>{runCalls.push(input);if(gate)await gate;const row={id:'a0000000-0000-4000-8000-000000000020',request_id:input.requestId,requested_by:actor,pipeline_group_id:input.pipelineGroupId,status:'awaiting_review',requested_at:new Date().toISOString(),input_sha256:'a'.repeat(64),input_manifest:{pipeline:{version_id:preset},assets:[]}};runRows.push(row);if(lost)throw new Error('Lost run response');return {run_intent_id:row.id}}}
  repository.listGroups=async()=>structuredClone(records.groups)
@@ -17,13 +20,14 @@ async function mount(t,{lost=false,initialStorage=new Map(),panel='configuration
  const server=await createServer({server:{middlewareMode:true},appType:'custom',logLevel:'silent',plugins:[{name:'isolated-pipeline-groups',enforce:'pre',resolveId(source){if(source.endsWith('/projectPipelineConfigurations.js'))return '\0pipeline-repository';if(source.endsWith('/pipelineRunIntents.js'))return '\0run-repository';if(source.endsWith('/AuthContext.jsx'))return '\0pipeline-auth'},load(id){if(id==='\0pipeline-repository')return 'export const projectPipelineConfigurations=globalThis.__pipelineGroupFixture.repository';if(id==='\0run-repository')return 'export const pipelineRunIntents=globalThis.__pipelineGroupFixture.runRepository';if(id==='\0pipeline-auth')return 'export function useAuth(){return {user:{id:globalThis.__pipelineGroupFixture.actor}}}'}}]})
  const {default:Panel}=await server.ssrLoadModule(panel==='run' ? '/src/components/PipelineRunIntentPanel.jsx' : '/src/components/ProjectPipelineConfigurationPanel.jsx'),env=mountedEnvironment(),storage=initialStorage
  const names=['document','window','Event','Node','HTMLElement','IS_REACT_ACT_ENVIRONMENT','sessionStorage','fetch'];const previous=Object.fromEntries(names.map(name=>[name,globalThis[name]]));Object.assign(globalThis,{document:env.document,window:env.window,Event:env.window.Event,Node:env.window.Node,HTMLElement:env.window.HTMLElement,IS_REACT_ACT_ENVIRONMENT:true,sessionStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},fetch:()=>{throw new Error('Network forbidden')}})
- const root=createRoot(env.container);const render=async()=>act(async()=>root.render(createElement(Panel,{organizationId:org,engagement:{id:engagement,status:'active'},services:[],assets:[],membership:{role:'operations_admin'}})));await render()
+ const root=createRoot(env.container);const render=async()=>act(async()=>root.render(createElement(Panel,{organizationId:org,engagement:{id:engagement,status:'active'},services:stages ? [{service_id:preset,status:'active'}] : [],assets:[],membership:{role:'operations_admin'}})));await render()
  t.after(async()=>{await act(async()=>root.unmount());await server.close();Object.assign(globalThis,previous);globalThis.__pipelineGroupFixture=previousFixture})
  const button=name=>elements(env.container,'button').find(node=>node.textContent===name),field=name=>['select','input'].flatMap(tag=>elements(env.container,tag)).find(node=>props(node)?.['aria-label']===name)
  const click=async name=>act(async()=>{const node=button(name);assert.ok(node,name);assert.notEqual(props(node).disabled,true);props(node).onClick()})
  const change=async(name,value)=>act(async()=>props(field(name)).onChange({target:{value}}))
  const prepare=async()=>{await change('Pipeline name','Second Website');await change('Independent pipeline preset',preset);await click('Review pipeline creation')}
- return {env,storage,records,calls,reads,runCalls,runReads,runRows,button,field,click,change,prepare,setGate(){gate=new Promise(done=>{release=done})},release:async()=>act(async()=>release())}
+ const previewDraft=async()=>act(async()=>{const form=elements(env.container,'form')[0];props(form).onSubmit({preventDefault(){}})})
+ return {env,storage,records,calls,configCalls,previewDraft,reads,runCalls,runReads,runRows,button,field,click,change,prepare,setGate(){gate=new Promise(done=>{release=done})},release:async()=>act(async()=>release())}
 }
 test('actual panel selects Website, Marketing and Legacy independently with no latest-global fallback',async t=>{
  const ui=await mount(t);assert.match(ui.env.container.textContent,/Active revision 9 · Legacy/)
@@ -55,4 +59,26 @@ test('actual manual run selector binds the chosen Website group; double request 
 test('lost run response recovers the exact actor/request beyond recent history, with no duplicate or provider submission',async t=>{
  const ui=await mount(t,{panel:'run',lost:true,hideRecent:true});await ui.change('Run pipeline',marketing);await ui.click('Request manual run review');assert.equal(ui.runCalls.length,1);assert.equal(ui.storage.size,1);assert.equal(props(ui.field('Run pipeline')).disabled,true)
  await ui.click('Check original run request');assert.equal(ui.runCalls.length,1);assert.equal(ui.storage.size,0);assert.equal(ui.runReads.at(-1).actorId,actor);assert.equal(ui.runReads.at(-1).requestId,ui.runCalls[0].requestId);assert.match(ui.env.container.textContent,/Original run request recovered/)
+})
+
+test('stage preview writes nothing; exact reviewed dependency order and scope are saved once',async t=>{
+ const ui=await mount(t,{stages:true});await ui.change('Pipeline selection',website)
+ const publication=elements(ui.env.container,'select').find(node=>props(node).required)
+ await act(async()=>props(publication).onChange({target:{value:'a0000000-0000-4000-8000-000000000007'}}))
+ await ui.change('Project brief quantity','1');await ui.change('Draft copy quantity','2');await ui.previewDraft()
+ assert.equal(ui.configCalls.length,0);assert.match(ui.env.container.textContent,/Dependencies: brief/);assert.match(ui.env.container.textContent,/Output: not specified/);assert.match(ui.env.container.textContent,/Required inputs: not specified/)
+ ui.setGate();const confirm=props(ui.button('Confirm draft revision')).onClick;await act(async()=>{void confirm();void confirm()});assert.equal(ui.configCalls.length,1);assert.deepEqual(ui.configCalls[0].selectedSteps,[{key:'brief',quantity:1},{key:'draft',quantity:2}]);assert.equal(ui.configCalls[0].pipelineGroupId,website);await ui.release();assert.equal(ui.storage.size,0)
+})
+test('omitted required dependency fails preview; editing invalidates a retained confirmation callback',async t=>{
+ const ui=await mount(t,{stages:true});await ui.change('Pipeline selection',website)
+ await act(async()=>props(elements(ui.env.container,'select').find(node=>props(node).required)).onChange({target:{value:'a0000000-0000-4000-8000-000000000007'}}))
+ await ui.change('Draft copy quantity','1');await ui.previewDraft();assert.match(ui.env.container.textContent,/requires its earlier steps/);assert.equal(ui.button('Confirm draft revision'),undefined);assert.equal(ui.configCalls.length,0)
+ await ui.change('Project brief quantity','1');await ui.previewDraft();const oldConfirm=props(ui.button('Confirm draft revision')).onClick
+ await ui.change('Draft copy quantity','3');assert.equal(ui.button('Confirm draft revision'),undefined);await act(async()=>oldConfirm());assert.equal(ui.configCalls.length,0)
+})
+test('lost configuration response blocks editing until immutable exact request read recovery',async t=>{
+ const ui=await mount(t,{stages:true,lost:true});await ui.change('Pipeline selection',website)
+ await act(async()=>props(elements(ui.env.container,'select').find(node=>props(node).required)).onChange({target:{value:'a0000000-0000-4000-8000-000000000007'}}))
+ await ui.change('Project brief quantity','1');await ui.previewDraft();await ui.click('Confirm draft revision');assert.equal(ui.configCalls.length,1);assert.equal(ui.storage.size,1);assert.equal(props(ui.field('Pipeline selection')).disabled,true)
+ await ui.click('Refresh');assert.equal(ui.configCalls.length,1);assert.equal(ui.storage.size,0);assert.match(ui.env.container.textContent,/Original command recovered/)
 })

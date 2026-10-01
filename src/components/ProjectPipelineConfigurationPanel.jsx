@@ -20,6 +20,7 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
   const [pending,setPending]=useState(()=>{try { const value=JSON.parse(sessionStorage.getItem(recoveryKey)||'null');if (!value) return null;if (['group','configuration','activation'].includes(value.kind) && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value.requestId)) return value;return {kind:'unreadable',requestId:''} } catch {return {kind:'unreadable',requestId:''}}}); const flight=useRef(false),groupRequest=useRef('')
   const [quantities, setQuantities] = useState({})
   const [cost, setCost] = useState('0')
+  const [creationReview,setCreationReview]=useState(null)
   const [preview, setPreview] = useState(null)
   const [acknowledged, setAcknowledged] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -40,9 +41,11 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
   const serviceIds = new Set(services.filter(row => ['planned', 'active'].includes(row.status)).map(row => row.service_id))
   const eligibleSteps = definitionSteps.filter(step => serviceIds.has(step.service_id))
   const aiSelected = eligibleSteps.some(step => quantities[step.key] && ['ai_assisted', 'automatic'].includes(step.kind))
+  const reviewSignature=JSON.stringify([actorId,organizationId,engagement.id,groupId,publicationId,publication?.definition,quantities,cost,services,membership])
+  const currentReviewSignature=useRef('');currentReviewSignature.current=reviewSignature
 
   const refresh = useCallback(async () => {
-    setPreview(null); setAcknowledged(false); activationRequest.current = ''
+    setCreationReview(null);setPreview(null); setAcknowledged(false); activationRequest.current = ''
     setLoading(true)
     try {
       const next = await projectPipelineConfigurations.list(organizationId, engagement.id, { signal })
@@ -72,6 +75,8 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
   }
   function clearPending() { sessionStorage.removeItem(recoveryKey);setPending(null) }
   function changeSelection(key, raw) {
+    if(flight.current || pending)return
+    setCreationReview(null)
     createRequest.current = ''
     setQuantities(current => {
       const next = { ...current, [key]: raw }
@@ -80,16 +85,17 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
     })
   }
   function changePublication(id) {
+    if(flight.current || pending)return
+    setCreationReview(null)
     createRequest.current = ''
     setPublicationId(id)
     setQuantities({})
     setCost('0')
   }
-  async function save(event) {
+  function inspectCreation(event) {
     event.preventDefault()
-    if (flight.current || pending) return
-    flight.current=true
-    setBusy(true); setError(''); setNotice('')
+    if (flight.current || pending || locked || !publication) return
+    setCreationReview(null);setError('');setNotice('')
     try {
       const selectedSteps = normalizeSelectedSteps(definitionSteps, quantities)
       if (selectedSteps.some(selected => !serviceIds.has(definitionSteps.find(step => step.key === selected.key)?.service_id)))
@@ -97,14 +103,23 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
       const micro = parseMicrousd(cost)
       if ((aiSelected && micro === 0) || (!aiSelected && micro !== 0))
         throw new TypeError('AI-capable steps need a positive local limit; human-only plans use zero')
+      setCreationReview({signature:reviewSignature,selectedSteps,micro,definitionPublicationId:publicationId,pipelineGroupId:groupId||null})
+    } catch (failure) {setError(failure.message)}
+  }
+  async function save() {
+    if (flight.current || pending || !creationReview || creationReview.signature!==currentReviewSignature.current || signal?.aborted) return
+    flight.current=true
+    setBusy(true); setError(''); setNotice('')
+    try {
+      const {selectedSteps,micro}=creationReview
       createRequest.current ||= crypto.randomUUID()
       persistPending({kind:'configuration',requestId:createRequest.current})
       const saved = await projectPipelineConfigurations.create({
-        organizationId, engagementId: engagement.id, definitionPublicationId: publicationId,pipelineGroupId:groupId || null,
+        organizationId, engagementId: engagement.id, definitionPublicationId: creationReview.definitionPublicationId,pipelineGroupId:creationReview.pipelineGroupId,
         requestId: createRequest.current, selectedSteps, maxAiCostMicrousd: micro,
       }, { signal })
       if (signal?.aborted) return
-      createRequest.current = ''; clearPending()
+      createRequest.current = ''; clearPending();setCreationReview(null)
       setNotice('Configuration revision ' + (saved.group_revision || saved.revision) + ' saved as a draft. Review impact before activation.')
       await refresh()
     } catch (failure) {
@@ -118,7 +133,7 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
     if (flight.current || pending) return
     flight.current=true
     setBusy(true); setError(''); setNotice('')
-    setPreview(null); setAcknowledged(false); activationRequest.current = ''
+    setCreationReview(null);setPreview(null); setAcknowledged(false); activationRequest.current = ''
     try {
       const impact = await projectPipelineConfigurations.preview(organizationId, configurationId, { signal })
       if (!signal?.aborted) setPreview(impact)
@@ -162,7 +177,7 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
       if (signal?.aborted) return
       clearPending();groupRequest.current='';setGroupReview(null)
       await refresh()
-      if (!signal?.aborted) { setGroupId(result.group.id);changePublication('');setNotice('Independent '+result.group.name+' pipeline created. Choose steps and review activation separately.') }
+      if (!signal?.aborted) { setGroupId(result.group.id);setPublicationId('');setQuantities({});setCost('0');setCreationReview(null);setNotice('Independent '+result.group.name+' pipeline created. Choose steps and review activation separately.') }
     } catch (failure) { if (!signal?.aborted) {if (failure.knownRollback) clearPending();setError(failure.message)} }
     finally { flight.current=false;if (!signal?.aborted) setBusy(false) }
   }
@@ -202,7 +217,7 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
         <label className="mt-3 flex items-start gap-2"><input type="checkbox" disabled={locked} checked={acknowledged} onChange={event => setAcknowledged(event.target.checked)} />I reviewed this exact impact and approve activation.</label>
         <button type="button" disabled={locked || !acknowledged} onClick={activate} className="mt-3 rounded-lg bg-[var(--anka-violet)] px-3 py-2 font-semibold text-[var(--anka-on-violet)] disabled:opacity-40">Activate reviewed configuration</button>
       </div>}
-      {canManage && <fieldset disabled={locked}><form onSubmit={save} className="mt-5 space-y-3 border-t border-[var(--anka-line)] pt-4">
+      {canManage && <fieldset disabled={locked}><form onSubmit={inspectCreation} className="mt-5 space-y-3 border-t border-[var(--anka-line)] pt-4">
         <h3 className="text-sm font-semibold">Draft a new revision</h3>
         <label className="block text-xs text-[var(--anka-muted)]">Published execution definition
           <select required className={INPUT} value={publicationId} onChange={event => changePublication(event.target.value)}>
@@ -215,11 +230,24 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
           <input aria-label={step.label + ' quantity'} type="number" min="1" max="50" placeholder="Off" disabled={!serviceIds.has(step.service_id)} className="w-16 shrink-0 rounded border border-[var(--anka-line)] bg-[var(--anka-surface)] p-1 text-[var(--anka-ink)]" value={quantities[step.key] ?? ''} onChange={event => changeSelection(step.key, event.target.value)} />
         </label>)}</div>}
         <label className="block text-xs text-[var(--anka-muted)]">Local AI cost limit (USD)
-          <input required inputMode="decimal" className={INPUT} value={cost} onChange={event => { createRequest.current = ''; setCost(event.target.value) }} disabled={!aiSelected} />
+          <input required inputMode="decimal" className={INPUT} value={cost} onChange={event => { if(flight.current || pending)return;setCreationReview(null);createRequest.current = ''; setCost(event.target.value) }} disabled={!aiSelected} />
           <span className="mt-1 block text-[var(--anka-muted)]">{aiSelected ? 'A positive limit is required for AI-capable steps; this does not authorize provider use.' : 'Human-only plans use zero.'}</span>
         </label>
-        <button type="submit" disabled={locked || !publication} className="rounded-lg bg-[var(--anka-violet)] px-3 py-2 text-xs font-semibold text-[var(--anka-on-violet)] disabled:opacity-40">Save draft revision</button>
-      </form></fieldset>}
+        <button type="submit" disabled={locked || !publication} className="rounded-lg bg-[var(--anka-violet)] px-3 py-2 text-xs font-semibold text-[var(--anka-on-violet)] disabled:opacity-40">Preview stages before creation</button>
+      </form>
+      {creationReview && creationReview.signature===reviewSignature && <section aria-label="Review pipeline stages" className="mt-4 space-y-3 rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] p-3 text-sm">
+        <h3 className="font-semibold">Review this exact draft</h3>
+        <p>{view.group?.name || 'Legacy'} · {publication.definition.name} · v{publication.definition.version_number} · local AI limit {money(creationReview.micro)}</p>
+        <ol className="space-y-3">{definitionSteps.map(step=>{const selected=creationReview.selectedSteps.find(item=>item.key===step.key);return <li key={step.key} className="rounded border border-[var(--anka-line)] p-2">
+          <p className="font-medium">{step.label} · {selected ? `Included ×${selected.quantity}` : 'Outside this draft'}</p>
+          <p>Dependencies: {step.depends_on?.join(', ') || 'none'}</p>
+          <p>Output: not specified by this published definition.</p>
+          <p>Required inputs: not specified by this published definition. Review linked records before activation.</p>
+          {!serviceIds.has(step.service_id) && <p className="text-[var(--anka-warning)]">Missing eligible planned or active service.</p>}
+        </li>})}</ol>
+        <p>This saves a draft only. Activation, work planning, assignment and provider use require their separate reviews.</p>
+        <button type="button" disabled={locked} onClick={save} className="workspace-button workspace-button-primary">Confirm draft revision</button>
+      </section>}</fieldset>}
       {canManage && <details className="mt-4 border-t border-[var(--anka-line)] pt-4"><summary>Create an independent pipeline</summary><fieldset disabled={locked} className="mt-3 space-y-3">
         <label className="block text-xs">Pipeline kind<select aria-label="Pipeline kind" className={INPUT} value={groupKind} onChange={event=>{setGroupKind(event.target.value);setGroupReview(null);groupRequest.current=''}}><option value="website">Website</option><option value="marketing">Marketing</option></select></label>
         <label className="block text-xs">Pipeline name<input aria-label="Pipeline name" className={INPUT} maxLength={80} value={groupName} onChange={event=>{setGroupName(event.target.value);setGroupReview(null);groupRequest.current=''}} /></label>
