@@ -340,6 +340,7 @@ function ScopedPipelineRunIntentPanel({ organizationId, engagement, assets, work
               </li>)}</ul>
           </div>}
         </div>}
+        <ReviewedStageInputs review={row.input_manifest?.stage_review} />
         <RunCardDetails row={row} userId={user?.id} manualEligible={manualEligible}
           reviewEligible={reviewEligible} outputDraft={outputDraft} setOutputDraft={setOutputDraft}
           onOpenOutput={openOutput} onReviewOutput={reviewOutput}
@@ -352,7 +353,7 @@ function ScopedPipelineRunIntentPanel({ organizationId, engagement, assets, work
               : <><label className="flex items-start gap-2 text-[var(--anka-ink)]">
                 <input type="checkbox" checked={acknowledgedJobId === row.job.id}
                   onChange={event => setAcknowledgedJobId(event.target.checked ? row.job.id : '')} />
-                <span>I confirm this exact engagement and work context may be sent to the organization-approved text AI model. No assets are selected.</span>
+                <span>I confirm this exact engagement, work context and the reviewed stage inputs shown above may be sent to the organization-approved text AI model. Only approved input versions that permit AI use are included; satisfied outputs are not regenerated.</span>
               </label>
               <button type="button" disabled={busy || acknowledgedJobId !== row.job.id}
                 onClick={() => approveInputs(row.job.id)}
@@ -397,11 +398,12 @@ function RunCardDetails({ row, userId, manualEligible, reviewEligible, outputDra
   onOpenOutput, onReviewOutput, manualDraft, setManualDraft, busy, onManualAction }) {
   const work = row.plan?.work_manifest || []
   const configured = [...(row.job?.configured_steps || [])].sort((a, b) => a.ordinal - b.ordinal)
-  const anyManualProgress = configured.some(step => step.progress?.status && step.progress.status !== 'waiting')
+  const anyManualProgress = configured.some(step => ['in_progress','paused'].includes(step.progress?.status))
+  const stagesSatisfied = configured.length>0 && configured.every(step=>step.progress?.status==='completed')
   const phase = row.review?.decision === 'rejected' ? 'Rejected'
     : !row.review ? 'Awaiting review'
       : !row.plan ? 'Awaiting linked work'
-        : anyManualProgress ? 'Manual steps in progress' : 'Awaiting configured steps'
+        : stagesSatisfied ? 'Stages satisfied' : anyManualProgress ? 'Stages in progress' : 'Awaiting configured steps'
   return <details className="mt-3 rounded-lg border border-[var(--anka-line)] bg-white/[0.02] p-3">
     <summary className="cursor-pointer font-semibold text-[var(--anka-ink)]">Run card · {phase}</summary>
     <p className="mt-2">Exact request {row.id.slice(0, 8)} · {row.project_activation_id ? 'project activation ' + row.project_activation_id.slice(0, 8) : 'no project activation'}</p>
@@ -419,6 +421,7 @@ function RunCardDetails({ row, userId, manualEligible, reviewEligible, outputDra
         return <li key={step.id}>
           {step.definition_step?.label || step.step_key} · instance {step.instance_number} · {kind?.replaceAll('_', ' ')} · {status?.replaceAll('_', ' ')}
           {step.definition_step?.depends_on?.length ? ' · after ' + step.definition_step.depends_on.join(', ') : ''}
+          {step.reused_artifact_version_id && <p className="mt-1 break-all text-[var(--anka-success)]">Satisfied by exact approved version {step.reused_artifact_version_id} · original approval {step.reuse_approval_id}. No regeneration or provider reservation.</p>}
           {step.output && <p className="mt-1 text-[var(--anka-success)]">
             AI output {step.output.id.slice(0, 8)} · {step.output.provider} / {step.output.model_id}
             · reconciled {step.output.measured_cost_microusd} µUSD · {step.output.review?.decision || 'pending human review'}.
@@ -483,4 +486,21 @@ function executionStepState(item) {
   if (item.reservation_status === 'settled') return 'output reconciled for human review'
   if (item.claimed_routes > item.confirmed_rejections) return 'provider submission claimed; reconciliation pending'
   return 'all claimed routes refused; budget recovery pending'
+}
+
+function ReviewedStageInputs({review}) {
+ if(!review?.id || !Array.isArray(review.decisions))return null
+ return <details className="mt-3 rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface)] p-3" aria-label="Exact reviewed stage inputs">
+  <summary className="cursor-pointer font-semibold text-[var(--anka-ink)]">Exact reviewed stage inputs</summary>
+  <p className="mt-2 break-all text-xs">Review {review.id} · checksum {review.review_sha256}. Manual values and generating-stage approved source versions are the additional AI input scope. Satisfied outputs and omission reasons are execution decisions.</p>
+  <ol className="mt-2 space-y-3">{review.decisions.map(decision=><li key={decision.key} className="break-words text-sm">
+   <p className="font-semibold">{decision.key} · {decision.action==='reuse' ? 'Satisfied by existing approval; no regeneration' : decision.action==='omit' ? 'Optional omission' : decision.action==='outside_scope' ? 'Outside selected service scope' : 'Included stage'}</p>
+   {decision.action==='omit' && <p>Reason: {decision.reason}</p>}
+   {(decision.inputs || []).map(input=>{
+    const source=(review.resolved_artifacts || []).find(item=>item.step_key===decision.key && item.input_key===input.key)?.reference
+    return <p key={input.key} className="mt-1 whitespace-pre-wrap break-all">{input.key}: {source ? `exact v${source.version_number} · ${source.artifact_version_id} · approval ${source.approval_id} · checksum ${source.content_checksum} · ${source.ai_use_allowed ? 'AI use permitted' : 'AI use not permitted'}` : input.value}</p>
+   })}
+   {decision.action==='reuse' && <p className="mt-1 break-all">Exact version {decision.artifact_version_id} · original approval {(review.resolved_artifacts || []).find(item=>item.step_key===decision.key && item.input_key===null)?.reference?.approval_id || 'unavailable'}</p>}
+  </li>)}</ol>
+ </details>
 }

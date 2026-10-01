@@ -436,6 +436,23 @@ async function pipelineDefinitionAssertions(browser){
  const packet=path.join(output,'b2-service-native-evidence.json'),evidence=JSON.parse(await fs.readFile(packet,'utf8'));evidence.publishedStageContracts.browser={source:'tools/check-direct-chat-browser.cjs --stage-definitions',scope:'Actual definition author in existing Layout; synthetic local fixture; no distinct-human publication acceptance',results};await fs.writeFile(packet,JSON.stringify(evidence,null,2)+'\n');console.log(JSON.stringify({stageDefinitionsPassed:results.length,evidence:packet}))
 }
 
+
+async function pipelineInputAssertions(browser){
+ const results=[]
+ for(const [width,theme] of [[1440,'light'],[390,'dark']]){
+  const context=await browser.newContext({viewport:{width,height:900}}),page=await context.newPage(),errors=[],blocked=[]
+  page.on('pageerror',error=>errors.push(error.message));await page.route('**/*',route=>{const u=new URL(route.request().url());if(u.hostname==='127.0.0.1' && u.port==='5188')return route.continue();blocked.push(u.origin);return route.abort()})
+  await page.goto(`${base}?panel=stage-inputs&theme=${theme}`);await page.getByText('Exact reviewed stage inputs',{exact:true}).click()
+  const inputs=page.getByLabel('Exact reviewed stage inputs',{exact:true});await inputs.getByText(/Startup owners/).waitFor();assert.match(await inputs.textContent(),/AI use permitted/);assert.match(await inputs.textContent(),/existing approval; no regeneration/);assert.match(await inputs.textContent(),/Existing approved source supplies evidence/)
+  await page.getByText(/^Run card ·/).click();assert.match(await page.locator('body').textContent(),/No regeneration or provider reservation/);assert.match(await page.locator('body').textContent(),/reviewed stage inputs shown above/)
+  assert.equal(await page.getByRole('button',{name:'Acknowledge exact inputs',exact:true}).isDisabled(),true)
+  await inputs.scrollIntoViewIfNeeded();const screenshot=`b2-pipeline-inputs-${theme}-${width}x900.png`;await page.screenshot({path:path.join(output,screenshot)})
+  const stats=await page.evaluate(()=>({calls:globalThis.__directChatPreview.pipeline.runCalls.length+globalThis.__directChatPreview.pipeline.configCalls.length+globalThis.__directChatPreview.pipeline.calls.length,overflow:document.documentElement.scrollWidth>innerWidth}));assert.equal(stats.calls,0);assert.equal(stats.overflow,false);assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
+  results.push({theme,viewport:{width,height:900},exactManualAndCanonicalVersionScopeBeforeConsent:true,reuseExcludedFromRegeneration:true,omissionReasonPreserved:true,reviewZeroWrites:true,noHorizontalOverflow:true,pageErrors:errors,blockedRemoteRequests:blocked,screenshot});await context.close()
+ }
+ const packet=path.join(output,'b2-service-native-evidence.json'),evidence=JSON.parse(await fs.readFile(packet,'utf8'));evidence.stageFulfilment.aiInputs.browser={source:'tools/check-direct-chat-browser.cjs --stage-inputs',scope:'Actual run/consent display in shared Layout; synthetic source fixture; no human consent or providers',results};await fs.writeFile(packet,JSON.stringify(evidence,null,2)+'\n');console.log(JSON.stringify({stageInputsPassed:results.length,evidence:packet}))
+}
+
 (async () => {
   await fs.mkdir(output, { recursive: true })
   const browser = await chromium.launch({ channel: 'msedge', headless: true })
@@ -450,6 +467,7 @@ async function pipelineDefinitionAssertions(browser){
     ['content', 'empty', 'system', 320, 900],
   ]
   try {
+    if(process.argv.includes('--stage-inputs')){await pipelineInputAssertions(browser);return}
     if(process.argv.includes('--stage-definitions')){await pipelineDefinitionAssertions(browser);return}
     if(process.argv.includes('--stage-fulfilment')){await pipelineGroupAssertions(browser,true);return}
     if (process.argv.includes('--pipeline-groups')) {await pipelineGroupAssertions(browser);return}
