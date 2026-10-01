@@ -83,6 +83,32 @@ async function drawerAssertions(page, label, opener) {
   assert(await opener.evaluate(node => document.activeElement === node), 'Escape did not restore opener focus')
   return { initialFocus: true, shiftTabContained: true, tabContained: true, escapeClosed: true, openerFocusRestored: true }
 }
+async function websiteSeoAssertions(browser){
+ const results=[]
+ for(const [width,theme] of [[1440,'light'],[390,'dark']]){
+  const context=await browser.newContext({viewport:{width,height:900},colorScheme:theme}),page=await context.newPage(),errors=[],blocked=[]
+  page.on('pageerror',error=>errors.push(error.message));await page.route('**/*',route=>{const u=new URL(route.request().url());if(u.hostname==='127.0.0.1'&&u.port==='5188')return route.continue();blocked.push(u.origin);return route.abort()})
+  await page.goto(`${base}?panel=website-pages&theme=${theme}`)
+  await page.getByRole('button',{name:'Find approved architectures',exact:true}).click()
+  const version=await page.evaluate(()=>globalThis.__directChatPreview.website.versionId)
+  await page.getByLabel('Website approved architecture',{exact:true}).selectOption(version)
+  await page.getByRole('button',{name:'SEO observations',exact:true}).first().click()
+  const panel=page.getByRole('region',{name:'Website page SEO observations',exact:true})
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.website.seoRepository.calls.length),0)
+  await panel.getByRole('button',{name:'Load stored SEO evidence',exact:true}).click()
+  await panel.getByText(/Mobile score: 0/).waitFor();assert.match(await panel.textContent(),/schema valid: false/);assert.match(await panel.textContent(),/Indexed: Unknown/)
+  const screenshots=[]
+  async function capture(kind){await panel.getByRole('region',{name:'Stored SEO records',exact:true}).scrollIntoViewIfNeeded();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));const filename=`b4-website-seo-${kind}-${theme}-${width}x900.png`;await page.screenshot({path:path.join(output,filename)});screenshots.push(filename)}
+  await capture('manual')
+  await panel.getByLabel('SEO evidence category',{exact:true}).selectOption('planned_targets');await panel.getByRole('button',{name:'Load stored SEO evidence',exact:true}).click();await panel.getByText('1–25 of 26 matches · 26 total',{exact:true}).waitFor();assert.doesNotMatch(await panel.textContent(),/Position:/)
+  await panel.getByRole('button',{name:'Next SEO evidence',exact:true}).click();await panel.getByText('26–26 of 26 matches · 26 total',{exact:true}).waitFor();await capture('targets')
+  await panel.getByLabel('SEO evidence category',{exact:true}).selectOption('query_observations');await panel.getByRole('button',{name:'Find existing GSC bindings',exact:true}).click();const binding=await page.evaluate(()=>globalThis.__directChatPreview.website.seoRepository.bindingId);await panel.getByLabel('SEO project GSC binding',{exact:true}).selectOption(binding);await panel.getByRole('button',{name:'Load stored SEO evidence',exact:true}).click();await panel.getByText('Position: Unknown · clicks: Unknown · impressions: Unknown',{exact:true}).first().waitFor();assert.match(await panel.textContent(),/historical resource is unknown/);assert.match(await panel.textContent(),/Selected resource access still needs provider verification/);await capture('queries')
+  await page.evaluate(()=>globalThis.__directChatPreview.website.seoRepository.setRevoked());await panel.getByRole('button',{name:'Load stored SEO evidence',exact:true}).click();await panel.getByText('The current resource mapping or authorization is unavailable.',{exact:true}).waitFor();assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.website.calls.length),0);assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
+  results.push({theme,viewport:{width,height:900},explicitLoadZeroInitialReads:true,manualZeroFalseUnknownPreserved:true,targetsAndObservationsSeparate:true,boundedPagination:true,legacyProviderValuesWithheld:true,currentMappingRechecked:true,noProviderRequestsOrWrites:true,noHorizontalOverflow:true,pageErrors:errors,blockedRemoteRequests:blocked,screenshots});await context.close()
+ }
+ const packet=path.join(output,'b2-service-native-evidence.json'),evidence=JSON.parse(await fs.readFile(packet,'utf8'));evidence.pageIdentity.seoObservationReads.browser={source:'tools/check-direct-chat-browser.cjs --website-seo',scope:'Actual page-scoped SEO view in shared Layout; synthetic local fixture; provider and human acceptance pending',results};await fs.writeFile(packet,JSON.stringify(evidence,null,2)+'\n');console.log(JSON.stringify({websiteSeoPassed:results.length,evidence:packet}))
+}
+
 async function websiteEditorAssertions(browser){
  const results=[]
  for(const [width,height,theme] of [[1440,900,'light'],[390,900,'dark']]){
@@ -609,6 +635,7 @@ async function pipelineInputAssertions(browser){
     if (process.argv.includes('--wider-direct')) {await widerDirectAssertions(browser);return}
     if (process.argv.includes('--engagement-first-send')) { await engagementFirstSendAssertions(browser); return }
     if (process.argv.includes('--shared-chat')) { await sharedChatAssertions(browser); return }
+    if(process.argv.includes('--website-seo')){await websiteSeoAssertions(browser);return}
     if(process.argv.includes('--website-editor')){await websiteEditorAssertions(browser);return}
     if(process.argv.includes('--website-pages')){await websitePageAssertions(browser);return}
     if (process.argv.includes('--writer') || process.argv.includes('--writer-recovery')) { await writerAssertions(browser); return }
