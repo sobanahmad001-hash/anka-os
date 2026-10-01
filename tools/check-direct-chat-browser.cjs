@@ -23,6 +23,46 @@ async function drawerAssertions(page, label, opener) {
   assert(await opener.evaluate(node => document.activeElement === node), 'Escape did not restore opener focus')
   return { initialFocus: true, shiftTabContained: true, tabContained: true, escapeClosed: true, openerFocusRestored: true }
 }
+async function websiteEditorAssertions(browser){
+ const results=[]
+ for(const [width,height,theme] of [[1440,900,'light'],[390,900,'dark']]){
+  const context=await browser.newContext({viewport:{width,height}}),page=await context.newPage();page.setDefaultTimeout(15000)
+  const errors=[],blocked=[];page.on('pageerror',error=>errors.push(error.message));await page.route('**/*',route=>{const url=new URL(route.request().url());if(url.hostname==='127.0.0.1' && url.port==='5188')return route.continue();blocked.push(url.origin);return route.abort()})
+  await page.goto(`${base}?panel=website-pages&theme=${theme}`)
+  await page.getByRole('button',{name:'Find approved architectures',exact:true}).click()
+  const version=await page.evaluate(()=>globalThis.__directChatPreview.website.versionId)
+  await page.getByLabel('Website approved architecture',{exact:true}).selectOption(version)
+  await page.getByRole('button',{name:'Edit page',exact:true}).click()
+  const editor=page.getByRole('region',{name:'Website page editor',exact:true})
+  await editor.getByText('Approved structure · exact v2',{exact:true}).click()
+  assert.match(await editor.getByLabel('Exact approved page structure',{exact:true}).textContent(),/Approved hero/);assert.match(await editor.textContent(),/original \/home/);assert.match(await editor.textContent(),/deadline: 2026-10-10/)
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.website.calls.length),0)
+  await editor.scrollIntoViewIfNeeded();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth))
+  const structure=`b4-website-editor-structure-${theme}-${width}x${height}.png`;await page.screenshot({path:path.join(output,structure)})
+  await editor.getByText('Approved structure · exact v2',{exact:true}).click()
+  await editor.getByLabel('Website page publication state',{exact:true}).selectOption('in_progress')
+  await editor.getByLabel('Implementation notes',{exact:true}).fill('Implement approved hero, call to action and canonical source references.')
+  await editor.getByLabel('QA evidence',{exact:true}).fill('Desktop and mobile review complete. Original live URL and redirect retained.')
+  await editor.getByRole('button',{name:'Review page change',exact:true}).click()
+  const review=editor.getByRole('region',{name:'Review Website page change',exact:true});await review.waitFor();assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.website.calls.length),0)
+  await review.scrollIntoViewIfNeeded();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth))
+  const implementation=`b4-website-editor-review-${theme}-${width}x${height}.png`;await page.screenshot({path:path.join(output,implementation)})
+  await review.getByRole('button',{name:'Confirm page change',exact:true}).click();await page.getByText('Page implementation revision saved. Canonical work and original path are preserved.',{exact:true}).waitFor()
+  const saved=await page.evaluate(()=>globalThis.__directChatPreview.website.calls[0]);assert.equal(saved.command_kind,'save_operations');assert.equal(saved.expectedRevision,2);assert.equal(saved.architectureVersionId,version);assert.equal(saved.operations.publication_state,'in_progress');assert.equal(saved.operations.recorded_live_url,'https://example.invalid/home');assert.equal(saved.operations.redirect_url,'https://example.invalid/welcome');assert.equal('assignee_id' in saved.operations,false)
+  await page.getByRole('button',{name:'Edit page',exact:true}).click();await editor.getByLabel('Website edit category',{exact:true}).selectOption('seo')
+  await editor.getByLabel('Website SEO observation page',{exact:true}).selectOption('a0000000-0000-4000-8000-000000000210');await editor.getByRole('button',{name:'Review page change',exact:true}).click()
+  await editor.scrollIntoViewIfNeeded();assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.website.calls.length),1);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth))
+  const seo=`b4-website-editor-seo-${theme}-${width}x${height}.png`;await page.screenshot({path:path.join(output,seo)})
+  await editor.getByRole('button',{name:'Confirm page change',exact:true}).click();await page.getByText('Explicit SEO observation link saved. Historical links are preserved.',{exact:true}).waitFor()
+  await page.getByRole('button',{name:'Edit page',exact:true}).click();await editor.getByLabel('Website edit category',{exact:true}).selectOption('seo');await editor.getByLabel('Website SEO observation page',{exact:true}).selectOption('');await editor.getByRole('button',{name:'Review page change',exact:true}).click();await editor.getByRole('button',{name:'Confirm page change',exact:true}).click()
+  await page.getByRole('button',{name:'History',exact:true}).click();const history=page.getByRole('region',{name:'Website page history',exact:true});assert.match(await history.textContent(),/Revision 3 · \/welcome/);assert.match(await history.textContent(),/Original path: \/home/);assert.match(await history.textContent(),/3 immutable SEO link events/)
+  const calls=await page.evaluate(()=>globalThis.__directChatPreview.website.calls);assert.equal(calls.length,3);assert.deepEqual(calls.slice(1).map(row=>[row.command_kind,row.expectedLinkNumber,row.trackedPageId]),[['link_seo',1,'a0000000-0000-4000-8000-000000000210'],['link_seo',2,null]])
+  assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
+  results.push({theme,viewport:{width,height},exactCanonicalV2Structure:true,derivedOwnerDeadline:true,zeroWriteReviews:true,oneNamedImplementationCommand:true,explicitSeoLinkAndUnlink:true,originalPathAndImmutableHistory:true,noHorizontalOverflow:true,pageErrors:errors,blockedRemoteRequests:blocked,screenshots:[structure,implementation,seo]});await context.close()
+ }
+ const packetPath=path.join(output,'b2-service-native-evidence.json'),packet=JSON.parse(await fs.readFile(packetPath,'utf8'));packet.pageIdentity.editorUi={...(packet.pageIdentity.editorUi||{}),browser:{source:'tools/check-direct-chat-browser.cjs --website-editor',scope:'Actual Website editor in shared Layout/theme; isolated synthetic approved source; no production/provider or human acceptance',results}};await fs.writeFile(packetPath,JSON.stringify(packet,null,2)+'\n');console.log(JSON.stringify({passed:results.length,evidence:packetPath}))
+}
+
 async function websitePageAssertions(browser){
  const results=[]
  for(const [width,height,theme] of [[1440,900,'light'],[390,900,'dark']]){
@@ -507,6 +547,7 @@ async function pipelineInputAssertions(browser){
     if (process.argv.includes('--wider-direct')) {await widerDirectAssertions(browser);return}
     if (process.argv.includes('--engagement-first-send')) { await engagementFirstSendAssertions(browser); return }
     if (process.argv.includes('--shared-chat')) { await sharedChatAssertions(browser); return }
+    if(process.argv.includes('--website-editor')){await websiteEditorAssertions(browser);return}
     if(process.argv.includes('--website-pages')){await websitePageAssertions(browser);return}
     if (process.argv.includes('--writer') || process.argv.includes('--writer-recovery')) { await writerAssertions(browser); return }
     for (const [surface, state, theme, width, height] of cases) {
