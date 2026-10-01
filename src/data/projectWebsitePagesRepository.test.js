@@ -25,3 +25,7 @@ test('native rejection is known rollback while network/abort ambiguity keeps ori
 test('abort signal is forwarded to bounded read transport',async()=>{
  const signal=new AbortController().signal;let received;const repo=createProjectWebsitePagesRepository({rpc(){return {abortSignal(value){received=value;return Promise.resolve({data:{pages:[]},error:null})}}}});assert.deepEqual(await repo.list(base,{signal}),{pages:[]});assert.equal(received,signal)
 })
+
+test('editor lookup uses exact registered page/source scope and bounded existing-resource search without mutations',async()=>{
+ const {repo,calls}=fixture();for(const change of [{query:'x'.repeat(121)},{workOffset:10001},{seoOffset:-1},{limit:51},{pageId:'by title'}])assert.throws(()=>repo.editor({...base,...change}));assert.equal(calls.length,0);await repo.editor({...base,query:'home',workOffset:25,seoOffset:50});assert.equal(calls.length,1);assert.equal(calls[0].name,'get_project_website_page_editor');assert.deepEqual(calls[0].args,{p_organization_id:base.organizationId,p_project_id:base.projectId,p_page_id:base.pageId,p_architecture_version_id:base.architectureVersionId,p_query:'home',p_work_offset:25,p_seo_offset:50,p_limit:25})
+})
