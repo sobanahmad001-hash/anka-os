@@ -7,6 +7,29 @@ const { chromium } = require(process.argv[2] || 'playwright')
 const output = process.argv[3]
 assert(output, 'An evidence output directory is required')
 const base = 'http://127.0.0.1:5188/tools/direct-chat-preview.html'
+async function campaignPlanningAssertions(browser){
+ const results=[]
+ for(const [width,height,theme] of [[1440,900,'light'],[390,900,'dark']]){
+  const context=await browser.newContext({viewport:{width,height}}),page=await context.newPage();page.setDefaultTimeout(15000)
+  const errors=[],blocked=[],shots=[];page.on('pageerror',e=>errors.push(e.message));await page.route('**/*',route=>{const u=new URL(route.request().url());if(u.hostname==='127.0.0.1'&&u.port==='5188')return route.continue();blocked.push(u.origin);return route.abort()})
+  await page.goto(`${base}?panel=campaign-planning&theme=${theme}`);await page.getByText('Campaign assets and calendar · Launch marketing',{exact:true}).click()
+  const panel=page.getByRole('region',{name:'Campaign assets and calendar',exact:true}),f=await page.evaluate(()=>{const c=globalThis.__directChatPreview.campaign;return {campaignId:c.campaignId,planId:c.planId,serviceId:c.serviceId,assetId:c.assetId,variantId:c.variantId,workId:c.workId,variantVersion:c.variant.version_id}})
+  const click=name=>panel.getByRole('button',{name,exact:true}).click(),choose=(name,value)=>panel.getByLabel(name,{exact:true}).selectOption(value),fill=(name,value)=>panel.getByLabel(name,{exact:true}).fill(value)
+  const shot=async(region,name)=>{await region.scrollIntoViewIfNeeded();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));const file=`b5-campaign-${name}-${theme}-${width}x${height}.png`;await page.screenshot({path:path.join(output,file)});shots.push(file)}
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.campaign.reads.length),0)
+  await click('Find campaigns');assert.match(await panel.textContent(),/1–25 of 26 matches/);await choose('Exact campaign',f.campaignId);await click('Load exact plan versions');assert.equal(await panel.getByLabel('Exact campaign plan version',{exact:true}).inputValue(),'');await choose('Exact campaign plan version',f.planId);await choose('Marketing service',f.serviceId)
+  await click('Load shared assets');await choose('Original shared asset',f.assetId);await click('Find approved sources');await choose('Exact approved source version',f.variantVersion);await choose('Source registration','register_variant');await fill('Variant label','Short social variant');await click('Review source registration')
+  const review=page.getByRole('region',{name:'Review exact campaign operation',exact:true});await review.waitFor();assert.match(await review.textContent(),/Original shared source: Approved product story · v1/);assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.campaign.calls.length),0);await shot(review,'source-review');await review.getByRole('button',{name:'Confirm campaign operation',exact:true}).click();await panel.getByText('Exact canonical source reference saved. Load shared assets to select it.',{exact:true}).waitFor()
+  await click('Load shared assets');await choose('Original shared asset',f.assetId);await click('Load exact variants');await choose('Exact placement variant',f.variantId);await click('Find existing contributions');await choose('Existing canonical contribution',f.workId);await fill('Placement channel','Website');await fill('Schedule UTC instant','2026-10-10T09:00:00Z');await fill('Schedule IANA timezone','Asia/Karachi');await fill('Call to action','Read the product story');await choose('Placement record state','planned');await click('Review channel placement');assert.match(await review.textContent(),/No account is selected/);assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.campaign.calls.length),1);await shot(review,'placement-review');await review.getByRole('button',{name:'Confirm campaign operation',exact:true}).click();await panel.getByText('Placement revision saved. No publication or advertising spend was performed.',{exact:true}).waitFor()
+  await choose('Placement mode','paid');await fill('Placement channel','Advertising');await choose('Placement record state','planned');await click('Review channel placement');await review.getByRole('button',{name:'Confirm campaign operation',exact:true}).click();await click('Load placement calendar')
+  const calendar=page.getByRole('region',{name:'Current campaign placements',exact:true});await calendar.waitFor();assert.match(await calendar.textContent(),/Engagement Work Item: Canonical product story · due 2026-10-10/);assert.match(await calendar.textContent(),/Asia\/Karachi/);await choose('Calendar mode','paid');await click('Load placement calendar');assert.match(await calendar.textContent(),/1–1 of 1 matches · 3 total/);await shot(calendar,'calendar')
+  await calendar.getByRole('button',{name:'Review pause',exact:true}).click();await review.getByRole('button',{name:'Confirm campaign operation',exact:true}).click();await click('Load placement calendar');await calendar.getByRole('button',{name:'Placement history',exact:true}).click();const history=page.getByRole('region',{name:'Exact placement history',exact:true});assert.match(await history.textContent(),/Revision 2 · paused/);assert.match(await history.textContent(),/Revision 1 · planned/);await shot(history,'history')
+  const calls=await page.evaluate(()=>globalThis.__directChatPreview.campaign.calls);assert.equal(calls.length,4);assert.equal(calls[0].input.asset_id,f.assetId);assert.equal(calls[1].input.asset_id,calls[2].input.asset_id);assert.equal(calls[1].input.variant_id,calls[2].input.variant_id);assert.equal(calls[1].input.contribution.id,calls[2].input.contribution.id);assert.ok(calls.slice(1).every(row=>!('assignee_id' in row.input)));assert.deepEqual(errors,[]);assert.deepEqual(blocked,[])
+  results.push({viewport:{width,height},theme,screenshots:shots,zeroWriteReviews:true,oneSharedSourceAndExactVariant:true,organicPaidCanonicalWorkReuse:true,explicitUtcAndIanaTimezone:true,calendarFiltersWholeCounts:true,pausePreservesImmutableHistory:true,horizontalOverflow:false,pageErrors:errors,blockedRemoteRequests:blocked});await context.close()
+ }
+ const evidence=path.join(output,'b2-service-native-evidence.json'),packet=JSON.parse(await fs.readFile(evidence,'utf8'));packet.campaignPlacements.ui={source:'tools/check-direct-chat-browser.cjs --campaign-planning',scope:'Actual Layout/theme, provider-free synthetic fixture; no distinct-human/provider/production acceptance',cases:results};await fs.writeFile(evidence,JSON.stringify(packet,null,2)+'\n');console.log(JSON.stringify({passed:results.length,evidence}))
+}
+
 async function reportingBindingsAssertions(browser){
  const results=[]
  for(const [width,height,theme] of [[1440,900,'light'],[390,900,'dark']]){
@@ -575,6 +598,7 @@ async function pipelineInputAssertions(browser){
     ['content', 'empty', 'system', 320, 900],
   ]
   try {
+    if(process.argv.includes('--campaign-planning')){await campaignPlanningAssertions(browser);return}
     if(process.argv.includes('--reporting-bindings')){await reportingBindingsAssertions(browser);return}
     if(process.argv.includes('--stage-inputs')){await pipelineInputAssertions(browser);return}
     if(process.argv.includes('--stage-definitions')){await pipelineDefinitionAssertions(browser);return}

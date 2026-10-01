@@ -1,3 +1,4 @@
+import _ProjectCampaignPlanningPanel from './ProjectCampaignPlanningPanel.jsx'
 import _ProjectReportingBindingsPanel from './ProjectReportingBindingsPanel.jsx'
 import _ProjectWebsitePagesPanel from './ProjectWebsitePagesPanel.jsx'
 import {inspectPipelineStagePlan} from '../data/pipelineStageContracts.js'
@@ -289,6 +290,7 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
         {groupReview && <section aria-label="Review independent pipeline" className="rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] p-3 space-y-2"><p>{groupReview.name} · {groupReview.kind==='website' ? 'Website' : 'Marketing'} · {presets.find(row=>row.preset_publication_id===groupReview.preset)?.name}</p><p>Preserves Legacy and other pipelines. Creates no work, activation, publication or provider request. Services and steps are selected in a separate draft.</p><button type="button" className="workspace-button workspace-button-primary" onClick={createGroup}>Confirm independent pipeline</button></section>}
       </fieldset></details>}
       {view.group?.kind==='website' && engagement.project_id && <_ProjectWebsitePagesPanel organizationId={organizationId} engagement={engagement} group={view.group} membership={membership} signal={signal} />}
+      {view.group?.kind==='marketing' && engagement.project_id && <_ProjectCampaignPlanningPanel organizationId={organizationId} engagement={engagement} group={view.group} membership={membership} signal={signal} /> }
       {['website','marketing'].includes(view.group?.kind) && engagement.project_id && <_ProjectReportingBindingsPanel organizationId={organizationId} engagement={engagement} group={view.group} membership={membership} signal={signal} />}
       {!view.available.length && <p className="mt-4 text-xs text-[var(--anka-muted)]">This project has no matching published execution definition yet.</p>}
     </>}
