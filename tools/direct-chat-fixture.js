@@ -1,3 +1,4 @@
+import {createProjectReportingControlsRepository} from '../src/data/projectReportingControlsRepository.js'
 import {buildProjectEngagementWorkspace} from '../src/data/projectEngagementWorkspaceModel.js'
 import {createProjectStoredReportingRepository} from '../src/data/projectStoredReportingRepository.js'
 import {createProjectCampaignDeliverablePlansRepository} from '../src/data/projectCampaignDeliverablePlansRepository.js'
@@ -374,4 +375,30 @@ export function createProjectNavigationPreviewFixture(projectId){
  const snapshot={project:{id:projectId,organization_id:organizationId,name:'Launch project',engagement_type:'internal',status:'active',health:'on_track',planning_timezone:'Asia/Karachi',progress:0,scope_statement:'Existing launch scope'},engagement:{id:engagementId,organization_id:organizationId,project_id:projectId,name:'Launch engagement',status:'active'},pipelineGroupsState:'available',pipelineGroups:[website.group,campaign.group].map(group=>({...group,organization_id:organizationId,project_id:projectId,engagement_id:engagementId})),memberships:[{organization_id:organizationId,user_id:actor}],profiles:[{id:actor,full_name:'Preview member'}]}
  for(const key of ['workstreams','tasks','milestones','deliverables','deliverableVersions','projectActivity','services','stages','stageDependencies','prerequisites','engagementAssets','workItems','taskDependencies','workItemDependencies','artifacts','artifactVersions','artifactApprovals','engagementActivity'])snapshot[key]=[]
  return {website,campaign,reporting,workspace:buildProjectEngagementWorkspace(snapshot)}
+}
+
+export function createReportingControlsPreviewFixture(){
+ const f=createStoredReportingPreviewFixture({verified:true}),uid=n=>'a0000000-0000-4000-8000-'+String(n).padStart(12,'0'),row=f.rows[0],operations=new Map(),controlCalls=[],controlReads=[]
+ let policy={id:uid(2990),revision_number:1,source_contract:'Synthetic stored-report fixture',reporting_time_zone:'UTC',limits:{cadence_seconds:3600,history_days:30,stale_after_seconds:7200,manual_min_interval_seconds:60,daily_request_limit:10,backoff_seconds:5,max_backoff_seconds:120,max_period_days:7,max_observations:100,lease_seconds:60},enabled:true,binding_revision_number:row.revision_number,context_checksum:row.context_checksum},lost=false,denied=false,gate=null,release=null,rollback=false,adapterEnabled=true,admin=true
+ const envelope=(a,result)=>({organization_id:a.p_organization_id,project_id:a.p_project_id,action:a.p_action,request_id:a.p_request_id,result,dispatch_authorized:false,provider_request_made:false})
+ const client={rpc:async(name,a)=>{
+  try{
+   if(denied)throw Object.assign(Error('Current reporting access revoked'),{code:'42501'})
+   if(name==='get_project_reporting_controls'){
+    controlReads.push({kind:'read',...a});const status=await f.reportingRepository.status({organizationId,projectId:f.projectId,bindingId:f.bindingId});status.refresh={...status.refresh,...policy.limits,limits:policy.limits,policy_id:policy.id,policy_revision:policy.revision_number,enabled:policy.enabled,eligible:policy.enabled&&adapterEnabled,source_contract:policy.source_contract,reporting_time_zone:policy.reporting_time_zone};return {data:structuredClone({organization_id:organizationId,project_id:f.projectId,binding_id:f.bindingId,binding_revision_number:row.revision_number,context_checksum:row.context_checksum,can_configure:admin,status,configuration:{policy,dispatch_authorized:false,provider_request_made:false},adapters:[{source_contract:policy.source_contract,manifest_sha256:'a'.repeat(64),enabled:adapterEnabled}],dispatch_authorized:false,provider_request_made:false}),error:null}
+   }
+   if(name==='get_project_reporting_control_operation'){controlReads.push({kind:'recover',...a});return {data:envelope(a,operations.get(a.p_request_id)||null),error:null}}
+   if(name!=='configure_project_reporting_refresh')throw Error('Unexpected control RPC')
+   controlCalls.push({kind:'configure',...a});if(gate)await gate;if(rollback)throw Object.assign(Error('Policy changed; reload settings'),{code:'40001'})
+   if(a.p_expected_revision!==policy.revision_number)throw Object.assign(Error('Policy changed'),{code:'40001'})
+   policy={...a.p_input,id:uid(2990+policy.revision_number),revision_number:policy.revision_number+1};const result={policy_id:policy.id,binding_id:f.bindingId,revision_number:policy.revision_number,enabled:policy.enabled,state:'completed',dispatch_authorized:false};operations.set(a.p_request_id,result)
+   if(lost){lost=false;throw TypeError('Original configuration response lost')}
+   return {data:{policy_id:policy.id,revision_number:policy.revision_number,enabled:policy.enabled,replayed:false,dispatch_authorized:false},error:null}
+  }catch(error){return {data:null,error:{message:error.message,code:error.code||'FETCH_ERROR'}}}
+ },functions:{async invoke(name,{body}){
+  if(name!=='reporting-worker')throw Error('Unexpected worker');controlCalls.push({kind:body.action,...body});if(gate)await gate
+  const result=body.action==='verify'?{challenge_id:body.request_id,binding_id:f.bindingId,policy_id:policy.id,state:'completed',original_result:{challenge_id:body.request_id,resource_verified:true,dispatch_authorized:false},dispatch_authorized:false,automatic_retry:false}:{job_id:uid(3990+controlCalls.length),binding_id:f.bindingId,policy_id:policy.id,state:'succeeded',period_start:body.period_start,period_end:body.period_end,dispatch_authorized:false};operations.set(body.request_id,result)
+  if(lost){lost=false;return {data:null,error:{message:'Original worker response lost'}}}return {data:{data:result,dispatch_authorized:false},error:null}
+ }}}
+ return {...f,controlsRepository:createProjectReportingControlsRepository(client),controlCalls,controlReads,controlOperations:operations,setControlLost:v=>{lost=v},setControlDenied:v=>{denied=v},setControlRollback:v=>{rollback=v},setControlAdapter:v=>{adapterEnabled=v},setControlAdmin:v=>{admin=v},setControlGate:()=>{gate=new Promise(resolve=>{release=resolve})},releaseControl:()=>{release?.();gate=null}}
 }

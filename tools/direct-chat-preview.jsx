@@ -16,7 +16,7 @@ import PipelineRunIntentPanel from '../src/components/PipelineRunIntentPanel.jsx
 import DesignVideoBriefEditor from '../src/components/DesignVideoBriefEditor.jsx'
 import {emptyVideoBrief} from '../supabase/functions/_shared/designVideoBrief.js'
 import ContextConversationPanel from '../src/components/ContextConversationPanel.jsx'
-import { actor, organizationId, threadId, requestId, dispatchId, humanId, createDirectChatFixture, createPipelinePreviewFixture, createWebsitePagePreviewFixture,createReportingBindingsPreviewFixture,createCampaignPlanningPreviewFixture,createCampaignPlanPreviewFixture,createMarketingOpportunityPreviewFixture,createCampaignDeliverablePreviewFixture,createStoredReportingPreviewFixture,createProjectNavigationPreviewFixture } from './direct-chat-fixture.js'
+import { actor, organizationId, threadId, requestId, dispatchId, humanId, createDirectChatFixture, createPipelinePreviewFixture, createWebsitePagePreviewFixture,createReportingBindingsPreviewFixture,createCampaignPlanningPreviewFixture,createCampaignPlanPreviewFixture,createMarketingOpportunityPreviewFixture,createCampaignDeliverablePreviewFixture,createStoredReportingPreviewFixture,createProjectNavigationPreviewFixture,createReportingControlsPreviewFixture } from './direct-chat-fixture.js'
 import { clearDirectChatDraft } from '../src/data/directChatDraft.js'
 import { directChatRecoveryKey, writeDirectChatRecovery } from '../src/data/directChatRecovery.js'
 import { browserStorage, writeThemePreference } from '../src/data/themePreference.js'
@@ -38,7 +38,7 @@ globalThis.__directChatPreview = { fixture, pipeline:createPipelinePreviewFixtur
 
 
 globalThis.__directChatPreview.campaign=params.get('deliveryPlan')==='1'?createCampaignDeliverablePreviewFixture():params.get('opportunities')==='1'?createMarketingOpportunityPreviewFixture():params.get('planEditor')==='1'?createCampaignPlanPreviewFixture():createCampaignPlanningPreviewFixture()
-globalThis.__directChatPreview.reporting=params.get('storedReport')==='1'?createStoredReportingPreviewFixture({verified:params.get('verifiedReport')==='1'}):createReportingBindingsPreviewFixture()
+globalThis.__directChatPreview.reporting=params.get('reportingControls')==='1'?createReportingControlsPreviewFixture():params.get('storedReport')==='1'?createStoredReportingPreviewFixture({verified:params.get('verifiedReport')==='1'}):createReportingBindingsPreviewFixture()
 globalThis.__directChatPreview.website=createWebsitePagePreviewFixture({siteFindings:params.get('siteFindings')==='1'})
 if(params.get('panel')==='project-navigation'){const n=createProjectNavigationPreviewFixture(scope.project_id);Object.assign(globalThis.__directChatPreview,n);globalThis.__directChatPreview.projectWorkspace=n.workspace}
 if(['website-pages','project-navigation'].includes(params.get('panel')))globalThis.__directChatPreview.pipeline.repository.listStageArtifacts=globalThis.__directChatPreview.website.sourceRepository.listStageArtifacts
