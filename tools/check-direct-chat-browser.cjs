@@ -44,6 +44,21 @@ async function projectNavigationAssertions(browser){
  const evidence=path.join(output,'b2-service-native-evidence.json'),packet=JSON.parse(await fs.readFile(evidence,'utf8'));packet.projectNavigation={source:'tools/check-direct-chat-browser.cjs --project-navigation',scope:'Actual Project route, Layout, Website/Marketing/Resources components with scoped provider-free repositories. Unrelated lifecycle, PM, service/planning/discussion/review children are omitted in this navigation fixture; no signed-in/provider acceptance.',cases:results};await fs.writeFile(evidence,JSON.stringify(packet,null,2)+'\n');console.log(JSON.stringify({passed:results.length,evidence}))
 }
 
+async function resourceOverviewAssertions(browser){
+ const results=[]
+ for(const [width,height,theme] of [[1440,900,'light'],[390,900,'dark']]){
+  const context=await browser.newContext({viewport:{width,height}}),page=await context.newPage();page.setDefaultTimeout(15000)
+  const errors=[],consoleErrors=[],blocked=[],shots=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')consoleErrors.push(m.text())});await page.route('**/*',route=>{const u=new URL(route.request().url());if(u.hostname==='127.0.0.1'&&u.port==='5188')return route.continue();blocked.push(u.origin);return route.abort()})
+  await page.goto(`${base}?panel=reporting-bindings&storedReport=1&verifiedReport=1&theme=${theme}`);await page.locator('summary').filter({hasText:/^Project reporting resources/}).click()
+  const parent=page.getByRole('region',{name:'Project reporting resources',exact:true});await parent.getByRole('button',{name:'Load project bindings',exact:true}).click()
+  const saved=parent.getByRole('region',{name:'Saved project resource bindings',exact:true});await saved.getByText('Current resource access is verified. Stored observations are available.',{exact:true}).waitFor();assert.match(await saved.textContent(),/Refresh paused/);assert.match(await saved.textContent(),/Cadence 3600s/);assert.match(await saved.textContent(),/History 30 days/)
+  async function shot(name,node){await node.scrollIntoViewIfNeeded();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));const filename=`b6-resource-overview-${name}-${theme}-${width}x${height}.png`;await page.screenshot({path:path.join(output,filename)});shots.push(filename)}
+  await shot('verified',saved)
+  await page.evaluate(()=>globalThis.__directChatPreview.reporting.setReportDenied(true));await parent.getByRole('button',{name:'Load project bindings',exact:true}).click();const alert=parent.getByRole('alert').filter({hasText:'resource access was revoked'});await alert.waitFor();assert.equal(await parent.getByText('Current resource access is verified. Stored observations are available.',{exact:true}).count(),0);assert.equal(await parent.getByRole('region',{name:'Saved project resource bindings',exact:true}).count(),0);await shot('revoked',alert)
+  assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.reporting.calls.length),0);assert.equal(await page.evaluate(()=>globalThis.__directChatPreview.reporting.reportReads.length),0);assert.deepEqual(errors,[]);assert.deepEqual(consoleErrors,[]);assert.deepEqual(blocked,[]);results.push({width,height,theme,screenshots:shots,currentProofDisplayed:true,pausedPolicyDisplayed:true,revocationClearsCachedProof:true,noProviderOrWrites:true,horizontalOverflow:false,pageErrors:errors,consoleErrors,blockedRemoteRequests:blocked});await context.close()
+ }
+ const evidence=path.join(output,'b2-service-native-evidence.json'),packet=JSON.parse(await fs.readFile(evidence,'utf8'));packet.storedReporting.resourceOverview.ui={source:'tools/check-direct-chat-browser.cjs --resource-overview',scope:'Actual Layout/theme, synthetic verified resource fixture only; no provider/resource/human acceptance',cases:results};await fs.writeFile(evidence,JSON.stringify(packet,null,2)+'\n');console.log(JSON.stringify({passed:results.length,evidence}))
+}
 async function storedReportingAssertions(browser,verified=false){
  const results=[]
  for(const [width,height,theme] of [[1440,900,'light'],[390,900,'dark']]){
@@ -786,6 +801,7 @@ async function pipelineInputAssertions(browser){
   try {
     if(process.argv.includes('--website-bulk')){await websiteBulkAssertions(browser);return}
     if(process.argv.includes('--project-navigation')){await projectNavigationAssertions(browser);return}
+    if(process.argv.includes('--resource-overview')){await resourceOverviewAssertions(browser);return}
     if(process.argv.includes('--stored-reporting-verified')){await storedReportingAssertions(browser,true);return}
     if(process.argv.includes('--stored-reporting')){await storedReportingAssertions(browser);return}
     if(process.argv.includes('--campaign-deliverables')){await campaignDeliverableAssertions(browser);return}
