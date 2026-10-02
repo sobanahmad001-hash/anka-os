@@ -5,10 +5,10 @@ const INPUT='w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-s
 const stamp=value=>value?value.replace('T',' '):'Unknown'
 const label=value=>(value||'unknown').replaceAll('_',' ')
 const resourceLabel={ga4_property:'GA4 property',gsc_site:'Search Console site',google_ads_customer:'Google Ads customer',meta_facebook_page:'Facebook page',meta_instagram_account:'Instagram account'}
-export default function ProjectStoredReportingPanel({organizationId,projectId,bindingId,signal,blocked=false}){
+export default function ProjectStoredReportingPanel({organizationId,projectId,bindingId,signal,blocked=false,onOpenRefreshControls}){
  const [startDate,setStartDate]=useState(''),[endDate,setEndDate]=useState(''),[timeZone,setTimeZone]=useState('UTC'),[metricKey,setMetricKey]=useState(''),[pageSize,setPageSize]=useState(25),[data,setData]=useState(null),[status,setStatus]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[beforeId,setBeforeId]=useState(''),[afterId,setAfterId]=useState(''),[comparison,setComparison]=useState(null),[rollup,setRollup]=useState(null)
  const alive=useRef(true),flight=useRef(false),seq=useRef(0),latest=useRef(null)
- latest.current={organizationId,projectId,bindingId,signal,blocked,startDate,endDate,timeZone,metricKey,pageSize,busy,data,beforeId,afterId}
+ latest.current={organizationId,projectId,bindingId,signal,blocked,onOpenRefreshControls,startDate,endDate,timeZone,metricKey,pageSize,busy,data,beforeId,afterId}
  const active=()=>alive.current&&!latest.current.signal?.aborted
  useEffect(()=>()=>{alive.current=false;seq.current+=1},[])
  function change(setter,value){if(!active()||flight.current||latest.current.blocked)return;seq.current+=1;setData(null);setComparison(null);setRollup(null);setBeforeId('');setAfterId('');setError('');setter(value)}
@@ -31,7 +31,7 @@ export default function ProjectStoredReportingPanel({organizationId,projectId,bi
    <label className="text-xs">Comparison timezone<input aria-label="Stored report timezone" value={timeZone} maxLength={120} className={INPUT} onChange={e=>change(setTimeZone,e.target.value)}/></label>
    <label className="text-xs">Exact metric key (optional)<input aria-label="Stored report metric key" value={metricKey} maxLength={240} className={INPUT} onChange={e=>change(setMetricKey,e.target.value)}/></label>
    <label className="text-xs">Observations per page<select aria-label="Stored report page size" className={INPUT} value={pageSize} onChange={e=>change(setPageSize,Number(e.target.value))}><option value={10}>10 observations</option><option value={25}>25 observations</option></select></label>
-   <div className="flex flex-wrap gap-2 sm:col-span-2"><button type="button" className="workspace-button" onClick={()=>load()}>Load stored report</button><button type="button" className="workspace-button" onClick={()=>load('status')}>Check reporting status</button><button type="button" className="workspace-button" disabled>Provider refresh unavailable</button></div>
+   <div className="flex flex-wrap gap-2 sm:col-span-2"><button type="button" className="workspace-button" onClick={()=>load()}>Load stored report</button><button type="button" className="workspace-button" onClick={()=>load('status')}>Check reporting status</button><button type="button" className="workspace-button" disabled={disabled||!onOpenRefreshControls} onClick={()=>{if(!active()||flight.current||latest.current.blocked)return;latest.current.onOpenRefreshControls?.()}}>Reporting settings and refresh</button></div>
   </fieldset>
   {busy&&<p role="status" className="text-sm text-[var(--anka-muted)]">Checking current resource access and stored evidence…</p>}
   {current&&<section aria-label="Current reporting status" className="rounded-lg bg-[var(--anka-surface-raised)] p-3 text-sm space-y-2">

@@ -45,8 +45,8 @@ export function createReportingWorkerHandler({getUserClient,getAdminClient,adapt
     const admin=await getAdminClient();const {data:admission,error}=await admin.rpc('schedule_project_reporting_refresh',{p_organization_id:body.organization_id,p_policy_ids:config.policy_ids})
     if(error)return json({error:'Scheduled policy review required'},403)
     // A lost enqueue acknowledgement stops here. A later wake reuses native deduplication.
-    const {data:due,error:dueError}=await admin.rpc('list_due_project_reporting_refreshes',{p_organization_id:body.organization_id,p_limit:25})
-    if(dueError||!Array.isArray(due?.items)||due.items.length>25)return json({error:'Due work could not be read'},503)
+    const {data:due,error:dueError}=await admin.rpc('list_due_project_reporting_refreshes_for_policies',{p_organization_id:body.organization_id,p_policy_ids:config.policy_ids,p_limit:25})
+    if(dueError||due?.organization_id!==body.organization_id||JSON.stringify(due.policy_ids)!==JSON.stringify(config.policy_ids)||due.dispatch_authorized!==false||!Array.isArray(due.items)||due.items.length>25)return json({error:'Due work could not be read'},503)
     const seen=new Set(),jobs=[]
     for(const job of due.items){if(id(job?.job_id)&&config.policy_ids.includes(job.policy_id)&&!seen.has(job.job_id)){seen.add(job.job_id);jobs.push(job)}}
     const outcomes=[]
