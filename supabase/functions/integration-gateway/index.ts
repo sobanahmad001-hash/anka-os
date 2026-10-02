@@ -1,3 +1,4 @@
+import { OPENAI_ROUTINE_MODEL } from '../_shared/openaiModelPolicy.js'
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.99.1'
 
@@ -74,7 +75,7 @@ function safePublicConfig(provider: string, value: unknown) {
     return { file_key: text(input.file_key, 160) }
   }
   if (provider === 'openai' || provider === 'anthropic' || provider === 'google_gemini') {
-    return { model_id: text(input.model_id, 120) || (provider === 'openai' ? 'gpt-5.6-terra' : '') }
+    return { model_id: text(input.model_id, 120) || (provider === 'openai' ? OPENAI_ROUTINE_MODEL : '') }
   }
   if (provider === 'higgsfield') return { model_id: 'bytedance/seedance-2.5/text-to-video' }
   return { username: text(input.username, 160) }

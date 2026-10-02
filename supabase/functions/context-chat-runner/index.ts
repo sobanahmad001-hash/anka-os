@@ -269,7 +269,8 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
     }
     const startedAt = Date.now()
     const providerRequest = buildN7TextRequest({ provider, model_id: configuration.model_id },
-      credential, prompt, claimId, await sha256(user.id), instruction)
+      credential, prompt, claimId, await sha256(user.id), instruction,
+      conversation.context_kind === 'department_private' ? 'substantive' : 'routine')
     const response = await fetcher(providerRequest.url, {
       ...providerRequest.init, signal: AbortSignal.timeout(120000),
     })

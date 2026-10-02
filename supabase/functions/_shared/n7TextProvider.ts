@@ -1,3 +1,4 @@
+import { isApprovedOpenAiModel, openAiTextOptions } from './openaiModelPolicy.js'
 export type N7TextProvider = 'openai' | 'anthropic' | 'google_gemini'
 export type N7TextRoute = { provider: N7TextProvider; model_id: string }
 export type N7TextResult = {
@@ -16,7 +17,7 @@ const record = (value: unknown): Record<string, any> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}
 
 export function buildN7TextRequest(route: N7TextRoute, credential: string, prompt: string,
-  claimId: string, safetyIdentifier: string, instruction = INSTRUCTION): { url: string; init: RequestInit } {
+  claimId: string, safetyIdentifier: string, instruction = INSTRUCTION, workload = 'substantive'): { url: string; init: RequestInit } {
   if (!['openai', 'anthropic', 'google_gemini'].includes(route.provider)
     || !bounded(route.model_id, 120) || !/^[A-Za-z0-9._-]+$/.test(route.model_id)
     || !bounded(credential, 4096) || !bounded(prompt, 24000)
@@ -28,7 +29,7 @@ export function buildN7TextRequest(route: N7TextRoute, credential: string, promp
     url: 'https://api.openai.com/v1/responses',
     init: { method: 'POST', headers: { 'Content-Type': 'application/json',
       Authorization: 'Bearer ' + credential },
-      body: JSON.stringify({ model: route.model_id, instructions: instruction,
+      body: JSON.stringify({ model: route.model_id, ...openAiTextOptions(route.model_id, workload), instructions: instruction,
         input: prompt, max_output_tokens: 1024, store: false, tools: [],
         safety_identifier: safetyIdentifier, metadata: { anka_claim_id: claimId } }) },
   }
@@ -72,7 +73,15 @@ export function normalizeN7TextResult(provider: N7TextProvider, raw: unknown): N
     model = body.model
     input = usage.input_tokens
     outputTokens = usage.output_tokens
-    cached = record(usage.input_tokens_details).cached_tokens ?? 0
+    const details = record(usage.input_tokens_details)
+    cached = details.cached_tokens ?? 0
+    cacheWrite = details.cache_write_tokens ?? 0
+    if (isApprovedOpenAiModel(model) && (!token(details.cached_tokens) || !token(details.cache_write_tokens))) {
+      throw new Error('GPT-6 cache usage is incomplete')
+    }
+    if (isApprovedOpenAiModel(model) && body.service_tier !== 'default') {
+      throw new Error('GPT-6 service tier differs from the standard price contract')
+    }
   } else if (provider === 'anthropic') {
     if (body.type !== 'message' || body.stop_reason !== 'end_turn'
       || !Array.isArray(body.content) || body.content.some((part: any) => part?.type !== 'text')) {

@@ -1,3 +1,4 @@
+import { requireAutomaticTextModel } from '../_shared/openaiModelPolicy.js'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { namedKey, sha256 } from '../_shared/googleOAuthTokens.ts'
 import { conservativePipelineCeiling, measuredPipelineTokenCost, selectFreshPipelineRate } from '../_shared/n6PipelineCost.ts'
@@ -214,6 +215,9 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
     })
     if (!Array.isArray(routes) || routes.length < 1 || routes.length > 3) {
       throw failure('Ordered verified text routes are unavailable')
+    }
+    for (const route of routes) {
+      if (route.provider === 'openai') requireAutomaticTextModel(route.model_id)
     }
     const routeContexts: PipelineFallbackContext[] = []
     let requiredReserve = 0

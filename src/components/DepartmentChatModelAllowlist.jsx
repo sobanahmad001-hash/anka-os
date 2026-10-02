@@ -1,3 +1,4 @@
+import { openAiModelLabel } from '../data/openaiModelPolicy.js'
 import { useEffect, useState } from 'react'
 
 import { DEPARTMENT_LABELS } from '../config/connectorCatalog.js'
@@ -79,7 +80,7 @@ export default function DepartmentChatModelAllowlist({ organizationId, connectio
   return <section className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-5">
     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--anka-violet)]">Approved department text models</p>
     <h2 className="mt-2 text-lg font-semibold text-[var(--anka-ink)]">Administrator-approved access</h2>
-    <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--anka-muted)]">Only models already verified through each connector can be approved. Disabling a choice blocks new pipeline dispatches without changing historical run records. Shared Chat currently uses OpenAI models.</p>
+    <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--anka-muted)]">Only models already verified through each connector can be approved. Disabling a choice blocks new pipeline dispatches without changing historical run records. Luna is preferred for routine general/project chat; Sol for Content, Marketing and Design work. Astra is a premium explicit choice. Approval alone does not enable spend.</p>
     {message && <p className="mt-3 text-sm text-[var(--anka-ink)]">{message}</p>}
     <div className="mt-4 space-y-4">
       {textConnections.map(connection => {
@@ -100,7 +101,7 @@ export default function DepartmentChatModelAllowlist({ organizationId, connectio
                 const values = connectionDraft.organization || []
                 return { ...current, [connection.id]: { ...connectionDraft, organization: values.includes(modelId) ? values.filter(value => value !== modelId) : [...values, modelId] } }
               })} />
-              <span className="break-all">{modelId}</span>
+              <span className="break-all">{openAiModelLabel(modelId)}</span>
             </label>)}</div>
             {canManage && connection.status !== 'verified' && <button type="button" disabled={Boolean(savingId)} onClick={() => verifyOrganization(connection)} className="mt-3 mr-2 rounded-lg border border-[var(--anka-line)] px-3 py-2 text-xs font-semibold text-[var(--anka-ink)] disabled:opacity-50">{savingId === `${connection.id}:verify` ? 'Verifying…' : 'Verify connection'}</button>}
             {canManage && <button type="button" disabled={Boolean(savingId) || !verifiedModels.length} onClick={() => saveOrganization(connection)} className="mt-3 rounded-lg border border-[var(--anka-violet)] bg-[var(--anka-violet)] px-3 py-2 text-xs font-semibold text-[var(--anka-on-violet)] disabled:opacity-50">{savingId === `${connection.id}:organization` ? 'Saving…' : 'Save private model access'}</button>}
@@ -114,7 +115,7 @@ export default function DepartmentChatModelAllowlist({ organizationId, connectio
                   const values = connectionDraft[departmentId] || []
                   return { ...current, [connection.id]: { ...connectionDraft, [departmentId]: values.includes(modelId) ? values.filter(value => value !== modelId) : [...values, modelId] } }
                 })} />
-                <span className="break-all">{modelId}</span>
+                <span className="break-all">{openAiModelLabel(modelId)}</span>
               </label>)}
               {!verifiedModels.length && <p className="mt-2 text-xs text-[var(--anka-muted)]">No verified model.</p>}
               {!mapped.has(departmentId) && <p className="mt-2 text-xs text-[var(--anka-muted)]">Connector not mapped here.</p>}

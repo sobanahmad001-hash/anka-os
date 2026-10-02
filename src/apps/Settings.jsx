@@ -1,3 +1,4 @@
+import { OPENAI_ROUTINE_MODEL, OPENAI_TEXT_MODELS } from '../data/openaiModelPolicy.js'
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
@@ -27,7 +28,7 @@ function initialForm(provider = 'openai') {
     department_ids: provider === 'higgsfield' ? [] : [...connector.departments],
     organization_only: provider === 'higgsfield',
     owner: '', repo: '', file_key: '', username: '',
-    model_id: provider === 'openai' ? 'gpt-5.6-terra' : '',
+    model_id: provider === 'openai' ? OPENAI_ROUTINE_MODEL : '',
     property_id: '', site_url: '', customer_id: '', login_customer_id: '',
     brand_id: '', facebook_page_id: '', instagram_account_id: '',
   }
@@ -422,7 +423,8 @@ export default function Settings() {
             ) : (
               <form onSubmit={saveConnection} className="mt-5 space-y-4">
                 <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Connection name<input required value={form.display_name} onChange={(event) => setForm({ ...form, display_name: event.target.value })} className={`${INPUT} mt-2 normal-case tracking-normal`} placeholder={`Primary ${selected.shortLabel} connection`} /></label>
-                {['openai', 'anthropic', 'google_gemini'].includes(form.provider) && <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Default model<input required value={form.model_id} onChange={(event) => setForm({ ...form, model_id: event.target.value })} className={`${INPUT} mt-2 font-mono normal-case tracking-normal`} /></label>}
+                {form.provider === 'openai' && <datalist id="openai-text-models">{OPENAI_TEXT_MODELS.map(model => <option key={model.id} value={model.id}>{model.label} — {model.role}</option>)}</datalist>}
+                {['openai', 'anthropic', 'google_gemini'].includes(form.provider) && <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Default model<input list={form.provider === 'openai' ? 'openai-text-models' : undefined} required value={form.model_id} onChange={(event) => setForm({ ...form, model_id: event.target.value })} className={`${INPUT} mt-2 font-mono normal-case tracking-normal`} /></label>}
                 {form.provider === 'github' && <div className="grid grid-cols-2 gap-3"><label className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Owner<input required value={form.owner} onChange={(event) => setForm({ ...form, owner: event.target.value })} className={`${INPUT} mt-2 normal-case tracking-normal`} /></label><label className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Repository<input required value={form.repo} onChange={(event) => setForm({ ...form, repo: event.target.value })} className={`${INPUT} mt-2 normal-case tracking-normal`} /></label></div>}
                 {form.provider === 'figma' && <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">File key<input required value={form.file_key} onChange={(event) => setForm({ ...form, file_key: event.target.value })} className={`${INPUT} mt-2 normal-case tracking-normal`} placeholder="From the Figma file URL" /></label>}
                 {form.provider === 'wordpress' && <><label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Site URL<input required type="url" value={form.base_url} onChange={(event) => setForm({ ...form, base_url: event.target.value })} className={`${INPUT} mt-2 normal-case tracking-normal`} placeholder="https://example.com" /></label><label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">WordPress username<input required value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} className={`${INPUT} mt-2 normal-case tracking-normal`} /></label></>}

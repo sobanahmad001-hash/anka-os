@@ -1,3 +1,4 @@
+import { openAiTextOptions, preferredApprovedModel, OPENAI_PREMIUM_MODEL } from '../_shared/openaiModelPolicy.js'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { contextChatAction } from './contextChatActions.ts'
 import {
@@ -401,7 +402,8 @@ export async function resolveApprovedWorkshopModel(
   const selectedId = text(selectedConfigurationId, 80)
   const selected = selectedId
     ? available.find(item => item.configuration.id === selectedId)
-    : available.find(item => item.configuration.is_default) || available[0]
+    : available.find(item => item.configuration.id === preferredApprovedModel(
+      available.map(entry => ({ ...entry.configuration, model_id: entry.model })), 'substantive')?.id) || available[0]
   if (!selected) throw Object.assign(new Error('Selected Workshop model is stale or unavailable. Refresh before retrying.'), { status: 409 })
   return {
     provider: selected.connection.provider as WorkshopAnswerRoute['provider'],
@@ -454,7 +456,7 @@ export function selectApprovedModelConfiguration(
   const requestedId = text(selectedConfigurationId, 80)
   const selected = requestedId
     ? approvedModels.find(configuration => configuration.id === requestedId)
-    : approvedModels.find(configuration => configuration.is_default) || approvedModels[0]
+    : preferredApprovedModel(approvedModels, 'substantive') || approvedModels[0]
   if (!selected) throw Object.assign(new Error('Selected model is stale or no longer approved. Refresh before retrying.'), {
     status: 409, outcome: 'stale',
   })
@@ -1669,6 +1671,9 @@ async function assertModelDispatch(admin: Client, body: Json, actorId: string, p
   configurationId?: string
   model: string
 }) {
+  if (provider.model === OPENAI_PREMIUM_MODEL && !text(body.model_configuration_id, 80)) {
+    throw new Error('GPT-6 Astra requires an explicit model choice')
+  }
   if (!provider.configurationId) return
   const { error } = await admin.rpc('assert_department_chat_model_dispatch', {
     p_configuration_id: provider.configurationId,
@@ -1805,7 +1810,7 @@ export async function proposeArtifact(userClient: Client, admin: Client, body: J
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + provider.credential },
     body: JSON.stringify({
-      model: provider.model, instructions: systemPrompt, input: prompt + attachments.providerText,
+      model: provider.model, ...openAiTextOptions(provider.model, 'substantive'), instructions: systemPrompt, input: prompt + attachments.providerText,
       max_output_tokens: 5000, store: false, safety_identifier: await sha256(actorId),
       text: { format: departmentId === 'content'
         ? contentArtifactResponseFormat(artifactType)
@@ -1893,7 +1898,7 @@ export async function proposeWorkItem(
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + provider.credential },
     body: JSON.stringify({
-      model: provider.model, instructions: systemPrompt, input: prompt + attachments.providerText,
+      model: provider.model, ...openAiTextOptions(provider.model, 'substantive'), instructions: systemPrompt, input: prompt + attachments.providerText,
       max_output_tokens: 1000, store: false, safety_identifier: await sha256(actorId),
     }),
     signal: AbortSignal.timeout(30_000),

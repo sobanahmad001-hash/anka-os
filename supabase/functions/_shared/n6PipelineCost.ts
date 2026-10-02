@@ -1,3 +1,4 @@
+import { isApprovedOpenAiModel } from './openaiModelPolicy.js'
 export type PipelinePricingProvider = 'openai' | 'anthropic' | 'google_gemini'
 
 export type PipelineModelRate = {
@@ -59,11 +60,14 @@ export function selectFreshPipelineRate(raw: string | undefined, modelId: string
     item.output_usd_per_million].every(rate)) {
     throw new Error('N6 model price rates are invalid')
   }
-  // These transports do not create explicit caches. Null means not applicable,
-  // not a free cache-write rate; Anthropic still requires its published rate.
+  // Null means not applicable, never a free cache-write rate. Anthropic and
+  // approved GPT-6 models require their published cache-write rate.
   if (!rate(item.cache_write_usd_per_million)
     && !(item.cache_write_usd_per_million === null && provider !== 'anthropic')) {
     throw new Error('N6 cache-write price is invalid')
+  }
+  if (provider === 'openai' && isApprovedOpenAiModel(modelId) && !rate(item.cache_write_usd_per_million)) {
+    throw new Error('GPT-6 requires a verified cache-write price')
   }
   return item
 }

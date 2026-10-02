@@ -1,3 +1,4 @@
+import { openAiTextOptions, requireAutomaticTextModel } from '../_shared/openaiModelPolicy.js'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { namedKey, sha256 } from '../_shared/googleOAuthTokens.ts'
 import { validateContentArtifact } from '../_shared/contentArtifacts.ts'
@@ -175,6 +176,7 @@ export function selectSingleSandboxOpenAiModel(
     ? connection.public_config as Json : {}
   const model = text(publicConfig.model_id, 120)
   if (!model) throw new Error('The verified OpenAI connector requires an explicit model_id')
+  requireAutomaticTextModel(model)
   return { connectorId, credential, model }
 }
 
@@ -349,7 +351,7 @@ ${JSON.stringify({ title: task.title, revision: revision.content, transcript }).
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${provider.credential}` },
       body: JSON.stringify({
-        model: provider.model, instructions, input: input.prompt, max_output_tokens: 5000,
+        model: provider.model, ...openAiTextOptions(provider.model), instructions, input: input.prompt, max_output_tokens: 5000,
         store: false, safety_identifier: await sha256(actorId), text: { format: quickTaskChatResponseFormat() },
       }),
       signal: AbortSignal.timeout(30_000),
