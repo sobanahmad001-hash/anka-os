@@ -38,7 +38,7 @@ globalThis.__directChatPreview = { fixture, pipeline:createPipelinePreviewFixtur
 
 
 globalThis.__directChatPreview.campaign=params.get('deliveryPlan')==='1'?createCampaignDeliverablePreviewFixture():params.get('opportunities')==='1'?createMarketingOpportunityPreviewFixture():params.get('planEditor')==='1'?createCampaignPlanPreviewFixture():createCampaignPlanningPreviewFixture()
-globalThis.__directChatPreview.reporting=params.get('storedReport')==='1'?createStoredReportingPreviewFixture():createReportingBindingsPreviewFixture()
+globalThis.__directChatPreview.reporting=params.get('storedReport')==='1'?createStoredReportingPreviewFixture({verified:params.get('verifiedReport')==='1'}):createReportingBindingsPreviewFixture()
 globalThis.__directChatPreview.website=createWebsitePagePreviewFixture({siteFindings:params.get('siteFindings')==='1'})
 if(params.get('panel')==='project-navigation'){const n=createProjectNavigationPreviewFixture(scope.project_id);Object.assign(globalThis.__directChatPreview,n);globalThis.__directChatPreview.projectWorkspace=n.workspace}
 if(['website-pages','project-navigation'].includes(params.get('panel')))globalThis.__directChatPreview.pipeline.repository.listStageArtifacts=globalThis.__directChatPreview.website.sourceRepository.listStageArtifacts
