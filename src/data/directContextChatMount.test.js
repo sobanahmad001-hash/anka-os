@@ -23,7 +23,7 @@ async function mount(t, options = {}) {
   const fixture = createDirectChatFixture(options)
   const scope = { contextKind: fixture.scope.context_kind, projectId: fixture.scope.project_id || '', departmentId: fixture.scope.department_id || '' }
   const accessError = () => {}
-  globalThis.__directChatTest = { fixture, actor, allowlist, organization: { activeOrganizationId: organizationId, scopeRevision: 1, requestSignal: new AbortController().signal, handleOrganizationAccessError: accessError } }
+  globalThis.__directChatTest = { fixture, actor, allowlist: options.allowlist || allowlist, organization: { activeOrganizationId: organizationId, scopeRevision: 1, requestSignal: new AbortController().signal, handleOrganizationAccessError: accessError } }
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [{
     name: 'direct-chat-mounted-offline', enforce: 'pre',
     resolveId(source) {
@@ -334,4 +334,26 @@ test('Design video guard denies changed org/owner/private scope/archive and late
   await assert.rejects(checking, /unavailable/)
   await assert.rejects(video.beforeGenerate(row.id), /context changed/)
   assert.equal(ui.fixture.data.counters.run,0)
+})
+
+const approvedPreferenceModels = ids => ({ connections: [{
+  id: 'connector', organization_level: true, status: 'verified', provider: 'openai', display_name: 'OpenAI',
+  context_model_configurations: ids.map(model_id => ({ id: model_id, model_id })),
+}] })
+
+for (const [surface, models, expected] of [
+  ['project', ['gpt-6-luna', 'gpt-6-astra', 'gpt-6.1-sol'], 'gpt-6.1-sol'],
+  ['organization', ['gpt-6.1-sol', 'gpt-6-luna'], 'gpt-6-luna'],
+  ['content', ['gpt-6-luna', 'gpt-6.1-sol'], 'gpt-6.1-sol'],
+  ['project', ['gpt-6-astra', 'gpt-4.1'], 'gpt-4.1'],
+  ['project', ['gpt-6-astra'], ''],
+]) test(`direct ${surface} chooses eligible preference ${expected || 'none'}`, async t => {
+  const ui = await mount(t, { surface, allowlist: approvedPreferenceModels(models) })
+  assert.equal(props(ui.named('Approved model')).value, expected)
+  if (models.includes('gpt-6-luna') && expected !== 'gpt-6-luna') {
+    await ui.type('gpt-6-luna', 'Approved model')
+    await ui.render()
+    assert.equal(props(ui.named('Approved model')).value, 'gpt-6-luna', 'explicit eligible choice survives rerender')
+  }
+  assert.equal(ui.fixture.data.counters.run, 0, 'preference never dispatches')
 })

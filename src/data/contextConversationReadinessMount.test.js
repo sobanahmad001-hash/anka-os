@@ -9,7 +9,7 @@ const descendants = node => [node, ...node.childNodes.flatMap(descendants)]
 const button = (root, label) => descendants(root).find(node => node.tagName === 'BUTTON' && node.textContent.includes(label))
 const reactProps = node => node[Object.keys(node).find(key => key.startsWith('__reactProps$'))]
 
-async function mount(t, readiness, panelProps = {}) {
+async function mount(t, readiness, panelProps = {}, modelAllowlist) {
   const environment = mountedEnvironment()
   const values = { document: environment.document, window: environment.window,
     Event: environment.window.Event, Node: environment.window.Node,
@@ -19,6 +19,7 @@ async function mount(t, readiness, panelProps = {}) {
   const calls = []
   globalThis.__contextReadinessFixture = {
     rows: [{ id: 'conversation', owner_id: 'actor', title: 'Private', state: 'active' }],
+    modelAllowlist,
     created: [],
     renamed: [],
     messages: [{ id: 'message', conversation_id: 'conversation', author_id: 'actor', role: 'user', body: 'Question', status: 'completed' }],
@@ -46,6 +47,7 @@ async function mount(t, readiness, panelProps = {}) {
         if (id === '\0context-organization') return 'export const useOrganization = () => ({ activeOrganizationId: "org", scopeRevision: 1, requestSignal: globalThis.__contextReadinessFixture.signal, handleOrganizationAccessError: () => {} })'
         if (id === '\0context-repository') return `export const departmentChat = {
           listContextConversations: async () => globalThis.__contextReadinessFixture.rows,
+          getProjectContextSharing: async () => ({ candidates: [], recipients: [] }),
           createContextConversation: async input => {
             const fixture = globalThis.__contextReadinessFixture
             fixture.created.push(input)
@@ -72,7 +74,7 @@ async function mount(t, readiness, panelProps = {}) {
           },
           getContextChatReadiness: async input => globalThis.__contextReadinessFixture.readiness(input),
         }`
-        if (id === '\0context-integrations') return `export const integrations = { listModelAllowlist: async () => ({ connections: [{ id: 'connector', organization_level: true, status: 'verified', provider: 'openai', display_name: 'OpenAI', context_model_configurations: [{ id: 'model', model_id: 'verified' }] }] }) }`
+        if (id === '\0context-integrations') return `export const integrations = { listModelAllowlist: async () => globalThis.__contextReadinessFixture.modelAllowlist || ({ connections: [{ id: 'connector', organization_level: true, status: 'verified', provider: 'openai', display_name: 'OpenAI', context_model_configurations: [{ id: 'model', model_id: 'verified' }] }] }) }`
         if (id === '\0context-runner') return 'export const contextChatRunner = { run: () => globalThis.__contextReadinessFixture.runner(), recover: () => globalThis.__contextReadinessFixture.runner() }'
       },
     }] })
@@ -260,4 +262,27 @@ test('canonical context stays opt-in per reply and selection alone never calls a
   await act(async () => reactProps(button(environment.container, 'Allow and ask Anka AI')).onClick())
   assert.equal(dispatches, 3)
   assert.equal(reactProps(canonical()).checked, false)
+})
+
+const approvedPreferenceModels = ids => ({ connections: [{
+  id: 'connector', organization_level: true, status: 'verified', provider: 'openai', display_name: 'OpenAI',
+  context_model_configurations: ids.map(model_id => ({ id: model_id, model_id })),
+}] })
+
+for (const [contextKind, models, expected] of [
+  ['project_team', ['gpt-6-luna', 'gpt-6-astra', 'gpt-6.1-sol'], 'gpt-6.1-sol'],
+  ['organization', ['gpt-6.1-sol', 'gpt-6-luna'], 'gpt-6-luna'],
+  ['department_private', ['gpt-6-luna', 'gpt-6.1-sol'], 'gpt-6.1-sol'],
+  ['project_team', ['gpt-6-astra', 'gpt-4.1'], 'gpt-4.1'],
+  ['project_team', ['gpt-6-astra'], ''],
+]) test(`conversation panel ${contextKind} chooses eligible preference ${expected || 'none'}`, async t => {
+  const panelProps = { contextKind, projectId: contextKind === 'project_team' ? 'project' : '', departmentId: contextKind === 'department_private' ? 'content' : '' }
+  const { environment, root, Panel } = await mount(t, () => ({ paid_execution_enabled: false }), panelProps, approvedPreferenceModels(models))
+  const selected = () => descendants(environment.container).find(node => reactProps(node)?.id === 'organization-conversation-model')
+  assert.equal(reactProps(selected()).value, expected)
+  if (models.includes('gpt-6-luna') && expected !== 'gpt-6-luna') {
+    await act(async () => reactProps(selected()).onChange({ target: { value: 'gpt-6-luna' } }))
+    await act(async () => root.render(createElement(Panel, { ...panelProps, label: 'Changed label' })))
+    assert.equal(reactProps(selected()).value, 'gpt-6-luna', 'explicit eligible choice survives rerender')
+  }
 })

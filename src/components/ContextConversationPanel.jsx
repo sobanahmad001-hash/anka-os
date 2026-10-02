@@ -200,7 +200,7 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
         setModelOptions(options)
         setIncludeCanonicalContext(false)
         setSelectedModelId(previous => options.some(option => option.id === previous)
-          ? previous : preferredApprovedModel(options, contextKind === 'department_private' ? 'substantive' : 'routine')?.id || '')
+          ? previous : preferredApprovedModel(options, ['department_private', 'project_team'].includes(contextKind) ? 'substantive' : 'routine')?.id || '')
       })
       .catch(reason => { if (current) showError(reason) })
     return () => { current = false }

@@ -169,7 +169,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
         .flatMap(connection => (connection.context_model_configurations || []).map(item => ({ id: item.id, model_id: item.model_id, label: openAiModelLabel(item.model_id),
           provider: connection.provider, connectionId: connection.id, connectionName: connection.display_name || connection.provider })))
       setModels(options); setModelId(previous => options.some(row => row.id === previous) ? previous
-        : preferredApprovedModel(options, contextKind === 'department_private' ? 'substantive' : 'routine')?.id || '')
+        : preferredApprovedModel(options, ['department_private', 'project_team'].includes(contextKind) ? 'substantive' : 'routine')?.id || '')
     }).catch(reason => { if (active && !signal.aborted) setError(reason.message) })
     return () => { active = false }
   }, [scope, requestScope, organizationId, signal, validConversation, hasExternalHistory, contextKind])
