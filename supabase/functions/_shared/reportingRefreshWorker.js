@@ -50,7 +50,7 @@ export async function runReportingRefreshJob({jobId,claimId,store,adapters,now=(
   // The abort is still honored when an adapter is slow. Even if it ignores the signal,
   // the worker never commits a late unobserved response or issues a second request.
   const expired=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(new Error('Original lease elapsed'))},Math.min(leaseRemaining,2147483647))})
-  page=await Promise.race([adapter.fetchPage({identity,limits:policy,cursor:claim.cursor,signal:controller.signal}),expired])
+  page=await Promise.race([adapter.fetchPage({identity,context:claim.context,limits:policy,cursor:claim.cursor,signal:controller.signal}),expired])
   validateReportingIngestionPage({identity,policy,metricDefinitions:adapter.metricDefinitions,page})
  }catch(error){
   if(error instanceof ReportingProviderFailure)return fail(error.reason,error.retryAfter)

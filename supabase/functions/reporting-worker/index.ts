@@ -1,11 +1,20 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
-import { namedKey } from '../_shared/googleOAuthTokens.ts'
+import { namedKey, decryptSecret } from '../_shared/googleOAuthTokens.ts'
 import { createReportingWorkerHandler, reportingScheduleConfiguration } from '../_shared/reportingWorkerEndpoint.js'
 
-// Registration grants no capability. Resource-specific modules must be implemented,
-// reviewed and match the native installed manifest before activation.
-const installedAdapters: unknown[] = []
+import { createGoogleReportingAdapters, createReportingGoogleTokenReader } from '../_shared/reportingGoogleAdapters.js'
+import manifests from '../_shared/reportingGoogleManifests.json' with { type: 'json' }
+
 const environment = (name: string) => Deno.env.get(name) || ''
+const admin = () => createClient(environment('SUPABASE_URL'), namedKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY'), {
+  auth: { persistSession: false, autoRefreshToken: false },
+})
+// Compiled modules are not resource grants. Native registry entries are initially
+// disabled and must match these exact reviewed manifests before a claim can dispatch.
+const installedAdapters = createGoogleReportingAdapters({
+  getToken: createReportingGoogleTokenReader({ admin, decrypt: decryptSecret, encryptionMaterial: () => environment('GOOGLE_OAUTH_ENCRYPTION_KEY') }),
+  manifests: Object.fromEntries(manifests.adapters.map(entry => [entry.sourceContract, entry.manifestSha256])),
+})
 const handler = createReportingWorkerHandler({
   adapters: installedAdapters,
   machineSecret: () => environment('ANKA_REPORTING_WORKER_SECRET'),
@@ -20,8 +29,6 @@ const handler = createReportingWorkerHandler({
     if (error || !user) throw new Error('Authentication required')
     return client
   },
-  getAdminClient: async () => createClient(environment('SUPABASE_URL'), namedKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY'), {
-    auth: { persistSession: false, autoRefreshToken: false },
-  }),
+  getAdminClient: async () => admin(),
 })
 if (import.meta.main) Deno.serve(handler)
