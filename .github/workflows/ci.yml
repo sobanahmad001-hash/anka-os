@@ -37,5 +37,6 @@ jobs:
       - run: deno test --allow-env --frozen supabase/functions/_shared/designMediaAdapter.test.ts supabase/functions/_shared/designVideoOutput.test.ts supabase/functions/design-workshop/videoQuote.test.ts supabase/functions/design-workshop/videoOutputActions.test.ts supabase/functions/design-workshop/videoBriefs.test.ts
       - run: deno check --frozen supabase/functions/_shared/designMediaAdapter.ts supabase/functions/_shared/designMediaAdapter.test.ts supabase/functions/_shared/designVideoOutput.ts supabase/functions/_shared/designVideoOutput.test.ts supabase/functions/design-workshop/videoQuote.test.ts supabase/functions/design-workshop/videoOutputActions.test.ts supabase/functions/design-workshop/videoBriefs.test.ts
       - run: python3 tools/check-reporting-google-manifests.py
+      - run: python3 tools/check-reporting-facebook-manifest.py
       - run: deno check --frozen supabase/functions/reporting-worker/index.ts supabase/functions/_shared/reportingMetaCredentials.js
       - run: npm run build

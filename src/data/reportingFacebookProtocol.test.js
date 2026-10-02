@@ -6,10 +6,11 @@ const context={provider:'meta',resource_kind:'meta_facebook_page',resource_key:p
 const NOW=Date.parse('2026-10-02T12:00:00Z'),window={since:'2026-09-28T00:00:00Z',until:'2026-09-30T00:00:00Z'}
 const debug=()=>({data:{is_valid:true,app_id:appId,profile_id:pageId,user_id:userId,issued_at:Math.floor(NOW/1000)-1000,expires_at:Math.floor(NOW/1000)+5000,data_access_expires_at:Math.floor(NOW/1000)+6000,scopes:['read_insights','pages_read_engagement'],granular_scopes:[{scope:'read_insights',target_ids:[pageId]},{scope:'pages_read_engagement'}]}})
 const report=()=>({data:FACEBOOK_PAGE_METRICS.map((m,i)=>({id:`${pageId}/insights/${m.metric_key}/day`,name:m.metric_key,period:'day',values:[{value:i?7:0,end_time:'2026-09-29T07:00:00+0000'}]})),paging:{}})
-function setup({debugBody=debug(),pageBody=report(),responses=null,credential=null,verifier=null,fetchError=null,afterFetch=null}={}){
- let clock=NOW;const calls=[]
- const adapter=createFacebookPageReportingProtocol({now:()=>clock,getCredential:async()=>credential??{token:'PAGE_SECRET',facebookPageId:pageId,expiresAt:'2026-10-03T00:00:00Z'},getVerifierCredential:()=>verifier??{appId,token:'DEBUG_SECRET'},fetcher:async(url,options)=>{calls.push({url,options});if(fetchError)throw fetchError;if(afterFetch)afterFetch(calls.length,()=>{clock+=7000*1000});return responses?.[calls.length-1]??new Response(JSON.stringify(calls.length===1?debugBody:pageBody),{status:200})}})
- return {adapter,calls,read:(input={})=>adapter.readPageInsights({context,window,maxValues:20,...input})}
+function setup({debugBody=debug(),pageBody=report(),responses=null,credential=null,verifier=null,fetchError=null,afterFetch=null,auditOverride=null}={}){
+ let clock=NOW;const calls=[],auditEvents=[]
+ const audit=auditOverride??{claim:async ordinal=>{auditEvents.push({action:'claim',ordinal});return {ordinal,permitId:crypto.randomUUID()}},record:async(permit,outcome,evidence,validUntil)=>{auditEvents.push({action:'record',ordinal:permit.ordinal,outcome,evidence,validUntil})}}
+ const adapter=createFacebookPageReportingProtocol({now:()=>clock,getRequestAudit:()=>audit,getCredential:async()=>credential??{token:'PAGE_SECRET',facebookPageId:pageId,expiresAt:'2026-10-03T00:00:00Z'},getVerifierCredential:()=>verifier??{appId,token:'DEBUG_SECRET'},fetcher:async(url,options)=>{calls.push({url,options});if(fetchError)throw fetchError;if(afterFetch)afterFetch(calls.length,()=>{clock+=7000*1000});return responses?.[calls.length-1]??new Response(JSON.stringify(calls.length===1?debugBody:pageBody),{status:200})}})
+ return {adapter,calls,auditEvents,read:(input={})=>adapter.readPageInsights({context,window,maxValues:20,...input})}
 }
 test('Facebook v26 uses exactly one debug then one Page request and retains zero/native boundaries without timezone invention',async()=>{
  const s=setup(),r=await s.read();assert.equal(s.calls.length,2);assert.equal(r.request_count,2);assert.equal(r.resource_matches,true);assert.equal(r.observed_reporting_grant,true)
@@ -70,4 +71,17 @@ test('cancellation and token expiry between reads deny completion and prevent fu
  const controller=new AbortController();controller.abort();let s=setup();await assert.rejects(s.read({signal:controller.signal}));assert.equal(s.calls.length,0)
  s=setup({afterFetch:(n,advance)=>{if(n===1)advance()}});const r=await s.read();assert.equal(r.observed_reporting_grant,false);assert.equal(s.calls.length,1)
  s=setup({afterFetch:(n,advance)=>{if(n===2)advance()}});await assert.rejects(s.read(),e=>e.reason==='disconnected');assert.equal(s.calls.length,2)
+})
+
+test('native one-use permit precedes each HTTP read and original token proof is recorded before call2',async()=>{
+ const s=setup(),r=await s.read();assert.deepEqual(s.auditEvents.map(x=>[x.action,x.ordinal,x.outcome??null]),[['claim',1,null],['record',1,'validated'],['claim',2,null],['record',2,'validated']]);assert.equal(s.auditEvents[3].evidence,r.source_evidence_sha256);assert.equal(s.auditEvents[1].validUntil,'2026-10-02T13:23:20.000Z')
+})
+test('missing or lost native permit denies HTTP and never retries that permit',async()=>{
+ let n=0;const s=setup({auditOverride:{claim:async()=>{n++;throw new Error('Original permit unknown')},record:async()=>assert.fail('No dispatch to record')}});await assert.rejects(s.read());assert.equal(n,1);assert.equal(s.calls.length,0)
+})
+test('unknown first outcome prevents call2 without retrying the original write',async()=>{
+ let records=0;const s=setup({auditOverride:{claim:async ordinal=>({ordinal,permitId:crypto.randomUUID()}),record:async()=>{records++;throw new Error('Outcome unknown')}}});await assert.rejects(s.read());assert.equal(records,1);assert.equal(s.calls.length,1)
+})
+test('transport failure records one uncertain dispatched ordinal and no success or second HTTP call',async()=>{
+ const s=setup({fetchError:new Error('SECRET')});await assert.rejects(s.read());assert.deepEqual(s.auditEvents.map(x=>[x.action,x.ordinal,x.outcome??null]),[['claim',1,null],['record',1,'uncertain']]);assert.equal(s.calls.length,1);assert.doesNotMatch(JSON.stringify(s.auditEvents),/SECRET/)
 })

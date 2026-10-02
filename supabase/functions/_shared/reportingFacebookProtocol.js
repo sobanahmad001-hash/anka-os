@@ -1,7 +1,7 @@
 import {ReportingProviderFailure} from './reportingRefreshWorker.js'
 // Source: user-supplied official v26.0 Page Insights and debug_token excerpts.
-// Deliberately not registered: native two-request quota reservation and ingestion
-// window/provenance integration must pass before a worker may dispatch this protocol.
+// Native reservation and one-use ordinal permits precede HTTP. The reviewed
+// registry remains disabled until explicit resource activation.
 const HOST='https://graph.facebook.com/v26.0/'
 const ID=/^[0-9]{4,40}$/
 const SCOPES=Object.freeze(['read_insights','pages_read_engagement'])
@@ -63,10 +63,10 @@ function pageEvidence(raw,pageId,{maxValues,since=null,until=null}={}){
    rows.push({metric_key:metric.name,metric_value:value.value,value_state:'available',provider_period:'day',provider_end_time:value.end_time,provider_bucket_time_zone:null,bucket_start:null})
   }
  }
- return {rows,missing_metrics:FACEBOOK_PAGE_METRICS.filter(x=>!seen.has(x.metric_key)).map(x=>x.metric_key),has_next:typeof raw.paging?.next==='string'&&raw.paging.next.length>0}
+ return {rows,missing_metrics:FACEBOOK_PAGE_METRICS.filter(x=>!rows.some(r=>r.metric_key===x.metric_key)).map(x=>x.metric_key),has_next:typeof raw.paging?.next==='string'&&raw.paging.next.length>0}
 }
-export function createFacebookPageReportingProtocol({getCredential,getVerifierCredential,fetcher=fetch,now=()=>Date.now()}){
- if(typeof getCredential!=='function'||typeof getVerifierCredential!=='function'||typeof fetcher!=='function')throw new TypeError('Exact server credential readers required')
+export function createFacebookPageReportingProtocol({getCredential,getVerifierCredential,getRequestAudit,fetcher=fetch,now=()=>Date.now()}){
+ if(typeof getCredential!=='function'||typeof getVerifierCredential!=='function'||typeof getRequestAudit!=='function'||typeof fetcher!=='function')throw new TypeError('Exact server credential readers required')
  async function operation({context,signal,window=null,maxValues=1000}){
   if(signal?.aborted)throw unknown()
   if(context?.provider!=='meta'||context.resource_kind!=='meta_facebook_page'||!isId(context.resource_key)||!Number.isSafeInteger(maxValues)||maxValues<1||maxValues>1000)throw unknown()
@@ -76,15 +76,19 @@ export function createFacebookPageReportingProtocol({getCredential,getVerifierCr
   try{credentials=await getCredential(context,signal);verifier=await getVerifierCredential()}catch{throw failure('disconnected')}
   if(!object(credentials)||credentials.facebookPageId!==context.resource_key||!token(credentials.token)||!object(verifier)||!isId(verifier.appId)||!token(verifier.token)||credentials.token===verifier.token)throw failure('disconnected')
   const checkLocal=()=>{if(signal?.aborted)throw unknown();const expires=Date.parse(credentials.expiresAt);if(!Number.isFinite(expires)||expires<=now())throw failure('disconnected')}
-  checkLocal();let requests=0
+  checkLocal();let requests=0,pending=null,attempted=false,recordAttempted=false
+  const audit=getRequestAudit(context)
+  if(typeof audit?.claim!=='function'||typeof audit?.record!=='function')throw unknown()
+  const record=async(outcome,evidence,validUntil=null)=>{recordAttempted=true;await audit.record(pending,outcome,evidence,validUntil)}
   async function read(path,accessToken,params){
    checkLocal();if(++requests>2)throw unknown()
+   pending=await audit.claim(requests);attempted=false;recordAttempted=false;checkLocal()
    const url=new URL(HOST+path);for(const [k,v]of Object.entries(params))url.searchParams.set(k,v)
    let response,raw
    // Suppress transport exceptions, which can contain the debug input-token URL.
-   try{response=await fetcher(url.toString(),{method:'GET',headers:{Authorization:`Bearer ${accessToken}`},signal,redirect:'error',cache:'no-store'});raw=await body(response)}catch{throw unknown()}
+   try{attempted=true;response=await fetcher(url.toString(),{method:'GET',headers:{Authorization:`Bearer ${accessToken}`},signal,redirect:'error',cache:'no-store'});raw=await body(response)}catch{throw unknown()}
    checkLocal()
-   if(object(raw.error)||!response.ok){
+   if(raw.error!==undefined||!response.ok){
     const code=raw.error?.code
     if(code===190||code===104)throw failure('disconnected')
     if(code===200)throw failure('permission_denied')
@@ -98,17 +102,25 @@ export function createFacebookPageReportingProtocol({getCredential,getVerifierCr
    }
    return raw
   }
-  const debug=await read('debug_token',verifier.token,{input_token:credentials.token}),observed=tokenEvidence(debug,{appId:verifier.appId,pageId:context.resource_key,now:now()})
-  if(!observed.valid)return {observed_at:new Date(now()).toISOString(),resource_matches:false,observed_reporting_grant:false,source_evidence_sha256:await sha({version:'v26.0',token:observed.proof}),request_count:requests,rows:[],missing_metrics:FACEBOOK_PAGE_METRICS.map(x=>x.metric_key),coverage:'unavailable'}
-  const params={metric:FACEBOOK_PAGE_METRICS.map(x=>x.metric_key).join(','),period:'day',...(window?{since:String(since/1000),until:String(until/1000)}:{date_preset:'yesterday'})}
-  let page
-  try{page=pageEvidence(await read(context.resource_key+'/insights',credentials.token,params),context.resource_key,{maxValues,since,until})}catch(error){
-   if(error instanceof ReportingProviderFailure&&['disconnected','permission_denied'].includes(error.reason))return {observed_at:new Date(now()).toISOString(),resource_matches:false,observed_reporting_grant:false,source_evidence_sha256:await sha({version:'v26.0',token:observed.proof,denial:error.reason}),request_count:requests,rows:[],missing_metrics:FACEBOOK_PAGE_METRICS.map(x=>x.metric_key),coverage:'unavailable'}
+  try{
+   const debug=await read('debug_token',verifier.token,{input_token:credentials.token}),observed=tokenEvidence(debug,{appId:verifier.appId,pageId:context.resource_key,now:now()})
+   const tokenSha=await sha({version:'v26.0',token:observed.proof})
+   if(!observed.valid){await record('denied',tokenSha);return {observed_at:new Date(now()).toISOString(),resource_matches:false,observed_reporting_grant:false,source_evidence_sha256:tokenSha,request_count:requests,rows:[],missing_metrics:FACEBOOK_PAGE_METRICS.map(x=>x.metric_key),coverage:'unavailable'}}
+   await record('validated',tokenSha,new Date(Math.min(observed.proof.expires_at*1000,observed.proof.data_access_expires_at*1000,Date.parse(credentials.expiresAt))).toISOString())
+   const params={metric:FACEBOOK_PAGE_METRICS.map(x=>x.metric_key).join(','),period:'day',...(window?{since:String(since/1000),until:String(until/1000)}:{date_preset:'yesterday'})}
+   let page
+   try{page=pageEvidence(await read(context.resource_key+'/insights',credentials.token,params),context.resource_key,{maxValues,since,until})}catch(error){
+    if(error instanceof ReportingProviderFailure&&['disconnected','permission_denied'].includes(error.reason)&&pending?.ordinal===2&&attempted&&!recordAttempted){const evidence=await sha({version:'v26.0',token:observed.proof,denial:error.reason});await record('denied',evidence);return {observed_at:new Date(now()).toISOString(),resource_matches:false,observed_reporting_grant:false,source_evidence_sha256:evidence,request_count:requests,rows:[],missing_metrics:FACEBOOK_PAGE_METRICS.map(x=>x.metric_key),coverage:'unavailable'}}
+    throw error
+   }
+   if(observed.proof.expires_at*1000<=now()||observed.proof.data_access_expires_at*1000<=now())throw failure('disconnected')
+   const evidence=await sha({version:'v26.0',token:observed.proof,window,params,page})
+   await record('validated',evidence)
+   return {observed_at:new Date(now()).toISOString(),resource_matches:true,observed_reporting_grant:true,source_evidence_sha256:evidence,request_count:requests,...page,coverage:page.has_next?'partial':'unknown',data_through:null,requested_window:window,provider_bucket_time_zone:null}
+  }catch(error){
+   if(pending&&attempted&&!recordAttempted){const outcome=error instanceof ReportingProviderFailure?'failed':'uncertain';await record(outcome,await sha({ordinal:pending.ordinal,outcome,reason:error instanceof ReportingProviderFailure?error.reason:'unobserved'}))}
    throw error
   }
-  // Expiry can cross while reading the second bounded body; never complete stale proof.
-  if(observed.proof.expires_at*1000<=now()||observed.proof.data_access_expires_at*1000<=now())throw failure('disconnected')
-  return {observed_at:new Date(now()).toISOString(),resource_matches:true,observed_reporting_grant:true,source_evidence_sha256:await sha({version:'v26.0',token:observed.proof,window,params,page}),request_count:requests,...page,coverage:page.has_next?'partial':'unknown',data_through:null,requested_window:window,provider_bucket_time_zone:null}
  }
  return Object.freeze({apiVersion:'v26.0',maxRequestsPerDispatch:2,metricDefinitions:FACEBOOK_PAGE_METRICS,
   readPageInsights:operation,

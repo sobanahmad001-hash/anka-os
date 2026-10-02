@@ -12,8 +12,8 @@ function exactStamp(value){
 }
 const disconnected=()=>new ReportingProviderFailure('disconnected')
 /** Local credential identity only, never observed Graph permission or metric capability.
- * The future reviewed adapter must verify exact resource access separately. This reader
- * is intentionally not registered or wired to a provider until that contract is proven.
+ * The reviewed Facebook adapter verifies exact resource access separately.
+ * Linked Instagram identity is local metadata, never Instagram capability.
  */
 export function createReportingMetaCredentialReader({admin,decrypt,encryptionMaterial,now=()=>Date.now()}){
  return async(context,signal)=>{
