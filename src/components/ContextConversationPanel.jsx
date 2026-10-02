@@ -1,3 +1,4 @@
+import { preferredApprovedModel, openAiModelLabel } from '../data/openaiModelPolicy.js'
 import TextAiConsent, { useTextAiConsent } from './TextAiConsent.jsx'
 import { textAiConsentKey } from '../data/textAiConsent.js'
 import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -193,13 +194,13 @@ function ScopedContextConversation({ contextKind, departmentId, projectId, label
         const options = (result.connections || [])
           .filter(connection => connection.organization_level && connection.status === 'verified')
           .flatMap(connection => (connection.context_model_configurations || []).map(model => ({
-            id: model.id, provider: connection.provider, connectionId: connection.id,
-            label: `${connection.display_name || connection.provider} · ${model.model_id}`,
+            id: model.id, model_id: model.model_id, provider: connection.provider, connectionId: connection.id,
+            label: `${connection.display_name || connection.provider} · ${openAiModelLabel(model.model_id)}`,
           })))
         setModelOptions(options)
         setIncludeCanonicalContext(false)
         setSelectedModelId(previous => options.some(option => option.id === previous)
-          ? previous : options[0]?.id || '')
+          ? previous : preferredApprovedModel(options, contextKind === 'department_private' ? 'substantive' : 'routine')?.id || '')
       })
       .catch(reason => { if (current) showError(reason) })
     return () => { current = false }

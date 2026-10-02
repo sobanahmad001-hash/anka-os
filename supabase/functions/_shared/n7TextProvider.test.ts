@@ -88,3 +88,31 @@ Deno.test('N7 rejects Gemini token totals or hidden tool-use usage that cannot b
     ...response, usageMetadata: { ...response.usageMetadata, toolUsePromptTokenCount: 1 },
   }))
 })
+
+Deno.test('approved GPT-6 requests keep exact model/claim/output bounds and workload effort', () => {
+  for (const model of ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra']) {
+    for (const workload of ['routine', 'substantive']) {
+      const request = buildN7TextRequest({ provider: 'openai', model_id: model }, 'offline', 'Prompt', 'claim-exact', 'safe', 'Instruction', workload)
+      const body = JSON.parse(String(request.init.body))
+      assertEquals(body.model, model)
+      assertEquals(body.reasoning.effort, workload === 'routine' ? 'low' : 'medium')
+      assertEquals(body.service_tier, 'default')
+      assertEquals(body.max_output_tokens, 1024)
+      assertEquals(body.metadata.anka_claim_id, 'claim-exact')
+      assertEquals(body.tools, [])
+      assertEquals(body.temperature, undefined)
+    }
+  }
+  const legacy = JSON.parse(String(buildN7TextRequest(route('openai'), 'offline', 'Prompt', 'claim', 'safe').init.body))
+  assertEquals(legacy.reasoning, undefined)
+  assertEquals(legacy.service_tier, undefined)
+})
+Deno.test('GPT-6 cache writes are retained and missing/invalid counters or tiers cannot settle', () => {
+  const result = { id: 'resp-6', model: 'gpt-6-luna', status: 'completed', service_tier: 'default',
+    output: [{ type: 'message', content: [{ type: 'output_text', text: 'Draft' }] }],
+    usage: { input_tokens: 100, output_tokens: 20, input_tokens_details: { cached_tokens: 30, cache_write_tokens: 40 } } }
+  assertEquals(normalizeN7TextResult('openai', result).usage.input_tokens_details, { cached_tokens: 30, cache_write_tokens: 40 })
+  assertThrows(() => normalizeN7TextResult('openai', { ...result, service_tier: 'priority' }))
+  assertThrows(() => normalizeN7TextResult('openai', { ...result, usage: { ...result.usage, input_tokens_details: { cached_tokens: 30 } } }))
+  assertThrows(() => normalizeN7TextResult('openai', { ...result, usage: { ...result.usage, input_tokens_details: { cached_tokens: 30, cache_write_tokens: 80 } } }))
+})

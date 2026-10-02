@@ -1,3 +1,4 @@
+import { openAiTextOptions } from '../_shared/openaiModelPolicy.js'
 import {confirmVideoBrief,getVideoBrief,getVideoJobBrief,reserveConfirmedVideoJob,videoBriefContext} from './videoBriefs.ts'
 import { Buffer } from 'node:buffer'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
@@ -739,7 +740,7 @@ async function generateOne(admin: ScopedClient, session: any, model: any, lane: 
       const apiResponse = await fetch('https://api.openai.com/v1/responses', {
         method: 'POST', headers: { Authorization: `Bearer ${credential}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: model.model_id, store: false, safety_identifier: await sha256(actorId),
+          model: model.model_id, ...openAiTextOptions(model.model_id, 'substantive'), store: false, safety_identifier: await sha256(actorId),
           metadata: { anka_session_id: session.id, anka_run_id: run.id, direction_slot: String(slot) },
           instructions: prompt.instructions,
           input: `APPROVED CONTEXT MANIFEST\n${JSON.stringify(session.context_manifest)}\n\nOUTPUT FAMILY\n${session.output_family}\n\nOUTPUT BRIEF\n${JSON.stringify(session.output_brief)}\n\nDESIGNER INSTRUCTIONS\n${session.designer_instructions}\n\n${prompt.context}`,

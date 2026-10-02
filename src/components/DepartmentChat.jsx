@@ -1,3 +1,4 @@
+import { openAiModelLabel } from '../data/openaiModelPolicy.js'
 import { engagementFirstSendKey, readEngagementFirstSend, saveEngagementFirstSend, clearEngagementFirstSend } from '../data/engagementChatFirstSend.js'
 import './departmentChatWorkbench.css'
 import TextAiConsent, { useTextAiConsent } from './TextAiConsent.jsx'
@@ -1168,7 +1169,8 @@ export function ScopedDepartmentChat({
               setObservationNotice('')
             }}
           >
-            {(capabilities.approved_models || []).map(model => <option key={model.configuration_id} value={model.configuration_id}>{MODEL_PROVIDER_LABELS[model.provider || capabilities.provider] || 'Provider unavailable'} · {model.display_name || model.model_id}{model.is_default ? ' · default' : ''}</option>)}
+            {!modelConfigurationId && <option value="">Choose a model</option>}
+            {(capabilities.approved_models || []).map(model => <option key={model.configuration_id} value={model.configuration_id}>{MODEL_PROVIDER_LABELS[model.provider || capabilities.provider] || 'Provider unavailable'} · {openAiModelLabel(model.model_id)}{model.is_default ? ' · default' : ''}</option>)}
           </select>
           <span hidden={compactWorkbench} className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-muted)]">Only administrator-approved models verified through this engagement's connector are available. A revoked or stale choice is rejected before dispatch without fallback.</span>
           {isAnswerMode && answerReadiness && (!compactWorkbench || !answerLocalChecksPass || answerReadiness.spend_guard_mode === 'provider_managed') && <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-warning)]">{!answerReadiness.paid_execution_enabled ? 'Workshop AI answers are currently off.' : !answerReadiness.spend_tracking_configured ? 'Organization spend tracking is not configured.' : !selectedPriceReady ? 'A fresh verified price for this exact model is unavailable.' : answerReadiness.spend_guard_mode === 'provider_managed' ? 'Provider-side spend limits are managed externally and cannot be verified or enforced by Anka. Each request is still priced and recorded.' : 'Local checks passed; the service will recheck before dispatch.'}</span>}

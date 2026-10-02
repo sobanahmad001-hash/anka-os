@@ -1,3 +1,4 @@
+import { openAiTextOptions, requireAutomaticTextModel } from '../_shared/openaiModelPolicy.js'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 
 type AnySupabaseClient = ReturnType<typeof createClient<any>>
@@ -290,7 +291,9 @@ async function resolveAiProvider(
       : {}
     const model = typeof config.model_id === 'string' && config.model_id.trim()
       ? config.model_id.trim().slice(0, 120)
-      : 'gpt-5.6-terra'
+      : ''
+    if (!model) throw new Error('The verified OpenAI connector requires an explicit model_id')
+    requireAutomaticTextModel(model)
     return { provider: 'openai', credential, model, connectorId: connector.id, credentialSource: 'connector' }
   }
 
@@ -316,9 +319,12 @@ async function resolveAiProvider(
 
   const openaiKey = Deno.env.get('OPENAI_API_KEY')
   if (openaiKey) {
+    const model = Deno.env.get('OPENAI_MODEL')
+    if (!model) throw new Error('Configure and verify an explicit OpenAI model before using the legacy route')
+    requireAutomaticTextModel(model)
     return {
       provider: 'openai', credential: openaiKey,
-      model: Deno.env.get('OPENAI_MODEL') || 'gpt-4.1',
+      model,
       connectorId: null, credentialSource: 'legacy',
     }
   }
@@ -615,6 +621,7 @@ export async function handleRequest(request: Request) {
       quality_review: 'Review the supplied work against scope, acceptance criteria, research, and project context. Return issues and recommendations; never approve the work.',
       action_proposal: `Return JSON only: {"summary":"...","action":{"type":"create_task|create_research_record","params":{...}}}. The action must use project_id ${projectId || 'null'}, an accessible workstream_id when relevant, and must not claim execution.`,
     }
+    const substantive = ['project_pulse', 'research_brief', 'writing_support', 'quality_review', 'action_proposal'].includes(capability)
     const providerConfig = await resolveAiProvider(adminClient, departmentId, engagementId)
     const memoryProjectId = verifiedProjectMemoryScope(projectId, engagementId, providerConfig.credentialSource)
     const engagementScope = context.engagement as { client_id?: string, brand_id?: string } | undefined
@@ -704,7 +711,7 @@ Current live records and the current user's explicit requirements take precedenc
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${providerConfig.credential}` },
         body: JSON.stringify({
-          model,
+          model, ...openAiTextOptions(model, substantive ? 'substantive' : 'routine'),
           instructions: systemPrompt,
           input: inputText || capabilityInstruction[capability],
           max_output_tokens: capability === 'action_proposal' ? 1400 : 2600,

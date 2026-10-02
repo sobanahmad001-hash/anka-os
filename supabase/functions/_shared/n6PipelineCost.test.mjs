@@ -86,3 +86,14 @@ test('explicit N/A cache-write pricing works only for transports without cache c
   assert.throws(() => selectFreshPipelineRate(JSON.stringify([anthropic]),
     entry.model_id, now, 'anthropic'), /cache-write/)
 })
+
+test('GPT-6 standard prices require cache writes and reserve their maximum rate', () => {
+  const price = { ...entry, model_id: 'gpt-6-luna', input_usd_per_million: 0.1,
+    cached_input_usd_per_million: 0.01, cache_write_usd_per_million: 0.125,
+    output_usd_per_million: 0.5 }
+  assert.deepEqual(selectFreshPipelineRate(JSON.stringify([price]), price.model_id, now), price)
+  assert.throws(() => selectFreshPipelineRate(JSON.stringify([{ ...price, cache_write_usd_per_million: null }]), price.model_id, now), /cache-write/)
+  assert.equal(measuredPipelineTokenCost({ input_tokens: 1000, output_tokens: 100,
+    input_tokens_details: { cached_tokens: 200, cache_write_tokens: 400 } }, price), 142)
+  assert.equal(conservativePipelineCeiling('hello', price), Math.ceil(4101 * 0.125 + 1024 * 0.5))
+})

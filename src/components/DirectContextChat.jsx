@@ -1,3 +1,4 @@
+import { preferredApprovedModel, openAiModelLabel } from '../data/openaiModelPolicy.js'
 import { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import TextAiConsent, { useTextAiConsent } from './TextAiConsent.jsx'
 import { textAiConsentKey } from '../data/textAiConsent.js'
@@ -165,12 +166,13 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     integrations.listModelAllowlist(organizationId, { signal }).then(result => {
       if (!active || signal.aborted) return
       const options = (result.connections || []).filter(connection => connection.organization_level && connection.status === 'verified')
-        .flatMap(connection => (connection.context_model_configurations || []).map(item => ({ id: item.id, label: item.model_id,
+        .flatMap(connection => (connection.context_model_configurations || []).map(item => ({ id: item.id, model_id: item.model_id, label: openAiModelLabel(item.model_id),
           provider: connection.provider, connectionId: connection.id, connectionName: connection.display_name || connection.provider })))
-      setModels(options); setModelId(options[0]?.id || '')
+      setModels(options); setModelId(previous => options.some(row => row.id === previous) ? previous
+        : preferredApprovedModel(options, contextKind === 'department_private' ? 'substantive' : 'routine')?.id || '')
     }).catch(reason => { if (active && !signal.aborted) setError(reason.message) })
     return () => { active = false }
-  }, [scope, requestScope, organizationId, signal, validConversation, hasExternalHistory])
+  }, [scope, requestScope, organizationId, signal, validConversation, hasExternalHistory, contextKind])
   useEffect(() => {
     let active = true
     setReadiness(null)
@@ -403,7 +405,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
         {messages.map(message => <article key={message.id} className={`direct-chat-message ${message.role}`}><strong>{message.role === 'assistant' ? 'Anka AI' : message.author_id === actorId ? 'You' : 'Teammate'}</strong><p>{message.body}</p>{message.role === 'assistant' && message.status === 'completed' && <button type="button" onClick={event => { replyButtonRef.current = event.currentTarget; if (mobileDrawer) setHistoryOpen(false); setOutputId(message.id) }}>Open reply</button>}</article>)}
       </div></div><form className="direct-chat-composer" onSubmit={send} aria-label="Chat composer"><label className="direct-chat-draft-label"><span className="sr-only">Message</span><textarea aria-label="Message" placeholder="Ask or explore an idea…" value={draft} maxLength={8000} disabled={busy || videoBusy || Boolean(pending)} onChange={event => { if (pendingRef.current) return; const text = event.target.value; setDraft(text); try { writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: selected?.id || null, text, attempt: attempt.current }) } catch { setError('Draft recovery is unavailable in this tab. Keep this page open until your message is saved.') } }} /></label>
         <div className="direct-chat-toolbar"><label>Work type<select aria-label="Work type" value="text" disabled><option value="text">Text</option></select></label>
-          {owner && <label>Model<select aria-label="Approved model" value={modelId} disabled={busy || videoBusy || !models.length} onChange={event => { setModelId(event.target.value); setCanonical(false) }}>{!models.length && <option value="">Unavailable</option>}{models.map(row => <option key={row.id} value={row.id}>{row.label}</option>)}</select></label>}
+          {owner && <label>Model<select aria-label="Approved model" value={modelId} disabled={busy || videoBusy || !models.length} onChange={event => { setModelId(event.target.value); setCanonical(false) }}>{!modelId && <option value="">{models.length ? 'Choose a model' : 'Unavailable'}</option>}{models.map(row => <option key={row.id} value={row.id}>{row.label}</option>)}</select></label>}
           <button type="submit" className="direct-chat-send" disabled={busy || videoBusy || Boolean(pending) || !draft.trim() || Boolean(selected && selected.state !== 'active')}>{busy ? 'Working…' : owner && ready ? 'Send' : 'Save message'}</button></div>
         <p>{owner ? !readiness ? 'Checking AI availability. Human messages can still be saved.' : ready ? `${model?.provider} · Organization-billed replies` : 'AI unavailable. Sending saves a human message only.' : 'Shared chat · Human replies only'} · Attachments unavailable</p>
       </form></div>

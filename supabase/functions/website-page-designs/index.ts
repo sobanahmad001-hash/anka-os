@@ -1,3 +1,4 @@
+import { openAiTextOptions } from '../_shared/openaiModelPolicy.js'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import {
   resolveServerOrganizationContext,
@@ -337,7 +338,7 @@ export async function generateOpenAiPage(
     method: 'POST',
     headers: { Authorization: `Bearer ${credential}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: modelId, store: false,
+      model: modelId, ...openAiTextOptions(modelId, 'substantive'), store: false,
       instructions: 'Create one production-quality standalone webpage. Return only the strict JSON response. Use semantic HTML, accessible headings and alt text, and matching standalone CSS. Do not include scripts, inline event handlers, iframes, objects, embeds, or approval claims.',
       input: prompt,
       text: { format: pageDesignSchema() },
