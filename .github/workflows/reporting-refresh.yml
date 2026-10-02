@@ -1,0 +1,46 @@
+name: Reporting refresh wake
+on:
+  workflow_dispatch:
+  schedule:
+    # Wake transport only. Native explicit resource policies decide actual cadence.
+    - cron: '*/5 * * * *'
+permissions: {}
+concurrency:
+  group: reporting-refresh-wake
+  cancel-in-progress: false
+jobs:
+  wake:
+    if: vars.ANKA_REPORTING_SCHEDULE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Wake the exact configured reporting organization
+        env:
+          SUPABASE_URL: ${{ vars.ANKA_REPORTING_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.ANKA_REPORTING_SUPABASE_ANON_KEY }}
+          WORKER_SECRET: ${{ secrets.ANKA_REPORTING_WORKER_SECRET }}
+          ORGANIZATION_ID: ${{ vars.ANKA_REPORTING_ORGANIZATION_ID }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, re, urllib.request, urllib.error
+          url = os.environ['SUPABASE_URL']
+          org = os.environ['ORGANIZATION_ID']
+          token = os.environ['SUPABASE_ANON_KEY']
+          secret = os.environ['WORKER_SECRET']
+          if not re.fullmatch(r'https://[a-z0-9]+\.supabase\.co', url) or not re.fullmatch(r'[0-9a-f-]{36}', org) or len(secret) < 32 or not token:
+              raise SystemExit('Exact approved scheduler configuration required')
+          request = urllib.request.Request(url + '/functions/v1/reporting-worker', data=json.dumps({'action':'tick','organization_id':org}).encode(), headers={'Authorization':'Bearer '+token,'apikey':token,'x-anka-reporting-worker':secret,'Content-Type':'application/json'}, method='POST')
+          # No retries, response payload logging or redirects with credentials.
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+          try:
+              with urllib.request.build_opener(NoRedirect).open(request, timeout=120) as response:
+                  if response.status != 200: raise SystemExit('Reporting wake rejected')
+                  body = json.loads(response.read(65537))
+                  if body.get('dispatch_authorized') is not False: raise SystemExit('Invalid reporting wake receipt')
+          except (urllib.error.URLError, ValueError):
+              raise SystemExit('Reporting wake outcome unavailable; review native original receipts')
+          print('Bounded reporting wake completed; per-resource native receipts retain outcomes')
+          PY

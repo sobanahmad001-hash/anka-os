@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "implementationFiles": {
+    "supabase/functions/_shared/reportingFacebookProtocol.js": "94de8a07b9b5b37659ecd498415f4ee39d68686c0f5a4c17142a2cc5ebe11a59",
+    "supabase/functions/_shared/reportingFacebookAdapter.js": "3deda18266fe22a76b0d2c84176bb4513d37ae414f7ea9584f3e80eb6145cfbc",
+    "supabase/functions/_shared/reportingHttpRequests.js": "6395fee4d1b8ac5b6407c2135e3c9f17c8f773bfa78a3f7c255429a4f398fe5f",
+    "supabase/functions/_shared/reportingMetaCredentials.js": "61df018727bc78d649c3035ce5f6d84c26fedd57036ea2082d0ffc9db7a7d4f0",
+    "supabase/functions/_shared/reportingRefreshWorker.js": "2ccaf3ca7603427c4939f7ed8fe13b1459f5ecdc91d2d5e8e0126679ea712e79",
+    "supabase/functions/_shared/reportingVerificationWorker.js": "634e6bb226f4fc4cb8cc7e1ef812403d60441810f291395cfbd919b881d2b72e",
+    "supabase/functions/_shared/reportingIngestion.js": "cd61b050a17678f18d47955dadfe9c476ac572211a1efda89c7c7ebe9d1f4a51",
+    "supabase/functions/_shared/reportingRefreshPolicy.js": "fe2e4ed84a8c8471ab0f67dd84baa87c29767428ef5e78646b74e9a2617c29ea",
+    "supabase/functions/_shared/googleOAuthTokens.ts": "8ecb9d551ed2c52ee9e237ec5523ed2afd8e048856daa965a88092de2786f8b9",
+    "supabase/functions/_shared/reportingWorkerEndpoint.js": "f5f7d8c96a9cfad77eec021349c67250b6ea2ac9ee662cc3377eba819008a557",
+    "supabase/functions/reporting-worker/index.ts": "33237f8a523ba6f36e66799745662c646e333c0d08a4929d693576ec6f7fd995"
+  },
+  "adapter": {
+    "sourceContract": "anka.meta.facebook-page.media-view.native-day.bounded.v26.v1",
+    "provider": "meta",
+    "resourceKind": "meta_facebook_page",
+    "maxRequestsPerDispatch": 2,
+    "apiVersion": "v26.0",
+    "providerBucketTimeZone": "unknown",
+    "requestWindowTimeZone": "explicit_owner_policy",
+    "sourceCompleteness": "partial_or_unknown",
+    "metricDefinitions": [
+      {
+        "metric_key": "page_media_view",
+        "metric_label": "Facebook content plays or displays",
+        "unit": "count",
+        "aggregation": "unknown"
+      },
+      {
+        "metric_key": "page_total_media_view_unique",
+        "metric_label": "Facebook unique media viewers",
+        "unit": "count",
+        "aggregation": "non_additive"
+      }
+    ],
+    "manifestSha256": "87c6ef2e5dc29d62fcb244de95cc7667d87686035d4b32140403397bc0f10daf"
+  }
+}
