@@ -1,6 +1,7 @@
 import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.14'
 import {
   CHAT_MARKETING_ARTIFACT_TYPE_SET,
+  freshChatPriceAvailable,
   attachmentContentDisposition,
   sha256AttachmentBytes,
   ENABLED_DEPARTMENTS,
@@ -1816,5 +1817,15 @@ Deno.test('atomic first Send reports only confirmed no-reservation errors as saf
   const body = await response.json()
   assertEquals(body.outcome, ['42501','42883'].includes(code) ? 'not_reserved' : code === '23505' ? 'idempotency_conflict' : undefined)
   assertEquals(fixture.providerCalls(),0)
+ }
+})
+
+Deno.test('readiness uses the same supplemental validation and preserves legacy isolation', () => {
+ const row = { provider: 'openai', model_id: 'gpt-6-luna', verified_at: new Date().toISOString(), source_url: 'https://developers.openai.com/api/docs/pricing', input_usd_per_million: 1, cached_input_usd_per_million: 1, cache_write_usd_per_million: 1, output_usd_per_million: 1 }
+ const base = JSON.stringify([{ ...row, model_id: 'gpt-4.1' }])
+ for (const [supplement, expected] of [[JSON.stringify([row]), true], ['{', false], [JSON.stringify([{ ...row, model_id: 'alias' }]), false]] as const) {
+   const get = (name: string) => name === 'N6_OPENAI_MODEL_PRICING_JSON' ? base : supplement
+   assertEquals(freshChatPriceAvailable('openai', row.model_id, get), expected)
+   assertEquals(freshChatPriceAvailable('openai', 'gpt-4.1', get), true)
  }
 })

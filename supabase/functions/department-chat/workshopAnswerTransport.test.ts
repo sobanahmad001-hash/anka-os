@@ -219,3 +219,40 @@ Deno.test('Workshop preserves exact configured model identity and retains unknow
   assertEquals(calls.includes('complete_workshop_chat_answer_with_budget'), false)
   assertEquals(calls.includes('mark_workshop_chat_outcome_unknown'), true)
 })
+
+Deno.test('Workshop supplemental rate is captured before claim and survives environment rotation', async () => {
+  const request = input('openai'); request.route.model = 'gpt-6-luna'
+  const rate = { provider: 'openai', model_id: request.route.model, verified_at: new Date().toISOString(),
+    source_url: source.openai, input_usd_per_million: 2, cached_input_usd_per_million: 1,
+    cache_write_usd_per_million: 3, output_usd_per_million: 4 }
+  let supplement = JSON.stringify([rate]); let completed = false; let calls = 0
+  const env = { get: (name: string) => name === 'N6_OPENAI_APPROVED_MODELS_PRICING_JSON'
+    ? supplement : environment('openai').get(name) }
+  const admin = { async rpc(name: string, args: Record<string, unknown>) {
+    if (name === 'reserve_workshop_chat_budget') return { data: { status: 'reserved' }, error: null }
+    if (name === 'claim_workshop_chat_dispatch') {
+      supplement = '{invalid-after-capture'
+      return { data: { status: 'claimed', claim_id: 'claim', provider: 'openai',
+        connector_connection_id: 'connector', model_configuration_id: 'configuration', model_id: request.route.model }, error: null }
+    }
+    if (name === 'complete_workshop_chat_answer_with_budget') {
+      assertEquals((args.p_context_manifest as Record<string, unknown>).pricing, rate)
+      assertEquals(args.p_actual_cost_microusd, 26); completed = true
+      return { data: { ai_run_id: 'run' }, error: null }
+    }
+    throw new Error('Unexpected ' + name)
+  } }
+  const fetcher = (async () => { calls++; return new Response(JSON.stringify({ ...providerBody('openai'),
+    model: request.route.model, service_tier: 'default', usage: { input_tokens: 7, output_tokens: 3,
+      input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 } } })) }) as typeof fetch
+  const response = await dispatchWorkshopAnswer(admin, request, fetcher, env, keepAlive)
+  await response.text(); assertEquals(completed, true); assertEquals(calls, 1)
+})
+Deno.test('Workshop invalid supplemental evidence denies before any reservation or provider call', async () => {
+  const request = input('openai'); request.route.model = 'gpt-6-luna'
+  let calls = 0
+  await assertRejects(() => dispatchWorkshopAnswer({ rpc() { calls++; throw new Error('Unexpected claim') } }, request,
+    (async () => { calls++; throw new Error('Unexpected provider') }) as typeof fetch,
+    { get: name => name === 'N6_OPENAI_APPROVED_MODELS_PRICING_JSON' ? '{' : environment('openai').get(name) }, keepAlive))
+  assertEquals(calls, 0)
+})

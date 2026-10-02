@@ -1504,11 +1504,12 @@ async function chatSpendGuardReadiness(admin: Client, organizationId: string, ac
     external_provider_limit_verified: false }
 }
 
-function freshChatPriceAvailable(provider: string, modelId: string, readEnv: (name: string) => string | undefined) {
+export function freshChatPriceAvailable(provider: string, modelId: string, readEnv: (name: string) => string | undefined) {
   const key = CHAT_PRICING_ENV[provider]
   if (!key) return false
   try {
-    selectFreshPipelineRate(readEnv(key), modelId, new Date(), provider as 'openai' | 'anthropic' | 'google_gemini')
+    selectFreshPipelineRate(readEnv(key), modelId, new Date(), provider as 'openai' | 'anthropic' | 'google_gemini',
+      readEnv('N6_OPENAI_APPROVED_MODELS_PRICING_JSON'))
     return true
   } catch { return false }
 }

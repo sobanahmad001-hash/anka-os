@@ -97,3 +97,29 @@ test('GPT-6 standard prices require cache writes and reserve their maximum rate'
     input_tokens_details: { cached_tokens: 200, cache_write_tokens: 400 } }, price), 142)
   assert.equal(conservativePipelineCeiling('hello', price), Math.ceil(4101 * 0.125 + 1024 * 0.5))
 })
+
+const approved = ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra'].map(model_id => ({ ...entry, provider: 'openai', model_id }))
+const base = JSON.stringify([entry])
+test('supplement adds exact approved rates and preserves legacy/provider isolation', () => {
+  for (const row of approved) assert.deepEqual(selectFreshPipelineRate(base, row.model_id, now, 'openai', JSON.stringify(approved)), row)
+  for (const extra of [undefined, '', '{', JSON.stringify(approved)]) {
+    assert.deepEqual(selectFreshPipelineRate(base, entry.model_id, now, 'openai', extra), entry)
+    const other = { ...entry, provider: 'anthropic', source_url: 'https://platform.claude.com/docs/en/about-claude/pricing' }
+    assert.deepEqual(selectFreshPipelineRate(JSON.stringify([other]), other.model_id, now, 'anthropic', extra), other)
+  }
+})
+test('supplement cannot rescue invalid base or override any identity', () => {
+  for (const raw of [undefined, '{', '[]', '{}', '[null]', JSON.stringify([entry, entry])])
+    assert.throws(() => selectFreshPipelineRate(raw, approved[0].model_id, now, 'openai', JSON.stringify(approved)))
+  assert.throws(() => selectFreshPipelineRate(JSON.stringify([approved[0]]), approved[0].model_id, now, 'openai', JSON.stringify(approved)), /conflicting/)
+  const full = Array.from({ length: 28 }, (_, i) => ({ ...entry, model_id: 'old-' + i }))
+  assert.throws(() => selectFreshPipelineRate(JSON.stringify(full), approved[0].model_id, now, 'openai', JSON.stringify(approved)), /bounded/)
+})
+test('supplement rejects malformed bounds, aliases, duplicates and invalid evidence before selection', () => {
+  const bad = ['', '{', '{}', '[]', JSON.stringify([...approved, approved[0]]), JSON.stringify([approved[0], approved[0]])]
+  for (const patch of [{ model_id: 'luna' }, { provider: 'anthropic' }, { provider: undefined },
+    { verified_at: '2026-09-23' }, { verified_at: '2026-01-01' }, { source_url: 'https://example.com' },
+    { input_usd_per_million: 0 }, { cached_input_usd_per_million: -1 }, { output_usd_per_million: 1001 },
+    { cache_write_usd_per_million: null }]) bad.push(JSON.stringify([{ ...approved[0], ...patch }]))
+  for (const raw of bad) assert.throws(() => selectFreshPipelineRate(base, approved[0].model_id, now, 'openai', raw))
+})
