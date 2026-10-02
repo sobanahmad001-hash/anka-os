@@ -80,7 +80,7 @@ export default function DepartmentChatModelAllowlist({ organizationId, connectio
   return <section className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-5">
     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--anka-violet)]">Approved department text models</p>
     <h2 className="mt-2 text-lg font-semibold text-[var(--anka-ink)]">Administrator-approved access</h2>
-    <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--anka-muted)]">Only models already verified through each connector can be approved. Disabling a choice blocks new pipeline dispatches without changing historical run records. Luna is preferred for routine general/project chat; Sol for Content, Marketing and Design work. Astra is a premium explicit choice. Approval alone does not enable spend.</p>
+    <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--anka-muted)]">Only models already verified through each connector can be approved. Disabling a choice blocks new pipeline dispatches without changing historical run records. Among eligible models, Luna is preferred for routine general chat; Sol for project chat and Content, Marketing and Design work. Astra is a premium explicit choice. Approval alone does not enable spend.</p>
     {message && <p className="mt-3 text-sm text-[var(--anka-ink)]">{message}</p>}
     <div className="mt-4 space-y-4">
       {textConnections.map(connection => {
