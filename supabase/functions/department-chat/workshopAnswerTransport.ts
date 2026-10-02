@@ -109,7 +109,8 @@ export async function dispatchWorkshopAnswer(
   buildN7TextRequest({ provider: input.route.provider, model_id: input.route.model },
     input.route.credential, input.prompt, input.dispatchRequestId, safetyIdentifier, instruction)
   const price = selectFreshPipelineRate(env.get(pricingEnv[input.route.provider]),
-    input.route.model, new Date(), input.route.provider)
+    input.route.model, new Date(), input.route.provider,
+    env.get('N6_OPENAI_APPROVED_MODELS_PRICING_JSON'))
   const maxCost = conservativePipelineCeiling(input.prompt, price)
   const reservation = await rpc(admin, 'reserve_workshop_chat_budget', {
     p_organization_id: input.organizationId,

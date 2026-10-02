@@ -231,7 +231,8 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
       }
       const provider = candidate.provider as N7TextProvider
       const rate = selectFreshPipelineRate(Deno.env.get(PRICING_ENV[provider]),
-        candidate.model_id, new Date(), provider)
+        candidate.model_id, new Date(), provider,
+        Deno.env.get('N6_OPENAI_APPROVED_MODELS_PRICING_JSON'))
       requiredReserve = Math.max(requiredReserve, conservativePipelineCeiling(prompt, rate))
       const connection = await one(admin.from('integration_connections')
         .select('id,organization_id,provider,status,archived_at,secret_name')

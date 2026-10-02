@@ -38,14 +38,44 @@ function verifiedPricingSource(provider: PipelinePricingProvider, sourceUrl: str
 }
 
 export function selectFreshPipelineRate(raw: string | undefined, modelId: string,
-  now = new Date(), provider: PipelinePricingProvider = 'openai'): PipelineModelRate {
+  now = new Date(), provider: PipelinePricingProvider = 'openai',
+  supplementalRaw?: string): PipelineModelRate {
   if (!raw) throw new Error('N6 model pricing is not configured')
   let catalog: unknown
   try { catalog = JSON.parse(raw) } catch { throw new Error('N6 model pricing is invalid') }
   if (!Array.isArray(catalog) || catalog.length < 1 || catalog.length > 30) {
     throw new Error('N6 model pricing requires a bounded catalog')
   }
-  const matches = catalog.filter((entry: unknown) => entry && typeof entry === 'object'
+  // Legacy models/providers never depend on this optional catalog.
+  if (provider === 'openai' && isApprovedOpenAiModel(modelId) && supplementalRaw !== undefined) {
+    let supplement: unknown
+    try { supplement = JSON.parse(supplementalRaw) } catch {
+      throw new Error('N6 supplemental pricing is invalid')
+    }
+    if (!Array.isArray(supplement) || supplement.length < 1 || supplement.length > 3
+      || catalog.length + supplement.length > 30) {
+      throw new Error('N6 supplemental pricing requires a bounded catalog')
+    }
+    const ids = new Set<string>()
+    for (const entry of catalog) {
+      if (!entry || typeof entry !== 'object' || typeof entry.model_id !== 'string'
+        || !entry.model_id || ids.has(entry.model_id)) {
+        throw new Error('N6 base pricing contains invalid or duplicate model identities')
+      }
+      ids.add(entry.model_id)
+    }
+    for (const entry of supplement) {
+      if (!entry || typeof entry !== 'object' || entry.provider !== 'openai'
+        || !isApprovedOpenAiModel(entry.model_id) || ids.has(entry.model_id)) {
+        throw new Error('N6 supplemental pricing contains an invalid or conflicting model')
+      }
+      ids.add(entry.model_id)
+      // Reuse freshness/provenance/rate validation without any overriding source.
+      selectFreshPipelineRate(JSON.stringify([entry]), entry.model_id, now, provider)
+    }
+    catalog = [...catalog, ...supplement]
+  }
+  const matches = (catalog as unknown[]).filter((entry: unknown) => entry && typeof entry === 'object'
     && (entry as PipelineModelRate).model_id === modelId)
   if (matches.length !== 1) throw new Error('N6 model requires one exact pricing entry')
   const item = matches[0] as PipelineModelRate

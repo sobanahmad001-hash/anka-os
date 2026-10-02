@@ -1,3 +1,4 @@
+import { GoTrueClient } from 'npm:@supabase/auth-js@2.112.4'
 import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.14'
 import { handleRequest, requireOpenAiCanonicalContextChoice, requirePrivateChatPaidExecution, requirePrivateConversationAccess } from './index.ts'
 import { buildPrivateConversationPrompt, canonicalOpenAiContext } from '../_shared/contextChatPrompt.js'
@@ -131,4 +132,43 @@ Deno.test('private reply scope rechecks active project and current department au
   await requirePrivateConversationAccess(
     accessAdmin({}) as never, department,
     { role: 'contributor', department_id: 'design' }, organizationId, userId)
+})
+
+Deno.test('context handler uses supplemental pricing before reservation and replay never dispatches', async () => {
+ const id = '11111111-1111-4111-8111-111111111111'
+ const originalFetch = globalThis.fetch; const originalGet = Deno.env.get
+ const originalRefresh = GoTrueClient.prototype.startAutoRefresh
+ GoTrueClient.prototype.startAutoRefresh = async () => {}
+ const row = { provider: 'openai', model_id: 'gpt-6-luna', verified_at: new Date().toISOString(), source_url: 'https://developers.openai.com/api/docs/pricing', input_usd_per_million: 1, cached_input_usd_per_million: 1, cache_write_usd_per_million: 1, output_usd_per_million: 1 }
+ const config: Record<string,string> = { SUPABASE_URL:'http://127.0.0.1:54321', SUPABASE_ANON_KEY:'offline-public', SUPABASE_SERVICE_ROLE_KEY:'offline-service', CONTEXT_CHAT_PAID_EXECUTION_ENABLED:'true', ANKA_OPENAI_TEST:'offline-key', N6_OPENAI_MODEL_PRICING_JSON: JSON.stringify([{...row,model_id:'gpt-4.1'}]) }
+ let reservations=0; let providers=0
+ const message={id,conversation_id:id,organization_id:id,owner_id:id,author_id:id,role:'user',status:'completed',sequence:1,body:'Hello'}
+ try {
+  Deno.env.get = name => config[name]
+  globalThis.fetch = async (input) => {
+   const url = new URL(input instanceof Request ? input.url : String(input)); let data: unknown
+   if(url.origin !== 'http://127.0.0.1:54321') throw new Error('Remote forbidden')
+   const path=url.pathname
+   if(path==='/auth/v1/user') data={id}
+   else if(path.endsWith('/organization_memberships')) data={status:'active',member_kind:'team',role:'system_owner'}
+   else if(path.endsWith('/department_chat_messages')) data=url.searchParams.has('limit')?[message]:message
+   else if(path.endsWith('/department_chat_conversations')) data={id,organization_id:id,owner_id:id,context_kind:'organization',project_id:null,department_id:null,state:'active'}
+   else if(path.endsWith('/context_chat_organization_models')) data={id,organization_id:id,connector_connection_id:id,model_id:row.model_id,revoked_at:null}
+   else if(path.endsWith('/integration_connections')) data={id,organization_id:id,provider:'openai',status:'verified',archived_at:null,secret_name:'ANKA_OPENAI_TEST'}
+   else if(path.endsWith('/append_context_chat_audited_reply')) return new Response(JSON.stringify({message:'No audit'}),{status:400,headers:{'content-type':'application/json'}})
+   else if(path.endsWith('/recover_context_chat_completed_run')) data={status:'no_run'}
+   else if(path.endsWith('/reserve_context_chat_budget')) { reservations++; data={status:'reserved'} }
+   else if(path.endsWith('/claim_context_chat_dispatch')) data={must_not_submit:true}
+   else throw new Error('Unexpected '+path)
+   return new Response(JSON.stringify(data),{headers:{'content-type':'application/json'}})
+  }
+  for(const valid of [false,true]) {
+   config.N6_OPENAI_APPROVED_MODELS_PRICING_JSON=valid?JSON.stringify([row]):'{'
+   const response=await handleRequest(new Request('https://example.test',{method:'POST',headers:{Authorization:'Bearer offline'},body:JSON.stringify({organization_id:id,message_id:id,model_configuration_id:id,dispatch_request_id:id})}), (async()=>{providers++;throw new Error('No provider')}) as typeof fetch, {get:name=>config[name]})
+   const body=await response.json()
+   if(valid) assertEquals(body.status,'already_claimed')
+   else assertEquals(String(body.error).includes('supplemental pricing is invalid'),true)
+  }
+  assertEquals(reservations,1); assertEquals(providers,0)
+ } finally { await new Promise(resolve => setTimeout(resolve, 20)); globalThis.fetch=originalFetch; Deno.env.get=originalGet; GoTrueClient.prototype.startAutoRefresh=originalRefresh }
 })

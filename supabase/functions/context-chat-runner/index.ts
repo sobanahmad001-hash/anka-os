@@ -238,7 +238,7 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
     }
     const prompt = buildPrivateConversationPrompt(orderedHistory, messageId, conversation, canonicalContext)
     const price = selectFreshPipelineRate(env.get(pricingEnv[provider]), configuration.model_id,
-      new Date(), provider)
+      new Date(), provider, env.get('N6_OPENAI_APPROVED_MODELS_PRICING_JSON'))
     const maxCost = conservativePipelineCeiling(prompt, price)
     const credential = env.get(connection.secret_name)
     if (!credential) throw fail('Verified connection credential is unavailable', 503)

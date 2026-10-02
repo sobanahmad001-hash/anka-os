@@ -101,3 +101,32 @@ Deno.test('actual handler resolves only the authenticated current step and stops
   assert(calls.filter(path=>path.startsWith('/rest/v1/rpc/')).length===1 && providerCalls===0,'Unconfigured inputs reached another RPC/provider')
  }finally{globalThis.fetch=originalFetch;Deno.env.get=originalGet}
 })
+
+Deno.test('pipeline rejects malformed supplemental price before preparation or provider',async()=>{
+ const org='11111111-1111-4111-8111-111111111111',actor='22222222-2222-4222-8222-222222222222',jobId='33333333-3333-4333-8333-333333333333',stepId='44444444-4444-4444-8444-444444444444',id='55555555-5555-4555-8555-555555555555'
+ const originalFetch=globalThis.fetch,originalGet=Deno.env.get,calls: string[]=[],rpcCalls: unknown[]=[];let providerCalls=0
+ const configuration:Record<string,string>={SUPABASE_URL:'http://127.0.0.1:54321',SUPABASE_ANON_KEY:'offline-public-key',SUPABASE_SERVICE_ROLE_KEY:'offline-service-key',N6_PAID_EXECUTION_ENABLED:'true',N6_OPENAI_MODEL_PRICING_JSON:JSON.stringify([{model_id:'gpt-4.1'}]),N6_OPENAI_APPROVED_MODELS_PRICING_JSON:'{'}
+ try{
+  Deno.env.get=(key:string)=>configuration[key]
+  globalThis.fetch=async(input:RequestInfo | URL,init?:RequestInit)=>{
+   const url=new URL(input instanceof Request ? input.url : String(input));if(url.origin!=='http://127.0.0.1:54321')throw new Error('Remote requests forbidden in this fixture')
+   calls.push(url.pathname)
+   let data:unknown
+   if(url.pathname==='/auth/v1/user')data={id:actor,email:'synthetic@example.invalid'}
+   else if(url.pathname==='/rest/v1/organization_memberships')data={role:'operations_admin',member_kind:'team',status:'active'}
+   else if(url.pathname==='/rest/v1/ai_execution_jobs')data={id:jobId,organization_id:org,run_intent_id:id,run_plan_id:id,requested_by:actor,input_sha256:job.input_sha256,status:'blocked_configuration'}
+   else if(url.pathname==='/rest/v1/ai_execution_configured_steps')data={...declaredStep,id:stepId,job_id:jobId,organization_id:org}
+   else if(url.pathname==='/rest/v1/pipeline_run_intents')data={...reviewedIntent,id,engagement_id:id,organization_id:org}
+   else if(url.pathname==='/rest/v1/pipeline_run_plans')data={...plan,id,run_intent_id:id,organization_id:org}
+   else if(url.pathname==='/rest/v1/engagements')data={id,organization_id:org,project_id:id,status:'active'}
+   else if(url.pathname==='/rest/v1/rpc/get_pipeline_ai_step_input_context'){rpcCalls.push(JSON.parse(String(init?.body)));data={...reviewedInputs,readiness:{configuration_ready:true}}}
+   else if(url.pathname==='/rest/v1/rpc/get_pipeline_ai_text_routes')data=[{priority:1,provider:'openai',connection_id:id,model_configuration_id:id,model_id:'gpt-6-luna'}]
+   else throw new Error('Unexpected data/reservation/dispatch path: '+url.pathname)
+   return new Response(JSON.stringify(data),{status:200,headers:{'content-type':'application/json'}})
+  }
+  const response=await handleRequest(new Request('http://127.0.0.1:54321/functions/v1/pipeline-ai-runner',{method:'POST',headers:{Authorization:'Bearer offline-test-token','Content-Type':'application/json'},body:JSON.stringify({organization_id:org,job_id:jobId,configured_step_id:stepId,request_id:id,dispatch_request_id:id,max_cost_microusd:1000})}),()=>{providerCalls++;throw new Error('Provider forbidden')})
+  const body=await response.json();assert(String(body.error).includes('supplemental pricing is invalid'),'Actual handler did not reach exact source readiness gate: '+String(body.error))
+  assert(JSON.stringify(rpcCalls)===JSON.stringify([{p_organization_id:org,p_job_id:jobId,p_step_id:stepId,p_actor_id:actor}]),'Input resolver payload did not bind authenticated actor and exact job/step')
+  assert(calls.filter(path=>path.startsWith('/rest/v1/rpc/')).length===2 && providerCalls===0,'Unconfigured inputs reached another RPC/provider')
+ }finally{globalThis.fetch=originalFetch;Deno.env.get=originalGet}
+})
