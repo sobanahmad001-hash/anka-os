@@ -7,15 +7,15 @@ export default function WorkshopConversationList(props) {
   return <ExactConversationList {...props} />
 }
 
-function ProjectConversationGroups({ engagements, workstreams, activeEngagementId, ...props }) {
+function ProjectConversationGroups({ engagements, projects: projectRows = [], activeEngagementId, ...props }) {
   const [expanded, setExpanded] = useState(() => activeEngagementId ? { [activeEngagementId]: true } : {})
   useEffect(() => { if (activeEngagementId) setExpanded(state => ({ ...state, [activeEngagementId]: true })) }, [activeEngagementId])
   const projects = [...new Set(engagements.map(row => row.project_id))]
   return <aside aria-label="Workshop saved conversations" className="space-y-3">
     <h3 className="font-semibold">Saved conversations</h3>
     <section aria-label="Private history"><h4>Private · Only you</h4><ExactConversationList {...props} engagement={null} /></section>
-    {projects.map(projectId => <section key={projectId} aria-label={`Project ${workstreams.find(row => row.project_id === projectId)?.projects?.name || projectId}`}>
-      <h4>{workstreams.find(row => row.project_id === projectId)?.projects?.name || 'Project'}</h4>
+    {projects.map(projectId => <section key={projectId} aria-label={`Project ${projectRows.find(row => row.id === projectId)?.name || projectId}`}>
+      <h4>{projectRows.find(row => row.id === projectId)?.name || 'Project'}</h4>
       {engagements.filter(row => row.project_id === projectId).map(engagement => <div key={engagement.id}>
         <button type="button" aria-expanded={Boolean(expanded[engagement.id])} onClick={() => setExpanded(state => ({ ...state, [engagement.id]: !state[engagement.id] }))}>{engagement.name}</button>
         {expanded[engagement.id] && <ExactConversationList {...props} engagement={engagement} engagementOnly />}

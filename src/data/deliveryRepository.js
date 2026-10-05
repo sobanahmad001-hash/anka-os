@@ -1,3 +1,4 @@
+import { readWorkshopProjectContext } from './workshopProjectContext.js'
 import { createDeliverableGovernance } from './deliverableGovernance.js'
 
 const requireOrganizationId = (organizationId) => {
@@ -243,7 +244,7 @@ export function createDeliveryRepository(client) {
       const organizationId = requireOrganizationId(activeOrganizationId)
       const load = (query) => dataOrThrow(withRequestSignal(query, signal))
 
-      const workstreams = await load(
+      const [workstreamRows, chatContext] = await Promise.all([load(
         client
           .from('workstreams')
           .select('*, projects(id, organization_id, client_id, name, status, priority, health, due_date, engagement_type)')
@@ -251,7 +252,8 @@ export function createDeliveryRepository(client) {
           .eq('department_id', departmentId)
           .in('status', ['planned', 'active', 'on_hold'])
           .order('updated_at', { ascending: false })
-      ) || []
+      ), departmentId === 'development' ? Promise.resolve(null) : readWorkshopProjectContext(client, departmentId, organizationId, signal)])
+      const workstreams = workstreamRows || []
 
       const workstreamIds = workstreams.map((workstream) => workstream.id)
       const projectIds = [...new Set(workstreams.map((workstream) => workstream.project_id))]
@@ -259,6 +261,7 @@ export function createDeliveryRepository(client) {
       if (workstreamIds.length === 0) {
         return {
           departmentId,
+          chatContext,
           workstreams: [],
           relatedWorkstreams: [],
           engagements: [],
@@ -379,6 +382,7 @@ export function createDeliveryRepository(client) {
 
       return {
         departmentId,
+        chatContext,
         workstreams,
         relatedWorkstreams: relatedWorkstreams || [],
         engagements,

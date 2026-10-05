@@ -177,7 +177,7 @@ test('project history groups load exact engagement pages on demand and isolate s
   const { root, container, vite, signal } = await setup(t, repo)
   const { default: List } = await vite.ssrLoadModule('/src/components/WorkshopConversationList.jsx')
   const opened = []
-  await act(async () => root.render(createElement(List, { organizationId: 'org', actorId: 'actor', departmentId: 'design', engagements: [engagement, second], workstreams: [{ project_id: 'project', projects: { name: 'First project' } }, { project_id: 'project-2', projects: { name: 'Second project' } }], signal, onOpen: item => opened.push(item) })))
+  await act(async () => root.render(createElement(List, { organizationId: 'org', actorId: 'actor', departmentId: 'design', engagements: [engagement, second], projects: [{ id: 'project', name: 'First project' }, { id: 'project-2', name: 'Second project' }], signal, onOpen: item => opened.push(item) })))
   assert.equal(requests.length, 0, 'collapsed histories never eagerly load all projects')
   assert.match(container.textContent, /Private · Only you/)
   assert.match(container.textContent, /First project/)
