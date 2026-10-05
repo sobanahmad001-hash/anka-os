@@ -156,12 +156,12 @@ function nodes(node, predicate) { return [...(predicate(node) ? [node] : []), ..
 function props(node) { return node[Object.keys(node).find(key => key.startsWith('__reactProps$'))] }
 function input(environment, label) { return nodes(environment.container, n => n.tagName === 'LABEL' && n.textContent.startsWith(label)).flatMap(n => nodes(n, child => child.tagName === 'INPUT'))[0] }
 async function flush() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) }) }
-async function mount(t, reply) {
+async function mount(t, reply, rows = []) {
   const environment = mountedEnvironment()
   const old = Object.fromEntries(['document','window','Event','Node','HTMLElement','IS_REACT_ACT_ENVIRONMENT','__saveHarness','fetch'].map(k => [k,globalThis[k]]))
   const calls=[]
   Object.assign(globalThis, {document:environment.document, window:environment.window, Event:TestEvent, Node:TestNode, HTMLElement:TestElement, IS_REACT_ACT_ENVIRONMENT:true,
-    fetch:()=>{throw Error('No network')}, __saveHarness:{org:ORG,calls,reply}})
+    fetch:()=>{throw Error('No network')}, __saveHarness:{org:ORG,calls,reply,rows}})
   const server=await createServer({server:{middlewareMode:true},appType:'custom',logLevel:'silent',resolve:{alias:{'react-router-dom':'/src/data/__settings_router_stub.js'}},plugins:[{name:'save-stubs',enforce:'pre',resolveId(id){
     if(id.endsWith('OrganizationContext.jsx'))return '/save-org'
     if(id.endsWith('integrationRepository.js'))return '/save-repo'
@@ -171,7 +171,7 @@ async function mount(t, reply) {
     if(id==='/save-org')return `export const useOrganization=()=>({activeOrganizationId:globalThis.__saveHarness.org,activeMembership:{role:'system_owner'},scopeRevision:1})`
     if(id==='/save-child')return 'export default function Child(){return null}'
     if(id==='/save-router')return 'const p=new URLSearchParams(); export const useSearchParams=()=>[p,()=>{}]'
-    if(id==='/save-repo')return `import {saveConnectionMetadata} from '/src/data/integrationSave.js';export const integrations={listForOrganization:async()=>({connections:[],can_manage:true}),listBrands:async()=>[],listModelAllowlist:async()=>({organization_id:globalThis.__saveHarness.org,connections:[],can_manage:true}),saveOrganizationTextConnection:(org,body)=>saveConnectionMetadata(async p=>{globalThis.__saveHarness.calls.push(p);return globalThis.__saveHarness.reply(p)}, {...body,organization_id:org,organization_only:true,department_ids:[]}),save:()=>{throw Error('Wrong save path')}}`
+    if(id==='/save-repo')return `import {saveConnectionMetadata} from '/src/data/integrationSave.js';export const integrations={listForOrganization:async(_org,_department,options)=>{globalThis.__saveHarness.listOptions=options;return {connections:globalThis.__saveHarness.rows,can_manage:true}},listBrands:async()=>[],listModelAllowlist:async()=>({organization_id:globalThis.__saveHarness.org,connections:[],can_manage:true}),saveOrganizationTextConnection:(org,body)=>saveConnectionMetadata(async p=>{globalThis.__saveHarness.calls.push(p);return globalThis.__saveHarness.reply(p)}, {...body,organization_id:org,organization_only:true,department_ids:[]}),save:()=>{throw Error('Wrong save path')}}`
   }}]})
   const root=createRoot(environment.container)
   t.after(async()=>{await act(async()=>root.unmount());await server.close();Object.assign(globalThis,old)})
@@ -213,4 +213,16 @@ for(const [label,reply,expected] of [
   assert.equal(input(m.environment,'Connection name').value,'OpenAI Sol Private')
   assert.equal(input(m.environment,'Organization-only').checked,true)
   assert.equal(m.calls.length,1)
+})
+
+test('disabled reserved connection is visible with original department scope and no action controls', async t => {
+  const m = await mount(t, () => { throw Error('No writes') }, [{ id: ID, provider: 'openai', display_name: 'OpenAI Sol Private', status: 'disabled', archived_at: '2026-10-05T16:40:00Z', organization_level: false, department_ids: ['content', 'design', 'development', 'marketing'] }])
+  assert.equal(globalThis.__saveHarness.listOptions.includeRetained, true)
+  const retained = nodes(m.environment.container, n => n.tagName === 'DETAILS')[0]
+  assert.ok(retained); assert.match(retained.textContent, /OpenAI Sol Private/)
+  assert.match(retained.textContent, /Original department scope: Content, Design, Development, Marketing/)
+  assert.match(retained.textContent, /Name reserved/)
+  assert.equal(nodes(retained, n => n.tagName === 'BUTTON').length, 0)
+  assert.match(m.environment.container.textContent, /0 configured · 1 retained/)
+  assert.equal(m.calls.length, 0)
 })

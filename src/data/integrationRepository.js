@@ -30,7 +30,7 @@ export const integrations = Object.freeze({
   },
   list: (departmentId = null) => invoke({ action: 'list', department_id: departmentId }),
   listForOrganization: (organizationId, departmentId = null, options = {}) => invoke({
-    action: 'list', organization_id: organizationId, department_id: departmentId,
+    action: 'list', organization_id: organizationId, department_id: departmentId, include_retained: options.includeRetained === true,
   }, options),
   listModelAllowlist: (organizationId, options = {}) => invoke({
     action: 'list_model_allowlist', organization_id: organizationId,

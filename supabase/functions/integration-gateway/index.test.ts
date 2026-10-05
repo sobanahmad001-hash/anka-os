@@ -539,3 +539,22 @@ Deno.test('duplicate private connection name returns safe conflict without mappi
   assertEquals(test.calls.length, 0)
   assertEquals(test.providerCalls(), 0)
 })
+
+Deno.test('retained list is opt-in, same-organization, read-only and excludes secret metadata', async () => {
+  const row = { id: '44444444-4444-4444-8444-444444444444', organization_id: ORG_B, provider: 'openai', display_name: 'OpenAI Sol Private', status: 'disabled', archived_at: '2026-10-05T16:40:00Z', secret_name: 'ANKA_OPENAI_PRIMARY', public_config: { model_id: 'gpt-6.1-sol' }, integration_connection_departments: [{ department_id: 'content' }] }
+  const test = fixture({ connections: [row, { ...row, id: '55555555-5555-4555-8555-555555555555', organization_id: ORG_A }] })
+  const ordinary = await test.request({ action: 'list', organization_id: ORG_B })
+  assertEquals((await ordinary.json()).connections.length, 0)
+  const response = await test.request({ action: 'list', organization_id: ORG_B, include_retained: true })
+  assertEquals(response.status, 200)
+  const rows = (await response.json()).connections
+  assertEquals(rows.length, 1)
+  assertEquals(rows[0].display_name, 'OpenAI Sol Private')
+  assertEquals(rows[0].department_ids, ['content'])
+  assertEquals(rows[0].organization_level, false)
+  assertEquals(rows[0].status, 'disabled')
+  assertEquals('secret_name' in rows[0], false)
+  assertEquals('public_config' in rows[0], false)
+  assertEquals(test.calls.length, 0)
+  assertEquals(test.providerCalls(), 0)
+})
