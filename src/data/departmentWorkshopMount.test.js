@@ -166,7 +166,7 @@ function workshopStubs() {
       return null
     },
     load(id) {
-      if (id === '/0dws-content-studio') return `export const contentStudio = { forOrganization: org => ({ load: async id => { const workspace = await globalThis.__dwsHarness.delivery.getDepartmentWorkspace('content', org); return { engagement: workspace.engagements.find(row => row.id === id), artifacts: [], stages: [], versions: [], contentServices: workspace.services || [] } } }) }`
+      if (id === '/0dws-content-studio') return `export const contentStudio = { forOrganization: org => ({ load: async id => { const workspace = await globalThis.__dwsHarness.delivery.getDepartmentWorkspace('content', org); const scope = workspace.chatContext || workspace; return { engagement: scope.engagements.find(row => row.id === id), artifacts: [], stages: [], versions: [], contentServices: scope.services || [] } } }) }`
       if (id === '/0dws-conversation-repository') return 'export const departmentChat = { listContextConversations: async () => globalThis.__dwsHarness.privateRows || [], searchConversations: async (_department, input) => ({ items: (globalThis.__dwsHarness.engagementRows || []).filter(row => row.engagement_id === input.engagement_id && row.project_id === input.project_id) }) }'
       if (id === '/0dws-design-tools') return "import { createElement, useEffect } from 'react'; export default function Tools(props) { globalThis.__dwsHarness.designToolsProps = props; useEffect(() => { globalThis.__dwsHarness.designMounts = (globalThis.__dwsHarness.designMounts || 0) + 1 }, []); return createElement('p', null, 'Inline Design tools') }"
       if (id === '/0dws-marketing-chat') return "import { createElement } from 'react'; export default function Chat(props) { globalThis.__dwsHarness.marketingChatProps = props; return createElement('p', null, 'Chat for ' + props.engagement.name) }"
@@ -176,7 +176,14 @@ function workshopStubs() {
       if (id === '/0dws-org' || id === '\\\\0dws-org') return 'export const useOrganization = () => globalThis.__dwsHarness.organization'
       if (id === '/0dws-delivery' || id === '\\\\0dws-delivery') {
         return `export const delivery = Object.freeze({
-          getDepartmentWorkspace: (...args) => globalThis.__dwsHarness.delivery.getDepartmentWorkspace(...args),
+          getDepartmentWorkspace: async (...args) => {
+            const result = await globalThis.__dwsHarness.delivery.getDepartmentWorkspace(...args)
+            return { ...result, chatContext: result.chatContext || {
+              projects: result.workstreams.map(row => ({ ...row.projects, id: row.project_id, organization_id: args[1] })),
+              engagements: result.engagements,
+              services: result.services.map(row => ({ ...row, organization_id: args[1] })),
+            } }
+          },
           transitionTask: () => Promise.resolve(),
           createTask: () => Promise.resolve(),
           createResearchRecord: () => Promise.resolve(),
@@ -611,7 +618,7 @@ test('integrated Design tools OR busy blocks queue/context changes and rejects s
   assert.equal(inactiveQueue.disabled, false)
 })
 
-test('opening another project history switches to its authorized workstream and exact conversation', async t => {
+test('opening another project history without its legacy workstream restores the exact conversation', async t => {
   const vite = await workshopServer(t)
   const { default: Workshop } = await vite.ssrLoadModule('/src/apps/DepartmentWorkshop.jsx')
   const workspace = workspaceBase()
@@ -619,6 +626,12 @@ test('opening another project history switches to its authorized workstream and 
   workspace.workstreams.push({ id: 'workstream-b', project_id: 'project-b', projects: { name: 'Second project', organization_id: 'org-1' } })
   workspace.engagements.push({ id: 'engagement-b', project_id: 'project-b', organization_id: 'org-1', name: 'Second engagement' })
   workspace.services.push({ id: 'service-b', engagement_id: 'engagement-b', status: 'active', service_catalog: { department_id: 'design' } })
+  workspace.chatContext = {
+    projects: workspace.workstreams.map(row => ({ ...row.projects, id: row.project_id })),
+    engagements: workspace.engagements,
+    services: workspace.services.map(row => ({ ...row, organization_id: 'org-1' })),
+  }
+  workspace.workstreams = workspace.workstreams.filter(row => row.project_id !== 'project-b')
   const row = { id: 'exact-b', title: 'Second conversation', department_id: 'design', organization_id: 'org-1', project_id: 'project-b', engagement_id: 'engagement-b', owner_id: 'user-1' }
   const { environment } = await mountWorkshop(t, Workshop, 'design', { auth: { user: { id: 'user-1' } }, organization: withOrganizationScope(), delivery: { getDepartmentWorkspace: async () => workspace }, engagementRows: [row], search: '?ctxOrg=org-1&ctxProject=project-a&ctxEngagement=engagement-a&ctxWorkshopTab=chat' })
   const all = node => [node, ...node.childNodes.flatMap(all)]
@@ -637,4 +650,107 @@ test('opening another project history switches to its authorized workstream and 
   assert.match(environment.container.textContent, /Second project/)
   assert.equal(globalThis.__dwsHarness.designToolsProps.engagement.id, 'engagement-b')
   assert.equal(globalThis.__dwsHarness.designMounts, initialDesignMounts + 1, 'cross-project history selection remounts Design output state')
+})
+
+
+function canonicalChatWorkspace(department, status = 'active') {
+  const base = workspaceBase()
+  const projects = ['a', 'b'].map(id => ({ id: 'project-' + id, organization_id: 'org-1', client_id: 'client-' + id, name: 'Project ' + id, archived_at: null }))
+  return { ...base, workstreams: [], relatedWorkstreams: [], engagements: [], services: [], stages: [], chatContext: {
+    projects,
+    engagements: projects.map(row => ({ id: row.id.replace('project', 'engagement'), project_id: row.id, organization_id: 'org-1', name: 'Engagement ' + row.id, status: 'active' })),
+    services: status ? [{ id: 'service-b', organization_id: 'org-1', engagement_id: 'engagement-b', status, service_catalog: { department_id: department } }] : [],
+  } }
+}
+const tree = node => [node, ...node.childNodes.flatMap(tree)]
+const properties = node => node?.[Object.keys(node).find(key => key.startsWith('__reactProps$'))]
+const namedControl = (environment, label) => tree(environment.container).find(node => properties(node)?.['aria-label'] === label)
+
+for (const department of departments) test(`${department} canonical project chat does not require a legacy workstream`, async t => {
+  const vite = await workshopServer(t)
+  const { default: Workshop } = await vite.ssrLoadModule('/src/apps/DepartmentWorkshop.jsx')
+  const snapshot = canonicalChatWorkspace(department)
+  const { environment } = await mountWorkshop(t, Workshop, department, { auth: { user: { id: 'user-1' } }, organization: withOrganizationScope(),
+    delivery: { getDepartmentWorkspace: async () => snapshot }, search: '?ctxWorkshopTab=chat' })
+  assert.equal(properties(namedControl(environment, 'Workshop project')).value, 'project-b', 'default prefers a project with an eligible service')
+  assert.ok(namedControl(environment, 'Workshop engagement'))
+  assert.doesNotMatch(environment.container.textContent, /Current workstream|Select an active workstream/)
+  await act(async () => properties(namedControl(environment, 'Workshop engagement')).onChange({ target: { value: 'engagement-b' } }))
+  await waitForStable(environment, () => /Chat for Engagement project-b/.test(environment.container.textContent))
+  assert.match(globalThis.__dwsHarness.search, /ctxProject=project-b/)
+  assert.match(globalThis.__dwsHarness.search, /ctxEngagement=engagement-b/)
+  await act(async () => properties(namedControl(environment, 'Workshop project')).onChange({ target: { value: 'project-a' } }))
+  await waitForStable(environment, () => /No eligible engagement/.test(environment.container.textContent))
+  assert.equal(properties(namedControl(environment, 'Workshop project')).value, 'project-a')
+  assert.doesNotMatch(environment.container.textContent, /Chat for Engagement project-b/)
+  assert.ok(tree(environment.container).some(node => properties(node)?.href === '/sphere/workspace/projects/project-a?tab=services'))
+})
+
+for (const department of departments) test(`${department} distinguishes service, access and deep-link states`, async t => {
+  const vite = await workshopServer(t)
+  const { default: Workshop } = await vite.ssrLoadModule('/src/apps/DepartmentWorkshop.jsx')
+  for (const status of ['planned', 'on_hold', 'completed', 'cancelled', null]) {
+    const snapshot = canonicalChatWorkspace(department, status)
+    const { environment, cleanup } = await mountWorkshop(t, Workshop, department, { auth: { user: { id: 'user-1' } }, organization: withOrganizationScope(),
+      delivery: { getDepartmentWorkspace: async () => snapshot }, search: '?ctxOrg=org-1&ctxProject=project-b&ctxWorkshopTab=chat' })
+    assert.equal(Boolean(namedControl(environment, 'Workshop engagement')), status === 'planned')
+    assert.equal(properties(namedControl(environment, 'Workshop project')).value, 'project-b')
+    if (status !== 'planned') assert.match(environment.container.textContent, /No eligible engagement/)
+    await cleanup()
+  }
+  for (const [search, expected] of [
+    ['?ctxOrg=org-1&ctxProject=project-b&ctxEngagement=engagement-b&ctxWorkshopTab=chat', /Chat for Engagement project-b/],
+    ['?ctxOrg=org-1&ctxProject=missing&ctxWorkshopTab=chat', /Workshop context not opened/],
+    ['?ctxOrg=other&ctxProject=project-b&ctxWorkshopTab=chat', /Workshop context not opened/],
+    ['?ctxOrg=org-1&ctxProject=project-a&ctxEngagement=engagement-b&ctxWorkshopTab=chat', /Workshop context not opened/],
+  ]) {
+    const { environment, cleanup } = await mountWorkshop(t, Workshop, department, { auth: { user: { id: 'user-1' } }, organization: withOrganizationScope(),
+      delivery: { getDepartmentWorkspace: async () => canonicalChatWorkspace(department) }, search })
+    await waitForStable(environment, () => expected.test(environment.container.textContent))
+    if (expected.source.includes('not opened')) assert.equal(namedControl(environment, 'Workshop project'), undefined)
+    await cleanup()
+  }
+})
+
+test('project chat loading, read denial and empty canonical project states stay distinct', async t => {
+  const vite = await workshopServer(t)
+  const { default: Workshop } = await vite.ssrLoadModule('/src/apps/DepartmentWorkshop.jsx')
+  let finish
+  const request = new Promise(resolve => { finish = resolve })
+  const ui = await mountWorkshop(t, Workshop, 'content', { auth: { user: { id: 'user-1' } }, organization: withOrganizationScope(), delivery: { getDepartmentWorkspace: () => request }, search: '?ctxWorkshopTab=chat' })
+  assert.match(ui.environment.container.textContent, /Loading Content workspace/)
+  assert.doesNotMatch(ui.environment.container.textContent, /No accessible projects|No eligible engagement/)
+  const empty = canonicalChatWorkspace('content'); empty.chatContext = { projects: [], engagements: [], services: [] }
+  await act(async () => finish(empty)); await flush()
+  assert.match(ui.environment.container.textContent, /No accessible projects/)
+  assert.equal(namedControl(ui.environment, 'Workshop project').disabled, true)
+  assert.match(ui.environment.container.textContent, /Open Projects/)
+  await ui.cleanup()
+  const denied = await mountWorkshop(t, Workshop, 'content', { auth: { user: { id: 'user-1' } }, organization: withOrganizationScope(),
+    delivery: { getDepartmentWorkspace: async () => { throw Object.assign(new Error('Project access denied'), { status: 403 }) } }, search: '?ctxWorkshopTab=chat' })
+  assert.match(denied.environment.container.textContent, /Project access denied/)
+  assert.doesNotMatch(denied.environment.container.textContent, /No accessible projects|No eligible engagement/)
+  await denied.cleanup()
+  const unlinked = canonicalChatWorkspace('content'); unlinked.chatContext.engagements = []; unlinked.chatContext.services = []
+  const missing = await mountWorkshop(t, Workshop, 'content', { auth: { user: { id: 'user-1' } }, organization: withOrganizationScope(), delivery: { getDepartmentWorkspace: async () => unlinked }, search: '?ctxWorkshopTab=chat' })
+  assert.match(missing.environment.container.textContent, /no accessible client engagement/)
+})
+
+
+test('late same-organization project response cannot replace newer exact navigation', async t => {
+  const vite = await workshopServer(t)
+  const { default: Workshop } = await vite.ssrLoadModule('/src/apps/DepartmentWorkshop.jsx')
+  const replies = []
+  const { environment, root } = await mountWorkshop(t, Workshop, 'design', { auth: { user: { id: 'user-1' } }, organization: withOrganizationScope(),
+    delivery: { getDepartmentWorkspace: () => new Promise(resolve => replies.push(resolve)) }, search: '?ctxOrg=org-1&ctxProject=project-a&ctxWorkshopTab=chat' })
+  assert.equal(replies.length, 1)
+  globalThis.__dwsHarness.search = '?ctxOrg=org-1&ctxProject=project-b&ctxEngagement=engagement-b&ctxWorkshopTab=chat'
+  await act(async () => root.render(createElement(Workshop, { departmentId: 'design' })))
+  assert.equal(replies.length, 2)
+  await act(async () => replies[1](canonicalChatWorkspace('design')))
+  await waitForStable(environment, () => /Chat for Engagement project-b/.test(environment.container.textContent))
+  const older = canonicalChatWorkspace('design'); older.chatContext.projects = older.chatContext.projects.filter(row => row.id === 'project-a'); older.chatContext.engagements = []; older.chatContext.services = []
+  await act(async () => replies[0](older)); await flush()
+  assert.equal(properties(namedControl(environment, 'Workshop project')).value, 'project-b')
+  assert.match(environment.container.textContent, /Chat for Engagement project-b/)
 })

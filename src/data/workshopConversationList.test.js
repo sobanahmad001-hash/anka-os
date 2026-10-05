@@ -38,7 +38,7 @@ test('adapter rejects foreign scopes and propagates denied reads without fallbac
 test('project groups require exact workspace organization, project and department service', async () => {
   const { eligibleWorkshopEngagements, matchesWorkshopConversation } = await import('./workshopConversationList.js')
   const engagements = ['a', 'b', 'wrong-department', 'inactive', 'foreign', 'no-project'].map(id => ({ id, project_id: id, organization_id: id === 'foreign' ? 'other' : 'org' }))
-  const workspace = { engagements, workstreams: engagements.filter(row => row.id !== 'no-project').map(row => ({ project_id: row.project_id })), services: engagements.map(row => ({ engagement_id: row.id, status: row.id === 'inactive' ? 'cancelled' : 'active', service_catalog: { department_id: row.id === 'wrong-department' ? 'content' : 'design' } })) }
+  const workspace = { engagements, projects: engagements.filter(row => row.id !== 'no-project').map(row => ({ id: row.project_id, organization_id: row.organization_id })), services: engagements.map(row => ({ organization_id: row.organization_id, engagement_id: row.id, status: row.id === 'inactive' ? 'cancelled' : 'active', service_catalog: { department_id: row.id === 'wrong-department' ? 'content' : 'design' } })) }
   assert.deepEqual(eligibleWorkshopEngagements(workspace, 'org', 'design').map(row => row.id), ['a', 'b'])
   const scope = { organizationId: 'org', actorId: 'actor', departmentId: 'design', engagement: engagements[0] }
   const item = { kind: 'engagement', engagementId: 'a', projectId: 'a', row: { id: 'conversation', engagement_id: 'a', project_id: 'a', department_id: 'design', organization_id: 'org' } }

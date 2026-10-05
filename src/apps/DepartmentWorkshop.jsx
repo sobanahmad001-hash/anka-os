@@ -22,6 +22,7 @@ import { WORKSHOP_TABS } from '../data/workshopTabs.js'
 import { supabase } from '../lib/supabase.js'
 import { appendWorkshopNavigation, parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
 
+const EMPTY_CHAT_CONTEXT = Object.freeze({ projects: [], engagements: [], services: [] })
 const ALL_DEPARTMENT_ROLES = new Set(['system_owner', 'operations_admin', 'executive'])
 const departmentAccess = createDepartmentAccessRepository(supabase)
 const CHAT_WORKSHOP_TABS = Object.freeze([...WORKSHOP_TABS, ['chat', 'Shared Chat'], ['private', 'Private Conversations']])
@@ -123,10 +124,11 @@ function withWorkshopContextMatch(entity, engagement) {
 
 export default function DepartmentWorkshop({ departmentId }) {
   const { user } = useAuth()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const navigationContext = parseWorkshopNavigation(searchParams)
   const { activeMembership, activeOrganizationId, selectionRequired, loading: organizationLoading, handleOrganizationAccessError, scopeRevision, requestSignal } = useOrganization()
   const currentScope = useRef(null)
+  const workspaceReadRevision = useRef(0)
   currentScope.current = { organizationId: activeOrganizationId, revision: scopeRevision }
   const config = DEPARTMENT_CONFIG[departmentId]
   const ContextSetup = departmentId === 'design' ? 'details' : 'div'
@@ -154,8 +156,10 @@ export default function DepartmentWorkshop({ departmentId }) {
   const initialTab = availableTabs.some(([id]) => id === navigationContext.workshopTab) ? navigationContext.workshopTab : departmentId === 'development' ? 'tasks' : 'private'
   const [activeTab, setActiveTab] = useState(initialTab)
   const [selectedWorkstreamId, setSelectedWorkstreamId] = useState('')
+  const [selectedChatProjectId, setSelectedChatProjectId] = useState('')
   const [selectedChatEngagementId, setSelectedChatEngagementId] = useState(navigationContext.engagementId || '')
   const [chatSelection, setChatSelection] = useState(null)
+  const pendingChatSelection = useRef(null)
   const [chatNavigationState, setChatNavigationState] = useState({ key: '', busy: false })
   const currentChatPane = useRef({ identity: '', generation: 0, key: '' })
   const [conversationListRevision, setConversationListRevision] = useState(0)
@@ -171,12 +175,27 @@ export default function DepartmentWorkshop({ departmentId }) {
   const loadWorkspace = useCallback(async () => {
     if (organizationLoading || selectionRequired || !activeOrganizationId || !departmentAllowed) return
     const requestedScope = { organizationId: activeOrganizationId, revision: scopeRevision, signal: requestSignal }
+    const readRevision = ++workspaceReadRevision.current
     setLoading(true)
     setError('')
     try {
       const result = await delivery.getDepartmentWorkspace(departmentId, activeOrganizationId, { signal: requestSignal })
-      if (!isCurrentOrganizationScope(requestedScope, currentScope.current)) return
+      if (readRevision !== workspaceReadRevision.current || !isCurrentOrganizationScope(requestedScope, currentScope.current)) return
       setWorkspace(result)
+      const chat = result.chatContext || EMPTY_CHAT_CONTEXT
+      const requestedChatEngagement = chat.engagements.find(row => row.id === navigationContext.engagementId)
+      const requestedProjectId = navigationContext.projectId || requestedChatEngagement?.project_id
+      const eligible = eligibleWorkshopEngagements(chat, activeOrganizationId, departmentId)
+      setSelectedChatProjectId(current => {
+        if (navigationContext.projectId || navigationContext.engagementId) return chat.projects.some(row => row.id === requestedProjectId) ? requestedProjectId : ''
+        return chat.projects.some(row => row.id === current) ? current : eligible[0]?.project_id || chat.projects[0]?.id || ''
+      })
+      const pending = pendingChatSelection.current
+      if (pending && eligible.some(row => row.id === pending.item.engagementId && row.project_id === pending.item.projectId)
+        && pending.scopeKey === JSON.stringify([user?.id, activeOrganizationId, scopeRevision, departmentId, pending.item.projectId, pending.item.engagementId])) {
+        setChatSelection(pending)
+      }
+      pendingChatSelection.current = null
       const requestedEngagement = navigationContext.engagementId
         ? result.engagements.find(engagement => engagement.id === navigationContext.engagementId)
         : null
@@ -191,28 +210,32 @@ export default function DepartmentWorkshop({ departmentId }) {
           : requestedWorkstream?.id || (navigationContext.projectId || navigationContext.engagementId ? '' : result.workstreams[0]?.id || '')
       ))
     } catch (loadError) {
-      if (!isAbortedRequest(loadError, requestSignal) && isCurrentOrganizationScope(requestedScope, currentScope.current)) {
+      if (readRevision === workspaceReadRevision.current && !isAbortedRequest(loadError, requestSignal) && isCurrentOrganizationScope(requestedScope, currentScope.current)) {
+        setWorkspace(null); setChatSelection(null); pendingChatSelection.current = null
         handleOrganizationAccessError(loadError, { membershipMismatch: loadError.membershipMismatch })
         setError(loadError.message)
       }
     } finally {
-      if (isCurrentOrganizationScope(requestedScope, currentScope.current)) setLoading(false)
+      if (readRevision === workspaceReadRevision.current && isCurrentOrganizationScope(requestedScope, currentScope.current)) setLoading(false)
     }
-  }, [activeOrganizationId, departmentAllowed, departmentId, handleOrganizationAccessError, navigationContext.engagementId, navigationContext.projectId, organizationLoading, requestSignal, scopeRevision, selectionRequired])
+  }, [activeOrganizationId, departmentAllowed, departmentId, handleOrganizationAccessError, navigationContext.engagementId, navigationContext.projectId, organizationLoading, requestSignal, scopeRevision, selectionRequired, user?.id])
 
   useEffect(() => {
-    setWorkspace(null); setActiveTab('tasks'); setSelectedWorkstreamId(''); setSelectedChatEngagementId(navigationContext.engagementId || ''); setLoading(true); setSaving(false); setError('')
+    setWorkspace(null); setActiveTab('tasks'); setSelectedWorkstreamId(''); setSelectedChatProjectId(''); setSelectedChatEngagementId(navigationContext.engagementId || ''); setLoading(true); setSaving(false); setError('')
     setChatSelection(null)
     if (initialTab !== 'tasks') setActiveTab(initialTab)
     setTaskForm(initialTask); setResearchForm(initialResearch); setDeliverableForm(initialDeliverable); setRequestForm(initialRequest)
     if (!organizationLoading && !selectionRequired && activeOrganizationId && departmentAllowed) loadWorkspace()
     else if (!organizationLoading) setLoading(false)
+    return () => { workspaceReadRevision.current += 1 }
   }, [activeOrganizationId, departmentAllowed, departmentId, initialTab, loadWorkspace, navigationContext.engagementId, organizationLoading, scopeRevision, selectionRequired])
 
   const selectedWorkstream = workspace?.workstreams.find((workstream) => workstream.id === selectedWorkstreamId)
-  const projectId = selectedWorkstream?.project_id
-  const projectName = selectedWorkstream?.projects?.name || 'Project'
-  const eligibleEngagements = departmentId === 'development' ? [] : eligibleWorkshopEngagements(workspace, activeOrganizationId, departmentId)
+  const chatContext = workspace?.chatContext || EMPTY_CHAT_CONTEXT
+  const selectedChatProject = chatContext.projects.find(row => row.id === selectedChatProjectId && row.organization_id === activeOrganizationId && !row.archived_at)
+  const projectId = activeTab === 'chat' ? selectedChatProject?.id : selectedWorkstream?.project_id
+  const projectName = (activeTab === 'chat' ? selectedChatProject?.name : selectedWorkstream?.projects?.name) || 'Project'
+  const eligibleEngagements = departmentId === 'development' ? [] : eligibleWorkshopEngagements(chatContext, activeOrganizationId, departmentId)
   const chatEngagements = eligibleEngagements.filter(engagement => engagement.project_id === projectId)
   const chatEngagement = chatEngagements.find(engagement => engagement.id === selectedChatEngagementId)
   const chatScopeKey = JSON.stringify([user?.id, activeOrganizationId, scopeRevision, departmentId, projectId, chatEngagement?.id])
@@ -338,7 +361,7 @@ export default function DepartmentWorkshop({ departmentId }) {
   if (!config) return null
 
   if (organizationLoading || departmentAccessLoading || loading) {
-    return <div className="flex h-full items-center justify-center bg-[var(--anka-canvas)]"><div className="h-9 w-9 animate-spin rounded-full border-2 border-[var(--anka-line)] border-t-[var(--anka-violet)]" /></div>
+    return <div role="status" className="flex h-full items-center justify-center gap-3 bg-[var(--anka-canvas)]"><div aria-hidden="true" className="h-9 w-9 animate-spin rounded-full border-2 border-[var(--anka-line)] border-t-[var(--anka-violet)]" />Loading {config.shortName} workspace and accessible projects...</div>
   }
 
   if (!departmentAllowed) return <div className="flex h-full items-center justify-center bg-[var(--anka-canvas)] p-6 text-center"><div><h1 className="workspace-title">Department workspace unavailable</h1><p className="mt-2 text-sm text-[var(--anka-muted)]">Your active team membership does not include this department.</p></div></div>
@@ -356,14 +379,16 @@ export default function DepartmentWorkshop({ departmentId }) {
   const projectTaskOverdue = workspace.tasks.filter((task) => task.due_date && !['done', 'cancelled'].includes(task.status) && new Date(task.due_date) < new Date()).length
   const workItemOverdue = workspace.workItems.filter((item) => item.due_date && item.status !== 'done' && new Date(item.due_date) < new Date()).length
   const incoming = workspace.requests.filter((request) => workspace.workstreams.some((workstream) => workstream.id === request.receiving_workstream_id) && !['completed', 'declined', 'withdrawn'].includes(request.status)).length
+  const scopeProjects = departmentId === 'development'
+    ? workspace.workstreams.map(row => ({ ...row.projects, id: row.project_id })) : chatContext.projects
   const linkedProject = navigationContext.projectId
-    ? workspace.workstreams.find(item => item.project_id === navigationContext.projectId)
-    : selectedWorkstream
-  const linkedEngagement = navigationContext.engagementId
-    ? workspace.engagements.find(item => item.id === navigationContext.engagementId)
-    : workspace.engagements.find(item => item.project_id === linkedProject?.project_id)
+    ? scopeProjects.find(item => item.id === navigationContext.projectId)
+    : scopeProjects.find(item => item.id === projectId)
+  const scopeEngagements = departmentId === 'development' ? workspace.engagements : chatContext.engagements
+  const linkedEngagement = scopeEngagements.find(item => item.project_id === linkedProject?.id
+    && (!navigationContext.engagementId || item.id === navigationContext.engagementId))
   const linkedService = navigationContext.activeServiceId
-    ? workspace.services.find(item => item.id === navigationContext.activeServiceId)
+    ? (departmentId === 'development' ? workspace.services : chatContext.services).find(item => item.id === navigationContext.activeServiceId)
     : null
   const linkedStage = navigationContext.stageId
     ? workspace.stages.find(item => item.id === navigationContext.stageId)
@@ -383,9 +408,9 @@ export default function DepartmentWorkshop({ departmentId }) {
   const canonicalScope = {
     status: 'ready',
     activeOrganizationId,
-    organizationId: linkedProject?.projects?.organization_id || linkedEngagement?.organization_id || activeOrganizationId,
-    clientId: linkedProject?.projects?.client_id || '',
-    projectId: linkedProject?.project_id || '',
+    organizationId: linkedProject?.organization_id || linkedEngagement?.organization_id || activeOrganizationId,
+    clientId: linkedProject?.client_id || '',
+    projectId: linkedProject?.id || '',
     engagementId: linkedEngagement?.id || '',
     brandId: linkedEngagement?.brand_id || '',
     activeServiceId: withWorkshopContextMatch(linkedService, linkedEngagement) ? linkedService.id : '',
@@ -400,7 +425,7 @@ export default function DepartmentWorkshop({ departmentId }) {
   const sameOrganization = !navigationContext.organizationId || navigationContext.organizationId === activeOrganizationId
   const returnTarget = workspaceReturnTarget(
     contextValidation.context ? contextValidation : {},
-    { fallbackProjectId: sameOrganization ? linkedProject?.project_id : '' },
+    { fallbackProjectId: sameOrganization ? linkedProject?.id : '' },
   )
 
   return (
@@ -416,7 +441,7 @@ export default function DepartmentWorkshop({ departmentId }) {
         </div>
 
         {error && <div className="mt-5 rounded-xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] px-4 py-3 text-sm text-[var(--anka-danger)]">{error}</div>}
-        <WorkshopContextShell navigation={navigationContext} validation={contextValidation} returnTarget={returnTarget} projectName={linkedProject?.projects?.name}>
+        <WorkshopContextShell navigation={navigationContext} validation={contextValidation} returnTarget={returnTarget} projectName={linkedProject?.name}>
 
         {(departmentId === 'development' || !['private', 'chat'].includes(activeTab)) && <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
           <Stat label="Active workstreams" value={workspace.workstreams.length} note="Across current engagements" />
@@ -449,13 +474,20 @@ export default function DepartmentWorkshop({ departmentId }) {
             const target = eligibleEngagements.find(row => row.id === item.engagementId && row.project_id === item.projectId)
             if (!matchesWorkshopConversation(item, { organizationId: activeOrganizationId, actorId: user?.id, departmentId, engagement: target, signal: requestSignal })) return
             const workstream = item.kind === 'engagement' && workspace.workstreams.find(row => row.project_id === target.project_id)
-            if (item.kind === 'engagement' && !workstream) return
             const nextScope = item.kind === 'engagement' ? JSON.stringify([user?.id, activeOrganizationId, scopeRevision, departmentId, target.project_id, target.id]) : chatScopeKey
-            if (workstream) { setSelectedWorkstreamId(workstream.id); setSelectedChatEngagementId(target.id) }
+            if (item.kind === 'engagement') {
+              if (navigationContext.projectId !== target.project_id || navigationContext.engagementId !== target.id || navigationContext.workshopTab !== 'chat') {
+                setLoading(true)
+                pendingChatSelection.current = { scopeKey: nextScope, item, revision: (chatSelection?.revision || 0) + 1 }
+              }
+              setSelectedChatProjectId(target.project_id); setSelectedChatEngagementId(target.id)
+              if (workstream) setSelectedWorkstreamId(workstream.id)
+              setSearchParams({ ctxOrg: activeOrganizationId, ctxProject: target.project_id, ctxEngagement: target.id, ctxWorkshopTab: 'chat' })
+            }
             setChatSelection(current => ({ scopeKey: nextScope, item, revision: (current?.revision || 0) + 1 }))
             setActiveTab(item.kind === 'private' ? 'private' : 'chat')
           }}
-          conversationList={onOpen => <WorkshopConversationList activeEngagementId={activeTab === 'chat' ? chatEngagement?.id : undefined} compact={['content', 'design', 'marketing'].includes(departmentId)} navigationBusy={navigationLocked} organizationId={activeOrganizationId} actorId={user?.id} scopeRevision={scopeRevision} departmentId={departmentId} engagements={eligibleEngagements} workstreams={workspace.workstreams} signal={requestSignal} onOpen={onOpen} refreshKey={conversationListRevision} />}>
+          conversationList={onOpen => <WorkshopConversationList activeEngagementId={activeTab === 'chat' ? chatEngagement?.id : undefined} compact={['content', 'design', 'marketing'].includes(departmentId)} navigationBusy={navigationLocked} organizationId={activeOrganizationId} actorId={user?.id} scopeRevision={scopeRevision} departmentId={departmentId} engagements={eligibleEngagements} projects={chatContext.projects} signal={requestSignal} onOpen={onOpen} refreshKey={conversationListRevision} />}>
         {activeTab === 'private' ? (
           <div className="mt-6 space-y-3">
             {departmentId !== 'content' && <p className="text-sm text-[var(--anka-muted)]">Explore privately with your {config.shortName} specialist. Selecting project chat opens separate engagement conversations; it does not share or move these messages. Use specialist tools for governed project outputs.</p>}
@@ -480,23 +512,44 @@ export default function DepartmentWorkshop({ departmentId }) {
               {departmentId === 'design' && <summary>Project context · {chatEngagement?.name || 'Choose an engagement'}</summary>}
               <h2 className="text-lg font-semibold">Engagement context</h2>
               <p className="mt-2 text-sm leading-6 text-[var(--anka-muted)]">Choose a client engagement with an active or planned {config.shortName} service. Conversations stay attached to that exact engagement; an administrator-approved model connection is required before sending.</p>
-              {workspace.workstreams.length > 0 && <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.13em] text-[var(--anka-muted)]">Current workstream
-                <select className={`${INPUT_CLASS} mt-2 normal-case tracking-normal`} disabled={navigationLocked} value={selectedWorkstreamId} onChange={event => { if (navigationLocked) return; setSelectedWorkstreamId(event.target.value); setSelectedChatEngagementId('') }}>
-                  {workspace.workstreams.map(workstream => <option key={workstream.id} value={workstream.id}>{workstream.projects?.name || workstream.name} · {workstream.name}</option>)}
+              <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.13em] text-[var(--anka-muted)]">Project
+                <select aria-label="Workshop project" className={`${INPUT_CLASS} mt-2 normal-case tracking-normal`} disabled={navigationLocked || chatDraftDirty || !chatContext.projects.length} value={selectedChatProject?.id || ''} onChange={event => {
+                  if (navigationLocked || chatDraftDirty) return
+                  const target = chatContext.projects.find(row => row.id === event.target.value)
+                  if (!target || target.id === selectedChatProject?.id) return
+                  setLoading(true)
+                  setChatSelection(null); setSelectedChatProjectId(target.id); setSelectedChatEngagementId('')
+                  setSearchParams({ ctxOrg: activeOrganizationId, ctxProject: target.id, ctxWorkshopTab: 'chat' })
+                }}>
+                  <option value="">{chatContext.projects.length ? 'Choose a project' : 'No accessible projects'}</option>
+                  {chatContext.projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
                 </select>
-              </label>}
+              </label>
               {chatEngagements.length > 0 ? <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.13em] text-[var(--anka-muted)]">Client engagement
-                <select className={`${INPUT_CLASS} mt-2 normal-case tracking-normal`} disabled={navigationLocked} value={chatEngagement?.id || ''} onChange={event => { if (!navigationLocked) setSelectedChatEngagementId(event.target.value) }}>
+                <select className={`${INPUT_CLASS} mt-2 normal-case tracking-normal`} aria-label="Workshop engagement" disabled={navigationLocked || chatDraftDirty} value={chatEngagement?.id || ''} onChange={event => {
+                  if (navigationLocked || chatDraftDirty) return
+                  const target = chatEngagements.find(row => row.id === event.target.value)
+                  if ((target?.id || '') === selectedChatEngagementId) return
+                  setLoading(true)
+                  setChatSelection(null); setSelectedChatEngagementId(target?.id || '')
+                  setSearchParams({ ctxOrg: activeOrganizationId, ctxProject: selectedChatProject.id, ...(target ? { ctxEngagement: target.id } : {}), ctxWorkshopTab: 'chat' })
+                }}>
                   <option value="">Choose an engagement</option>
                   {chatEngagements.map(engagement => <option key={engagement.id} value={engagement.id}>{engagement.name}</option>)}
                 </select>
-              </label> : <p className="mt-4 text-sm text-[var(--anka-warning)]">No eligible engagement is available in this workstream. Select an active workstream and activate this department's service on its engagement.</p>}
+              </label> : <p className="mt-4 text-sm text-[var(--anka-warning)]">{!chatContext.projects.length ? 'No accessible projects are available in this organization. Open Projects to review access or create a governed draft.' : !selectedChatProject ? 'Choose a project to see its engagement context.' : !chatContext.engagements.some(row => row.project_id === selectedChatProject.id) ? 'This project has no accessible client engagement. Internal Work and project-only conversations remain in the project workspace.' : `No eligible engagement: this project has no active or planned ${config.shortName} service. Review its service scope; paused, completed and cancelled services do not enable Workshop chat.`}</p>}
+              {chatDraftDirty && <p role="status" className="mt-3 text-sm">Save or clear the current draft before choosing another project or engagement.</p>}
+              <div className="mt-3 flex flex-wrap gap-4 text-sm">
+                <Link to="/sphere/portfolio" aria-disabled={navigationLocked} onClick={event => { if (navigationLocked) event.preventDefault() }} className="text-[var(--anka-violet)]">Open Projects</Link>
+                {selectedChatProject && <Link to={`/sphere/workspace/projects/${encodeURIComponent(selectedChatProject.id)}?tab=services`} aria-disabled={navigationLocked} onClick={event => { if (navigationLocked) event.preventDefault() }} className="text-[var(--anka-violet)]">Review project services</Link>}
+              </div>
+              {chatEngagement && !chatContext.services.some(row => row.engagement_id === chatEngagement.id && row.status === 'active') && <p role="status" className="mt-3 text-sm text-[var(--anka-muted)]">This service is planned. Sending requires an active department service and the existing access, model and spend approvals.</p>}
             </ContextSetup>
             {chatEngagement && <div className={['content', 'marketing'].includes(departmentId) ? 'space-y-4' : 'grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.8fr)]'}>
               <div className="min-w-0">{departmentId === 'content' ? <ContentArtifactChat sideEditor presentation="workbench" key={selectedConversationRevision} projectId={projectId} engagement={chatEngagement} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} onDraftDirtyChange={reportChatDraftDirty} /> : departmentId === 'marketing' ? <MarketingArtifactChat presentation="workbench" key={selectedConversationRevision} projectId={projectId} engagement={chatEngagement} activeServiceId={contextValidation.context?.activeServiceId || undefined} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} onDraftDirtyChange={reportChatDraftDirty} /> : <DepartmentChat key={selectedConversationRevision} presentation={departmentId === 'design' ? 'workbench' : undefined} departmentId={departmentId} engagement={chatEngagement} allowArtifactDraft={false} externalNavigationBusy={designNavigationBusy} presentationLabel="Engagement conversations" hideConversationList initialConversation={selectedConversation?.kind === 'engagement' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} onDraftDirtyChange={reportChatDraftDirty} />}</div>
               <details className="rounded-xl border border-[var(--anka-line)] p-3"><summary>Work editor & preview</summary>
               {departmentId === 'design' && <DesignChatTools key={designPaneKey} presentation="workbench" engagement={chatEngagement} onNavigationBusyChange={reportDesignNavigationBusy} />}
-              {departmentId === 'content' && <ContentWorkshopActions key={chatScopeKey} organizationId={activeOrganizationId} projectId={projectId} engagement={chatEngagement} services={workspace.services} unavailable={Boolean(error) || loading || requestSignal?.aborted} busy={chatNavigationBusy} />}
+              {departmentId === 'content' && <ContentWorkshopActions key={chatScopeKey} organizationId={activeOrganizationId} projectId={projectId} engagement={chatEngagement} services={chatContext.services} unavailable={Boolean(error) || loading || requestSignal?.aborted} busy={chatNavigationBusy} />}
               <ProjectContext aria-label="Selected project context" className="design-project-reference space-y-4 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4 text-sm">
                 {departmentId === 'design' && <summary>Project references & review</summary>}
                 <h2 className="font-semibold">{projectName}</h2>
@@ -514,7 +567,7 @@ export default function DepartmentWorkshop({ departmentId }) {
         ) : activeTab === 'specialists' ? (
           <div className="mt-6"><SpecialistQueues config={config} navigationContext={navigationContext.status === 'empty' ? navigationContext : contextValidation.context} /></div>
         ) : workspace.workstreams.length === 0 ? (
-          <div className="mt-7"><Empty title={`No active ${config.shortName} workstreams`} description="Create an engagement and activate this department's services. The work will appear here automatically. Department connectors remain available from the Connectors tab." /></div>
+          <div className="mt-7"><Empty title={`No active ${config.shortName} workstreams`} description="No operational workstream is available for these work queues. Project chat uses accessible projects and their eligible department services independently. Open Chat for project conversations or Projects to review setup." /></div>
         ) : (
           <>
             <div className="mt-7 workspace-card p-4">

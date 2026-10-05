@@ -27,8 +27,8 @@ export async function readWorkshopConversationPage(repository, scope, kind, curs
 
 export function eligibleWorkshopEngagements(workspace, organizationId, departmentId) {
   return (workspace?.engagements || []).filter(engagement => engagement.organization_id === organizationId
-    && workspace.workstreams.some(workstream => workstream.project_id === engagement.project_id)
-    && workspace.services.some(service => service.engagement_id === engagement.id
+    && workspace.projects.some(project => project.id === engagement.project_id && project.organization_id === organizationId && !project.archived_at)
+    && workspace.services.some(service => service.organization_id === organizationId && service.engagement_id === engagement.id
       && (service.service_catalog?.department_id || service.department_id) === departmentId
       && ['active', 'planned'].includes(service.status)))
 }

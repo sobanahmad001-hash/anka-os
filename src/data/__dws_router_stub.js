@@ -1,8 +1,9 @@
-import { createElement } from 'react'
+import { createElement, useReducer } from 'react'
 
 export function useSearchParams() {
   const query = String(globalThis.__dwsHarness?.search || '')
-  return [new URLSearchParams(query), () => {}]
+  const [, refresh] = useReducer(value => value + 1, 0)
+  return [new URLSearchParams(query), next => { globalThis.__dwsHarness.search = new URLSearchParams(next).toString(); refresh() }]
 }
 
 export function Link(props) {

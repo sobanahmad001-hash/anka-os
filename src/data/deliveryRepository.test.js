@@ -192,6 +192,7 @@ test('department workspace composes shared records without legacy tables', async
 
   assert.deepEqual(tables, [
     'workstreams',
+    'projects',
     'engagements',
     'workstreams',
     'tasks',
@@ -395,4 +396,40 @@ test('repository converts Supabase errors into thrown failures', async () => {
   const repository = createDeliveryRepository(client)
 
   await assert.rejects(repository.listProjects('org-a'), /RLS denied/)
+})
+
+
+const canonicalChatTables = () => ({
+  projects: { data: [{ id: 'project-1', organization_id: 'org-a', name: 'Accessible', archived_at: null }], error: null },
+  engagements: { data: [{ id: 'engagement-1', project_id: 'project-1', organization_id: 'org-a' }], error: null },
+  engagement_services: { data: [{ id: 'service-1', engagement_id: 'engagement-1', organization_id: 'org-a', status: 'active', service_catalog: { department_id: 'content' } }], error: null },
+})
+test('canonical Workshop chat discovers authorized service projects with zero legacy workstreams', async () => {
+  const client = createFakeClient(canonicalChatTables())
+  const snapshot = await createDeliveryRepository(client).getDepartmentWorkspace('content', 'org-a', { signal: new AbortController().signal })
+  assert.deepEqual(snapshot.workstreams, [])
+  assert.deepEqual(snapshot.engagements, [], 'operational snapshot does not acquire fabricated workstream scope')
+  assert.equal(snapshot.chatContext.projects[0].id, 'project-1')
+  assert.equal(snapshot.chatContext.services[0].id, 'service-1')
+  for (const chain of queryChains(client.calls)) {
+    assert.ok(chain.some(([, op, key, value]) => op === 'eq' && key === 'organization_id' && value === 'org-a'))
+    assert.ok(chain.some(([, op]) => op === 'abortSignal'))
+  }
+  assert.equal(client.calls.some(([, op]) => ['insert', 'update', 'rpc'].includes(op)), false)
+})
+test('canonical Workshop context rejects denied, archived, cross-organization and broken-parent reads', async () => {
+  for (const [table, patch, expected] of [
+    ['projects', { organization_id: 'foreign' }, /active organization/],
+    ['projects', { archived_at: '2026-01-01' }, /no longer current/],
+    ['engagements', { project_id: 'foreign-project' }, /accessible project/],
+    ['engagement_services', { engagement_id: 'foreign-engagement' }, /selected department/],
+    ['engagement_services', { service_catalog: { department_id: 'design' } }, /selected department/],
+  ]) {
+    const tables = canonicalChatTables(); Object.assign(tables[table].data[0], patch)
+    await assert.rejects(createDeliveryRepository(createFakeClient(tables)).getDepartmentWorkspace('content', 'org-a'), expected)
+  }
+  const tables = canonicalChatTables(); tables.projects = { data: null, error: { message: 'Denied' }, status: 403 }
+  await assert.rejects(createDeliveryRepository(createFakeClient(tables)).getDepartmentWorkspace('content', 'org-a'), error => error.status === 403)
+  const controller = new AbortController(); controller.abort()
+  await assert.rejects(createDeliveryRepository(createFakeClient()).getDepartmentWorkspace('content', 'org-a', { signal: controller.signal }), { name: 'AbortError' })
 })

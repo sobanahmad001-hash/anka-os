@@ -35,7 +35,7 @@ test('a delayed organization A response cannot replace organization B state', ()
     assert.match(view, /request\.revision === current\?\.revision/)
     assert.match(view, /!request\.signal\?\.aborted/)
   }
-  assert.match(department, /if \(!isCurrentOrganizationScope\(requestedScope, currentScope\.current\)\) return\s+setWorkspace\(result\)/)
+  assert.match(department, /if \(readRevision !== workspaceReadRevision\.current \|\| !isCurrentOrganizationScope\(requestedScope, currentScope\.current\)\) return\s+setWorkspace\(result\)/)
   assert.match(myWork, /if \(isCurrentOrganizationScope\(requestedScope, currentScope\.current\)\) setWorkspace\(next\)/)
 })
 
