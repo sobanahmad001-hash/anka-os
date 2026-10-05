@@ -459,6 +459,9 @@ export async function handleRequest(req: Request, dependencies: {
         ? adminClient.from('integration_connections').update(payload).eq('id', connectionId).eq('organization_id', selectedOrganizationId)
         : adminClient.from('integration_connections').insert(payload)
       const { data: connection, error } = await query.select().single()
+      if (error?.code === '23505') {
+        return json({ error: 'A connection with this name already exists. Existing connections are unchanged.', code: 'connection_name_conflict' }, 409)
+      }
       if (error) throw error
       const { error: deleteMappingError } = await adminClient.from('integration_connection_departments')
         .delete().eq('connection_id', connection.id).eq('organization_id', selectedOrganizationId)

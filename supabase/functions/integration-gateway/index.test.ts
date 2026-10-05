@@ -28,6 +28,7 @@ Deno.test('Higgsfield credential test is one read-only request and does not clai
 
 function fixture(options: {
   role?: string
+  insertError?: { code: string; message: string }
   membershipOrganizationId?: string
   connectionStatus?: string
   provider?: string
@@ -108,6 +109,7 @@ function fixture(options: {
         const result = (single = false) => {
           if (operation === 'update') calls.push({ client: name, table, operation, value: inserted })
           if (operation === 'insert') {
+            if (table === 'integration_connections' && options.insertError) return { data: null, error: options.insertError }
             calls.push({ client: name, table, operation, value: inserted })
             return { data: inserted, error: null }
           }
@@ -524,4 +526,16 @@ Deno.test('Gemini verification retains exact requested resource identity', async
   await assertRejects(() => testConnection({ provider: 'google_gemini', public_config: { model_id: 'gemini-test' } },
     'fixture-secret', async () => Response.json({ name: 'models/gemini-test-snapshot', supportedGenerationMethods: ['generateContent'] })),
   Error, 'Google Gemini model cannot generate content')
+})
+
+Deno.test('duplicate private connection name returns safe conflict without mapping changes or provider calls', async () => {
+  const test = fixture({ insertError: { code: '23505', message: 'SQL internals and secret-value must not escape' } })
+  const response = await test.request({ action: 'save', organization_id: ORG_B, organization_only: true,
+    provider: 'openai', display_name: 'OpenAI Sol Private', secret_name: 'ANKA_OPENAI_PRIMARY',
+    public_config: { model_id: 'gpt-6.1-sol' }, department_ids: [],
+  })
+  assertEquals(response.status, 409)
+  assertEquals(await response.json(), { error: 'A connection with this name already exists. Existing connections are unchanged.', code: 'connection_name_conflict' })
+  assertEquals(test.calls.length, 0)
+  assertEquals(test.providerCalls(), 0)
 })

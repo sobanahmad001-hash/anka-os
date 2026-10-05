@@ -1,3 +1,4 @@
+import { connectionSaveErrorMessage } from '../data/integrationSave.js'
 import { OPENAI_ROUTINE_MODEL, OPENAI_TEXT_MODELS } from '../data/openaiModelPolicy.js'
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -57,6 +58,8 @@ export default function Settings() {
   const [form, setForm] = useState(initialForm())
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const saveInFlight = useRef(false)
+  const [saveFeedback, setSaveFeedback] = useState(null)
   const [testingId, setTestingId] = useState('')
   const [reportingDrafts, setReportingDrafts] = useState({})
   const [message, setMessage] = useState('')
@@ -144,6 +147,7 @@ export default function Settings() {
 
   function chooseProvider(provider) {
     setForm(initialForm(provider))
+    setSaveFeedback(null)
     setMessage('')
     setError('')
   }
@@ -159,8 +163,13 @@ export default function Settings() {
 
   async function saveConnection(event) {
     event.preventDefault()
-    if (!CONFIGURABLE_CONNECTOR_IDS.includes(form.provider)) return
-    if (!form.organization_only && !form.department_ids.length) return setError('Select at least one department for this connector.')
+    if (saveInFlight.current || !CONFIGURABLE_CONNECTOR_IDS.includes(form.provider)) return
+    if (!form.organization_only && !form.department_ids.length) {
+      setSaveFeedback({ kind: 'error', text: 'Select at least one department for this connector.' })
+      return
+    }
+    saveInFlight.current = true
+    setSaveFeedback({ kind: 'pending', text: 'Saving connector metadata…' })
     setSaving(true)
     setMessage('')
     setError('')
@@ -183,13 +192,14 @@ export default function Settings() {
         public_config: publicConfig,
         department_ids: form.department_ids,
       })
-      setMessage('Connector metadata saved. Configure the named Supabase secret before testing.')
+      setSaveFeedback({ kind: 'success', text: `Saved ${form.display_name.trim()}${form.organization_only ? ' as an organization-only connection' : ''}. Test the saved connection, then save its model access. No model access was granted by this save.` })
       setForm(initialForm(form.provider))
       await loadConnections()
       if (form.organization_only) await loadModelConnections()
     } catch (saveError) {
-      setError(saveError.message)
+      setSaveFeedback({ kind: 'error', text: connectionSaveErrorMessage(saveError) })
     } finally {
+      saveInFlight.current = false
       setSaving(false)
     }
   }
@@ -246,8 +256,9 @@ export default function Settings() {
       setMessage(`${connection.display_name} reporting scope saved.`)
       await loadConnections()
     } catch (saveError) {
-      setError(saveError.message)
+      setSaveFeedback({ kind: 'error', text: connectionSaveErrorMessage(saveError) })
     } finally {
+      saveInFlight.current = false
       setSaving(false)
     }
   }
@@ -434,7 +445,8 @@ export default function Settings() {
                 {!form.organization_only && <fieldset><legend className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Department access</legend><div className="mt-2 grid grid-cols-2 gap-2">{Object.entries(DEPARTMENT_LABELS).map(([departmentId, label]) => <label key={departmentId} className="flex items-center gap-2 rounded-lg border border-[var(--anka-line)] bg-[var(--anka-canvas)] px-3 py-2 text-xs text-[var(--anka-ink)]"><input type="checkbox" checked={form.department_ids.includes(departmentId)} onChange={() => toggleDepartment(departmentId)} />{label}</label>)}</div></fieldset>}
 
                 <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Supabase secret name<input required value={form.secret_name} onChange={(event) => setForm({ ...form, secret_name: event.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_') })} className={`${INPUT} mt-2 font-mono normal-case tracking-normal`} /><span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-muted)]">Enter the environment variable name only. Never paste the credential into Anka OS.</span></label>
-                <button disabled={saving} className="w-full workspace-button workspace-button-primary disabled:opacity-50">{saving ? 'Saving…' : 'Save connector metadata'}</button>
+                {saveFeedback && <div id="connector-save-feedback" role={saveFeedback.kind === 'error' ? 'alert' : 'status'} aria-live={saveFeedback.kind === 'error' ? 'assertive' : 'polite'} className={`rounded-xl border p-3 text-sm ${saveFeedback.kind === 'error' ? 'border-[var(--anka-danger)] text-[var(--anka-danger)]' : 'border-[var(--anka-line)] text-[var(--anka-ink)]'}`}>{saveFeedback.text}</div>}
+                <button disabled={saving} aria-describedby={saveFeedback ? 'connector-save-feedback' : undefined} className="w-full workspace-button workspace-button-primary disabled:opacity-50">{saving ? 'Saving…' : 'Save connector metadata'}</button>
               </form>
             )}
           </section>
