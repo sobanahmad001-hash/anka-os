@@ -374,10 +374,11 @@ export async function handleRequest(req: Request, dependencies: {
     if (action === 'list') {
       const departmentId = text(body.department_id, 40)
       if (departmentId && !DEPARTMENTS.has(departmentId)) return json({ error: 'Unknown department' }, 400)
-      const { data, error } = await userClient.from('integration_connections')
+      let listQuery = userClient.from('integration_connections')
         .select('*, integration_connection_departments(department_id)')
         .eq('organization_id', selectedOrganizationId)
-        .is('archived_at', null).order('provider').order('display_name')
+      if (body.include_retained !== true) listQuery = listQuery.is('archived_at', null)
+      const { data, error } = await listQuery.order('provider').order('display_name')
       if (error) throw error
       const visibleConnections = (data || []).map((connection: Record<string, any>) => {
         const mappings = Array.isArray(connection.integration_connection_departments)
@@ -415,7 +416,11 @@ export async function handleRequest(req: Request, dependencies: {
       return json({
         organization_id: selectedOrganizationId,
         connections: visibleConnections.map((connection: Record<string, any>) => ({
-          ...connection,
+          ...(connection.archived_at || connection.status === 'disabled'
+            ? { id: connection.id, organization_id: connection.organization_id, provider: connection.provider,
+              display_name: connection.display_name, status: connection.status, archived_at: connection.archived_at,
+              department_ids: connection.department_ids }
+            : connection),
           organization_level: connection.department_ids.length === 0
             && !engagementConnectionIds.has(String(connection.id)),
           health_observation: currentConnectionHealthObservation(connection, observations.get(String(connection.id))),

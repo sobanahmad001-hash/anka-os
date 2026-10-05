@@ -76,7 +76,7 @@ export default function Settings() {
     }
     try {
       const [result, brandRows] = await Promise.all([
-        integrations.listForOrganization(organizationId, null, { signal: requestSignal }),
+        integrations.listForOrganization(organizationId, null, { signal: requestSignal, includeRetained: true }),
         integrations.listBrands(),
       ])
       if (!stillCurrent()) return
@@ -341,6 +341,8 @@ export default function Settings() {
     }
   }
 
+  const configuredConnections = connections.filter(connection => !connection.archived_at && connection.status !== 'disabled')
+  const retainedConnections = connections.filter(connection => connection.archived_at || connection.status === 'disabled')
   const selected = CONNECTOR_CATALOG[form.provider]
 
   return (
@@ -374,7 +376,7 @@ export default function Settings() {
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {Object.entries(CONNECTOR_CATALOG).map(([id, connector]) => {
-            const providerConnections = connections.filter((connection) => connection.provider === id)
+            const providerConnections = configuredConnections.filter((connection) => connection.provider === id)
             const verified = providerConnections.filter((connection) => connection.status === 'verified').length
             return (
               <button key={id} type="button" onClick={() => chooseProvider(id)} className={`rounded-2xl border p-5 text-left transition ${form.provider === id ? 'border-[var(--anka-violet)] bg-[var(--anka-violet-soft)]' : 'border-[var(--anka-line)] bg-[var(--anka-surface)] hover:border-[var(--anka-line)]'}`}>
@@ -385,11 +387,21 @@ export default function Settings() {
           })}
         </section>
 
+        {retainedConnections.length > 0 && <details className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-5">
+          <summary className="cursor-pointer font-semibold">Disabled or archived connections ({retainedConnections.length})</summary>
+          <p className="mt-3 text-sm text-[var(--anka-muted)]">These records retain their names and history. Their names cannot be reused. They are not active connections and cannot be converted to a different scope.</p>
+          <div className="mt-3 space-y-3">{retainedConnections.map(connection => <article key={connection.id} className="rounded-xl border border-[var(--anka-line)] p-3">
+            <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">{connection.display_name}</h3><Status value={connection.status} /></div>
+            <p className="mt-1 text-sm">{connectorLabel(connection.provider)} · {connection.organization_level ? 'Original organization-only scope' : (connection.department_ids || []).length ? `Original department scope: ${connection.department_ids.map(id => DEPARTMENT_LABELS[id] || id).join(', ')}` : 'Original engagement scope'}</p>
+            <p className="mt-1 text-xs text-[var(--anka-muted)]">Name reserved. For a new organization-only connection, use a distinct name and select Organization-only before saving. This retained record will remain unchanged.</p>
+          </article>)}</div>
+        </details>}
+
         <div className="grid gap-6 xl:grid-cols-[1fr_400px]">
           <section className="workspace-card p-5">
-            <div className="flex items-center justify-between gap-3"><div><h2 className="font-semibold">Configured connections</h2><p className="mt-1 text-sm text-[var(--anka-muted)]">Department mappings are visible; credentials and provider response bodies are never returned.</p></div><span className="text-xs text-[var(--anka-muted)]">{connections.length} total</span></div>
+            <div className="flex items-center justify-between gap-3"><div><h2 className="font-semibold">Configured connections</h2><p className="mt-1 text-sm text-[var(--anka-muted)]">Department mappings are visible; credentials and provider response bodies are never returned.</p></div><span className="text-xs text-[var(--anka-muted)]">{configuredConnections.length} configured · {retainedConnections.length} retained</span></div>
             <div className="mt-5 space-y-3">
-              {loading ? <p className="text-sm text-[var(--anka-muted)]">Loading connectors…</p> : connections.length === 0 ? (
+              {loading ? <p className="text-sm text-[var(--anka-muted)]">Loading connectors…</p> : configuredConnections.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-[var(--anka-line)] px-5 py-10 text-center text-sm text-[var(--anka-muted)]">No connectors configured yet.</div>
               ) : connections.map((connection) => {
                 const connector = CONNECTOR_CATALOG[connection.provider]
