@@ -302,7 +302,8 @@ export async function handleRequest(req: Request, dependencies: {
     const body = await req.json()
     const action = text(body.action, 40)
     const mappingAction = ['list_workshop_mappings', 'save_workshop_mappings', 'recover_workshop_mappings'].includes(action)
-    const modelScopedAction = mappingAction || action === 'list_model_allowlist' || action === 'configure_model_allowlist'
+    const executionAction = ['list_workshop_execution', 'save_workshop_execution', 'recover_workshop_execution'].includes(action)
+    const modelScopedAction = executionAction || mappingAction || action === 'list_model_allowlist' || action === 'configure_model_allowlist'
       || action === 'configure_context_organization_models'
       || (action === 'save' && body.organization_only === true)
     const designScopedAction = (action === 'list' || action === 'test' || action === 'disable'
@@ -324,6 +325,26 @@ export async function handleRequest(req: Request, dependencies: {
     }
 
     const isLeader = LEADER_ROLES.has(membership.role)
+
+    if (executionAction) {
+      if (!isLeader) return json({ error: 'Leadership access required' }, 403)
+      const uuid = (value: unknown) => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+      if (!uuid(body.project_id) || !uuid(body.engagement_id) || (action !== 'list_workshop_execution' && !uuid(body.request_id))) return json({ error: 'Exact activation scope and request required' }, 400)
+      if (action === 'save_workshop_execution' && (typeof body.expected_token !== 'string' || !/^[0-9a-f]{32}$/.test(body.expected_token)
+        || !Array.isArray(body.selections) || body.selections.length < 1 || body.selections.length > 3
+        || new Set(body.selections.map((v: any) => v?.department_id)).size !== body.selections.length
+        || body.selections.some((v: any) => !['content', 'design', 'marketing'].includes(v?.department_id) || typeof v?.enabled !== 'boolean'))) return json({ error: 'Reviewed activation required' }, 400)
+      const args: Record<string, unknown> = { p_organization_id: selectedOrganizationId, p_project_id: body.project_id, p_engagement_id: body.engagement_id, p_actor_id: user.id }
+      if (action !== 'list_workshop_execution') args.p_request_id = body.request_id
+      if (action === 'save_workshop_execution') Object.assign(args, { p_expected_token: body.expected_token, p_selections: body.selections.map(({ department_id, enabled }: { department_id: string; enabled: boolean }) => ({ department_id, enabled })) })
+      const procedure = action === 'list_workshop_execution' ? 'get_workshop_execution_settings' : action === 'save_workshop_execution' ? 'save_workshop_execution_settings' : 'recover_workshop_execution_settings'
+      const { data, error } = await adminClient.rpc(procedure, args)
+      if (error) {
+        const status = error.code === '42501' ? 403 : error.code === '40001' ? 409 : ['22023','23514','22P02'].includes(error.code) ? 400 : 503
+        return json({ error: 'Activation outcome could not be confirmed. Check the original request.', code: `execution_${status}` }, status)
+      }
+      return json({ result: data })
+    }
 
     if (mappingAction) {
       if (!isLeader) return json({ error: 'Leadership access required' }, 403)

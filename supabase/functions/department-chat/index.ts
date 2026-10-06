@@ -1,3 +1,4 @@
+import { workshopExecutionEnabled } from './workshopExecutionGate.ts'
 import { openAiTextOptions, preferredApprovedModel, OPENAI_PREMIUM_MODEL } from '../_shared/openaiModelPolicy.js'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { contextChatAction } from './contextChatActions.ts'
@@ -1558,7 +1559,7 @@ async function getCapabilities(
   const spendGuard = savedAnswer ? await chatSpendGuardReadiness(admin, organizationId, actorId) : null
   return {
     ...(savedAnswer ? { answer_readiness: {
-      paid_execution_enabled: Deno.env.get('WORKSHOP_CHAT_PAID_EXECUTION_ENABLED') === 'true',
+      paid_execution_enabled: await workshopExecutionEnabled(admin, { organizationId, actorId, projectId: scope.projectId, engagementId: scope.engagementId, departmentId: scope.departmentId }, Deno.env),
       ...spendGuard,
       model_price_available: provider.approvedModels.map(model => ({
         configuration_id: model.configuration_id,

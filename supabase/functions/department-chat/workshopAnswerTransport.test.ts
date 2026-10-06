@@ -51,6 +51,7 @@ for (const provider of ['openai', 'anthropic', 'google_gemini'] as const) {
   Deno.test('Workshop ' + provider + ' submits only after a claim and settles normalized usage', async () => {
     const calls: string[] = []
     const admin = { async rpc(name: string, args: Record<string, unknown>) {
+    if (name === 'get_workshop_execution_readiness') return { data: {schema_version: 1, enabled: true, organization_id: 'org', project_id: 'project', engagement_id: 'engagement', department_id: 'content'}, error: null }
       calls.push(name)
       if (name === 'reserve_workshop_chat_budget') return { data: { status: 'reserved' }, error: null }
       if (name === 'claim_workshop_chat_dispatch') return { data: {
@@ -112,6 +113,7 @@ Deno.test('Workshop rejects an oversized pinned prompt before budget reservation
 Deno.test('Workshop claim replay never submits a second provider request', async () => {
   const calls: string[] = []
   const admin = { async rpc(name: string) {
+    if (name === 'get_workshop_execution_readiness') return { data: {schema_version: 1, enabled: true, organization_id: 'org', project_id: 'project', engagement_id: 'engagement', department_id: 'content'}, error: null }
     calls.push(name)
     return { data: name === 'reserve_workshop_chat_budget'
       ? { status: 'reserved' } : { status: 'already_claimed', must_not_submit: true }, error: null }
@@ -126,6 +128,7 @@ Deno.test('Workshop claim replay never submits a second provider request', async
 Deno.test('Workshop claim refusal releases only an unclaimed reservation before any provider call', async () => {
   const calls: string[] = []
   const admin = { async rpc(name: string) {
+    if (name === 'get_workshop_execution_readiness') return { data: {schema_version: 1, enabled: true, organization_id: 'org', project_id: 'project', engagement_id: 'engagement', department_id: 'content'}, error: null }
     calls.push(name)
     if (name === 'claim_workshop_chat_dispatch') return {
       data: null, error: new Error('Current contribution was revoked'),
@@ -144,6 +147,7 @@ Deno.test('Workshop claim refusal releases only an unclaimed reservation before 
 Deno.test('Workshop uncertainty evidence excludes raw provider failures', async () => {
   let evidence = ''
   const admin = { async rpc(name: string, args: Record<string, unknown>) {
+    if (name === 'get_workshop_execution_readiness') return { data: {schema_version: 1, enabled: true, organization_id: 'org', project_id: 'project', engagement_id: 'engagement', department_id: 'content'}, error: null }
     if (name === 'reserve_workshop_chat_budget') return { data: { status: 'reserved' }, error: null }
     if (name === 'claim_workshop_chat_dispatch') return { data: {
       status: 'claimed', must_not_submit: false, claim_id: 'claim-1',
@@ -167,6 +171,7 @@ Deno.test('Workshop settlement continues after the client stops observing', asyn
   const providerPending = new Promise<void>(resolve => { releaseProvider = resolve })
   let durableTask!: Promise<void>
   const admin = { async rpc(name: string) {
+    if (name === 'get_workshop_execution_readiness') return { data: {schema_version: 1, enabled: true, organization_id: 'org', project_id: 'project', engagement_id: 'engagement', department_id: 'content'}, error: null }
     calls.push(name)
     if (name === 'reserve_workshop_chat_budget') {
       return { data: { status: 'reserved' }, error: null }
@@ -200,6 +205,7 @@ Deno.test('Workshop settlement continues after the client stops observing', asyn
 Deno.test('Workshop preserves exact configured model identity and retains unknown cost on alias mismatch', async () => {
   const calls: string[] = []
   const admin = { async rpc(name: string) {
+    if (name === 'get_workshop_execution_readiness') return { data: {schema_version: 1, enabled: true, organization_id: 'org', project_id: 'project', engagement_id: 'engagement', department_id: 'content'}, error: null }
     calls.push(name)
     if (name === 'reserve_workshop_chat_budget') return { data: { status: 'reserved' }, error: null }
     if (name === 'claim_workshop_chat_dispatch') return { data: {
@@ -229,6 +235,7 @@ Deno.test('Workshop supplemental rate is captured before claim and survives envi
   const env = { get: (name: string) => name === 'N6_OPENAI_APPROVED_MODELS_PRICING_JSON'
     ? supplement : environment('openai').get(name) }
   const admin = { async rpc(name: string, args: Record<string, unknown>) {
+    if (name === 'get_workshop_execution_readiness') return { data: {schema_version: 1, enabled: true, organization_id: 'org', project_id: 'project', engagement_id: 'engagement', department_id: 'content'}, error: null }
     if (name === 'reserve_workshop_chat_budget') return { data: { status: 'reserved' }, error: null }
     if (name === 'claim_workshop_chat_dispatch') {
       supplement = '{invalid-after-capture'
@@ -255,4 +262,11 @@ Deno.test('Workshop invalid supplemental evidence denies before any reservation 
     (async () => { calls++; throw new Error('Unexpected provider') }) as typeof fetch,
     { get: name => name === 'N6_OPENAI_APPROVED_MODELS_PRICING_JSON' ? '{' : environment('openai').get(name) }, keepAlive))
   assertEquals(calls, 0)
+})
+
+Deno.test('Workshop scope denial performs no reservation, claim or provider call', async () => {
+  const calls: string[] = []
+  const admin = { async rpc(name: string) { calls.push(name); return { data: {schema_version: 1, enabled: false, organization_id: 'org', project_id: 'project', engagement_id: 'engagement', department_id: 'content'}, error: null } } }
+  await assertRejects(() => dispatchWorkshopAnswer(admin, input('openai'), (async () => { throw Error('Provider must not run') }) as typeof fetch, environment('openai'), keepAlive), Error, 'not enabled')
+  assertEquals(calls, ['get_workshop_execution_readiness'])
 })

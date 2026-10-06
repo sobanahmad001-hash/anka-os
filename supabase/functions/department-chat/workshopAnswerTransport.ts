@@ -1,3 +1,4 @@
+import { requireWorkshopExecution } from './workshopExecutionGate.ts'
 import { conservativePipelineCeiling, measuredPipelineTokenCost, selectFreshPipelineRate } from '../_shared/n6PipelineCost.ts'
 import { buildN7TextRequest, normalizeN7TextResult } from '../_shared/n7TextProvider.ts'
 import type { N7TextProvider } from '../_shared/n7TextProvider.ts'
@@ -112,6 +113,7 @@ export async function dispatchWorkshopAnswer(
     input.route.model, new Date(), input.route.provider,
     env.get('N6_OPENAI_APPROVED_MODELS_PRICING_JSON'))
   const maxCost = conservativePipelineCeiling(input.prompt, price)
+  await requireWorkshopExecution(admin, input, env)
   const reservation = await rpc(admin, 'reserve_workshop_chat_budget', {
     p_organization_id: input.organizationId,
     p_conversation_id: input.conversationId,

@@ -253,6 +253,7 @@ function selectedOrganizationFixture() {
           ? { data: null, error: null }
           : { data: null, error: { code: '23514', message: 'Selected model is unavailable' } }
       }
+      if (name === 'get_workshop_execution_readiness') return { data: rows.activation_readiness?.[0] || null, error: null }
       if (name === 'get_ai_spend_guard_readiness') return { data: { spend_guard_mode: null, spend_tracking_configured: false, local_monthly_cap_configured: false, external_provider_limit_verified: false }, error: null }
       if (name === 'assert_department_chat_model_dispatch' && modelDispatchError) {
         return { data: null, error: modelDispatchError }
@@ -1571,6 +1572,7 @@ Deno.test('Shared Department Chat exposes only the OpenAI Responses endpoint', (
   assertEquals(outputText({ output_text: '{"summary":"draft"}' }), '{"summary":"draft"}')
 })
 function enableSavedAnswerFixture(fixture: ReturnType<typeof selectedOrganizationFixture>, ownerId = 'actor') {
+  fixture.rows.activation_readiness = [{ schema_version: 1, enabled: true, organization_id: 'B', project_id: 'project-B', engagement_id: 'engagement-B', department_id: 'content' }]
   Object.assign(fixture.rows.organization_memberships.find((row: any) => row.organization_id === 'B'), {
     department_id: 'content', role: 'contributor',
   })
@@ -1829,3 +1831,16 @@ Deno.test('readiness uses the same supplemental validation and preserves legacy 
    assertEquals(freshChatPriceAvailable('openai', 'gpt-4.1', get), true)
  }
 })
+
+for (const mode of ['off','foreign','unknown']) {
+ Deno.test(`Workshop ${mode} activation blocks answer before reservation or provider`, async () => {
+  const fixture=selectedOrganizationFixture(); enableSavedAnswerFixture(fixture)
+  if(mode==='off') fixture.rows.activation_readiness[0].enabled=false
+  if(mode==='foreign') fixture.rows.activation_readiness[0].project_id='project-A'
+  if(mode==='unknown') fixture.rows.activation_readiness=[]
+  const response=await fixture.request(answerRequest)
+  assertEquals(response.status,503)
+  assertEquals(fixture.rpcCalls.some(call=>call.name==='reserve_workshop_chat_budget'||call.name==='claim_workshop_chat_dispatch'),false)
+  assertEquals(fixture.providerCalls(),0)
+ })
+}
