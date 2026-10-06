@@ -1,3 +1,4 @@
+import WorkshopModelMappingPanel from '../components/WorkshopModelMappingPanel.jsx'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
@@ -386,6 +387,7 @@ function EngagementWorkspace({ workspace, owners, organizationId, membership, si
     <button onClick={onBack} className="text-sm text-[var(--anka-muted)] hover:text-[var(--anka-ink)]">← Back to engagements</button>{returnProjectId && <Link to={`/sphere/workspace/projects/${encodeURIComponent(returnProjectId)}`} className="ml-4 text-sm text-[var(--anka-violet)] hover:text-[var(--anka-ink)]">Back to project</Link>}
     <header className="mt-5 flex flex-wrap items-start justify-between gap-5"><div><p className="text-xs text-[var(--anka-violet)]">{workspace.engagement.agency_clients?.name} · {workspace.engagement.brands?.name}</p><h1 className="workspace-title">{workspace.engagement.name}</h1><p className="workspace-description">{workspace.engagement.objective || 'No objective recorded.'}</p></div><Badge>{labelize(workspace.engagement.status)}</Badge></header>
     <div className="mt-7 grid gap-3 sm:grid-cols-4"><Metric label="Services" value={workspace.services.length} /><Metric label="Journey stages" value={workspace.stages.length} /><Metric label="Dependencies" value={workspace.dependencies.length} /><Metric label="Scoped connectors" value={workspace.connectors.length} /></div>
+    <WorkshopModelMappingPanel organizationId={organizationId} projectId={workspace.engagement.project_id} engagementId={workspace.engagement.id} membership={membership} />
     <nav className="mt-7 flex gap-2 overflow-x-auto border-b border-[var(--anka-line)]">
       <button onClick={() => setTab('overview')} className={`whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold ${tab === 'overview' ? 'border-[var(--anka-violet)] text-[var(--anka-ink)]' : 'border-transparent text-[var(--anka-muted)]'}`}>Overview</button>
       <button onClick={() => setTab('pipeline')} className={`whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold ${tab === 'pipeline' ? 'border-[var(--anka-violet)] text-[var(--anka-ink)]' : 'border-transparent text-[var(--anka-muted)]'}`}>Pipeline</button>
