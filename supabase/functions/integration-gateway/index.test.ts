@@ -580,3 +580,25 @@ for (const action of ['list_workshop_mappings', 'save_workshop_mappings', 'recov
     assertEquals(leader.rpcCalls.length, 0)
   })
 }
+
+for (const action of ['list_workshop_execution', 'save_workshop_execution', 'recover_workshop_execution']) {
+  Deno.test(`Workshop ${action} pins authenticated actor and performs no provider request`, async () => {
+    const f = fixture()
+    const response = await f.request({ action, organization_id: ORG_B, project_id: ORG_A, engagement_id: ORG_B,
+      request_id: USER_ID, actor_id: ORG_A, expected_token: 'a'.repeat(32), selections: [{ department_id: 'content', enabled: true }] })
+    assertEquals(response.status, 200)
+    assertEquals(f.rpcCalls.length, 1)
+    assertEquals(f.rpcCalls[0].args.p_actor_id, USER_ID)
+    assertEquals(f.rpcCalls[0].args.p_organization_id, ORG_B)
+    assertEquals(f.calls.some(c => c.operation !== 'select'), false)
+    assertEquals(f.providerCalls(), 0)
+  })
+  Deno.test(`Workshop ${action} rejects nonleader and malformed target before RPC`, async () => {
+    const f = fixture({ role: 'contributor' })
+    assertEquals((await f.request({ action, organization_id: ORG_B, project_id: ORG_A, engagement_id: ORG_B, request_id: USER_ID })).status, 403)
+    assertEquals(f.rpcCalls.length, 0)
+    const leader = fixture()
+    assertEquals((await leader.request({ action, organization_id: ORG_B, project_id: 'invalid', engagement_id: ORG_B })).status, 400)
+    assertEquals(leader.rpcCalls.length, 0)
+  })
+}

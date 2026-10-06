@@ -1,3 +1,4 @@
+import WorkshopExecutionPanel from './WorkshopExecutionPanel.jsx'
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -7,7 +8,7 @@ const BUTTON = 'rounded-lg border border-[var(--anka-line)] px-3 py-2 text-sm di
 export default function WorkshopModelMappingPanel({ organizationId, projectId, engagementId, membership }) {
   const { user } = useAuth()
   if (!projectId || !['system_owner', 'operations_admin', 'executive'].includes(membership?.role)) return null
-  return <MappingPanel key={`${organizationId}:${projectId}:${engagementId}:${user?.id}`} scope={{ organization_id: organizationId, project_id: projectId, engagement_id: engagementId }} actorId={user?.id} />
+  return <div key={`${organizationId}:${projectId}:${engagementId}:${user?.id}`} ><MappingPanel scope={{ organization_id: organizationId, project_id: projectId, engagement_id: engagementId }} actorId={user?.id} /><WorkshopExecutionPanel scope={{ organization_id: organizationId, project_id: projectId, engagement_id: engagementId }} actorId={user?.id} /></div>
 }
 function MappingPanel({ scope, actorId }) {
   const storageKey = `anka-workshop-mapping:${actorId}:${scope.organization_id}:${scope.project_id}:${scope.engagement_id}`
