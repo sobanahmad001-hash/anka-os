@@ -17,7 +17,7 @@ function availableModels(connections, departmentId) {
         && !configuration.revoked_at && verified.has(configuration.model_id))
       .map(configuration => ({
         id: configuration.id,
-        label: `${connection.provider} / ${configuration.model_id} · ${connection.display_name}`,
+        label: `${connection.provider} / ${configuration.model_id} / ${connection.display_name}`,
       }))
   })
 }
@@ -32,6 +32,7 @@ export default function PipelineAiTextRouteSettings({ organizationId, connection
 
   useEffect(() => {
     let current = true
+    const requests = pendingRequests.current
     if (!organizationId || requestSignal?.aborted) {
       setSettings([])
       setDrafts({})
@@ -46,9 +47,9 @@ export default function PipelineAiTextRouteSettings({ organizationId, connection
         row.department_id, row.model_configuration_ids || [],
       ])))
       setLoading(false)
-    }).catch(error => {
+    }).catch(() => {
       if (!current || requestSignal?.aborted) return
-      setMessage(error.message || 'Text routes could not be loaded.')
+      setMessage('Text routes could not be loaded. No route changes were made by this read.')
       setLoading(false)
     })
     return () => { current = false; requests.clear() }
@@ -88,7 +89,7 @@ export default function PipelineAiTextRouteSettings({ organizationId, connection
       setMessage(`${DEPARTMENT_LABELS[departmentId]} text routes saved. Jobs remain blocked until all execution gates are released.`)
     } catch (error) {
       if (!requestSignal?.aborted && error?.name !== 'AbortError') {
-        setMessage(error.message || 'Text routes could not be saved.')
+        setMessage('Route save could not be confirmed. Your selections are retained; retrying the same selection uses the original request. No run was started.')
       }
     } finally {
       if (!requestSignal?.aborted) setBusyDepartment('')
@@ -100,7 +101,7 @@ export default function PipelineAiTextRouteSettings({ organizationId, connection
     <h2 className="mt-2 text-lg font-semibold text-white">Ordered eligible models</h2>
     <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Choose up to three approved text models per department. The exact engagement connection and model are checked again for every job. An empty list disables that department. Saving routes does not start a run or spend money.</p>
     {message && <p role="status" className="mt-3 text-sm text-slate-300">{message}</p>}
-    {loading ? <p className="mt-4 text-sm text-slate-500">Loading routes…</p> : <div className="mt-4 grid gap-4 lg:grid-cols-3">
+    {loading ? <p className="mt-4 text-sm text-slate-500">Loading routes...</p> : <div className="mt-4 grid gap-4 lg:grid-cols-3">
       {DEPARTMENTS.map(departmentId => {
         const models = availableModels(connections, departmentId)
         const selected = drafts[departmentId] || []
@@ -131,7 +132,7 @@ export default function PipelineAiTextRouteSettings({ organizationId, connection
           {canManage && <button type="button" onClick={() => save(departmentId)}
             disabled={busyDepartment !== '' || unavailable || unchanged}
             className="mt-4 rounded-lg border border-purple-700 px-3 py-2 text-xs font-semibold text-purple-200 disabled:opacity-50">
-            {busyDepartment === departmentId ? 'Saving…' : 'Save ordered routes'}
+            {busyDepartment === departmentId ? 'Saving...' : 'Save ordered routes'}
           </button>}
         </div>
       })}

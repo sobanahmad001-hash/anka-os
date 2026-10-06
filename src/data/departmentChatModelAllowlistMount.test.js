@@ -46,11 +46,11 @@ test('organization connector can be verified before model approval, without bypa
   assert.equal(find(environment.container, 'FIELDSET', 'Private organization conversations').disabled, false)
   assert.equal(verify.disabled, false)
   assert.equal(find(environment.container, 'BUTTON', 'Save private model access').disabled, true)
-  assert.equal(find(environment.container, 'BUTTON', 'Save model access').disabled, true)
+  assert.equal(find(environment.container, 'BUTTON', 'Save department model approval'), undefined)
   await act(async () => verify.dispatchEvent(new environment.window.Event('click')))
   assert.equal(calls.length, 1)
   assert.equal(calls[0][0], 'verify')
-  assert.equal(find(environment.container, 'BUTTON', 'Verifying…').disabled, true)
+  assert.equal(find(environment.container, 'BUTTON', 'Verifying...').disabled, true)
   assert.equal(find(environment.container, 'BUTTON', 'Save private model access').disabled, true)
   await act(async () => finishVerification())
 
