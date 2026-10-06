@@ -301,7 +301,8 @@ export async function handleRequest(req: Request, dependencies: {
 
     const body = await req.json()
     const action = text(body.action, 40)
-    const modelScopedAction = action === 'list_model_allowlist' || action === 'configure_model_allowlist'
+    const mappingAction = ['list_workshop_mappings', 'save_workshop_mappings', 'recover_workshop_mappings'].includes(action)
+    const modelScopedAction = mappingAction || action === 'list_model_allowlist' || action === 'configure_model_allowlist'
       || action === 'configure_context_organization_models'
       || (action === 'save' && body.organization_only === true)
     const designScopedAction = (action === 'list' || action === 'test' || action === 'disable'
@@ -323,6 +324,34 @@ export async function handleRequest(req: Request, dependencies: {
     }
 
     const isLeader = LEADER_ROLES.has(membership.role)
+
+    if (mappingAction) {
+      if (!isLeader) return json({ error: 'Leadership access required' }, 403)
+      const uuid = (value: unknown) => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+      if (!uuid(body.project_id) || !uuid(body.engagement_id) || (action !== 'list_workshop_mappings' && !uuid(body.request_id))) {
+        return json({ error: 'Exact project, engagement and request are required' }, 400)
+      }
+      if (action === 'save_workshop_mappings' && (typeof body.expected_token !== 'string' || !/^[0-9a-f]{32}$/.test(body.expected_token)
+        || !Array.isArray(body.selections) || body.selections.length < 1 || body.selections.length > 30)) {
+        return json({ error: 'Review the selected mappings first' }, 400)
+      }
+      const args: Record<string, unknown> = { p_organization_id: selectedOrganizationId,
+        p_project_id: body.project_id, p_engagement_id: body.engagement_id, p_actor_id: user.id }
+      if (action !== 'list_workshop_mappings') args.p_request_id = body.request_id
+      if (action === 'save_workshop_mappings') Object.assign(args, { p_expected_token: body.expected_token, p_selections: body.selections })
+      const procedure = action === 'list_workshop_mappings' ? 'get_workshop_model_mappings'
+        : action === 'save_workshop_mappings' ? 'save_workshop_model_mappings' : 'recover_workshop_model_mappings'
+      const { data, error } = await adminClient.rpc(procedure, args)
+      if (error) {
+        const status = error.code === '42501' ? 403 : error.code === '40001' ? 409
+          : ['22023', '23514', '22P02'].includes(error.code) ? 400 : 503
+        return json({ error: status === 409 ? 'Mapping review changed. Load and review again.'
+          : status === 403 ? 'Current leadership and active project access required.'
+          : status === 400 ? 'Reviewed mapping command is invalid or unavailable.'
+          : 'Mapping outcome could not be confirmed. Check the original request.', code: `mapping_${status}` }, status)
+      }
+      return json({ result: data })
+    }
 
     if (action === 'list_model_allowlist') {
       const { data, error } = await userClient.from('integration_connections')
