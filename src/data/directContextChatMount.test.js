@@ -72,7 +72,7 @@ async function mount(t, options = {}) {
       if (source.endsWith('PrivateDesignVideoTools.jsx')) return '\0direct-video'
     },
     load(id) {
-      if (id === '\0direct-import-client') return 'export const supabase = new Proxy({}, {get(){throw Error("Closed importer must not access client")}})'
+      if (id === '\0direct-import-client') return 'export const supabase = {functions:{invoke(){throw Error("Unexpected importer network request")}}}'
       if (id === '\0direct-auth') return 'export const useAuth = () => ({ user: { id: globalThis.__directChatTest.actor } })'
       if (id === '\0direct-org') return 'export const useOrganization = () => globalThis.__directChatTest.organization'
       if (id === '\0direct-chat') return 'export const departmentChat = new Proxy({}, {get: (_, key) => (...args) => globalThis.__directChatTest.fixture.chat[key](...args)})'

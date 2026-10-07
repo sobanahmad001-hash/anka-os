@@ -91,7 +91,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   const ready = readiness?.model_configuration_id === modelId && readiness?.paid_execution_enabled === true
     && readiness?.spend_tracking_configured === true && readiness?.model_status === 'configured'
   const canCanonical = model?.provider === 'openai' && contextKind === 'project_team'
-  const importScope=useMemo(()=>selected?.id?{organizationId,projectId,conversationId:selected.id,actorId}:null,[organizationId,projectId,selected?.id,actorId])
+  const importScope=useMemo(()=>contextKind==='project_team'&&selected?.id?{organizationId,projectId,conversationId:selected.id,actorId}:null,[contextKind,organizationId,projectId,selected?.id,actorId])
   const importRepository=useMemo(()=>PROJECT_IMPORT_RELEASE_READY&&importScope&&selected.owner_id===actorId?createProjectSpreadsheetImportRepository(supabase,importScope):null,[importScope,selected?.owner_id,actorId])
   const consent = useTextAiConsent(textAiConsentKey({ userId: actorId, organizationId, contextKind, departmentId, projectId,
     conversationId: selected?.id || newId, connectionId: model?.connectionId, provider: model?.provider,
