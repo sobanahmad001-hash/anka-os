@@ -18,7 +18,6 @@ test('combined list paginates each source without losing the other loaded rows',
     searchConversations: async (_d, input) => { cursors.push(['engagement', input.before_id]); return input.before_id ? { items: [engagementRow('older')] } : { items: [engagementRow()], next_cursor: { id: 'same', last_activity_at: '2026-09-26T00:00:00Z' } } },
   }
   const { root, container, vite, signal } = await setup(t, repo)
-  t.after(() => vite.close())
   const { default: List } = await vite.ssrLoadModule('/src/components/WorkshopConversationList.jsx')
   await act(async () => root.render(createElement(List, { organizationId: 'org', actorId: 'actor', departmentId: 'design', engagement, signal, onOpen: noop })))
   assert.match(container.textContent, /51 loaded/)
@@ -59,7 +58,7 @@ async function setup(t, repository) {
       },
     }] })
   const root = createRoot(env.container)
-  t.after(async () => { await act(async () => root.unmount()); Object.assign(globalThis, previous) })
+  t.after(async () => { await act(async () => root.unmount()); await vite.close(); Object.assign(globalThis, previous) })
   return { ...env, root, vite, signal: values.__workshopListFixture.signal, abortController }
 }
 
