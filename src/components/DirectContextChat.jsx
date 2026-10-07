@@ -9,13 +9,19 @@ import { clearDirectChatRecovery, directChatRecoveryKey, readDirectChatRecovery,
 import { clearDirectChatDraft, readDirectChatDraft, writeDirectChatDraft } from '../data/directChatDraft.js'
 import { WorkshopChatHistoryContext } from '../context/WorkshopChatHistoryContext.jsx'
 import './directContextChat.css'
+import { supabase } from '../lib/supabase.js'
+import { createProjectSpreadsheetImportRepository } from '../data/projectSpreadsheetImportRepository.js'
+import { PROJECT_IMPORT_RELEASE_READY } from '../data/projectSpreadsheetMappingAssist.js'
+import { createSpreadsheetMappingTransport } from '../data/projectSpreadsheetMappingTransport.js'
 const PrivateDesignVideoTools = lazy(() => import('./PrivateDesignVideoTools.jsx'))
+const ProjectSpreadsheetImportPanel = lazy(() => import('./ProjectSpreadsheetImportPanel.jsx'))
 function VideoWorkbenchReady({ onReady }) { useEffect(onReady, [onReady]); return null }
 
 export default function DirectContextChat({ contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError, initialConversation, onConversationListChange, onNavigationBusyChange, onDraftDirtyChange }) {
   const workshopHistory = useContext(WorkshopChatHistoryContext)
   const hasExternalHistory = Boolean(workshopHistory)
   const actorId = user.id
+  const [importOpen, setImportOpen] = useState(false)
   const scope = useMemo(() => ({ context_kind: contextKind, ...(departmentId ? { department_id: departmentId } : {}), ...(projectId ? { project_id: projectId } : {}) }), [contextKind, departmentId, projectId])
   const requestScope = useMemo(() => ({ organizationId, signal }), [organizationId, signal])
   const recoveryKey = directChatRecoveryKey(actorId, organizationId, contextKind, projectId, departmentId)
@@ -85,6 +91,8 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   const ready = readiness?.model_configuration_id === modelId && readiness?.paid_execution_enabled === true
     && readiness?.spend_tracking_configured === true && readiness?.model_status === 'configured'
   const canCanonical = model?.provider === 'openai' && contextKind === 'project_team'
+  const importScope=useMemo(()=>selected?.id?{organizationId,projectId,conversationId:selected.id,actorId}:null,[organizationId,projectId,selected?.id,actorId])
+  const importRepository=useMemo(()=>PROJECT_IMPORT_RELEASE_READY&&importScope&&selected.owner_id===actorId?createProjectSpreadsheetImportRepository(supabase,importScope):null,[importScope,selected?.owner_id,actorId])
   const consent = useTextAiConsent(textAiConsentKey({ userId: actorId, organizationId, contextKind, departmentId, projectId,
     conversationId: selected?.id || newId, connectionId: model?.connectionId, provider: model?.provider,
     canonical: canonical && canCanonical, recipients: sharing?.recipients.map(row => row.recipient_id) || [] }))
@@ -109,6 +117,23 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
       ? await departmentChat.getProjectContextSharing({ conversation_id: id }, requestScope) : null
     return { ...result, messages: all, sharing }
   }, [requestScope, validConversation, contextKind, actorId])
+  const mappingState=useRef(null)
+  const mappingActive=useRef(false)
+  mappingState.current={modelId,ready,selected,organizationId,projectId,busy,pending}
+  const mappingTransport=useMemo(()=>PROJECT_IMPORT_RELEASE_READY&&importRepository?createSpreadsheetMappingTransport({chat:departmentChat,runner:contextChatRunner,scope:importScope,storage:globalThis.sessionStorage,
+    consent:()=>consent.confirm(),checkCurrent:async()=>{
+      const current=mappingState.current
+      if(!current.ready||current.busy&&!mappingActive.current||current.pending||current.organizationId!==importScope.organizationId||current.projectId!==importScope.projectId||current.selected?.id!==importScope.conversationId||current.selected?.owner_id!==importScope.actorId)throw Error('Owned idle Project Chat and approved model required')
+      const latest=await read(importScope.conversationId)
+      if(latest.conversation.owner_id!==importScope.actorId||latest.conversation.state!=='active'||latest.sharing?.recipients?.length)throw Error('Mapping samples require an unshared active private source conversation')
+      if(mappingState.current!==current)throw Error('Mapping context changed during access check')
+      return current.modelId
+    }}):null,[importRepository,importScope,read,consent])
+  async function mappingAction(kind,disclosure){
+    if(!mappingTransport||lock.current||pendingRef.current||!current())throw Error('Finish the current Chat operation before mapping')
+    mappingActive.current=true;lock.current=true;setBusy(true)
+    try{return await mappingTransport[kind](disclosure)}finally{mappingActive.current=false;lock.current=false;if(current())setBusy(false)}
+  }
   const apply = useCallback(result => {
     setSelected(result.conversation); setRename(result.conversation.title)
     setMessages(result.messages || []); setHasOlder(Boolean(result.has_older))
@@ -352,14 +377,15 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     })
   }
   const output = messages.find(row => row.id === outputId && row.role === 'assistant' && row.status === 'completed')
-  return <><section ref={rootRef} className={`direct-chat ${historyOpen ? 'history-open' : ''} ${output ? 'output-open' : ''}`} aria-label={label} onKeyDown={event => {
+  return <><section ref={rootRef} inert={importOpen && contextKind === 'project_team' && projectId ? true : undefined} className={`direct-chat ${historyOpen ? 'history-open' : ''} ${output ? 'output-open' : ''}`} aria-label={label} onKeyDown={event => {
     if (event.key === 'Escape' && !consent.dialog) { setHistoryOpen(false); setOutputId(''); setShareOpen(false); setDetailsOpen(false) }
   }}>
     <header className="direct-chat-header" inert={drawerOpen ? true : undefined}><div><h2>{label}</h2><p>{selected?.title || 'New chat'} · {contextKind === 'department_private' ? 'Only you' : sharing?.recipients.length ? 'Shared with selected teammates' : 'Private unless explicitly shared'}</p></div>
       <div className="direct-chat-actions">{privateDesign && <button ref={videoButton} type="button" disabled={busy || videoBusy || Boolean(pending) || !selected || !owner || selected.state !== 'active'} title={!selected ? "Send a message to save this private chat before opening video tools." : undefined} aria-expanded={videoOpen} onClick={() => { if (lock.current || videoLock.current || pendingRef.current) return; setVideoOpen(!videoOpen); setVideoOpened(true) }}>Video tools</button>}<button type="button" ref={historyButtonRef} aria-expanded={historyOpen} onClick={() => { setOutputId(''); setHistoryOpen(!historyOpen) }}>History</button>{!historyOpen && <button type="button" disabled={busy || videoBusy || Boolean(pending)} onClick={newChat}>New chat</button>}<button type="button" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>Details</button>
+        {contextKind === 'project_team' && projectId && <button type="button" disabled={busy || videoBusy} onClick={() => setImportOpen(true)}>Import spreadsheet</button>}
         {selected && owner && contextKind === 'project_team' && <button type="button" disabled={busy || videoBusy} onClick={loadSharing}>Share</button>}</div>
+
     </header>
-    {consent.dialog && <TextAiConsent {...consent.dialog} provider={model?.provider} model={`${model?.connectionName} · ${model?.label}`} scope={`${contextKind} conversation`} canonical={canonical && canCanonical} />}
     {error && <p role="alert" className="direct-chat-error">{error}</p>}
     {notice && !pending && <p role="status" className="direct-chat-notice">{notice}</p>}
     {pending && <div className="direct-chat-notice direct-chat-recovery"><p>Check this send before sending again. Recovery never requests another AI reply.</p><button type="button" disabled={busy || videoBusy} onClick={recover}>Check recovery</button></div>}
@@ -412,6 +438,8 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
       {output && <aside ref={outputId && mobileDrawer ? drawerRef : undefined} className="direct-chat-output" role={mobileDrawer ? 'dialog' : undefined} aria-modal={mobileDrawer ? true : undefined} onKeyDown={drawerKeyDown} aria-label="Saved reply output" data-source-message-id={output.id}><div><h3>Saved reply</h3><button ref={outputClose} type="button" onClick={() => setOutputId('')}>Close output</button></div><p>{output.body}</p><small>Saved conversation reply · Read-only preview</small></aside>}
     </div>
   </section>
+      {importOpen && contextKind === 'project_team' && projectId && <Suspense fallback={<p role="status">Opening local spreadsheet inspector…</p>}><ProjectSpreadsheetImportPanel key={`${projectId}:${selected?.id||'local'}`} projectId={projectId} projectLabel={label} repository={importRepository} recoveryScope={importScope} onMappingAssist={mappingTransport?disclosure=>mappingAction('request',disclosure):null} onMappingRecover={mappingTransport?disclosure=>mappingAction('recover',disclosure):null} onClose={() => setImportOpen(false)} /></Suspense>}
+    {consent.dialog && <TextAiConsent {...consent.dialog} provider={model?.provider} model={`${model?.connectionName} · ${model?.label}`} scope={`${contextKind} conversation`} canonical={canonical && canCanonical} />}
     {privateDesign && videoOpened && selected && owner && <section ref={videoPane} hidden={!videoOpen} className="direct-chat-video workspace-card p-4 mt-3" aria-label="Private video workbench">
       <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">Private video · {selected.title}</h3><button type="button" disabled={videoBusy} onClick={() => { if (videoLock.current) return; setVideoOpen(false); videoButton.current?.focus() }}>Back to chat</button></div>
       <p className="mt-2 text-xs text-[var(--anka-muted)]">Generate is a separate explicit action. Eligibility, verified pricing, spend, consent and private job recovery still apply. A project copy remains a separate authorized draft.</p>

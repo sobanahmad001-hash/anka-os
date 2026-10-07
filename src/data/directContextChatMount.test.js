@@ -10,8 +10,44 @@ import { readDirectChatDraft } from './directChatDraft.js'
 
 const descendants = node => [node, ...node.childNodes.flatMap(descendants)]
 const props = node => node?.[Object.keys(node).find(key => key.startsWith('__reactProps$'))]
+
+test('Project Chat spreadsheet inspection stays local and creates no conversation or provider request', async t => {
+  const renderErrors=[],previousConsoleError=console.error;console.error=(...args)=>renderErrors.push(args.join(' '));t.after(()=>{console.error=previousConsoleError})
+  const ui = await mount(t)
+  assert.equal(ui.button('Import spreadsheet'), undefined)
+  await ui.render({ contextKind: 'project_team', projectId, departmentId: '' })
+  await ui.click('Import spreadsheet')
+  // Vite's cold lazy-module transform can exceed a short fixed retry window.
+  // Synchronize on usable rendered controls, returning as soon as they exist.
+  await waitForRendered(() => ui.named('Project spreadsheet import') && ui.named('Source spreadsheet'), 'Project spreadsheet import and source control')
+  const data = new TextEncoder().encode('page key,title,path\npage:home,Home,/home')
+  await act(async () => props(ui.named('Source spreadsheet')).onChange({ target: { files: [{ name: 'synthetic.csv', size: data.length, arrayBuffer: async () => data.buffer }] } }))
+  const noInspectionError = () => assert.equal(descendants(ui.environment.container).find(node => props(node)?.role === 'alert')?.textContent, undefined, 'Local inspection must not render an error')
+  await waitForRendered(() => { noInspectionError(); return ui.named('Import sheet') && ui.button('Preview mapped rows')?.disabled === false }, 'inspected sheet and enabled preview')
+  // The general click helper intentionally flushes one turn; it does not await
+  // async handlers. Await this inspection handler before observing its result.
+  await act(async () => { await props(ui.button('Preview mapped rows')).onClick() })
+  await waitForRendered(() => { noInspectionError(); return ui.named('Spreadsheet row preview') }, 'mapped source row preview')
+  assert.match(ui.named('Spreadsheet row preview').textContent, /1 source rows/)
+  assert.match(ui.named('Spreadsheet row preview').textContent, /Home/)
+  assert.match(ui.named('Spreadsheet row preview').textContent, /\/home/)
+  assert.match(ui.named('Spreadsheet row preview').textContent, /lookup is incomplete/)
+  assert.deepEqual(ui.fixture.data.counters, { created: 0, messages: 0, run: 0, recover: 0 })
+  await ui.render({ contextKind: 'project_team', projectId: crypto.randomUUID(), departmentId: '' })
+  await waitForRendered(() => !ui.named('Project spreadsheet import') && !ui.named('Spreadsheet row preview'), 'project change to clear importer and preview')
+  assert.deepEqual(renderErrors,[])
+})
 const defer = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
 const flush = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+
+async function waitForRendered(condition, description, timeoutMs = 10_000) {
+  const deadline = performance.now() + timeoutMs
+  while (!condition()) {
+    const remaining = deadline - performance.now()
+    assert.ok(remaining > 0, `Timed out waiting for rendered ${description}`)
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, Math.min(20, remaining))) })
+  }
+}
 
 async function mount(t, options = {}) {
   const environment = mountedEnvironment(), storage = new Map()
@@ -27,6 +63,7 @@ async function mount(t, options = {}) {
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [{
     name: 'direct-chat-mounted-offline', enforce: 'pre',
     resolveId(source) {
+      if (source.endsWith('/lib/supabase.js')) return '\0direct-import-client'
       if (source.endsWith('AuthContext.jsx')) return '\0direct-auth'
       if (source.endsWith('OrganizationContext.jsx')) return '\0direct-org'
       if (source.endsWith('departmentChatRepository.js')) return '\0direct-chat'
@@ -35,6 +72,7 @@ async function mount(t, options = {}) {
       if (source.endsWith('PrivateDesignVideoTools.jsx')) return '\0direct-video'
     },
     load(id) {
+      if (id === '\0direct-import-client') return 'export const supabase = new Proxy({}, {get(){throw Error("Closed importer must not access client")}})'
       if (id === '\0direct-auth') return 'export const useAuth = () => ({ user: { id: globalThis.__directChatTest.actor } })'
       if (id === '\0direct-org') return 'export const useOrganization = () => globalThis.__directChatTest.organization'
       if (id === '\0direct-chat') return 'export const departmentChat = new Proxy({}, {get: (_, key) => (...args) => globalThis.__directChatTest.fixture.chat[key](...args)})'
