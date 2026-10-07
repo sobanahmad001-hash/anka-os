@@ -17,6 +17,7 @@ for (const contextKind of ['organization', 'project_team']) {
     const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent',
       plugins: [{ name: 'offline-private-context-mount', enforce: 'pre',
         resolveId(source) {
+      if (source.endsWith('/lib/supabase.js')) return '\0offline-import-client'
           if (source.endsWith('AuthContext.jsx')) return '\0context-auth'
           if (source.endsWith('OrganizationContext.jsx')) return '\0context-organization'
           if (source.endsWith('departmentChatRepository.js')) return '\0context-repository'
@@ -24,6 +25,7 @@ for (const contextKind of ['organization', 'project_team']) {
           if (source.endsWith('contextChatRunnerRepository.js')) return '\0context-runner'
         },
         load(id) {
+      if (id === '\0offline-import-client') return 'export const supabase = {functions:{invoke(){throw Error("Unexpected importer network request")}}}'
           if (id === '\0context-auth') return 'export const useAuth = () => ({ user: { id: "actor" } })'
           if (id === '\0context-organization') return 'export const useOrganization = () => ({ activeOrganizationId: "org", scopeRevision: 1, requestSignal: globalThis.__privateContextMount.signal, handleOrganizationAccessError: () => {} })'
           if (id === '\0context-repository') return `export const departmentChat = {
@@ -36,9 +38,10 @@ for (const contextKind of ['organization', 'project_team']) {
           if (id === '\0context-runner') return 'export const contextChatRunner = { run: () => { throw new Error("Provider call forbidden") }, recover: () => { throw new Error("Provider call forbidden") } }'
         },
       }] })
+  t.after(() => vite.close())
     const { default: Panel } = await vite.ssrLoadModule('/src/components/ContextConversationPanel.jsx')
     const root = createRoot(environment.container)
-    t.after(async () => { await act(async () => root.unmount()); await vite.close(); Object.assign(globalThis, previous); delete globalThis.__privateContextMount })
+    t.after(async () => { await act(async () => root.unmount()); Object.assign(globalThis, previous); delete globalThis.__privateContextMount })
     await act(async () => root.render(createElement(Panel,
       { contextKind, projectId: contextKind === 'project_team' ? 'project' : '', label: 'Private conversations' })))
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })

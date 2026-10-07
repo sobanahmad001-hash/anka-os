@@ -154,6 +154,7 @@ function workshopStubs() {
     name: 'department-workshop-stubs',
     enforce: 'pre',
     resolveId(source) {
+      if (source.endsWith('/lib/supabase.js')) return '\0offline-import-client'
       if (source && source.endsWith('AuthContext.jsx')) return '/0dws-auth'
       if (source && source.endsWith('OrganizationContext.jsx')) return '/0dws-org'
       if (source && source.endsWith('delivery.js')) return '/0dws-delivery'
@@ -166,6 +167,7 @@ function workshopStubs() {
       return null
     },
     load(id) {
+      if (id === '\0offline-import-client') return 'export const supabase = {functions:{invoke(){throw Error("Unexpected importer network request")}}}'
       if (id === '/0dws-content-studio') return `export const contentStudio = { forOrganization: org => ({ load: async id => { const workspace = await globalThis.__dwsHarness.delivery.getDepartmentWorkspace('content', org); const scope = workspace.chatContext || workspace; return { engagement: scope.engagements.find(row => row.id === id), artifacts: [], stages: [], versions: [], contentServices: scope.services || [] } } }) }`
       if (id === '/0dws-conversation-repository') return 'export const departmentChat = { listContextConversations: async () => globalThis.__dwsHarness.privateRows || [], searchConversations: async (_department, input) => ({ items: (globalThis.__dwsHarness.engagementRows || []).filter(row => row.engagement_id === input.engagement_id && row.project_id === input.project_id) }) }'
       if (id === '/0dws-design-tools') return "import { createElement, useEffect } from 'react'; export default function Tools(props) { globalThis.__dwsHarness.designToolsProps = props; useEffect(() => { globalThis.__dwsHarness.designMounts = (globalThis.__dwsHarness.designMounts || 0) + 1 }, []); return createElement('p', null, 'Inline Design tools') }"

@@ -1,0 +1,23 @@
+.project-import-overlay { position: fixed; inset: 0; z-index: 60; display: flex; justify-content: flex-end; background: #0005; }
+.project-import { box-sizing: border-box; width: min(680px, 100%); height: 100%; min-width: 0; padding: 16px; overflow: auto; overscroll-behavior: contain; background: var(--anka-surface, #fff); color: var(--anka-ink, #20202a); display: flex; flex-direction: column; gap: 12px; font-size: 14px; }
+.project-import *, .project-import *::before, .project-import *::after { box-sizing: border-box; min-width: 0; }
+.project-import :is(p, h3, h4, label, dd, li, strong, span, summary) { overflow-wrap: anywhere; }
+.project-import > * { flex-shrink: 0; }
+.project-import-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.project-import-header h3 { flex: 1; margin: 0; }
+.project-import :is(input:not([type=checkbox]), select) { display: block; width: 100%; max-width: 100%; padding: 8px; margin-top: 4px; }
+.project-import input[type=file] { font-size: 12px; }
+.project-import input[type=checkbox] { width: 18px; height: 18px; flex-shrink: 0; vertical-align: middle; margin-right: 8px; }
+.project-import button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; padding: 8px 12px; }
+.project-import label { display: block; margin-block: 8px; }
+.project-import-mapping { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
+.project-import details { border: 1px solid var(--anka-line, #ddd); padding: 10px; border-radius: 8px; }
+.project-import summary { cursor: pointer; font-weight: 600; }
+.project-import-row { margin: 10px 0; padding: 12px; border: 1px solid var(--anka-line, #ddd); border-radius: 8px; }
+.project-import-row h4 { margin: 0; }
+.project-import-row dl { margin: 8px 0; }
+.project-import-row dl > div { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 2fr); gap: 10px; padding-block: 4px; }
+.project-import-row dt { color: var(--anka-muted, #555); text-transform: capitalize; }
+.project-import-row dd { margin: 0; white-space: pre-wrap; }
+.project-import-warning { color: var(--anka-danger, #b42318); }
+@media (max-width: 480px) { .project-import { padding: 12px; } .project-import-mapping { grid-template-columns: minmax(0, 1fr); } .project-import-row dl > div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }

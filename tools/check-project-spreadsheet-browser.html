@@ -1,0 +1,48 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Synthetic spreadsheet parser checks</title></head><body><h1>Local synthetic spreadsheet checks</h1><div id="result" style="overflow-wrap:anywhere">Running…</div><div id="panel"></div><script type="module">
+import { zipSync, strToU8 } from 'fflate'
+import { parseImportXlsx } from '../src/data/projectSpreadsheetSource.js'
+import React from 'react'
+import { createRoot } from 'react-dom/client'
+import Panel from '../src/components/ProjectSpreadsheetImportPanel.jsx'
+import '../src/components/directContextChat.css'
+import { preparePrivateProjectImport } from '../supabase/functions/_shared/projectSpreadsheetServer.ts'
+import { spreadsheetSourceIdentity } from '../src/data/projectSpreadsheetPreview.js'
+const results = []
+const check = (name, run) => { try { run(); results.push('PASS ' + name) } catch (e) { results.push('FAIL ' + name + ': ' + e.message) } }
+const assert = (ok, message) => { if (!ok) throw Error(message) }
+const workbook = (sheet, options = {}) => zipSync(Object.fromEntries(Object.entries({
+ 'xl/workbook.xml': `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Visible" sheetId="1" r:id="r1"/><sheet name="Hidden" state="veryHidden" sheetId="2" r:id="r2"/></sheets></workbook>`,
+ 'xl/_rels/workbook.xml.rels': `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="r1" Target="worksheets/sheet1.xml"/><Relationship Id="r2" Target="worksheets/sheet2.xml"/></Relationships>`,
+ 'xl/worksheets/sheet1.xml': `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${sheet}</worksheet>`,
+ ...options,
+}).map(([k,v]) => [k, strToU8(v)])))
+const base = '<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>title</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>Original</t></is></c></row></sheetData>'
+check('visible values, provenance and hidden sheet exclusion', () => { const p = parseImportXlsx(workbook(base)); assert(p.sheets[0].rows[1].cells[0] === 'Original', 'value'); assert(p.sheets[0].rows[1].row === 2, 'row'); assert(p.sheets[1].hidden && !p.sheets[1].rows.length, 'hidden') })
+check('hidden rows and columns never appear', () => { const p = parseImportXlsx(workbook('<cols><col min="2" max="2" hidden="1"/></cols><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>title</t></is></c><c r="B1" t="inlineStr"><is><t>PRIVATE</t></is></c></row><row r="2" hidden="1"><c r="A2" t="inlineStr"><is><t>SECRET</t></is></c></row></sheetData>')); assert(!JSON.stringify(p).includes('PRIVATE') && !JSON.stringify(p).includes('SECRET'), 'hidden leakage') })
+check('formulas are flagged and cached value stays literal', () => { const p = parseImportXlsx(workbook('<sheetData><row r="1"><c r="A1"><f>WEBSERVICE("https://invalid.test")</f><v>12</v></c></row></sheetData>')); assert(p.sheets[0].rows[0].cells[0] === '12' && p.sheets[0].formulas.length === 1, 'formula') })
+check('shared strings preserve escaped text', () => { const p = parseImportXlsx(workbook('<sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row></sheetData>', { 'xl/sharedStrings.xml': '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>A &amp; B</t></si></sst>' })); assert(p.sheets[0].rows[0].cells[0] === 'A & B', 'shared string') })
+check('DTD/entity payload rejected', () => { let rejected = false; try { parseImportXlsx(workbook(base, { 'xl/workbook.xml': '<!DOCTYPE workbook [<!ENTITY x "secret">]><workbook/>' })) } catch { rejected = true } assert(rejected, 'DTD accepted') })
+check('malformed XML and duplicate cell rejected', () => { for (const xml of ['<sheetData>', '<sheetData><row r="1"><c r="A1"><v>1</v></c><c r="A1"><v>2</v></c></row></sheetData>']) { let rejected = false; try { parseImportXlsx(workbook(xml)) } catch { rejected = true } assert(rejected, 'invalid XML accepted') } })
+document.getElementById('result').textContent = results.join('\n')
+document.getElementById('panel').className='direct-chat'
+const id=n=>`a0000000-0000-4000-8000-${String(n).padStart(12,'0')}`
+const scope={organizationId:id(2),projectId:id(1),conversationId:id(3),actorId:id(4)}
+const owned={...scope,conversation:{id:scope.conversationId,owner_id:scope.actorId,organization_id:scope.organizationId,project_id:scope.projectId,context_kind:'project_team',state:'active'},project:{planning_timezone:'UTC'}}
+let attachment=null,bytes=null,saved=null,confirmation=null,saveLost=false
+const calls=[];window.importerSyntheticCalls=calls
+const admin={from:table=>{const data=table==='engagements'?{id:id(6),name:'Synthetic website workstream',project_id:scope.projectId,organization_id:scope.organizationId}:table==='department_chat_attachments'?attachment:[]
+ const q={select(){return q},eq(){return q},neq(){return q},limit(){return q},order(){return q},maybeSingle:async()=>({data,error:null}),then(resolve){return Promise.resolve({data,error:null}).then(resolve)}};return q},storage:{from:()=>({download:async()=>({data:new Blob([bytes]),error:null})})},rpc(){throw Error('Offline preview cannot write')}}
+const repository={
+ targets:async()=>{calls.push('targets');return {type:'website_pages',engagements:[{id:id(6),label:'Synthetic website workstream',status:'active'}],artifacts:[],architectures:[]}},
+ sourceStatus:async()=>{calls.push('source_status');return attachment},
+ reserveSource:async(file,uuid)=>{calls.push('reserve');attachment={id:uuid,conversation_id:scope.conversationId,organization_id:scope.organizationId,project_id:scope.projectId,uploaded_by:scope.actorId,source_kind:'project_spreadsheet',status:'awaiting_upload',ai_use_allowed:false,share_with_recipients:false,original_name:file.name,verified_mime:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',final_path:`${scope.organizationId}/${scope.conversationId}/final/${uuid}`};return {attachment_id:uuid}},
+ uploadSource:async(file)=>{calls.push('upload_mock');bytes=new Uint8Array(await file.arrayBuffer())},
+ finishSource:async()=>{calls.push('finish_mock');attachment.status='reference_only';attachment.sha256_hex=await spreadsheetSourceIdentity(bytes);attachment.byte_size=bytes.length;return attachment},
+ preview:async input=>{calls.push('preview');return preparePrivateProjectImport(admin,owned,input)},
+ save:async(input,requestId)=>{calls.push('save_mock');const prepared=await preparePrivateProjectImport(admin,owned,input);saved={status:'pending',request_id:requestId,review_sha256:prepared.review_sha256,preview:prepared.preview};if(!saveLost){saveLost=true;throw Error('Synthetic lost save response')}return saved},
+ recover:async requestId=>{calls.push('recover_mock');if(saved?.request_id!==requestId)return null;return confirmation?{...saved,status:'accepted',result:confirmation}:saved},
+ confirm:async()=>{calls.push('confirm_mock');if(!confirmation)confirmation={rows:saved.preview.rows.map(row=>({row_id:row.rowId,action:row.action,outcome:'verified',result:{unapproved:true}}))};return confirmation},
+}
+const integrated=new URLSearchParams(location.search).get('integrated')==='1'
+createRoot(document.getElementById('panel')).render(React.createElement(Panel, { projectId: scope.projectId, projectLabel: 'Synthetic local project', onClose: () => {}, ...(integrated?{repository,recoveryScope:scope}:{}) }))
+</script></body></html>

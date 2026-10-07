@@ -29,6 +29,7 @@ async function mount(t, readiness, panelProps = {}, modelAllowlist) {
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent',
     plugins: [{ name: 'offline-context-readiness', enforce: 'pre',
       resolveId(source) {
+      if (source.endsWith('/lib/supabase.js')) return '\0offline-import-client'
         if (source.endsWith('PrivateDesignVideoTools.jsx')) return '\0context-video'
         if (source.endsWith('/context/AuthContext.jsx') || source.endsWith('../context/AuthContext.jsx')) return '\0context-auth'
         if (source.endsWith('/context/OrganizationContext.jsx') || source.endsWith('../context/OrganizationContext.jsx')) return '\0context-organization'
@@ -37,6 +38,7 @@ async function mount(t, readiness, panelProps = {}, modelAllowlist) {
         if (source.endsWith('contextChatRunnerRepository.js')) return '\0context-runner'
       },
       load(id) {
+      if (id === '\0offline-import-client') return 'export const supabase = {functions:{invoke(){throw Error("Unexpected importer network request")}}}'
         if (id === '\0context-video') return `import { createElement, useEffect, useState } from 'react'; export default function Tools(props) {
           const [draft, setDraft] = useState('');
           globalThis.__contextReadinessFixture.videoProps = props;
@@ -78,10 +80,11 @@ async function mount(t, readiness, panelProps = {}, modelAllowlist) {
         if (id === '\0context-runner') return 'export const contextChatRunner = { run: () => globalThis.__contextReadinessFixture.runner(), recover: () => globalThis.__contextReadinessFixture.runner() }'
       },
     }] })
+  t.after(() => vite.close())
   const { default: Panel } = await vite.ssrLoadModule('/src/components/ContextConversationPanel.jsx')
   const root = createRoot(environment.container)
   globalThis.__contextReadinessFixture.signal = new AbortController().signal
-  t.after(async () => { await act(async () => root.unmount()); await vite.close(); Object.assign(globalThis, previous); delete globalThis.__contextReadinessFixture })
+  t.after(async () => { await act(async () => root.unmount()); Object.assign(globalThis, previous); delete globalThis.__contextReadinessFixture })
   await act(async () => root.render(createElement(Panel, { contextKind: 'organization', label: 'Organization conversations', ...panelProps })))
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
   return { environment, calls, root, Panel }

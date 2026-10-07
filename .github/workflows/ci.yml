@@ -39,4 +39,5 @@ jobs:
       - run: python3 tools/check-reporting-google-manifests.py
       - run: python3 tools/check-reporting-facebook-manifest.py
       - run: deno check --frozen supabase/functions/reporting-worker/index.ts supabase/functions/_shared/reportingMetaCredentials.js
+      - run: deno check --frozen --config supabase/functions/project-chat-import/deno.json supabase/functions/project-chat-import/index.ts
       - run: npm run build

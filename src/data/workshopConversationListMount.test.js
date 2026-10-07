@@ -39,6 +39,7 @@ async function setup(t, repository) {
   const vite = await createServer({ server: { middlewareMode: true }, ssr: { noExternal: ['react-router-dom', 'react-router'] }, appType: 'custom', logLevel: 'silent',
     plugins: [{ name: 'offline-workshop-list', enforce: 'pre',
       resolveId(source) {
+      if (source.endsWith('/lib/supabase.js')) return '\0offline-import-client'
         if (source.endsWith('departmentChatRepository.js')) return '\0list-repo'
         if (source.endsWith('AuthContext.jsx')) return '\0list-auth'
         if (source.endsWith('OrganizationContext.jsx')) return '\0list-org'
@@ -47,6 +48,7 @@ async function setup(t, repository) {
         if (source === 'react-router-dom') return '\0list-router'
       },
       load(id) {
+      if (id === '\0offline-import-client') return 'export const supabase = {functions:{invoke(){throw Error("Unexpected importer network request")}}}'
         if (id === '\0list-repo') return 'export const departmentChat = new Proxy({}, { get(_target, key) { return (...args) => globalThis.__workshopListFixture.repository[key](...args) } })'
         if (id === '\0list-auth') return 'export const useAuth = () => ({ user: { id: "actor" } })'
         if (id === '\0list-org') return 'export const useOrganization = () => ({ activeOrganizationId: "org", scopeRevision: 1, requestSignal: globalThis.__workshopListFixture.signal, handleOrganizationAccessError: globalThis.__workshopListFixture.handleError })'
