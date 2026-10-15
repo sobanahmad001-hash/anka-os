@@ -36,7 +36,7 @@ export default function WorkshopChatWorkspace({ mode, onModeChange, departmentNa
         <label className={compact ? 'flex items-center gap-2 text-xs font-semibold text-[var(--anka-muted)]' : 'grid w-full gap-2 text-xs font-semibold text-[var(--anka-muted)] sm:w-auto'}>{compact ? (design ? '' : 'Context') : 'Conversation context'}
           <select aria-label="Conversation context" value={pendingMode || mode} onChange={event => requestMode(event.target.value)} className="max-w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-canvas)] px-3 py-2 text-sm text-[var(--anka-ink)]">
             <option value="private">Private exploration</option>
-            <option value="chat">Project / engagement</option>
+            <option value="chat">{design && projectName ? `Project: ${projectName}` : 'Project / engagement'}</option>
           </select>
         </label>
       </div>
@@ -45,8 +45,8 @@ export default function WorkshopChatWorkspace({ mode, onModeChange, departmentNa
         <p className="text-[var(--anka-muted)]">{privateMode ? 'Visibility: only you' : 'Visibility: per conversation — creator-private unless explicitly shared with selected internal teammates'}</p>
       </div>}
       {!compact && <p className="mt-3 text-xs leading-5 text-[var(--anka-muted)]">{conversationList ? 'Saved histories are grouped by authorized project and engagement; private exploration stays separate.' : 'The saved list below belongs only to the current context.'} Private exploration and engagement conversations keep separate histories. Switching context does not share or move messages.</p>}
-      {design && compact && <p className="design-scope-label" aria-label="Current conversation scope">{privateMode ? 'Only you · Private exploration' : `${projectName || 'Project'}${engagementName ? ` · ${engagementName}` : ''} · Private unless shared`}</p>}
-      {compact && <details className="text-xs text-[var(--anka-muted)]"><summary>Scope</summary><p>Visibility: {privateMode ? 'only you' : 'per conversation; private unless deliberately shared'}. Switching context opens a separate history; it does not share or move these messages.</p></details>}
+      {design && compact && <p className="design-scope-label" aria-label="Current conversation scope">{privateMode ? 'Only you' : `${engagementName || 'Project conversation'} · Private unless shared`}</p>}
+      {compact && <details className="text-xs text-[var(--anka-muted)]"><summary aria-label="Conversation scope details">{design ? '•••' : 'Scope'}</summary><p>Visibility: {privateMode ? 'only you' : 'per conversation; private unless deliberately shared'}. Switching context opens a separate history; it does not share or move these messages.</p></details>}
       {pendingMode && <div role="group" aria-label="Confirm conversation context switch" className="mt-4 rounded-xl border border-[var(--anka-warning)] p-3">
         <p className="text-sm text-[var(--anka-warning)]">Switching may discard unsaved text. Save it first or cancel. Switching closes this view; unsaved text and selections are not transferred or saved automatically.</p>
         {pendingConversation && <p className="mt-2 text-sm">Open: {pendingConversation.row.title} · {pendingConversation.kind === 'private' ? 'Private exploration' : 'Selected engagement'}</p>}

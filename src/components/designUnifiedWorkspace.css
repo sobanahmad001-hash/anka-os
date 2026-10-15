@@ -81,3 +81,30 @@
 .design-unified-workspace .department-chat-footer select{height:42px;margin:0;font-size:14px}
 .design-unified-workspace .department-chat-footer-body>details:not([open]){width:auto;min-width:0;padding:6px 10px;font-size:13px}
 @media(max-width:700px){.design-unified-workspace .department-chat-footer{grid-template-columns:minmax(100px,1fr) minmax(100px,1.5fr)}.design-unified-workspace .department-chat-footer-actions>.design-unified-toolbar>button{grid-column:1;grid-row:3}.design-unified-workspace .department-chat-footer-actions>.department-chat-submit{grid-column:2;grid-row:3}.design-unified-workspace .department-chat-footer select{font-size:16px}}
+
+/* Final readable-width polish; output-open keeps both working columns useful. */
+.design-unified-workspace:not(.output-open)>.design-unified-chat{width:100%;max-width:900px;margin-inline:auto}
+.design-unified-workspace .direct-chat-message-stream{width:100%;max-width:76ch;margin-inline:auto}
+.design-unified-workspace .direct-chat-header h2,.design-unified-workspace .department-chat-heading h2{font-size:22px}
+.design-unified-workspace .direct-chat-header p,.design-unified-workspace .department-chat-heading p{font-size:14px}
+.design-unified-workspace :is(.direct-chat-toolbar,.department-chat-footer) :is(button,select){font-size:14px;min-height:44px}
+.design-unified-workspace .direct-chat-empty{padding-block:clamp(24px,6vh,70px)}
+.design-empty-starters{max-width:640px;margin:24px auto 0}
+.design-empty-starters>p{font-size:14px!important;color:var(--anka-muted);line-height:1.6}
+.design-empty-starters>div{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin-top:16px}
+.design-empty-starters button{font-size:14px;min-height:44px;padding:10px 14px;background:var(--anka-surface);border:1px solid var(--anka-line);border-radius:10px;cursor:pointer}
+.design-empty-starters button:hover{border-color:var(--anka-violet);background:var(--anka-violet-soft)}
+.design-empty-starters button:disabled{opacity:.5;cursor:not-allowed}
+@media(max-width:600px){.design-empty-starters{margin-top:18px}.design-empty-starters>div{display:grid;grid-template-columns:minmax(0,1fr);gap:8px}.design-empty-starters button{font-size:15px}.design-unified-workspace .direct-chat-empty{padding:24px 4px}.design-unified-workspace :is(.direct-chat-toolbar,.department-chat-footer) select{font-size:16px}}
+
+/* Design controls remain above the conversation; generation stays explicit. */
+.design-conversation-top-toolbar{padding:12px 0;border-bottom:1px solid var(--anka-line);min-width:0}
+.design-conversation-top-toolbar .design-unified-toolbar,.design-toolbar-model-settings{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.design-conversation-top-toolbar select{max-width:min(100%,320px);min-height:42px;font-size:14px}
+.design-toolbar-model-settings:empty{display:none}
+.design-toolbar-model-settings label{margin:0;min-width:0}
+.design-toolbar-model-settings .design-media-advanced{position:relative}
+.design-toolbar-model-settings .design-media-advanced>summary{cursor:pointer;min-height:42px;display:flex;align-items:center;padding:0 12px}
+.design-toolbar-model-settings .design-media-setting-fields{position:absolute;top:100%;right:0;z-index:25;width:min(340px,80vw);max-height:50dvh;overflow:auto;padding:16px;background:var(--anka-surface);border:1px solid var(--anka-line);border-radius:12px;box-shadow:0 12px 30px #0003}
+.design-conversation-top-toolbar .department-chat-model>span:not(.sr-only){max-width:60ch;font-size:12px}
+@media(max-width:600px){.design-conversation-top-toolbar{padding:8px 0}.design-conversation-top-toolbar select{font-size:16px;max-width:100%}.design-toolbar-model-settings{flex:1 1 180px}.design-unified-toolbar{gap:6px}.design-toolbar-model-settings .design-media-setting-fields{right:auto;left:0}}

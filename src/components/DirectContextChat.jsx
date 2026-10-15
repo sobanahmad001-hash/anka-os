@@ -37,6 +37,8 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   const [models, setModels] = useState([])
   const [modelId, setModelId] = useState('')
   const [readiness, setReadiness] = useState(null)
+  const [readinessState, setReadinessState] = useState('loading')
+  const [readinessAttempt, setReadinessAttempt] = useState(0)
   const [canonical, setCanonical] = useState(false)
   const [pending, setPending] = useState(initial.recovery)
   const [busy, setBusy] = useState(false)
@@ -201,12 +203,35 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   }, [scope, requestScope, organizationId, signal, validConversation, hasExternalHistory, contextKind])
   useEffect(() => {
     let active = true
-    setReadiness(null)
-    departmentChat.getContextChatReadiness({ model_configuration_id: modelId }, requestScope).then(result => {
-      if (active && !signal.aborted) setReadiness({ ...result, model_configuration_id: modelId })
-    }).catch(reason => { if (active && !signal.aborted) setError(reason.message) })
-    return () => { active = false }
-  }, [modelId, requestScope, signal])
+    const controller = new AbortController()
+    const stop = () => { active = false; controller.abort() }
+    signal.addEventListener('abort', stop, { once: true })
+    setReadiness(null); setReadinessState('loading')
+    const timer = setTimeout(() => {
+      if (!active || signal.aborted) return
+      active = false; controller.abort()
+      setReadiness(null); setReadinessState('failed')
+    }, 15_000)
+    if (signal.aborted) stop()
+    else Promise.resolve().then(() => departmentChat.getContextChatReadiness(
+      { model_configuration_id: modelId }, { ...requestScope, signal: controller.signal },
+    )).then(result => {
+      if (!active || signal.aborted) return
+      clearTimeout(timer)
+      if (!result || typeof result.paid_execution_enabled !== 'boolean' || typeof result.spend_tracking_configured !== 'boolean' || typeof result.model_status !== 'string') {
+        setReadinessState('failed'); return
+      }
+      setReadiness({ ...result, model_configuration_id: modelId }); setReadinessState('resolved')
+    }).catch(() => {
+      if (!active || signal.aborted) return
+      clearTimeout(timer); setReadiness(null); setReadinessState('failed')
+    })
+    return () => { clearTimeout(timer); signal.removeEventListener('abort', stop); stop() }
+  }, [modelId, requestScope, signal, readinessAttempt])
+  const retryReadiness = () => {
+    if (!current() || readinessState === 'loading') return
+    setReadiness(null); setReadinessState('loading'); setReadinessAttempt(value => value + 1)
+  }
   useEffect(() => {
     let active = true
     const target = initial.recovery?.conversation_id || initial.conversation?.id || restoredDraft?.conversation_id
@@ -381,6 +406,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   const reportDesignConversation=designWorkspace?.onConversationChange
   useEffect(()=>{reportDesignConversation?.(selected,checkPrivateVideoContext)},[selected,checkPrivateVideoContext,reportDesignConversation])
   const newChatControl = <button type="button" className="workshop-new-chat" aria-label="New chat" disabled={busy || videoBusy || Boolean(pending)} onClick={newChat}>+ New chat</button>
+  const modelControl=owner && <label><span className={designWorkspace ? 'sr-only' : undefined}>Model</span><select aria-label="Approved model" value={modelId} disabled={busy || videoBusy || !models.length} onChange={event => { setModelId(event.target.value); setCanonical(false) }}>{!modelId && <option value="">{models.length ? 'Choose a model' : 'Unavailable'}</option>}{models.map(row => <option key={row.id} value={row.id}>{row.label}</option>)}</select></label>
   return <>{designWorkspace && workshopHistory?.newChatTarget && createPortal(newChatControl,workshopHistory.newChatTarget)}<section ref={rootRef} inert={importOpen && contextKind === 'project_team' && projectId ? true : undefined} className={`direct-chat ${historyOpen ? 'history-open' : ''} ${output ? 'output-open' : ''}`} aria-label={label} onKeyDown={event => {
     if (event.key === 'Escape' && !consent.dialog) { setHistoryOpen(false); setOutputId(''); setShareOpen(false); setDetailsOpen(false) }
   }}>
@@ -389,14 +415,14 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
         {contextKind === 'project_team' && projectId && <button type="button" disabled={busy || videoBusy} onClick={() => setImportOpen(true)}>Import spreadsheet</button>}
         {selected && owner && contextKind === 'project_team' && <button type="button" disabled={busy || videoBusy} onClick={loadSharing}>Share</button>}</div>
 
-    </header>
+    </header>{designWorkspace && <div className="design-conversation-top-toolbar" aria-label="Design conversation tools">{designWorkspace.toolbar}{designWorkspace.mode === 'chat' && (designWorkspace.toolbarTarget ? createPortal(modelControl,designWorkspace.toolbarTarget) : modelControl)}</div>}
     {error && <p role="alert" className="direct-chat-error">{error}</p>}
     {notice && !pending && <p role="status" className="direct-chat-notice">{notice}</p>}
     {pending && <div className="direct-chat-notice direct-chat-recovery"><p>Check this send before sending again. Recovery never requests another AI reply.</p><button type="button" disabled={busy || videoBusy} onClick={recover}>Check recovery</button></div>}
     {detailsOpen && <aside className="direct-chat-details" aria-label="Chat details">
       <p>Attachments are unavailable in this chat. Drafts stay only in this browser tab for up to one hour, including refresh; successful Send clears the draft. Closing this tab ends local draft recovery.</p>
       <p>AI replies are organization-billed. The service rechecks model approval, exact pricing, spend tracking and access before dispatch.</p>
-      <p>{!readiness ? 'Checking AI availability…' : ready ? 'AI configuration ready.' : `AI unavailable (${readiness.model_status || 'configuration unavailable'}). You can save a human message.`}</p>
+      <p>{readinessState === 'failed' ? 'AI availability could not be checked. You can still save a human message.' : !readiness ? 'Checking AI availability…' : ready ? 'AI configuration ready.' : `AI unavailable (${readiness.model_status || 'configuration unavailable'}). You can save a human message.`}</p>
       {readiness?.paid_execution_enabled === false && <p>AI execution is currently off.</p>}
       {readiness?.spend_tracking_configured === false && <p>Organization spend tracking is not configured.</p>}
       {readiness?.spend_guard_mode === 'provider_managed' && <p>Your provider-side spend limit is managed externally. Anka cannot verify or enforce it; each request is still priced and recorded.</p>}
@@ -425,7 +451,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
           setRows(previous => [...previous, ...result.slice(0, 50).filter(validConversation).filter(row => !previous.some(item => item.id === row.id))]); setOffset(offset + Math.min(result.length, 50)); setHasMore(result.length > 50)
         })}>Load older chats</button>}</>}</aside>}
       <div className="direct-chat-main" inert={drawerOpen ? true : undefined}><div className="direct-chat-messages" aria-label="Chat messages" aria-busy={busy}><div className="direct-chat-message-stream">
-        {!messages.length && <div className="direct-chat-empty"><h3>What would you like to work on?</h3><p>Start with a message. This chat is saved when you send.</p></div>}
+        {!messages.length && <div className="direct-chat-empty"><h3>What would you like to work on?</h3><p>Start with a message. This chat is saved when you send.</p>{designWorkspace?.starters}</div>}
         {hasOlder && <button type="button" disabled={busy || videoBusy} onClick={() => exclusive(async () => {
           const result = await departmentChat.getContextConversation({ conversation_id: selected.id, before_sequence: messages[0].sequence }, requestScope)
           if (!current()) return
@@ -433,11 +459,11 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
           setMessages(previous => [...result.messages, ...previous]); setHasOlder(result.has_older)
         })}>Load older messages</button>}
         {messages.map(message => <article key={message.id} className={`direct-chat-message ${message.role}`}><strong>{message.role === 'assistant' ? 'Anka AI' : message.author_id === actorId ? 'You' : 'Teammate'}</strong><p>{message.body}</p>{message.role === 'assistant' && message.status === 'completed' && <button type="button" onClick={event => { replyButtonRef.current = event.currentTarget; if (mobileDrawer) setHistoryOpen(false); setOutputId(message.id) }}>Open reply</button>}</article>)}
-      </div></div>{designWorkspace?.mode!=='chat' && designWorkspace?.toolbar}{designWorkspace?.media}<form hidden={Boolean(designWorkspace && designWorkspace.mode!=='chat')} className="direct-chat-composer" onSubmit={send} aria-label="Chat composer"><label className="direct-chat-draft-label"><span className="sr-only">Message</span><textarea aria-label="Message" placeholder="Ask or explore an idea…" value={draft} maxLength={8000} disabled={busy || videoBusy || Boolean(pending)} onChange={event => { if (pendingRef.current) return; const text = event.target.value; setDraft(text); try { writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: selected?.id || null, text, attempt: attempt.current }) } catch { setError('Draft recovery is unavailable in this tab. Keep this page open until your message is saved.') } }} /></label>
-        <div className="direct-chat-toolbar">{designWorkspace?.mode==='chat' && designWorkspace?.toolbar}{!designWorkspace && <label>Work type<select aria-label="Work type" value="text" disabled><option value="text">Text</option></select></label>}
-          {owner && <label><span className={designWorkspace ? 'sr-only' : undefined}>Model</span><select aria-label="Approved model" value={modelId} disabled={busy || videoBusy || !models.length} onChange={event => { setModelId(event.target.value); setCanonical(false) }}>{!modelId && <option value="">{models.length ? 'Choose a model' : 'Unavailable'}</option>}{models.map(row => <option key={row.id} value={row.id}>{row.label}</option>)}</select></label>}
+      </div></div>{designWorkspace?.media}<form hidden={Boolean(designWorkspace && designWorkspace.mode!=='chat')} className="direct-chat-composer" onSubmit={send} aria-label="Chat composer"><label className="direct-chat-draft-label"><span className="sr-only">Message</span><textarea aria-label="Message" placeholder="Ask or explore an idea…" value={draft} maxLength={8000} disabled={busy || videoBusy || Boolean(pending)} onChange={event => { if (pendingRef.current) return; const text = event.target.value; setDraft(text); try { writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: selected?.id || null, text, attempt: attempt.current }) } catch { setError('Draft recovery is unavailable in this tab. Keep this page open until your message is saved.') } }} /></label>
+        <div className="direct-chat-toolbar">{!designWorkspace && <label>Work type<select aria-label="Work type" value="text" disabled><option value="text">Text</option></select></label>}
+          {!designWorkspace && modelControl}
           <button type="submit" className="direct-chat-send" disabled={busy || videoBusy || Boolean(pending) || !draft.trim() || Boolean(selected && selected.state !== 'active')}>{busy ? 'Working…' : owner && ready ? 'Send' : 'Save message'}</button></div>
-        <p>{owner ? !readiness ? 'Checking AI availability. Human messages can still be saved.' : ready ? `${model?.provider} · Organization-billed replies` : 'AI unavailable. Sending saves a human message only.' : 'Shared chat · Human replies only'} · Attachments unavailable</p>
+        <p>{owner ? readinessState === 'failed' ? 'AI availability could not be checked. Sending saves a human message only.' : !readiness ? 'Checking AI availability. Human messages can still be saved.' : ready ? `${model?.provider} · Organization-billed replies` : 'AI unavailable. Sending saves a human message only.' : 'Shared chat · Human replies only'} · Attachments unavailable</p>{owner && readinessState === 'failed' && <button type="button" onClick={retryReadiness}>Retry AI availability</button>}
       </form></div>
       {output && <aside ref={outputId && mobileDrawer ? drawerRef : undefined} className="direct-chat-output" role={mobileDrawer ? 'dialog' : undefined} aria-modal={mobileDrawer ? true : undefined} onKeyDown={drawerKeyDown} aria-label="Saved reply output" data-source-message-id={output.id}><div><h3>Saved reply</h3><button ref={outputClose} type="button" onClick={() => setOutputId('')}>Close output</button></div><p>{output.body}</p><small>Saved conversation reply · Read-only preview</small></aside>}
     </div>
