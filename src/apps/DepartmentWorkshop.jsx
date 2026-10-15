@@ -1,3 +1,4 @@
+import '../components/designWorkshopShell.css'
 import DesignUnifiedWorkspace from '../components/DesignUnifiedWorkspace.jsx'
 import { eligibleWorkshopEngagements, matchesWorkshopConversation } from '../data/workshopConversationList.js'
 import MarketingArtifactChat from '../components/MarketingArtifactChat.jsx'
@@ -428,20 +429,21 @@ export default function DepartmentWorkshop({ departmentId }) {
     { fallbackProjectId: sameOrganization ? linkedProject?.id : '' },
   )
 
+  const designConversation = departmentId === 'design' && ['private', 'chat'].includes(activeTab)
   return (
-    <div className={['design', 'content', 'marketing'].includes(departmentId) ? 'design-workshop-surface h-full overflow-y-auto' : "h-full overflow-y-auto bg-[var(--anka-canvas)] text-[var(--anka-ink)]"}>
+    <div data-design-conversation={designConversation || undefined} className={['design', 'content', 'marketing'].includes(departmentId) ? 'design-workshop-surface h-full overflow-y-auto' : "h-full overflow-y-auto bg-[var(--anka-canvas)] text-[var(--anka-ink)]"}>
       <div className="workspace-container workspace-page">
-        <div className="flex flex-wrap items-start justify-between gap-5">
+        <div className="workshop-page-heading flex flex-wrap items-start justify-between gap-5">
           <div>
-            <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${config.accentClass}`}>{config.surfaceLabel}</p>
+            {!designConversation && <p className={`text-xs font-semibold uppercase tracking-[0.18em] ${config.accentClass}`}>{config.surfaceLabel}</p>}
             <h1 className="workspace-title">{config.name}</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--anka-muted)]">{config.description}</p>
+            {!designConversation && <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--anka-muted)]">{config.description}</p>}
           </div>
           <Link to="/sphere/engagements" className="rounded-xl border border-[var(--anka-line)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-ink)] hover:border-[var(--anka-violet)] hover:text-[var(--anka-ink)]">Engagements</Link>
         </div>
 
         {error && <div className="mt-5 rounded-xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] px-4 py-3 text-sm text-[var(--anka-danger)]">{error}</div>}
-        <WorkshopContextShell navigation={navigationContext} validation={contextValidation} returnTarget={returnTarget} projectName={linkedProject?.name}>
+        <WorkshopContextShell compact={designConversation} navigation={navigationContext} validation={contextValidation} returnTarget={returnTarget} projectName={linkedProject?.name}>
 
         {(departmentId === 'development' || !['private', 'chat'].includes(activeTab)) && <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
           <Stat label="Active workstreams" value={workspace.workstreams.length} note="Across current engagements" />
@@ -453,7 +455,7 @@ export default function DepartmentWorkshop({ departmentId }) {
         </div>}
 
         {departmentId === 'development' ? <_WorkshopTabs departmentId={departmentId} activeTab={activeTab} onChange={setActiveTab} tabs={availableTabs} /> : (
-          <nav aria-label="Workshop sections" className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-[var(--anka-line)] p-3">
+          <nav aria-label="Workshop sections" className="workshop-section-nav mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-[var(--anka-line)] p-3">
             <button type="button" aria-pressed={['private', 'chat'].includes(activeTab)} disabled={navigationLocked} onClick={() => { if (navigationLocked) return; if (!['private', 'chat'].includes(activeTab)) setActiveTab('private') }} className="rounded-lg border border-[var(--anka-violet)] px-3 py-2 text-sm text-[var(--anka-violet)]">Chat</button>
             <button type="button" aria-pressed={!['private', 'chat', 'deliverables'].includes(activeTab)} disabled={navigationLocked} onClick={() => { if (!navigationLocked) setActiveTab('tasks') }} className="rounded-lg border border-[var(--anka-line)] px-3 py-2 text-sm">Work</button>
             <button type="button" aria-pressed={activeTab === 'deliverables'} disabled={navigationLocked} onClick={() => { if (!navigationLocked) setActiveTab('deliverables') }} className="rounded-lg border border-[var(--anka-line)] px-3 py-2 text-sm">Library</button>
@@ -489,8 +491,8 @@ export default function DepartmentWorkshop({ departmentId }) {
           }}
           conversationList={onOpen => <WorkshopConversationList activeEngagementId={activeTab === 'chat' ? chatEngagement?.id : undefined} compact={['content', 'design', 'marketing'].includes(departmentId)} navigationBusy={navigationLocked} organizationId={activeOrganizationId} actorId={user?.id} scopeRevision={scopeRevision} departmentId={departmentId} engagements={eligibleEngagements} projects={chatContext.projects} signal={requestSignal} onOpen={onOpen} refreshKey={conversationListRevision} />}>
         {activeTab === 'private' ? (
-          <div className="mt-6 space-y-3">
-            {departmentId !== 'content' && <p className="text-sm text-[var(--anka-muted)]">Explore privately with your {config.shortName} specialist. Selecting project chat opens separate engagement conversations; it does not share or move these messages. Use specialist tools for governed project outputs.</p>}
+          <div className={designConversation ? "design-private-chat-content" : "mt-6 space-y-3"}>
+            {!['content', 'design'].includes(departmentId) && <p className="text-sm text-[var(--anka-muted)]">Explore privately with your {config.shortName} specialist. Selecting project chat opens separate engagement conversations; it does not share or move these messages. Use specialist tools for governed project outputs.</p>}
             {departmentId === 'design' ? <DesignUnifiedWorkspace key={JSON.stringify([designPaneKey,selectedConversationRevision])} onNavigationBusyChange={reportDesignNavigationBusy}>{bridge => <ContextConversationPanel designWorkspace={bridge} key={selectedConversationRevision} directSend={['content', 'design', 'marketing'].includes(departmentId)} contextKind="department_private" departmentId={departmentId} label={`${config.shortName} private conversations`} workshopLayout hideConversationList initialConversation={selectedConversation?.kind === 'private' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} onDraftDirtyChange={reportChatDraftDirty} />}</DesignUnifiedWorkspace> : <ContextConversationPanel key={selectedConversationRevision} directSend={['content', 'design', 'marketing'].includes(departmentId)} contextKind="department_private" departmentId={departmentId} label={`${config.shortName} private conversations`} workshopLayout hideConversationList initialConversation={selectedConversation?.kind === 'private' ? selectedConversation.row : null} onConversationListChange={refreshConversationList} onNavigationBusyChange={reportChatNavigationBusy} onDraftDirtyChange={reportChatDraftDirty} />}
             {['content', 'marketing'].includes(departmentId) && <details className="design-private-video-guide rounded-xl border border-[var(--anka-line)] px-3 py-2 text-sm">
               <summary>{config.shortName} draft tools · how to open</summary>
