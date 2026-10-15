@@ -151,17 +151,9 @@ export function ScopedDepartmentChat({
   const [draftConversation, setDraftConversation] = useState(false)
   const initialFirstSend = useRef(pendingFirstSend).current
   firstSendAttempt.current = pendingFirstSend || firstSendAttempt.current
-  const workbenchRef = useRef(null)
   const messageViewport = useRef(null)
   const lastMessageId = messages.at(-1)?.id
   useLayoutEffect(() => { if (compactWorkbench && messageViewport.current && lastMessageId) messageViewport.current.scrollTop = messageViewport.current.scrollHeight }, [compactWorkbench,lastMessageId])
-  useLayoutEffect(() => {
-    if (!compactWorkbench || !workbenchRef.current || !workbenchRef.current.style?.setProperty || !workbenchRef.current.getBoundingClientRect) return
-    const panel = workbenchRef.current
-    const measure = () => panel.style.setProperty('--department-chat-height', Math.max(260, (globalThis.innerHeight || globalThis.window?.innerHeight || 900) - panel.getBoundingClientRect().top - 88) + 'px')
-    measure(); globalThis.addEventListener?.('resize', measure); globalThis.addEventListener?.('scroll', measure, true)
-    return () => { globalThis.removeEventListener?.('resize', measure); globalThis.removeEventListener?.('scroll', measure, true) }
-  }, [compactWorkbench])
   const [contextExpanded, setContextExpanded] = useState(() => presentation !== 'workbench' && (!globalThis.window?.matchMedia || globalThis.window.matchMedia('(min-width: 1280px)').matches))
 
   const [pendingDraftSwitch, setPendingDraftSwitch] = useState(null)
@@ -1082,7 +1074,7 @@ export function ScopedDepartmentChat({
 
   const SourcePanel = presentation === 'workbench' ? 'details' : 'section'
   const ConversationControls = compactWorkbench ? 'details' : 'div'
-  return <><div ref={workbenchRef} className={presentation === 'workbench' ? 'department-chat-workbench design-chat-composer grid min-w-0 gap-3' : `grid gap-6 ${supportsSavedConversations ? hideConversationList ? 'xl:grid-cols-[minmax(0,1fr)_320px]' : 'xl:grid-cols-[260px_minmax(0,1fr)_320px]' : 'xl:grid-cols-[minmax(0,1fr)_360px]'}`}>
+  return <><div className={presentation === 'workbench' ? 'department-chat-workbench design-chat-composer grid min-w-0 gap-3' : `grid gap-6 ${supportsSavedConversations ? hideConversationList ? 'xl:grid-cols-[minmax(0,1fr)_320px]' : 'xl:grid-cols-[260px_minmax(0,1fr)_320px]' : 'xl:grid-cols-[minmax(0,1fr)_360px]'}`}>
     {supportsSavedConversations && !hideConversationList && <aside className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4">
       <div className="flex items-center justify-between gap-3">
         <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--anka-muted)]">Conversations</p><p className="mt-1 text-xs text-[var(--anka-success)]">Private to you or deliberately shared</p></div>

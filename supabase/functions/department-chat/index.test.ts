@@ -223,7 +223,7 @@ function selectedOrganizationFixture() {
         return { data: single ? matching[0] || null : matching, error: null, count: matching.length }
       }
       const query: any = {
-        select: () => query,
+        select: (columns: string) => { if (table === 'profiles' && columns.split(',').map(x => x.trim()).includes('email')) throw new Error('column profiles.email does not exist'); return query },
         eq: (key: string, value: unknown) => { filters.push([key, value]); return query },
         is: (key: string, value: unknown) => { filters.push([key, value]); return query },
         // No dated/approved rows are present in this fixture.
@@ -1844,3 +1844,33 @@ for (const mode of ['off','foreign','unknown']) {
   assertEquals(fixture.providerCalls(),0)
  })
 }
+
+Deno.test('saved first-send readback and sharing use installed profile columns; repeated recovery never dispatches', async () => {
+  const fixture = selectedOrganizationFixture()
+  enableSavedAnswerFixture(fixture)
+  fixture.rows.profiles = [{ id: 'actor', full_name: 'Synthetic owner' }, { id: 'peer', full_name: 'Synthetic peer' }]
+  fixture.rows.organization_memberships.push({ organization_id: 'B', user_id: 'peer', role: 'contributor', department_id: 'content', member_kind: 'team', status: 'active' })
+  fixture.rows.department_chat_messages = [
+    { id: 'saved-user', organization_id: 'B', conversation_id: 'conversation-B', role: 'user', author_id: 'actor', client_request_id: answerRequest.client_request_id, status: 'completed', sequence: 1, body: 'Synthetic question' },
+    { id: 'saved-answer', organization_id: 'B', conversation_id: 'conversation-B', role: 'assistant', status: 'completed', sequence: 2, body: 'Synthetic answer' },
+  ]
+  const scope = { ...answerRequest, prompt: undefined }
+  for (let i = 0; i < 2; i++) {
+    const response = await fixture.request({ ...scope, action: 'get_conversation' })
+    assertEquals(response.status, 200, await response.clone().text())
+    const saved = (await response.json()).data
+    assertEquals(saved.messages.length, 2)
+    assertEquals(saved.messages[0].author.full_name, 'Synthetic owner')
+    assertEquals(saved.messages[0].client_request_id, answerRequest.client_request_id)
+    assertEquals(saved.messages[1].status, 'completed')
+  }
+  const shares = await fixture.request({ ...scope, action: 'list_conversation_share_candidates' })
+  assertEquals(shares.status, 200, await shares.clone().text())
+  assertEquals((await shares.json()).data, [{ id: 'peer', full_name: 'Synthetic peer', email: '', role: 'contributor', department_id: 'content' }])
+  assertEquals(fixture.providerCalls(), 0)
+  assertEquals(fixture.rpcCalls.some(call => /begin_|start_|claim_|settle_/.test(call.name)), false)
+  fixture.rows.organization_memberships.find(row => row.organization_id === 'B' && row.user_id === 'actor').status = 'suspended'
+  const denied = await fixture.request({ ...scope, action: 'get_conversation' })
+  assertEquals(denied.status, 403)
+  assertEquals(fixture.rows.department_chat_messages.length, 2)
+})

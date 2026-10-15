@@ -1,6 +1,6 @@
 /* Opt-in shared workbench presentation; message, proposal and source contracts stay in DepartmentChat. */
 .department-chat-workbench { min-width: 0; }
-.department-chat-workbench .department-chat-main { height: var(--department-chat-height, 650px); min-height: 260px; display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+.department-chat-workbench .department-chat-main { height: clamp(360px, 75dvh, 760px); min-height: 260px; display: flex; flex-direction: column; gap: 10px; padding: 12px; }
 .department-chat-heading { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 12px; }
 .department-chat-heading h2 { font-size: 1rem; font-weight: 600; }
 .department-chat-heading p { margin-top: 3px; font-size: .75rem; color: var(--anka-muted); }
