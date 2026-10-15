@@ -224,7 +224,7 @@ export default function ReportsAndRecords() {
             <h1 className="workspace-title">Reports & Living Records</h1>
             <p className="workspace-description mt-2">Versioned project truth generated from canonical work. Client records contain released information only. Recent activity is a bounded feed, not a complete event record.</p>
           </div>
-          <label className="min-w-64 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">
+          <label className="w-full min-w-0 text-xs sm:w-auto sm:min-w-64 font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">
             Project
             <select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="mt-2 w-full rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] px-3.5 py-2.5 text-sm font-medium normal-case tracking-normal text-[var(--anka-ink)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--anka-focus)]">
               {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
