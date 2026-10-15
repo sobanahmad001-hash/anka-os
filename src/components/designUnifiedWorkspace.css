@@ -108,3 +108,8 @@
 .design-toolbar-model-settings .design-media-setting-fields{position:absolute;top:100%;right:0;z-index:25;width:min(340px,80vw);max-height:50dvh;overflow:auto;padding:16px;background:var(--anka-surface);border:1px solid var(--anka-line);border-radius:12px;box-shadow:0 12px 30px #0003}
 .design-conversation-top-toolbar .department-chat-model>span:not(.sr-only){max-width:60ch;font-size:12px}
 @media(max-width:600px){.design-conversation-top-toolbar{padding:8px 0}.design-conversation-top-toolbar select{font-size:16px;max-width:100%}.design-toolbar-model-settings{flex:1 1 180px}.design-unified-toolbar{gap:6px}.design-toolbar-model-settings .design-media-setting-fields{right:auto;left:0}}
+/* Desktop review: expand conversation and composer as one bounded column. */
+@media(min-width:901px){
+ .design-unified-workspace:not(.output-open)>.design-unified-chat{max-width:1100px}
+ .design-unified-workspace:not(.output-open) .direct-chat-message-stream{max-width:none}
+}
