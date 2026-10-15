@@ -11,6 +11,7 @@ import ProjectServiceScopePanel from './ProjectServiceScopePanel.jsx'
 import ProjectManagerAssignment from './ProjectManagerAssignment.jsx'
 import ProjectDiscussionPanel from './ProjectDiscussionPanel.jsx'
 import ContextConversationPanel from '../components/ContextConversationPanel.jsx'
+import './projectConversationLayout.css'
 import _ProjectReviewEvidencePanel from './ProjectReviewEvidencePanel.jsx'
 import { appendWorkshopNavigation, parseWorkshopNavigation } from '../data/workshopNavigation.js'
 
@@ -153,17 +154,17 @@ export default function ProjectEngagementWorkspace() {
     <main className="workspace-page">
       <div className="workspace-container">
         <button type="button" onClick={() => {if(allowLeavingCurrentView())navigate('/sphere/portfolio')}} className="text-sm font-medium text-[var(--anka-muted)] hover:text-[var(--anka-ink)]">← Portfolio Workspace</button>
-        <header className="mt-5 flex flex-wrap items-start justify-between gap-5">
+        <header className="mt-3 flex flex-wrap items-start justify-between gap-3">
           <div className="max-w-4xl">
             <div className="flex flex-wrap items-center gap-2 text-xs"><Pill>{identity.workType}</Pill><Pill>{label(project.engagement_type)}</Pill>{identity.hasEngagement && <Pill>Engagement connected</Pill>}</div>
-            <h1 className="workspace-title">{project.name}</h1>
+            <h1 className="mt-1 break-words text-2xl font-semibold tracking-tight text-[var(--anka-ink)] sm:text-3xl">{project.name}</h1>
             <p className={`mt-2 text-sm text-[var(--anka-muted)] ${tab === 'discussion' ? 'sr-only' : ''}`}>{[identity.clientName, identity.brandName].filter(Boolean).join(' · ') || (identity.workType === 'Internal Work' ? 'Internal project; no client identity is required.' : 'No client or brand identity is attached.')}</p>
             <p className={`mt-3 max-w-3xl text-sm leading-6 text-[var(--anka-muted)] ${tab === 'discussion' ? 'sr-only' : ''}`}>{project.description || project.scope_statement || 'No project description recorded.'}</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">{identity.hasEngagement && workspace.engagement?.id && <Link to={`/sphere/engagements?engagement=${encodeURIComponent(workspace.engagement.id)}&tab=pipeline&project=${encodeURIComponent(projectId)}`} onClick={event=>{if(!allowLeavingCurrentView())event.preventDefault()}} className="rounded-xl border border-[var(--anka-violet)] px-4 py-2 text-sm text-[var(--anka-violet)]">Open Pipeline</Link>}<button type="button" onClick={load} disabled={loading||isNavigationBusy} className="workspace-button hover:bg-[var(--anka-surface-raised)] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={project.status} /><ProjectDraftActivation project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onActivated={load} onAccessError={handleOrganizationAccessError} /></div>
+          <div className="flex flex-wrap items-center gap-2"><button type="button" disabled={isNavigationBusy} onClick={() => selectTab('services')} className="workspace-button">Manage services</button>{identity.hasEngagement && workspace.engagement?.id && <Link to={`/sphere/engagements?engagement=${encodeURIComponent(workspace.engagement.id)}&tab=pipeline&project=${encodeURIComponent(projectId)}`} onClick={event=>{if(!allowLeavingCurrentView())event.preventDefault()}} className="rounded-xl border border-[var(--anka-violet)] px-4 py-2 text-sm text-[var(--anka-violet)]">Open Pipeline</Link>}<button type="button" onClick={load} disabled={loading||isNavigationBusy} className="workspace-button hover:bg-[var(--anka-surface-raised)] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={project.status} /><ProjectDraftActivation project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onActivated={load} onAccessError={handleOrganizationAccessError} /></div>
         </header>
 
-        <ProjectLifecyclePanel key={`${activeOrganizationId}:${project.id}:${scopeRevision}`} project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={(result) => { setWorkspace(current => current ? { ...current, project: { ...current.project, archived_at: result.archived_at } } : current); load() }} onDeleted={() => navigate('/sphere/portfolio')} />
+        <details className="mt-3 text-sm"><summary className="cursor-pointer text-[var(--anka-muted)]">Project settings</summary><ProjectLifecyclePanel key={`${activeOrganizationId}:${project.id}:${scopeRevision}`} project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={(result) => { setWorkspace(current => current ? { ...current, project: { ...current.project, archived_at: result.archived_at } } : current); load() }} onDeleted={() => navigate('/sphere/portfolio')} /></details>
 
         {!project.archived_at && tab !== 'discussion' && <ProjectManagerAssignment project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onAssigned={load} onAccessError={handleOrganizationAccessError} />}
 
@@ -178,7 +179,7 @@ export default function ProjectEngagementWorkspace() {
           <Metric title="Progress" value={summary.progress === null ? 'Not set' : `${summary.progress}%`} note={`Due ${date(project.due_date)}`} />
         </section>}
 
-        <nav role="tablist" aria-label="Project workspace sections" className="mt-7 flex gap-1 overflow-x-auto border-b border-[var(--anka-line)]">
+        <nav role="tablist" aria-label="Project workspace sections" className="mt-4 flex gap-1 overflow-x-auto border-b border-[var(--anka-line)]">
           {tabs.map(([id, title], index) => <button type="button" role="tab" disabled={isNavigationBusy} id={`project-tab-${id}`} aria-selected={selectedPrimaryTab === id} aria-controls="project-workspace-panel" tabIndex={selectedPrimaryTab === id ? 0 : -1} key={id} onClick={() => selectTab(id)} onKeyDown={(event) => onTabKeyDown(event, index)} className={`whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium focus-visible:ring-2 focus-visible:ring-[var(--anka-focus)] ${selectedPrimaryTab === id ? 'border-[var(--anka-violet)] text-[var(--anka-ink)]' : 'border-transparent text-[var(--anka-muted)] hover:text-[var(--anka-ink)]'}`}>{title}</button>)}
         </nav>
 
@@ -193,7 +194,7 @@ export default function ProjectEngagementWorkspace() {
             <div className={projectChatMode === 'team' ? 'workspace-card p-4' : ''}>
               {projectChatMode === 'team' && <p className="text-xs font-semibold uppercase tracking-wide text-[var(--anka-violet)]">{project.name} · Chat</p>}
               {projectChatMode === 'team' && <><h2 className="mt-1 text-lg font-semibold">Talk with your project team</h2>
-              <p className="mt-1 text-sm leading-5 text-[var(--anka-muted)]">Project activity and private AI conversations are separate. Team messages use the project discussion permissions; AI conversations start private; each owner can choose active internal teammates to share a conversation with.</p></>}
+              <p className="mt-1 text-sm leading-5 text-[var(--anka-muted)]">Team discussion is shared with this project. AI conversations start private; sharing stays under your control.</p></>}
               <nav aria-label="Project chat views" className={`flex flex-wrap gap-2 ${projectChatMode === 'team' ? 'mt-4' : ''}`}>
                 <button type="button" aria-pressed={projectChatMode === 'team'} disabled={isNavigationBusy} onClick={() => {if(!navCurrent.current.busy)setProjectChatMode('team')}} className={`rounded-xl border px-4 py-2 text-sm ${projectChatMode === 'team' ? 'border-[var(--anka-violet)] bg-[var(--anka-violet-soft)] text-[var(--anka-violet)]' : 'border-[var(--anka-line)] text-[var(--anka-muted)]'}`}>Team discussion · shared</button>
                 <button type="button" aria-pressed={projectChatMode === 'private'} disabled={isNavigationBusy} onClick={() => {if(!navCurrent.current.busy)setProjectChatMode('private')}} className={`rounded-xl border px-4 py-2 text-sm ${projectChatMode === 'private' ? 'border-[var(--anka-violet)] bg-[var(--anka-violet-soft)] text-[var(--anka-violet)]' : 'border-[var(--anka-line)] text-[var(--anka-muted)]'}`}>AI conversations</button>
@@ -202,7 +203,7 @@ export default function ProjectEngagementWorkspace() {
             <section hidden={projectChatMode !== 'team'} aria-label="Shared project team discussion">
               <ProjectDiscussionPanel organizationId={activeOrganizationId} projectId={project.id} tasks={workspace.projectTasks} workstreams={workspace.workstreams} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={handleOrganizationAccessError} onApplied={load} />
             </section>
-            <section hidden={projectChatMode !== 'private'} aria-label="Project AI conversations">
+            <section className="project-ai-conversations" hidden={projectChatMode !== 'private'} aria-label="Project AI conversations">
               <ContextConversationPanel directSend contextKind="project_team" projectId={project.id} label={`${project.name} · Project AI`} onNavigationBusyChange={reportChatBusy} onDraftDirtyChange={reportChatDirty} />
             </section>
           </div>}
@@ -227,7 +228,7 @@ function Overview({ workspace }) {
 function ServicesAndScope({ workspace, organizationId, membership, scopeRevision, requestSignal, onChanged, onAccessError }) {
   const { context, deliveryShape, engagement, identity } = workspace
   return <div className="space-y-5">
-    <div className="grid gap-5 xl:grid-cols-2">
+    <details className="rounded-xl border border-[var(--anka-line)] p-4"><summary className="cursor-pointer text-sm font-medium">Project scope and delivery context</summary><div className="mt-4 grid gap-5 xl:grid-cols-2">
       <Panel title="Project scope" description="The canonical project statement remains the source for scope and exclusions.">
         <TextBlock value={context.scope} empty="No scope statement recorded." />
         <div className="mt-4 border-t border-[var(--anka-line)] pt-4">
@@ -240,6 +241,7 @@ function ServicesAndScope({ workspace, organizationId, membership, scopeRevision
         {identity.hasEngagement && <div className="mt-3"><Record title={engagement?.name || 'Operating engagement'} note={context.objective || 'No engagement objective recorded.'} status={engagement?.status} /></div>}
       </Panel>
     </div>
+    </details>
     <ProjectServiceScopePanel project={workspace.project} organizationId={organizationId} membership={membership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={onChanged} onAccessError={onAccessError} />
   </div>
 }

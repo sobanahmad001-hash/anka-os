@@ -21,7 +21,7 @@ test('Project Chat keeps the shared team thread and private AI conversations in 
   assert.match(project, /Team discussion · shared/)
   assert.match(project, /AI conversations/)
   assert.match(project, /<section hidden=\{projectChatMode !== 'team'\} aria-label="Shared project team discussion"/)
-  assert.match(project, /<section hidden=\{projectChatMode !== 'private'\} aria-label="Project AI conversations"/)
+  assert.match(project, /<section\b[^>]* hidden=\{projectChatMode !== 'private'\} aria-label="Project AI conversations"/)
   assert.match(project, /<ProjectDiscussionPanel /)
   assert.match(project, /<ContextConversationPanel\b[^>]*contextKind="project_team"/)
   assert.match(project, /tab === 'overview' && <section aria-label="Workspace summary"/)

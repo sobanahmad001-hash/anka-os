@@ -5,7 +5,7 @@ import { projectDraftRepository } from '../data/projectDraftRepository.js'
 import { canManageProjectServices, createProjectServiceProposalQueue, projectServiceProposalContextKey, submitProjectServiceProposals } from '../data/projectServiceProposalQueue.js'
 import { projectServiceScopeRepository } from '../data/projectServiceScopeRepository.js'
 
-const inputClass = 'mt-1 w-full rounded-lg border border-white/10 bg-[#111622] px-3 py-2 text-sm text-white'
+const inputClass = 'mt-1 w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface)] px-3 py-2 text-sm text-[var(--anka-ink)]'
 const blank = { serviceId: '', scopeStatement: '', exclusions: '', quantity: 1, unit: '', recurrence: '', ownerId: '', startDate: '', targetDate: '' }
 const title = value => value.replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
 
@@ -24,6 +24,7 @@ function ServiceScopePanel({ project, organizationId, membership, scopeRevision,
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [forms, setForms] = useState({})
+  const [serviceQuery, setServiceQuery] = useState('')
   const [results, setResults] = useState({})
   const [queue, setQueue] = useState(createProjectServiceProposalQueue)
   const dispatching = useRef(false)
@@ -167,35 +168,39 @@ function ServiceScopePanel({ project, organizationId, membership, scopeRevision,
   }
   const selectedReview = snapshot?.scopes.find(scope => scope.id === review?.scopeId)
   const available = snapshot?.catalog.filter(service => !queue.succeeded.has(service.id) && !snapshot.scopes.some(scope => scope.service_id === service.id)) || []
+  const visibleServices = available.filter(service => `${service.name} ${title(service.department_id || 'other')}`.toLowerCase().includes(serviceQuery.trim().toLowerCase()))
   return <section aria-label="Selected services" className="space-y-5">
-    <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5">
+    <div className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-5">
       <h2 className="font-semibold">Selected services · scope</h2>
-      <p className="mt-1 text-sm text-slate-400">Services define what is included. Pipelines define how delivery runs. Add services as scope grows; proposals do not start delivery. Activation is a separate action after the project is active.</p>
-      {loading && <p className="mt-4 text-sm text-slate-400">Loading service scope…</p>}
-      {error && <p role="alert" className="mt-4 rounded-lg border border-rose-500/25 bg-rose-500/10 p-3 text-sm text-rose-200">{error}</p>}
-      {notice && <p role="status" className="mt-4 text-sm text-emerald-200">{notice}</p>}
+      <p className="mt-1 text-sm text-[var(--anka-muted)]">Services define what is included. Pipelines define how delivery runs. Add services as scope grows; proposals do not start delivery. Activation is a separate action after the project is active.</p>
+      {loading && <p className="mt-4 text-sm text-[var(--anka-muted)]">Loading service scope…</p>}
+      {error && <p role="alert" className="mt-4 rounded-lg border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] p-3 text-sm text-[var(--anka-danger)]">{error}</p>}
+      {notice && <p role="status" className="mt-4 text-sm text-[var(--anka-success)]">{notice}</p>}
       {snapshot && <div className="mt-5 space-y-3">{snapshot.scopes.length ? snapshot.scopes.map(scope => {
         const service = snapshot.catalog.find(row => row.id === scope.service_id)
         const owner = snapshot.members.find(row => row.id === scope.owner_id)
-        return <article key={scope.id} className="rounded-xl border border-white/10 p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="mb-1 text-xs font-semibold uppercase text-violet-300">{title(service?.department_id || 'other')}</p><h3 className="font-medium">{service?.name || 'Previously selected service'}</h3><p className="mt-1 text-xs text-slate-400">{title(scope.status)} · {title(scope.source)} · Quantity {scope.quantity} {scope.unit || '(unit unspecified)'} · {scope.recurrence || 'Recurrence unspecified'}{owner ? ` · ${owner.name}` : ''}{scope.target_date ? ` · Target ${scope.target_date}` : ''}</p></div>
+        return <article key={scope.id} className="rounded-xl border border-[var(--anka-line)] p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="mb-1 text-xs font-semibold uppercase text-[var(--anka-violet)]">{title(service?.department_id || 'other')}</p><h3 className="font-medium">{service?.name || 'Previously selected service'}</h3><p className="mt-1 text-xs text-[var(--anka-muted)]">{title(scope.status)} · {title(scope.source)} · Quantity {scope.quantity} {scope.unit || '(unit unspecified)'} · {scope.recurrence || 'Recurrence unspecified'}{owner ? ` · ${owner.name}` : ''}{scope.target_date ? ` · Target ${scope.target_date}` : ''}</p></div>
             {canManage && <div className="flex flex-wrap gap-2">
-              {scope.status === 'proposed' && <button type="button" disabled={saving || project.status !== 'active'} onClick={() => run('activate', scope)} className="rounded-lg border border-violet-400/30 px-3 py-1.5 text-xs text-violet-200 disabled:opacity-40">Activate service</button>}
-              {scope.status === 'active' && ['pause', 'complete', 'cancel'].map(action => <button type="button" key={action} disabled={saving} onClick={() => beginReview(scope, action)} className="rounded-lg border border-amber-400/30 px-3 py-1.5 text-xs text-amber-200 disabled:opacity-40">{title(action)}…</button>)}
-              {['on_hold', 'cancelled'].includes(scope.status) && <button type="button" disabled={saving || project.status !== 'active'} onClick={() => beginReview(scope, 'resume')} className="rounded-lg border border-violet-400/30 px-3 py-1.5 text-xs text-violet-200 disabled:opacity-40">Resume service</button>}
+              {scope.status === 'proposed' && <button type="button" disabled={saving || project.status !== 'active'} onClick={() => run('activate', scope)} className="rounded-lg border border-[var(--anka-violet)] px-3 py-1.5 text-xs text-[var(--anka-violet)] disabled:opacity-40">Activate service</button>}
+              {scope.status === 'active' && ['pause', 'complete', 'cancel'].map(action => <button type="button" key={action} disabled={saving} onClick={() => beginReview(scope, action)} className="rounded-lg border border-[var(--anka-warning)] px-3 py-1.5 text-xs text-[var(--anka-warning)] disabled:opacity-40">{title(action)}…</button>)}
+              {['on_hold', 'cancelled'].includes(scope.status) && <button type="button" disabled={saving || project.status !== 'active'} onClick={() => beginReview(scope, 'resume')} className="rounded-lg border border-[var(--anka-violet)] px-3 py-1.5 text-xs text-[var(--anka-violet)] disabled:opacity-40">Resume service</button>}
             </div>}</div>
-          {scope.scope_statement && <p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">{scope.scope_statement}</p>}
-          {scope.exclusions && <p className="mt-2 text-xs text-slate-400">Exclusions: {scope.exclusions}</p>}
-          {scope.status === 'proposed' && project.status !== 'active' && <p className="mt-2 text-xs text-slate-500">Activate the project before activating this service.</p>}
+          {scope.scope_statement && <p className="mt-3 whitespace-pre-wrap text-sm text-[var(--anka-ink)]">{scope.scope_statement}</p>}
+          {scope.exclusions && <p className="mt-2 text-xs text-[var(--anka-muted)]">Exclusions: {scope.exclusions}</p>}
+          {scope.status === 'proposed' && project.status !== 'active' && <p className="mt-2 text-xs text-[var(--anka-muted)]">Activate the project before activating this service.</p>}
         </article>
-      }) : <p className="text-sm text-slate-500">No services selected yet.</p>}</div>}
+      }) : <p className="text-sm text-[var(--anka-muted)]">No services selected yet.</p>}</div>}
     </div>
-    {snapshot && canManage && (available.length > 0 || Object.keys(forms).length > 0 || Object.keys(results).length > 0) && <form onSubmit={reviewProposals} className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-5">
+    {snapshot && canManage && (available.length > 0 || Object.keys(forms).length > 0 || Object.keys(results).length > 0) && <form onSubmit={reviewProposals} className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-5">
       <h2 className="font-semibold">Propose services</h2>
-      <p className="mt-2 text-sm text-slate-400">Each service saves independently, in sequence. Partial success is possible; a failed save does not stop the others. Proposals do not activate services.</p>
-      <div className="mt-4 space-y-4">{[...new Set(available.map(service => service.department_id || 'other'))].map(department => <fieldset key={department} disabled={saving} className="rounded-xl border border-white/10 p-4">
-        <legend className="px-1 text-xs font-semibold uppercase text-violet-300">{title(department)}</legend>
-        <div className="flex flex-wrap gap-4">{available.filter(service => (service.department_id || 'other') === department).map(service => <label key={service.id} className="flex items-center gap-2 text-sm text-slate-300">
+      <p className="mt-2 text-sm text-[var(--anka-muted)]">Each service saves independently, in sequence. Partial success is possible; a failed save does not stop the others. Proposals do not activate services.</p>
+      <label className="mt-4 block text-sm">Find services<input type="search" className={inputClass} value={serviceQuery} onChange={event => setServiceQuery(event.target.value)} placeholder="Search by service or department" /></label>
+      <p role="status" className="mt-2 text-xs text-[var(--anka-muted)]">{Object.keys(forms).length} selected · {visibleServices.length} matching services</p>
+      {!visibleServices.length && <p className="mt-3 text-sm text-[var(--anka-muted)]">No matching services. Your selected services are retained below.</p>}
+      <div className="mt-4 space-y-4">{[...new Set(visibleServices.map(service => service.department_id || 'other'))].map(department => <fieldset key={department} disabled={saving} className="rounded-xl border border-[var(--anka-line)] p-4">
+        <legend className="px-1 text-xs font-semibold uppercase text-[var(--anka-violet)]">{title(department)}</legend>
+        <div className="flex flex-wrap gap-4">{visibleServices.filter(service => (service.department_id || 'other') === department).map(service => <label key={service.id} className="flex items-center gap-2 text-sm text-[var(--anka-ink)]">
           <input type="checkbox" checked={Boolean(forms[service.id])} disabled={Boolean(results[service.id])} onChange={event => {
             const checked = event.target.checked
             setForms(values => { const next = { ...values }; if (checked) next[service.id] = { ...blank, serviceId: service.id, unit: service.unit || '', recurrence: service.recurrence || '' }; else delete next[service.id]; return next })
@@ -205,24 +210,24 @@ function ServiceScopePanel({ project, organizationId, membership, scopeRevision,
       {Object.values(forms).map(form => {
         const service = snapshot.catalog.find(row => row.id === form.serviceId)
         const update = field => event => setForms(values => ({ ...values, [form.serviceId]: { ...values[form.serviceId], [field]: event.target.value } }))
-        return <fieldset key={form.serviceId} disabled={saving || Boolean(results[form.serviceId])} className="mt-4 rounded-xl border border-white/10 p-4">
+        return <fieldset key={form.serviceId} disabled={saving || Boolean(results[form.serviceId])} className="mt-4 rounded-xl border border-[var(--anka-line)] p-4">
           <legend className="px-1 text-sm font-medium">{service?.name || 'Selected service'}</legend>
           <div className="grid gap-4 md:grid-cols-2">
-            <label className="text-xs text-slate-400">Owner<select className={inputClass} value={form.ownerId} onChange={update('ownerId')}><option value="">Unassigned</option>{snapshot.members.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
-            <label className="text-xs text-slate-400">Quantity<input required min="1" step="1" type="number" className={inputClass} value={form.quantity} onChange={update('quantity')} /></label>
-            <label className="text-xs text-slate-400">Unit<input required maxLength="80" placeholder="For example, page or article" className={inputClass} value={form.unit} onChange={update('unit')} /></label>
-            <label className="text-xs text-slate-400">Recurrence<input required maxLength="120" placeholder="For example, one-time or 4 articles per month" className={inputClass} value={form.recurrence} onChange={update('recurrence')} /><span className="mt-1 block">Describes agreed scope; does not schedule work.</span></label>
-            <label className="text-xs text-slate-400">Start<input type="date" className={inputClass} value={form.startDate} onChange={update('startDate')} /></label>
-            <label className="text-xs text-slate-400">Target<input type="date" min={form.startDate || undefined} className={inputClass} value={form.targetDate} onChange={update('targetDate')} /></label>
-            <label className="text-xs text-slate-400 md:col-span-2">Included scope<textarea className={inputClass} rows={3} value={form.scopeStatement} onChange={update('scopeStatement')} /></label>
-            <label className="text-xs text-slate-400 md:col-span-2">Exclusions<textarea className={inputClass} rows={2} value={form.exclusions} onChange={update('exclusions')} /></label>
+            <label className="text-xs text-[var(--anka-muted)]">Owner<select className={inputClass} value={form.ownerId} onChange={update('ownerId')}><option value="">Unassigned</option>{snapshot.members.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
+            <label className="text-xs text-[var(--anka-muted)]">Quantity<input required min="1" step="1" type="number" className={inputClass} value={form.quantity} onChange={update('quantity')} /></label>
+            <label className="text-xs text-[var(--anka-muted)]">Unit<input required maxLength="80" placeholder="For example, page or article" className={inputClass} value={form.unit} onChange={update('unit')} /></label>
+            <label className="text-xs text-[var(--anka-muted)]">Recurrence<input required maxLength="120" placeholder="For example, one-time or 4 articles per month" className={inputClass} value={form.recurrence} onChange={update('recurrence')} /><span className="mt-1 block">Describes agreed scope; does not schedule work.</span></label>
+            <label className="text-xs text-[var(--anka-muted)]">Start<input type="date" className={inputClass} value={form.startDate} onChange={update('startDate')} /></label>
+            <label className="text-xs text-[var(--anka-muted)]">Target<input type="date" min={form.startDate || undefined} className={inputClass} value={form.targetDate} onChange={update('targetDate')} /></label>
+            <label className="text-xs text-[var(--anka-muted)] md:col-span-2">Included scope<textarea className={inputClass} rows={3} value={form.scopeStatement} onChange={update('scopeStatement')} /></label>
+            <label className="text-xs text-[var(--anka-muted)] md:col-span-2">Exclusions<textarea className={inputClass} rows={2} value={form.exclusions} onChange={update('exclusions')} /></label>
           </div>
         </fieldset>
       })}
-      <div aria-live="polite" className="mt-4 space-y-2">{Object.entries(results).map(([serviceId, result]) => <p key={serviceId} className={`text-sm ${result.status === 'succeeded' ? 'text-emerald-200' : result.status === 'failed' ? 'text-rose-200' : 'text-slate-400'}`}>
+      <div aria-live="polite" className="mt-4 space-y-2">{Object.entries(results).map(([serviceId, result]) => <p key={serviceId} className={`text-sm ${result.status === 'succeeded' ? 'text-[var(--anka-success)]' : result.status === 'failed' ? 'text-[var(--anka-danger)]' : 'text-[var(--anka-muted)]'}`}>
         {snapshot.catalog.find(service => service.id === serviceId)?.name || 'Selected service'}: {result.status === 'succeeded' ? 'Proposal saved.' : result.status === 'failed' ? `Save failed or could not be confirmed: ${result.error?.message || 'Unknown error'}. Retry uses the same request ID and original values to avoid duplicate proposals.` : 'Saving…'}
       </p>)}</div>
-      {Object.values(results).some(result => result.status === 'failed') && <p className="mt-3 text-xs text-slate-400">Attempted service values remain visible and are locked for safe retry because a failed response may still have saved.</p>}
+      {Object.values(results).some(result => result.status === 'failed') && <p className="mt-3 text-xs text-[var(--anka-muted)]">Attempted service values remain visible and are locked for safe retry because a failed response may still have saved.</p>}
       {proposalReview?.identity === JSON.stringify(forms) && Object.keys(forms).length > 0 && <section aria-label="Service proposal review" className="mt-4 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4">
         <h3 className="font-semibold">Review proposed scope</h3>
         <p className="mt-2 text-sm text-[var(--anka-muted)]">Confirm these services and their details. Each proposal saves independently. Saving does not activate services, assign delivery work, or start a pipeline.</p>
@@ -234,13 +239,13 @@ function ServiceScopePanel({ project, organizationId, membership, scopeRevision,
         </article>)}
         <div className="mt-4 flex flex-wrap gap-2"><button type="button" disabled={saving} onClick={submitProposals} className="rounded-lg bg-[var(--anka-violet)] px-4 py-2 text-sm font-semibold text-[var(--anka-on-violet)] disabled:opacity-40">{saving ? 'Saving…' : Object.values(results).some(result => result.status === 'failed') ? 'Confirm safe retry of reviewed proposals' : 'Confirm and save reviewed proposals'}</button><button type="button" disabled={saving} onClick={() => setProposalReview(null)} className="rounded-lg border border-[var(--anka-line)] px-4 py-2 text-sm">Return to service details</button></div>
       </section>}
-      {proposalReview?.identity !== JSON.stringify(forms) && <button type="submit" disabled={saving || !Object.keys(forms).length} className="mt-4 rounded-lg bg-violet-500 px-4 py-2 text-sm font-semibold disabled:opacity-40">{Object.values(results).some(result => result.status === 'failed') ? 'Review failed / selected proposals' : 'Review selected proposals'}</button>}
+      {proposalReview?.identity !== JSON.stringify(forms) && <button type="submit" disabled={saving || !Object.keys(forms).length} className="mt-4 rounded-lg bg-[var(--anka-violet)] text-[var(--anka-on-violet)] px-4 py-2 text-sm font-semibold disabled:opacity-40">{Object.values(results).some(result => result.status === 'failed') ? 'Review failed / selected proposals' : 'Review selected proposals'}</button>}
     </form>}
-    {selectedReview && <div role="dialog" aria-modal="false" aria-label="Service impact review" className="rounded-2xl border border-amber-400/30 bg-amber-500/[0.07] p-5">
+    {selectedReview && <div role="dialog" aria-modal="false" aria-label="Service impact review" className="rounded-2xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] p-5">
       <h2 className="font-semibold">Review impact before {review.action}</h2>
-      <p className="mt-2 text-sm text-slate-300">This project currently has {snapshot.impact.project_tasks} project tasks, {snapshot.impact.engagement_work_items} engagement work items, and {snapshot.impact.deliverables} deliverables. Exact links to this service are not recorded, so these are project-wide counts. All linked records will remain intact.</p>
-      <label className="mt-4 flex gap-2 text-sm text-slate-200"><input type="checkbox" checked={acknowledged} onChange={event => setAcknowledged(event.target.checked)} />I reviewed the current project-wide work and will preserve it.</label>
-      <div className="mt-4 flex gap-2"><button type="button" disabled={!acknowledged || saving} onClick={() => run(review.action, selectedReview, { impactToken: selectedReview.impact_token, impactAcknowledged: true })} className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">{saving ? 'Saving…' : `Confirm ${review.action}`}</button><button type="button" onClick={() => { setReview(null); setAcknowledged(false) }} className="rounded-lg border border-white/10 px-4 py-2 text-sm">Keep current scope</button></div>
+      <p className="mt-2 text-sm text-[var(--anka-ink)]">This project currently has {snapshot.impact.project_tasks} project tasks, {snapshot.impact.engagement_work_items} engagement work items, and {snapshot.impact.deliverables} deliverables. Exact links to this service are not recorded, so these are project-wide counts. All linked records will remain intact.</p>
+      <label className="mt-4 flex gap-2 text-sm text-[var(--anka-ink)]"><input type="checkbox" checked={acknowledged} onChange={event => setAcknowledged(event.target.checked)} />I reviewed the current project-wide work and will preserve it.</label>
+      <div className="mt-4 flex gap-2"><button type="button" disabled={!acknowledged || saving} onClick={() => run(review.action, selectedReview, { impactToken: selectedReview.impact_token, impactAcknowledged: true })} className="rounded-lg bg-[var(--anka-warning)] px-4 py-2 text-sm font-semibold text-[var(--anka-canvas)] disabled:opacity-40">{saving ? 'Saving…' : `Confirm ${review.action}`}</button><button type="button" onClick={() => { setReview(null); setAcknowledged(false) }} className="rounded-lg border border-[var(--anka-line)] px-4 py-2 text-sm">Keep current scope</button></div>
     </div>}
   </section>
 }

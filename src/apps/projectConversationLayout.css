@@ -1,0 +1,6 @@
+/* Mobile project headers and composer may exceed the viewport-fit chat height. */
+@media (max-width: 900px) {
+  .project-ai-conversations .direct-chat { height: auto; }
+  .project-ai-conversations .direct-chat-layout { min-height: 440px; }
+  .project-ai-conversations .direct-chat-messages { max-height: 45dvh; }
+}
