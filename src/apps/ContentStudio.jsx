@@ -1,3 +1,4 @@
+import '../components/contentToolsPresentation.css'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useOrganization } from '../context/OrganizationContext.jsx'
@@ -255,27 +256,33 @@ export default function ContentStudio() {
     </WorkshopContextShell><div className="mt-5 text-center"><button type="button" onClick={() => setSearchParams({})} className="rounded-xl border border-[var(--anka-line)] px-4 py-2 text-sm font-semibold text-[var(--anka-ink)]">Choose permitted work</button></div></ContentEntryShell>
   }
 
-  return <div className="h-full overflow-y-auto bg-[var(--anka-canvas)] text-[var(--anka-ink)]">
-    <header className="border-b border-[var(--anka-line)] bg-[var(--anka-surface)] px-6 py-6">
+  return <div className="content-tools-surface h-full overflow-y-auto bg-[var(--anka-canvas)] text-[var(--anka-ink)]">
+    <header className="border-b border-[var(--anka-line)] bg-[var(--anka-surface)] px-4 py-4">
       <div className="workspace-container flex flex-wrap items-end justify-between gap-5">
-        <div><p className="workspace-eyebrow">Content department</p><h1 className="workspace-title">Content Studio</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--anka-muted)]">Build the approved context and structured content system that Design, Development, and Marketing consume.</p></div>
+        <div><p className="workspace-eyebrow">Content department</p><h1 className="workspace-title">Content Studio</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--anka-muted)]">Write, review and find saved content for your work.</p></div>
         <div className="flex flex-wrap gap-3"><button type="button" onClick={() => selectTab('general')} className="workspace-button workspace-button-primary disabled:cursor-not-allowed disabled:opacity-50">Make a post / reel</button><Link to={parentWorkshopPath} className="workspace-button disabled:cursor-not-allowed disabled:opacity-50">Back to Content Workshop</Link></div>
       </div>
     </header>
     <main className="workspace-container space-y-6 workspace-page">
       <WorkshopContextShell navigation={navigationContext} validation={contextValidation} returnTarget={returnTarget} projectName={context.engagement?.name}>
       {(error || message) && <div className={`rounded-xl border px-4 py-3 text-sm ${error ? "border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] text-[var(--anka-danger)]" : "border-[var(--anka-success)] bg-[var(--anka-success-soft)] text-[var(--anka-success)]"}`}>{error || message}</div>}
-      {!['general', 'queue', 'library'].includes(tab) && <section className="flex flex-wrap items-end gap-4 workspace-card p-5">
-        <label className="min-w-72 flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Content engagement
+      {!['general', 'queue', 'library'].includes(tab) && <details key={`${activeOrganizationId}:${scopeRevision}:${engagementId}`} open={!workspace?.engagement} className="content-tools-context workspace-card p-4">
+        <summary>Engagement · {workspace?.engagement?.name || 'Choose work'}</summary>
+        <div className="mt-3 flex flex-wrap items-end gap-4">
+        <label className="min-w-0 w-full flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Content engagement
           <select value={engagementId} onChange={event => { const item = engagements.find(candidate => candidate.id === event.target.value); setSearchParams(item ? contentSelectionParams(navigationContext, item, activeOrganizationId) : {}) }} className={`w-full rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] px-3.5 py-2.5 text-sm text-[var(--anka-ink)] focus:border-[var(--anka-focus)] focus:ring-2 focus:ring-[var(--anka-focus)] mt-2 normal-case tracking-normal`}>
             <option value="">Choose work</option>
             {engagements.map(item => <option key={item.id} value={item.id}>{item.name} · {item.brands?.name || 'Brand'}</option>)}
           </select>
         </label>
         {workspace?.engagement && <div className="rounded-xl bg-[var(--anka-canvas)] px-4 py-3 text-sm text-[var(--anka-muted)]"><span className="font-semibold text-[var(--anka-ink)]">{workspace.engagement.brands?.name}</span><span className="mx-2 text-[var(--anka-muted)]">/</span>{workspace.engagement.agency_clients?.name}</div>}
-      </section>}
-      <nav className="flex gap-2 overflow-x-auto border-b border-[var(--anka-line)]">
-        {[['home', 'Content home'], ['general', 'General requests'], ['queue', 'Content queue'], ['writer', 'Production writer'], ['library', 'Content library'], ['artifacts', 'Artifact workspace'], ['requests', 'Content requests'], ['calendar', 'Blog calendar'], ['brand', 'Brief & brand statement'], ['chat', 'Shared Department Chat']].map(([id, label]) => <button type="button" key={id} onClick={() => selectTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold focus:ring-2 focus:ring-inset focus:ring-[var(--anka-focus)] ${tab === id ? "border-[var(--anka-violet)] text-[var(--anka-violet)]" : "border-transparent text-[var(--anka-muted)] hover:text-[var(--anka-ink)]"}`}>{label}</button>)}
+        </div>
+      </details>}
+      <nav aria-label="Content tools" className="content-tools-navigation">
+        <label>Tool<select aria-label="Content tool" value={tab} onChange={event => selectTab(event.target.value)}>
+          {[['home', 'Content home'], ['general', 'General requests'], ['queue', 'Content queue'], ['writer', 'Production writer'], ['library', 'Content library'], ['artifacts', 'Artifact workspace'], ['requests', 'Content requests'], ['calendar', 'Blog calendar'], ['brand', 'Brief & brand statement'], ['chat', 'Shared Department Chat']].map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </select></label>
+        <p>Open Workshop to continue the conversation. Editors retain their existing save and review steps.</p>
       </nav>
       {!repositories ? <div className="py-20 text-center text-sm text-[var(--anka-muted)]">Select an active organization to open Content Studio.</div> : tab === 'general' ? <GeneralContentRequestsPanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.requests} /> : tab === 'library' ? <ContentLibraryPanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.studio} initialArtifactId={searchParams.get('artifact') || ''} initialVersionId={searchParams.get('version') || navigationContext.output?.versionId || ''} /> : tab === 'home' ? <ContentWorkshopHomePanel key={`${activeOrganizationId}:${scopeRevision}:${engagementId}`} workspace={workspace} loadState={loading ? 'loading' : workspaceDenied ? 'denied' : error && !workspace ? 'error' : 'ready'} stale={workspaceStale} error={error} onRetry={() => loadWorkspace(engagementId)} onNewContent={() => selectTab('writer')} onOpenBrief={() => selectTab('brand')} onOpenEditor={(item, editorTab) => { setType(item.contentType); selectTab(editorTab) }} /> : loading && tab !== 'writer' ? <div className="py-20 text-center text-sm text-[var(--anka-muted)]">Loading Content Studio…</div> : tab === 'queue' ? <ContentQueuePanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.queue} /> : !workspace ? <div className="rounded-2xl border border-dashed border-[var(--anka-line)] px-6 py-16 text-center text-sm text-[var(--anka-muted)]">Activate a Content service on an engagement to begin, or use General requests without an engagement.</div> : tab === 'writer' ? (
         <ContentWriterEditor key={`${activeOrganizationId}:${scopeRevision}:${workspace.engagement.id}`} workspace={workspace} studio={studio} saving={saving} act={act} onRefresh={() => loadWorkspace(engagementId)} refreshing={loading} stale={workspaceStale} stageId={bestContentStage(workspace.stages, 'content')?.id || null} defaultLanguage={resolveContentLanguage({ approvedBrandLanguage: approvedVisionLanguage(workspace), organizationDefaultLanguage: workspace.organizationSettings?.content_language || workspace.organizationSettings?.default_language }).language} />

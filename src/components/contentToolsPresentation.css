@@ -1,0 +1,30 @@
+/* Scoped Content tools presentation; no workflow, authority or media overrides. */
+.content-tools-surface { color: var(--anka-ink); min-width: 0; overflow-wrap: anywhere; }
+.content-tools-surface :is([class~="text-white"], [class~="text-slate-200"], [class~="text-slate-300"]) { color: var(--anka-ink); }
+.content-tools-surface :is([class~="text-slate-400"], [class~="text-slate-500"], [class~="text-slate-600"], [class~="text-slate-700"]) { color: var(--anka-muted); }
+.content-tools-surface :is([class~="bg-slate-800"], [class~="bg-slate-900"], [class~="bg-slate-900/70"], [class~="bg-slate-950"], [class~="bg-slate-950/40"], [class~="bg-slate-950/50"], [class~="bg-slate-950/60"]) { background: var(--anka-surface); }
+.content-tools-surface :is([class~="border-slate-600"], [class~="border-slate-700"], [class~="border-slate-800"]) { border-color: var(--anka-line); }
+.content-tools-surface :is([class~="text-amber-200"], [class~="text-amber-300"], [class~="text-amber-400"]) { color: var(--anka-warning); }
+.content-tools-surface :is([class~="bg-amber-950"], [class~="bg-amber-950/20"]) { background: var(--anka-warning-soft); }
+.content-tools-surface :is([class~="text-emerald-300"]) { color: var(--anka-success); }
+.content-tools-surface :is([class~="bg-emerald-950"]) { background: var(--anka-success-soft); }
+.content-tools-surface :is([class~="text-blue-300"]) { color: var(--anka-violet); }
+.content-tools-surface :is([class~="bg-blue-950"]) { background: var(--anka-violet-soft); }
+.content-tools-surface :is([class~="text-red-300"]) { color: var(--anka-danger); }
+.content-tools-surface :is([class~="bg-red-950"]) { background: var(--anka-danger-soft); }
+.content-tools-surface button[class~="bg-amber-500"] { background: var(--anka-violet); color: var(--anka-on-violet); }
+.content-tools-surface :is(button, input, select, textarea, a, summary):focus-visible { outline: 3px solid var(--anka-focus); outline-offset: 3px; }
+.content-tools-surface :is(select, input, textarea) { max-width: 100%; }
+.content-tools-surface summary { cursor: pointer; font-weight: 600; line-height: 1.6; }
+.content-tools-navigation { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 24px; border-bottom: 1px solid var(--anka-line); padding-bottom: 16px; }
+.content-tools-navigation label { display: flex; align-items: center; gap: 12px; font-size: 13px; font-weight: 600; }
+.content-tools-navigation select { min-width: 0; max-width: 100%; padding: 10px 12px; border: 1px solid var(--anka-line); border-radius: 8px; background: var(--anka-surface); color: var(--anka-ink); }
+.content-tools-navigation p { color: var(--anka-muted); font-size: 13px; line-height: 1.6; }
+.content-source-panel { grid-column: 1 / -1; }
+.content-record-grid > *, .content-record-evidence { min-width: 0; }
+.content-record-evidence summary { color: var(--anka-ink); }
+@media (max-width: 600px) {
+  .content-tools-navigation label { width: 100%; }
+  .content-tools-navigation select { flex: 1; width: 0; }
+  .content-tools-surface :is(input, select, textarea) { font-size: 16px; }
+}

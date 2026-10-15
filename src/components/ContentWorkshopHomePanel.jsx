@@ -1,3 +1,4 @@
+import './contentToolsPresentation.css'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import {
@@ -72,25 +73,25 @@ export default function ContentWorkshopHomePanel({
   if (!workspace) return <HomeState title="No Content work selected" detail="Choose an authorized engagement. Content Studio will not select one silently." />
 
   const empty = allItems.length === 0
-  return <section aria-labelledby="content-home-title" className="space-y-5">
-    <header className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+  return <section aria-labelledby="content-home-title" className="content-tools-surface space-y-4">
+    <header className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
       <div className="flex flex-wrap items-start justify-between gap-4"><div>
-        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Content B01</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Content records</p>
         <h2 id="content-home-title" className="mt-1 text-2xl font-semibold text-white">Content home</h2>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Browse the current engagement’s Content records, select exact saved versions, and see source readiness without imposing unrelated gates.</p>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Browse saved content, choose an exact version and continue in its editor.</p>
       </div><div className="flex flex-wrap gap-2"><button type="button" className={PRIMARY} disabled={stale} onClick={onNewContent}>New content</button><button type="button" className={BUTTON} onClick={onOpenBrief}>Open brief</button><a className={BUTTON} href="/sphere/quick-tasks">Start private exploration</a></div></div>
-      <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+      <details className="content-record-context mt-4"><summary>Context details</summary><dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
         <Meta label="Organization" value={context.organizationId} /><Meta label="Project" value={context.projectId} />
         <Meta label="Engagement" value={workspace.engagement?.name || context.engagementId} /><Meta label="Brand" value={workspace.engagement?.brands?.name || context.brandId} />
-      </dl>
+      </dl></details>
       {!access.canCreateOfficial && <p role="status" className="mt-4 text-sm text-amber-300">Official creation unavailable: {access.reason}</p>}
       {stale && <div role="status" className="mt-4 flex flex-wrap items-center gap-3 text-sm text-amber-300"><p>Fresh data could not be loaded. This last verified snapshot is read-only until retry succeeds.</p><button type="button" className={BUTTON} onClick={onRetry}>Retry current Content work</button></div>}
     </header>
 
-    {empty ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-14 text-center">
+    {empty ? <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-8 text-center">
       <h3 className="font-semibold text-slate-200">No Content records in this engagement</h3>
       <p className="mt-2 text-sm text-slate-500">This is an empty result, not a permission denial. Start a permitted request or open the brief.</p>
-    </div> : <div className="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
+    </div> : <div className="content-record-grid grid gap-5 xl:grid-cols-[260px_minmax(0,1fr)]">
       <nav aria-label="Project Content index" className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
         {groups.map(group => <section key={group.id} aria-labelledby={`content-home-${group.id}`}>
           <div className="flex items-center justify-between gap-3"><h3 id={`content-home-${group.id}`} className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{group.label}</h3><span className="text-xs text-slate-600">{group.items.length}</span></div>
@@ -106,8 +107,8 @@ export default function ContentWorkshopHomePanel({
         {!selectedItem ? <div className="py-16 text-center"><h3 className="font-semibold text-slate-200">Select a Content record</h3><p className="mt-2 text-sm text-slate-500">Nothing has been selected automatically. Choose an item from the index to inspect its exact current version.</p></div> : <>
           <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-400">Explicit selection</p><h3 ref={detailHeading} tabIndex="-1" className="mt-1 text-xl font-semibold text-white outline-none">{selectedItem.title}</h3><p className="mt-2 text-sm text-slate-400">{label(selectedItem.contentType)} · owner {selectedItem.ownerId || 'not recorded'} · {displayDate(selectedItem.updatedAt)}</p></div><span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${selectedItem.reviewState === 'approved' || selectedItem.reviewState === 'released' ? 'bg-emerald-950 text-emerald-300' : 'bg-amber-950 text-amber-300'}`}>{selectedItem.reviewLabel}</span></div>
           {selectedVersion ? <>
-            <dl className="mt-5 grid gap-3 sm:grid-cols-2"><Meta label="Exact version ID" value={selectedVersion.id} /><Meta label="Version number" value={selectedVersion.version_number} /><Meta label="Checksum" value={selectedVersion.content_checksum || 'Not recorded'} /><Meta label="Classification" value={selectedVersion.data_classification || 'Not recorded'} /></dl>
-            <div className="mt-5"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Exact saved payload</p><pre className="mt-2 max-h-[34rem] overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-4 text-xs leading-5 text-slate-300">{JSON.stringify(selectedVersion.content || {}, null, 2)}</pre></div>
+            <details className="content-record-evidence mt-5"><summary>Version details &amp; saved payload</summary><dl className="mt-3 grid gap-3 sm:grid-cols-2"><Meta label="Exact version ID" value={selectedVersion.id} /><Meta label="Version number" value={selectedVersion.version_number} /><Meta label="Checksum" value={selectedVersion.content_checksum || 'Not recorded'} /><Meta label="Classification" value={selectedVersion.data_classification || 'Not recorded'} /></dl>
+            <div className="mt-5"><p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Exact saved payload</p><pre className="mt-2 max-h-[34rem] overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-4 text-xs leading-5 text-slate-300">{JSON.stringify(selectedVersion.content || {}, null, 2)}</pre></div></details>
           </> : <p className="mt-5 rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400">This artifact root has no saved version. No content has been inferred.</p>}
           <div className="mt-5 flex flex-wrap gap-2"><a className={BUTTON} href={`/sphere/artifacts/${encodeURIComponent(selectedItem.id)}`}>Open canonical artifact</a>
             {editorTarget ? <button type="button" className={BUTTON} disabled={stale} onClick={() => onOpenEditor(selectedItem, editorTarget)}>{writerTarget ? 'Open Production writer to continue' : 'Continue in Content editor'}</button>
@@ -116,8 +117,9 @@ export default function ContentWorkshopHomePanel({
         </>}
       </div>
 
-      <aside aria-labelledby="content-source-readiness" className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-        <h3 id="content-source-readiness" className="font-semibold text-white">Source readiness</h3>
+      <aside aria-labelledby="content-source-readiness" className="content-source-panel rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><details>
+        <summary id="content-source-readiness">Source readiness</summary>
+
         <p className="mt-2 text-xs leading-5 text-slate-500">These indicators describe available inputs. Missing optional sources do not block unrelated content work.</p>
         <p className="mt-2 text-[11px] leading-4 text-slate-600">Changed since use is shown only when this selected saved version records an exact source version. A browsing choice alone is not provenance.</p>
         <div className="mt-4 space-y-3">{CONTENT_HOME_GROUPS.filter(group => group.artifactTypes.length).flatMap(group => group.artifactTypes.map(type => {
@@ -136,7 +138,7 @@ export default function ContentWorkshopHomePanel({
             {readiness.status === 'invalid_selection' && <p role="alert" className="mt-2 text-[11px] text-red-300">{readiness.reason}</p>}
           </div>
         }))}</div>
-      </aside>
+      </details></aside>
     </div>}
   </section>
 }

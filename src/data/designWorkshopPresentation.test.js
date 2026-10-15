@@ -90,7 +90,7 @@ test('Unified Design layout retains context reset and shared chat navigation gua
   assert.match(css,/var\(--anka-focus\)/)
   assert.match(css,/max-width: 600px/)
   assert.doesNotMatch(css,/filter:|!important|position: fixed/)
-  assert.match(parent,/presentation=\{departmentId === 'design' \? 'design' : undefined\}/)
+  assert.ok(parent.includes("presentation={['design', 'content'].includes(departmentId) ? departmentId : undefined}"))
   assert.match(parent,/externalNavigationBusy=\{designNavigationBusy\}/)
   assert.ok(parent.includes("key={JSON.stringify([designPaneKey,selectedConversationRevision])}"))
   assert.match(parent,/\['design', 'content', 'marketing'\]\.includes\(departmentId\) \? 'design-workshop-surface h-full overflow-y-auto'/)
