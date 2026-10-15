@@ -15,7 +15,7 @@ export default function Layout() {
       <Header sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed(value => !value)} />
       <OrganizationGate>
         <div className="flex min-h-0 flex-1 overflow-hidden">
-          <Sidebar collapsed={sidebarCollapsed} compact={pathname === '/sphere/design'} />
+          <Sidebar collapsed={sidebarCollapsed} compact={['/sphere/design', '/sphere/content'].includes(pathname)} />
           <main id="main-workspace" className="anka-workspace relative min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain" tabIndex="-1">
             <Outlet />
           </main>

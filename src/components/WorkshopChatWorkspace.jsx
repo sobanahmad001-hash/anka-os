@@ -5,7 +5,7 @@ import './designWorkshopPresentation.css'
 
 // Presentation only: each child retains its own store, permissions and saved-thread controls.
 export default function WorkshopChatWorkspace({ mode, onModeChange, departmentName, projectName, engagementName, conversationList, onConversationSelect, navigationBusy = false, presentation, compactPrivate = false, compactChat = false, draftDirty, children }) {
-  const design = presentation === 'design'
+  const design = ['design', 'content'].includes(presentation)
   const compact = compactPrivate || compactChat
   const historyId = useId()
   const [newChatTarget, setNewChatTarget] = useState(null)
@@ -57,7 +57,7 @@ export default function WorkshopChatWorkspace({ mode, onModeChange, departmentNa
         </div>
       </div>}
     </header>
-  return <section aria-label="Workshop Chat" className={design ? 'design-workshop design-conversation-workspace space-y-4' : 'mt-6 space-y-4'}>
+  return <section aria-label="Workshop Chat" className={design ? `design-workshop design-conversation-workspace space-y-4${presentation === 'content' ? ' content-conversation-workspace' : ''}` : 'mt-6 space-y-4'}>
     {!compactChat && scopeHeader}
     {compactChat && conversationList ? <WorkshopChatHistoryContext.Provider value={railContext}><WorkshopConversationRail newChatSlot={design ? <div ref={setNewChatTarget} /> : undefined} header={scopeHeader} navigationBusy={navigationBusy} renderHistory={closeAfter => conversationList(item => closeAfter(() => requestConversation(item)))}>{children}</WorkshopConversationRail></WorkshopChatHistoryContext.Provider> : conversationList && !compactPrivate ? <div className={design ? 'design-chat-layout history-open' : 'grid items-start gap-4 lg:grid-cols-[260px_minmax(0,1fr)]'}>
       <div id={historyId}>{conversationList(requestConversation)}</div>

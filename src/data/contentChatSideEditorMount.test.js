@@ -33,11 +33,11 @@ test('engagement side editor shares one canonical load, preserves dirty edits th
   }
   new Function('require', 'module', 'exports', 'React', compiled)(require, module, module.exports, React)
   const root = createRoot(env.container), Component = module.exports.default
-  const render = () => act(async () => { root.render(React.createElement(Component, { engagement, projectId: 'project', sideEditor: true, onNavigationBusyChange: value => busy.push(value) })); await new Promise(resolve => setTimeout(resolve, 0)) })
+  const render = () => act(async () => { root.render(React.createElement(Component, { engagement, projectId: 'project', conversationLayout: true, sideEditor: true, onNavigationBusyChange: value => busy.push(value) })); await new Promise(resolve => setTimeout(resolve, 0)) })
   t.after(async () => { await act(async () => root.unmount()); Object.assign(globalThis, previous) })
   const button = title => elements(env.container, 'button').find(node => node.textContent === title)
   const click = node => act(async () => props(node).onClick())
-  await render(); assert.equal(loads, 1)
+  await render(); assert.equal(loads, 1); assert.equal(departmentProps.conversationLayout, true); assert.equal(departmentProps.designWorkspace, undefined)
   await click(button('Open Content writer beside chat'))
   assert.equal(paneProps.workspace, workspace); assert.equal(loads, 1); assert.equal(mounts, 1)
   await act(async () => paneProps.onStateChange({ dirty: true, saving: false }))

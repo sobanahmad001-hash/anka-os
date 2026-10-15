@@ -395,3 +395,19 @@ for (const [surface, models, expected] of [
   }
   assert.equal(ui.fixture.data.counters.run, 0, 'preference never dispatches')
 })
+
+test('Content compact layout keeps one approved model above composer and preserves consent cancellation', async t => {
+  const ui = await mount(t)
+  await ui.render({ departmentId: 'content', conversationLayout: true })
+  const toolbar = ui.named('Content conversation tools')
+  assert.ok(toolbar)
+  assert.equal(descendants(toolbar).filter(node => props(node)?.['aria-label'] === 'Approved model').length, 1)
+  assert.equal(descendants(ui.named('Chat composer')).filter(node => node.tagName === 'SELECT').length, 0)
+  assert.equal(ui.button('Video tools'), undefined)
+  await ui.type('Preserve this Content draft')
+  await ui.send()
+  assert.ok(ui.named('Confirm AI data sharing'))
+  await ui.click('Cancel')
+  assert.equal(ui.named('Message').value, 'Preserve this Content draft')
+  assert.deepEqual(ui.fixture.data.counters, { created: 0, messages: 0, run: 0, recover: 0 })
+})
