@@ -28,7 +28,7 @@ const config = { root, cacheDir: '/tmp/anka-direct-chat-preview-vite-cache', ser
     if (path.endsWith('/src/data/integrationRepository.js')) return `import {allowlist} from '/tools/direct-chat-fixture.js'; export const integrations = {listModelAllowlist: async () => allowlist,listForOrganization: async organization_id => ({organization_id,connections:[]})};`
     if (path.endsWith('/src/hooks/useNotifications.js')) return 'export const useNotifications = () => ({notifications:[],unread:0,markRead:()=>{},markAllRead:()=>{}})'
     if (path.endsWith('/src/components/AssistantFloat.jsx')) return 'export default function OfflineAssistantFloat() { return null }'
-    if (path.endsWith('/src/lib/supabase.js')) return `export const supabase = {from: table => {if(table !== 'user_preferences') throw new Error('Unexpected live-data path in offline fixture: '+table);const query={select:()=>query,eq:()=>query,maybeSingle:async()=>({data:null,error:null}),upsert:async()=>({error:null})};return query}};`
+    if (path.endsWith('/src/lib/supabase.js')) return `export const supabase = {functions:{invoke:async()=>{throw new Error('Importer unavailable in layout-only fixture')}},from: table => {if(table !== 'user_preferences') throw new Error('Unexpected live-data path in offline fixture: '+table);const query={select:()=>query,eq:()=>query,maybeSingle:async()=>({data:null,error:null}),upsert:async()=>({error:null})};return query}};`
     // Actual private video UI uses the isolated repository above; generation is disabled.
   },
 }] }

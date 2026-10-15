@@ -1152,7 +1152,7 @@ async function getConversation(admin: Client, body: Json, actorId: string, organ
   const authorIds = [...new Set((messages || []).map(message => text(message.author_id, 80)).filter(Boolean))]
   let authors: Json[] = []
   if (authorIds.length) {
-    const result = await admin.from('profiles').select('id, full_name, email').in('id', authorIds)
+    const result = await admin.from('profiles').select('id, full_name').in('id', authorIds)
     if (result.error) throw result.error
     authors = result.data || []
   }
@@ -1215,13 +1215,13 @@ async function listConversationShareCandidates(
   const ids = [...new Set(eligible.map(item => text(item.user_id, 80)).filter(Boolean))]
   if (!ids.length) return []
   const { data: profiles, error: profileError } = await admin.from('profiles')
-    .select('id, full_name, email').in('id', ids)
+    .select('id, full_name').in('id', ids)
   if (profileError) throw profileError
   const names = new Map((profiles || []).map(profile => [profile.id, profile]))
   return eligible.map(item => ({
     id: item.user_id,
     full_name: names.get(item.user_id)?.full_name || '',
-    email: names.get(item.user_id)?.email || '',
+    email: '',
     role: item.role,
     department_id: item.department_id,
   })).sort((left, right) =>
