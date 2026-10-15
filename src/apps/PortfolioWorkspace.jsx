@@ -82,24 +82,24 @@ export default function PortfolioWorkspace({ initialOwnerKind = 'all' }) {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="workspace-eyebrow">Coordination</p>
-            <h1 className="workspace-title">Portfolio Workspace</h1>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">Projects</h1>
             <p className="workspace-description">A project-root view of Client Work and Internal Work. Project Tasks and Engagement Work Items remain separate.</p>
           </div>
-          <div className="flex gap-2">{canShowAuthorityAdministration(activeMembership) && <button type="button" onClick={() => setShowSetup(true)} disabled={showSetup} className="rounded-xl workspace-button workspace-button-primary px-4 py-2 text-sm font-semibold disabled:opacity-50">New draft project</button>}<button type="button" onClick={load} disabled={loading} className="workspace-button font-medium text-[var(--anka-ink)] hover:bg-[var(--anka-surface-raised)] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button></div>
+          <div className="flex flex-wrap gap-2">{canShowAuthorityAdministration(activeMembership) && <button type="button" onClick={() => setShowSetup(true)} disabled={showSetup} className="rounded-xl workspace-button workspace-button-primary px-4 py-2 text-sm font-semibold disabled:opacity-50">New draft project</button>}<button type="button" onClick={load} disabled={loading} className="workspace-button font-medium text-[var(--anka-ink)] hover:bg-[var(--anka-surface-raised)] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button></div>
         </div>
 
         {showSetup && canShowAuthorityAdministration(activeMembership) && <ProjectDraftSetupPanel organizationId={activeOrganizationId} scopeRevision={scopeRevision} requestSignal={requestSignal} initialType="project" onCreated={(result) => navigate(`/sphere/workspace/projects/${result.project_id}?tab=services`)} onCancel={() => setShowSetup(false)} onAccessError={handleOrganizationAccessError} />}
 
-        {!organizationLoading && !selectionRequired && activeOrganizationId && <ProjectRequestPanel organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={handleOrganizationAccessError} />}
+        {!organizationLoading && !selectionRequired && activeOrganizationId && <details className="mt-4 workspace-card p-4"><summary className="cursor-pointer text-sm font-medium">Project requests</summary><ProjectRequestPanel organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={handleOrganizationAccessError} /></details>}
 
-        {!organizationLoading && !selectionRequired && activeOrganizationId && canShowAuthorityAdministration(activeMembership) && <ProjectLifecycleAdminList key={`${activeOrganizationId}:${scopeRevision}`} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={load} />}
+        {!organizationLoading && !selectionRequired && activeOrganizationId && canShowAuthorityAdministration(activeMembership) && <details className="mt-3 workspace-card p-4"><summary className="cursor-pointer text-sm font-medium">Archived projects and lifecycle administration</summary><ProjectLifecycleAdminList key={`${activeOrganizationId}:${scopeRevision}`} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={load} /></details>}
 
         {error && <div role="alert" className="mt-6 rounded-2xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] p-4 text-sm text-[var(--anka-danger)]">{error}</div>}
         {loading && !snapshot && <div className="mt-8 workspace-card p-10 text-center text-sm text-[var(--anka-muted)]">Loading live portfolio data…</div>}
 
         <nav aria-label="Project work type" className="mt-5 flex flex-wrap gap-2">{[['all', 'All Projects'], ['client', 'Client Work'], ['internal', 'Internal Work']].map(([kind, title]) => <button type="button" key={kind} aria-pressed={filters.ownerKind === kind} onClick={() => setFilters(current => ({ ...current, ownerKind: kind }))} className={`rounded-xl border px-4 py-2 text-sm ${filters.ownerKind === kind ? 'border-[var(--anka-violet)] bg-[var(--anka-violet-soft)] text-[var(--anka-violet)]' : 'border-[var(--anka-line)] text-[var(--anka-muted)]'}`}>{title}</button>)}</nav>
         {snapshot && <>
-          <section aria-label="Portfolio summary" className="mt-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+          <section aria-label="Portfolio summary" className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
             {metrics.map((item) => <div key={item.title} className="workspace-card p-4"><p className="text-xs text-[var(--anka-muted)]">{item.title}</p><p className="mt-2 text-2xl font-semibold">{item.value}</p><p className="mt-1 text-[11px] text-[var(--anka-muted)]">{item.note}</p></div>)}
           </section>
 

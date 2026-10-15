@@ -31,6 +31,8 @@ test('mounted My Work preserves review deeplink but resets review targets and re
   const compiled = transformSync(source, { loader: 'jsx', format: 'cjs', jsxFactory: 'React.createElement' }).code
   const module = { exports: {} }
   const require = name => {
+    // Dialog focus/keyboard behavior is exercised in the real-browser presentation suite.
+    if (name.includes('WorkspaceDialog')) return { __esModule: true, default: ({ title, children }) => React.createElement('section', { role: 'dialog', 'aria-label': title }, children) }
     if (name.includes('AuthContext')) return { useAuth: () => ({ user: { id: 'user-a' } }) }
     if (name.includes('OrganizationContext')) return { useOrganization: () => organization }
     if (name.endsWith('/delivery.js')) return { delivery }

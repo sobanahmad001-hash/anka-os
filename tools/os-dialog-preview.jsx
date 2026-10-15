@@ -1,0 +1,4 @@
+import React,{useState} from 'react'
+import {createRoot} from 'react-dom/client'
+import Dialog from '../src/components/WorkspaceDialog.jsx'
+function Preview(){const[open,setOpen]=useState(false),[busy,setBusy]=useState(false);window.finishSyntheticSave=()=>setBusy(false);return <main className="workspace-page"><h1 className="workspace-title">Operating queue · synthetic</h1><button className="workspace-button" onClick={()=>setOpen(true)}>Open review</button><button className="workspace-button">Background action</button>{open&&<Dialog title="Review project changes" busy={busy} onClose={()=>{window.dialogDismissals++;setOpen(false)}}><label className="block">Review notes<input className="workspace-button block w-full" /></label><button className="workspace-button mt-4" onClick={()=>setBusy(true)}>Simulate pending save</button></Dialog>}</main>};window.dialogDismissals=0;createRoot(document.getElementById('root')).render(<Preview/>);
