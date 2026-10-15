@@ -1,3 +1,6 @@
+import {quoteMediaRequest,listMediaChoices} from './mediaRequests.ts'
+import {listMediaGenerations,generateMedia,recoverMediaGeneration,pollMediaGeneration,ingestMediaGeneration,signMediaGeneration} from './mediaExecution.ts'
+import { listMediaRates, configureMediaRate } from './mediaPricing.ts'
 import { namedKey } from '../_shared/googleOAuthTokens.ts'
 import { openAiTextOptions } from '../_shared/openaiModelPolicy.js'
 import {confirmVideoBrief,getVideoBrief,getVideoJobBrief,reserveConfirmedVideoJob,videoBriefContext} from './videoBriefs.ts'
@@ -242,6 +245,13 @@ async function callerDeliveryPackageRoot(userClient: Client, artifactId: string)
 export async function designWorkshopScope(userClient: Client, body: Json): Promise<ServerOrganizationScope> {
   const action = text(body.action, 80)
   const requestedOrganizationId = text(body.organization_id, 80) || null
+  if (['list_media_generations','recover_media_generation','poll_media_generation','ingest_media_generation','sign_media_generation'].includes(action)) return {root:null,requestedOrganizationId:requestedOrganizationId || ''}
+  if (['list_media_choices','quote_media_request','generate_media_request'].includes(action)) {
+    const root=await callerCreativeBriefRoot(userClient,requiredActionId(body.creative_brief_id,'Confirmed creative brief'));
+    if(requestedOrganizationId&&requestedOrganizationId!==root.organizationId)throw Object.assign(new Error('Creative brief organization mismatch'),{status:403});
+    return root.engagementId?{root:{kind:'engagement',id:root.engagementId},requestedOrganizationId}:{root:null,requestedOrganizationId:root.organizationId}
+  }
+  if (['list_media_rates','configure_media_rate'].includes(action)) return {root:null,requestedOrganizationId:requestedOrganizationId || ''}
   if (['get_video_brief','confirm_video_brief'].includes(action)) {
     const briefContext=videoBriefContext(body)
     if(briefContext.private_conversation_id) return {root:null,requestedOrganizationId:requestedOrganizationId || ''}
@@ -256,7 +266,7 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
     if (text(body.visibility, 20) === 'private') return { root: null, requestedOrganizationId: requestedOrganizationId || '' }
     return { root: { kind: 'engagement', id: requiredActionId(body.engagement_id, 'Engagement') }, requestedOrganizationId }
   }
-  if (action === 'save_creative_brief' || action === 'freeze_creative_brief') {
+  if (action === 'save_creative_brief' || action === 'freeze_creative_brief' || action === 'create_manual_direction') {
     const root = await callerCreativeBriefRoot(userClient, requiredActionId(body.creative_brief_id, 'Creative brief'))
     if (requestedOrganizationId && requestedOrganizationId !== root.organizationId) {
       throw Object.assign(new Error('Requested organization does not match the creative brief'), { status: 403 })
@@ -474,6 +484,7 @@ function outputText(result: Json) {
 export function hasWorkshopAuthority(membership: Json, action: string) {
   if (membership.member_kind !== 'team') return false
   const role = String(membership.role || ''); const department = String(membership.department_id || '')
+  if (['list_media_rates','configure_media_rate'].includes(action)) return ['system_owner','operations_admin'].includes(role)
   if (LEADER_ROLES.has(role)) return true
   if (action === 'release_direction' || action === 'decide_asset_review') return department === 'design' && role === 'department_manager'
   if (action === 'generate_content_request_image' || action === 'create_content_request_video_placeholder') {
@@ -630,6 +641,20 @@ export async function requireActiveDesignService(context: WorkshopOrganizationCo
   return { service, catalog, outputFamily: outputFamilyForService(catalog.slug) }
 }
 
+export async function createManualDirection(admin: ScopedClient, body: Json, actorId: string) {
+  const revision=body.expected_revision
+  if (!Number.isSafeInteger(revision) || Number(revision)<1) throw new Error('Exact saved brief revision required')
+  const {data,error}=await admin.rpc('create_design_manual_direction', {
+    p_organization_id:admin.organizationId,p_actor_id:actorId,
+    p_creative_brief_id:requiredActionId(body.creative_brief_id,'Creative brief'),
+    p_creative_brief_version_id:requiredActionId(body.creative_brief_version_id,'Brief version'),
+    p_expected_revision:revision,p_operation_key:requiredActionId(body.operation_key,'Operation'),
+    p_engagement_id:requiredActionId(body.engagement_id,'Engagement'),
+    p_engagement_service_id:requiredActionId(body.engagement_service_id,'Design service'),
+  })
+  if(error)throw error
+  return data
+}
 export async function createSession(admin: ScopedClient, body: Json, actorId: string) {
   const engagementId = text(body.engagement_id, 80); const brandId = text(body.brand_id, 80)
   const stageId = text(body.engagement_stage_instance_id, 80) || null
@@ -2028,6 +2053,10 @@ export async function generateDesignVideo(admin: ScopedClient, body: Json, actor
   return getDesignVideoJob(admin, { job_id: created.job_id }, actorId)
 }
 
+export function requireExactMediaWorkflow():never {
+ throw Object.assign(new Error('Open Design chat, select the exact saved brief and refresh its media price before Generate. Existing outputs remain available.'),{status:409});
+}
+
 async function handler(req: Request, dependencies: HandlerDependencies = {}) {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
@@ -2043,8 +2072,19 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
     admin.organizationId = context.organizationId
     const { user, membership, userClient } = context
     const actions: Record<string, () => Promise<unknown>> = {
+      list_media_choices: () => listMediaChoices(admin,body,user.id),
+      quote_media_request: () => quoteMediaRequest(admin,body,user.id),
+      generate_media_request: () => generateMedia(admin,body,user.id),
+      list_media_generations: () => listMediaGenerations(admin,body,user.id),
+      recover_media_generation: () => recoverMediaGeneration(admin,body,user.id),
+      poll_media_generation: () => pollMediaGeneration(admin,body,user.id),
+      ingest_media_generation: () => ingestMediaGeneration(admin,body,user.id),
+      sign_media_generation: () => signMediaGeneration(admin,body,user.id),
+      list_media_rates: () => listMediaRates(admin,user.id),
+      configure_media_rate: () => configureMediaRate(admin,body,user.id),
       create_page_flow: () => createPageFlow(admin, body, user.id),
       create_session: () => createSession(admin, body, user.id),
+      create_manual_direction: () => createManualDirection(admin,body,user.id),
       get_video_brief:()=>getVideoBrief(admin,body,user.id),
       confirm_video_brief:()=>confirmVideoBrief(admin,body,user.id),
       validate_creative_brief: async () => validateCreativeBrief(body.content),
@@ -2057,16 +2097,16 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       promote_direction_experiment: () => promoteDirectionExperiment(admin, body, user.id),
       select_direction: () => selectDirection(admin, body, user.id),
       release_direction: () => releaseDirection(admin, body, user.id),
-      generate_private_image: () => generatePrivateImage(admin, userClient, body, user.id),
+      generate_private_image: () => requireExactMediaWorkflow(),
       get_private_image_job: () => privateImageJob(userClient, admin.organizationId, requiredActionId(body.job_id, 'Private image request'), user.id),
       reconcile_private_image_request: () => reconcilePrivateImageRequest(userClient, admin.organizationId, user.id, requiredActionId(body.operation_key, 'Operation key')),
       sign_private_image_job: () => signPrivateImageJob(admin, userClient, body, user.id),
       preview_private_promotion: () => privatePromotionPreview(admin, userClient, body, user.id),
       promote_private_image: () => promotePrivateImage(admin, userClient, body, user.id),
-      generate_image: () => generateImage(admin, userClient, body, user.id),
+      generate_image: () => requireExactMediaWorkflow(),
       get_image_generation_job: () => getImageGenerationJob(admin, body),
-      retry_image_generation: () => retryImageGeneration(admin, userClient, body, user.id),
-      generate_variants: () => generateVariants(admin, userClient, body, user.id),
+      retry_image_generation: () => requireExactMediaWorkflow(),
+      generate_variants: () => requireExactMediaWorkflow(),
       create_video_placeholder: () => createVideoPlaceholder(admin, userClient, body, user.id),
       get_video_quote: () => getDesignVideoQuote(admin, body, user.id),
       get_private_video_quote: () => getDesignVideoQuote(admin, body, user.id),
@@ -2074,8 +2114,8 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       get_video_job: () => getDesignVideoJob(admin, body, user.id),
       list_video_jobs: () => listDesignVideoJobs(admin, body, user.id),
       list_private_video_jobs: () => listDesignVideoJobs(admin, body, user.id),
-      generate_video: () => generateDesignVideo(admin, body, user.id),
-      generate_private_video: () => generateDesignVideo(admin, body, user.id),
+      generate_video: () => requireExactMediaWorkflow(),
+      generate_private_video: () => requireExactMediaWorkflow(),
       poll_video_job: () => pollDesignVideoJob(admin, body, user.id),
       ingest_video_output: () => ingestDesignVideoOutput(admin, body, user.id),
       sign_video_output: () => signDesignVideoOutput(admin, body, user.id),

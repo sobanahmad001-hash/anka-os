@@ -70,8 +70,8 @@ test('the Design Media boundary migration is isolated and enforces exactly one c
   assert.doesNotMatch(mediaMigration, /alter table public\.(engagements|brands|external_events|content_event_links)/)
 })
 
-test('existing Design Workshop generation remains direction-scoped and unchanged at its public action', () => {
-  assert.match(designEdge, /generate_image: \(\) => generateImage\(admin, userClient, body, user\.id\)/)
+test('legacy Design media requires exact pricing while retained media remains direction-scoped', () => {
+  assert.match(designEdge, /generate_image: \(\) => requireExactMediaWorkflow\(\)/)
   assert.match(designEdge, /directionVersionId: version\.id,[\s\S]*contentRequestId: null/)
   assert.match(designEdge, /mediaStoragePath\(admin\.organizationId, input\.directionVersionId, asset\.id\)/)
   assert.match(designEdge, /createVideoPlaceholder[\s\S]*design_direction_version_id: version\.id/)

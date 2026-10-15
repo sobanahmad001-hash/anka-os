@@ -17,7 +17,7 @@ const PrivateDesignVideoTools = lazy(() => import('./PrivateDesignVideoTools.jsx
 const ProjectSpreadsheetImportPanel = lazy(() => import('./ProjectSpreadsheetImportPanel.jsx'))
 function VideoWorkbenchReady({ onReady }) { useEffect(onReady, [onReady]); return null }
 
-export default function DirectContextChat({ contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError, initialConversation, onConversationListChange, onNavigationBusyChange, onDraftDirtyChange }) {
+export default function DirectContextChat({ contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError, initialConversation, onConversationListChange, onNavigationBusyChange, onDraftDirtyChange, designWorkspace }) {
   const workshopHistory = useContext(WorkshopChatHistoryContext)
   const hasExternalHistory = Boolean(workshopHistory)
   const actorId = user.id
@@ -42,7 +42,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   const [notice, setNotice] = useState(initial.recovery ? 'Checking the previous send. Your draft stays in this browser tab during recovery.' : '')
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
-  const [historyOpen, setHistoryOpen] = useState(() => globalThis.matchMedia?.('(min-width: 901px)').matches ?? true)
+  const [historyOpen, setHistoryOpen] = useState(() => designWorkspace ? false : globalThis.matchMedia?.('(min-width: 901px)').matches ?? true)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [outputId, setOutputId] = useState('')
   const [rename, setRename] = useState('')
@@ -377,11 +377,13 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     })
   }
   const output = messages.find(row => row.id === outputId && row.role === 'assistant' && row.status === 'completed')
+  const reportDesignConversation=designWorkspace?.onConversationChange
+  useEffect(()=>{reportDesignConversation?.(selected,checkPrivateVideoContext)},[selected,checkPrivateVideoContext,reportDesignConversation])
   return <><section ref={rootRef} inert={importOpen && contextKind === 'project_team' && projectId ? true : undefined} className={`direct-chat ${historyOpen ? 'history-open' : ''} ${output ? 'output-open' : ''}`} aria-label={label} onKeyDown={event => {
     if (event.key === 'Escape' && !consent.dialog) { setHistoryOpen(false); setOutputId(''); setShareOpen(false); setDetailsOpen(false) }
   }}>
     <header className="direct-chat-header" inert={drawerOpen ? true : undefined}><div><h2>{label}</h2><p>{selected?.title || 'New chat'} · {contextKind === 'department_private' ? 'Only you' : sharing?.recipients.length ? 'Shared with selected teammates' : 'Private unless explicitly shared'}</p></div>
-      <div className="direct-chat-actions">{privateDesign && <button ref={videoButton} type="button" disabled={busy || videoBusy || Boolean(pending) || !selected || !owner || selected.state !== 'active'} title={!selected ? "Send a message to save this private chat before opening video tools." : undefined} aria-expanded={videoOpen} onClick={() => { if (lock.current || videoLock.current || pendingRef.current) return; setVideoOpen(!videoOpen); setVideoOpened(true) }}>Video tools</button>}<button type="button" ref={historyButtonRef} aria-expanded={historyOpen} onClick={() => { setOutputId(''); setHistoryOpen(!historyOpen) }}>History</button>{!historyOpen && <button type="button" disabled={busy || videoBusy || Boolean(pending)} onClick={newChat}>New chat</button>}<button type="button" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>Details</button>
+      <div className="direct-chat-actions">{privateDesign && !designWorkspace && <button ref={videoButton} type="button" disabled={busy || videoBusy || Boolean(pending) || !selected || !owner || selected.state !== 'active'} title={!selected ? "Send a message to save this private chat before opening video tools." : undefined} aria-expanded={videoOpen} onClick={() => { if (lock.current || videoLock.current || pendingRef.current) return; setVideoOpen(!videoOpen); setVideoOpened(true) }}>Video tools</button>}{!designWorkspace && <button type="button" ref={historyButtonRef} aria-expanded={historyOpen} onClick={() => { setOutputId(''); setHistoryOpen(!historyOpen) }}>History</button>}{!historyOpen && <button type="button" disabled={busy || videoBusy || Boolean(pending)} onClick={newChat}>New chat</button>}<button type="button" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>Details</button>
         {contextKind === 'project_team' && projectId && <button type="button" disabled={busy || videoBusy} onClick={() => setImportOpen(true)}>Import spreadsheet</button>}
         {selected && owner && contextKind === 'project_team' && <button type="button" disabled={busy || videoBusy} onClick={loadSharing}>Share</button>}</div>
 
@@ -429,8 +431,8 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
           setMessages(previous => [...result.messages, ...previous]); setHasOlder(result.has_older)
         })}>Load older messages</button>}
         {messages.map(message => <article key={message.id} className={`direct-chat-message ${message.role}`}><strong>{message.role === 'assistant' ? 'Anka AI' : message.author_id === actorId ? 'You' : 'Teammate'}</strong><p>{message.body}</p>{message.role === 'assistant' && message.status === 'completed' && <button type="button" onClick={event => { replyButtonRef.current = event.currentTarget; if (mobileDrawer) setHistoryOpen(false); setOutputId(message.id) }}>Open reply</button>}</article>)}
-      </div></div><form className="direct-chat-composer" onSubmit={send} aria-label="Chat composer"><label className="direct-chat-draft-label"><span className="sr-only">Message</span><textarea aria-label="Message" placeholder="Ask or explore an idea…" value={draft} maxLength={8000} disabled={busy || videoBusy || Boolean(pending)} onChange={event => { if (pendingRef.current) return; const text = event.target.value; setDraft(text); try { writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: selected?.id || null, text, attempt: attempt.current }) } catch { setError('Draft recovery is unavailable in this tab. Keep this page open until your message is saved.') } }} /></label>
-        <div className="direct-chat-toolbar"><label>Work type<select aria-label="Work type" value="text" disabled><option value="text">Text</option></select></label>
+      </div></div>{designWorkspace?.toolbar}{designWorkspace?.media}<form hidden={Boolean(designWorkspace && designWorkspace.mode!=='chat')} className="direct-chat-composer" onSubmit={send} aria-label="Chat composer"><label className="direct-chat-draft-label"><span className="sr-only">Message</span><textarea aria-label="Message" placeholder="Ask or explore an idea…" value={draft} maxLength={8000} disabled={busy || videoBusy || Boolean(pending)} onChange={event => { if (pendingRef.current) return; const text = event.target.value; setDraft(text); try { writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: selected?.id || null, text, attempt: attempt.current }) } catch { setError('Draft recovery is unavailable in this tab. Keep this page open until your message is saved.') } }} /></label>
+        <div className="direct-chat-toolbar">{!designWorkspace && <label>Work type<select aria-label="Work type" value="text" disabled><option value="text">Text</option></select></label>}
           {owner && <label>Model<select aria-label="Approved model" value={modelId} disabled={busy || videoBusy || !models.length} onChange={event => { setModelId(event.target.value); setCanonical(false) }}>{!modelId && <option value="">{models.length ? 'Choose a model' : 'Unavailable'}</option>}{models.map(row => <option key={row.id} value={row.id}>{row.label}</option>)}</select></label>}
           <button type="submit" className="direct-chat-send" disabled={busy || videoBusy || Boolean(pending) || !draft.trim() || Boolean(selected && selected.state !== 'active')}>{busy ? 'Working…' : owner && ready ? 'Send' : 'Save message'}</button></div>
         <p>{owner ? !readiness ? 'Checking AI availability. Human messages can still be saved.' : ready ? `${model?.provider} · Organization-billed replies` : 'AI unavailable. Sending saves a human message only.' : 'Shared chat · Human replies only'} · Attachments unavailable</p>

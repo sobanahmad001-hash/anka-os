@@ -35,6 +35,7 @@ export default function DepartmentChat(props) {
 }
 
 export function ScopedDepartmentChat({
+  designWorkspace,
   departmentId,
   departmentLabel,
   presentationLabel = 'Shared Department Chat',
@@ -1072,6 +1073,8 @@ export function ScopedDepartmentChat({
     }
   }
 
+  const ChatSurface=designWorkspace?'section':'form'
+  const ChatComposer=designWorkspace?'form':'div'
   const SourcePanel = presentation === 'workbench' ? 'details' : 'section'
   const ConversationControls = compactWorkbench ? 'details' : 'div'
   return <><div className={presentation === 'workbench' ? 'department-chat-workbench design-chat-composer grid min-w-0 gap-3' : `grid gap-6 ${supportsSavedConversations ? hideConversationList ? 'xl:grid-cols-[minmax(0,1fr)_320px]' : 'xl:grid-cols-[260px_minmax(0,1fr)_320px]' : 'xl:grid-cols-[minmax(0,1fr)_360px]'}`}>
@@ -1103,7 +1106,7 @@ export function ScopedDepartmentChat({
         {nextConversationCursor && <button type="button" disabled={busy || historyBusy} onClick={() => loadMoreConversations().catch(reason => setError(reason.message))} className="w-full rounded-lg border border-[var(--anka-line)] px-3 py-2 text-xs font-semibold text-[var(--anka-ink)] disabled:opacity-50">Load more</button>}
       </div>
     </aside>}
-    <form onSubmit={submit} className={(compactWorkbench ? 'department-chat-main ' : '') + "min-w-0 rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4 sm:p-6"}>
+    <ChatSurface onSubmit={designWorkspace?undefined:submit} className={(compactWorkbench ? 'department-chat-main ' : '') + "min-w-0 rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4 sm:p-6"}>
       {atomicFirstSend && pendingFirstSend && <div role="status" className="rounded-xl border border-[var(--anka-warning)] p-3 text-sm text-[var(--anka-ink)]"><p>Check the earlier first Send before submitting it again.</p><button type="button" disabled={busy || historyBusy} onClick={recoverFirstSend} className="mt-2 font-semibold text-[var(--anka-info)]">Recover first Send</button></div>}
       {supportsSavedConversations && hideConversationList && !compactWorkbench && <button type="button" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)} className="mb-4 rounded-lg bg-[var(--anka-violet)] px-3 py-2 text-sm text-[var(--anka-on-violet)]">New engagement conversation</button>}
       {compactWorkbench ? <header className="department-chat-heading"><div><h2>{resolvedDepartmentLabel} · Chat</h2><p>{currentConversation?.title || (draftConversation ? 'New chat' : 'Choose or start a conversation')} · {!currentConversation ? 'Private draft' : isConversationOwner ? sharing.recipients?.length ? 'Shared with selected teammates' : 'Private' : 'Shared with you'}</p></div>{supportsSavedConversations && hideConversationList && <button type="button" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)}>New chat</button>}</header> : <>
@@ -1145,7 +1148,8 @@ export function ScopedDepartmentChat({
         {compactWorkbench && <p className="mt-2 text-xs text-[var(--anka-muted)]">Optional: save unsent text for later without asking AI. Send already saves each submitted message.</p>}
       </ConversationControls>}
       <div ref={messageViewport} className={compactWorkbench ? 'department-chat-messages' : undefined} aria-label="Engagement chat messages">{supportsSavedConversations && <ConversationHistory draftConversation={draftConversation} messages={messages} userId={userId} busy={busy} onConfirm={proposal => decide('confirm', proposal)} onReject={proposal => decide('reject', proposal)} />}</div>
-      <div className={compactWorkbench ? 'department-chat-footer' : 'mt-6 space-y-5'}>
+      {designWorkspace?.toolbar}{designWorkspace?.media}
+      <ChatComposer onSubmit={designWorkspace?submit:undefined} hidden={Boolean(designWorkspace&&designWorkspace.mode!=='chat')} className={compactWorkbench ? 'department-chat-footer' : 'mt-6 space-y-5'}>
         <div className={compactWorkbench ? 'department-chat-footer-body' : 'space-y-5'}>
         {supportsSavedConversations && capabilities && <label className="department-chat-model block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]"><span className={compactWorkbench ? 'sr-only' : undefined}>Approved model</span>
           <select
@@ -1318,8 +1322,8 @@ export function ScopedDepartmentChat({
         </button>
         {busy && isAnswerMode && <button type="button" onClick={() => answerObservation.current?.stop()} className="w-full rounded-xl border border-[var(--anka-warning)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-warning)]">Stop watching locally</button>}
         </div>
-      </div>
-    </form>
+      </ChatComposer>
+    </ChatSurface>
     <aside className="min-w-0 rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4" aria-label="Context and output panel">
       <button ref={panelToggleRef} type="button" aria-expanded={contextExpanded} aria-controls={contextPanelId}
         onClick={() => {
