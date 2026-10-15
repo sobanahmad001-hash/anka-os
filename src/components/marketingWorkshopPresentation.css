@@ -1,0 +1,31 @@
+/* Scoped presentation only: preserve tool actions, status meaning and media. */
+.marketing-workshop-surface { color: var(--anka-ink); min-width: 0; overflow-wrap: anywhere; }
+.marketing-workshop-surface :is([class~="text-white"], [class~="text-slate-200"], [class~="text-slate-300"]) { color: var(--anka-ink); }
+.marketing-workshop-surface :is([class~="text-slate-400"], [class~="text-slate-500"], [class~="text-slate-600"], [class~="text-slate-700"]) { color: var(--anka-muted); }
+.marketing-workshop-surface :is([class~="bg-slate-900"], [class~="bg-slate-900/70"], [class~="bg-slate-950"], [class~="bg-slate-950/40"], [class~="bg-slate-950/50"]) { background: var(--anka-surface); }
+.marketing-workshop-surface :is([class~="border-slate-600"], [class~="border-slate-700"], [class~="border-slate-800"]) { border-color: var(--anka-line); }
+.marketing-workshop-surface :is([class~="text-emerald-300"], [class~="text-emerald-400"]) { color: var(--anka-success); }
+.marketing-workshop-surface :is([class~="text-amber-100"], [class~="text-amber-200"], [class~="text-amber-300"]) { color: var(--anka-warning); }
+.marketing-workshop-surface :is([class~="text-red-200"], [class~="text-red-300"]) { color: var(--anka-danger); }
+.marketing-workshop-surface :is([class~="bg-amber-950"], [class~="bg-amber-950/30"]) { background: var(--anka-warning-soft); }
+.marketing-workshop-surface :is([class~="bg-red-950/40"]) { background: var(--anka-danger-soft); }
+.marketing-workshop-surface :is([class~="bg-emerald-950"], [class~="bg-emerald-950/20"], [class~="bg-emerald-950/25"]) { background: var(--anka-success-soft); }
+.marketing-workshop-surface button[class~="bg-emerald-600"] { background: var(--anka-violet); color: var(--anka-on-violet); }
+.marketing-workshop-surface :is(button, input, select, textarea, a, summary):focus-visible { outline: 3px solid var(--anka-focus); outline-offset: 3px; }
+.marketing-workshop-surface :is(select, input, textarea) { max-width: 100%; }
+.marketing-workshop-surface summary { cursor: pointer; font-weight: 600; line-height: 1.6; }
+.marketing-tool-navigation { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 24px; border-bottom: 1px solid var(--anka-line); padding-bottom: 16px; }
+.marketing-tool-navigation label { display: flex; align-items: center; gap: 12px; font-size: 13px; font-weight: 600; }
+.marketing-tool-navigation select { min-width: 0; max-width: 100%; padding: 10px 12px; border: 1px solid var(--anka-line); border-radius: 8px; background: var(--anka-surface); color: var(--anka-ink); }
+.marketing-tool-navigation p, .marketing-draft-guide p { color: var(--anka-muted); font-size: 13px; line-height: 1.6; }
+.marketing-draft-guide { border: 1px solid var(--anka-line); border-radius: 12px; padding: 12px 16px; font-size: 13px; }
+.marketing-draft-guide p { margin-top: 10px; }
+.marketing-context > summary { overflow-wrap: anywhere; }
+.marketing-filters summary { color: var(--anka-ink); }
+@media (max-width: 600px) {
+  .marketing-overview-facets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .marketing-overview-facets button { padding: 12px; }
+  .marketing-tool-navigation label { width: 100%; }
+  .marketing-tool-navigation select { flex: 1; width: 0; }
+  .marketing-workshop-surface :is(input, select, textarea) { font-size: 16px; }
+}

@@ -1,3 +1,4 @@
+import './marketingWorkshopPresentation.css'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import DepartmentChat from './DepartmentChat.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
@@ -35,11 +36,17 @@ export default function MarketingArtifactChat({ engagement, projectId, activeSer
     return () => { generation.current += 1; requestSignal?.removeEventListener('abort', abort) }
   }, [load, key, requestSignal])
   const targets = state?.key === key && state.status === 'ready' && !requestSignal?.aborted ? state.targets : null
-  return <section aria-label="Marketing artifact chat" className="space-y-3">
+  return <section aria-label="Marketing artifact chat" className="marketing-workshop-surface marketing-conversation space-y-3">
     {!targets && <p role="status" className="text-sm text-[var(--anka-warning)]">{state?.key !== key || state.status === 'loading' ? 'Loading Marketing draft tools. Ordinary chat remains available.' : 'Marketing draft tools are unavailable for this context. Ordinary chat remains available.'}</p>}
     <DepartmentChat {...conversationProps} key={key} engagement={engagement} departmentId="marketing"
       allowedArtifactTypes={MARKETING_CHAT_ARTIFACT_TYPES} allowArtifactDraft={Boolean(targets)}
       artifactDefinitions={targets?.definitions || {}} artifactForType={targets?.artifactForType} stageForType={targets?.stageForType}
       onCreated={async (...args) => { if (current.current !== key || requestSignal?.aborted) return; await load(); if (current.current === key && !requestSignal?.aborted) onCreated?.(...args) }} />
+    <details className="marketing-draft-guide">
+      <summary>Drafts &amp; review</summary>
+      <p>Discuss a campaign, channel strategy or measurement plan here. Available draft tools depend on this engagement and your access.</p>
+      <p>Preview a proposal before using the existing review and confirmation controls. Campaign brief suggestions are applied selectively in the campaign editor.</p>
+      <p>Chat does not approve, publish or schedule work. Private exploration and project conversations keep separate histories.</p>
+    </details>
   </section>
 }
