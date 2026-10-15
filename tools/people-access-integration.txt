@@ -1,0 +1,49 @@
+People & access read-only slice — integration contract
+
+Base main 63523334afe05a5a841f6087d2fa25d2887faebb (PR287), source audit 2026-10-15.
+This is an isolated candidate. It does not replace /users or old UI. No deployed/installed parity claim.
+
+RESERVED NEW FILES ONLY
+src/components/PeopleAccessProfile.jsx
+src/data/peopleAccessReadModel.js
+src/data/peopleAccessReadModel.test.js
+src/data/peopleAccessProfileMount.test.js
+tools/people-access-preview.jsx
+tools/people-access-preview.html
+tools/check-people-access-browser.cjs
+tools/people-access-integration.txt
+Shared UserManagement/ClientWorkspace/App/Header/Sidebar/Layout/environmentNav/Auth/Org contexts/AuthorityCompatibilityAdmin and CSS remain untouched and owned by local manager. Scoped CSS lives inside the new component; no global selectors or CSS files changed. No migrations/functions/grants/invites/deactivation/reactivation/provider commands.
+
+HOST CONTRACT (future integration by local owner)
+Construct a stable repository with createPeopleAccessReadRepository(existingSupabaseClient).
+Render PeopleAccessProfile with organizationId, organizationName, stable repository, and current OrganizationContext.requestSignal. The host may hide the entry by existing selected-org admin UI hint; backend get_authority_administration independently checks current owner/operations-admin authority. Never use a profile-role hint as authorization. The component aborts scope/target reads on cleanup and keys the subtree by organizationId to clear prior-org data synchronously. Host must remount/reset appropriately on identity change as it already does for current admin view; this component has no auth session dependency.
+
+READS ONLY
+get_authority_administration(p_organization_id,p_user_id) for selected-org team list and exact target snapshot; same existing validator/scope checks.
+profiles.select('id, full_name, role, department').eq('id',target).maybeSingle only after same-org team target is verified by authorized RPC. Missing/denied profile becomes unavailable, never fake membership authority. No emails/customer contacts/Auth rows requested.
+get_organization_deactivation_history(p_organization_id,p_user_id) only after explicit Read history click; UI projects receipt date and reassignment count, never work titles/raw JSON.
+No token/receipt mutation payload is exposed by read model. Legacy/profile mismatch is display reconciliation, not automatic synchronization.
+
+BOUNDARIES / GAPS
+Current authorized administration RPC targets team members. Client-only identity lists/grants, project ownership and participation are not supplied by that read; profile explicitly displays not evaluated. No customer query or new server read was added. Target permissions for each action remain not evaluated because existing capability endpoints evaluate caller+exact resource/version. No caller impersonation or JS allow booleans.
+Invitation/account state not read; organization status not equated with Auth availability/acceptance. Broader unified client/identity access requires a separately reviewed authorized read design, not a broad profiles/client dump.
+Installation/security metadata remains separately unapproved and was not retrieved. Source history supplies semantics, not installed equivalence.
+
+VERIFICATION
+node --test src/data/peopleAccessReadModel.test.js src/data/peopleAccessProfileMount.test.js
+Focused adapter/mount tests exercise RPC read allowlist/no direct network mutation, envelope mismatch, aborts, profile discrepancy/missing/denied, revoked/empty/error states, explicit history and late response after org switch. No unrelated tests run.
+ESLint on added JSX/JS; bundle actual component in synthetic standalone preview via installed esbuild. UI-only preview has no backend configuration or provider connection.
+Browser package: in permitted existing local browser runtime, run Vite on 127.0.0.1:5178 and node tools/check-people-access-browser.cjs <existing-playwright-module> <evidence-directory>. It checks 1440/390 viewport overflow, native keyboard Enter activation/focus, states, no page errors and only local GET asset traffic. No localhost forwarding/tunnels or new runtime installation authorized. Browser execution status must be reported separately; mounted DOM does not prove visual/keyboard/browser acceptance.
+Alternatively append the absolute path to People_Access_Synthetic_Preview.html as fourth argument: runner uses that self-contained file directly, permits only its file GET and blocks all external traffic. This requires no local server or localhost forwarding. Cloud attempt used this mode but stopped at launch: existing Playwright package has no Chromium executable. No browser installed. Desktop/mobile/keyboard browser assertions remain unexecuted; local manager can use its existing authorized browser runtime. Standalone build uses installed esbuild, actual component and synthetic repository, with no Auth/backend/provider configuration.
+Current focused results: 4 test cases PASS (multiple lifecycle assertions), scoped ESLint 0 errors (JSX usage/preview refresh and fixture unused-variable warnings), preview bundle PASS, runner syntax PASS. Initial test failures (UUID regex group and fixture null-target envelope) were corrected before the final focused pass. No installed metadata/live read or production acceptance claimed.
+
+RELEASE
+Review isolated preview and candidate first. Local owner coordinates any shared integration and affected host checks; no merge or deployment performed by cloud lane. No mutation support/control retirement included or implied.
+
+CORRECTIVE DELTA FROM f2649f9 — 2026-10-15
+Original local f2649f9 browser evidence passed basic desktop/mobile/keyboard/traffic checks; separate loaded-state abort diagnostic failed. Keep that failure and earlier evidence distinct.
+The component now subscribes to AbortSignal via useSyncExternalStore (no host render needed), clears person/member/history state on abort, disables reads, guards handlers and skips repository calls for an already-aborted signal. Layout-effect boundaries clear stale data before paint when signal changes; cleanup aborts pending reads/history. Fresh non-aborted signal permits current authorized rereads, not reuse of cached authority.
+New focused mounted regression loads person+history then aborts without root.render, asserts both disappear and reads disable, blocks same-aborted-signal retry, exercises new-signal recovery, pending history and profile aborts, late completion, signal replacement and unmount. Five focused test cases PASS. No backend contract/mutation changes.
+Component styling uses existing --anka-* tokens only; production host's existing light/dark/system selection is inherited. Preview extracts the exact token definitions from unchanged src/index.css and uses existing resolveTheme; preview-only light/dark/system controls and Abort access without host render/Renew view controls support affected QA. No shared theme/CSS file edited.
+User-facing copy explains unknown access and separate responsibilities without installation/RPC/source-contract jargon. Integration/installation limits stay in this contract.
+Updated browser runner adds loaded-state abort/no-new-read checks and token color/background parity for light/dark/system. Rerun these affected browser assertions locally; cloud browser execution remains blocked by absent executable and was not relabeled PASS. No install or network bypass attempted. Shared admin integration remains proposed only, with host identity+org reset and stable adapter/current scope signal; no cutover performed.

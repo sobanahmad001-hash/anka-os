@@ -5,6 +5,8 @@ import { supabase } from '../lib/supabase'
 import { useOrganization } from '../context/OrganizationContext'
 import AuthorityCompatibilityAdmin from '../components/AuthorityCompatibilityAdmin'
 import { canShowAuthorityAdministration } from '../data/authorityAdministration'
+import PeopleAccessProfile from '../components/PeopleAccessProfile'
+import { createPeopleAccessReadRepository } from '../data/peopleAccessReadModel'
 
 const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
 const DEPARTMENTS = [
@@ -32,17 +34,23 @@ export default function UserManagement() {
   const { profile, user } = useAuth()
   const scope = useOrganization()
   const [legacy, setLegacy] = useState(false)
+  const [people, setPeople] = useState(false)
+  const peopleRepository = useMemo(() => createPeopleAccessReadRepository(supabase), [])
   const canAdmin = canShowAuthorityAdministration(scope.activeMembership)
   const canLegacy = profile?.role === 'admin'
   if (scope.loading) return <p className="p-6 text-[var(--anka-ink)]">Loading organization…</p>
   if (!canAdmin && !canLegacy) return <div className="p-6 text-[var(--anka-ink)]">Select an organization where you are an active System Owner or Operations Admin to manage compatibility records.</div>
   const showLegacy = canLegacy && (legacy || !canAdmin)
+  const showPeople = canAdmin && people
   return <div className="flex h-full flex-col overflow-auto bg-[var(--anka-canvas)] text-[var(--anka-ink)]">
     <nav aria-label="Team administration modes" className="flex flex-wrap gap-3 border-b border-[var(--anka-line)] p-4 text-sm text-[var(--anka-ink)]">
-      {canAdmin && <button className="workspace-button aria-pressed:border-[var(--anka-violet)] aria-pressed:bg-[var(--anka-violet-soft)] aria-pressed:text-[var(--anka-violet)]" aria-pressed={!showLegacy} onClick={() => setLegacy(false)}>Compatibility records — selected organization</button>}
-      {canLegacy && <button className="workspace-button aria-pressed:border-[var(--anka-violet)] aria-pressed:bg-[var(--anka-violet-soft)] aria-pressed:text-[var(--anka-violet)]" aria-pressed={showLegacy} onClick={() => setLegacy(true)}>Legacy team controls — Anka organization</button>}
+      {canAdmin && <button className="workspace-button aria-pressed:border-[var(--anka-violet)] aria-pressed:bg-[var(--anka-violet-soft)] aria-pressed:text-[var(--anka-violet)]" aria-pressed={!showLegacy && !showPeople} onClick={() => { setPeople(false); setLegacy(false) }}>Compatibility records — selected organization</button>}
+      {canAdmin && <button className="workspace-button aria-pressed:border-[var(--anka-violet)] aria-pressed:bg-[var(--anka-violet-soft)] aria-pressed:text-[var(--anka-violet)]" aria-pressed={showPeople} onClick={() => setPeople(true)}>People & access — read only</button>}
+      {canLegacy && <button className="workspace-button aria-pressed:border-[var(--anka-violet)] aria-pressed:bg-[var(--anka-violet-soft)] aria-pressed:text-[var(--anka-violet)]" aria-pressed={showLegacy && !showPeople} onClick={() => { setPeople(false); setLegacy(true) }}>Legacy team controls — Anka organization</button>}
     </nav>
-    {showLegacy ? <LegacyTeamManagement /> : <AuthorityCompatibilityAdmin
+    {showPeople ? <PeopleAccessProfile key={user?.id + ':' + scope.activeOrganizationId + ':' + scope.scopeRevision}
+      organizationId={scope.activeOrganizationId} organizationName={scope.activeOrganization?.name}
+      repository={peopleRepository} requestSignal={scope.requestSignal} /> : showLegacy ? <LegacyTeamManagement /> : <AuthorityCompatibilityAdmin
       key={user?.id + ':' + scope.activeOrganizationId + ':' + scope.scopeRevision}
       organizationId={scope.activeOrganizationId} organizationName={scope.activeOrganization?.name} requestSignal={scope.requestSignal} />}
   </div>
