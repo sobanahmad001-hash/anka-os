@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { departmentChat } from '../data/departmentChatRepository.js'
-import { readWorkshopConversationPage, matchesWorkshopConversation } from '../data/workshopConversationList.js'
+import { readWorkshopConversationPage, matchesWorkshopConversation, resolveWorkshopHistoryContext } from '../data/workshopConversationList.js'
 
 export default function WorkshopConversationList(props) {
+  if (props.selectedContext !== undefined) {
+    const context = resolveWorkshopHistoryContext(props)
+    if (!context) return <p role="status">Select an available project and engagement to view its conversations.</p>
+    return <ExactConversationList {...props} engagement={context.engagement} engagementOnly={context.kind === 'engagement'} historyKind={context.kind} />
+  }
   if (props.engagements) return props.simplifiedHistory ? <ProjectConversationGroups {...props} /> : <LegacyProjectConversationGroups {...props} />
   return <ExactConversationList {...props} />
 }
@@ -48,19 +53,21 @@ function LegacyProjectConversationGroups({ engagements, projects: projectRows = 
 }
 
 function ExactConversationList(props) {
-  const identity = JSON.stringify([props.organizationId, props.actorId, props.scopeRevision, props.departmentId, props.engagement?.project_id, props.engagement?.id])
+  const identity = JSON.stringify([props.organizationId, props.actorId, props.scopeRevision, props.departmentId, props.historyKind, props.engagement?.project_id, props.engagement?.id])
   return <ScopedWorkshopConversationList key={identity} {...props} />
 }
 
-function ScopedWorkshopConversationList({ organizationId, actorId, scopeRevision: _scopeRevision, departmentId, engagement, engagementOnly = false, signal, onOpen, refreshKey = 0, compact = false, navigationBusy = false, grouped = false, groupQuery = '' }) {
+function ScopedWorkshopConversationList({ organizationId, actorId, scopeRevision: _scopeRevision, departmentId, engagement, engagementOnly = false, signal, onOpen, refreshKey = 0, compact = false, navigationBusy = false, grouped = false, groupQuery = '', historyKind, simplifiedHistory = false }) {
   const [query, setQuery] = useState('')
   const serverQuery = engagementOnly && !grouped ? query : ''
-  const scope = useMemo(() => ({ organizationId, actorId, departmentId, engagement, signal, query: serverQuery }), [organizationId, actorId, departmentId, engagement, signal, serverQuery])
+  const scope = useMemo(() => ({ organizationId, actorId, departmentId, engagement, signal, historyKind, query: serverQuery }), [organizationId, actorId, departmentId, engagement, signal, historyKind, serverQuery])
   const [pages, setPages] = useState({})
   const [reload, setReload] = useState(0)
   const generation = useRef(0)
+  const alive = useRef(false)
   const inFlight = useRef(new Set())
   useEffect(() => {
+    alive.current = true
     const revision = ++generation.current
     let current = true
     setPages({}); inFlight.current = new Set()
@@ -73,7 +80,7 @@ function ScopedWorkshopConversationList({ organizationId, actorId, scopeRevision
         if (current && !signal?.aborted && revision === generation.current) setPages(state => ({ ...state, [kind]: { items: [], error: reason.message } }))
       }).finally(() => { if (current && revision === generation.current) inFlight.current.delete(kind) })
     }
-    return () => { current = false; generation.current++ }
+    return () => { current = false; alive.current = false; generation.current++ }
   }, [scope, engagement, engagementOnly, signal, reload, refreshKey])
   async function more(kind) {
     const page = pages[kind]
@@ -96,17 +103,17 @@ function ScopedWorkshopConversationList({ organizationId, actorId, scopeRevision
     {!compact && <h3 className="font-semibold">Saved conversations</h3>}
     {!compact && <p className="text-xs text-[var(--anka-muted)]">{engagementOnly ? engagement.name : engagement ? `Private exploration + ${engagement.name}` : 'Private exploration · Only you'}. Histories stay separate.</p>}
     {!grouped && <input aria-label={engagementOnly ? "Search engagement conversations" : "Search loaded conversation titles"} placeholder={engagementOnly ? "Search this engagement" : "Search loaded titles"} value={query} onChange={event => setQuery(event.target.value)} className="w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-2 text-sm" />}
-    {!compact && <p className="text-xs text-[var(--anka-muted)]">{items.length} loaded · {visible.length} {engagementOnly ? 'matching conversations' : 'matching loaded titles'}. Not a total across projects.</p>}
+    {!compact && !simplifiedHistory && <p className="text-xs text-[var(--anka-muted)]">{items.length} loaded · {visible.length} {engagementOnly ? 'matching conversations' : 'matching loaded titles'}. Not a total across projects.</p>}
     {!grouped && <button type="button" onClick={() => setReload(value => value + 1)} className="text-sm text-[var(--anka-violet)]" aria-label="Refresh saved conversations">{compact ? 'Refresh' : 'Refresh saved conversations'}</button>}
     {Object.entries(pages).map(([kind, page]) => <div key={kind}>
-      {!grouped && <p className="text-xs text-[var(--anka-muted)]">{kind}: {page.items.length} loaded</p>}
+      {!grouped && !simplifiedHistory && <p className="text-xs text-[var(--anka-muted)]">{kind}: {page.items.length} loaded</p>}
       {page.busy && <p role="status" className="text-xs">Loading {kind} conversations…</p>}
       {page.error && <p role="alert" className="text-xs text-[var(--anka-warning)]">{kind}: {page.error}. Refresh to retry.</p>}
       {page.next != null && <button type="button" disabled={page.busy} onClick={() => more(kind)} className="text-xs text-[var(--anka-violet)]">Load more {kind} conversations</button>}
     </div>)}
-    <ul className="space-y-2">{visible.map(item => <li key={item.key}><button type="button" disabled={navigationBusy} onClick={() => { if (matchesWorkshopConversation(item, scope)) onOpen(item) }} className="w-full rounded-lg border border-[var(--anka-line)] p-3 text-left text-sm">
+    <ul className="space-y-2">{visible.map(item => <li key={item.key}><button type="button" disabled={navigationBusy} onClick={() => { if (alive.current && !navigationBusy && matchesWorkshopConversation(item, scope)) onOpen(item) }} className="w-full rounded-lg border border-[var(--anka-line)] p-3 text-left text-sm">
       <span className="block break-words font-medium">{item.row.title || 'Untitled conversation'}</span>
-      {grouped ? <>{item.row.access_role === 'recipient' && <span className="workshop-history-note">Shared with you</span>}{item.row.state && item.row.state !== 'active' && <span className="workshop-history-note">{item.row.state}</span>}</> : <span className="mt-1 block text-xs text-[var(--anka-muted)]">{item.kind === 'private' ? 'Private exploration · Only you' : `${engagement.name} · ${item.row.access_role === 'recipient' ? 'Shared with you' : 'Yours · sharing managed in conversation'}`} · {item.row.state || 'active'}</span>}
+      {grouped || simplifiedHistory ? <>{item.row.access_role === 'recipient' && <span className="workshop-history-note">Shared with you</span>}{item.row.state && item.row.state !== 'active' && <span className="workshop-history-note">{item.row.state}</span>}</> : <span className="mt-1 block text-xs text-[var(--anka-muted)]">{item.kind === 'private' ? 'Private exploration · Only you' : `${engagement.name} · ${item.row.access_role === 'recipient' ? 'Shared with you' : 'Yours · sharing managed in conversation'}`} · {item.row.state || 'active'}</span>}
     </button></li>)}</ul>
     {!visible.length && !Object.values(pages).some(page => page.busy) && <p className="text-xs text-[var(--anka-muted)]">No matching loaded conversations.</p>}
   </aside>

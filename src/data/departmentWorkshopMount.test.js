@@ -622,7 +622,7 @@ test('integrated Design tools OR busy blocks queue/context changes and rejects s
   assert.equal(inactiveQueue.disabled, false)
 })
 
-test('opening another project history without its legacy workstream restores the exact conversation', async t => {
+test('selected project history excludes other projects without changing active Design context', async t => {
   const vite = await workshopServer(t)
   const { default: Workshop } = await vite.ssrLoadModule('/src/apps/DepartmentWorkshop.jsx')
   const workspace = workspaceBase()
@@ -643,17 +643,12 @@ test('opening another project history without its legacy workstream restores the
   const initialDesignMounts = globalThis.__dwsHarness.designMounts
   assert.equal(globalThis.__dwsHarness.designToolsProps.engagement.id, 'engagement-a')
   await act(async()=>globalThis.__dwsHarness.engagementChatProps.onDraftDirtyChange(true))
-  await act(async () => button('Second engagement').dispatchEvent(new TestEvent('click')))
   await flush()
-  await act(async () => button('Second conversation').dispatchEvent(new TestEvent('click')))
-  assert.equal(globalThis.__dwsHarness.designToolsProps.engagement.id, 'engagement-a', 'pending selection retains existing output context')
-  await act(async () => button('Switch context').dispatchEvent(new TestEvent('click')))
-  await flush()
-  assert.equal(globalThis.__dwsHarness.engagementChatProps.engagement.id, 'engagement-b')
-  assert.equal(globalThis.__dwsHarness.engagementChatProps.initialConversation.id, 'exact-b')
-  assert.match(environment.container.textContent, /Second project/)
-  assert.equal(globalThis.__dwsHarness.designToolsProps.engagement.id, 'engagement-b')
-  assert.equal(globalThis.__dwsHarness.designMounts, initialDesignMounts + 1, 'cross-project history selection remounts Design output state')
+  assert.equal(button('Second engagement'), undefined, 'other engagement is not offered in selected history')
+  assert.equal(button('Second conversation'), undefined, 'foreign project row is rejected even if returned')
+  assert.equal(globalThis.__dwsHarness.engagementChatProps.engagement.id, 'engagement-a')
+  assert.equal(globalThis.__dwsHarness.designToolsProps.engagement.id, 'engagement-a')
+  assert.equal(globalThis.__dwsHarness.designMounts, initialDesignMounts, 'filtering does not move the current conversation')
 })
 
 
