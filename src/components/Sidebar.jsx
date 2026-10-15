@@ -4,7 +4,7 @@ import { useOrganization } from '../context/OrganizationContext'
 import { environmentNav, getEnvironmentFromPath, isNavigationItemActive, visibleEnvironmentItems } from '../config/environmentNav'
 import { featureFlags } from '../config/featureFlags'
 
-export default function Sidebar({ collapsed = false }) {
+export default function Sidebar({ collapsed = false, compact = false }) {
   const { profile } = useAuth()
   const { activeMembership } = useOrganization()
   const location = useLocation()
@@ -28,7 +28,7 @@ export default function Sidebar({ collapsed = false }) {
   }
 
   return (
-    <aside id="workspace-sidebar" aria-label="Workspace sidebar" className={`shell-sidebar hidden min-h-0 w-60 shrink-0 flex-col overflow-y-auto border-r ${collapsed ? '' : 'md:flex'}`}>
+    <aside id="workspace-sidebar" aria-label="Workspace sidebar" className={`shell-sidebar ${compact ? 'shell-sidebar-compact' : ''} hidden min-h-0 w-60 shrink-0 flex-col overflow-y-auto border-r ${collapsed ? '' : 'md:flex'}`}>
       <div className="border-b shell-line px-5 py-5">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-violet-400/20 bg-violet-500/10 text-violet-300">
@@ -76,6 +76,8 @@ export default function Sidebar({ collapsed = false }) {
               <Link
                 key={item.path}
                 to={item.path}
+                aria-label={compact ? item.label : undefined}
+                title={compact ? item.label : undefined}
                 aria-current={isCurrent ? 'page' : undefined}
                 className={`group flex items-center gap-3 rounded-xl border px-3 py-2.5 text-[13px] font-medium transition-all ${
                     isCurrent
