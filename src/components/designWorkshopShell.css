@@ -24,3 +24,7 @@
   .design-conversation-context select { font-size: 16px; }
   .design-conversation-context .design-scope-label { font-size: 13px; }
 }
+
+.design-engagement-selector { padding: 0 4px; font-size: 14px; color: var(--anka-muted); }
+.design-engagement-selector > summary { padding: 3px 0; }
+.design-engagement-selector[open] { padding: 12px 16px; background: var(--anka-surface); border: 1px solid var(--anka-line); border-radius: 10px; }

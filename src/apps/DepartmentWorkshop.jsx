@@ -504,7 +504,7 @@ export default function DepartmentWorkshop({ departmentId }) {
           </div>
         ) : (
           <section className="space-y-5" aria-label={`${config.shortName} engagement conversations`}>
-            <ContextSetup open={departmentId === 'design' && !chatEngagement ? true : undefined} className="workspace-card p-5">
+            <ContextSetup open={departmentId === 'design' && !chatEngagement ? true : undefined} className={departmentId === 'design' ? 'design-engagement-selector' : 'workspace-card p-5'}>
               {departmentId === 'design' && <summary>Project context · {chatEngagement?.name || 'Choose an engagement'}</summary>}
               <h2 className="text-lg font-semibold">Engagement context</h2>
               <p className="mt-2 text-sm leading-6 text-[var(--anka-muted)]">Choose a client engagement with an active or planned {config.shortName} service. Conversations stay attached to that exact engagement; an administrator-approved model connection is required before sending.</p>

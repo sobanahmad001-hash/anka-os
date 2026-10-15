@@ -24,12 +24,12 @@ export default function WorkshopContextShell({
   ].filter(Boolean)
 
   if (compact && usable) return <div className="design-navigation-shell">
-    <details className="design-navigation-reference">
+    {(context.workRecord || pointers.length > 0) && <details className="design-navigation-reference">
       <summary>Work reference</summary>
       <p>{projectName || context.projectId || 'Workspace context'} · {recordLabel}</p>
       {pointers.length > 0 && <p>{pointers.join(' / ')}</p>}
       <Link to={returnTarget}>Back to work</Link>
-    </details>
+    </details>}
     {validation.status === 'stale' && <p role="status" className="text-[var(--anka-warning)]">{navigationRecoveryMessage(validation.reason)}</p>}
     {children}
   </div>
