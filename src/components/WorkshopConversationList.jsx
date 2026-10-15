@@ -3,11 +3,34 @@ import { departmentChat } from '../data/departmentChatRepository.js'
 import { readWorkshopConversationPage, matchesWorkshopConversation } from '../data/workshopConversationList.js'
 
 export default function WorkshopConversationList(props) {
-  if (props.engagements) return <ProjectConversationGroups {...props} />
+  if (props.engagements) return props.simplifiedHistory ? <ProjectConversationGroups {...props} /> : <LegacyProjectConversationGroups {...props} />
   return <ExactConversationList {...props} />
 }
 
 function ProjectConversationGroups({ engagements, projects: projectRows = [], activeEngagementId, ...props }) {
+  const [groupQuery, setGroupQuery] = useState('')
+  const [groupRefresh, setGroupRefresh] = useState(0)
+  const [expanded, setExpanded] = useState(() => activeEngagementId ? { [activeEngagementId]: true } : {})
+  useEffect(() => { if (activeEngagementId) setExpanded(state => ({ ...state, [activeEngagementId]: true })) }, [activeEngagementId])
+  const projects = [...new Set(engagements.map(row => row.project_id))]
+  return <aside aria-label="Workshop saved conversations" className="space-y-3">
+    <div className="workshop-history-search">
+      <label>Search loaded titles<input aria-label="Search loaded conversation titles" placeholder="Search conversations…" value={groupQuery} onChange={event => setGroupQuery(event.target.value)} /></label>
+      <details><summary>Search scope</summary><p>Private history and expanded engagements only. Load more within a group to include older titles. Closed engagements have not been searched.</p></details>
+      <button type="button" aria-label="Refresh saved conversations" onClick={() => setGroupRefresh(value => value + 1)}>Refresh</button>
+    </div>
+    <section aria-label="Private history"><h4>Private · Only you</h4><ExactConversationList {...props} groupQuery={groupQuery} grouped refreshKey={`${props.refreshKey || 0}:${groupRefresh}`} engagement={null} /></section>
+    {projects.map(projectId => <section key={projectId} aria-label={`Project ${projectRows.find(row => row.id === projectId)?.name || projectId}`}>
+      <h4>{projectRows.find(row => row.id === projectId)?.name || 'Project'}</h4>
+      {engagements.filter(row => row.project_id === projectId).map(engagement => <div key={engagement.id}>
+        <button type="button" aria-expanded={Boolean(expanded[engagement.id])} onClick={() => setExpanded(state => ({ ...state, [engagement.id]: !state[engagement.id] }))}>{engagement.name}</button>
+        {expanded[engagement.id] && <ExactConversationList {...props} groupQuery={groupQuery} grouped refreshKey={`${props.refreshKey || 0}:${groupRefresh}`} engagement={engagement} engagementOnly />}
+      </div>)}
+    </section>)}
+  </aside>
+}
+
+function LegacyProjectConversationGroups({ engagements, projects: projectRows = [], activeEngagementId, ...props }) {
   const [expanded, setExpanded] = useState(() => activeEngagementId ? { [activeEngagementId]: true } : {})
   useEffect(() => { if (activeEngagementId) setExpanded(state => ({ ...state, [activeEngagementId]: true })) }, [activeEngagementId])
   const projects = [...new Set(engagements.map(row => row.project_id))]
@@ -29,9 +52,9 @@ function ExactConversationList(props) {
   return <ScopedWorkshopConversationList key={identity} {...props} />
 }
 
-function ScopedWorkshopConversationList({ organizationId, actorId, scopeRevision: _scopeRevision, departmentId, engagement, engagementOnly = false, signal, onOpen, refreshKey = 0, compact = false, navigationBusy = false }) {
+function ScopedWorkshopConversationList({ organizationId, actorId, scopeRevision: _scopeRevision, departmentId, engagement, engagementOnly = false, signal, onOpen, refreshKey = 0, compact = false, navigationBusy = false, grouped = false, groupQuery = '' }) {
   const [query, setQuery] = useState('')
-  const serverQuery = engagementOnly ? query : ''
+  const serverQuery = engagementOnly && !grouped ? query : ''
   const scope = useMemo(() => ({ organizationId, actorId, departmentId, engagement, signal, query: serverQuery }), [organizationId, actorId, departmentId, engagement, signal, serverQuery])
   const [pages, setPages] = useState({})
   const [reload, setReload] = useState(0)
@@ -68,22 +91,22 @@ function ScopedWorkshopConversationList({ organizationId, actorId, scopeRevision
   }
   const items = Object.values(pages).flatMap(page => page.items || [])
     .sort((a, b) => String(b.row.last_activity_at || '').localeCompare(String(a.row.last_activity_at || '')) || a.key.localeCompare(b.key))
-  const visible = items.filter(item => matchesWorkshopConversation(item, scope)).filter(item => engagementOnly || String(item.row.title || '').toLowerCase().includes(query.toLowerCase()))
+  const visible = items.filter(item => matchesWorkshopConversation(item, scope)).filter(item => (!grouped && engagementOnly) || String(item.row.title || '').toLowerCase().includes((grouped ? groupQuery : query).toLowerCase()))
   return <aside aria-label="Workshop saved conversations" className="min-w-0 space-y-3 rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4">
     {!compact && <h3 className="font-semibold">Saved conversations</h3>}
     {!compact && <p className="text-xs text-[var(--anka-muted)]">{engagementOnly ? engagement.name : engagement ? `Private exploration + ${engagement.name}` : 'Private exploration · Only you'}. Histories stay separate.</p>}
-    <input aria-label={engagementOnly ? "Search engagement conversations" : "Search loaded conversation titles"} placeholder={engagementOnly ? "Search this engagement" : "Search loaded titles"} value={query} onChange={event => setQuery(event.target.value)} className="w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-2 text-sm" />
+    {!grouped && <input aria-label={engagementOnly ? "Search engagement conversations" : "Search loaded conversation titles"} placeholder={engagementOnly ? "Search this engagement" : "Search loaded titles"} value={query} onChange={event => setQuery(event.target.value)} className="w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-2 text-sm" />}
     {!compact && <p className="text-xs text-[var(--anka-muted)]">{items.length} loaded · {visible.length} {engagementOnly ? 'matching conversations' : 'matching loaded titles'}. Not a total across projects.</p>}
-    <button type="button" onClick={() => setReload(value => value + 1)} className="text-sm text-[var(--anka-violet)]" aria-label="Refresh saved conversations">{compact ? 'Refresh' : 'Refresh saved conversations'}</button>
+    {!grouped && <button type="button" onClick={() => setReload(value => value + 1)} className="text-sm text-[var(--anka-violet)]" aria-label="Refresh saved conversations">{compact ? 'Refresh' : 'Refresh saved conversations'}</button>}
     {Object.entries(pages).map(([kind, page]) => <div key={kind}>
-      <p className="text-xs text-[var(--anka-muted)]">{kind}: {page.items.length} loaded</p>
+      {!grouped && <p className="text-xs text-[var(--anka-muted)]">{kind}: {page.items.length} loaded</p>}
       {page.busy && <p role="status" className="text-xs">Loading {kind} conversations…</p>}
       {page.error && <p role="alert" className="text-xs text-[var(--anka-warning)]">{kind}: {page.error}. Refresh to retry.</p>}
       {page.next != null && <button type="button" disabled={page.busy} onClick={() => more(kind)} className="text-xs text-[var(--anka-violet)]">Load more {kind} conversations</button>}
     </div>)}
     <ul className="space-y-2">{visible.map(item => <li key={item.key}><button type="button" disabled={navigationBusy} onClick={() => { if (matchesWorkshopConversation(item, scope)) onOpen(item) }} className="w-full rounded-lg border border-[var(--anka-line)] p-3 text-left text-sm">
       <span className="block break-words font-medium">{item.row.title || 'Untitled conversation'}</span>
-      <span className="mt-1 block text-xs text-[var(--anka-muted)]">{item.kind === 'private' ? 'Private exploration · Only you' : `${engagement.name} · ${item.row.access_role === 'recipient' ? 'Shared with you' : 'Yours · sharing managed in conversation'}`} · {item.row.state || 'active'}</span>
+      {grouped ? <>{item.row.access_role === 'recipient' && <span className="workshop-history-note">Shared with you</span>}{item.row.state && item.row.state !== 'active' && <span className="workshop-history-note">{item.row.state}</span>}</> : <span className="mt-1 block text-xs text-[var(--anka-muted)]">{item.kind === 'private' ? 'Private exploration · Only you' : `${engagement.name} · ${item.row.access_role === 'recipient' ? 'Shared with you' : 'Yours · sharing managed in conversation'}`} · {item.row.state || 'active'}</span>}
     </button></li>)}</ul>
     {!visible.length && !Object.values(pages).some(page => page.busy) && <p className="text-xs text-[var(--anka-muted)]">No matching loaded conversations.</p>}
   </aside>

@@ -8,3 +8,23 @@
 .workshop-history-heading { display:flex; justify-content:space-between; align-items:center; padding:8px 4px 16px; color:var(--anka-ink); }
 .workshop-history-heading button { padding:6px 10px; border:1px solid var(--anka-line); border-radius:8px; }
 @media(max-width:900px){.workshop-conversation-layout.history-open {grid-template-columns:minmax(0,1fr);}}
+
+.design-workshop .workshop-conversation-layout.history-open{grid-template-columns:280px minmax(0,1fr);gap:0}
+.design-workshop .workshop-conversation-rail{padding:16px 18px;border-right:1px solid var(--anka-line);background:var(--anka-surface);font-size:14px}
+.design-workshop .workshop-conversation-rail [aria-label="Workshop saved conversations"]{padding:0;border:0;border-radius:0;background:transparent}
+.design-workshop .workshop-conversation-rail input{min-height:42px;font-size:14px;padding:10px 12px}
+.design-workshop .workshop-conversation-rail li button{border:0;border-radius:8px;padding:12px;background:transparent}
+.design-workshop .workshop-conversation-rail li button:hover{background:var(--anka-violet-soft)}
+.design-workshop .workshop-conversation-rail h4{font-size:14px;font-weight:600;margin:18px 0 8px}
+.design-workshop .workshop-new-chat{display:block;width:100%;min-height:44px;margin-bottom:16px;background:var(--anka-violet);color:var(--anka-on-violet);border:0;border-radius:9px;padding:10px 16px;font-size:15px;font-weight:600;text-align:center}
+.design-workshop .workshop-new-chat:disabled{opacity:.5;cursor:not-allowed}
+.design-workshop .workshop-conversation-rail.mobile-history{padding:18px;border:0}
+@media(max-width:900px){.design-workshop .workshop-conversation-layout.history-open{grid-template-columns:minmax(0,1fr)}}
+
+.design-workshop .workshop-history-search {display:grid;grid-template-columns:1fr auto;gap:8px 12px;margin-bottom:20px;color:var(--anka-muted);font-size:13px}
+.design-workshop .workshop-history-search label {grid-column:1/-1;font-size:13px}
+.design-workshop .workshop-history-search input {display:block;width:100%;margin-top:6px;border:1px solid var(--anka-line);border-radius:9px;background:var(--anka-canvas);color:var(--anka-ink)}
+.design-workshop .workshop-history-search details p {margin-top:8px;line-height:1.5}
+.design-workshop .workshop-history-search > button {align-self:start;color:var(--anka-violet)}
+.design-workshop .workshop-history-note {display:block;margin-top:4px;font-size:12px;color:var(--anka-muted)}
+.design-workshop .workshop-conversation-rail section > div > button {padding:6px 0;text-align:left;font-size:14px}

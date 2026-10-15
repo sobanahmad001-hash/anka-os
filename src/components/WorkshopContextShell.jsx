@@ -9,6 +9,7 @@ export default function WorkshopContextShell({
   returnTarget,
   projectName,
   children,
+  compact = false,
 }) {
   if (navigation.status === 'empty') return children
 
@@ -21,6 +22,17 @@ export default function WorkshopContextShell({
     context.output && `${label(context.output.kind)} / ${context.output.id}`,
     context.draft && `Draft ${label(context.draft.kind)} / ${context.draft.id}`,
   ].filter(Boolean)
+
+  if (compact && usable) return <div className="design-navigation-shell">
+    {(context.workRecord || pointers.length > 0) && <details className="design-navigation-reference">
+      <summary>Work reference</summary>
+      <p>{projectName || context.projectId || 'Workspace context'} · {recordLabel}</p>
+      {pointers.length > 0 && <p>{pointers.join(' / ')}</p>}
+      <Link to={returnTarget}>Back to work</Link>
+    </details>}
+    {validation.status === 'stale' && <p role="status" className="text-[var(--anka-warning)]">{navigationRecoveryMessage(validation.reason)}</p>}
+    {children}
+  </div>
 
   return (
     <div className="space-y-6">

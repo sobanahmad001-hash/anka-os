@@ -41,3 +41,13 @@
 @media (prefers-reduced-motion: reduce) {
   .anka-shell .shell-header *, .anka-shell .shell-sidebar * { transition: none; }
 }
+
+/* A compact navigation rail gives the Design conversation room without changing destinations. */
+@media(min-width:768px){
+ .anka-shell .shell-sidebar-compact{width:64px}
+ .anka-shell .shell-sidebar-compact>div{display:none}
+ .anka-shell .shell-sidebar-compact nav{padding:12px 8px}
+ .anka-shell .shell-sidebar-compact nav>div>div{display:none}
+ .anka-shell .shell-sidebar-compact a{justify-content:center;padding:13px 8px;min-height:44px}
+ .anka-shell .shell-sidebar-compact a>span{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+}

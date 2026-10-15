@@ -1,10 +1,12 @@
+import { createPortal } from 'react-dom'
+import { WorkshopChatHistoryContext } from '../context/WorkshopChatHistoryContext.jsx'
 import { openAiModelLabel } from '../data/openaiModelPolicy.js'
 import { engagementFirstSendKey, readEngagementFirstSend, saveEngagementFirstSend, clearEngagementFirstSend } from '../data/engagementChatFirstSend.js'
 import './departmentChatWorkbench.css'
 import TextAiConsent, { useTextAiConsent } from './TextAiConsent.jsx'
 import { textAiConsentKey } from '../data/textAiConsent.js'
 import { restrictArtifactTypes } from '../data/departmentChatArtifactTypes.js'
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useBlocker } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useOrganization } from '../context/OrganizationContext.jsx'
@@ -60,6 +62,7 @@ export function ScopedDepartmentChat({
   onComposerDirtyChange,
   selectOrganization,
 }) {
+  const workshopHistory = useContext(WorkshopChatHistoryContext)
   const submissionFlight = useRef(false)
   const firstSendAttempt = useRef(null)
   const completion = useRef(null)
@@ -1076,6 +1079,27 @@ export function ScopedDepartmentChat({
   const ChatSurface=designWorkspace?'section':'form'
   const ChatComposer=designWorkspace?'form':'div'
   const SourcePanel = presentation === 'workbench' ? 'details' : 'section'
+  const modelControl = supportsSavedConversations && capabilities && <label className="department-chat-model block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]"><span className={compactWorkbench ? 'sr-only' : undefined}>Approved model</span>
+          <select
+            className={`${INPUT} mt-2 normal-case tracking-normal`}
+            value={modelConfigurationId}
+            disabled={Boolean(consent.dialog) || busy || historyBusy || !(capabilities.approved_models || []).length}
+            onChange={event => {
+              if (consent.dialog) return
+              setModelConfigurationId(event.target.value)
+              setResult(null)
+              setOfficial(null)
+              setAnswerState({ status: 'idle', text: '', durable: false })
+              setObservationNotice('')
+            }}
+          >
+            {!modelConfigurationId && <option value="">Choose a model</option>}
+            {(capabilities.approved_models || []).map(model => <option key={model.configuration_id} value={model.configuration_id}>{MODEL_PROVIDER_LABELS[model.provider || capabilities.provider] || 'Provider unavailable'} · {openAiModelLabel(model.model_id)}{model.is_default ? ' · default' : ''}</option>)}
+          </select>
+          <span hidden={compactWorkbench} className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-muted)]">Only administrator-approved models verified through this engagement's connector are available. A revoked or stale choice is rejected before dispatch without fallback.</span>
+          {isAnswerMode && answerReadiness && (!compactWorkbench || !answerLocalChecksPass || answerReadiness.spend_guard_mode === 'provider_managed') && <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-warning)]">{!answerReadiness.paid_execution_enabled ? 'Workshop AI answers are currently off.' : !answerReadiness.spend_tracking_configured ? 'Organization spend tracking is not configured.' : !selectedPriceReady ? 'A fresh verified price for this exact model is unavailable.' : answerReadiness.spend_guard_mode === 'provider_managed' ? 'Provider-side spend limits are managed externally and cannot be verified or enforced by Anka. Each request is still priced and recorded.' : 'Local checks passed; the service will recheck before dispatch.'}</span>}
+          {isAnswerMode && !answerReadiness && <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-warning)]">Workshop answer readiness is unavailable.</span>}
+        </label>
   const ConversationControls = compactWorkbench ? 'details' : 'div'
   return <><div className={presentation === 'workbench' ? 'department-chat-workbench design-chat-composer grid min-w-0 gap-3' : `grid gap-6 ${supportsSavedConversations ? hideConversationList ? 'xl:grid-cols-[minmax(0,1fr)_320px]' : 'xl:grid-cols-[260px_minmax(0,1fr)_320px]' : 'xl:grid-cols-[minmax(0,1fr)_360px]'}`}>
     {supportsSavedConversations && !hideConversationList && <aside className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4">
@@ -1109,7 +1133,7 @@ export function ScopedDepartmentChat({
     <ChatSurface onSubmit={designWorkspace?undefined:submit} className={(compactWorkbench ? 'department-chat-main ' : '') + "min-w-0 rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4 sm:p-6"}>
       {atomicFirstSend && pendingFirstSend && <div role="status" className="rounded-xl border border-[var(--anka-warning)] p-3 text-sm text-[var(--anka-ink)]"><p>Check the earlier first Send before submitting it again.</p><button type="button" disabled={busy || historyBusy} onClick={recoverFirstSend} className="mt-2 font-semibold text-[var(--anka-info)]">Recover first Send</button></div>}
       {supportsSavedConversations && hideConversationList && !compactWorkbench && <button type="button" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)} className="mb-4 rounded-lg bg-[var(--anka-violet)] px-3 py-2 text-sm text-[var(--anka-on-violet)]">New engagement conversation</button>}
-      {compactWorkbench ? <header className="department-chat-heading"><div><h2>{resolvedDepartmentLabel} · Chat</h2><p>{currentConversation?.title || (draftConversation ? 'New chat' : 'Choose or start a conversation')} · {!currentConversation ? 'Private draft' : isConversationOwner ? sharing.recipients?.length ? 'Shared with selected teammates' : 'Private' : 'Shared with you'}</p></div>{supportsSavedConversations && hideConversationList && <button type="button" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)}>New chat</button>}</header> : <>
+      {compactWorkbench ? <header className="department-chat-heading"><div><h2>{designWorkspace ? currentConversation?.title || 'New chat' : `${resolvedDepartmentLabel} · Chat`}</h2><p>{!designWorkspace && <>{currentConversation?.title || (draftConversation ? 'New chat' : 'Choose or start a conversation')} · </>} {!currentConversation ? 'Private draft' : isConversationOwner ? sharing.recipients?.length ? 'Shared with selected teammates' : 'Private' : 'Shared with you'}</p></div>{supportsSavedConversations && hideConversationList && (designWorkspace && workshopHistory?.newChatTarget ? createPortal(<button type="button" className="workshop-new-chat" aria-label="New chat" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)}>+ New chat</button>,workshopHistory.newChatTarget) : <button type="button" className="workshop-new-chat" aria-label="New chat" disabled={busy || historyBusy || !projectId} onClick={() => requestDraftSwitch('start a new conversation', createConversation)}>+ New chat</button>)}</header> : <>
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--anka-info)]">{presentationLabel} · {departmentId}</p>
         <h2 className="mt-2 text-2xl font-semibold text-[var(--anka-ink)]">{presentation === 'workbench' ? 'Discuss the work' : 'Ask, explore, or prepare a governed proposal'}</h2>
@@ -1117,6 +1141,7 @@ export function ScopedDepartmentChat({
         {supportsSavedConversations && <p className="mt-2 text-xs leading-5 text-[var(--anka-muted)]">Work context: canonical client engagement. Saved conversations are creator-private until explicitly shared with eligible internal contributors. Standalone private-project and internal-project chat modes are unavailable here.</p>}
       </div>
       </>}
+      {designWorkspace && <div className="design-conversation-top-toolbar" aria-label="Design conversation tools">{designWorkspace.toolbar}{designWorkspace.mode === 'chat' && (designWorkspace.toolbarTarget ? createPortal(modelControl, designWorkspace.toolbarTarget) : modelControl)}</div>}
       {error && <div className="mt-5 rounded-xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] p-3 text-sm text-[var(--anka-danger)]">{error}</div>}
       {draftNotice && <div className="mt-5 rounded-xl border border-[var(--anka-info)] bg-[var(--anka-surface-raised)] p-3 text-sm text-[var(--anka-info)]">{draftNotice}</div>}
       {observationNotice && <div className="mt-5 rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] p-3 text-sm text-[var(--anka-warning)]">{observationNotice}</div>}
@@ -1147,31 +1172,11 @@ export function ScopedDepartmentChat({
         {compactWorkbench && supportsSavedConversations && currentConversation && <button type="button" disabled={busy || historyBusy || attachmentBusy || draftSaving || !prompt.trim()} onClick={saveUnsentDraft} className="w-full rounded-xl border border-[var(--anka-info)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-info)] disabled:opacity-50">{draftSaving ? 'Saving draft…' : 'Save draft to this conversation'}</button>}
         {compactWorkbench && <p className="mt-2 text-xs text-[var(--anka-muted)]">Optional: save unsent text for later without asking AI. Send already saves each submitted message.</p>}
       </ConversationControls>}
-      <div ref={messageViewport} className={compactWorkbench ? 'department-chat-messages' : undefined} aria-label="Engagement chat messages">{supportsSavedConversations && <ConversationHistory draftConversation={draftConversation} messages={messages} userId={userId} busy={busy} onConfirm={proposal => decide('confirm', proposal)} onReject={proposal => decide('reject', proposal)} />}</div>
-      {designWorkspace?.toolbar}{designWorkspace?.media}
+      <div ref={messageViewport} className={compactWorkbench ? 'department-chat-messages' : undefined} aria-label="Engagement chat messages">{supportsSavedConversations && <ConversationHistory emptyState={designWorkspace?.starters} draftConversation={draftConversation} messages={messages} userId={userId} busy={busy} onConfirm={proposal => decide('confirm', proposal)} onReject={proposal => decide('reject', proposal)} />}</div>
+      {designWorkspace?.media}
       <ChatComposer onSubmit={designWorkspace?submit:undefined} hidden={Boolean(designWorkspace&&designWorkspace.mode!=='chat')} className={compactWorkbench ? 'department-chat-footer' : 'mt-6 space-y-5'}>
         <div className={compactWorkbench ? 'department-chat-footer-body' : 'space-y-5'}>
-        {supportsSavedConversations && capabilities && <label className="department-chat-model block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]"><span className={compactWorkbench ? 'sr-only' : undefined}>Approved model</span>
-          <select
-            className={`${INPUT} mt-2 normal-case tracking-normal`}
-            value={modelConfigurationId}
-            disabled={Boolean(consent.dialog) || busy || historyBusy || !(capabilities.approved_models || []).length}
-            onChange={event => {
-              if (consent.dialog) return
-              setModelConfigurationId(event.target.value)
-              setResult(null)
-              setOfficial(null)
-              setAnswerState({ status: 'idle', text: '', durable: false })
-              setObservationNotice('')
-            }}
-          >
-            {!modelConfigurationId && <option value="">Choose a model</option>}
-            {(capabilities.approved_models || []).map(model => <option key={model.configuration_id} value={model.configuration_id}>{MODEL_PROVIDER_LABELS[model.provider || capabilities.provider] || 'Provider unavailable'} · {openAiModelLabel(model.model_id)}{model.is_default ? ' · default' : ''}</option>)}
-          </select>
-          <span hidden={compactWorkbench} className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-muted)]">Only administrator-approved models verified through this engagement's connector are available. A revoked or stale choice is rejected before dispatch without fallback.</span>
-          {isAnswerMode && answerReadiness && (!compactWorkbench || !answerLocalChecksPass || answerReadiness.spend_guard_mode === 'provider_managed') && <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-warning)]">{!answerReadiness.paid_execution_enabled ? 'Workshop AI answers are currently off.' : !answerReadiness.spend_tracking_configured ? 'Organization spend tracking is not configured.' : !selectedPriceReady ? 'A fresh verified price for this exact model is unavailable.' : answerReadiness.spend_guard_mode === 'provider_managed' ? 'Provider-side spend limits are managed externally and cannot be verified or enforced by Anka. Each request is still priced and recorded.' : 'Local checks passed; the service will recheck before dispatch.'}</span>}
-          {isAnswerMode && !answerReadiness && <span className="mt-2 block font-normal normal-case leading-5 tracking-normal text-[var(--anka-warning)]">Workshop answer readiness is unavailable.</span>}
-        </label>}
+        {!designWorkspace && modelControl}
         <label className="department-chat-mode block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]"><span className={compactWorkbench ? 'sr-only' : undefined}>Task mode</span>
           <select disabled={busy || historyBusy} className={`${INPUT} mt-2 normal-case tracking-normal`} value={proposalMode} onChange={event => setProposalMode(event.target.value)}>
             {supportsSavedConversations && <option value="answer">Conversational answer</option>}
@@ -1358,8 +1363,8 @@ export function ScopedDepartmentChat({
   </>
 }
 
-function ConversationHistory({ messages, userId, busy, onConfirm, onReject, draftConversation = false }) {
-  if (!messages.length) return <div className="mt-5 rounded-xl border border-dashed border-[var(--anka-line)] p-6 text-center text-sm text-[var(--anka-muted)]">{draftConversation ? 'Start with a message. This chat is saved on first Send.' : 'This conversation has no messages yet.'}</div>
+function ConversationHistory({ emptyState, messages, userId, busy, onConfirm, onReject, draftConversation = false }) {
+  if (!messages.length) return <div className="mt-5 rounded-xl border border-dashed border-[var(--anka-line)] p-6 text-center text-sm text-[var(--anka-muted)]">{draftConversation ? 'Start with a message. This chat is saved on first Send.' : 'This conversation has no messages yet.'}{emptyState}</div>
   return <section className="mt-5 space-y-3" aria-label="Saved conversation history">
     {messages.map(message => {
       const proposal = message.proposal ? {

@@ -1,7 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import './workshopConversationRail.css'
 
-export default function WorkshopConversationRail({ header, navigationBusy, renderHistory, children }) {
+export default function WorkshopConversationRail({ header, navigationBusy, renderHistory, newChatSlot, children }) {
   const [mobile, setMobile] = useState(() => globalThis.matchMedia?.('(max-width: 900px)').matches ?? false)
   const [open, setOpen] = useState(() => !(globalThis.matchMedia?.('(max-width: 900px)').matches ?? false))
   const rail = useRef(null), opener = useRef(null), close = useRef(null)
@@ -32,7 +32,7 @@ export default function WorkshopConversationRail({ header, navigationBusy, rende
     close.current?.focus()
     return () => {document.body.style.overflow=overflow;for(const [node,value] of changed)node.inert=value;origin?.focus()}
   }, [open,mobile])
-  const keys = event => {
+  const keys = useCallback(event => {
     if (!mobile) return
     if(event.key==='Escape'){event.preventDefault();setOpen(false);return}
     if(event.key!=='Tab')return
@@ -40,13 +40,25 @@ export default function WorkshopConversationRail({ header, navigationBusy, rende
     if(!nodes.length){event.preventDefault();return}
     if(event.shiftKey&&document.activeElement===nodes[0]){event.preventDefault();nodes.at(-1).focus()}
     else if(!event.shiftKey&&document.activeElement===nodes.at(-1)){event.preventDefault();nodes[0].focus()}
-  }
+  }, [mobile])
+  useEffect(() => {
+    const node = rail.current
+    if (!open || !mobile || !node) return
+    const newChat = event => {
+      const button = event.target.closest?.('button.workshop-new-chat')
+      if (button && !button.disabled && !navigationBusy) setOpen(false)
+    }
+    // Native listeners also receive events from New chat rendered through a portal.
+    node.addEventListener('keydown', keys)
+    node.addEventListener('click', newChat)
+    return () => { node.removeEventListener('keydown', keys); node.removeEventListener('click', newChat) }
+  }, [open, mobile, navigationBusy, keys])
   return <div className="workshop-conversation-shell">
     <div className="workshop-conversation-topbar">{header}<button ref={opener} type="button" className="workshop-history-toggle" aria-expanded={open} onClick={()=>setOpen(!open)}>History</button></div>
     <div className={'workshop-conversation-layout'+(open&&!mobile?' history-open':'')}>
-      {open&&<aside ref={rail} className={'workshop-conversation-rail'+(mobile?' mobile-history':'')} role={mobile?'dialog':undefined} aria-modal={mobile?true:undefined} aria-label="Workshop history" onKeyDown={keys}>
+      {open&&<aside ref={rail} className={'workshop-conversation-rail'+(mobile?' mobile-history':'')} role={mobile?'dialog':undefined} aria-modal={mobile?true:undefined} aria-label="Workshop history">
         {mobile&&<div className="workshop-history-heading"><strong>History</strong><button ref={close} type="button" onClick={()=>setOpen(false)}>Back to chat</button></div>}
-        {renderHistory(item=>{if(navigationBusy)return;setOpen(!mobile);item()})}
+        {newChatSlot}{renderHistory(item=>{if(navigationBusy)return;setOpen(!mobile);item()})}
       </aside>}
       <div className="min-w-0">{children}</div>
     </div>

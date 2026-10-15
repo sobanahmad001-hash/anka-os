@@ -13,3 +13,103 @@
 .design-unified-media-composer dialog{box-sizing:border-box;width:min(480px,calc(100vw - 32px))}
 
 .design-unified-media-composer label:has(>input[type=checkbox]){flex-direction:row;align-items:flex-start;line-height:1.5}.design-unified-media-composer input[type=checkbox]{flex:none;width:auto;margin-top:4px}
+
+/* Reference-aligned Design shell. All rules are opt-in; conversation contracts stay unchanged. */
+.design-unified-workspace{gap:0;font-size:15px;line-height:1.55}
+.design-unified-workspace.output-open{grid-template-columns:minmax(0,1fr) minmax(300px,.64fr)}
+.design-unified-workspace .direct-chat,.design-unified-workspace .department-chat-main{border:0;border-radius:0;background:transparent;box-shadow:none;height:clamp(520px,76dvh,900px)!important}
+.design-unified-workspace .direct-chat-header,.design-unified-workspace .department-chat-heading{padding:16px 24px;border:0;background:transparent}
+.design-unified-workspace .direct-chat-header h2,.design-unified-workspace .department-chat-heading h2{font-size:20px;letter-spacing:-.02em}
+.design-unified-workspace .direct-chat-header p,.design-unified-workspace .department-chat-heading p{font-size:14px;margin-top:4px}
+.design-unified-workspace .direct-chat-messages{padding:20px 28px}
+.design-unified-workspace .direct-chat-message{background:transparent;padding:16px 0;margin-bottom:16px;border:0;font-size:15px;line-height:1.75}
+.design-unified-workspace .direct-chat-message strong{font-size:15px}
+.design-unified-workspace .direct-chat-empty{padding:clamp(40px,10vh,110px) 12px}
+.design-unified-workspace .direct-chat-empty h3{font-size:clamp(24px,2.3vw,32px);letter-spacing:-.025em;line-height:1.25}
+.design-unified-workspace .direct-chat-empty p{font-size:15px;margin-top:12px}
+.design-unified-workspace .direct-chat-composer,.design-unified-workspace .department-chat-footer{margin:12px 20px 20px;padding:14px;border:1px solid var(--anka-line);border-radius:16px;background:var(--anka-surface);box-shadow:0 6px 24px #00000006}
+.design-unified-workspace .direct-chat-composer textarea{border:0;background:transparent;min-height:72px;font-size:16px;padding:8px;margin:0 0 12px;resize:vertical}
+.design-unified-workspace .direct-chat-toolbar{align-items:center;gap:8px}
+.design-unified-workspace .direct-chat-toolbar>.design-unified-toolbar{display:contents}
+.design-unified-workspace .direct-chat-toolbar label{font-size:13px;max-width:270px;flex:1}
+.design-unified-workspace .direct-chat-toolbar>.design-unified-toolbar+label{max-width:260px}
+.design-unified-workspace .direct-chat-toolbar select{min-height:42px;font-size:14px;width:100%}
+.design-unified-workspace .direct-chat-toolbar .design-unified-toolbar label{flex:0 1 140px;max-width:150px}
+.design-unified-workspace .direct-chat-send{min-height:42px;min-width:90px}
+.design-unified-workspace .direct-chat-composer>p{font-size:12px;margin:12px 4px 0}
+.design-unified-toolbar{border:0;padding:10px 20px;gap:8px}
+.design-unified-toolbar>button{margin-left:auto;font-size:13px}
+.design-unified-toolbar label{font-size:14px}
+.design-unified-workspace .design-brief-chip{font-size:12px;max-width:100%;overflow-wrap:anywhere}
+.design-unified-output{border:0;border-left:1px solid var(--anka-line);border-radius:0;padding:20px;max-height:85dvh;background:var(--anka-canvas)}
+.design-unified-output h2{font-size:20px}.design-unified-output [role=tablist]{gap:4px;padding:0}
+.design-unified-output [role=tab]{background:transparent;border:0;border-radius:0;flex:1;padding:12px 8px;font-size:14px}
+.design-unified-output [role=tab][aria-selected=true]{border-bottom:2px solid var(--anka-violet)}
+.design-unified-media{padding:0 20px 16px;max-height:58dvh}
+.design-unified-workspace .department-chat-footer-body,.design-unified-workspace .department-chat-footer-actions{gap:10px}
+.design-unified-workspace .department-chat-footer-actions{display:flex;align-items:center;flex-wrap:wrap}
+.design-unified-workspace .department-chat-footer-actions>.design-unified-toolbar{padding:0;flex:1}
+.design-unified-workspace .department-chat-submit{width:auto;min-width:90px;min-height:42px}
+@media(max-width:1200px){.design-unified-workspace.output-open{grid-template-columns:minmax(0,1fr)}.design-unified-output{border-left:0;border-top:1px solid var(--anka-line);max-height:65dvh}}
+@media(max-width:600px){.design-unified-workspace .direct-chat-header,.design-unified-workspace .department-chat-heading{padding:12px 14px}.design-unified-workspace .direct-chat-messages{padding:14px}.design-unified-workspace .direct-chat-composer,.design-unified-workspace .department-chat-footer{margin:8px 10px 12px;padding:10px}.design-unified-workspace .direct-chat-toolbar{display:flex;flex-wrap:wrap}.design-unified-workspace .direct-chat-toolbar label{max-width:none;flex:1 1 120px}.design-unified-workspace .direct-chat-toolbar .direct-chat-send{width:auto;margin-left:auto}.design-unified-toolbar{padding:8px 12px}.design-unified-media{padding:0 12px 12px}.design-unified-workspace select{font-size:16px}.design-unified-output{padding:14px}}
+
+.design-unified-workspace .direct-chat-toolbar>.design-unified-toolbar>label{order:1}
+.design-unified-workspace .direct-chat-toolbar>label{order:2}
+.design-unified-workspace .direct-chat-toolbar>.design-unified-toolbar>button{order:3;margin-left:0}
+.design-unified-workspace .direct-chat-toolbar>.design-unified-toolbar>.design-brief-chip{order:5;flex-basis:100%}
+.design-unified-workspace .direct-chat-toolbar>.direct-chat-send{order:4}
+.design-media-advanced{grid-column:1/-1;border:1px solid var(--anka-line);border-radius:10px;padding:10px 12px}
+.design-media-advanced>summary{cursor:pointer;font-size:14px;font-weight:600}
+.design-media-setting-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
+@media(max-width:600px){.design-media-setting-fields{grid-template-columns:minmax(0,1fr)}}
+
+.design-unified-workspace .direct-chat,.design-unified-workspace .department-chat-main{height:clamp(430px,calc(100dvh - 310px),760px)!important}
+.design-unified-workspace .department-chat-messages [aria-label="Saved conversation history"]>article{border:0;background:transparent;margin:0;padding:16px 20px;border-radius:0}
+.design-unified-workspace .department-chat-messages [aria-label="Saved conversation history"]>article>div:first-child>span:first-child{text-transform:none;letter-spacing:normal;font-size:14px;color:var(--anka-ink)}
+.design-unified-workspace .department-chat-messages [aria-label="Saved conversation history"]>article>p{font-size:15px;line-height:1.75}
+.design-unified-workspace .department-chat-controls{border:0;border-radius:0;background:transparent;padding:4px 24px}
+.design-unified-workspace .department-chat-footer{display:grid;grid-template-columns:140px minmax(120px,1fr) auto auto;align-items:center;gap:10px;overflow:auto;max-height:48dvh}
+.design-unified-workspace .department-chat-footer-body,.design-unified-workspace .department-chat-footer-actions,.design-unified-workspace .department-chat-footer-actions>.design-unified-toolbar{display:contents}
+.design-unified-workspace .department-chat-footer-body>*{grid-column:1/-1}
+.design-unified-workspace .department-chat-footer-body>.department-chat-prompt{grid-row:1;margin:0}
+.design-unified-workspace .department-chat-footer-body>.department-chat-prompt textarea{border:0;background:transparent;font-size:16px;min-height:70px}
+.design-unified-workspace .department-chat-footer-body>.department-chat-model{grid-column:2;grid-row:2;width:100%;font-size:14px;text-transform:none;letter-spacing:normal}
+.design-unified-workspace .department-chat-footer-actions>.design-unified-toolbar>label{grid-column:1;grid-row:2}
+.design-unified-workspace .department-chat-footer-actions>.design-unified-toolbar>button{grid-column:3;grid-row:2;margin:0}
+.design-unified-workspace .department-chat-footer-actions>.design-unified-toolbar>.design-brief-chip{grid-column:1/-1}
+.design-unified-workspace .department-chat-footer-actions>.department-chat-submit{grid-column:4;grid-row:2}
+.design-unified-workspace .department-chat-footer select{height:42px;margin:0;font-size:14px}
+.design-unified-workspace .department-chat-footer-body>details:not([open]){width:auto;min-width:0;padding:6px 10px;font-size:13px}
+@media(max-width:700px){.design-unified-workspace .department-chat-footer{grid-template-columns:minmax(100px,1fr) minmax(100px,1.5fr)}.design-unified-workspace .department-chat-footer-actions>.design-unified-toolbar>button{grid-column:1;grid-row:3}.design-unified-workspace .department-chat-footer-actions>.department-chat-submit{grid-column:2;grid-row:3}.design-unified-workspace .department-chat-footer select{font-size:16px}}
+
+/* Final readable-width polish; output-open keeps both working columns useful. */
+.design-unified-workspace:not(.output-open)>.design-unified-chat{width:100%;max-width:900px;margin-inline:auto}
+.design-unified-workspace .direct-chat-message-stream{width:100%;max-width:76ch;margin-inline:auto}
+.design-unified-workspace .direct-chat-header h2,.design-unified-workspace .department-chat-heading h2{font-size:22px}
+.design-unified-workspace .direct-chat-header p,.design-unified-workspace .department-chat-heading p{font-size:14px}
+.design-unified-workspace :is(.direct-chat-toolbar,.department-chat-footer) :is(button,select){font-size:14px;min-height:44px}
+.design-unified-workspace .direct-chat-empty{padding-block:clamp(24px,6vh,70px)}
+.design-empty-starters{max-width:640px;margin:24px auto 0}
+.design-empty-starters>p{font-size:14px!important;color:var(--anka-muted);line-height:1.6}
+.design-empty-starters>div{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin-top:16px}
+.design-empty-starters button{font-size:14px;min-height:44px;padding:10px 14px;background:var(--anka-surface);border:1px solid var(--anka-line);border-radius:10px;cursor:pointer}
+.design-empty-starters button:hover{border-color:var(--anka-violet);background:var(--anka-violet-soft)}
+.design-empty-starters button:disabled{opacity:.5;cursor:not-allowed}
+@media(max-width:600px){.design-empty-starters{margin-top:18px}.design-empty-starters>div{display:grid;grid-template-columns:minmax(0,1fr);gap:8px}.design-empty-starters button{font-size:15px}.design-unified-workspace .direct-chat-empty{padding:24px 4px}.design-unified-workspace :is(.direct-chat-toolbar,.department-chat-footer) select{font-size:16px}}
+
+/* Design controls remain above the conversation; generation stays explicit. */
+.design-conversation-top-toolbar{padding:12px 0;border-bottom:1px solid var(--anka-line);min-width:0}
+.design-conversation-top-toolbar .design-unified-toolbar,.design-toolbar-model-settings{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.design-conversation-top-toolbar select{max-width:min(100%,320px);min-height:42px;font-size:14px}
+.design-toolbar-model-settings:empty{display:none}
+.design-toolbar-model-settings label{margin:0;min-width:0}
+.design-toolbar-model-settings .design-media-advanced{position:relative}
+.design-toolbar-model-settings .design-media-advanced>summary{cursor:pointer;min-height:42px;display:flex;align-items:center;padding:0 12px}
+.design-toolbar-model-settings .design-media-setting-fields{position:absolute;top:100%;right:0;z-index:25;width:min(340px,80vw);max-height:50dvh;overflow:auto;padding:16px;background:var(--anka-surface);border:1px solid var(--anka-line);border-radius:12px;box-shadow:0 12px 30px #0003}
+.design-conversation-top-toolbar .department-chat-model>span:not(.sr-only){max-width:60ch;font-size:12px}
+@media(max-width:600px){.design-conversation-top-toolbar{padding:8px 0}.design-conversation-top-toolbar select{font-size:16px;max-width:100%}.design-toolbar-model-settings{flex:1 1 180px}.design-unified-toolbar{gap:6px}.design-toolbar-model-settings .design-media-setting-fields{right:auto;left:0}}
+/* Desktop review: expand conversation and composer as one bounded column. */
+@media(min-width:901px){
+ .design-unified-workspace:not(.output-open)>.design-unified-chat{max-width:1100px}
+ .design-unified-workspace:not(.output-open) .direct-chat-message-stream{max-width:none}
+}

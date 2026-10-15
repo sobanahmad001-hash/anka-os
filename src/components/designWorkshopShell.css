@@ -1,0 +1,36 @@
+/* Design chat shell only. Existing work queues and context authority remain unchanged. */
+[data-design-conversation] > .workspace-container { max-width: none; padding: 20px 24px; }
+[data-design-conversation] .workshop-page-heading { align-items: center; gap: 12px; }
+[data-design-conversation] .workspace-title { font-size: clamp(22px, 2vw, 28px); line-height: 1.25; margin: 0; }
+[data-design-conversation] .workshop-page-heading > a { font-size: 13px; padding: 8px 12px; }
+[data-design-conversation] .workshop-section-nav { margin-top: 16px; border: 0; border-bottom: 1px solid var(--anka-line); border-radius: 0; padding: 0; gap: 8px; }
+[data-design-conversation] .workshop-section-nav > :is(button,a) { border: 0; border-bottom: 3px solid transparent; border-radius: 0; padding: 12px 18px; font-size: 14px; color: var(--anka-muted); }
+[data-design-conversation] .workshop-section-nav > [aria-pressed="true"] { border-bottom-color: var(--anka-violet); color: var(--anka-ink); }
+.design-conversation-workspace { margin-top: 16px; }
+.design-conversation-context { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 14px; border: 1px solid var(--anka-line); border-radius: 10px; background: var(--anka-surface-raised); }
+.design-conversation-context select { font-size: 14px; background: transparent; }
+.design-conversation-context .design-scope-label { font-size: 14px; color: var(--anka-muted); margin: 0; flex: 1; min-width: 140px; overflow-wrap: anywhere; }
+.design-conversation-context > details { margin-left: auto; }
+.design-conversation-context > [role="group"] { flex-basis: 100%; }
+.design-private-chat-content { min-width: 0; }
+.design-navigation-reference { margin-top: 10px; font-size: 13px; color: var(--anka-muted); }
+.design-navigation-reference p { margin: 8px 0; overflow-wrap: anywhere; }
+.design-navigation-reference a { color: var(--anka-violet); }
+@media (max-width: 600px) {
+  [data-design-conversation] > .workspace-container { padding: 14px 12px; }
+  [data-design-conversation] .workshop-section-nav { gap: 0; }
+  [data-design-conversation] .workshop-section-nav > :is(button,a) { padding: 10px 12px; }
+  .design-conversation-context { gap: 8px; padding: 10px; }
+  .design-conversation-context select { font-size: 16px; }
+  .design-conversation-context .design-scope-label { font-size: 13px; }
+}
+
+.design-engagement-selector { padding: 0 4px; font-size: 14px; color: var(--anka-muted); }
+.design-engagement-selector > summary { padding: 3px 0; }
+.design-engagement-selector[open] { padding: 12px 16px; background: var(--anka-surface); border: 1px solid var(--anka-line); border-radius: 10px; }
+
+.design-conversation-context>details{position:relative}
+.design-conversation-context>details>summary{min-width:40px;min-height:36px;display:flex;align-items:center;justify-content:center;border-radius:8px;list-style:none;font-size:16px;letter-spacing:2px}
+.design-conversation-context>details>summary::-webkit-details-marker{display:none}
+.design-conversation-context>details>summary:hover{background:var(--anka-violet-soft)}
+.design-conversation-context>details[open]>p{position:absolute;right:0;top:100%;z-index:15;width:min(320px,75vw);padding:16px;border:1px solid var(--anka-line);border-radius:10px;background:var(--anka-surface);color:var(--anka-ink);font-size:14px;line-height:1.6;letter-spacing:normal;box-shadow:0 8px 28px #0002}
