@@ -9,7 +9,7 @@ export default function WorkshopChatWorkspace({ mode, onModeChange, departmentNa
   const compact = compactPrivate || compactChat
   const historyId = useId()
   const [newChatTarget, setNewChatTarget] = useState(null)
-  const railContext = useMemo(() => ({ newChatTarget }), [newChatTarget])
+  const railContext = useMemo(() => ({ newChatTarget, externalHistory: true }), [newChatTarget])
   const [pendingMode, setPendingMode] = useState(null)
   const [pendingConversation, setPendingConversation] = useState(null)
   const alive=useRef(true),current=useRef(null)
