@@ -45,7 +45,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   const [notice, setNotice] = useState(initial.recovery ? 'Checking the previous send. Your draft stays in this browser tab during recovery.' : '')
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
-  const [historyOpen, setHistoryOpen] = useState(() => designWorkspace ? false : globalThis.matchMedia?.('(min-width: 901px)').matches ?? true)
+  const [historyOpen, setHistoryOpen] = useState(() => designWorkspace || conversationLayout ? false : globalThis.matchMedia?.('(min-width: 901px)').matches ?? true)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [outputId, setOutputId] = useState('')
   const [rename, setRename] = useState('')
