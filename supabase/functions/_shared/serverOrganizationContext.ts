@@ -1,5 +1,6 @@
 // deno-lint-ignore-file no-import-prefix
 import { createClient, type User } from "npm:@supabase/supabase-js@2.112.4";
+import { namedKey } from "./googleOAuthTokens.ts";
 import { readAuthorityCompatibility } from "./authorityCompatibility.js";
 
 // The repository's ungenerated Supabase client has no database type parameter.
@@ -74,14 +75,6 @@ export type SameOrganizationResource =
 
 function httpError(message: string, status: number) {
   return Object.assign(new Error(message), { status });
-}
-
-function namedKey(primary: string, legacy: string) {
-  return Deno.env.get(primary)?.split(",").map((value) => value.trim()).find(
-    Boolean,
-  ) ??
-    Deno.env.get(legacy) ??
-    "";
 }
 
 function requiredId(value: unknown, label: string) {

@@ -1,3 +1,4 @@
+import { namedKey } from '../_shared/googleOAuthTokens.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { stableJson } from '../_shared/approvedArtifactContext.ts'
 import {
@@ -153,8 +154,7 @@ export function designSystemsScope(body: Json): ServerOrganizationScope {
 }
 
 function publicApiKey() {
-  return Deno.env.get('SUPABASE_PUBLISHABLE_KEYS')?.split(',').map(value => value.trim()).find(Boolean)
-    || Deno.env.get('SUPABASE_ANON_KEY') || ''
+  return namedKey('SUPABASE_PUBLISHABLE_KEYS', 'SUPABASE_ANON_KEY')
 }
 
 async function callerIdentity(request: Request): Promise<CallerIdentity> {

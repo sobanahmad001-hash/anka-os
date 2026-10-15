@@ -1,3 +1,4 @@
+import { namedKey } from '../_shared/googleOAuthTokens.ts'
 import { openAiTextOptions } from '../_shared/openaiModelPolicy.js'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import {
@@ -141,8 +142,7 @@ type PageDesignPreflight = PageDesignRoot & {
 }
 
 function publicApiKey() {
-  return Deno.env.get('SUPABASE_PUBLISHABLE_KEYS')?.split(',').map(value => value.trim()).find(Boolean)
-    || Deno.env.get('SUPABASE_ANON_KEY') || ''
+  return namedKey('SUPABASE_PUBLISHABLE_KEYS', 'SUPABASE_ANON_KEY')
 }
 
 async function callerIdentity(req: Request): Promise<CallerIdentity> {

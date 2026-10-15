@@ -1,3 +1,4 @@
+import { namedKey } from '../_shared/googleOAuthTokens.ts'
 import { openAiTextOptions } from '../_shared/openaiModelPolicy.js'
 import {confirmVideoBrief,getVideoBrief,getVideoJobBrief,reserveConfirmedVideoJob,videoBriefContext} from './videoBriefs.ts'
 import { Buffer } from 'node:buffer'
@@ -351,8 +352,7 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
 }
 
 function publicApiKey() {
-  return Deno.env.get('SUPABASE_PUBLISHABLE_KEYS')?.split(',').map(value => value.trim()).find(Boolean)
-    || Deno.env.get('SUPABASE_ANON_KEY') || ''
+  return namedKey('SUPABASE_PUBLISHABLE_KEYS', 'SUPABASE_ANON_KEY')
 }
 
 async function callerClient(request: Request) {
