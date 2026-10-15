@@ -19,6 +19,7 @@ test('mounted Marketing adapter retains conversation callbacks and disables draf
   let chatProps
   const compiled = transformSync(readFileSync(new URL('../components/MarketingArtifactChat.jsx', import.meta.url), 'utf8'), { loader: 'jsx', format: 'cjs', jsxFactory: 'React.createElement' }).code
   const module = { exports: {} }, require = name => {
+    if (name.endsWith('.css')) return {}
     if (name.includes('OrganizationContext')) return { useOrganization: () => org }
     if (name.includes('lib/supabase')) return { supabase: {} }
     if (name.includes('marketingArtifactChat')) return { marketingArtifactChatTargets, MARKETING_CHAT_ARTIFACT_TYPES, loadMarketingArtifactChatWorkspace: (_client, organizationId, id, options) => repository.forOrganization(organizationId, options).load(id) }
@@ -27,12 +28,12 @@ test('mounted Marketing adapter retains conversation callbacks and disables draf
   }
   new Function('require', 'module', 'exports', 'React', compiled)(require, module, module.exports, React)
   const callbacks = { onConversationListChange: () => {}, onNavigationBusyChange: () => {} }, initialConversation = { id: 'conversation' }
-  let props = { projectId: 'project', engagement: data('org', 'project', 'first').engagement, hideConversationList: true, initialConversation, ...callbacks }
+  let props = { conversationLayout: true, projectId: 'project', engagement: data('org', 'project', 'first').engagement, hideConversationList: true, initialConversation, ...callbacks }
   const root = createRoot(env.container), Component = module.exports.default
   t.after(async () => { await act(async () => root.unmount()); Object.assign(globalThis, previous) })
   const render = () => act(async () => root.render(React.createElement(Component, props)))
   await render(); assert.equal(chatProps.allowArtifactDraft, false); assert.match(env.container.textContent, /Ordinary chat/)
-  assert.equal(chatProps.initialConversation, initialConversation); assert.equal(chatProps.hideConversationList, true)
+  assert.equal(chatProps.conversationLayout, true); assert.equal(chatProps.initialConversation, initialConversation); assert.equal(chatProps.hideConversationList, true)
   assert.equal(chatProps.onConversationListChange, callbacks.onConversationListChange); assert.equal(chatProps.onNavigationBusyChange, callbacks.onNavigationBusyChange)
   await act(async () => resolves.get('first').resolve(data('org', 'project', 'first')))
   assert.equal(chatProps.allowArtifactDraft, true); assert.deepEqual(chatProps.allowedArtifactTypes, MARKETING_CHAT_ARTIFACT_TYPES)

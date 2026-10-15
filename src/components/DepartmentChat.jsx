@@ -1152,7 +1152,7 @@ export function ScopedDepartmentChat({
         {supportsSavedConversations && <p className="mt-2 text-xs leading-5 text-[var(--anka-muted)]">Work context: canonical client engagement. Saved conversations are creator-private until explicitly shared with eligible internal contributors. Standalone private-project and internal-project chat modes are unavailable here.</p>}
       </div>
       </>}
-      {conversationLayout && <div className="content-conversation-toolbar" aria-label="Content conversation tools">{taskModeControl}{modelControl}</div>}
+      {conversationLayout && <div className="content-conversation-toolbar" aria-label={`${resolvedDepartmentLabel} conversation tools`}>{taskModeControl}{modelControl}</div>}
       {designWorkspace && <div className="design-conversation-top-toolbar" aria-label="Design conversation tools">{designWorkspace.toolbar}{designWorkspace.mode === 'chat' && (designWorkspace.toolbarTarget ? createPortal(modelControl, designWorkspace.toolbarTarget) : modelControl)}</div>}
       {error && <div className="mt-5 rounded-xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] p-3 text-sm text-[var(--anka-danger)]">{error}</div>}
       {draftNotice && <div className="mt-5 rounded-xl border border-[var(--anka-info)] bg-[var(--anka-surface-raised)] p-3 text-sm text-[var(--anka-info)]">{draftNotice}</div>}

@@ -1,3 +1,4 @@
+import './marketingWorkshopPresentation.css'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -56,21 +57,24 @@ export default function MarketingOverview({ organizationId, scopeRevision, signa
   const navigation = { organizationId, clientId: project?.client_id || '', projectId: engagement.project_id, engagementId: engagement.id, brandId: engagement.brand_id, serviceId }
 
   if (loading && !work) return <OverviewSkeleton />
-  return <section className="space-y-6">
+  return <section className="marketing-workshop-surface space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-emerald-900/50 bg-emerald-950/20 p-5">
-      <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-300">Engagement overview</p><h2 className="mt-1 text-xl font-semibold">{engagement.name}</h2><p className="mt-2 text-sm text-slate-400">Current authorized Marketing work only. Counts and rows always use the same filters.</p><p className="mt-1 text-xs text-slate-500">Dates use your browser display timezone; stored due dates remain unchanged.</p></div>
+      <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-300">Engagement overview</p><h2 className="mt-1 text-xl font-semibold">{engagement.name}</h2><p className="mt-2 text-sm text-slate-400">Work and review for this engagement.</p><p className="mt-1 text-xs text-slate-500">Dates use your browser display timezone; stored due dates remain unchanged.</p></div>
       <div className="flex flex-wrap gap-2"><button type="button" className={BUTTON} onClick={onOpenBrief}>New marketing brief</button><button type="button" className={BUTTON} onClick={onOpenConnections}>View connection issues</button><button type="button" disabled={loading} className={BUTTON} onClick={refresh}>{loading ? 'Refreshing…' : 'Refresh'}</button></div>
     </div>
     {workError && <div role="alert" className="rounded-xl border border-red-800 bg-red-950/40 px-4 py-3 text-sm text-red-200">Overview load failed. {stale ? 'Previously verified rows are shown below and are explicitly stale.' : 'No current Overview rows are available.'} {workError}</div>}
     {stale && <div className="rounded-xl border border-amber-700 bg-amber-950/30 px-4 py-3 text-sm font-semibold text-amber-200">Stale snapshot — refresh did not complete. Do not treat these rows as current.</div>}
     {(sourceError || sectionFailures.length > 0) && <div role="status" className="rounded-xl border border-amber-800 bg-amber-950/30 px-4 py-3 text-sm text-amber-200">Some Overview sources are unavailable. Healthy work remains visible. {sourceError || sectionFailures.join(' ')}</div>}
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{FACETS.map(([id, title]) => <button type="button" key={id} onClick={() => setFilters(current => ({ ...current, facet: id }))} className={`rounded-2xl border p-4 text-left ${filters.facet === id ? 'border-emerald-500 bg-emerald-950/25' : 'border-slate-800 bg-slate-900/70'}`}><p className="text-xs uppercase tracking-[0.12em] text-slate-500">{title}</p><p className="mt-2 text-3xl font-semibold text-white">{counts[id]}</p></button>)}</div>
-    <div className="grid gap-3 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 md:grid-cols-4">
+    <div className="marketing-overview-facets grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{FACETS.map(([id, title]) => <button type="button" key={id} aria-pressed={filters.facet === id} onClick={() => setFilters(current => ({ ...current, facet: id }))} className={`rounded-2xl border p-4 text-left ${filters.facet === id ? 'border-emerald-500 bg-emerald-950/25' : 'border-slate-800 bg-slate-900/70'}`}><p className="text-xs uppercase tracking-[0.12em] text-slate-500">{title}</p><p className="mt-2 text-3xl font-semibold text-white">{counts[id]}</p></button>)}</div>
+    <details className="marketing-filters rounded-xl border border-slate-800 p-4">
+      <summary>Filter work{[filters.owner, filters.status, filters.dueWindow].filter(Boolean).length ? ` · ${[filters.owner, filters.status, filters.dueWindow].filter(Boolean).length} active` : ''}</summary>
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
       <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Owner<select className={`${INPUT} mt-2 w-full normal-case`} value={filters.owner} onChange={event => setFilters({ ...filters, owner: event.target.value })}><option value="">All authorized owners</option><option value="__unassigned__">Unassigned</option>{overview.owners.map(owner => <option key={owner.id} value={owner.id}>{owner.label}</option>)}</select></label>
       <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status<select className={`${INPUT} mt-2 w-full normal-case`} value={filters.status} onChange={event => setFilters({ ...filters, status: event.target.value })}><option value="">All statuses</option>{overview.statuses.map(status => <option key={status} value={status}>{label(status)}</option>)}</select></label>
       <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Due window<select className={`${INPUT} mt-2 w-full normal-case`} value={filters.dueWindow} onChange={event => setFilters({ ...filters, dueWindow: event.target.value })}><option value="">Any due date</option><option value="overdue">Overdue</option><option value="7_days">Next 7 days</option><option value="30_days">Next 30 days</option><option value="no_due">No due date</option></select></label>
       <div className="flex items-end"><button type="button" className={`${BUTTON} w-full`} onClick={() => setFilters({ facet: 'due_work', owner: '', status: '', dueWindow: '' })}>Reset filters</button></div>
     </div>
+    </details>
     <div className="space-y-3">{rows.map(item => <OverviewRow key={item.id} item={item} navigation={navigation} onOpenConnections={onOpenConnections} />)}{!rows.length && <EmptyOverview facet={filters.facet} onOpenBrief={onOpenBrief} onOpenPrivate={onOpenPrivate} />}</div>
   </section>
 }
@@ -82,7 +86,7 @@ function OverviewRow({ item, navigation, onOpenConnections }) {
 }
 
 function EmptyOverview({ facet, onOpenBrief, onOpenPrivate }) {
-  return <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-14 text-center"><p className="text-sm text-slate-400">No {label(facet).toLowerCase()} matches these filters.</p><div className="mt-4 flex justify-center gap-3"><button type="button" onClick={onOpenBrief} className={BUTTON}>Create brief</button><button type="button" onClick={onOpenPrivate} className={BUTTON}>Explore privately</button></div></div>
+  return <div className="rounded-2xl border border-dashed border-slate-700 px-6 py-8 text-center"><p className="text-sm text-slate-400">No {label(facet).toLowerCase()} matches these filters.</p><div className="mt-4 flex justify-center gap-3"><button type="button" onClick={onOpenBrief} className={BUTTON}>Create brief</button><button type="button" onClick={onOpenPrivate} className={BUTTON}>Explore privately</button></div></div>
 }
 
 function OverviewSkeleton() {

@@ -1,3 +1,4 @@
+import '../components/marketingWorkshopPresentation.css'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useBlocker, useSearchParams } from 'react-router-dom'
 import { useOrganization } from '../context/OrganizationContext.jsx'
@@ -46,6 +47,7 @@ import {
 import { appendWorkshopNavigation, parseWorkshopNavigation, validateWorkshopNavigation, workspaceReturnTarget } from '../data/workshopNavigation.js'
 import DepartmentChat from '../components/DepartmentChat.jsx' // eslint-disable-line no-unused-vars
 import MarketingConnectionReadinessPanel from '../components/MarketingConnectionReadinessPanel.jsx'
+import MarketingToolNavigation from '../components/MarketingToolNavigation.jsx'
 import MarketingOverview from '../components/MarketingOverview.jsx'
 import MarketingCampaignBrief from '../components/MarketingCampaignBrief.jsx'
 import MarketingCampaignPlan from '../components/MarketingCampaignPlan.jsx'
@@ -325,13 +327,13 @@ export default function MarketingStudio() {
   }
 
   return (
-    <div className="h-full overflow-y-auto bg-[var(--anka-canvas)] text-[var(--anka-ink)]">
-      <header className="border-b border-[var(--anka-line)] bg-[var(--anka-surface)] px-6 py-6">
+    <div className="marketing-workshop-surface h-full overflow-y-auto bg-[var(--anka-canvas)] text-[var(--anka-ink)]">
+      <header className="border-b border-[var(--anka-line)] bg-[var(--anka-surface)] px-4 py-4">
         <div className="workspace-container flex flex-wrap items-end justify-between gap-5">
           <div>
             <p className="workspace-eyebrow">Marketing department</p>
             <h1 className="workspace-title">Marketing Studio</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--anka-muted)]">Plan campaigns, maintain backlink outreach research, version accountable marketing artifacts, and inspect live read-only performance.</p>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--anka-muted)]">Campaign tools, saved outputs and reporting for the selected engagement.</p>
           </div>
           <Link to={parentWorkshopPath} className="workspace-button disabled:cursor-not-allowed disabled:opacity-50">Back to Marketing Workshop</Link>
         </div>
@@ -340,21 +342,20 @@ export default function MarketingStudio() {
       <main className="workspace-container space-y-6 workspace-page">
         <WorkshopContextShell navigation={navigationContext} validation={contextValidation} returnTarget={returnTarget} projectName={context.engagement?.name}>
         <Notice error={error} message={message} />
-        <section className="flex flex-wrap items-end gap-4 workspace-card p-5">
-          <label className="min-w-72 flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Marketing engagement
+        <details key={`${activeOrganizationId}:${scopeRevision}:${engagementId}`} open={!workspace?.engagement} className="marketing-context workspace-card p-4">
+          <summary>Engagement · {workspace?.engagement?.name || 'Choose work'}</summary>
+          <div className="mt-3 flex flex-wrap items-end gap-4">
+          <label className="min-w-0 w-full flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Marketing engagement
             <select value={engagementId} onChange={event => { const item = engagements.find(candidate => candidate.id === event.target.value); setSearchParams(item ? marketingSelectionParams(navigationContext, item, activeOrganizationId) : {}) }} className={`w-full rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] px-3.5 py-2.5 text-sm text-[var(--anka-ink)] focus:border-[var(--anka-focus)] focus:ring-2 focus:ring-[var(--anka-focus)] mt-2 normal-case tracking-normal`}>
               <option value="">Choose work</option>
               {engagements.map(item => <option key={item.id} value={item.id}>{item.name} · {item.brands?.name || 'Brand'}</option>)}
             </select>
           </label>
           {workspace?.engagement && <div className="rounded-xl bg-[var(--anka-canvas)] px-4 py-3 text-sm text-[var(--anka-muted)]"><span className="font-semibold text-[var(--anka-ink)]">{workspace.engagement.brands?.name}</span><span className="mx-2 text-[var(--anka-muted)]">/</span>{workspace.engagement.agency_clients?.name}</div>}
-        </section>
+          </div>
+        </details>
 
-        <nav className="flex gap-2 overflow-x-auto border-b border-[var(--anka-line)]">
-          {MARKETING_TABS.map(([id, label]) => (
-            <button key={id} onClick={() => selectTab(id)} className={`border-b-2 px-4 py-3 text-sm font-semibold ${tab === id ? "border-[var(--anka-violet)] text-[var(--anka-violet)]" : "border-transparent text-[var(--anka-muted)] hover:text-[var(--anka-ink)]"}`}>{label}</button>
-          ))}
-        </nav>
+        <MarketingToolNavigation tabs={MARKETING_TABS} value={tab} onChange={selectTab} />
 
         {loading && !(tab === 'reports' && workspace) ? <div className="py-20 text-center text-sm text-[var(--anka-muted)]">Loading Marketing Studio…</div> : !workspace ? (
           <div className="rounded-2xl border border-dashed border-[var(--anka-line)] px-6 py-16 text-center text-sm text-[var(--anka-muted)]">Select an engagement with a Marketing service to begin.</div>
