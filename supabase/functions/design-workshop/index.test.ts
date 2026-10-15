@@ -947,3 +947,12 @@ Deno.test('D02 review decisions use Design manager authority, not contributor au
   assert(!hasWorkshopAuthority({ member_kind: 'team', role: 'department_manager', department_id: 'content' }, 'decide_asset_review'))
   assert(!hasWorkshopAuthority({ member_kind: 'client', role: 'department_manager', department_id: 'design' }, 'decide_asset_review'))
 })
+Deno.test('legacy Design media dispatches require the exact-price workflow before any privileged write',async()=>{
+ for(const action of ['generate_private_image','generate_image','retry_image_generation','generate_variants','generate_video','generate_private_video']){
+  let privilegedCalls=0;
+  const admin={from(){privilegedCalls++;throw Error('No legacy write')},rpc(){privilegedCalls++;throw Error('No legacy claim')}};
+  const request=new Request('https://example.test/design-workshop',{method:'POST',headers:{Authorization:'Bearer synthetic','Content-Type':'application/json'},body:JSON.stringify({action,organization_id:'org-1',...(action==='generate_private_video'?{private_conversation_id:'chat'}:{direction_version_id:'version-1'}),source_direction_version_id:'version-1',job_id:'job-1',creative_brief_version_id:'version-1'})});
+  const result=await handler(request,{createCallerClient:async()=>scopeClient(scopeFixtures()) as never,resolveContext:async()=>({admin,organizationId:'org-1',user:{id:'actor'},membership:{member_kind:'team',role:'system_owner'},userClient:{}}) as never});
+  if(result.status!==409||privilegedCalls!==0)throw Error(action+' did not stop before dispatch: '+result.status);
+ }
+})

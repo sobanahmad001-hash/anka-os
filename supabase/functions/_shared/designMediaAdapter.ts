@@ -3,11 +3,17 @@
 // A caller MUST first obtain the shared durable dispatch claim. This transport
 // is not a job ledger, authorization check, budget reservation or retry policy.
 export const SEEDANCE_MODEL = 'bytedance/seedance-2.5/text-to-video'
+export const SEEDANCE_IMAGE_MODEL = 'bytedance/seedance-2.5/image-to-video'
+export const SOUL_IMAGE_MODEL = 'higgsfield-ai/soul/v2/standard'
+// Official API references verified 2026-10-15. Transport support is separate from
+// current model grants, exact quotes, confirmed source consent and durable claims.
+export type ImageInput = {prompt:string;batch_size:1|4;resolution:string;aspect_ratio:string;enhance_prompt:boolean;seed?:number}
+export type ImageVideoInput = {prompt:string;duration:number;image_url:string;resolution:string;output_format:string;generate_audio:boolean}
 type Input = { prompt: string; duration: number; resolution: string; aspect_ratio: string;
   output_format: string; generate_audio: boolean }
-type Client = { subscribe(endpoint: string, options: { input: Input; withPolling: boolean }): Promise<unknown> }
+type Client = { subscribe(endpoint: string, options: { input: Input | ImageInput | ImageVideoInput; withPolling: boolean }): Promise<unknown> }
 export type SdkFactory = (config: { credentials: string; maxRetries: number; timeout: number; baseURL: string }) => Client
-export type MediaReceipt = { state: 'pending' | 'provider_completed' | 'provider_failed' | 'safety_refused'; requestId: string; statusUrl?: string; outputUrl?: string }
+export type MediaReceipt = { state: 'pending' | 'provider_completed' | 'provider_failed' | 'safety_refused'; requestId: string; statusUrl?: string; outputUrl?: string; outputUrls?: string[] }
 const requestIdPattern = /^[a-zA-Z0-9_-]{1,128}$/
 
 function validateStatusUrl(value: unknown, requestId: string): string {
@@ -19,7 +25,7 @@ function validateStatusUrl(value: unknown, requestId: string): string {
   return value
 }
 
-function normalize(raw: unknown, expectedId?: string, persistedStatusUrl?: string): MediaReceipt {
+function normalize(raw: unknown, expectedId?: string, persistedStatusUrl?: string, outputKind: 'video'|'image' = 'video', expectedCount?: number): MediaReceipt {
   if (!raw || typeof raw !== 'object') throw new Error('Invalid provider receipt')
   const row = raw as Record<string, unknown>
   if (typeof row.request_id !== 'string' || !requestIdPattern.test(row.request_id)
@@ -36,6 +42,16 @@ function normalize(raw: unknown, expectedId?: string, persistedStatusUrl?: strin
   if (row.status === 'failed') return { ...base, state: 'provider_failed' }
   if (row.status === 'nsfw') return { ...base, state: 'safety_refused' }
   if (row.status !== 'completed') throw new Error('Invalid provider receipt')
+  if(outputKind==='image'){
+    if(!Array.isArray(row.images)||!row.images.length||row.images.length>4||(expectedCount!==undefined&&row.images.length!==expectedCount))throw new Error('Invalid image output count')
+    const outputUrls=row.images.map(value=>{
+      if(!value||typeof value!=='object'||typeof value.url!=='string'||value.url.length>4096)throw new Error('Missing image output')
+      const url=new URL(value.url)
+      if(url.protocol!=='https:'||url.username||url.password)throw new Error('Invalid image output')
+      return value.url as string
+    })
+    return {...base,state:'provider_completed',outputUrls}
+  }
   const video = row.video as Record<string, unknown> | undefined
   if (!video || typeof video.url !== 'string' || video.url.length > 4096) throw new Error('Missing video output')
   const url = new URL(video.url)
@@ -77,9 +93,30 @@ export function createDesignMediaAdapter(createClient: SdkFactory, credential: s
         throw new Error('Media submission outcome unknown; reconcile before resubmission')
       }
     },
+    async submitImage(input:ImageInput):Promise<MediaReceipt>{
+      if(!input||typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>12000
+        ||![1,4].includes(input.batch_size)||!['720p','1080p'].includes(input.resolution)
+        ||!['9:16','16:9','4:3','3:4','1:1','2:3','3:2'].includes(input.aspect_ratio)
+        ||typeof input.enhance_prompt!=='boolean'||(input.seed!==undefined&&(!Number.isInteger(input.seed)||input.seed<1||input.seed>1000000)))throw new Error('Unsupported Soul image request')
+      const pinned:ImageInput={prompt:input.prompt.trim(),batch_size:input.batch_size,resolution:input.resolution,aspect_ratio:input.aspect_ratio,enhance_prompt:input.enhance_prompt,...(input.seed===undefined?{}:{seed:input.seed})}
+      try{return normalize(await client.subscribe(SOUL_IMAGE_MODEL,{input:pinned,withPolling:false}),undefined,undefined,'image',input.batch_size)}
+      catch{throw new Error('Media submission outcome unknown; reconcile before resubmission')}
+    },
+    async submitImageToVideo(input:ImageVideoInput):Promise<MediaReceipt>{
+      // image_url must be resolved by the caller from an authorized immutable asset,
+      // after explicit provider-scope consent; never pass a browser-supplied URL.
+      let url:URL;try{url=new URL(input.image_url)}catch{throw new Error('Unsupported image input')}
+      if(url.protocol!=='https:'||url.username||url.password||input.image_url.length>4096
+        ||typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>12000
+        ||!Number.isInteger(input.duration)||input.duration<4||input.duration>30
+        ||!['480p','720p','1080p'].includes(input.resolution)||!['mp4','mov'].includes(input.output_format)||typeof input.generate_audio!=='boolean')throw new Error('Unsupported image-to-video request')
+      const pinned:ImageVideoInput={prompt:input.prompt.trim(),duration:input.duration,image_url:input.image_url,resolution:input.resolution,output_format:input.output_format,generate_audio:input.generate_audio}
+      try{return normalize(await client.subscribe(SEEDANCE_IMAGE_MODEL,{input:pinned,withPolling:false}))}
+      catch{throw new Error('Media submission outcome unknown; reconcile before resubmission')}
+    },
     // Both arguments must come from the server-owned immutable job receipt,
     // never browser input. Validation is defense in depth, not authorization.
-    async status(requestId: string, persistedStatusUrl: string): Promise<MediaReceipt> {
+    async status(requestId: string, persistedStatusUrl: string, outputKind: 'video'|'image' = 'video', expectedCount?: number): Promise<MediaReceipt> {
       if (typeof requestId !== 'string' || !requestIdPattern.test(requestId)) throw new Error('Invalid provider request identity')
       const statusUrl = validateStatusUrl(persistedStatusUrl, requestId)
       try {
@@ -88,7 +125,7 @@ export function createDesignMediaAdapter(createClient: SdkFactory, credential: s
           redirect: 'error', signal: AbortSignal.timeout(30000),
         })
         if (!response.ok) throw new Error('Status unavailable')
-        return normalize(await response.json(), requestId, statusUrl)
+        return normalize(await response.json(), requestId, statusUrl, outputKind, expectedCount)
       } catch {
         throw new Error('Media status unavailable; retain the original request identity')
       }

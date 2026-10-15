@@ -1,3 +1,4 @@
+import DesignMediaPricingSettings from '../components/DesignMediaPricingSettings.jsx'
 import { connectionSaveErrorMessage } from '../data/integrationSave.js'
 import { OPENAI_ROUTINE_MODEL, OPENAI_TEXT_MODELS } from '../data/openaiModelPolicy.js'
 import { useEffect, useRef, useState } from 'react'
@@ -366,6 +367,7 @@ export default function Settings() {
           canManage={modelCanManage}
           onSaved={loadModelConnections}
         />
+        <DesignMediaPricingSettings key={`media-pricing:${activeOrganizationId}:${scopeRevision}`} organizationId={activeOrganizationId} requestSignal={requestSignal} canManage={['system_owner','operations_admin'].includes(activeMembership?.role)} />
         <PipelineAiTextRouteSettings
           key={`routes:${activeOrganizationId}:${scopeRevision}`}
           organizationId={activeOrganizationId}

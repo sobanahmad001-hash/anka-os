@@ -138,3 +138,27 @@ Deno.test('terminal recovery keeps the saved URL and missing saved URL cannot tr
   await assertRejects(() => adapter.status('r1', undefined as unknown as string))
   assertEquals(reads, 1)
 })
+
+Deno.test('Soul image adapter pins supported model/count and retains every returned original',async()=>{
+ const {calls,adapter}=fixture({status:'completed',request_id:'images-1',images:[{url:'https://cdn.example/one.png'},{url:'https://cdn.example/two.png'},{url:'https://cdn.example/three.png'},{url:'https://cdn.example/four.png'}]})
+ const result=await adapter.submitImage({prompt:'Synthetic composition',batch_size:4,resolution:'720p',aspect_ratio:'1:1',enhance_prompt:false})
+ assertEquals(result.outputUrls?.length,4)
+ assertEquals((calls[1] as any).endpoint,'higgsfield-ai/soul/v2/standard')
+ assertEquals((calls[1] as any).options.withPolling,false)
+})
+Deno.test('unsupported image counts are rejected before SDK submission',async()=>{
+ const {calls,adapter}=fixture()
+ await assertRejects(()=>adapter.submitImage({prompt:'Synthetic',batch_size:2,resolution:'720p',aspect_ratio:'1:1',enhance_prompt:false} as any))
+ assertEquals(calls.length,1)
+})
+Deno.test('image-to-video sends only authorized input URL and supported fields, no text-only aspect setting',async()=>{
+ const {calls,adapter}=fixture()
+ await adapter.submitImageToVideo({prompt:'Synthetic movement',duration:5,image_url:'https://assets.example/original.png',resolution:'720p',output_format:'mp4',generate_audio:false,aspect_ratio:'16:9',secret:'not-forwarded'} as any)
+ assertEquals((calls[1] as any).endpoint,'bytedance/seedance-2.5/image-to-video')
+ assertEquals((calls[1] as any).options.input,{prompt:'Synthetic movement',duration:5,image_url:'https://assets.example/original.png',resolution:'720p',output_format:'mp4',generate_audio:false})
+})
+Deno.test('image output count mismatch is uncertain, never automatically billed twice',async()=>{
+ const {calls,adapter}=fixture({status:'completed',request_id:'images-1',images:[{url:'https://cdn.example/one.png'}]})
+ await assertRejects(()=>adapter.submitImage({prompt:'Synthetic',batch_size:4,resolution:'720p',aspect_ratio:'1:1',enhance_prompt:false}),Error,'outcome unknown')
+ assertEquals(calls.length,2)
+})

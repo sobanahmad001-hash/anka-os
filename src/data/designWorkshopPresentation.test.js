@@ -82,7 +82,7 @@ test('colored Workshop confirmation buttons and primary links retain paired cont
   assert.equal(props(actionLink).href, '/sphere/engagements')
 })
 
-test('Design-only layout opts in without changing media jobs or shared chat transport',()=>{
+test('Unified Design layout retains context reset and shared chat navigation guards',()=>{
   const css=readFileSync(new URL('../components/designWorkshopPresentation.css',import.meta.url),'utf8')
   const parent=readFileSync(new URL('../apps/DepartmentWorkshop.jsx',import.meta.url),'utf8')
   assert.match(css,/@container \(min-width: 1000px\)/)
@@ -92,13 +92,11 @@ test('Design-only layout opts in without changing media jobs or shared chat tran
   assert.doesNotMatch(css,/filter:|!important|position: fixed/)
   assert.match(parent,/presentation=\{departmentId === 'design' \? 'design' : undefined\}/)
   assert.match(parent,/externalNavigationBusy=\{designNavigationBusy\}/)
-  assert.match(parent,/key=\{designPaneKey\}/)
+  assert.ok(parent.includes("key={JSON.stringify([designPaneKey,selectedConversationRevision])}"))
   assert.match(parent,/\['design', 'content', 'marketing'\]\.includes\(departmentId\) \? 'design-workshop-surface h-full overflow-y-auto'/)
   assert.match(css,/\.design-workshop-surface \{ background: var\(--anka-canvas\); color: var\(--anka-ink\); \}/)
-  assert.match(parent,/Video · private exploration/)
-  assert.match(parent,/No project is required for the private-video path when the service is available/)
-  assert.match(parent,/does not share or move this private conversation/)
-  assert.match(parent,/Higgsfield is a video connection, not a text-chat model/)
+  assert.match(parent,/DesignUnifiedWorkspace/)
+  assert.match(parent,/designWorkspace=\{bridge\}/)
   assert.match(parent,/draft tools · how to open/)
   assert.match(parent,/Campaign brief suggestions are applied selectively/)
   assert.match(parent,/Project draft tools are not enabled in this private context/)

@@ -22,14 +22,14 @@ const MODEL_READINESS_MESSAGES = {
   price_unavailable: 'A fresh verified price for this exact model is unavailable.',
 }
 
-export default function ContextConversationPanel({ contextKind, departmentId = '', projectId = '', label = 'Conversation', workshopLayout = false, initialConversation = null, hideConversationList = false, onConversationListChange, onNavigationBusyChange, onDraftDirtyChange, directSend = false }) {
+export default function ContextConversationPanel({ contextKind, departmentId = '', projectId = '', label = 'Conversation', workshopLayout = false, initialConversation = null, hideConversationList = false, onConversationListChange, onNavigationBusyChange, onDraftDirtyChange, directSend = false, designWorkspace }) {
   const { user } = useAuth()
   const { activeOrganizationId, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
   if (!user?.id || !activeOrganizationId || requestSignal.aborted) return null
   const identity = [user.id, activeOrganizationId, scopeRevision, contextKind, departmentId, projectId, initialConversation?.id || ''].join(':')
   if (directSend) return <DirectContextChat key={identity} contextKind={contextKind} departmentId={departmentId}
     projectId={projectId} label={label} organizationId={activeOrganizationId} user={user} signal={requestSignal}
-    onAccessError={handleOrganizationAccessError} initialConversation={initialConversation}
+    designWorkspace={designWorkspace} onAccessError={handleOrganizationAccessError} initialConversation={initialConversation}
     onConversationListChange={onConversationListChange} onNavigationBusyChange={onNavigationBusyChange} onDraftDirtyChange={onDraftDirtyChange} />
   return <ScopedContextConversation key={identity} contextKind={contextKind} departmentId={departmentId}
     projectId={projectId} label={label} organizationId={activeOrganizationId} user={user} signal={requestSignal}

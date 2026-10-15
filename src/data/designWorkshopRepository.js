@@ -255,6 +255,14 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
     }
   },
 
+  listMediaGenerations: input => invoke('list_media_generations',input),
+  listMediaChoices: input => invoke('list_media_choices',input),
+  quoteMediaRequest: input => invoke('quote_media_request',input),
+  generateMediaRequest: input => invoke('generate_media_request',input),
+  recoverMediaGeneration: input => invoke('recover_media_generation',input),
+  pollMediaGeneration: input => invoke('poll_media_generation',input),
+  ingestMediaGeneration: input => invoke('ingest_media_generation',input),
+  signMediaGeneration: input => invoke('sign_media_generation',input),
   getPrivateVideoQuote: input => getPrivateDesignVideoQuote(client, organizationId, input, signal),
   generatePrivateVideo: input => invoke('generate_private_video', input),
   listPrivateVideoJobs: (privateConversationId, cursor = null) => invoke('list_private_video_jobs', {
@@ -282,6 +290,7 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
   freezeCreativeBrief: input => invoke('freeze_creative_brief', input),
   setWorkingDirection: input => invoke('set_working_direction', input),
   createSession: input => invoke('create_session', input),
+  createManualDirection: input => invoke('create_manual_direction', input),
   generateDirections: sessionId => invoke('generate_directions', { session_id: sessionId }),
   createDirectionRevision: (directionId, parentVersionId, content, experiment = {}, creativeBriefVersionId = '') => invoke('create_direction_revision', {
     direction_id: directionId, parent_version_id: parentVersionId, content,
