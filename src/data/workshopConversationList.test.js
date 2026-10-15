@@ -46,3 +46,18 @@ test('project groups require exact workspace organization, project and departmen
   for (const field of ['organization_id', 'project_id', 'engagement_id', 'department_id']) assert.equal(matchesWorkshopConversation({ ...item, row: { ...item.row, [field]: 'other' } }, scope), false, field)
   assert.equal(matchesWorkshopConversation(item, { ...scope, signal: { aborted: true } }), false)
 })
+
+test('private isolation rejects any project or engagement association and late aborted responses', async () => {
+ const { matchesWorkshopConversation } = await import('./workshopConversationList.js')
+ for (const field of ['project_id','engagement_id']) for (const value of ['foreign','']) {
+  const row={...privateRow('a'),[field]:value}
+  assert.equal(matchesWorkshopConversation({kind:'private',row},scope),false)
+  await assert.rejects(readWorkshopConversationPage({listContextConversations:async()=>[row]},scope,'private'),/scope mismatch/)
+ }
+ const abort=new AbortController()
+ await assert.rejects(readWorkshopConversationPage({listContextConversations:async()=>{abort.abort();return [privateRow('a')]}},{...scope,signal:abort.signal},'private'),/unavailable/)
+ let called=false
+ await assert.rejects(readWorkshopConversationPage({listContextConversations:async()=>{called=true;return []}},{...scope,historyKind:'engagement'},'private'),/scope mismatch/)
+ assert.equal(called,false)
+ assert.equal(matchesWorkshopConversation({kind:'private',row:privateRow('a')},{...scope,historyKind:'engagement'}),false)
+})

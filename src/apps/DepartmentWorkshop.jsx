@@ -240,7 +240,7 @@ export default function DepartmentWorkshop({ departmentId }) {
   const chatEngagements = eligibleEngagements.filter(engagement => engagement.project_id === projectId)
   const chatEngagement = chatEngagements.find(engagement => engagement.id === selectedChatEngagementId)
   const chatScopeKey = JSON.stringify([user?.id, activeOrganizationId, scopeRevision, departmentId, projectId, chatEngagement?.id])
-  const selectedConversation = chatSelection?.scopeKey === chatScopeKey ? chatSelection.item : null
+  const selectedConversation = chatSelection?.scopeKey === chatScopeKey && chatSelection.item?.kind === (activeTab === 'private' ? 'private' : 'engagement') && matchesWorkshopConversation(chatSelection.item, { organizationId: activeOrganizationId, actorId: user?.id, departmentId, engagement: activeTab === 'chat' ? chatEngagement : null, signal: requestSignal }) ? chatSelection.item : null
   const selectedConversationRevision = selectedConversation ? chatSelection.revision : 0
   const chatPaneIdentity = JSON.stringify([chatScopeKey, activeTab, selectedConversation?.key || '', selectedConversationRevision])
   if (currentChatPane.current.identity !== chatPaneIdentity) {
@@ -470,9 +470,10 @@ export default function DepartmentWorkshop({ departmentId }) {
         </label>}
 
         <div id={`${departmentId}-${activeTab}-panel`} role={departmentId === 'development' ? 'tabpanel' : 'region'} aria-label={departmentId === 'development' ? undefined : 'Workshop workspace'} aria-labelledby={departmentId === 'development' ? `${departmentId}-${activeTab}-tab` : undefined}>
-        {['private', 'chat'].includes(activeTab) ? <WorkshopChatWorkspace key={chatScopeKey} compactPrivate={['content', 'marketing'].includes(departmentId) && activeTab === 'private'} compactChat={departmentId === 'design' || ['content', 'marketing'].includes(departmentId) && activeTab === 'chat'} presentation={departmentId === 'design' ? 'design' : undefined} mode={activeTab} draftDirty={['content', 'design', 'marketing'].includes(departmentId) ? chatDraftDirty : undefined} navigationBusy={navigationLocked} onModeChange={mode => { if (navigationLocked) return; setChatSelection(null); setActiveTab(mode) }} departmentName={config.shortName} projectName={projectName} engagementName={chatEngagement?.name}
+        {['private', 'chat'].includes(activeTab) ? <WorkshopChatWorkspace key={JSON.stringify([chatScopeKey, activeTab])} compactPrivate={['content', 'marketing'].includes(departmentId) && activeTab === 'private'} compactChat={departmentId === 'design' || ['content', 'marketing'].includes(departmentId) && activeTab === 'chat'} presentation={departmentId === 'design' ? 'design' : undefined} mode={activeTab} draftDirty={['content', 'design', 'marketing'].includes(departmentId) ? chatDraftDirty : undefined} navigationBusy={navigationLocked} onModeChange={mode => { if (navigationLocked) return; setChatSelection(null); setActiveTab(mode) }} departmentName={config.shortName} projectName={projectName} engagementName={chatEngagement?.name}
           onConversationSelect={item => {
-            if (navigationLocked) return
+            if (navigationLocked || currentChatPane.current.key !== chatPaneKey) return
+            if (activeTab === 'private' ? item?.kind !== 'private' : item?.kind !== 'engagement' || item.projectId !== chatEngagement?.project_id || item.engagementId !== chatEngagement?.id) return
             const target = eligibleEngagements.find(row => row.id === item.engagementId && row.project_id === item.projectId)
             if (!matchesWorkshopConversation(item, { organizationId: activeOrganizationId, actorId: user?.id, departmentId, engagement: target, signal: requestSignal })) return
             const workstream = item.kind === 'engagement' && workspace.workstreams.find(row => row.project_id === target.project_id)
@@ -489,7 +490,7 @@ export default function DepartmentWorkshop({ departmentId }) {
             setChatSelection(current => ({ scopeKey: nextScope, item, revision: (current?.revision || 0) + 1 }))
             setActiveTab(item.kind === 'private' ? 'private' : 'chat')
           }}
-          conversationList={onOpen => <WorkshopConversationList simplifiedHistory={departmentId === 'design'} activeEngagementId={activeTab === 'chat' ? chatEngagement?.id : undefined} compact={['content', 'design', 'marketing'].includes(departmentId)} navigationBusy={navigationLocked} organizationId={activeOrganizationId} actorId={user?.id} scopeRevision={scopeRevision} departmentId={departmentId} engagements={eligibleEngagements} projects={chatContext.projects} signal={requestSignal} onOpen={onOpen} refreshKey={conversationListRevision} />}>
+          conversationList={onOpen => <WorkshopConversationList selectedContext={activeTab === 'private' ? { kind: 'private' } : { kind: 'engagement', projectId: selectedChatProject?.id, engagementId: chatEngagement?.id }} simplifiedHistory={departmentId === 'design'} activeEngagementId={activeTab === 'chat' ? chatEngagement?.id : undefined} compact={['content', 'design', 'marketing'].includes(departmentId)} navigationBusy={navigationLocked} organizationId={activeOrganizationId} actorId={user?.id} scopeRevision={scopeRevision} departmentId={departmentId} engagements={eligibleEngagements} projects={chatContext.projects} signal={requestSignal} onOpen={onOpen} refreshKey={conversationListRevision} />}>
         {activeTab === 'private' ? (
           <div className={designConversation ? "design-private-chat-content" : "mt-6 space-y-3"}>
             {!['content', 'design'].includes(departmentId) && <p className="text-sm text-[var(--anka-muted)]">Explore privately with your {config.shortName} specialist. Selecting project chat opens separate engagement conversations; it does not share or move these messages. Use specialist tools for governed project outputs.</p>}
