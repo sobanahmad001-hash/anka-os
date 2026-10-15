@@ -1,3 +1,4 @@
+import { namedKey } from '../_shared/googleOAuthTokens.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { strToU8, zipSync } from 'npm:fflate@0.8.3'
 import {
@@ -91,8 +92,7 @@ type HandoffPreflight = HandoffRoot & {
 type CallerIdentity = { userClient: Client; userId: string }
 
 function publicApiKey() {
-  return Deno.env.get('SUPABASE_PUBLISHABLE_KEYS')?.split(',').map(value => value.trim()).find(Boolean)
-    || Deno.env.get('SUPABASE_ANON_KEY') || ''
+  return namedKey('SUPABASE_PUBLISHABLE_KEYS', 'SUPABASE_ANON_KEY')
 }
 
 async function callerIdentity(req: Request): Promise<CallerIdentity> {
