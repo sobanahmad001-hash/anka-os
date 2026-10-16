@@ -1,3 +1,4 @@
+import { prepareDesignBrief, designBriefAudit, settleDesignBrief, recoverAuditedDesignBrief } from '../_shared/designChatBriefIntegration.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { namedKey, sha256 } from '../_shared/googleOAuthTokens.ts'
 import { conservativePipelineCeiling, measuredPipelineTokenCost, selectFreshPipelineRate } from '../_shared/n6PipelineCost.ts'
@@ -106,9 +107,10 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
     const { data: { user }, error: authError } = await userClient.auth.getUser()
     if (authError || !user) throw fail('Authentication required', 401)
     const raw = await request.text()
-    if (raw.length > 4096) throw fail('Request is too large', 400)
+    if (raw.length > 64000) throw fail('Request is too large', 400)
     let body: Json
     try { body = object(JSON.parse(raw)) } catch { throw fail('Valid JSON is required', 400) }
+    if (!body.design_brief && raw.length > 4096) throw fail('Request is too large', 400)
     organizationId = requiredId(body.organization_id, 'organization')
     messageId = requiredId(body.message_id, 'message')
     const membership = await one(admin.from('organization_memberships')
@@ -129,11 +131,20 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
       .eq('id', source.conversation_id).eq('organization_id', organizationId)
       .eq('owner_id', user.id).maybeSingle(), 'Private conversation')
     await requirePrivateConversationAccess(admin, conversation, membership, organizationId, user.id)
+    const recoverBrief = async () => {
+      if (conversation.context_kind !== 'department_private' || conversation.department_id !== 'design') return null
+      const {data:run,error}=await admin!.from('ai_runs').select('context_manifest')
+        .eq('organization_id',organizationId).eq('user_id',user.id).eq('status','completed')
+        .eq('context_chat_conversation_id',conversation.id).eq('context_chat_message_id',messageId).maybeSingle()
+      if(error || !run) return null
+      return recoverAuditedDesignBrief(admin,userClient,run.context_manifest,{organization_id:organizationId,actor_id:user.id,conversation_id:conversation.id,message_id:messageId})
+    }
+
     try {
       const recovered = await rpc(admin, 'append_context_chat_audited_reply', {
         p_organization_id: organizationId, p_message_id: messageId, p_actor_id: user.id,
       })
-      return reply({ status: 'completed', message: recovered, must_not_submit: true })
+      return reply({ status: 'completed', message: recovered, design_brief: await recoverBrief(), must_not_submit: true })
     } catch {
       // No settled reply is available; continue through the current authorization checks.
     }
@@ -145,7 +156,7 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
         const recovered = await rpc(admin, 'append_context_chat_audited_reply', {
           p_organization_id: organizationId, p_message_id: messageId, p_actor_id: user.id,
         })
-        return reply({ status: 'completed', message: recovered, must_not_submit: true })
+        return reply({ status: 'completed', message: recovered, design_brief: await recoverBrief(), must_not_submit: true })
       } catch {
         return reply({ status: 'pending_append', must_not_submit: true }, 503)
       }
@@ -236,7 +247,17 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
       canonicalContext = canonicalOpenAiContext(organization, project, work.summary)
       workManifest = work.manifest
     }
+    let briefTurn: Json | undefined
+    if (body.design_brief !== undefined) {
+      if (conversation.context_kind !== 'department_private' || conversation.department_id !== 'design') throw fail('Design draft assistance requires the private Design Workshop',403)
+      briefTurn=await prepareDesignBrief(admin,userClient,{organization_id:organizationId,actor_id:user.id,conversation_id:conversation.id,message_id:messageId,request_id:dispatchRequestId},body.design_brief,
+        {visibility:'private',engagement_id:null},{kind:'private_design_chat',message_ids:orderedHistory.map(row=>row.id),source_message_id:messageId})
+    }
     const prompt = buildPrivateConversationPrompt(orderedHistory, messageId, conversation, canonicalContext)
+      + (briefTurn ? '\nCURRENT UNAPPROVED DESIGN DRAFT JSON:\n'+briefTurn.snapshot : '')
+    const turnInstruction=briefTurn?.instruction || instruction
+    buildN7TextRequest({provider,model_id:configuration.model_id},'preflight',prompt,dispatchRequestId,await sha256(user.id),turnInstruction)
+
     const price = selectFreshPipelineRate(env.get(pricingEnv[provider]), configuration.model_id,
       new Date(), provider, env.get('N6_OPENAI_APPROVED_MODELS_PRICING_JSON'))
     const maxCost = conservativePipelineCeiling(prompt, price)
@@ -258,7 +279,7 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
         const recovered = await rpc(admin, 'append_context_chat_audited_reply', {
           p_organization_id: organizationId, p_message_id: messageId, p_actor_id: user.id,
         })
-        return reply({ status: 'completed', message: recovered, must_not_submit: true })
+        return reply({ status: 'completed', message: recovered, design_brief: await recoverBrief(), must_not_submit: true })
       } catch {
         return reply({ status: 'already_claimed', must_not_submit: true }, 409)
       }
@@ -269,7 +290,7 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
     }
     const startedAt = Date.now()
     const providerRequest = buildN7TextRequest({ provider, model_id: configuration.model_id },
-      credential, prompt, claimId, await sha256(user.id), instruction,
+      credential, prompt, claimId, await sha256(user.id), turnInstruction,
       conversation.context_kind === 'department_private' ? 'substantive' : 'routine')
     const response = await fetcher(providerRequest.url, {
       ...providerRequest.init, signal: AbortSignal.timeout(120000),
@@ -293,7 +314,9 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
         'Provider output needs reconciliation; claim=' + claimId + '; provider_request=' + providerRequestId)
       return reply({ status: 'outcome_unknown', must_not_submit: true }, 503)
     }
+    const briefAudit=designBriefAudit(briefTurn,normalized.output_text)
     const manifest = {
+      ...briefAudit.manifest,
       source_kind: 'private_context_conversation', context_kind: conversation.context_kind,
       canonical_context_included: includeCanonicalContext,
       ...(workManifest ? { work_snapshot: workManifest } : {}),
@@ -313,7 +336,7 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
       context_chat_message_id: messageId,
       context_chat_model_configuration_id: configuration.id,
       provider, model: configuration.model_id,
-      input_text: prompt, output_text: normalized.output_text,
+      input_text: prompt, output_text: briefAudit.text,
       context_manifest: manifest, latency_ms: Date.now() - startedAt,
       input_tokens: normalized.usage.input_tokens,
       output_tokens: normalized.usage.output_tokens,
@@ -335,11 +358,12 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
         'Provider output needs settlement; claim=' + claimId + '; run=' + run.id)
       return reply({ status: 'outcome_unknown', must_not_submit: true }, 503)
     }
+    const briefReceipt=briefTurn ? await settleDesignBrief(admin,userClient,briefTurn.identity,normalized.output_text) : null
     try {
       const message = await rpc(admin, 'append_context_chat_audited_reply', {
         p_organization_id: organizationId, p_message_id: messageId, p_actor_id: user.id,
       })
-      return reply({ status: 'completed', message, must_not_submit: true })
+      return reply({ status: 'completed', message, design_brief: briefReceipt, must_not_submit: true })
     } catch {
       return reply({ status: 'pending_append', ai_run_id: run.id, must_not_submit: true }, 503)
     }

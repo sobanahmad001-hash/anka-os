@@ -270,3 +270,40 @@ Deno.test('Workshop scope denial performs no reservation, claim or provider call
   await assertRejects(() => dispatchWorkshopAnswer(admin, input('openai'), (async () => { throw Error('Provider must not run') }) as typeof fetch, environment('openai'), keepAlive), Error, 'not enabled')
   assertEquals(calls, ['get_workshop_execution_readiness'])
 })
+
+for (const finalizeFails of [false,true]) Deno.test('Design structured answer settles once and '+(finalizeFails?'retains pending recovery':'saves unapproved draft'),async()=>{
+ const request=input('openai');request.departmentId='design'
+ const identity={organization_id:'org',actor_id:'actor',conversation_id:'conversation',message_id:'message',request_id:'request'}
+ const content={title:'Poster',output_type:'image',media_references:[]}
+ request.designBrief={identity,binding:{content,source_version_ids:[],engagement_id:'engagement',brand_id:null},instruction:'Return a validated JSON brief reply'}
+ request.sourceReader={}
+ const raw=JSON.stringify({assistant_text:'I updated the objective.',questions:['Who is the audience?'],patch:{objective:'Introduce the service'}})
+ const calls:string[]=[]
+ const admin={async rpc(name:string,args:Record<string,any>){
+  calls.push(name)
+  if(name==='get_workshop_execution_readiness')return {data:{schema_version:1,enabled:true,organization_id:'org',project_id:'project',engagement_id:'engagement',department_id:'design'},error:null}
+  if(name==='reserve_workshop_chat_budget')return {data:{status:'reserved'},error:null}
+  if(name==='claim_workshop_chat_dispatch')return {data:{status:'claimed',claim_id:'claim',provider:'openai',model_configuration_id:'configuration',connector_connection_id:'connector',model_id:'verified'},error:null}
+  if(name==='complete_workshop_chat_answer_with_budget'){
+   assertEquals(args.p_output_text,'I updated the objective.\n\nWho is the audience?')
+   assertEquals(args.p_context_manifest.design_brief_reply,raw)
+   assertEquals(args.p_context_manifest.design_brief_turn,identity)
+   return {data:{ai_run_id:'run'},error:null}
+  }
+  if(name==='recover_design_chat_brief_turn')return {data:{...identity,binding:request.designBrief!.binding,status:'pending'},error:null}
+  if(name==='finalize_design_chat_brief_turn'){
+   if(finalizeFails)return {data:null,error:Error('Temporary persistence failure')}
+   assertEquals(args.p_result.content.objective,'Introduce the service')
+   return {data:{...identity,status:'saved',result:{version:{id:'version'},brief:{id:'brief'}}},error:null}
+  }
+  throw Error('Unexpected '+name)
+ }}
+ const body=providerBody('openai') as any;body.output[0].content[0].text=raw
+ const fetcher=(async()=>{calls.push('fake-provider');return new Response(JSON.stringify(body))}) as typeof fetch
+ const response=await dispatchWorkshopAnswer(admin,request,fetcher,environment('openai'),keepAlive)
+ const event=JSON.parse((await response.text()).slice(6))
+ assertEquals(event.type,'completed');assertEquals(event.design_brief.status,finalizeFails?'pending':'saved')
+ assertEquals(calls.filter(x=>x==='fake-provider').length,1)
+ assertEquals(calls.includes('mark_workshop_chat_outcome_unknown'),false)
+ assertEquals(calls.indexOf('finalize_design_chat_brief_turn')>calls.indexOf('complete_workshop_chat_answer_with_budget'),true)
+})

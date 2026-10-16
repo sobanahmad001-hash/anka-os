@@ -113,3 +113,20 @@
  .design-unified-workspace:not(.output-open)>.design-unified-chat{max-width:1100px}
  .design-unified-workspace:not(.output-open) .direct-chat-message-stream{max-width:none}
 }
+/* Allocate setup forms only the remaining chat height, so their final actions stay scrollable. */
+.design-unified-workspace .design-mode-content{display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden}
+.design-unified-workspace .design-mode-content>.design-unified-media{flex:1;min-height:0;max-height:none;overflow:auto}
+.design-unified-workspace .direct-chat-main:has(>.design-mode-content:not([hidden]))>.direct-chat-messages,.design-unified-workspace .department-chat-main:has(>.design-mode-content:not([hidden]))>.department-chat-messages{display:none}
+
+/* Conversation stays mounted beside an independently scrollable brief and execution panel. */
+.design-conversation-workspace{grid-template-columns:minmax(0,1fr) minmax(320px,.85fr);gap:16px;align-items:start}
+.design-conversation-workspace.output-open{grid-template-columns:minmax(0,1fr) minmax(320px,.85fr)}
+.design-conversation-workspace>.design-unified-output{grid-column:1/-1}
+.design-conversation-brief{display:flex;flex-direction:column;min-width:0;min-height:0;height:clamp(430px,calc(100dvh - 310px),760px);border:1px solid var(--anka-line);border-radius:14px;background:var(--anka-surface);overflow:hidden}
+.design-conversation-brief>header{flex:none;padding:16px;border-bottom:1px solid var(--anka-line)}
+.design-conversation-brief h2{font-size:18px;font-weight:600}.design-conversation-brief p{font-size:13px;color:var(--anka-muted);line-height:1.6;margin:8px 0}
+.design-brief-panel-scroll{min-height:0;overflow:auto;padding:16px;overscroll-behavior:contain}
+.design-output-choice{margin:18px 0;padding-top:14px;border-top:1px solid var(--anka-line)}
+.design-output-choice label{display:flex;flex-direction:column;gap:6px;font-weight:600}.design-output-choice select{max-width:100%}
+.design-conversation-brief .design-unified-editor .lg\:col-span-2{grid-column:1/-1}
+@media(max-width:1100px){.design-conversation-workspace,.design-conversation-workspace.output-open{grid-template-columns:minmax(0,1fr)}.design-conversation-brief{height:min(680px,80dvh)}}

@@ -1,3 +1,4 @@
+import { designBriefAudit, settleDesignBrief } from '../_shared/designChatBriefIntegration.ts'
 import { requireWorkshopExecution } from './workshopExecutionGate.ts'
 import { conservativePipelineCeiling, measuredPipelineTokenCost, selectFreshPipelineRate } from '../_shared/n6PipelineCost.ts'
 import { buildN7TextRequest, normalizeN7TextResult } from '../_shared/n7TextProvider.ts'
@@ -25,6 +26,8 @@ export type WorkshopAnswerInput = {
   route: WorkshopAnswerRoute
   prompt: string
   contextManifest: Json
+  designBrief?: Record<string, any>
+  sourceReader?: any
   startedAt: number
 }
 
@@ -105,10 +108,11 @@ export async function dispatchWorkshopAnswer(
   if (!waitUntil) {
     throw Object.assign(new Error('Workshop background settlement is unavailable'), { status: 503 })
   }
+  const turnInstruction=input.designBrief?.instruction || instruction
   const safetyIdentifier = await sha256(input.actorId)
   // Reject an invalid pinned request before reserving budget or creating a claim.
   buildN7TextRequest({ provider: input.route.provider, model_id: input.route.model },
-    input.route.credential, input.prompt, input.dispatchRequestId, safetyIdentifier, instruction)
+    input.route.credential, input.prompt, input.dispatchRequestId, safetyIdentifier, turnInstruction)
   const price = selectFreshPipelineRate(env.get(pricingEnv[input.route.provider]),
     input.route.model, new Date(), input.route.provider,
     env.get('N6_OPENAI_APPROVED_MODELS_PRICING_JSON'))
@@ -163,7 +167,7 @@ export async function dispatchWorkshopAnswer(
   }
   try {
     const request = buildN7TextRequest({ provider: input.route.provider, model_id: input.route.model },
-      input.route.credential, input.prompt, claim.claim_id, safetyIdentifier, instruction)
+      input.route.credential, input.prompt, claim.claim_id, safetyIdentifier, turnInstruction)
     const response = await fetcher(request.url, {
       ...request.init, signal: AbortSignal.timeout(120000),
     })
@@ -172,6 +176,7 @@ export async function dispatchWorkshopAnswer(
     if (normalized.actual_model_id !== input.route.model) throw new Error('Provider model changed')
     const actualCost = measuredPipelineTokenCost(normalized.usage, price)
     if (actualCost > maxCost) throw new Error('Measured cost exceeds reservation')
+    const briefAudit=designBriefAudit(input.designBrief,normalized.output_text)
     const saved = await rpc(admin, 'complete_workshop_chat_answer_with_budget', {
       p_conversation_id: input.conversationId,
       p_message_id: input.messageId,
@@ -184,21 +189,22 @@ export async function dispatchWorkshopAnswer(
       p_connector_connection_id: input.route.connectorId,
       p_model_id: input.route.model,
       p_context_manifest: {
-        ...input.contextManifest, prompt_sha256: promptSha,
+        ...input.contextManifest, ...briefAudit.manifest, prompt_sha256: promptSha,
         actual_model_id: normalized.actual_model_id,
         selected_model_id: input.route.model,
         provider_response_id: normalized.provider_response_id,
         dispatch_claim_id: claim.claim_id,
         pricing: price,
       },
-      p_output_text: normalized.output_text,
+      p_output_text: briefAudit.text,
       p_latency_ms: Date.now() - input.startedAt,
       p_input_tokens: normalized.usage.input_tokens,
       p_output_tokens: normalized.usage.output_tokens,
       p_actual_cost_microusd: actualCost,
       p_evidence: 'Provider response ' + normalized.provider_response_id + '; claim ' + claim.claim_id,
     })
-    return { type: 'completed', answer: normalized.output_text, ...saved }
+    const design_brief=input.designBrief ? await settleDesignBrief(admin,input.sourceReader,input.designBrief.identity,normalized.output_text) : null
+    return { type: 'completed', answer: briefAudit.text, ...saved, design_brief }
   } catch {
     await uncertain(admin, input, 'Workshop claimed provider or persistence outcome unknown; claim ' + claim.claim_id)
     return { type: 'unknown', message: 'The provider or saved outcome is unknown. Do not retry automatically.' }
