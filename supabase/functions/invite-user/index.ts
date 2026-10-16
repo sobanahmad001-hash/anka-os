@@ -1,3 +1,4 @@
+import { invitationRedirect } from '../_shared/invitationRedirect.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 
 export const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
@@ -45,7 +46,7 @@ async function context(req: Request): Promise<TeamContext> {
     rpc: async (name, input) => await userClient.rpc(name, input),
   }
 }
-export function createTeamHandler(getContext: (req: Request) => Promise<TeamContext> = context) {
+export function createTeamHandler(getContext: (req: Request) => Promise<TeamContext> = context, getRedirect: () => string = () => invitationRedirect(Deno.env.get('ANKA_APP_URL'), Deno.env.get('SUPABASE_URL'))) {
   return async (req: Request) => {
     if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
     if (!['POST', 'DELETE'].includes(req.method)) return json({ error: 'Method not allowed' }, 405)
@@ -71,8 +72,7 @@ export function createTeamHandler(getContext: (req: Request) => Promise<TeamCont
       const department = typeof body.department === 'string' ? body.department : ''
       const role = typeof body.role === 'string' ? body.role : 'contributor'
       if (!email || !email.includes('@') || !DEPARTMENTS.has(department) || !ROLES.has(role)) return json({ error: 'Valid email, department and organization role required' }, 400)
-      const origin = req.headers.get('origin')
-      const invited = await ctx.invite(email, department, origin ? origin + '/auth/callback' : undefined)
+      const invited = await ctx.invite(email, department, getRedirect())
       if (invited.error || !invited.userId) return json({ error: 'Invitation was not confirmed. Check account state before retrying; no automatic retry was attempted.' }, 400)
       invitedUserId = invited.userId
       const { error } = await ctx.rpc('complete_team_invitation', {

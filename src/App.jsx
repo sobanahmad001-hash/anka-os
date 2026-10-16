@@ -7,6 +7,8 @@ import Layout from './components/Layout'
 import { featureFlags } from './config/featureFlags'
 
 const Login = lazy(() => import('./pages/Login'))
+const AuthCallback = lazy(() => import('./pages/AuthCallback'))
+const AuthRecovery = lazy(() => import('./pages/AuthRecovery'))
 const Settings = lazy(() => import('./apps/Settings'))
 const WorkspaceHome = lazy(() => import('./apps/WorkspaceHome'))
 const AgencyCommandCenter = lazy(() => import('./apps/AgencyCommandCenter'))
@@ -56,6 +58,8 @@ export default function App() {
     <Suspense fallback={<RouteFallback />}>
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/auth/callback" element={<AuthCallback />} />
+      <Route path="/auth/recover" element={<AuthRecovery />} />
       
       <Route 
         path="/" 

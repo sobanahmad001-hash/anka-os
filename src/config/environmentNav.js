@@ -9,7 +9,7 @@ export const environmentNav = [
     description: 'Central hub',
     items: [
       { label: 'Overview', path: '/admin', legacyAdmin: true },
-      { label: 'Users', path: '/users', organizationAdmin: true, legacyAdminFallback: true },
+      { label: 'People & access', path: '/users', peopleAdmin: true },
       { label: 'Connectors', path: '/settings', organizationAdmin: true },
       { label: 'Product Document', path: '/admin/living-product-document', legacyAdmin: true },
     ],
@@ -68,6 +68,7 @@ export function isNavigationItemVisible(item, {
 } = {}) {
   if (!activeMembership?.organizationId) return false
   if (item.path === '/assistant' && !aiAssistance) return false
+  if (item.peopleAdmin) return ['system_owner','operations_admin','executive','project_owner'].includes(activeMembership.role)
   if (item.legacyAdmin) return profileRole === 'admin'
   if (item.organizationAdmin) {
     return ORGANIZATION_ADMIN_ROLES.has(activeMembership.role)
