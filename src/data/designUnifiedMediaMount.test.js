@@ -27,5 +27,15 @@ test('animation source requires explicit exact-provider consent and changing con
  await act(async()=>root.render(createElement(Panel,{studio,mode:'video',outputKind:'motion',organizationId:'org',userId:'actor',context,brief:{id:'brief',frozen_version_id:'version'}})))
  const button=text=>all(env.container).find(n=>n.tagName==='BUTTON'&&n.textContent===text),click=text=>act(async()=>props(button(text)).onClick()),field=label=>all(env.container).find(n=>props(n)?.['aria-label']===label);
  assert.equal(props(button('Load available models')).disabled,true);await click('Load saved requests');await act(async()=>props(field('Starting image')).onChange({target:{value:original.id}}));assert.equal(props(button('Load available models')).disabled,true);const consent=()=>all(env.container).find(n=>n.tagName==='INPUT'&&props(n)?.type==='checkbox');await act(async()=>props(consent()).onChange({target:{checked:true}}));await click('Load available models');assert.deepEqual(JSON.parse(JSON.stringify(inputs)),[{kind:'media_output',id:original.id,checksum:original.checksum,provider_consent:{provider:'higgsfield',source_id:original.id,checksum:original.checksum,allow_transfer:true}}]);await act(async()=>props(field('Model')).onChange({target:{value:'animation'}}));assert.equal(field('Aspect ratio'),undefined);await click('Refresh price');assert.equal(props(button('Generate')).disabled,false);await act(async()=>props(consent()).onChange({target:{checked:false}}));assert.equal(button('Generate'),undefined);assert.equal(props(button('Load available models')).disabled,true)
+
+ const official={kind:'design_asset_version',id:'asset-version',checksum:'d'.repeat(64),mime_type:'image/png',label:'Brand PNG · v1'};
+ const projectProps={key:'official',studio,mode:'video',outputKind:'motion',organizationId:'org',userId:'actor',context:{kind:'engagement',id:'eng',service_id:'service'},brief:{id:'brief',frozen_version_id:'version'}};
+ await act(async()=>root.render(createElement(Panel,{...projectProps,officialImages:[official]})));
+ await act(async()=>props(field('Starting image')).onChange({target:{value:official.id}}));
+ assert.equal(props(button('Load available models')).disabled,true);
+ await act(async()=>props(consent()).onChange({target:{checked:true}}));await click('Load available models');
+ assert.equal(inputs[0].kind,'design_asset_version');assert.equal(inputs[0].id,official.id);assert.equal(inputs[0].provider_consent.checksum,official.checksum);
+ await act(async()=>root.render(createElement(Panel,{...projectProps,officialImages:[]})));
+ assert.equal(props(button('Load available models')).disabled,true);assert.equal(field('Model'),undefined);assert.match(env.container.textContent,/no longer available/);
  await act(async()=>root.render(createElement(Panel,{key:'text-video',studio,mode:'video',outputKind:'video',organizationId:'org',userId:'actor',context,brief:{id:'brief',frozen_version_id:'version'}})));assert.equal(field('Starting image'),undefined);await click('Load available models');assert.equal(field('Model'),undefined);assert.deepEqual(inputs,[])
 })

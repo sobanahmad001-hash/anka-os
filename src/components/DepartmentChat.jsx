@@ -1138,6 +1138,55 @@ export function ScopedDepartmentChat({
         </label>
   </>
   const ConversationControls = compactWorkbench ? 'details' : 'div'
+  const AttachmentPanel = designWorkspace ? 'section' : SourcePanel
+  const attachmentPanel = <AttachmentPanel className="rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-4">
+          {!designWorkspace && presentation === 'workbench' ? <summary>Source files · {selectedAttachmentIds.length} selected</summary> : <p>Source files · {selectedAttachmentIds.length} selected</p>}
+          {!designWorkspace && isAnswerMode && <p className="text-xs text-[var(--anka-muted)]">Ordinary engagement answers send your prompt, existing conversation history (including participant messages), selected approved artifact versions, and validated text from explicitly selected TXT/MD/DOCX files.</p>}
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">{designWorkspace ? 'Choose chat files' : 'Explicit source files'}</p>
+          <p className="mt-2 text-xs leading-5 text-[var(--anka-muted)]">{designWorkspace ? 'Up to 3 files: 5 MiB each, DOCX 4 MiB. Images remain reference-only. Only selected, consented text is included when you Send.' : 'TXT, Markdown, and DOCX contribute validated text. PNG/JPEG are reference-only and are never sent to the model. PDF and scanned/OCR documents are unavailable. Choose up to 3 files: 5 MiB per file; DOCX 4 MiB. Extracted text is limited to 16,000 characters per file and 24,000 per turn; rejected limits never truncate content.'}</p>
+          <input
+            key={conversationId}
+            type="file" multiple aria-label="Chat source files"
+            accept=".txt,.md,.docx,.png,.jpg,.jpeg,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg"
+            disabled={busy || historyBusy || attachmentBusy || !currentConversation || currentConversation.state !== 'active'}
+            className="mt-3 block w-full text-xs text-[var(--anka-muted)] file:mr-3 file:rounded-lg file:border-0 file:bg-[var(--anka-surface-raised)] file:px-3 file:py-2 file:text-[var(--anka-ink)]"
+            onChange={event => {
+              const selection = selectPendingDepartmentChatAttachments(event.target.files)
+              setPendingFiles(selection.files)
+              setError(selection.error)
+              if (selection.error) event.target.value = ''
+            }}
+          />
+          {pendingFiles.length > 0 && <div className="mt-3 space-y-3">
+            <p className="text-xs text-[var(--anka-ink)]">{pendingFiles.map(file => file.name).join(', ')}</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-xs text-[var(--anka-muted)]">Classification
+                <select className={`${INPUT} mt-1 normal-case tracking-normal`} value={attachmentClassification} onChange={event => {
+                  setAttachmentClassification(event.target.value)
+                  if (event.target.value === 'restricted') { setAttachmentAiUse(false); setAttachmentShare(false) }
+                }}>
+                  <option value="public">Public</option><option value="internal">Internal</option>
+                  <option value="confidential">Confidential</option><option value="restricted">Restricted</option>
+                </select>
+              </label>
+              <label className="flex items-start gap-2 pt-6 text-xs text-[var(--anka-ink)]"><input type="checkbox" checked={attachmentShare} disabled={attachmentClassification === 'restricted'} onChange={event => setAttachmentShare(event.target.checked)} />Share this source with current and future conversation recipients</label>
+            </div>
+            <label className="flex items-start gap-2 text-xs text-[var(--anka-warning)]"><input type="checkbox" checked={attachmentAiUse} disabled={attachmentClassification === 'restricted'} onChange={event => setAttachmentAiUse(event.target.checked)} />I approve sending validated text from text-bearing files to the configured AI. Images remain reference-only.</label>
+            <button type="button" disabled={attachmentBusy || draftSaving} onClick={uploadPendingAttachments} className="rounded-lg border border-[var(--anka-info)] px-3 py-2 text-xs font-semibold text-[var(--anka-info)] disabled:opacity-50">{attachmentBusy ? 'Validating privately…' : 'Upload and validate'}</button>
+          </div>}
+          {attachments.length > 0 && <div className="mt-4 space-y-2">
+            {attachments.map(item => {
+              const ready = ['extracted', 'reference_only'].includes(item.status) && item.data_classification !== 'restricted'
+                && (!conversationHasRecipients || item.share_with_recipients)
+              const selected = selectedAttachmentIds.includes(item.id)
+              return <label key={item.id} className={`flex items-start gap-3 rounded-lg border p-3 text-xs ${ready ? 'border-[var(--anka-line)] text-[var(--anka-ink)]' : 'border-[var(--anka-surface-raised)] text-[var(--anka-muted)]'}`}>
+                <input type="checkbox" disabled={!ready || busy || attachmentBusy} checked={selected} onChange={() => setSelectedAttachmentIds(current => selected ? current.filter(id => id !== item.id) : current.length < 3 ? [...current, item.id] : current)} />
+                <span className="min-w-0"><span className="block truncate font-medium">{item.original_name}</span><span className="mt-1 block text-[var(--anka-muted)]">{item.verified_mime || item.claimed_mime} · {Number.isFinite(item.byte_size) ? `${item.byte_size.toLocaleString()} bytes` : 'Size pending validation'}</span><span className="mt-1 block capitalize text-[var(--anka-muted)]">{item.status.replaceAll('_', ' ')} · {item.data_classification} · {item.share_with_recipients ? 'source shared' : 'uploader only'} · {item.extraction_notice}</span></span>
+              </label>
+            })}
+          </div>}
+          <p className="mt-3 text-xs text-[var(--anka-muted)]">Choose up to three files for this turn. Only checked files are linked to the request; rejected limits never truncate content. Revocation blocks later server reads and replies, but cannot recall copies someone already saved.</p>
+        </AttachmentPanel>
   return <><div className={presentation === 'workbench' ? 'department-chat-workbench design-chat-composer grid min-w-0 gap-3' : `grid gap-6 ${supportsSavedConversations ? hideConversationList ? 'xl:grid-cols-[minmax(0,1fr)_320px]' : 'xl:grid-cols-[260px_minmax(0,1fr)_320px]' : 'xl:grid-cols-[minmax(0,1fr)_360px]'}`}>
     {supportsSavedConversations && !hideConversationList && <aside className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-4">
       <div className="flex items-center justify-between gap-3">
@@ -1289,54 +1338,7 @@ export function ScopedDepartmentChat({
           <p className="mt-2 text-xs text-[var(--anka-muted)]">{selectedSourceVersionIds.length} of 5 exact versions selected. Permission and approval are rechecked at send.</p>
         </SourcePanel>}
 
-        {supportsSavedConversations && capabilities?.attachments?.supported && <SourcePanel className="rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-4">
-          {presentation === 'workbench' && <summary>Source files · {selectedAttachmentIds.length} selected</summary>}
-          {isAnswerMode && <p className="text-xs text-[var(--anka-muted)]">Ordinary engagement answers send your prompt, existing conversation history (including participant messages), selected approved artifact versions, and validated text from explicitly selected TXT/MD/DOCX files.</p>}
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">Explicit source files</p>
-          <p className="mt-2 text-xs leading-5 text-[var(--anka-muted)]">TXT, Markdown, and DOCX contribute validated text. PNG/JPEG are reference-only and are never sent to the model. PDF and scanned/OCR documents are unavailable. Choose up to 3 files: 5 MiB per file; DOCX 4 MiB. Extracted text is limited to 16,000 characters per file and 24,000 per turn; rejected limits never truncate content.</p>
-          <input
-            key={conversationId}
-            type="file" multiple
-            accept=".txt,.md,.docx,.png,.jpg,.jpeg,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg"
-            disabled={busy || historyBusy || attachmentBusy || !currentConversation || currentConversation.state !== 'active'}
-            className="mt-3 block w-full text-xs text-[var(--anka-muted)] file:mr-3 file:rounded-lg file:border-0 file:bg-[var(--anka-surface-raised)] file:px-3 file:py-2 file:text-[var(--anka-ink)]"
-            onChange={event => {
-              const selection = selectPendingDepartmentChatAttachments(event.target.files)
-              setPendingFiles(selection.files)
-              setError(selection.error)
-              if (selection.error) event.target.value = ''
-            }}
-          />
-          {pendingFiles.length > 0 && <div className="mt-3 space-y-3">
-            <p className="text-xs text-[var(--anka-ink)]">{pendingFiles.map(file => file.name).join(', ')}</p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="text-xs text-[var(--anka-muted)]">Classification
-                <select className={`${INPUT} mt-1 normal-case tracking-normal`} value={attachmentClassification} onChange={event => {
-                  setAttachmentClassification(event.target.value)
-                  if (event.target.value === 'restricted') { setAttachmentAiUse(false); setAttachmentShare(false) }
-                }}>
-                  <option value="public">Public</option><option value="internal">Internal</option>
-                  <option value="confidential">Confidential</option><option value="restricted">Restricted</option>
-                </select>
-              </label>
-              <label className="flex items-start gap-2 pt-6 text-xs text-[var(--anka-ink)]"><input type="checkbox" checked={attachmentShare} disabled={attachmentClassification === 'restricted'} onChange={event => setAttachmentShare(event.target.checked)} />Share this source with current and future conversation recipients</label>
-            </div>
-            <label className="flex items-start gap-2 text-xs text-[var(--anka-warning)]"><input type="checkbox" checked={attachmentAiUse} disabled={attachmentClassification === 'restricted'} onChange={event => setAttachmentAiUse(event.target.checked)} />I approve sending validated text from text-bearing files to the configured AI. Images remain reference-only.</label>
-            <button type="button" disabled={attachmentBusy || draftSaving} onClick={uploadPendingAttachments} className="rounded-lg border border-[var(--anka-info)] px-3 py-2 text-xs font-semibold text-[var(--anka-info)] disabled:opacity-50">{attachmentBusy ? 'Validating privately…' : 'Upload and validate'}</button>
-          </div>}
-          {attachments.length > 0 && <div className="mt-4 space-y-2">
-            {attachments.map(item => {
-              const ready = ['extracted', 'reference_only'].includes(item.status) && item.data_classification !== 'restricted'
-                && (!conversationHasRecipients || item.share_with_recipients)
-              const selected = selectedAttachmentIds.includes(item.id)
-              return <label key={item.id} className={`flex items-start gap-3 rounded-lg border p-3 text-xs ${ready ? 'border-[var(--anka-line)] text-[var(--anka-ink)]' : 'border-[var(--anka-surface-raised)] text-[var(--anka-muted)]'}`}>
-                <input type="checkbox" disabled={!ready || busy || attachmentBusy} checked={selected} onChange={() => setSelectedAttachmentIds(current => selected ? current.filter(id => id !== item.id) : current.length < 3 ? [...current, item.id] : current)} />
-                <span className="min-w-0"><span className="block truncate font-medium">{item.original_name}</span><span className="mt-1 block text-[var(--anka-muted)]">{item.verified_mime || item.claimed_mime} · {Number.isFinite(item.byte_size) ? `${item.byte_size.toLocaleString()} bytes` : 'Size pending validation'}</span><span className="mt-1 block capitalize text-[var(--anka-muted)]">{item.status.replaceAll('_', ' ')} · {item.data_classification} · {item.share_with_recipients ? 'source shared' : 'uploader only'} · {item.extraction_notice}</span></span>
-              </label>
-            })}
-          </div>}
-          <p className="mt-3 text-xs text-[var(--anka-muted)]">Choose up to three files for this turn. Only checked files are linked to the request; rejected limits never truncate content. Revocation blocks later server reads and replies, but cannot recall copies someone already saved.</p>
-        </SourcePanel>}
+        {supportsSavedConversations && capabilities?.attachments?.supported && (designWorkspace ? (designWorkspace.attachmentTarget ? createPortal(attachmentPanel, designWorkspace.attachmentTarget) : null) : attachmentPanel)}
 
         <label className="department-chat-prompt block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]"><span className={compactWorkbench ? 'sr-only' : undefined}>{isAnswerMode ? 'Message' : 'Draft request'}</span>
           <textarea ref={composerRef} required maxLength={8000} rows={compactWorkbench ? 2 : 10} className={`${INPUT} mt-2 normal-case tracking-normal`} value={prompt} onInput={event => setPrompt(event.currentTarget.value)} placeholder={isAnswerMode ? 'Ask a question or explore the work context. This will not create an official output.' : 'Describe the draft you need, the evidence to prioritize, known constraints, tone, and gaps the team should keep visible.'} />
