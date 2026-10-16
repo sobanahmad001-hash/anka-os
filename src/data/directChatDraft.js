@@ -3,7 +3,8 @@ const TTL = 60 * 60 * 1000
 const validText = value => typeof value === 'string' && value.length <= 8000
 const validAttempt = value => !value || (UUID.test(value.conversation_id) && UUID.test(value.client_request_id)
   && validText(value.text) && typeof value.isNew === 'boolean'
-  && Object.keys(value).every(key => ['conversation_id', 'client_request_id', 'text', 'isNew'].includes(key)))
+  && (value.design_attachment_ids === undefined || Array.isArray(value.design_attachment_ids) && value.design_attachment_ids.length <= 3 && new Set(value.design_attachment_ids).size === value.design_attachment_ids.length && value.design_attachment_ids.every(id => typeof id === 'string' && UUID.test(id)))
+  && Object.keys(value).every(key => ['conversation_id', 'client_request_id', 'text', 'isNew', 'design_attachment_ids'].includes(key)))
 export function readDirectChatDraft(key, storage = globalThis.sessionStorage, now = Date.now()) {
   try {
     const value = JSON.parse(storage.getItem(`${key}:draft`))

@@ -62,7 +62,7 @@ test('CHAT-3 parsers enforce bounded preflight and fail-closed extraction', () =
   }
   assert.ok(parser.includes('Main document text only; comments, headers, footers, embedded media, and unsupported parts are excluded.'))
   assert.ok(edge.includes('reference_only: { mime_types:'))
-  assert.ok(edge.includes("unavailable: ['PDF'"))
+  assert.ok(edge.includes("scope.departmentId === 'design' ? [] : ['PDF']"))
   assert.doesNotMatch(edge, /input_file|input_image/)
 })
 

@@ -1,3 +1,4 @@
+import { privateDesignMessageSources } from '../department-chat/designPrivateAttachments.ts'
 import { prepareDesignBrief, designBriefAudit, settleDesignBrief, recoverAuditedDesignBrief } from '../_shared/designChatBriefIntegration.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { namedKey, sha256 } from '../_shared/googleOAuthTokens.ts'
@@ -247,13 +248,15 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
       canonicalContext = canonicalOpenAiContext(organization, project, work.summary)
       workManifest = work.manifest
     }
+    const designSources = conversation.context_kind === 'department_private' && conversation.department_id === 'design'
+      ? await privateDesignMessageSources(admin, organizationId, user.id, conversation.id, messageId) : { manifest: [], text: '' }
     let briefTurn: Json | undefined
     if (body.design_brief !== undefined) {
       if (conversation.context_kind !== 'department_private' || conversation.department_id !== 'design') throw fail('Design draft assistance requires the private Design Workshop',403)
       briefTurn=await prepareDesignBrief(admin,userClient,{organization_id:organizationId,actor_id:user.id,conversation_id:conversation.id,message_id:messageId,request_id:dispatchRequestId},body.design_brief,
-        {visibility:'private',engagement_id:null},{kind:'private_design_chat',message_ids:orderedHistory.map(row=>row.id),source_message_id:messageId})
+        {visibility:'private',engagement_id:null},{kind:'private_design_chat',message_ids:orderedHistory.map(row=>row.id),source_message_id:messageId,attachment_sources:designSources.manifest})
     }
-    const prompt = buildPrivateConversationPrompt(orderedHistory, messageId, conversation, canonicalContext)
+    const prompt = buildPrivateConversationPrompt(orderedHistory, messageId, conversation, canonicalContext) + designSources.text
       + (briefTurn ? '\nCURRENT UNAPPROVED DESIGN DRAFT JSON:\n'+briefTurn.snapshot : '')
     const turnInstruction=briefTurn?.instruction || instruction
     buildN7TextRequest({provider,model_id:configuration.model_id},'preflight',prompt,dispatchRequestId,await sha256(user.id),turnInstruction)
@@ -321,7 +324,7 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
       canonical_context_included: includeCanonicalContext,
       ...(workManifest ? { work_snapshot: workManifest } : {}),
       project_id: conversation.project_id, department_id: conversation.department_id,
-      source_message_id: messageId,
+      source_message_id: messageId, attachment_sources: designSources.manifest,
       dispatch_claim_id: claimId, connector_connection_id: connection.id,
       model_configuration_id: configuration.id, prompt_sha256: promptSha,
       provider_response_id: normalized.provider_response_id,

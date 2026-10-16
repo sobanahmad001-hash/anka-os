@@ -1,3 +1,5 @@
+import { inspectDesignPdf } from '../_shared/designPdfInspection.mjs'
+import { DESIGN_PRIVATE_ATTACHMENT_ACTIONS, designPrivateAttachmentAction } from './designPrivateAttachments.ts'
 import { prepareDesignBrief, recoverAuditedDesignBrief } from '../_shared/designChatBriefIntegration.ts'
 import { workshopExecutionEnabled } from './workshopExecutionGate.ts'
 import { openAiTextOptions, preferredApprovedModel, OPENAI_PREMIUM_MODEL } from '../_shared/openaiModelPolicy.js'
@@ -1269,8 +1271,8 @@ async function reserveAttachment(admin: Client, body: Json, actorId: string, org
   const originalName = attachmentName(body.original_name)
   const claimedMime = text(body.claimed_mime, 160).toLowerCase()
   const classification = text(body.data_classification, 30).toLowerCase()
-  if (!ATTACHMENT_MIME_TYPES.includes(claimedMime)) {
-    throw Object.assign(new Error('Supported files are TXT, Markdown, DOCX, PNG, and JPEG. PDF is intentionally unavailable.'), { status: 415 })
+  if (!ATTACHMENT_MIME_TYPES.includes(claimedMime) && !(claimedMime === 'application/pdf' && conversation.department_id === 'design')) {
+    throw Object.assign(new Error('Supported files are TXT, Markdown, DOCX, PNG, and JPEG. PDF is supported only in Design.'), { status: 415 })
   }
   if (!ATTACHMENT_CLASSIFICATIONS.has(classification)) throw Object.assign(new Error('Choose a valid source classification'), { status: 400 })
   if (classification === 'restricted' && body.ai_use_allowed === true) {
@@ -1325,6 +1327,15 @@ async function finalizeAttachment(admin: Client, body: Json, actorId: string, or
     p_engagement_id: conversation.engagement_id, p_department_id: conversation.department_id,
     p_actor_id: actorId,
   }
+  // Recover a completed Design upload after a lost response without claiming
+  // or rewriting it again. Existing scope/owner authority is still checked.
+  if (conversation.department_id === 'design') {
+    const saved = await admin.from('department_chat_attachments').select('*')
+      .eq('id', attachmentId).eq('organization_id', organizationId)
+      .eq('conversation_id', conversation.id).eq('uploaded_by', actorId).maybeSingle()
+    if (saved.error) throw saved.error
+    if (saved.data && ['extracted', 'reference_only'].includes(saved.data.status)) return publicAttachment(saved.data)
+  }
   const claim = await admin.rpc('claim_department_chat_attachment_finalization', scope)
   if (claim.error) throw claim.error
   const attachment = claim.data as Json
@@ -1341,7 +1352,7 @@ async function finalizeAttachment(admin: Client, body: Json, actorId: string, or
     if (storedMime !== claimedMime) {
       throw Object.assign(new Error('Stored Content-Type does not match the reserved file type.'), { status: 422 })
     }
-    const inspected = inspectDepartmentChatAttachment(bytes, claimedMime)
+    const inspected = claimedMime === 'application/pdf' && conversation.department_id === 'design' ? await inspectDesignPdf(bytes) : inspectDepartmentChatAttachment(bytes, claimedMime)
     const digest = await sha256AttachmentBytes(bytes)
     const stored = await admin.storage.from(ATTACHMENT_BUCKET).upload(finalPath, bytes, {
       contentType: inspected.verifiedMime, cacheControl: '0', upsert: false,
@@ -1591,10 +1602,10 @@ async function getCapabilities(
     attachments: {
       supported: true, max_files_per_turn: ATTACHMENT_LIMITS.filesPerTurn,
       max_file_bytes: ATTACHMENT_LIMITS.fileBytes,
-      extracted_text: { mime_types: ['text/plain', 'text/markdown', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+      extracted_text: { mime_types: ['text/plain', 'text/markdown', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', ...(scope.departmentId === 'design' ? ['application/pdf'] : [])],
         max_characters_per_file: ATTACHMENT_LIMITS.textCharacters, max_characters_per_turn: ATTACHMENT_LIMITS.turnCharacters },
       reference_only: { mime_types: ['image/png', 'image/jpeg'], sent_to_model: false },
-      unavailable: ['PDF', 'OCR/scanned documents', 'spreadsheets', 'audio/video', 'archives/executables', 'remote URLs'],
+      unavailable: [...(scope.departmentId === 'design' ? [] : ['PDF']), 'OCR/scanned documents', 'spreadsheets', 'audio/video', 'archives/executables', 'remote URLs'],
     },
     sharing: {
       supported: true,
@@ -2110,6 +2121,11 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
     const { userClient, admin, user, membership, organizationId } = await requireContext(request, body.organization_id, dependencies.clients)
     auditContext = { admin, actorId: user.id, organizationId }
     const action = text(body.action, 60)
+    if (DESIGN_PRIVATE_ATTACHMENT_ACTIONS.has(action)) {
+      const result = await designPrivateAttachmentAction(action, admin, body, user.id, organizationId)
+      if (result instanceof Response) { for (const [name, value] of Object.entries(cors)) result.headers.set(name, value); return result }
+      return response({ data: result })
+    }
     if (action === 'get_context_chat_readiness') {
       const spendGuard = await chatSpendGuardReadiness(admin, organizationId, user.id)
       const modelStatus = await contextModelReadiness(admin, organizationId, user.id, text(body.model_configuration_id, 80), dependencies.readinessEnv ?? (name => Deno.env.get(name)))

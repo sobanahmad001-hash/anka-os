@@ -890,7 +890,7 @@ export function ScopedDepartmentChat({
       if (pendingFiles.length > 3) throw new Error('Choose no more than three files. No files were uploaded.')
       for (const file of pendingFiles) {
         if (!isCurrent()) return
-        const claimedMime = validateDepartmentChatAttachmentFile(file)
+        const claimedMime = validateDepartmentChatAttachmentFile(file, { allowDesignPdf: departmentId === 'design' })
         const isImage = claimedMime === 'image/png' || claimedMime === 'image/jpeg'
         if (!isImage && !attachmentAiUse) throw new Error('Approve AI use before uploading text-bearing files.')
         uploaded.push(await departmentChat.uploadAttachment(departmentId, {
@@ -1147,11 +1147,11 @@ export function ScopedDepartmentChat({
           <input
             key={conversationId}
             type="file" multiple aria-label="Chat source files"
-            accept=".txt,.md,.docx,.png,.jpg,.jpeg,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg"
+            accept={departmentId === 'design' ? '.txt,.md,.docx,.pdf,.png,.jpg,.jpeg' : '.txt,.md,.docx,.png,.jpg,.jpeg'}
             disabled={busy || historyBusy || attachmentBusy || !currentConversation || currentConversation.state !== 'active'}
             className="mt-3 block w-full text-xs text-[var(--anka-muted)] file:mr-3 file:rounded-lg file:border-0 file:bg-[var(--anka-surface-raised)] file:px-3 file:py-2 file:text-[var(--anka-ink)]"
             onChange={event => {
-              const selection = selectPendingDepartmentChatAttachments(event.target.files)
+              const selection = selectPendingDepartmentChatAttachments(event.target.files, { allowDesignPdf: departmentId === 'design' })
               setPendingFiles(selection.files)
               setError(selection.error)
               if (selection.error) event.target.value = ''

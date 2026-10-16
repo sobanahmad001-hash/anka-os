@@ -96,6 +96,12 @@ export async function contextChatAction(
       if (error) throw error
       return data || []
     }
+    if (body.upload_conversation_id !== undefined) {
+      if (scope.context_kind !== 'department_private' || scope.department_id !== 'design' || !isContextChatUuid(body.upload_conversation_id)) throw fail('Exact private Design upload identity required')
+      const { data, error } = await admin.rpc('create_design_private_upload_conversation', { p_org: organizationId, p_actor: actorId, p_id: body.upload_conversation_id })
+      if (error) throw error
+      return data
+    }
     const title = string(body.title)
     if (title.length > 160) throw fail('Conversation title is too long')
     const { data, error } = await admin.from('department_chat_conversations')
@@ -180,6 +186,13 @@ export async function contextChatAction(
     const requestId = string(body.client_request_id)
     if (!isContextChatUuid(requestId)) throw fail('Message request ID is required')
     const message = validateContextChatMessage(body.message)
+    if (body.design_attachment_ids !== undefined) {
+      if (conversation.context_kind !== 'department_private' || conversation.department_id !== 'design' || conversation.owner_id !== actorId
+        || !Array.isArray(body.design_attachment_ids) || body.design_attachment_ids.length > 3 || body.design_attachment_ids.some(value => !isContextChatUuid(value))) throw fail('Exact private Design sources required')
+      const { data, error } = await admin.rpc('append_design_private_message_sources', { p_org: organizationId, p_conversation: conversation.id, p_actor: actorId, p_request: requestId, p_body: message, p_ids: body.design_attachment_ids })
+      if (error) throw fail(error.code === '42501' ? 'Selected Design source unavailable or access changed' : error.code === '23505' ? 'This message request already has different sources or content' : 'Design source selection could not be saved', error.code === '42501' ? 403 : error.code === '23505' ? 409 : 422)
+      return data
+    }
     const { data, error } = await admin.rpc('append_context_chat_human_message', {
       p_conversation_id: conversation.id, p_organization_id: organizationId,
       p_actor_id: actorId, p_request_id: requestId, p_body: message,

@@ -106,16 +106,16 @@ function ScopedDesignUnifiedWorkspace({engagement,userId,organizationId,membersh
   <section ref={attachmentPanel} tabIndex={-1} hidden={!attachmentsOpen} className="design-attachments" aria-label="Design attachments">
    <header><h3>Attachments</h3><button type="button" disabled={locked} onClick={()=>{setAttachmentsOpen(false);attachmentButton.current?.focus()}}>Close attachments</button></header>
    <p>Choose how a file will be used. Adding a reference does not generate media or confirm a brief.</p>
-   {privateMode?<p>Private file uploads are not available yet. You can animate a saved image generated in this private conversation, with explicit transfer consent.</p>:<>
+   {privateMode?<p>Private files stay in this owner-only Design conversation. Uploaded images are reference-only; generated images can be animated separately with explicit transfer consent.</p>:<>
     <h4>Project image</h4><p>Upload an official PNG version for this engagement. It can be selected as a brief reference or a starting image for animation. PNG only, up to 10 MiB.</p>
     <button type="button" disabled={locked||!workspace||!capabilities.createDraft||!services.some(s=>s.id===serviceId)} onClick={()=>setUploadOpen(true)}>Upload project PNG</button>
     {!serviceId&&<p>Choose a Design service below before uploading a project image.</p>}
     {uploadOpen&&workspace&&<DesignAssetUpload workspace={workspace} contextKey={`${organizationId}:${engagement.id}:${serviceId}`} canUpload={capabilities.createDraft&&!locked} busy={busy} onUpload={uploadAsset} onClose={()=>{if(!locked)setUploadOpen(false)}}/>}
-    <h4>Chat source files</h4><p>For a saved project conversation, use DOCX, TXT or Markdown as text sources, or PNG/JPEG as reference-only files. Text use requires explicit consent; upload alone never sends a chat.</p>
+    <h4>Chat source files</h4><p>For a saved project conversation, use PDF, DOCX, TXT or Markdown as text sources, or PNG/JPEG as reference-only files. Text use requires explicit consent; upload alone never sends a chat.</p>
     <p>Chat files need a saved conversation. A new conversation is saved on its first explicit Send.</p>
-    <div ref={setAttachmentTarget}/>
    </>}
-   <details><summary>File support and limits</summary><p>DOCX extracts main-document text only, without OCR; embedded images are not interpreted. Text is limited to 16,000 characters per file and 24,000 per turn, with no silent truncation. PDF, scanned documents/OCR, legacy DOC and video uploads are not supported here yet. Saved video references do not enable video analysis or editing. Images attached to chat are reference-only, not image-generation inputs. Animation requires an eligible exact original and separate Higgsfield transfer consent.</p></details>
+   <div ref={setAttachmentTarget}/>
+   <details><summary>File support and limits</summary><p>DOCX extracts main-document text only, without OCR; embedded images are not interpreted. Text is limited to 16,000 characters per file and 24,000 per turn, with no silent truncation. PDF reads up to 20 pages of text only; encrypted or interactive PDFs and external resources are rejected. Scanned documents/OCR, legacy DOC and video uploads are unsupported. Saved video references do not enable video analysis or editing. Images attached to chat are reference-only, not image-generation inputs. Animation requires an eligible exact original and separate Higgsfield transfer consent.</p></details>
   </section>
   {editor}
   <div className="design-output-choice"><label>Output<select aria-label="Design output type" value={mode} disabled={locked} onChange={e=>{if(locked)return;setMode(e.target.value);setPreparing(false)}}><option value="image">Image · static</option><option value="motion">Motion image · animate an original</option><option value="video">Video · from the brief</option></select></label><p>{mode==='motion'?'Uses a saved original image from this context, with your explicit permission to transfer it.':'Uses the exact brief version you confirm. Choosing an output does not generate anything.'}</p></div>

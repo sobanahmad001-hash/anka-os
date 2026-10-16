@@ -17,3 +17,10 @@ test('invalid/unbounded drafts and mismatched metadata cannot enter recovery sto
  assert.throws(()=>writeDirectChatDraft(key,{...record,attempt:{conversation_id:uuid(),client_request_id:uuid(),text:'Draft',isNew:true,provider_secret:'forbidden'}},store,1000))
  writeDirectChatDraft(key,record,store,1000);clearDirectChatDraft(key,store);assert.equal(store.data.size,0)
 })
+
+test('private Design draft retains exact source IDs and rejects duplicates or overflow',()=>{
+ const store=storage(),key='design-sources',source=uuid(),record={new_conversation_id:uuid(),text:'Draft',attempt:{conversation_id:uuid(),client_request_id:uuid(),text:'Draft',isNew:false,design_attachment_ids:[source]}}
+ writeDirectChatDraft(key,record,store,1000)
+ assert.deepEqual(readDirectChatDraft(key,store,1001).attempt.design_attachment_ids,[source])
+ for(const ids of [[source,source],[uuid(),uuid(),uuid(),uuid()],['not-a-uuid']])assert.throws(()=>writeDirectChatDraft(key,{...record,attempt:{...record.attempt,design_attachment_ids:ids}},store,1000))
+})
