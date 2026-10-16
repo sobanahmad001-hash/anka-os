@@ -1,3 +1,4 @@
+import { prepareDesignBrief, recoverAuditedDesignBrief } from '../_shared/designChatBriefIntegration.ts'
 import { workshopExecutionEnabled } from './workshopExecutionGate.ts'
 import { openAiTextOptions, preferredApprovedModel, OPENAI_PREMIUM_MODEL } from '../_shared/openaiModelPolicy.js'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.4'
@@ -1038,7 +1039,7 @@ async function updateConversation(
   return data
 }
 
-async function getConversation(admin: Client, body: Json, actorId: string, organizationId: string) {
+async function getConversation(admin: Client, body: Json, actorId: string, organizationId: string, sourceReader: Client) {
   const conversation = await requireConversationContext(admin, body, actorId, organizationId)
   await requireCurrentConversationSources(admin, conversation, organizationId)
   const { error: expiryError } = await admin.rpc('expire_department_chat_pending_turns', {
@@ -1099,6 +1100,14 @@ async function getConversation(admin: Client, body: Json, actorId: string, organ
       .eq('organization_id', organizationId).in('id', aiRunIds)
     if (result.error) throw result.error
     aiRuns = result.data || []
+  }
+  const designBriefReceipts: Json[] = []
+  if (conversation.department_id === 'design' && text(body.design_brief_request_id,80)) {
+    for (const run of aiRuns) {
+      if (run.status !== 'completed' || ((run.context_manifest as Json)?.design_brief_turn as Json)?.request_id !== text(body.design_brief_request_id,80)) continue
+      const receipt=await recoverAuditedDesignBrief(admin,sourceReader,run.context_manifest as Json,{organization_id:organizationId,actor_id:actorId,conversation_id:conversation.id})
+      if (receipt) designBriefReceipts.push(receipt)
+    }
   }
   const configurationIds = [...new Set(aiRuns.map(run =>
     text(run.department_chat_model_configuration_id, 80)).filter(Boolean))]
@@ -1182,6 +1191,7 @@ async function getConversation(admin: Client, body: Json, actorId: string, organ
   }
   return {
     conversation,
+    design_brief: designBriefReceipts,
     sharing: { can_manage: conversation.owner_id === actorId, recipients },
     messages: (messages || []).map(message => ({
       ...message,
@@ -1740,7 +1750,13 @@ export async function answerConversation(
     attachmentManifest: attachments.manifest,
   })
   const history = await conversationAnswerHistory(admin, conversationId, organizationId)
-  const systemPrompt = [
+  let briefTurn: Json | undefined
+  if (body.design_brief !== undefined) {
+    if (departmentId !== 'design' || !sourceReader) throw new Error('Design draft assistance requires the authorized Design Workshop')
+    briefTurn=await prepareDesignBrief(admin,sourceReader,{organization_id:organizationId,actor_id:actorId,conversation_id:conversationId,message_id:messageId,request_id:text(body.client_request_id,80)},body.design_brief,
+      {visibility:'official',engagement_id:engagement.id},{kind:'project_design_chat',...contextFreeze.manifest,source_message_id:messageId})
+  }
+  const systemPrompt = briefTurn ? briefTurn.instruction+'\nENGAGEMENT CONTEXT JSON:\n'+boundedDepartmentChatContext(contextFreeze.frozen)+'\nCURRENT UNAPPROVED DESIGN DRAFT JSON:\n'+briefTurn.snapshot : [
     'You are the ordinary conversational assistant inside Anka OS Shared Department Chat.',
     'Answer the user with helpful internal working text for the ' + departmentId + ' department.',
     'Conversational text is not an official output, approval, task completion, proposal, artifact, work item, release, publication, deployment, connector action, purchase, or authorization.',
@@ -1769,6 +1785,7 @@ export async function answerConversation(
     route: provider as WorkshopAnswerRoute,
     prompt: frozenPrompt,
     contextManifest: contextFreeze.manifest,
+    designBrief:briefTurn, sourceReader,
     startedAt,
   }, fetcher, dependencies.workshopEnv, waitUntil)
 }
@@ -2138,7 +2155,7 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
       return response({ data: await createConversation(admin, body, user.id, organizationId, dependencies.proposal || {}) })
     }
     if (action === 'get_conversation') {
-      return response({ data: await getConversation(admin, body, user.id, organizationId) })
+      return response({ data: await getConversation(admin, body, user.id, organizationId, userClient) })
     }
     if (action === 'list_conversation_share_candidates') {
       return response({ data: await listConversationShareCandidates(
