@@ -113,3 +113,7 @@
  .design-unified-workspace:not(.output-open)>.design-unified-chat{max-width:1100px}
  .design-unified-workspace:not(.output-open) .direct-chat-message-stream{max-width:none}
 }
+/* Allocate setup forms only the remaining chat height, so their final actions stay scrollable. */
+.design-unified-workspace .design-mode-content{display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden}
+.design-unified-workspace .design-mode-content>.design-unified-media{flex:1;min-height:0;max-height:none;overflow:auto}
+.design-unified-workspace .direct-chat-main:has(>.design-mode-content:not([hidden]))>.direct-chat-messages,.design-unified-workspace .department-chat-main:has(>.design-mode-content:not([hidden]))>.department-chat-messages{display:none}
