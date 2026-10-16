@@ -68,6 +68,7 @@ export function ScopedDepartmentChat({
   const firstSendAttempt = useRef(null)
   const completion = useRef(null)
   const requestedConversation = useRef(initialConversation).current
+  const briefSend = useRef(null)
   const answerObservation = useRef(null)
   const attachmentCompletion = useRef(null)
   const draftSwitchGeneration = useRef(0)
@@ -455,6 +456,20 @@ export function ScopedDepartmentChat({
     }
   }
 
+  function briefRecoveryRequest(id) { const pending = briefSend.current?.conversationId === id ? briefSend.current.requestId : firstSendAttempt.current?.conversationId === id ? firstSendAttempt.current.requestId : null; return pending ? {design_brief_request_id: pending} : {} }
+  async function applyMatchingBriefReceipt(data, id, isCurrent) {
+    const sentBrief = briefSend.current
+    const recoverBrief = firstSendAttempt.current
+    const expectedBriefRequest = sentBrief?.conversationId === id ? sentBrief.requestId : recoverBrief?.conversationId === id ? recoverBrief.requestId : null
+    const briefReceipt = expectedBriefRequest && (Array.isArray(data.design_brief) ? data.design_brief : []).find(receipt => receipt.conversation_id === id && receipt.client_request_id === expectedBriefRequest && receipt.actor_id === userId && receipt.organization_id === organizationId)
+    if (briefReceipt) {
+      await designWorkspace?.applyBriefReceipt?.(sentBrief?.conversationId === id && sentBrief.requestId === expectedBriefRequest ? sentBrief.snapshot : null, briefReceipt)
+      if (!isCurrent()) return false
+      if (briefReceipt.status === 'pending') throw new Error('Brief update is pending. Recover the original send; no provider request is repeated.')
+    }
+    return isCurrent()
+  }
+
   async function loadConversation(id = conversationId, isCurrent = () => true, restoreDraft = false, answeredRequestId = '') {
     if (!id || !projectId) {
       setMessages([])
@@ -467,12 +482,13 @@ export function ScopedDepartmentChat({
       return
     }
     const data = await departmentChat.getConversation(departmentId, {
-      conversation_id: id,
+      ...briefRecoveryRequest(id), conversation_id: id,
       engagement_id: engagement.id,
       project_id: projectId,
     }, requestScope)
     if (!isCurrent()) return null
     setMessages(data.messages || [])
+    if (!await applyMatchingBriefReceipt(data, id, isCurrent)) return null
     if (compactWorkbench && answeredRequestId) {
       const sent = (data.messages || []).find(message => message.role === 'user' && message.client_request_id === answeredRequestId)
       if (sent && (data.messages || []).some(message => message.role === 'assistant' && message.status === 'completed' && message.sequence === sent.sequence + 1)) setAnswerState({ status: 'idle', text: '', durable: false })
@@ -502,7 +518,8 @@ export function ScopedDepartmentChat({
       setPendingFirstSend(null)
       setDraftConversation(false)
       setPrompt('')
-      setObservationNotice('The first Send is saved. Reload its durable status before repeating that request.')
+      const settledBrief = (data.design_brief || []).find(receipt => receipt.client_request_id === savedAttempt.requestId && ['saved','question_only','conflict','invalid'].includes(receipt.status))
+      setObservationNotice(settledBrief ? 'Saved reply and brief status loaded.' : 'The first Send is saved. Reload its durable status before repeating that request.')
       onConversationListChange?.()
     }
     if (restoreDraft && isCurrent()) await restoreUnsentDraft(id, isCurrent)
@@ -541,13 +558,15 @@ export function ScopedDepartmentChat({
       setConversationTitle(selected?.title || '')
       if (selected) {
         const data = await departmentChat.getConversation(departmentId, {
-          conversation_id: selected.id,
+          ...briefRecoveryRequest(selected.id), conversation_id: selected.id,
           engagement_id: engagement.id,
           project_id: projectId,
         }, requestScope)
         if (!isCurrent()) return
         if (requestedConversation && data.conversation?.id !== selected.id) throw new Error('Selected conversation is unavailable')
         setMessages(data.messages || [])
+        if (!await applyMatchingBriefReceipt(data, selected.id, isCurrent)) return
+
         const attachmentRows = await departmentChat.listAttachments(departmentId, {
           conversation_id: selected.id, engagement_id: engagement.id, project_id: projectId,
         }, requestScope)
@@ -689,12 +708,14 @@ export function ScopedDepartmentChat({
     setPendingFiles([])
     try {
       const data = await departmentChat.getConversation(departmentId, {
-        conversation_id: id,
+        ...briefRecoveryRequest(id), conversation_id: id,
         engagement_id: engagement.id,
         project_id: projectId,
       }, requestScope)
       if (!isCurrent()) return
       setMessages(data.messages || [])
+      if (!await applyMatchingBriefReceipt(data, id, isCurrent)) return
+
       await loadAttachments(id, isCurrent)
       if (!isCurrent()) return
       setConversationTitle(data.conversation?.title || '')
@@ -902,7 +923,7 @@ export function ScopedDepartmentChat({
 
   async function submitRequest(event) {
     event.preventDefault()
-    if (busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim() || (draftConversation && (pendingFirstSend || proposalMode !== 'answer'))) return
+    if (busy || historyBusy || attachmentBusy || sourceBusy || draftSaving || !prompt.trim() || (designWorkspace && pendingFirstSend) || (draftConversation && (pendingFirstSend || proposalMode !== 'answer'))) return
     if (prompt.length > 8000) { setError('Keep the message within 8,000 characters. No request was sent.'); return }
     if (proposalMode === 'artifact' && !artifactTypes.includes(artifactType)) { setError('This artifact tool is unavailable in this chat.'); return }
     if (!allowArtifactDraft && proposalMode === 'artifact') { setError('Open the specialist Studio to draft an artifact.'); return }
@@ -910,6 +931,9 @@ export function ScopedDepartmentChat({
       setError('Artifact and work-item previews currently require an approved OpenAI model. Choose one or switch to a conversational answer.')
       return
     }
+    let briefSnapshot = null
+    try { briefSnapshot = isAnswerMode && designWorkspace?.captureBriefForSend ? designWorkspace.captureBriefForSend() : null }
+    catch (reason) { setError(reason.message || 'Brief context is unavailable.'); return }
     if (isAnswerMode) {
       if (!answerLocalChecksPass || !selectedModel || (draftConversation ? Boolean(pendingFirstSend) : !currentConversation || currentConversation.state !== 'active')) return
       if (!await consent.confirm() || requestSignal?.aborted) return
@@ -918,11 +942,13 @@ export function ScopedDepartmentChat({
     if (!isCurrent()) return
     const targetConversationId = conversationId
     const clientRequestId = supportsSavedConversations ? crypto.randomUUID() : undefined
-    if (draftConversation) {
+    if (draftConversation || briefSnapshot) {
       try { firstSendAttempt.current = saveEngagementFirstSend(firstSendKey, { conversationId: targetConversationId, requestId: clientRequestId }); setPendingFirstSend(firstSendAttempt.current) }
       catch (reason) { setError(reason.message); return }
     }
+    briefSend.current = briefSnapshot ? { snapshot: briefSnapshot, conversationId: targetConversationId, requestId: clientRequestId } : null
     const common = {
+      ...(briefSnapshot ? { design_brief: briefSnapshot.binding } : {}),
       ...(draftConversation ? { start_new: true } : {}),
       conversation_id: supportsSavedConversations ? targetConversationId : undefined,
       client_request_id: clientRequestId,
@@ -1320,6 +1346,7 @@ export function ScopedDepartmentChat({
           <input required type="checkbox" className="mt-1" checked={safe} onChange={event => setSafe(event.target.checked)} />
           <span>I confirm this message, the previewed exact artifact versions, and the validated text from explicitly selected files are safe to send to the engagement-mapped {resolvedDepartmentLabel} model. Restricted sources are never included.</span>
         </label>}
+        {designWorkspace && <p>Sending includes the editable brief for an unapproved draft update. Only separately selected source contents are included; generation remains separate.</p>}
         {consent.dialog && <TextAiConsent {...consent.dialog} provider={MODEL_PROVIDER_LABELS[selectedProvider] || selectedProvider} model={selectedModel?.model_id} engagementHistory scope={`${resolvedDepartmentLabel} · ${engagement.name} · this conversation`} sources={selectedSourceVersionIds.length > 0} selectedAttachmentIds={selectedAttachmentIds} />}
 
         </div>

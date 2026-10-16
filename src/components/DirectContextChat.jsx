@@ -71,6 +71,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   const alive = useRef(true)
   const lock = useRef(false)
   const revision = useRef(0)
+  const briefSend = useRef(null)
   const pendingRef = useRef(initial.recovery)
   const attempt = useRef(restoredDraft?.attempt && restoredDraft.attempt.client_request_id === initial.recovery?.client_request_id && restoredDraft.attempt.conversation_id === initial.recovery?.conversation_id ? restoredDraft.attempt : null)
   const drafts = useRef(new Map())
@@ -248,6 +249,8 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
         const recovered = await contextChatRunner.recover(human.id, requestScope)
         if (!active || signal.aborted) return
         if (recovered.status !== 'completed') throw new Error('Reply outcome is uncertain. Check recovery again; no new AI request was sent.')
+        await designWorkspace?.applyBriefReceipt?.(null, recovered.design_brief)
+        if(recovered.design_brief?.status === 'pending') throw new Error('Brief update is pending. Check recovery; no second reply will be requested.')
         const latest = await read(target)
         if (!active || signal.aborted) return
         apply(latest)
@@ -331,6 +334,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
           if (ids(latestSharing) !== ids(sharing)) throw new Error('Sharing has changed. Review Share, then send again to confirm the new scope.')
         }
       }
+      const briefSnapshot = ai && designWorkspace?.captureBriefForSend ? designWorkspace.captureBriefForSend() : null
       if (ai && !await consent.confirm()) return
       if (!current() || token !== revision.current) return
       const metadata = { conversation_id: target, client_request_id: crypto.randomUUID(), ...(ai ? { dispatch_request_id: crypto.randomUUID() } : {}) }
@@ -345,6 +349,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
         apply({ conversation: result.conversation, messages: [result.message] }); saved = result.message
       } else saved = await departmentChat.appendContextHumanMessage({ conversation_id: target, client_request_id: metadata.client_request_id, message: text }, requestScope)
       if (!current() || token !== revision.current) return
+      briefSend.current = briefSnapshot ? { snapshot: briefSnapshot, conversationId: target, messageId: saved.id } : null
       remember({ ...metadata, message_id: saved.id })
       setMessages(previous => previous.some(row => row.id === saved.id) ? previous : [...previous, saved])
       onConversationListChange?.()
@@ -352,9 +357,11 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
         const include = canonical && canCanonical
         setCanonical(false)
         const result = await contextChatRunner.run({ message_id: saved.id, model_configuration_id: modelId,
-          dispatch_request_id: metadata.dispatch_request_id, include_canonical_context: include }, requestScope)
+          dispatch_request_id: metadata.dispatch_request_id, include_canonical_context: include, ...(briefSnapshot ? { design_brief: briefSnapshot.binding } : {}) }, requestScope)
         if (!current() || token !== revision.current) return
         if (result.status !== 'completed') throw new Error('Reply outcome is uncertain. Check recovery; a second AI request will not be sent.')
+        await designWorkspace?.applyBriefReceipt?.(briefSnapshot, result.design_brief)
+        if(result.design_brief?.status === 'pending') throw new Error('Brief update is pending. Check recovery; no second reply will be requested.')
       }
       const latest = await read(target)
       if (!current() || token !== revision.current) return
@@ -389,6 +396,9 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
         const result = await contextChatRunner.recover(human.id, requestScope)
         if (!current() || token !== revision.current) return
         if (result.status !== 'completed') throw new Error('Reply not settled. No second AI request was sent. Check again later.')
+        const sentBrief = briefSend.current
+        await designWorkspace?.applyBriefReceipt?.(sentBrief?.messageId === human.id && sentBrief?.conversationId === record.conversation_id ? sentBrief.snapshot : null, result.design_brief)
+        if(result.design_brief?.status === 'pending') throw new Error('Brief update is pending. Check recovery; no second reply will be requested.')
         latest = await read(record.conversation_id)
         if (!current() || token !== revision.current) return
         apply(latest)
@@ -421,6 +431,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     {notice && !pending && <p role="status" className="direct-chat-notice">{notice}</p>}
     {pending && <div className="direct-chat-notice direct-chat-recovery"><p>Check this send before sending again. Recovery never requests another AI reply.</p><button type="button" disabled={busy || videoBusy} onClick={recover}>Check recovery</button></div>}
     {detailsOpen && <aside className="direct-chat-details" aria-label="Chat details">
+      {designWorkspace && <p>Sending includes the current editable brief for an unapproved draft update. Referenced files are not automatically sent. Media generation remains separate.</p>}
       <p>Attachments are unavailable in this chat. Drafts stay only in this browser tab for up to one hour, including refresh; successful Send clears the draft. Closing this tab ends local draft recovery.</p>
       <p>AI replies are organization-billed. The service rechecks model approval, exact pricing, spend tracking and access before dispatch.</p>
       <p>{readinessState === 'failed' ? 'AI availability could not be checked. You can still save a human message.' : !readiness ? 'Checking AI availability…' : ready ? 'AI configuration ready.' : `AI unavailable (${readiness.model_status || 'configuration unavailable'}). You can save a human message.`}</p>

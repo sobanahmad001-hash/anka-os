@@ -172,3 +172,50 @@ Deno.test('context handler uses supplemental pricing before reservation and repl
   assertEquals(reservations,1); assertEquals(providers,0)
  } finally { await new Promise(resolve => setTimeout(resolve, 20)); globalThis.fetch=originalFetch; Deno.env.get=originalGet; GoTrueClient.prototype.startAutoRefresh=originalRefresh }
 })
+
+Deno.test('private Design saves a validated draft and recovers without another provider call',async()=>{
+ const id='11111111-1111-4111-8111-111111111111'
+ const oldFetch=globalThis.fetch,oldGet=Deno.env.get,oldRefresh=GoTrueClient.prototype.startAutoRefresh
+ GoTrueClient.prototype.startAutoRefresh=async()=>{}
+ const rate={provider:'openai',model_id:'verified',verified_at:new Date().toISOString(),source_url:'https://developers.openai.com/api/docs/pricing',input_usd_per_million:1,cached_input_usd_per_million:1,cache_write_usd_per_million:null,output_usd_per_million:1}
+ const config:Record<string,string>={SUPABASE_URL:'http://127.0.0.1:54321',SUPABASE_ANON_KEY:'offline-public',SUPABASE_SERVICE_ROLE_KEY:'offline-service',CONTEXT_CHAT_PAID_EXECUTION_ENABLED:'true',ANKA_OPENAI_TEST:'offline-key',N6_OPENAI_MODEL_PRICING_JSON:JSON.stringify([rate])}
+ const binding={creative_brief_id:null,expected_revision:0,visibility:'private',engagement_id:null,brand_id:null,engagement_service_id:null,content:{title:'Poster',output_type:'image',media_references:[]},source_version_ids:[]}
+ const identity={organization_id:id,actor_id:id,conversation_id:id,message_id:id,request_id:id}
+ const message={id,conversation_id:id,organization_id:id,owner_id:id,author_id:id,role:'user',status:'completed',sequence:1,body:'The objective is to introduce our service.'}
+ let receipt:any=null,run:any=null,settled=false,providers=0,versions=0
+ try{
+  Deno.env.get=name=>config[name]
+  globalThis.fetch=async(input,init)=>{
+   const url=new URL(input instanceof Request?input.url:String(input));if(url.origin!=='http://127.0.0.1:54321')throw Error('Remote forbidden')
+   const path=url.pathname;const args=init?.body?JSON.parse(String(init.body)):{};let data:any
+   if(path==='/auth/v1/user')data={id}
+   else if(path.endsWith('/organization_memberships'))data={status:'active',member_kind:'team',role:'system_owner'}
+   else if(path.endsWith('/department_chat_messages'))data=url.searchParams.has('limit')?[message]:message
+   else if(path.endsWith('/department_chat_conversations'))data={id,organization_id:id,owner_id:id,context_kind:'department_private',project_id:null,department_id:'design',state:'active'}
+   else if(path.endsWith('/context_chat_organization_models'))data={id,organization_id:id,connector_connection_id:id,model_id:'verified',revoked_at:null}
+   else if(path.endsWith('/integration_connections'))data={id,organization_id:id,provider:'openai',status:'verified',archived_at:null,secret_name:'ANKA_OPENAI_TEST'}
+   else if(path.endsWith('/append_context_chat_audited_reply')){
+    if(!settled)return new Response(JSON.stringify({message:'No audit'}),{status:400,headers:{'content-type':'application/json'}})
+    data={id,body:run.output_text}
+   }else if(path.endsWith('/recover_context_chat_completed_run'))data={status:'no_run'}
+   else if(path.endsWith('/begin_design_chat_brief_turn')){receipt={...identity,binding:args.p_binding,status:'pending'};data=receipt}
+   else if(path.endsWith('/recover_design_chat_brief_turn'))data=receipt
+   else if(path.endsWith('/finalize_design_chat_brief_turn')){
+    assertEquals(settled,true)
+    if(receipt.status==='pending'){versions++;receipt={...receipt,status:'saved',result:{brief:{id},version:{id,content:args.p_result.content}}}}
+    data=receipt
+   }else if(path.endsWith('/reserve_context_chat_budget'))data={status:'reserved'}
+   else if(path.endsWith('/claim_context_chat_dispatch'))data={status:'claimed',claim_id:id,model_configuration_id:id}
+   else if(path.endsWith('/ai_runs')){if(init?.method==='POST'){run=args;data={id}}else data={context_manifest:run.context_manifest}}
+   else if(path.endsWith('/reconcile_context_chat_budget')){assertEquals(args.p_outcome,'settled');settled=true;data={status:'settled'}}
+   else throw Error('Unexpected '+path)
+   return new Response(JSON.stringify(data),{headers:{'content-type':'application/json'}})
+  }
+  const fetcher=(async()=>{providers++;return new Response(JSON.stringify({id:'response',status:'completed',model:'verified',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({assistant_text:'I updated the objective.',questions:['Who is the audience?'],patch:{objective:'Introduce our service'}})}]}],usage:{input_tokens:7,output_tokens:3}}))}) as typeof fetch
+  const request=(body:any)=>new Request('https://example.test',{method:'POST',headers:{Authorization:'Bearer offline'},body:JSON.stringify({organization_id:id,message_id:id,...body})})
+  const first=await (await handleRequest(request({model_configuration_id:id,dispatch_request_id:id,design_brief:binding}),fetcher,{get:name=>config[name]})).json()
+  assertEquals(first.status,'completed',JSON.stringify(first));assertEquals(first.design_brief.status,'saved');assertEquals(run.output_text,'I updated the objective.\n\nWho is the audience?')
+  const recovered=await (await handleRequest(request({recover_only:true}),fetcher,{get:name=>config[name]})).json()
+  assertEquals(recovered.design_brief.status,'saved');assertEquals(providers,1);assertEquals(versions,1)
+ }finally{await new Promise(r=>setTimeout(r,20));globalThis.fetch=oldFetch;Deno.env.get=oldGet;GoTrueClient.prototype.startAutoRefresh=oldRefresh}
+})
