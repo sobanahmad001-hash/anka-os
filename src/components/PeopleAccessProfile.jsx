@@ -4,19 +4,19 @@ const words = value => value ? String(value).replaceAll('_', ' ') : 'Not recorde
 const styles = `.people-access-profile{box-sizing:border-box;width:100%;max-width:1000px;margin:auto;padding:20px;color:var(--anka-ink);background:var(--anka-canvas);font:15px/1.5 system-ui}.people-access-profile *{box-sizing:border-box;min-width:0;overflow-wrap:anywhere}.people-access-profile h2{font-size:22px;margin:0}.people-access-profile h3{font-size:17px;margin:0 0 10px}.people-access-profile p{margin:8px 0}.people-access-profile .pap-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:14px}.people-access-profile section{padding:16px;border:1px solid var(--anka-line);border-radius:12px;background:var(--anka-surface);margin-top:14px}.people-access-profile label{display:block;margin:16px 0}.people-access-profile select,.people-access-profile button{font:inherit;padding:9px;border:1px solid var(--anka-line);border-radius:6px;background:var(--anka-surface);max-width:100%;color:inherit}.people-access-profile select{display:block;width:100%;margin-top:5px}.people-access-profile button{cursor:pointer}.people-access-profile :focus-visible{outline:3px solid var(--anka-focus);outline-offset:3px}.people-access-profile dl{margin:0}.people-access-profile dt{font-weight:600}.people-access-profile dd{margin:0 0 10px}.people-access-profile ul{padding-left:20px}.people-access-profile small{display:block;color:var(--anka-muted)}.people-access-profile [role=alert]{border-left:4px solid var(--anka-danger);padding:10px}.people-access-profile .pap-note{background:var(--anka-violet-soft);padding:12px;border-radius:8px}.people-access-profile .pap-access{list-style:none;padding:0}.people-access-profile .pap-access li{border-top:1px solid var(--anka-line);padding:10px 0}.people-access-profile header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}@media(max-width:480px){.people-access-profile{padding:12px}.people-access-profile section{padding:12px}}`
 
 // No global auth/client imports. Host supplies a stable, approved read adapter.
-export default function PeopleAccessProfile({ organizationId, organizationName, repository, requestSignal }) {
+export default function PeopleAccessProfile({ organizationId, organizationName, repository, requestSignal, initialUserId = '' }) {
   const [revision, setRevision] = useState(0)
   // A keyed subtree synchronously discards previous-org data before any effects.
-  return <PeopleProfileScope key={organizationId} {...{ organizationId, organizationName, repository, requestSignal, revision }} onReload={() => setRevision(n => n + 1)} />
+  return <PeopleProfileScope key={organizationId} {...{ organizationId, organizationName, repository, requestSignal, revision, initialUserId }} onReload={() => setRevision(n => n + 1)} />
 }
 
-function PeopleProfileScope({ organizationId, organizationName, repository, requestSignal, revision, onReload }) {
+function PeopleProfileScope({ organizationId, organizationName, repository, requestSignal, revision, initialUserId, onReload }) {
   const subscribe = useCallback(listener => {
     requestSignal?.addEventListener('abort', listener)
     return () => requestSignal?.removeEventListener('abort', listener)
   }, [requestSignal])
   const aborted = useSyncExternalStore(subscribe, () => Boolean(requestSignal?.aborted), () => Boolean(requestSignal?.aborted))
-  const [members, setMembers] = useState([]), [userId, setUserId] = useState('')
+  const [members, setMembers] = useState([]), [userId, setUserId] = useState(initialUserId)
   const [data, setData] = useState(null), [loading, setLoading] = useState(true), [error, setError] = useState('')
   const [history, setHistory] = useState(null), [historyBusy, setHistoryBusy] = useState(false), [historyError, setHistoryError] = useState('')
   const historyController = useRef(null), target = useRef(userId)

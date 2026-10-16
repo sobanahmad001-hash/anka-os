@@ -1,5 +1,5 @@
-﻿import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 
 const inputStyle = {
@@ -140,6 +140,7 @@ export default function Login() {
               {loading ? 'Please wait...' : 'Sign In'}
             </button>
           </form>
+          <p style={{ marginTop: 20 }}><Link to="/auth/recover" style={{ color: '#a5b4fc' }}>Forgot password or need a fresh invitation link?</Link></p>
 
 
         </div>

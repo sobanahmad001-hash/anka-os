@@ -4,7 +4,6 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { clientWorkspace } from '../data/clientWorkspace'
 import ClientPeopleAccess from './ClientPeopleAccess.jsx'
 
-const INVITATION_ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
 const TABS = [['overview', 'Overview'], ['projects', 'Projects'], ['people', 'People & Access'], ['due', 'Dated Work'], ['requests', 'Requests'], ['delivery', 'Deliverables & Releases']]
 const label = (value) => value ? value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) : 'Unknown'
 const date = (value) => value ? new Date(`${value.slice(0, 10)}T00:00:00Z`).toLocaleDateString() : 'No date'
@@ -13,7 +12,7 @@ export default function ClientWorkspace() {
   const { clientId } = useParams()
   const navigate = useNavigate()
 
-  const { activeOrganizationId, activeMembership, selectionRequired, loading: organizationLoading, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
+  const { activeOrganizationId, selectionRequired, loading: organizationLoading, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
   const currentRequest = useRef(null)
   currentRequest.current = { organizationId: activeOrganizationId, revision: scopeRevision, recordId: clientId }
   const requestGeneration = useRef(0)
@@ -63,7 +62,7 @@ export default function ClientWorkspace() {
     {error && <div role="alert" className="mt-5 rounded-xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] p-4 text-sm text-[var(--anka-danger)]">{error}</div>}
     <section aria-label="Client workspace summary" className="mt-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-7"><Metric title="Active projects" value={summary.activeProjects} /><Metric title="One-time" value={summary.oneTimeProjects} /><Metric title="Retainers" value={summary.retainers} /><Metric title="Project Tasks" value={summary.openProjectTasks} /><Metric title="Engagement Work Items" value={summary.openEngagementWorkItems} /><Metric title="Open requests" value={summary.openRequests} /><Metric title="Releases" value={summary.releases} /></section>
     <nav aria-label="Client workspace sections" className="mt-7 flex gap-1 overflow-x-auto border-b border-[var(--anka-line)]">{TABS.map(([id, title]) => <button type="button" key={id} onClick={() => setTab(id)} className={`whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium ${tab === id ? 'border-[var(--anka-violet)] text-[var(--anka-ink)]' : 'border-transparent text-[var(--anka-muted)] hover:text-[var(--anka-ink)]'}`}>{title}</button>)}</nav>
-    <div className="mt-6">{tab === 'overview' && <Overview workspace={workspace} navigate={navigate} />}{tab === 'projects' && <Projects rows={workspace.projects} navigate={navigate} />}{tab === 'people' && <ClientPeopleAccess key={clientId + ':' + activeOrganizationId} rows={workspace.people} projects={workspace.projects} clientId={clientId} organizationId={activeOrganizationId} canInvite={activeOrganizationId === INVITATION_ORGANIZATION_ID && ['system_owner', 'operations_admin', 'executive', 'project_owner'].includes(activeMembership?.role)} onInvited={load} />}{tab === 'due' && <DueWork rows={workspace.dueWork} />}{tab === 'requests' && <Requests projects={workspace.projects} />}{tab === 'delivery' && <Delivery workspace={workspace} />}</div>
+    <div className="mt-6">{tab === 'overview' && <Overview workspace={workspace} navigate={navigate} />}{tab === 'projects' && <Projects rows={workspace.projects} navigate={navigate} />}{tab === 'people' && <><Link className="workspace-button" to={'/users?view=clients&client='+encodeURIComponent(clientId)}>Manage in People & access</Link><ClientPeopleAccess key={clientId + ':' + activeOrganizationId} rows={workspace.people} projects={workspace.projects} clientId={clientId} organizationId={activeOrganizationId} canInvite={false} onInvited={load} /></>}{tab === 'due' && <DueWork rows={workspace.dueWork} />}{tab === 'requests' && <Requests projects={workspace.projects} />}{tab === 'delivery' && <Delivery workspace={workspace} />}</div>
   </div></main>
 }
 

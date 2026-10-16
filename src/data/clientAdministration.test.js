@@ -25,10 +25,11 @@ test('client invitation is server-authorized and project-scoped', () => {
   assert.match(inviteFunction, /\.eq\('organization_id', ORGANIZATION_ID\)\.eq\('client_id', clientId\)\.in\('id', projectIds\)/)
   assert.match(inviteFunction, /from\('clients'\)/)
   assert.match(inviteFunction, /organizationId !== ORGANIZATION_ID/)
-  assert.match(inviteFunction, /new URL\('\/auth\/callback', appUrl\)/)
+  assert.match(inviteFunction, /invitationRedirect\(environment\('ANKA_APP_URL'\), url\)/)
   assert.doesNotMatch(inviteFunction, /request\.headers\.get\('origin'\)/)
-  assert.match(inviteFunction, /from\('client_contacts'\)\.insert/)
-  assert.match(inviteFunction, /from\('project_client_access'\)\.insert/)
+  assert.match(inviteFunction, /userClient\.rpc\('complete_client_invitation'/)
+  assert.match(inviteFunction, /p_project_ids: projectIds, p_request_id: requestId/)
+  assert.doesNotMatch(inviteFunction, /auth\.admin\.deleteUser|from\('(client_contacts|project_client_access)'\)\.insert/)
 })
 
 test('client identities never receive a team organization membership', () => {

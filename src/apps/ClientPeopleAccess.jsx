@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { delivery } from '../data/delivery.js'
 
 const ROLES = [['viewer', 'Viewer'], ['collaborator', 'Collaborator'], ['approver', 'Approver'], ['admin', 'Admin']]
@@ -6,6 +6,9 @@ const ACTIVE = new Set(['completed', 'cancelled', 'archived'])
 const label = (value) => value ? value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) : 'Unknown'
 
 export default function ClientPeopleAccess({ rows, projects, clientId, organizationId, canInvite, onInvited }) {
+  const running = useRef(false)
+  const request = useRef(null)
+  const [uncertain, setUncertain] = useState(false)
   const [open, setOpen] = useState(false)
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
@@ -18,12 +21,15 @@ export default function ClientPeopleAccess({ rows, projects, clientId, organizat
   const toggleProject = (id) => setProjectIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
   const submit = async (event) => {
     event.preventDefault()
-    if (busy || !canInvite || !eligibleProjects.some((project) => projectIds.includes(project.id))) return
+    if (running.current || uncertain || busy || !canInvite || !eligibleProjects.some((project) => projectIds.includes(project.id))) return
+    running.current = true
+    request.current ||= crypto.randomUUID()
     setBusy(true)
     setError('')
     setSuccess('')
     try {
-      const result = await delivery.inviteClientContact({ organizationId, clientId, fullName: fullName.trim(), email: email.trim(), portalRole, projectIds })
+      const result = await delivery.inviteClientContact({ requestId: request.current, organizationId, clientId, fullName: fullName.trim(), email: email.trim(), portalRole, projectIds })
+      request.current = null
       setSuccess(result.message || 'Portal invitation sent.')
       setOpen(false)
       setFullName('')
@@ -31,8 +37,10 @@ export default function ClientPeopleAccess({ rows, projects, clientId, organizat
       setProjectIds([])
       await onInvited()
     } catch (cause) {
+      setUncertain(true)
       setError(cause.message || 'Unable to send the invitation.')
     } finally {
+      running.current = false
       setBusy(false)
     }
   }
@@ -43,9 +51,9 @@ export default function ClientPeopleAccess({ rows, projects, clientId, organizat
         <div className="grid gap-4 sm:grid-cols-2"><label className="block text-sm">Full name<input required maxLength={160} value={fullName} onChange={(event) => setFullName(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-2 text-[var(--anka-ink)]" /></label><label className="block text-sm">Email<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-2 text-[var(--anka-ink)]" /></label></div>
         <label className="block text-sm">Portal role<select value={portalRole} onChange={(event) => setPortalRole(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-2 text-[var(--anka-ink)]">{ROLES.map(([value, title]) => <option key={value} value={value}>{title}</option>)}</select></label>
         <fieldset><legend className="text-sm">Project access (choose at least one)</legend><div className="mt-2 space-y-2">{eligibleProjects.map((project) => <label key={project.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={projectIds.includes(project.id)} onChange={() => toggleProject(project.id)} />{project.name}</label>)}</div></fieldset>
-        <div className="flex gap-2"><button type="submit" disabled={busy || !projectIds.length} className="rounded-xl bg-[var(--anka-violet)] px-4 py-2 text-sm font-medium text-[var(--anka-on-violet)] disabled:opacity-50">{busy ? 'Sending…' : 'Send portal invitation'}</button><button type="button" disabled={busy} onClick={() => { setOpen(false); setError('') }} className="rounded-xl border border-[var(--anka-line)] px-4 py-2 text-sm">Cancel</button></div>
+        <div className="flex gap-2"><button type="submit" disabled={busy || uncertain || !projectIds.length} className="rounded-xl bg-[var(--anka-violet)] px-4 py-2 text-sm font-medium text-[var(--anka-on-violet)] disabled:opacity-50">{busy ? 'Sending…' : 'Send portal invitation'}</button><button type="button" disabled={busy} onClick={() => { setOpen(false); setError('') }} className="rounded-xl border border-[var(--anka-line)] px-4 py-2 text-sm">Cancel</button></div>
       </form>}
-      {error && <p role="alert" className="mt-3 text-sm text-[var(--anka-danger)]">{error}</p>}{success && <p role="status" className="mt-3 text-sm text-[var(--anka-success)]">{success}</p>}
+      {uncertain && <p role="status">Outcome requires administrator review before another invitation. No automatic retry was made.</p>}{error && <p role="alert" className="mt-3 text-sm text-[var(--anka-danger)]">{error}</p>}{success && <p role="status" className="mt-3 text-sm text-[var(--anka-success)]">{success}</p>}
     </section>}
   </div>
 }

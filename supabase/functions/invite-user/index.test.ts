@@ -55,3 +55,12 @@ Deno.test('N1-D uncertain completion and invite failures never claim successful 
  const rejected=await failed(request({email:'new@example.invalid',department:'design'}))
  assert(rejected.status===400 && rpcCalls===0 && !(await rejected.text()).includes('private provider detail'))
 })
+
+Deno.test('team invite ignores attacker, localhost and absent request origins', async () => {
+ for (const origin of ['', 'http://localhost:3000', 'https://evil.test']) {
+  let destination = ''
+  const handler = createTeamHandler(async () => base({invite: async (_email, _department, redirect) => {destination = redirect || ''; return {userId:target,error:null}}}), () => 'https://anka-os.vercel.app/auth/callback')
+  const response = await handler(new Request('https://service.test', {method:'POST', headers: origin ? {origin} : {}, body:JSON.stringify({email:'synthetic@example.invalid',department:'design',redirectTo:'https://evil.test'})}))
+  assert(response.status === 200 && destination === 'https://anka-os.vercel.app/auth/callback')
+ }
+})

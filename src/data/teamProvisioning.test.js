@@ -4,6 +4,8 @@ import test from 'node:test'
 
 const inviteFunction = readFileSync(new URL('../../supabase/functions/invite-user/index.ts', import.meta.url), 'utf8')
 const profileMigration = readFileSync(new URL('../../supabase/migrations/20260825060000_team_profile_alignment.sql', import.meta.url), 'utf8')
+const controls = readFileSync(new URL('../components/OrganizationDeactivation.jsx', import.meta.url), 'utf8')
+const management = readFileSync(new URL('./peopleManagement.js', import.meta.url), 'utf8')
 const adminScreen = readFileSync(new URL('../apps/UserManagement.jsx', import.meta.url), 'utf8')
 
 test('team invitations are authorized by canonical organization membership', () => {
@@ -28,18 +30,19 @@ test('self-signup metadata cannot create organization membership', () => {
 
 test('team admin supports all canonical departments and roles', () => {
   for (const department of ['content', 'design', 'development', 'marketing']) {
-    assert.match(adminScreen, new RegExp(`id: '${department}'`))
+    assert.match(management, new RegExp(`'${department}'`))
     assert.match(profileMigration, new RegExp(`'${department}'`))
   }
   for (const role of ['operations_admin', 'executive', 'department_manager', 'project_owner', 'contributor']) {
-    assert.match(adminScreen, new RegExp(`id: '${role}'`))
+    assert.match(management, new RegExp(`'${role}'`))
     assert.match(inviteFunction, new RegExp(`'${role}'`))
   }
 })
 
 test('organization deactivation stays server-side and preserves profiles and work', () => {
-  assert.match(adminScreen, /action: 'deactivate'/)
-  assert.match(adminScreen, /Deactivate Anka access/)
+  assert.match(adminScreen, /AuthorityCompatibilityAdmin/)
+  assert.match(controls, /deactivate_organization_member/)
+  assert.match(controls, /auth_account_preserved !== true/)
   assert.match(inviteFunction, /deactivate_organization_member/)
-  assert.doesNotMatch(adminScreen, /from\('profiles'\)\.delete/)
+  assert.doesNotMatch(adminScreen + management + controls, /from\('profiles'\)\.(delete|update|upsert)/)
 })
