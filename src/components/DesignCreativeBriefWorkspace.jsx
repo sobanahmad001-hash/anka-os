@@ -20,7 +20,7 @@ function hasEdits(draft) {
 
 const DesignCreativeBriefWorkspace = forwardRef(function DesignCreativeBriefWorkspace({
   workspace, activeServiceId, workRecord, busy, canSave, onSave, onFreeze, onDirtyChange,
-  visibility = 'official', selectedPrivateBriefId = '', useBriefLabel = 'Use exact saved version for generation later',
+  outputTypeLabel = 'Output type', visibility = 'official', selectedPrivateBriefId = '', useBriefLabel = 'Use exact saved version for generation later',
 }, ref) {
   const brief = visibility === 'private'
     ? (workspace.creativeBriefs || []).find(item => item.visibility === 'private'
@@ -109,7 +109,7 @@ const DesignCreativeBriefWorkspace = forwardRef(function DesignCreativeBriefWork
         </label>)}</div>
       </fieldset>
       <Field label="Title"><input required maxLength="200" className={INPUT} value={content.title} onChange={event => set('title', event.target.value)} /></Field>
-      <Field label="Output type"><select className={INPUT} value={content.output_type} onChange={event => set('output_type', event.target.value)}>{CREATIVE_BRIEF_OUTPUTS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></Field>
+      <Field label={outputTypeLabel}><select className={INPUT} value={content.output_type} onChange={event => set('output_type', event.target.value)}>{CREATIVE_BRIEF_OUTPUTS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></Field>
       <Field label="Purpose"><textarea rows="3" className={INPUT} value={content.purpose} onChange={event => set('purpose', event.target.value)} /></Field>
       <Field label="Audience"><textarea rows="3" className={INPUT} value={content.audience} onChange={event => set('audience', event.target.value)} /></Field>
       <Field label="Objective"><textarea rows="3" className={INPUT} value={content.objective} onChange={event => set('objective', event.target.value)} /></Field>
