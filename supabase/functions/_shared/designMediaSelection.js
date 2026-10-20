@@ -1,3 +1,4 @@
+import {LINEUP_CONTRACTS,buildLineupInput} from './designModelLineup.js'
 // Supported transport settings, not model grants or paid-execution authority.
 // Official references verified 2026-10-15; registry/connector checks remain server-owned.
 export const SOUL_GUIDED_MODEL='higgsfield-ai/soul/v2/image-to-image'
@@ -8,6 +9,7 @@ export const OPENAI_STILL_MODELS=Object.freeze(['gpt-image-1','gpt-image-1-mini'
 function exact(value,keys){if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join('|')!==keys.slice().sort().join('|'))throw Error('Exact supported media settings required')}
 export function requireSupportedMediaSelection(provider,model,settings,count,inputs){
  if(!Number.isInteger(count)||!Array.isArray(inputs))throw Error('Exact output count and input selection required')
+ if(provider==='higgsfield'&&LINEUP_CONTRACTS[model]){const spec=LINEUP_CONTRACTS[model];if(inputs.length!==(spec.input?1:0)||spec.input&&!['design_asset_version','media_output','private_attachment'].includes(inputs[0]?.kind))throw Error('One exact authorized original is required');buildLineupInput(model,'validated brief',settings,count,spec.input?'https://validated.invalid/original':undefined);return spec.kind}
  if(provider==='higgsfield'&&[SOUL_MODEL,SOUL_GUIDED_MODEL].includes(model)){
   const guided=model===SOUL_GUIDED_MODEL;
   if(guided&&(inputs.length!==1||!['design_asset_version','media_output'].includes(inputs[0]?.kind)||settings.enhance_prompt!==true))throw Error('One authorized original and enabled reference processing are required');

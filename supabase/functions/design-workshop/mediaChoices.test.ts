@@ -9,6 +9,6 @@ Deno.test('animation discovery requires consent and preserves the exact original
  const body={creative_brief_id:'brief',creative_brief_version_id:'version',context:{kind:'private',id:'chat'},input_versions:[input]};
  const result=await listMediaChoices(fixture.admin,body,'actor');
  const animation=result.choices.find(x=>x.kind==='video'),image=result.choices.find(x=>x.kind==='image');
- if(result.choices.length!==2||animation?.selection.model_id!=='bytedance/seedance-2.5/image-to-video'||'aspect_ratio' in animation.selection.settings||image?.selection.model_id!=='higgsfield-ai/soul/v2/image-to-image'||image.selection.settings.enhance_prompt!==true||result.choices.some(x=>JSON.stringify(x.selection.input_versions)!==JSON.stringify([input])))throw Error('Original selection changed');
+ if(result.choices.length!==5||animation?.selection.model_id!=='bytedance/seedance-2.5/image-to-video'||'aspect_ratio' in animation.selection.settings||image?.selection.model_id!=='higgsfield-ai/soul/v2/image-to-image'||image.selection.settings.enhance_prompt!==true||result.choices.some(x=>JSON.stringify(x.selection.input_versions)!==JSON.stringify([input])))throw Error('Original selection changed');
  const before=fixture.calls.length;let denied=false;try{await listMediaChoices(fixture.admin,{...body,input_versions:[{...input,provider_consent:{...input.provider_consent,allow_transfer:false}}]},'actor')}catch{denied=true}if(!denied||fixture.calls.length!==before)throw Error('Unconsented source reached eligibility');
 })
