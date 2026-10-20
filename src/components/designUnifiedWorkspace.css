@@ -130,3 +130,26 @@
 .design-output-choice label{display:flex;flex-direction:column;gap:6px;font-weight:600}.design-output-choice select{max-width:100%}
 .design-conversation-brief .design-unified-editor .lg\:col-span-2{grid-column:1/-1}
 @media(max-width:1100px){.design-conversation-workspace,.design-conversation-workspace.output-open{grid-template-columns:minmax(0,1fr)}.design-conversation-brief{height:min(680px,80dvh)}}
+
+.design-attachments{padding:14px;border:1px solid var(--anka-line);border-radius:12px;background:var(--anka-canvas);margin-bottom:16px;min-width:0;overflow-wrap:anywhere}
+.design-attachments[hidden]{display:none}
+.design-attachments header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
+.design-attachments h3{font-size:18px;font-weight:600}.design-attachments h4{margin-top:18px;font-weight:600}
+.design-attachments input:not([type=checkbox]),.design-attachments select,.design-attachments textarea{max-width:100%;min-width:0}
+.design-attachments details{margin-top:16px}.design-attachments summary{cursor:pointer;min-height:44px;display:flex;align-items:center}
+.design-attachments button{min-height:44px}.design-attachments .sm\:grid-cols-2{grid-template-columns:minmax(0,1fr)}
+.design-private-attachments{display:grid;gap:14px;margin-top:16px;font-size:14px}
+.design-private-attachments>p{margin:0}
+.design-private-attachments>label{display:grid;gap:7px;font-weight:500}
+.design-private-attachments>label:has(input[type=checkbox]){display:flex;align-items:flex-start;gap:10px;font-weight:400;line-height:1.5}
+.design-private-attachments input[type=checkbox]{flex:none;width:18px;height:18px;margin-top:2px;accent-color:var(--anka-accent,#8b5cf6)}
+.design-private-attachments input[type=file]{width:100%;padding:10px;border:1px solid var(--anka-line);border-radius:8px;background:var(--anka-surface)}
+.design-private-attachments select{width:100%;padding:10px;border:1px solid var(--anka-line);border-radius:8px;background:var(--anka-surface);color:inherit}
+.design-private-attachments>button{width:100%;border:1px solid var(--anka-line);border-radius:8px;background:var(--anka-surface-raised);font-weight:600;padding:10px}
+.design-private-attachments button:disabled{opacity:.5;cursor:not-allowed}
+.design-private-attachments ul{list-style:none;padding:0;margin:0;display:grid;gap:10px}
+.design-private-attachments li{display:grid;gap:8px;padding:12px;border:1px solid var(--anka-line);border-radius:10px;background:var(--anka-surface)}
+.design-private-attachments li label{display:flex;align-items:flex-start;gap:10px;min-width:0;overflow-wrap:anywhere;font-weight:600}
+.design-private-attachments li span{color:var(--anka-muted);font-size:12px;line-height:1.5}
+.design-private-attachments li button{justify-self:start;padding:8px 12px;border:1px solid var(--anka-line);border-radius:8px}
+.design-private-attachments [role=alert]{color:var(--anka-danger,#c24141)}

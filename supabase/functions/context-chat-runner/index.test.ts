@@ -192,6 +192,8 @@ Deno.test('private Design saves a validated draft and recovers without another p
    else if(path.endsWith('/organization_memberships'))data={status:'active',member_kind:'team',role:'system_owner'}
    else if(path.endsWith('/department_chat_messages'))data=url.searchParams.has('limit')?[message]:message
    else if(path.endsWith('/department_chat_conversations'))data={id,organization_id:id,owner_id:id,context_kind:'department_private',project_id:null,department_id:'design',state:'active'}
+   else if(path.endsWith('/read_design_private_attachments')){assertEquals(args,{p_org:id,p_conversation:id,p_actor:id});data=[{id:'source',status:'ready',expected_sha256:'hash',verified_mime:'application/pdf',extraction_kind:'pdf_text',ai_use_allowed:true,extracted_text:'Reference excerpt'}]}
+   else if(path.endsWith('/design_private_message_sources')){assertEquals(url.searchParams.get('owner_id'),'eq.'+id);assertEquals(url.searchParams.get('message_id'),'eq.'+id);data=[{attachment_id:'source',source_sha256:'hash',source_mime:'application/pdf',extraction_kind:'pdf_text',extraction_revision:1,classification:'internal',ai_use_allowed:true,position:1}]}
    else if(path.endsWith('/context_chat_organization_models'))data={id,organization_id:id,connector_connection_id:id,model_id:'verified',revoked_at:null}
    else if(path.endsWith('/integration_connections'))data={id,organization_id:id,provider:'openai',status:'verified',archived_at:null,secret_name:'ANKA_OPENAI_TEST'}
    else if(path.endsWith('/append_context_chat_audited_reply')){
@@ -211,10 +213,10 @@ Deno.test('private Design saves a validated draft and recovers without another p
    else throw Error('Unexpected '+path)
    return new Response(JSON.stringify(data),{headers:{'content-type':'application/json'}})
   }
-  const fetcher=(async()=>{providers++;return new Response(JSON.stringify({id:'response',status:'completed',model:'verified',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({assistant_text:'I updated the objective.',questions:['Who is the audience?'],patch:{objective:'Introduce our service'}})}]}],usage:{input_tokens:7,output_tokens:3}}))}) as typeof fetch
+  const fetcher=(async(_input,init)=>{assertEquals(String(init?.body).includes('Reference excerpt'),true);providers++;return new Response(JSON.stringify({id:'response',status:'completed',model:'verified',output:[{type:'message',content:[{type:'output_text',text:JSON.stringify({assistant_text:'I updated the objective.',questions:['Who is the audience?'],patch:{objective:'Introduce our service'}})}]}],usage:{input_tokens:7,output_tokens:3}}))}) as typeof fetch
   const request=(body:any)=>new Request('https://example.test',{method:'POST',headers:{Authorization:'Bearer offline'},body:JSON.stringify({organization_id:id,message_id:id,...body})})
   const first=await (await handleRequest(request({model_configuration_id:id,dispatch_request_id:id,design_brief:binding}),fetcher,{get:name=>config[name]})).json()
-  assertEquals(first.status,'completed',JSON.stringify(first));assertEquals(first.design_brief.status,'saved');assertEquals(run.output_text,'I updated the objective.\n\nWho is the audience?')
+  assertEquals(first.status,'completed',JSON.stringify(first));assertEquals(first.design_brief.status,'saved');assertEquals(run.context_manifest.attachment_sources[0].attachment_id,'source');assertEquals(run.output_text,'I updated the objective.\n\nWho is the audience?')
   const recovered=await (await handleRequest(request({recover_only:true}),fetcher,{get:name=>config[name]})).json()
   assertEquals(recovered.design_brief.status,'saved');assertEquals(providers,1);assertEquals(versions,1)
  }finally{await new Promise(r=>setTimeout(r,20));globalThis.fetch=oldFetch;Deno.env.get=oldGet;GoTrueClient.prototype.startAutoRefresh=oldRefresh}

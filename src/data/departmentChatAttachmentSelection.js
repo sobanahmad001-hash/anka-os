@@ -11,32 +11,32 @@ export function departmentChatAttachmentMime(file) {
   const extension = String(file?.name || '').toLowerCase().split('.').pop()
   return {
     txt: 'text/plain', md: 'text/markdown', docx: DOCX_MIME,
-    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+    pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
   }[extension] || ''
 }
 
-export function validateDepartmentChatAttachmentFile(file) {
+export function validateDepartmentChatAttachmentFile(file, { allowDesignPdf = false } = {}) {
   const claimedMime = departmentChatAttachmentMime(file)
-  if (!['text/plain', 'text/markdown', DOCX_MIME, 'image/png', 'image/jpeg'].includes(claimedMime)) {
+  if (!['text/plain', 'text/markdown', DOCX_MIME, 'image/png', 'image/jpeg'].includes(claimedMime) && !(allowDesignPdf === true && claimedMime === 'application/pdf')) {
     throw new Error(`${file?.name || 'File'}: unsupported file type. Choose TXT, Markdown, DOCX, PNG, or JPEG.`)
   }
   const byteLimit = claimedMime === DOCX_MIME
     ? DEPARTMENT_CHAT_ATTACHMENT_LIMITS.docxBytes
     : DEPARTMENT_CHAT_ATTACHMENT_LIMITS.fileBytes
   const limitLabel = claimedMime === DOCX_MIME ? '4 MiB DOCX' : '5 MiB'
-  if (!Number.isFinite(file?.size) || file.size < 0 || file.size > byteLimit) {
+  if (!Number.isFinite(file?.size) || file.size < 0 || claimedMime === 'application/pdf' && file.size === 0 || file.size > byteLimit) {
     throw new Error(`${file?.name || 'File'}: file exceeds the ${limitLabel} limit.`)
   }
   return claimedMime
 }
 
-export function selectPendingDepartmentChatAttachments(fileList) {
+export function selectPendingDepartmentChatAttachments(fileList, options) {
   const files = Array.from(fileList || [])
   if (files.length > DEPARTMENT_CHAT_ATTACHMENT_LIMITS.filesPerSelection) {
     return { files: [], error: 'Choose no more than three files. No files were selected.' }
   }
   try {
-    for (const file of files) validateDepartmentChatAttachmentFile(file)
+    for (const file of files) validateDepartmentChatAttachmentFile(file, options)
     return { files, error: '' }
   } catch (error) {
     return { files: [], error: error.message || 'Attachment selection is invalid.' }

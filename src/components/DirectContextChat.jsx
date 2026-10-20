@@ -1,3 +1,4 @@
+import DesignPrivateAttachmentPanel from './DesignPrivateAttachmentPanel.jsx'
 import { createPortal } from 'react-dom'
 import { preferredApprovedModel, openAiModelLabel } from '../data/openaiModelPolicy.js'
 import { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
@@ -23,6 +24,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   const hasExternalHistory = Boolean(workshopHistory?.render || workshopHistory?.externalHistory)
   const actorId = user.id
   const [importOpen, setImportOpen] = useState(false)
+  const [designAttachmentIds, setDesignAttachmentIds] = useState([])
   const scope = useMemo(() => ({ context_kind: contextKind, ...(departmentId ? { department_id: departmentId } : {}), ...(projectId ? { project_id: projectId } : {}) }), [contextKind, departmentId, projectId])
   const requestScope = useMemo(() => ({ organizationId, signal }), [organizationId, signal])
   const recoveryKey = directChatRecoveryKey(actorId, organizationId, contextKind, projectId, departmentId)
@@ -316,6 +318,21 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     revision.current++; setNewId(crypto.randomUUID()); setSelected(null); setMessages([]); setDraft('')
     setOutputId(''); setCanonical(false); setSharing(null); setShareOpen(false); setHistoryOpen(false); setNotice(''); setError('')
   }
+  async function ensurePrivateAttachmentConversation() {
+    if (!privateDesign || !current()) throw new Error('Private Design context changed')
+    const token = revision.current, target = selected?.id || newId
+    if (selected) {
+      const result = await read(target)
+      if (!current() || token !== revision.current || result.conversation.owner_id !== actorId || result.conversation.state !== 'active') throw new Error('Private Design context changed')
+      return result.conversation
+    }
+    const row = await departmentChat.createContextConversation({ ...scope, upload_conversation_id: target }, requestScope)
+    if (!current() || token !== revision.current || !validConversation(row) || row.id !== target) throw new Error('Private upload conversation changed')
+    apply({ conversation: row, messages: [] })
+    writeDirectChatDraft(recoveryKey, { new_conversation_id: target, conversation_id: target, text: draft, attempt: null })
+    onConversationListChange?.()
+    return row
+  }
   async function send(event) {
     event.preventDefault()
     if (!draft.trim() || draft.trim().length > 8000 || pendingRef.current || selected?.state && selected.state !== 'active') return
@@ -339,7 +356,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
       if (!current() || token !== revision.current) return
       const metadata = { conversation_id: target, client_request_id: crypto.randomUUID(), ...(ai ? { dispatch_request_id: crypto.randomUUID() } : {}) }
       remember({ conversation_id: target, client_request_id: metadata.client_request_id })
-      attempt.current = { text, isNew: !selected, conversation_id: target, client_request_id: metadata.client_request_id }
+      attempt.current = { text, isNew: !selected, conversation_id: target, client_request_id: metadata.client_request_id, ...(privateDesign ? { design_attachment_ids: [...designAttachmentIds] } : {}) }
       writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: selected?.id || null, text: draft, attempt: attempt.current })
       let saved
       if (!selected) {
@@ -347,7 +364,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
         if (!current() || token !== revision.current) return
         if (!validConversation(result.conversation) || result.conversation.id !== target || result.conversation.owner_id !== actorId) throw new Error('Conversation identity mismatch')
         apply({ conversation: result.conversation, messages: [result.message] }); saved = result.message
-      } else saved = await departmentChat.appendContextHumanMessage({ conversation_id: target, client_request_id: metadata.client_request_id, message: text }, requestScope)
+      } else saved = await departmentChat.appendContextHumanMessage({ conversation_id: target, client_request_id: metadata.client_request_id, message: text, ...(privateDesign ? { design_attachment_ids: designAttachmentIds } : {}) }, requestScope)
       if (!current() || token !== revision.current) return
       briefSend.current = briefSnapshot ? { snapshot: briefSnapshot, conversationId: target, messageId: saved.id } : null
       remember({ ...metadata, message_id: saved.id })
@@ -381,7 +398,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
       let human = latest?.messages.find(row => row.client_request_id === record.client_request_id && row.author_id === actorId)
       if (!human && attempt.current) {
         // Only retry persistence, with the identical in-memory body and UUIDs.
-        const input = { conversation_id: record.conversation_id, client_request_id: record.client_request_id, message: attempt.current.text }
+        const input = { conversation_id: record.conversation_id, client_request_id: record.client_request_id, message: attempt.current.text, ...(attempt.current.design_attachment_ids ? { design_attachment_ids: attempt.current.design_attachment_ids } : {}) }
         const saved = attempt.current.isNew
           ? await departmentChat.startContextConversation({ ...scope, ...input }, requestScope)
           : { message: await departmentChat.appendContextHumanMessage(input, requestScope) }
@@ -418,7 +435,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   useEffect(()=>{reportDesignConversation?.(selected,checkPrivateVideoContext)},[selected,checkPrivateVideoContext,reportDesignConversation])
   const newChatControl = <button type="button" className="workshop-new-chat" aria-label="New chat" disabled={busy || videoBusy || Boolean(pending)} onClick={newChat}>+ New chat</button>
   const modelControl=owner && <label><span className={compactConversation ? 'sr-only' : undefined}>Model</span><select aria-label="Approved model" value={modelId} disabled={busy || videoBusy || !models.length} onChange={event => { setModelId(event.target.value); setCanonical(false) }}>{!modelId && <option value="">{models.length ? 'Choose a model' : 'Unavailable'}</option>}{models.map(row => <option key={row.id} value={row.id}>{row.label}</option>)}</select></label>
-  return <>{compactConversation && workshopHistory?.newChatTarget && createPortal(newChatControl,workshopHistory.newChatTarget)}<section ref={rootRef} inert={importOpen && contextKind === 'project_team' && projectId ? true : undefined} className={`direct-chat ${historyOpen ? 'history-open' : ''} ${output ? 'output-open' : ''}`} aria-label={label} onKeyDown={event => {
+  return <>{privateDesign && designWorkspace?.attachmentTarget && createPortal(<DesignPrivateAttachmentPanel conversationKey={selected?.id || newId} conversationId={selected?.id || null} requestScope={requestScope} busy={busy || Boolean(pending)} ensureConversation={ensurePrivateAttachmentConversation} run={exclusive} selectedIds={designAttachmentIds} onSelection={setDesignAttachmentIds} />, designWorkspace.attachmentTarget)}{compactConversation && workshopHistory?.newChatTarget && createPortal(newChatControl,workshopHistory.newChatTarget)}<section ref={rootRef} inert={importOpen && contextKind === 'project_team' && projectId ? true : undefined} className={`direct-chat ${historyOpen ? 'history-open' : ''} ${output ? 'output-open' : ''}`} aria-label={label} onKeyDown={event => {
     if (event.key === 'Escape' && !consent.dialog) { setHistoryOpen(false); setOutputId(''); setShareOpen(false); setDetailsOpen(false) }
   }}>
     <header className="direct-chat-header" inert={drawerOpen ? true : undefined}><div><h2>{compactConversation ? selected?.title || 'New chat' : label}</h2><p>{!compactConversation && <>{selected?.title || 'New chat'} · </>} {contextKind === 'department_private' ? 'Only you' : sharing?.recipients.length ? 'Shared with selected teammates' : 'Private unless explicitly shared'}</p></div>
@@ -432,7 +449,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     {pending && <div className="direct-chat-notice direct-chat-recovery"><p>Check this send before sending again. Recovery never requests another AI reply.</p><button type="button" disabled={busy || videoBusy} onClick={recover}>Check recovery</button></div>}
     {detailsOpen && <aside className="direct-chat-details" aria-label="Chat details">
       {designWorkspace && <p>Sending includes the current editable brief for an unapproved draft update. Referenced files are not automatically sent. Media generation remains separate.</p>}
-      <p>Attachments are unavailable in this chat. Drafts stay only in this browser tab for up to one hour, including refresh; successful Send clears the draft. Closing this tab ends local draft recovery.</p>
+      <p>{privateDesign && designWorkspace ? 'Use Attach references to upload and explicitly select sources. ' : 'Attachments are unavailable in this chat. '}Drafts stay only in this browser tab for up to one hour, including refresh; successful Send clears the draft. Closing this tab ends local draft recovery.</p>
       <p>AI replies are organization-billed. The service rechecks model approval, exact pricing, spend tracking and access before dispatch.</p>
       <p>{readinessState === 'failed' ? 'AI availability could not be checked. You can still save a human message.' : !readiness ? 'Checking AI availability…' : ready ? 'AI configuration ready.' : `AI unavailable (${readiness.model_status || 'configuration unavailable'}). You can save a human message.`}</p>
       {readiness?.paid_execution_enabled === false && <p>AI execution is currently off.</p>}
@@ -475,7 +492,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
         <div className="direct-chat-toolbar">{!compactConversation && <label>Work type<select aria-label="Work type" value="text" disabled><option value="text">Text</option></select></label>}
           {!compactConversation && modelControl}
           <button type="submit" className="direct-chat-send" disabled={busy || videoBusy || Boolean(pending) || !draft.trim() || Boolean(selected && selected.state !== 'active')}>{busy ? 'Working…' : owner && ready ? 'Send' : 'Save message'}</button></div>
-        <p>{owner ? readinessState === 'failed' ? 'AI availability could not be checked. Sending saves a human message only.' : !readiness ? 'Checking AI availability. Human messages can still be saved.' : ready ? `${model?.provider} · Organization-billed replies` : 'AI unavailable. Sending saves a human message only.' : 'Shared chat · Human replies only'} · Attachments unavailable</p>{owner && readinessState === 'failed' && <button type="button" onClick={retryReadiness}>Retry AI availability</button>}
+        <p>{owner ? readinessState === 'failed' ? 'AI availability could not be checked. Sending saves a human message only.' : !readiness ? 'Checking AI availability. Human messages can still be saved.' : ready ? `${model?.provider} · Organization-billed replies` : 'AI unavailable. Sending saves a human message only.' : 'Shared chat · Human replies only'} · {privateDesign && designWorkspace ? `${designAttachmentIds.length} selected reference(s)` : 'Attachments unavailable'}</p>{owner && readinessState === 'failed' && <button type="button" onClick={retryReadiness}>Retry AI availability</button>}
       </form></div>
       {output && <aside ref={outputId && mobileDrawer ? drawerRef : undefined} className="direct-chat-output" role={mobileDrawer ? 'dialog' : undefined} aria-modal={mobileDrawer ? true : undefined} onKeyDown={drawerKeyDown} aria-label="Saved reply output" data-source-message-id={output.id}><div><h3>Saved reply</h3><button ref={outputClose} type="button" onClick={() => setOutputId('')}>Close output</button></div><p>{output.body}</p><small>Saved conversation reply · Read-only preview</small></aside>}
     </div>
