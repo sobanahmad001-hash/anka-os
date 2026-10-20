@@ -15,7 +15,7 @@ export async function prepareMediaRequest(admin:Admin,body:Record<string,any>,ac
 export async function quoteMediaRequest(admin:Admin,body:Record<string,any>,actor:string){
  const prepared=await prepareMediaRequest(admin,body,actor);
  const {data,error}=await admin.rpc('quote_design_media_request',{p_org:admin.organizationId,p_actor:actor,p_request:prepared.request});
- if(error)throw Object.assign(new Error('A current reviewed price is unavailable for this exact request'),{status:409});
+ if(error){if(error.code==='55000')throw Object.assign(new Error('Admin pricing setup required: a current reviewed price is unavailable for these exact settings.'),{status:409,code:'MEDIA_RATE_UNAVAILABLE'});throw Object.assign(new Error('The exact price could not be verified. Nothing was generated. Try Generate again.'),{status:409,code:'MEDIA_QUOTE_UNAVAILABLE'});}
  requireMediaQuote(prepared.request,data);return {request:prepared.request,quote:data};
 }
 import {OPENAI_STILL_MODELS,SOUL_MODEL,SOUL_GUIDED_MODEL,SEEDANCE_TEXT_MODEL,SEEDANCE_INPUT_MODEL} from '../_shared/designMediaSelection.js'

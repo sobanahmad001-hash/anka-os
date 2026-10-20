@@ -1,7 +1,8 @@
+import {usdBoundToMicrousd} from '../data/designMediaPriceInput.js'
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { invokeDesignFunction } from '../data/designWorkshopRequest.js'
-const empty=()=>({provider:'higgsfield',model_id:'',settings:'{}',unit_max_charge_microusd:'',source_url:'',verified_at:'',valid_until:''})
+const empty=()=>({provider:'higgsfield',model_id:'',settings:'{}',unit_max_charge_usd:'',source_url:'',verified_at:'',valid_until:''})
 const inputClass='mt-1 w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface)] p-2 text-[var(--anka-ink)]'
 export default function DesignMediaPricingSettings({organizationId,canManage,requestSignal,client=supabase}) {
  const [form,setForm]=useState(empty),[rates,setRates]=useState([]),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[blocked,setBlocked]=useState(Boolean(requestSignal?.aborted)),[uncertain,setUncertain]=useState(false)
@@ -18,13 +19,13 @@ export default function DesignMediaPricingSettings({organizationId,canManage,req
  async function save(event){
   event.preventDefault();if(pending.current||blocked||uncertain)return
   let settings;try{settings=JSON.parse(form.settings);if(!settings||typeof settings!=='object'||Array.isArray(settings))throw Error()}catch{setMessage('Enter an exact settings JSON object.');return}
-  const unit=Number(form.unit_max_charge_microusd);if(!Number.isSafeInteger(unit)||unit<1){setMessage('Enter a positive whole-number price bound in microdollars.');return}
+  let unit;try{unit=usdBoundToMicrousd(form.unit_max_charge_usd)}catch(error){setMessage(error.message);return}
   pending.current=true;setBusy(true);setMessage('Saving reviewed rate…');const current=generation.current
-  try{const saved=await invokeDesignFunction(client,'design-workshop',organizationId,'configure_media_rate',{...form,settings,unit_max_charge_microusd:unit},{signal:requestSignal});if(current!==generation.current||requestSignal?.aborted)return;if(!saved?.id||saved.organization_id!==organizationId)throw Error('Unconfirmed save');setRates(rows=>[saved,...rows.filter(row=>row.id!==saved.id)]);setMessage('Reviewed rate saved and confirmed. Existing generated media is unchanged.')}
+  try{const saved=await invokeDesignFunction(client,'design-workshop',organizationId,'configure_media_rate',{provider:form.provider,model_id:form.model_id,source_url:form.source_url,verified_at:form.verified_at,valid_until:form.valid_until,settings,unit_max_charge_microusd:unit},{signal:requestSignal});if(current!==generation.current||requestSignal?.aborted)return;if(!saved?.id||saved.organization_id!==organizationId)throw Error('Unconfirmed save');setRates(rows=>[saved,...rows.filter(row=>row.id!==saved.id)]);setMessage('Reviewed rate saved and confirmed. Existing generated media is unchanged.')}
   catch{if(current===generation.current&&!requestSignal?.aborted){setUncertain(true);setMessage('Save was not confirmed. Refresh rates before making another change. Your draft is preserved.')}}
   finally{pending.current=false;if(current===generation.current)setBusy(false)}
  }
- return <section aria-label="Design media pricing administration" className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-5">
+ return <section id="design-media-pricing" aria-label="Design media pricing administration" className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-5">
  <h2 className="font-semibold">Design media pricing</h2><p className="mt-2 text-sm text-[var(--anka-muted)]">Administrators record reviewed maximum prices for exact provider settings. A rate is valid for at most 24 hours. This does not enable a model or send a generation request.</p>
  <button type="button" onClick={read} disabled={busy||blocked} className="mt-3 rounded-lg border border-[var(--anka-line)] px-3 py-2">Refresh rates</button>
  {message&&<p role="status" className="mt-3 text-sm">{message}</p>}
@@ -32,7 +33,7 @@ export default function DesignMediaPricingSettings({organizationId,canManage,req
  <label>Provider<select className={inputClass} value={form.provider} onChange={e=>change('provider',e.target.value)}><option value="higgsfield">Higgsfield</option><option value="openai">OpenAI</option></select></label>
  <label>Exact model ID<input required className={inputClass} value={form.model_id} onChange={e=>change('model_id',e.target.value)}/></label>
  <label className="md:col-span-2">Exact settings (JSON)<textarea required rows={3} className={inputClass} value={form.settings} onChange={e=>change('settings',e.target.value)}/></label>
- <label>Maximum price per output (USD microdollars)<input required type="number" min="1" step="1" className={inputClass} value={form.unit_max_charge_microusd} onChange={e=>change('unit_max_charge_microusd',e.target.value)}/><small>1,000,000 microdollars = $1. Total quotes multiply this bound by output count.</small></label>
+ <label>Maximum total price per output (USD)<input required type="text" inputMode="decimal" className={inputClass} value={form.unit_max_charge_usd} onChange={e=>change('unit_max_charge_usd',e.target.value)}/><small>Enter the complete verified USD bound for one output, including billable inputs and duration. Starting prices or unverified credit conversions are insufficient. Quotes multiply this bound by output count.</small></label>
  <label>Official pricing source URL<input required type="url" className={inputClass} value={form.source_url} onChange={e=>change('source_url',e.target.value)}/></label>
  <label>Verified at (ISO date and time with timezone)<input required placeholder="2026-10-15T12:00:00Z" className={inputClass} value={form.verified_at} onChange={e=>change('verified_at',e.target.value)}/></label>
  <label>Expires at (ISO date and time with timezone)<input required placeholder="2026-10-15T13:00:00Z" className={inputClass} value={form.valid_until} onChange={e=>change('valid_until',e.target.value)}/></label>

@@ -1,3 +1,4 @@
+import {readMediaSpending} from './mediaSpending.ts'
 import {privateAnimationSources} from './privateAnimationSources.ts'
 import {quoteMediaRequest,listMediaChoices} from './mediaRequests.ts'
 import {listMediaGenerations,generateMedia,recoverMediaGeneration,pollMediaGeneration,ingestMediaGeneration,signMediaGeneration} from './mediaExecution.ts'
@@ -252,7 +253,7 @@ export async function designWorkshopScope(userClient: Client, body: Json): Promi
     if(requestedOrganizationId&&requestedOrganizationId!==root.organizationId)throw Object.assign(new Error('Creative brief organization mismatch'),{status:403});
     return root.engagementId?{root:{kind:'engagement',id:root.engagementId},requestedOrganizationId}:{root:null,requestedOrganizationId:root.organizationId}
   }
-  if (['list_media_rates','configure_media_rate'].includes(action)) return {root:null,requestedOrganizationId:requestedOrganizationId || ''}
+  if (['list_media_rates','configure_media_rate','get_media_spending'].includes(action)) return {root:null,requestedOrganizationId:requestedOrganizationId || ''}
   if (['get_video_brief','confirm_video_brief'].includes(action)) {
     const briefContext=videoBriefContext(body)
     if(briefContext.private_conversation_id) return {root:null,requestedOrganizationId:requestedOrganizationId || ''}
@@ -485,7 +486,7 @@ function outputText(result: Json) {
 export function hasWorkshopAuthority(membership: Json, action: string) {
   if (membership.member_kind !== 'team') return false
   const role = String(membership.role || ''); const department = String(membership.department_id || '')
-  if (['list_media_rates','configure_media_rate'].includes(action)) return ['system_owner','operations_admin'].includes(role)
+  if (['list_media_rates','configure_media_rate','get_media_spending'].includes(action)) return ['system_owner','operations_admin'].includes(role)
   if (LEADER_ROLES.has(role)) return true
   if (action === 'release_direction' || action === 'decide_asset_review') return department === 'design' && role === 'department_manager'
   if (action === 'generate_content_request_image' || action === 'create_content_request_video_placeholder') {
@@ -2082,6 +2083,7 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       poll_media_generation: () => pollMediaGeneration(admin,body,user.id),
       ingest_media_generation: () => ingestMediaGeneration(admin,body,user.id),
       sign_media_generation: () => signMediaGeneration(admin,body,user.id),
+      get_media_spending: () => readMediaSpending(admin,user.id,body),
       list_media_rates: () => listMediaRates(admin,user.id),
       configure_media_rate: () => configureMediaRate(admin,body,user.id),
       create_page_flow: () => createPageFlow(admin, body, user.id),
@@ -2141,7 +2143,7 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
   } catch (error) {
     console.error('Design Workshop failure', error)
     const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : 400
-    return response({ error: error instanceof Error ? error.message : 'Design Workshop failed', ...((error as any)?.rollback_verified===true && (error as any)?.code ? {code:(error as any).code,rollback_verified:true} : {}) },
+    return response({ ...(['MEDIA_RATE_UNAVAILABLE','MEDIA_QUOTE_UNAVAILABLE'].includes((error as any)?.code)?{code:(error as any).code}:{}), error: error instanceof Error ? error.message : 'Design Workshop failed', ...((error as any)?.rollback_verified===true && (error as any)?.code ? {code:(error as any).code,rollback_verified:true} : {}) },
       Number.isFinite(status) ? status : 400)
   }
 }

@@ -39,3 +39,11 @@ test('canonical brief transport releases edits only after an explicitly verified
  try {await invokeDesignFunction(unknown,'design-workshop','org','confirm_video_brief',{})} catch(error){assert.equal(error.knownRollback,false)}
  try {await invokeDesignFunction(client,'design-workshop','org','generate_video',{})} catch(error){assert.equal(error.knownRollback,false)}
 })
+
+
+test('quote errors expose only allowlisted setup guidance and never confer rollback authority',async()=>{
+ for(const [code,expected] of [['MEDIA_RATE_UNAVAILABLE','Admin pricing setup required'],['MEDIA_QUOTE_UNAVAILABLE','Nothing was generated'],['UNTRUSTED','generic']]){
+  const client={functions:{invoke:async()=>({error:{message:'generic',context:{status:409,clone:()=>({json:async()=>({code,error:'raw internal secret',rollback_verified:true})})}}})}};
+  await assert.rejects(invokeDesignFunction(client,'design-workshop','org','quote_media_request'),e=>e.message.includes(expected)&&!e.message.includes('secret')&&!e.knownRollback)
+ }
+})
