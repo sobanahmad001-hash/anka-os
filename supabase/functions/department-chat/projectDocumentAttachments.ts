@@ -88,7 +88,7 @@ export async function projectDocumentMessageSources(admin:any,org:string,actor:s
  const snippets:string[]=[]
  for(const source of sources) {
   const a=rows.find((row:Json)=>row.id===source.attachment_id)
-  if(!a||a.status!=='ready'||a.expected_sha256!==source.source_sha256||a.verified_mime!==source.source_mime||a.extraction_kind!==source.extraction_kind||a.ai_use_allowed!==source.ai_use_allowed||a.extraction_revision!==source.extraction_revision||a.classification!==source.classification)throw fail('Saved source is revoked or changed',403)
+  if(!a||a.status!=='ready'||a.expected_sha256!==source.source_sha256||a.verified_mime!==source.source_mime||a.extraction_kind!==source.extraction_kind||a.ai_use_allowed!==source.ai_use_allowed||source.extraction_revision!=='project-document-v1'||a.classification!==source.classification)throw fail('Saved source is revoked or changed',403)
   if(!['plain_text','main_document_text','pdf_text'].includes(a.extraction_kind))throw fail('Unsupported document extraction',403)
   if(!source.ai_use_allowed||!a.extracted_text)throw fail('Source consent or extracted text unavailable',403)
   chars+=a.extracted_text.length
