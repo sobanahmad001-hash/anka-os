@@ -4,12 +4,12 @@ const mimeByFormat: Record<string, string> = {
 }
 
 export async function fetchDesignVideoOutput(
-  rawUrl: string, allowedHosts: string[], outputFormat: 'mp4' | 'mov',
+  rawUrl: string, allowedHosts: string[], outputFormat: 'mp4' | 'mov' | 'original',
   fetcher: typeof fetch = fetch, maxBytes = MAX_BYTES,
 ) {
   if (typeof rawUrl !== 'string' || rawUrl.length > 4096
     || !Array.isArray(allowedHosts) || !allowedHosts.length
-    || !mimeByFormat[outputFormat]
+    || (outputFormat!=='original'&&!mimeByFormat[outputFormat])
     || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_BYTES) {
     throw new Error('Private video ingestion is unavailable')
   }
@@ -25,14 +25,14 @@ export async function fetchDesignVideoOutput(
   }
   const response = await fetcher(url.href, {
     method: 'GET', redirect: 'error', signal: AbortSignal.timeout(120000),
-    headers: { Accept: mimeByFormat[outputFormat] },
+    headers: { Accept: outputFormat==='original'?'video/mp4,video/quicktime':mimeByFormat[outputFormat] },
   })
   if (!response.ok || (response.url && response.url !== url.href)) {
     throw new Error('Video output download failed')
   }
   const contentType = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase()
   const length = Number(response.headers.get('content-length'))
-  if (contentType !== mimeByFormat[outputFormat]
+  if ((outputFormat==='original'?!Object.values(mimeByFormat).includes(contentType||''):contentType !== mimeByFormat[outputFormat])
     || (response.headers.has('content-length') && (!Number.isSafeInteger(length)
       || length < 1 || length > maxBytes))
     || !response.body) {

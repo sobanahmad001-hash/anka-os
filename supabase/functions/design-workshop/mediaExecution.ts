@@ -1,7 +1,8 @@
+import {LINEUP_CONTRACTS,mediaKind,requiresImage} from '../_shared/designModelLineup.js'
 import {resolvePrivateAnimationSource} from './privateAnimationSources.ts'
 import {prepareMediaRequest} from './mediaRequests.ts'
 import {createDesignMediaAdapter} from '../_shared/designMediaAdapter.ts'
-import {SOUL_MODEL,SOUL_GUIDED_MODEL,SEEDANCE_INPUT_MODEL} from '../_shared/designMediaSelection.js'
+import {SOUL_MODEL,SOUL_GUIDED_MODEL,SEEDANCE_INPUT_MODEL,SEEDANCE_TEXT_MODEL} from '../_shared/designMediaSelection.js'
 import {imageOutput,fetchDesignImageOutput} from '../_shared/designImageOutput.ts'
 import {fetchDesignVideoOutput} from '../_shared/designVideoOutput.ts'
 type Json=Record<string,any>
@@ -31,7 +32,7 @@ export async function originalInputUrl(admin:any,request:Json,actor:string){
   const {data,error}=await admin.from('design_asset_versions').select('id,asset_id,storage_path,storage_bucket,content_checksum').eq('id',uuid(input.id)).eq('organization_id',admin.organizationId).maybeSingle();
   if(error||!data||data.content_checksum!==input.checksum||data.storage_bucket!==bucket||!data.storage_path?.startsWith(admin.organizationId+'/'))throw Error('Original asset version changed');path=data.storage_path;
  }else throw Error('Unsupported original input');
- if(request.model_id===SOUL_GUIDED_MODEL||input.kind==='private_attachment'){
+ if(request.model_id===SOUL_GUIDED_MODEL||LINEUP_CONTRACTS[request.model_id]?.input||input.kind==='private_attachment'){
   if(!['design_asset_version','media_output','private_attachment'].includes(input.kind))throw Error('Original byte checksum required');
   const {data:original,error:readError}=await admin.storage.from(bucket).download(path);
   if(readError||!original||original.size<12||original.size>(input.kind==='private_attachment'?5:10)*1024*1024)throw Error('Original input bytes unavailable');
@@ -46,7 +47,7 @@ export async function generateMedia(admin:any,body:Json,actor:string,deps:Json={
  if(request.provider==='higgsfield'&&Deno.env.get('DESIGN_VIDEO_PAID_EXECUTION_ENABLED')!=='true')throw Error('Media execution is not enabled');
  const credential=deps.credential?await deps.credential(request):await connection(admin,request),reader=deps.fetch||fetch;
  const media=request.provider==='higgsfield'?(deps.adapter||await adapter(credential,reader)):null;
- const source=[SEEDANCE_INPUT_MODEL,SOUL_GUIDED_MODEL].includes(request.model_id)?(deps.inputUrl?await deps.inputUrl(request):await originalInputUrl(admin,request,actor)):null;
+ const source=requiresImage(request.model_id)?(deps.inputUrl?await deps.inputUrl(request):await originalInputUrl(admin,request,actor)):null;
  const job=await rpc(admin,'claim_design_media_generation',{p_org:admin.organizationId,p_actor:actor,p_operation:operation,p_quote:quote,p_request:request,p_prompt:prepared.prompt,p_acceptance:body.acceptance});
  if(job.must_not_submit===true)return publicJob(job);
  let receipt:Json,inline:any[]|null=null;
@@ -57,10 +58,12 @@ export async function generateMedia(admin:any,body:Json,actor:string,deps:Json={
    if(!response.ok)throw Error('Provider response uncertain');const result=await readBoundedImageResponse(response,request.output_count);if(!Array.isArray(result.data)||result.data.length!==request.output_count)throw Error('Incomplete original output set');
    inline=[];for(const item of result.data){if(typeof item.b64_json!=='string'||item.b64_json.length>14000000)throw Error('Unsupported original output');inline.push(await imageOutput(Uint8Array.from(atob(item.b64_json),c=>c.charCodeAt(0)),'image/png'))}
    receipt={kind:'openai-inline',outputCount:inline.length,...(response.headers.get('x-request-id')?{requestId:response.headers.get('x-request-id')}:{}),state:'provider_completed'};
-  }else if(request.model_id===SOUL_GUIDED_MODEL)receipt=await media.submitGuidedImage({prompt:prepared.prompt,image_url:source,batch_size:request.output_count,resolution:settings.resolution,aspect_ratio:settings.aspect_ratio,enhance_prompt:true});
+  }else if(LINEUP_CONTRACTS[request.model_id])receipt=await media.submitLineup(request.model_id,prepared.prompt,settings,request.output_count,source||undefined);
+  else if(request.model_id===SOUL_GUIDED_MODEL)receipt=await media.submitGuidedImage({prompt:prepared.prompt,image_url:source,batch_size:request.output_count,resolution:settings.resolution,aspect_ratio:settings.aspect_ratio,enhance_prompt:true});
   else if(request.model_id===SOUL_MODEL)receipt=await media.submitImage({prompt:prepared.prompt,batch_size:request.output_count,resolution:settings.resolution,aspect_ratio:settings.aspect_ratio,enhance_prompt:settings.enhance_prompt});
   else if(request.model_id===SEEDANCE_INPUT_MODEL)receipt=await media.submitImageToVideo({prompt:prepared.prompt,image_url:source,duration:settings.duration_seconds,resolution:settings.resolution,output_format:settings.output_format,generate_audio:settings.generate_audio});
-  else receipt=await media.submit({prompt:prepared.prompt,duration:settings.duration_seconds,resolution:settings.resolution,aspect_ratio:settings.aspect_ratio,output_format:settings.output_format,generate_audio:settings.generate_audio});
+  else if(request.model_id===SEEDANCE_TEXT_MODEL)receipt=await media.submit({prompt:prepared.prompt,duration:settings.duration_seconds,resolution:settings.resolution,aspect_ratio:settings.aspect_ratio,output_format:settings.output_format,generate_audio:settings.generate_audio});
+  else throw Error('No verified transport for this exact model');
  }catch{await record(admin,job,actor,'outcome_unknown',null);return publicJob({...job,status:'outcome_unknown'})}
  const saved=await record(admin,job,actor,receipt.state==='pending'?'provider_pending':receipt.state,receipt);
  if(inline)return publicJob(await storeOriginals(admin,saved,actor,inline));return publicJob(saved);
@@ -78,7 +81,7 @@ async function storeOriginals(admin:any,job:Json,actor:string,outputs:any[],alre
 }
 export async function pollMediaGeneration(admin:any,body:Json,actor:string,reader:typeof fetch=fetch){
  const job=await loadJob(admin,body,actor);if(!['provider_pending','outcome_unknown'].includes(job.status)||job.request.provider!=='higgsfield'||!job.provider_receipt?.requestId||!job.provider_receipt?.statusUrl)return publicJob(job);
- const media=await adapter(await connection(admin,job.request),reader),receipt=await media.status(job.provider_receipt.requestId,job.provider_receipt.statusUrl,[SOUL_MODEL,SOUL_GUIDED_MODEL].includes(job.request.model_id)?'image':'video',[SOUL_MODEL,SOUL_GUIDED_MODEL].includes(job.request.model_id)?job.request.output_count:undefined);
+ const media=await adapter(await connection(admin,job.request),reader),receipt=await media.status(job.provider_receipt.requestId,job.provider_receipt.statusUrl,mediaKind(job.request.model_id)==='image'?'image':'video',mediaKind(job.request.model_id)==='image'?job.request.output_count:undefined);
  return publicJob(await record(admin,job,actor,receipt.state==='pending'?'provider_pending':receipt.state,receipt));
 }
 export async function ingestMediaGeneration(admin:any,body:Json,actor:string,reader:typeof fetch=fetch){
@@ -95,8 +98,8 @@ export async function ingestMediaGeneration(admin:any,body:Json,actor:string,rea
  }
  if(job.request.provider!=='higgsfield')throw Error('Unsupported original provider');
  const hosts=(Deno.env.get('DESIGN_VIDEO_OUTPUT_ALLOWED_HOSTS')||'').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean),outputs=[];
- if([SOUL_MODEL,SOUL_GUIDED_MODEL].includes(job.request.model_id)){for(const url of job.provider_receipt.outputUrls||[])outputs.push(await fetchDesignImageOutput(url,hosts,reader))}
- else outputs.push(await fetchDesignVideoOutput(job.provider_receipt.outputUrl,hosts,job.request.settings.output_format,reader));
+ if(mediaKind(job.request.model_id)==='image'){for(const url of job.provider_receipt.outputUrls||[])outputs.push(await fetchDesignImageOutput(url,hosts,reader))}
+ else outputs.push(await fetchDesignVideoOutput(job.provider_receipt.outputUrl,hosts,LINEUP_CONTRACTS[job.request.model_id]?'original':job.request.settings.output_format,reader));
  return publicJob(await storeOriginals(admin,job,actor,outputs));
 }
 export async function signMediaGeneration(admin:any,body:Json,actor:string){

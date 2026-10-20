@@ -15,7 +15,9 @@ Deno.test('private animation lists only same-owner ready PNG/JPEG metadata and n
  await assertRejects(()=>privateAnimationSources({...admin,rpc:async()=>({data:[{...row,owner_id:'other'}],error:null})},{context},'actor'));
  await assertRejects(()=>privateAnimationSources({...admin,rpc:async()=>({data:null,error:{code:'42501'}})},{context},'actor'));
 });
-Deno.test('uploaded animation rechecks exact original, byte checksum and revocation before signing',async()=>{
+for(const model of ['bytedance/seedance-2.5/image-to-video','kling-video/v3.0/std/image-to-video','alibaba/wan-3.0/image-to-video','lightricks/ltx-2.5/image-to-video/fast']){
+Deno.test('uploaded original checksum and revocation before signing: '+model,async()=>{
+ const request={model_id:model,context,input_versions:[input]};
  let revoked=false,changed=false,signs=0;
  const admin={organizationId:'org',rpc:async()=>({data:[{...row,status:revoked?'revoked':'ready'}],error:null}),storage:{from:(bucket:string)=>{assertEquals(bucket,'design-private-attachments');return {download:async(path:string)=>{assertEquals(path,'org/actor/'+chat+'/'+id+'/original');return {data:new Blob([changed?new Uint8Array([...bytes,0]):bytes],{type:'image/png'}),error:null}},createSignedUrl:async()=>{signs++;return {data:{signedUrl:'https://storage.example/original'},error:null}}}}}};
  assertEquals(await originalInputUrl(admin,request,'actor'),'https://storage.example/original');assertEquals(signs,1);
@@ -24,6 +26,7 @@ Deno.test('uploaded animation rechecks exact original, byte checksum and revocat
  await assertRejects(()=>resolvePrivateAnimationSource(admin,{...request,model_id:'higgsfield-ai/soul/v2/image-to-image'},'actor'));
  await assertRejects(()=>resolvePrivateAnimationSource(admin,{...request,input_versions:[input,input]},'actor'));
 });
+}
 Deno.test('revocation rejected by final atomic claim cannot dispatch the prepared private image',async()=>{
  const previous=Deno.env.get('DESIGN_VIDEO_PAID_EXECUTION_ENABLED');Deno.env.set('DESIGN_VIDEO_PAID_EXECUTION_ENABLED','true');
  try{

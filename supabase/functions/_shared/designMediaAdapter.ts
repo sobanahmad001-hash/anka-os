@@ -1,3 +1,4 @@
+import {LINEUP_CONTRACTS,buildLineupInput} from './designModelLineup.js'
 // Server-only adapter for @higgsfield/client 0.2.6 /v2. Inject the official
 // createHiggsfieldClient export; never its global config/singleton.
 // A caller MUST first obtain the shared durable dispatch claim. This transport
@@ -14,7 +15,7 @@ export type ImageInput = {prompt:string;batch_size:1|4;resolution:string;aspect_
 export type ImageVideoInput = {prompt:string;duration:number;image_url:string;resolution:string;output_format:string;generate_audio:boolean}
 type Input = { prompt: string; duration: number; resolution: string; aspect_ratio: string;
   output_format: string; generate_audio: boolean }
-type Client = { subscribe(endpoint: string, options: { input: Input | ImageInput | ImageVideoInput | (ImageInput & {image_url:string}); withPolling: boolean }): Promise<unknown> }
+type Client = { subscribe(endpoint: string, options: { input: Record<string,unknown> | Input | ImageInput | ImageVideoInput | (ImageInput & {image_url:string}); withPolling: boolean }): Promise<unknown> }
 export type SdkFactory = (config: { credentials: string; maxRetries: number; timeout: number; baseURL: string }) => Client
 export type MediaReceipt = { state: 'pending' | 'provider_completed' | 'provider_failed' | 'safety_refused'; requestId: string; statusUrl?: string; outputUrl?: string; outputUrls?: string[] }
 const requestIdPattern = /^[a-zA-Z0-9_-]{1,128}$/
@@ -87,6 +88,11 @@ export function createDesignMediaAdapter(createClient: SdkFactory, credential: s
     throw new Error('Media client unavailable')
   }
   return {
+    async submitLineup(model:string,prompt:string,settings:Record<string,unknown>,count:number,source?:string):Promise<MediaReceipt>{
+      const input=buildLineupInput(model,prompt,settings,count,source),kind=LINEUP_CONTRACTS[model].kind;
+      try{return normalize(await client.subscribe(model,{input,withPolling:false}),undefined,undefined,kind,count)}
+      catch{throw new Error('Media submission outcome unknown; recover the original request')}
+    },
     async submit(input: Input): Promise<MediaReceipt> {
       const pinned = validate(input)
       try {
