@@ -130,3 +130,11 @@ Deno.test('saved conversation titles reject blank and overlong values', async ()
       { conversation_id: thread, title }, owner, org, { user_id: owner, role: 'contributor' }))
   }
 })
+Deno.test('document append uses exact source-bound RPC and rejects shared actor or mixed sources',async()=>{
+ const {admin,calls}=fixture()
+ const body={conversation_id:thread,client_request_id:unnamed,message:'Use the document',project_document_ids:[project]}
+ await contextChatAction('append_context_human_message',admin as any,body,owner,org,{role:'contributor'})
+ assertEquals(calls.some(([kind,name])=>kind==='rpc'&&name==='append_project_document_message_sources'),true)
+ await assertRejects(()=>contextChatAction('append_context_human_message',admin as any,body,recipient,org,{role:'contributor'}))
+ await assertRejects(()=>contextChatAction('append_context_human_message',admin as any,{...body,design_attachment_ids:[]},owner,org,{role:'contributor'}))
+})

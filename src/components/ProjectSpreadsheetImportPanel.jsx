@@ -8,7 +8,7 @@ import { prepareMappingDisclosure, validateAssistedMapping } from '../data/proje
 
 // Local proposal workbench. No provider calls, persistence, upload or canonical
 // commit is wired until the server authority/provenance contracts are settled.
-export default function ProjectSpreadsheetImportPanel({ projectId, projectLabel, onClose, repository=null, recoveryScope=null, onMappingAssist=null, onMappingRecover=null }) {
+export default function ProjectSpreadsheetImportPanel({ projectId, projectLabel, onClose, repository=null, recoveryScope=null, onMappingAssist=null, onMappingRecover=null, initialFile=null }) {
   const [workbook, setWorkbook] = useState(null); const [source, setSource] = useState(null)
   const [sheetIndex, setSheetIndex] = useState(0); const [type, setType] = useState('website_pages')
   const [mapping, setMapping] = useState({}); const [preview, setPreview] = useState(null)
@@ -56,6 +56,7 @@ export default function ProjectSpreadsheetImportPanel({ projectId, projectLabel,
     } catch (e) { if (generation.current === token) setError(e.message) }
     finally { if (generation.current === token) setBusy(false) }
   }
+  useEffect(() => { if (initialFile) void read(initialFile) }, [initialFile])
   async function inspect() {
     const token = ++generation.current; setBusy(true); setError('')
     try {
