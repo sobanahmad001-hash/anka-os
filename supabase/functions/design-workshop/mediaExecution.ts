@@ -1,3 +1,4 @@
+import {resolvePrivateAnimationSource} from './privateAnimationSources.ts'
 import {prepareMediaRequest} from './mediaRequests.ts'
 import {createDesignMediaAdapter} from '../_shared/designMediaAdapter.ts'
 import {SOUL_MODEL,SOUL_GUIDED_MODEL,SEEDANCE_INPUT_MODEL} from '../_shared/designMediaSelection.js'
@@ -18,7 +19,9 @@ async function adapter(credential:string,reader:typeof fetch){const {createHiggs
 async function record(admin:any,job:Json,actor:string,state:string,receipt:Json|null){return rpc(admin,'record_design_media_generation',{p_org:admin.organizationId,p_actor:actor,p_job:job.id,p_claim:job.claim_id,p_state:state,p_receipt:receipt})}
 export async function originalInputUrl(admin:any,request:Json,actor:string){
  const input=request.input_versions[0];let path:string,bucket='design-generated-media';
- if(input.kind==='media_output'){
+ if(input.kind==='private_attachment'){
+  const original=await resolvePrivateAnimationSource(admin,request,actor);bucket=original.bucket;path=original.path;
+ }else if(input.kind==='media_output'){
   const original=await rpc(admin,'resolve_design_media_input',{p_org:admin.organizationId,p_actor:actor,p_context:request.context,p_source:input.id,p_checksum:input.checksum});
   if(original.id!==input.id||original.checksum!==input.checksum||original.bucket!==bucket||!original.path?.startsWith(admin.organizationId+'/private/'+actor+'/media/'))throw Error('Original input scope changed');path=original.path;
  }else if(input.kind==='private_image_job'){
@@ -28,10 +31,10 @@ export async function originalInputUrl(admin:any,request:Json,actor:string){
   const {data,error}=await admin.from('design_asset_versions').select('id,asset_id,storage_path,storage_bucket,content_checksum').eq('id',uuid(input.id)).eq('organization_id',admin.organizationId).maybeSingle();
   if(error||!data||data.content_checksum!==input.checksum||data.storage_bucket!==bucket||!data.storage_path?.startsWith(admin.organizationId+'/'))throw Error('Original asset version changed');path=data.storage_path;
  }else throw Error('Unsupported original input');
- if(request.model_id===SOUL_GUIDED_MODEL){
-  if(!['design_asset_version','media_output'].includes(input.kind))throw Error('Original byte checksum required');
+ if(request.model_id===SOUL_GUIDED_MODEL||input.kind==='private_attachment'){
+  if(!['design_asset_version','media_output','private_attachment'].includes(input.kind))throw Error('Original byte checksum required');
   const {data:original,error:readError}=await admin.storage.from(bucket).download(path);
-  if(readError||!original||original.size<12||original.size>10*1024*1024)throw Error('Original input bytes unavailable');
+  if(readError||!original||original.size<12||original.size>(input.kind==='private_attachment'?5:10)*1024*1024)throw Error('Original input bytes unavailable');
   const verified=await imageOutput(new Uint8Array(await original.arrayBuffer()),original.type.split(';')[0]);
   if(verified.checksum!==input.checksum)throw Error('Original input bytes changed');
  }

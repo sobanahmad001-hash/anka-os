@@ -24,6 +24,6 @@ export function requireSupportedMediaSelection(provider,model,settings,count,inp
 }
 export function requireSelectedSourceConsent(input,source,provider){
  exact(input,['kind','id','checksum','provider_consent']);exact(input.provider_consent,['provider','source_id','checksum','allow_transfer']);
- if(!source||!['design_asset_version','private_image_job','media_output'].includes(input.kind)||source.kind!==input.kind||source.id!==input.id||source.checksum!==input.checksum||!/^[a-f0-9]{64}$/.test(input.checksum)||input.provider_consent.provider!==provider||input.provider_consent.source_id!==input.id||input.provider_consent.checksum!==input.checksum||input.provider_consent.allow_transfer!==true)throw Error('Confirm transfer of this exact original image to the selected provider');
+ if(!source||!['design_asset_version','private_image_job','media_output','private_attachment'].includes(input.kind)||source.kind!==input.kind||source.id!==input.id||source.checksum!==input.checksum||!/^[a-f0-9]{64}$/.test(input.checksum)||input.provider_consent.provider!==provider||input.provider_consent.source_id!==input.id||input.provider_consent.checksum!==input.checksum||input.provider_consent.allow_transfer!==true)throw Error('Confirm transfer of this exact original image to the selected provider');
  return {kind:input.kind,id:input.id,checksum:input.checksum,provider_consent:{...input.provider_consent}}
 }
