@@ -6,3 +6,12 @@ async function fixture(change:any={}){const checksum=Array.from(new Uint8Array(a
 Deno.test('media preparation binds current organization and database-confirmed frozen prompt',async()=>{const {admin,calls}=await fixture();const result=await prepareMediaRequest(admin,{creative_brief_id:'brief',selection},actor);if(result.request.organization_id!==org||result.prompt!==prompt||calls.length!==1||calls[0].args.p_actor!==actor||calls[0].args.p_request.prompt_checksum!=='0'.repeat(64))throw Error('Caller controlled identity or prompt')})
 Deno.test('media preparation refuses altered server selection or checksum',async()=>{for(const change of [{model_id:'gpt-image-1.5'},{output_count:2},{context:{kind:'private',id:'other'}},{prompt_checksum:'a'.repeat(64)}]){const {admin}=await fixture(change);let rejected=false;try{await prepareMediaRequest(admin,{creative_brief_id:'brief',selection},actor)}catch{rejected=true}if(!rejected)throw Error('Changed request accepted')}})
 Deno.test('unsupported selection and mismatched brief never become dispatch-ready',async()=>{const {admin,calls}=await fixture();let rejected=false;try{await prepareMediaRequest(admin,{creative_brief_id:'brief',selection:{...selection,settings:{...selection.settings,webhook:'https://example.com'}}},actor)}catch{rejected=true}if(!rejected||calls.length)throw Error('Unsupported setting reached database');rejected=false;try{await prepareMediaRequest(admin,{creative_brief_id:'other',selection},actor)}catch{rejected=true}if(!rejected)throw Error('Wrong brief accepted')})
+import {quoteMediaRequest} from './mediaRequests.ts'
+Deno.test('missing reviewed rates produce safe setup guidance; unrelated failures do not masquerade as missing rates',async()=>{
+ for(const code of ['55000','42501','NETWORK_ERROR']){
+  const base=await fixture();const admin:any=base.admin;const original=admin.rpc;
+  admin.rpc=async(name:string,args:any)=>name==='quote_design_media_request'?{data:null,error:{code,message:'internal detail'}}:original(name,args);
+  let error:any;try{await quoteMediaRequest(admin,{creative_brief_id:'brief',selection},actor)}catch(e){error=e}
+  if(error?.status!==409||error?.code!==(code==='55000'?'MEDIA_RATE_UNAVAILABLE':'MEDIA_QUOTE_UNAVAILABLE')||error.message.includes('internal detail'))throw Error('Unsafe or misclassified quote error')
+ }
+})

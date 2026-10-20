@@ -165,7 +165,7 @@ async function mount(t, reply, rows = []) {
   const server=await createServer({server:{middlewareMode:true},appType:'custom',logLevel:'silent',resolve:{alias:{'react-router-dom':'/src/data/__settings_router_stub.js'}},plugins:[{name:'save-stubs',enforce:'pre',resolveId(id){
     if(id.endsWith('OrganizationContext.jsx'))return '/save-org'
     if(id.endsWith('integrationRepository.js'))return '/save-repo'
-    if(['ContentCustomFieldSettings.jsx','DepartmentChatModelAllowlist.jsx','PipelineAiTextRouteSettings.jsx','DesignMediaPricingSettings.jsx'].some(n=>id.endsWith(n)))return '/save-child'
+    if(['ContentCustomFieldSettings.jsx','DepartmentChatModelAllowlist.jsx','PipelineAiTextRouteSettings.jsx','DesignMediaPricingSettings.jsx','DesignMediaSpendingSettings.jsx'].some(n=>id.endsWith(n)))return '/save-child'
     if(id==='react-router-dom')return '/save-router'
   },load(id){
     if(id==='/save-org')return `export const useOrganization=()=>({activeOrganizationId:globalThis.__saveHarness.org,activeMembership:{role:'system_owner'},scopeRevision:1})`
