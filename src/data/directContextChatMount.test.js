@@ -14,9 +14,11 @@ const props = node => node?.[Object.keys(node).find(key => key.startsWith('__rea
 test('Project Chat spreadsheet inspection stays local and creates no conversation or provider request', async t => {
   const renderErrors=[],previousConsoleError=console.error;console.error=(...args)=>renderErrors.push(args.join(' '));t.after(()=>{console.error=previousConsoleError})
   const ui = await mount(t)
-  assert.equal(ui.button('Import spreadsheet'), undefined)
+  assert.equal(ui.button('Attach files'), undefined)
   await ui.render({ contextKind: 'project_team', projectId, departmentId: '' })
-  await ui.click('Import spreadsheet')
+  await ui.click('Attach files')
+  await waitForRendered(() => ui.button('Open spreadsheet review or recovery'), 'unified attachment picker')
+  await ui.click('Open spreadsheet review or recovery')
   // Vite's cold lazy-module transform can exceed a short fixed retry window.
   // Synchronize on usable rendered controls, returning as soon as they exist.
   await waitForRendered(() => ui.named('Project spreadsheet import') && ui.named('Source spreadsheet'), 'Project spreadsheet import and source control')

@@ -148,6 +148,26 @@ export function createDepartmentChatRepository(client) {
     listDesignPrivateAttachments: (input, scope) => invoke('design_private_attachment_list', input, scope),
     revokeDesignPrivateAttachment: (input, scope) => invoke('design_private_attachment_revoke', input, scope),
     downloadDesignPrivateAttachment: (input, scope) => invoke('design_private_attachment_download', input, scope),
+    uploadProjectDocument: async (input, scope) => {
+      const { file, ...metadata } = input
+      if (!(file instanceof Blob) || !file.size || file.size > 5 * 1024 * 1024) throw new Error('Choose a local reference file up to 5 MiB')
+      const reserved = await invoke('project_document_attachment_reserve', metadata, scope)
+      scope?.signal?.throwIfAborted()
+      if (reserved.upload) {
+        const { bucket, path, token } = reserved.upload
+        const uploaded = await client.storage.from(bucket).uploadToSignedUrl(path, token, file, { contentType: metadata.claimed_mime, upsert: false })
+        // An interrupted prior upload can already exist. Finalization validates
+        // exact bytes/checksum; never overwrite, discard or allocate another ID.
+        if (uploaded.error) {
+          try { return await invoke('project_document_attachment_finalize', metadata, scope) }
+          catch { throw failure(uploaded.error, uploaded) }
+        }
+      }
+      return invoke('project_document_attachment_finalize', metadata, scope)
+    },
+    listProjectDocuments: (input, scope) => invoke('project_document_attachment_list', input, scope),
+    revokeProjectDocument: (input, scope) => invoke('project_document_attachment_revoke', input, scope),
+    downloadProjectDocument: (input, scope) => invoke('project_document_attachment_download', input, scope),
     uploadAttachment,
     discardAttachment: (departmentId, input, scope) => invoke('discard_attachment', { ...input, department_id: departmentId }, scope),
     listAttachments: (departmentId, input, scope) => invoke('list_attachments', { ...input, department_id: departmentId }, scope),

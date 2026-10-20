@@ -1,4 +1,5 @@
 import { inspectDesignPdf } from '../_shared/designPdfInspection.mjs'
+import { PROJECT_DOCUMENT_ATTACHMENT_ACTIONS, projectDocumentAttachmentAction } from './projectDocumentAttachments.ts'
 import { DESIGN_PRIVATE_ATTACHMENT_ACTIONS, designPrivateAttachmentAction } from './designPrivateAttachments.ts'
 import { prepareDesignBrief, recoverAuditedDesignBrief } from '../_shared/designChatBriefIntegration.ts'
 import { workshopExecutionEnabled } from './workshopExecutionGate.ts'
@@ -2121,6 +2122,11 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
     const { userClient, admin, user, membership, organizationId } = await requireContext(request, body.organization_id, dependencies.clients)
     auditContext = { admin, actorId: user.id, organizationId }
     const action = text(body.action, 60)
+    if (PROJECT_DOCUMENT_ATTACHMENT_ACTIONS.has(action)) {
+      const result = await projectDocumentAttachmentAction(action, admin, body, user.id, organizationId)
+      if (result instanceof Response) { for (const [name, value] of Object.entries(cors)) result.headers.set(name, value); return result }
+      return response({ data: result })
+    }
     if (DESIGN_PRIVATE_ATTACHMENT_ACTIONS.has(action)) {
       const result = await designPrivateAttachmentAction(action, admin, body, user.id, organizationId)
       if (result instanceof Response) { for (const [name, value] of Object.entries(cors)) result.headers.set(name, value); return result }

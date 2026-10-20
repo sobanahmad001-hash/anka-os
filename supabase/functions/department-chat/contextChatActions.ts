@@ -186,6 +186,13 @@ export async function contextChatAction(
     const requestId = string(body.client_request_id)
     if (!isContextChatUuid(requestId)) throw fail('Message request ID is required')
     const message = validateContextChatMessage(body.message)
+    if (body.project_document_ids !== undefined) {
+      if (body.design_attachment_ids !== undefined || conversation.context_kind !== 'project_team' || conversation.department_id || conversation.engagement_id || conversation.owner_id !== actorId
+        || !Array.isArray(body.project_document_ids) || body.project_document_ids.length > 3 || body.project_document_ids.some(value => !isContextChatUuid(value))) throw fail('Exact owned Project Chat document sources required')
+      const { data, error } = await admin.rpc('append_project_document_message_sources', { p_org: organizationId, p_conversation: conversation.id, p_actor: actorId, p_request: requestId, p_body: message, p_ids: body.project_document_ids })
+      if (error) throw fail(error.code === '42501' ? 'Selected project document unavailable or access changed' : error.code === '23505' ? 'This message request already has different sources or content' : 'Project document selection could not be saved', error.code === '42501' ? 403 : error.code === '23505' ? 409 : 422)
+      return data
+    }
     if (body.design_attachment_ids !== undefined) {
       if (conversation.context_kind !== 'department_private' || conversation.department_id !== 'design' || conversation.owner_id !== actorId
         || !Array.isArray(body.design_attachment_ids) || body.design_attachment_ids.length > 3 || body.design_attachment_ids.some(value => !isContextChatUuid(value))) throw fail('Exact private Design sources required')
