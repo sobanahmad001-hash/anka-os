@@ -1,5 +1,6 @@
 // Supported transport settings, not model grants or paid-execution authority.
 // Official references verified 2026-10-15; registry/connector checks remain server-owned.
+export const SOUL_GUIDED_MODEL='higgsfield-ai/soul/v2/image-to-image'
 export const SOUL_MODEL='higgsfield-ai/soul/v2/standard'
 export const SEEDANCE_TEXT_MODEL='bytedance/seedance-2.5/text-to-video'
 export const SEEDANCE_INPUT_MODEL='bytedance/seedance-2.5/image-to-video'
@@ -7,8 +8,10 @@ export const OPENAI_STILL_MODELS=Object.freeze(['gpt-image-1','gpt-image-1-mini'
 function exact(value,keys){if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join('|')!==keys.slice().sort().join('|'))throw Error('Exact supported media settings required')}
 export function requireSupportedMediaSelection(provider,model,settings,count,inputs){
  if(!Number.isInteger(count)||!Array.isArray(inputs))throw Error('Exact output count and input selection required')
- if(provider==='higgsfield'&&model===SOUL_MODEL){
-  exact(settings,['resolution','aspect_ratio','enhance_prompt']);if(![1,4].includes(count)||inputs.length||!['720p','1080p'].includes(settings.resolution)||!['9:16','16:9','4:3','3:4','1:1','2:3','3:2'].includes(settings.aspect_ratio)||typeof settings.enhance_prompt!=='boolean')throw Error('Unsupported image settings');return 'image'
+ if(provider==='higgsfield'&&[SOUL_MODEL,SOUL_GUIDED_MODEL].includes(model)){
+  const guided=model===SOUL_GUIDED_MODEL;
+  if(guided&&(inputs.length!==1||!['design_asset_version','media_output'].includes(inputs[0]?.kind)||settings.enhance_prompt!==true))throw Error('One authorized original and enabled reference processing are required');
+  exact(settings,['resolution','aspect_ratio','enhance_prompt']);if(![1,4].includes(count)||inputs.length!==(guided?1:0)||!['720p','1080p'].includes(settings.resolution)||!['9:16','16:9','4:3','3:4','1:1','2:3','3:2'].includes(settings.aspect_ratio)||typeof settings.enhance_prompt!=='boolean')throw Error('Unsupported image settings');return 'image'
  }
  if(provider==='higgsfield'&&[SEEDANCE_TEXT_MODEL,SEEDANCE_INPUT_MODEL].includes(model)){
   const input=model===SEEDANCE_INPUT_MODEL;exact(settings,['duration_seconds','resolution','output_format','generate_audio',...(input?[]:['aspect_ratio'])]);
