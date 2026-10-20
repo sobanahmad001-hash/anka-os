@@ -25,7 +25,7 @@ export async function listMediaChoices(admin:any,body:Record<string,any>,actor:s
  const inputs=body.input_versions||[];if(!Array.isArray(inputs)||inputs.length>1)throw Error('One exact selected input is supported');for(const input of inputs)requireSelectedSourceConsent(input,input,'higgsfield');
  const choices=[];
  for(const c of connections){
-  const models=inputs.length?(c.provider==='higgsfield'?[SOUL_GUIDED_MODEL,SEEDANCE_INPUT_MODEL]:[]):c.provider==='openai'?OPENAI_STILL_MODELS:[SOUL_MODEL,SEEDANCE_TEXT_MODEL];
+  const models=inputs.length?(c.provider==='higgsfield'?(inputs[0]?.kind==='private_attachment'?[SEEDANCE_INPUT_MODEL]:[SOUL_GUIDED_MODEL,SEEDANCE_INPUT_MODEL]):[]):c.provider==='openai'?OPENAI_STILL_MODELS:[SOUL_MODEL,SEEDANCE_TEXT_MODEL];
   for(const model of models){
    const settings=c.provider==='openai'?{size:'1024x1024',quality:'medium',background:'opaque',output_format:'png'}:[SOUL_MODEL,SOUL_GUIDED_MODEL].includes(model)?{resolution:'720p',aspect_ratio:'16:9',enhance_prompt:model===SOUL_GUIDED_MODEL}:{duration_seconds:5,resolution:'720p',aspect_ratio:'16:9',output_format:'mp4',generate_audio:false};
    if(model===SEEDANCE_INPUT_MODEL)delete (settings as Record<string,any>).aspect_ratio;
