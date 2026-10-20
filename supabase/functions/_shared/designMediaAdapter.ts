@@ -3,15 +3,18 @@
 // A caller MUST first obtain the shared durable dispatch claim. This transport
 // is not a job ledger, authorization check, budget reservation or retry policy.
 export const SEEDANCE_MODEL = 'bytedance/seedance-2.5/text-to-video'
+export const SOUL_GUIDED_MODEL='higgsfield-ai/soul/v2/image-to-image'
 export const SEEDANCE_IMAGE_MODEL = 'bytedance/seedance-2.5/image-to-video'
 export const SOUL_IMAGE_MODEL = 'higgsfield-ai/soul/v2/standard'
-// Official API references verified 2026-10-15. Transport support is separate from
+// Official API references verified 2026-10-15; Soul image-to-image verified 2026-10-20.
+// https://open.higgsfield.ai/models/higgsfield-ai/soul/v2/image-to-image/api-reference
+// Transport support is separate from
 // current model grants, exact quotes, confirmed source consent and durable claims.
 export type ImageInput = {prompt:string;batch_size:1|4;resolution:string;aspect_ratio:string;enhance_prompt:boolean;seed?:number}
 export type ImageVideoInput = {prompt:string;duration:number;image_url:string;resolution:string;output_format:string;generate_audio:boolean}
 type Input = { prompt: string; duration: number; resolution: string; aspect_ratio: string;
   output_format: string; generate_audio: boolean }
-type Client = { subscribe(endpoint: string, options: { input: Input | ImageInput | ImageVideoInput; withPolling: boolean }): Promise<unknown> }
+type Client = { subscribe(endpoint: string, options: { input: Input | ImageInput | ImageVideoInput | (ImageInput & {image_url:string}); withPolling: boolean }): Promise<unknown> }
 export type SdkFactory = (config: { credentials: string; maxRetries: number; timeout: number; baseURL: string }) => Client
 export type MediaReceipt = { state: 'pending' | 'provider_completed' | 'provider_failed' | 'safety_refused'; requestId: string; statusUrl?: string; outputUrl?: string; outputUrls?: string[] }
 const requestIdPattern = /^[a-zA-Z0-9_-]{1,128}$/
@@ -101,6 +104,17 @@ export function createDesignMediaAdapter(createClient: SdkFactory, credential: s
       const pinned:ImageInput={prompt:input.prompt.trim(),batch_size:input.batch_size,resolution:input.resolution,aspect_ratio:input.aspect_ratio,enhance_prompt:input.enhance_prompt,...(input.seed===undefined?{}:{seed:input.seed})}
       try{return normalize(await client.subscribe(SOUL_IMAGE_MODEL,{input:pinned,withPolling:false}),undefined,undefined,'image',input.batch_size)}
       catch{throw new Error('Media submission outcome unknown; reconcile before resubmission')}
+    },
+    async submitGuidedImage(input:ImageInput & {image_url:string}):Promise<MediaReceipt>{
+      let url:URL;try{url=new URL(input.image_url)}catch{throw new Error('Unsupported original image URL')}
+      if(url.protocol!=='https:'||url.username||url.password||input.image_url.length>4096
+        ||typeof input.prompt!=='string'||!input.prompt.trim()||input.prompt.length>12000
+        ||![1,4].includes(input.batch_size)||!['720p','1080p'].includes(input.resolution)
+        ||!['9:16','16:9','4:3','3:4','1:1','2:3','3:2'].includes(input.aspect_ratio)
+        ||input.enhance_prompt!==true)throw new Error('Unsupported image-guided request');
+      const pinned={prompt:input.prompt.trim(),image_url:input.image_url,batch_size:input.batch_size,resolution:input.resolution,aspect_ratio:input.aspect_ratio,enhance_prompt:true};
+      try{return normalize(await client.subscribe(SOUL_GUIDED_MODEL,{input:pinned,withPolling:false}),undefined,undefined,'image',input.batch_size)}
+      catch{throw new Error('Image-guided submission outcome unknown; recover the original request')}
     },
     async submitImageToVideo(input:ImageVideoInput):Promise<MediaReceipt>{
       // image_url must be resolved by the caller from an authorized immutable asset,

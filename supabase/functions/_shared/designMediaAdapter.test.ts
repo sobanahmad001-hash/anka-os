@@ -162,3 +162,11 @@ Deno.test('image output count mismatch is uncertain, never automatically billed 
  await assertRejects(()=>adapter.submitImage({prompt:'Synthetic',batch_size:4,resolution:'720p',aspect_ratio:'1:1',enhance_prompt:false}),Error,'outcome unknown')
  assertEquals(calls.length,2)
 })
+
+Deno.test('image-guided adapter pins original URL and exact image model without retries or hidden conditioning',async()=>{
+ const {adapter,calls}=fixture();const input={prompt:'Use the original',image_url:'https://storage.example/original?token=synthetic',batch_size:1,resolution:'720p',aspect_ratio:'16:9',enhance_prompt:true};
+ await adapter.submitGuidedImage({...input,custom_reference_id:'not-approved',webhook:'https://outside'} as any);
+ assertEquals(calls[1],{endpoint:'higgsfield-ai/soul/v2/image-to-image',options:{input,withPolling:false}});
+ for(const patch of [{image_url:'http://outside'},{image_url:'https://user:pass@outside'},{enhance_prompt:false},{batch_size:2}])await assertRejects(()=>adapter.submitGuidedImage({...input,...patch} as any));
+ assertEquals(calls.length,2);
+})
