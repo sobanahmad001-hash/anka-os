@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
-import { textAiConsentKey, hasTextAiConsent } from './textAiConsent.js'
+import { textAiConsentKey, hasTextAiConsent, textAiConsentNeedsReview, readTextAiConsent, rememberTextAiConsent } from './textAiConsent.js'
 const scope = { userId: 'actor', organizationId: 'org', departmentId: 'design', projectId: 'project', engagementId: 'engagement', contextKind: 'engagement', conversationId: 'conversation', connectionId: 'connection', provider: 'openai', canonical: false, recipients: ['a', 'b'], sources: ['version'], selectedAttachmentIds: ['file'] }
 test('text consent excludes message content, normalizes selections, and has no time expiry', () => {
   const key = textAiConsentKey(scope)
@@ -41,4 +41,24 @@ test('both chat surfaces key only material scope and preserve engagement selecti
       assert.doesNotMatch(keyLine, /sources:|selectedAttachmentIds/)
     }
   }
+})
+
+test('ordinary text Send needs no extra approval; added data still requires review', () => {
+  const plain = { ...scope, canonical: false, sources: [], selectedAttachmentIds: [] }
+  assert.equal(textAiConsentNeedsReview(textAiConsentKey(plain)), false)
+  for (const extra of [{ canonical: true }, { sources: ['version'] }, { selectedAttachmentIds: ['file'] }]) {
+    assert.equal(textAiConsentNeedsReview(textAiConsentKey({ ...plain, ...extra })), true)
+  }
+  assert.equal(textAiConsentNeedsReview('malformed'), true)
+})
+test('exact additional-source approval survives remount but never grants a changed scope', () => {
+  const values = new Map(); const storage = { getItem: key => values.get(key), setItem: (key, value) => values.set(key, value) }
+  const key = textAiConsentKey(scope)
+  rememberTextAiConsent(key, storage)
+  assert.equal(hasTextAiConsent(readTextAiConsent(key, storage), key), true)
+  for (const extra of [{ userId: 'other' }, { organizationId: 'other' }, { conversationId: 'other' }, { provider: 'other' }, { connectionId: 'other' }, { recipients: ['other'] }, { sources: ['new-version'] }, { selectedAttachmentIds: ['new-file'] }]) {
+    assert.equal(readTextAiConsent(textAiConsentKey({ ...scope, ...extra }), storage), null)
+  }
+  assert.equal(readTextAiConsent(key, { getItem() { throw Error('unavailable') } }), null)
+  rememberTextAiConsent(key, { setItem() { throw Error('unavailable') } })
 })

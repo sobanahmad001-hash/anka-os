@@ -126,9 +126,7 @@ for (const departmentId of ['design', 'content', 'marketing']) test(`compact ${d
   let dispatches = 0
   globalThis.__contextReadinessFixture.runner = () => { dispatches++; return { status: 'pending' } }
   await act(async () => { void reactProps(button(environment.container, 'Ask Anka AI')).onClick() })
-  assert.equal(dispatches, 0)
-  assert.match(environment.container.textContent, /Teammate-authored messages, private files and private memory are excluded/)
-  await act(async () => reactProps(button(environment.container, 'Allow and ask Anka AI')).onClick())
+  assert.equal(button(environment.container, 'Allow and ask Anka AI'), undefined)
   assert.equal(dispatches, 1)
   await act(async () => reactProps(button(environment.container, 'Ask Anka AI')).onClick())
   assert.equal(dispatches, 2, 'same scope needs no second click')
@@ -246,7 +244,7 @@ test('canonical context stays opt-in per reply and selection alone never calls a
   globalThis.__contextReadinessFixture.runner = () => { dispatches++; return { status: 'pending' } }
   assert.equal(reactProps(canonical()).checked, false)
   await act(async () => { void reactProps(button(environment.container, 'Ask Anka AI')).onClick() })
-  await act(async () => reactProps(button(environment.container, 'Allow and ask Anka AI')).onClick())
+  assert.equal(button(environment.container, 'Allow and ask Anka AI'), undefined)
   assert.equal(dispatches, 1)
   await act(async () => reactProps(canonical()).onChange({ target: { checked: true } }))
   assert.equal(dispatches, 1, 'records-only selection is not execution')
@@ -261,8 +259,7 @@ test('canonical context stays opt-in per reply and selection alone never calls a
   assert.equal(dispatches, 2)
   assert.equal(reactProps(canonical()).checked, false, 'canonical sources remain an explicit per-reply choice')
   await act(async () => { void reactProps(button(environment.container, 'Ask Anka AI')).onClick() })
-  assert.equal(dispatches, 2)
-  await act(async () => reactProps(button(environment.container, 'Allow and ask Anka AI')).onClick())
+  assert.equal(button(environment.container, 'Allow and ask Anka AI'), undefined)
   assert.equal(dispatches, 3)
   assert.equal(reactProps(canonical()).checked, false)
 })
