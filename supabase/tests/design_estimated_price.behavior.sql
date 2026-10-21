@@ -15,19 +15,22 @@ begin
  prepared:=public.prepare_design_media_request(org,actor,request);request:=prepared->'request';
  perform pg_temp.ok(request->>'prompt_checksum'=encode(sha256(convert_to(prepared->>'prompt','UTF8')),'hex'),'database derives exact confirmed prompt');
 
- rate:=public.configure_design_media_reference_rate(org,actor,'higgsfield',request->>'model_id',request->'settings',3000000,'https://open.higgsfield.ai/pricing#synthetic-only',clock_timestamp(),clock_timestamp()+interval '1 hour');
+ rate:=public.configure_design_media_reference_rate(org,actor,'higgsfield',request->>'model_id',request->'settings',3000000,'https://open.higgsfield.ai/pricing#synthetic-only',clock_timestamp(),clock_timestamp()+interval '6 days');
  perform pg_temp.ok(rate->>'price_basis'='estimated','reference rate is not verified');
+ begin perform public.configure_design_media_reference_rate(org,actor,'higgsfield',request->>'model_id',request->'settings',3000000,'https://open.higgsfield.ai/pricing#synthetic-only',clock_timestamp(),clock_timestamp()+interval '8 days');raise exception 'FAIL estimated rate expiry';exception when check_violation then raise notice 'PASS estimated rates cannot exceed seven days';end;
+ begin perform public.configure_design_media_rate(org,actor,'higgsfield',request->>'model_id',request->'settings',3000000,'https://open.higgsfield.ai/pricing#synthetic-only',clock_timestamp(),clock_timestamp()+interval '2 days');raise exception 'FAIL verified expiry';exception when check_violation then raise notice 'PASS verified rates remain limited to 24 hours';end;
+
  quote:=public.quote_design_media_request(org,actor,request);
  perform pg_temp.ok(quote->>'price_basis'='estimated' and quote->>'verified_at' is null and quote->>'reviewed_at' is not null,'quote explicitly estimate, no verified timestamp');
  acceptance:=jsonb_build_object('generate',true,'quote_id',quote->>'id','request_checksum',quote->>'request_checksum','total_max_charge_microusd',3000000,'confirm_above_threshold',true);
  begin perform public.claim_design_media_generation(org,actor,op,(quote->>'id')::uuid,request,prepared->>'prompt',acceptance||'{"accept_estimated_price_risk":true}'::jsonb);raise exception 'FAIL un-enrolled estimate';exception when insufficient_privilege then raise notice 'PASS estimates cannot bypass shared enrollment';end;
  insert into private.design_media_test_budgets(organization_id) values(org);
- begin perform public.set_design_estimated_test_mode(org,actor,true,false,clock_timestamp()+interval '1 hour');raise exception 'FAIL absent risk';exception when invalid_parameter_value then raise notice 'PASS absent risk denied';end;
- begin perform public.set_design_estimated_test_mode(org,actor,true,true,clock_timestamp()+interval '25 hours');raise exception 'FAIL duration';exception when invalid_parameter_value then raise notice 'PASS mode expiry bound';end;
+ begin perform public.set_design_estimated_test_mode(org,actor,true,false,clock_timestamp()+interval '6 days');raise exception 'FAIL absent risk';exception when invalid_parameter_value then raise notice 'PASS absent risk denied';end;
+ begin perform public.set_design_estimated_test_mode(org,actor,true,true,clock_timestamp()+interval '8 days');raise exception 'FAIL duration';exception when invalid_parameter_value then raise notice 'PASS mode expiry bound';end;
  update public.organization_memberships set role='executive' where organization_id=org and user_id=actor;
- begin perform public.set_design_estimated_test_mode(org,actor,true,true,clock_timestamp()+interval '1 hour');raise exception 'FAIL role';exception when insufficient_privilege then raise notice 'PASS non-admin denied';end;
+ begin perform public.set_design_estimated_test_mode(org,actor,true,true,clock_timestamp()+interval '6 days');raise exception 'FAIL role';exception when insufficient_privilege then raise notice 'PASS non-admin denied';end;
  update public.organization_memberships set role='operations_admin' where organization_id=org and user_id=actor;
- perform public.set_design_estimated_test_mode(org,actor,true,true,clock_timestamp()+interval '1 hour');
+ perform public.set_design_estimated_test_mode(org,actor,true,true,clock_timestamp()+interval '6 days');
  perform pg_temp.ok((select state='estimated' and evidence_reference is null and verified_at is null from private.design_media_test_budgets where organization_id=org),'activation not mislabeled verified');
  begin perform public.claim_design_media_generation(org,actor,op,(quote->>'id')::uuid,request,prepared->>'prompt',acceptance);raise exception 'FAIL per-request risk';exception when insufficient_privilege then raise notice 'PASS per-request risk required';end;
  acceptance:=acceptance||'{"accept_estimated_price_risk":true}'::jsonb;
@@ -52,7 +55,7 @@ begin
  perform pg_temp.ok((select consumed_microusd+overage_microusd=10000000 from private.design_media_test_budgets where organization_id=org),'lower actual does not refill one-time allowance');
  begin update private.design_media_test_budgets set overage_microusd=0 where organization_id=org;raise exception 'FAIL overage reset';exception when insufficient_privilege then raise notice 'PASS overage cannot decrease';end;
  perform public.set_design_estimated_test_mode(org,actor,false,false,null);
- perform public.set_design_estimated_test_mode(org,actor,true,true,clock_timestamp()+interval '1 hour');
+ perform public.set_design_estimated_test_mode(org,actor,true,true,clock_timestamp()+interval '6 days');
  perform pg_temp.ok((select consumed_microusd+overage_microusd=10000000 from private.design_media_test_budgets where organization_id=org),'disable and reenabling does not reset');
  update private.design_media_test_budgets set estimated_valid_until=clock_timestamp()-interval '1 second',estimated_risk_accepted_at=clock_timestamp()-interval '1 hour' where organization_id=org;
  begin perform public.claim_design_media_generation(org,actor,gen_random_uuid(),(quote->>'id')::uuid,request,prepared->>'prompt',acceptance);raise exception 'FAIL expired mode';exception when insufficient_privilege then raise notice 'PASS expired mode blocks';end;

@@ -17,7 +17,7 @@ export async function configureMediaRate(admin:PricingClient,body:Record<string,
  if(!hosts.includes(source.hostname)||source.protocol!=='https:'||source.username||source.password||source.port
  ||typeof model!=='string'||!model.trim()||model.length>200||!settings||typeof settings!=='object'||Array.isArray(settings)
  ||JSON.stringify(settings).length>8192||!Number.isSafeInteger(unit)||unit<1||unit>90071992547409
- ||!Number.isFinite(verified)||!Number.isFinite(until)||verified>now||until<=now||until<=verified||until-verified>86400000)
+ ||!Number.isFinite(verified)||!Number.isFinite(until)||verified>now||until<=now||until<=verified||until-verified>(estimated?604800000:86400000))
  throw new Error('Current exact settings, official source and bounded unit price required');
  const {data,error}=await admin.rpc(estimated?'configure_design_media_reference_rate':'configure_design_media_rate',{p_org:admin.organizationId,p_actor:actorId,p_provider:provider,p_model:model,p_settings:settings,p_unit_max:unit,p_source:source.href,[estimated?'p_reviewed_at':'p_verified_at']:new Date(verified).toISOString(),p_valid_until:new Date(until).toISOString()});
  if(error)throw Object.assign(new Error('Reviewed rate was not confirmed. Refresh rates before trying again.'),{status:409});
@@ -27,7 +27,7 @@ export async function configureMediaRate(admin:PricingClient,body:Record<string,
 
 export async function setEstimatedTestMode(admin:PricingClient,body:Record<string,any>,actorId:string,now=Date.now()){
  const enabled=body.enabled,until=Date.parse(body.valid_until);
- if(typeof enabled!=='boolean'||(enabled&&(body.accept_estimated_price_risk!==true||!Number.isFinite(until)||until<=now||until-now>86400000)))throw Error('Explicit estimated-price risk acceptance and expiry required');
+ if(typeof enabled!=='boolean'||(enabled&&(body.accept_estimated_price_risk!==true||!Number.isFinite(until)||until<=now||until-now>604800000)))throw Error('Explicit estimated-price risk acceptance and expiry required');
  const {data,error}=await admin.rpc('set_design_estimated_test_mode',{p_org:admin.organizationId,p_actor:actorId,p_enabled:enabled,p_accept_risk:body.accept_estimated_price_risk===true,p_until:enabled?new Date(until).toISOString():null});
  if(error||data?.organization_id!==admin.organizationId||data?.state!==(enabled?'estimated':'blocked')||data?.limit_microusd!==10000000||(enabled&&Date.parse(data.valid_until)!==until))throw Object.assign(new Error('Test mode change was not confirmed'),{status:409});
  return data;
