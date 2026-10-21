@@ -27,7 +27,7 @@ export function requireMediaQuote(request,quote,now=Date.now()) {
   ||quote.total_max_charge_microusd!==quote.unit_max_charge_microusd*request.output_count
   ||!Number.isFinite(Date.parse(reviewed))||Date.parse(reviewed)>now
   ||!Number.isFinite(Date.parse(quote.valid_until))||Date.parse(quote.valid_until)<=now
-  ||Date.parse(quote.valid_until)-Date.parse(reviewed)>86400000
+  ||Date.parse(quote.valid_until)-Date.parse(reviewed)>(estimated?604800000:86400000)
   ||typeof quote.request_checksum!=='string'||!/^[a-f0-9]{64}$/.test(quote.request_checksum))throw Error('Fresh verified total quote required for this exact request')
  return {estimated,quoteId:quote.id,requestChecksum:quote.request_checksum,totalMicrousd:quote.total_max_charge_microusd,requiresConfirmation:quote.total_max_charge_microusd>MEDIA_ONE_CLICK_LIMIT_MICROUSD}
 }

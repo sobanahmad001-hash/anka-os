@@ -15,3 +15,16 @@ Deno.test('missing reviewed rates produce safe setup guidance; unrelated failure
   if(error?.status!==409||error?.code!==(code==='55000'?'MEDIA_RATE_UNAVAILABLE':'MEDIA_QUOTE_UNAVAILABLE')||error.message.includes('internal detail'))throw Error('Unsafe or misclassified quote error')
  }
 })
+
+Deno.test('quote endpoint accepts seven-day estimates and rejects over-window or verified extensions',async()=>{
+ for(const [basis,days,extra,pass] of [['estimated',7,0,true],['estimated',7,1,false],['verified',1,0,true],['verified',1,1,false]] as const){
+  const base=await fixture();const original=base.admin.rpc;
+  const admin={organizationId:org,rpc:async(name:string,args:any)=>{
+   if(name!=='quote_design_media_request')return original(name,args);
+   const reviewed=Date.now()-60000;
+   return {error:null,data:{id:'quote',currency:'USD',request:args.p_request,request_checksum:'b'.repeat(64),unit_max_charge_microusd:3200,total_max_charge_microusd:3200,price_basis:basis,reviewed_at:new Date(reviewed).toISOString(),verified_at:new Date(reviewed).toISOString(),valid_until:new Date(reviewed+days*86400000+extra).toISOString()}};
+  }};
+  let accepted=false;try{await quoteMediaRequest(admin,{creative_brief_id:'brief',selection},actor);accepted=true}catch{}
+  if(accepted!==pass)throw Error('Quote window mismatch '+basis+' '+extra);
+ }
+});

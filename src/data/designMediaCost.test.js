@@ -14,3 +14,22 @@ test('acceptance binds quote checksum and total, never just a boolean',()=>{cons
 
 test('reference quote is explicitly estimated and needs per-request risk consent',()=>{const q={...quote(),price_basis:'estimated',reviewed_at:'2026-10-15T11:00:00Z',verified_at:null};assert.equal(requireMediaQuote(request,q,now).estimated,true);assert.throws(()=>requireMediaGenerationAcceptance(request,q,acceptance(q),now));assert.equal(requireMediaGenerationAcceptance(request,q,{...acceptance(q),accept_estimated_price_risk:true},now).estimated,true)})
 test('estimated above USD2 still requires exact confirmation and rejects stale reference',()=>{const q={...quote(600000),price_basis:'estimated',reviewed_at:'2026-10-15T11:00:00Z',verified_at:null};assert.throws(()=>requireMediaGenerationAcceptance(request,q,{...acceptance(q),accept_estimated_price_risk:true},now));assert.equal(requireMediaGenerationAcceptance(request,q,{...acceptance(q),accept_estimated_price_risk:true,confirm_above_threshold:true},now).requiresConfirmation,true);assert.throws(()=>requireMediaQuote(request,{...q,reviewed_at:null},now));assert.throws(()=>requireMediaQuote(request,{...q,price_basis:'unknown'},now))})
+
+
+test('seven-day estimated quotes retain exact acceptance and above-$2 confirmation',()=>{
+ const reviewed_at='2026-10-15T11:00:00Z';const until=Date.parse(reviewed_at)+7*86400000;
+ const q={...quote(600000),price_basis:'estimated',reviewed_at,verified_at:null,valid_until:new Date(until).toISOString()};
+ assert.equal(requireMediaQuote(request,q,now).estimated,true);
+ assert.throws(()=>requireMediaGenerationAcceptance(request,q,{...acceptance(q),accept_estimated_price_risk:true},now));
+ assert.equal(requireMediaGenerationAcceptance(request,q,{...acceptance(q),accept_estimated_price_risk:true,confirm_above_threshold:true},now).requiresConfirmation,true);
+ assert.throws(()=>requireMediaQuote(request,{...q,valid_until:new Date(until+1).toISOString()},now));
+ assert.throws(()=>requireMediaQuote(request,q,until));
+ assert.throws(()=>requireMediaGenerationAcceptance(request,q,{...acceptance(q),confirm_above_threshold:true},now));
+});
+test('verified and legacy quotes remain limited to exactly 24 hours',()=>{
+ for(const basis of [undefined,'verified']){
+ const q={...quote(),price_basis:basis,valid_until:'2026-10-16T11:00:00Z'};
+ assert.equal(requireMediaQuote(request,q,now).estimated,false);
+ assert.throws(()=>requireMediaQuote(request,{...q,valid_until:'2026-10-16T11:00:00.001Z'},now));
+ }
+});
