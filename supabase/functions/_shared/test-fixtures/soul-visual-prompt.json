@@ -1,0 +1,3 @@
+{
+  "prompt": "Create one still image from the visual instructions below. Render the scene itself, not a screenshot of this brief or a presentation of the request. Do not add a poster, interface, panels, captions, labels, logos or typography unless explicitly requested as visible content. Follow the exclusions. Motion instructions describe scene context only; do not turn them into storyboards or multiple frames.\n\nVisual instructions: A white ceramic coffee cup, soft sunlight, realistic photography, no text or logos. For motion and video: slow camera push, steam rising.\n\nExclusions and constraints: No text, logos, people, audio or multiple shots.\n\nContext only, not visible text: {\"purpose\": \"Internal browser verification\", \"audience\": \"Owner QA only\"}"
+}
