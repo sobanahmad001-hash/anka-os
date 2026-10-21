@@ -27,7 +27,7 @@ export default function DesignMediaPricingSettings({organizationId,canManage,req
   finally{pending.current=false;if(current===generation.current)setBusy(false)}
  }
  return <section id="design-media-pricing" aria-label="Design media pricing administration" className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-5">
- <h2 className="font-semibold">Design media pricing</h2><p className="mt-2 text-sm text-[var(--anka-muted)]">Administrators record verified maximum prices or clearly labeled reference estimates for exact provider settings. A rate is valid for at most 24 hours. This does not enable a model or send a generation request.</p>
+ <h2 className="font-semibold">Design media pricing</h2><p className="mt-2 text-sm text-[var(--anka-muted)]">Administrators record verified maximum prices or clearly labeled reference estimates for exact provider settings. Verified maximum rates last at most 24 hours; reference estimates last at most 7 days. This does not enable a model or send a generation request.</p>
  <button type="button" onClick={read} disabled={busy||blocked} className="mt-3 rounded-lg border border-[var(--anka-line)] px-3 py-2">Refresh rates</button>
  {message&&<p role="status" className="mt-3 text-sm">{message}</p>}
  {!blocked&&<form onSubmit={save} className="mt-4 grid gap-3 md:grid-cols-2"><fieldset disabled={busy||blocked} className="contents">
