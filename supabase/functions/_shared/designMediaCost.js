@@ -18,21 +18,24 @@ export function mediaRequestIdentity(request) {
 }
 export function requireMediaQuote(request,quote,now=Date.now()) {
  const identity=mediaRequestIdentity(request)
+ const estimated=quote?.price_basis==='estimated', reviewed=estimated?quote?.reviewed_at:quote?.verified_at
+ if(quote?.price_basis!==undefined&&!['estimated','verified'].includes(quote.price_basis))throw Error('Unknown price basis')
  if(!quote||typeof quote.id!=='string'||!quote.id||quote.currency!=='USD'
   ||mediaRequestIdentity(quote.request)!==identity
   ||!Number.isSafeInteger(quote.unit_max_charge_microusd)||quote.unit_max_charge_microusd<1
   ||!Number.isSafeInteger(quote.total_max_charge_microusd)||quote.total_max_charge_microusd<1
   ||quote.total_max_charge_microusd!==quote.unit_max_charge_microusd*request.output_count
-  ||!Number.isFinite(Date.parse(quote.verified_at))||Date.parse(quote.verified_at)>now
+  ||!Number.isFinite(Date.parse(reviewed))||Date.parse(reviewed)>now
   ||!Number.isFinite(Date.parse(quote.valid_until))||Date.parse(quote.valid_until)<=now
-  ||Date.parse(quote.valid_until)-Date.parse(quote.verified_at)>86400000
+  ||Date.parse(quote.valid_until)-Date.parse(reviewed)>86400000
   ||typeof quote.request_checksum!=='string'||!/^[a-f0-9]{64}$/.test(quote.request_checksum))throw Error('Fresh verified total quote required for this exact request')
- return {quoteId:quote.id,requestChecksum:quote.request_checksum,totalMicrousd:quote.total_max_charge_microusd,requiresConfirmation:quote.total_max_charge_microusd>MEDIA_ONE_CLICK_LIMIT_MICROUSD}
+ return {estimated,quoteId:quote.id,requestChecksum:quote.request_checksum,totalMicrousd:quote.total_max_charge_microusd,requiresConfirmation:quote.total_max_charge_microusd>MEDIA_ONE_CLICK_LIMIT_MICROUSD}
 }
 export function requireMediaGenerationAcceptance(request,quote,acceptance,now=Date.now()) {
  const cost=requireMediaQuote(request,quote,now)
  if(acceptance?.generate!==true||acceptance.quote_id!==cost.quoteId||acceptance.request_checksum!==cost.requestChecksum
   ||acceptance.total_max_charge_microusd!==cost.totalMicrousd
+  ||(cost.estimated&&acceptance.accept_estimated_price_risk!==true)
   ||(cost.requiresConfirmation&&acceptance.confirm_above_threshold!==true))throw Error('Confirm this exact media request before charging')
  return cost
 }
