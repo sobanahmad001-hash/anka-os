@@ -28,3 +28,30 @@ Deno.test('quote endpoint accepts seven-day estimates and rejects over-window or
   if(accepted!==pass)throw Error('Quote window mismatch '+basis+' '+extra);
  }
 });
+
+import {listMediaChoices} from './mediaRequests.ts'
+import {LINEUP_CONTRACTS,requiresImage} from '../_shared/designModelLineup.js'
+Deno.test('all exposed models intersect exact priced combinations and reject unrelated readiness scope',async()=>{
+ const previous=Deno.env.get('DESIGN_VIDEO_PAID_EXECUTION_ENABLED');Deno.env.set('DESIGN_VIDEO_PAID_EXECUTION_ENABLED','true');
+ try{
+  for(const input of [false,true]){
+   const chain:any={select(){return this},eq(){return this},in(){return this},is(){return this},order(){return this},limit:async()=>({data:[{id:'connector',display_name:'Higgsfield',provider:'higgsfield'}],error:null})};
+   let changed=false,missing=false;
+   const admin:any={organizationId:org,from:()=>chain,rpc:async(name:string,args:any)=>{
+    const request=args.p_request;
+    if(name==='prepare_design_media_request')return {data:{creative_brief_id:'brief',request,prompt},error:null};
+    if(name!=='read_design_media_readiness')throw Error('Unexpected RPC');
+    if(missing)return {data:null,error:{code:'NETWORK'}};
+    const settings={...request.settings,...(request.model_id.startsWith('kling-')?{duration:3}:{}),...(request.model_id.startsWith('xai/')?{quality:'low'}:{})};
+    return {data:{configurations:[{request:{...request,settings,...(changed?{organization_id:'other'}:{})},price_basis:'estimated',total_microusd:30000,valid_until:new Date(Date.now()+60000).toISOString()},{request:{...request,settings:{...settings,unsupported:true}},price_basis:'estimated',total_microusd:30000,valid_until:new Date(Date.now()+60000).toISOString()}]},error:null};
+   }};
+   const source={kind:'media_output',id:'old:0',checksum:'a'.repeat(64),provider_consent:{provider:'higgsfield',source_id:'old:0',checksum:'a'.repeat(64),allow_transfer:true}};
+   const body={creative_brief_id:'brief',creative_brief_version_id:'v2',context:{kind:'private',id:'chat'},input_versions:input?[source]:[]};
+   const response=await listMediaChoices(admin,body,actor);
+   if(response.choices.length!==Object.keys(LINEUP_CONTRACTS).filter(m=>requiresImage(m)===input).length+2)throw Error('Model coverage missing');
+   for(const choice of response.choices){if(choice.configurations.length!==1)throw Error('Unsupported combination exposed');if(choice.selection.model_id.startsWith('kling-')&&choice.configurations[0].request.settings.duration!==3)throw Error('Priced duration replaced');if(choice.selection.model_id.startsWith('xai/')&&choice.configurations[0].request.settings.quality!=='low')throw Error('Priced quality replaced')}
+   changed=true;let denied=false;try{await listMediaChoices(admin,body,actor)}catch{denied=true}if(!denied)throw Error('Cross-scope readiness accepted');changed=false;missing=true;denied=false;try{await listMediaChoices(admin,body,actor)}catch{denied=true}if(!denied)throw Error('Transient failure presented as ready');missing=false;
+   Deno.env.set('DESIGN_VIDEO_PAID_EXECUTION_ENABLED','false');const disabled=await listMediaChoices(admin,body,actor);if(disabled.choices.some(c=>c.configurations.length||c.unavailable_reason!=='execution_disabled'))throw Error('Disabled provider exposed');Deno.env.set('DESIGN_VIDEO_PAID_EXECUTION_ENABLED','true');
+  }
+ }finally{if(previous===undefined)Deno.env.delete('DESIGN_VIDEO_PAID_EXECUTION_ENABLED');else Deno.env.set('DESIGN_VIDEO_PAID_EXECUTION_ENABLED',previous)}
+});

@@ -36,7 +36,20 @@ export async function listMediaChoices(admin:any,body:Record<string,any>,actor:s
    const {data,error:denied}=await admin.rpc('prepare_design_media_request',{p_org:admin.organizationId,p_actor:actor,p_request:selection});
    if(denied){if(['42501','22023','40001'].includes(denied.code))continue;throw Error('Media eligibility could not be confirmed')}
    if(data?.creative_brief_id!==body.creative_brief_id||!data?.request||mediaRequestIdentity({...data.request,prompt_checksum:selection.prompt_checksum})!==mediaRequestIdentity(selection))throw Error('Media eligibility response changed');
-   choices.push({id:c.id+':'+model,label:(c.display_name||c.provider)+' · '+(LINEUP_LABELS[model]||model),kind:mediaKind(model),selection:data.request});
+   const {data:readiness,error:readinessError}=await admin.rpc('read_design_media_readiness',{p_org:admin.organizationId,p_actor:actor,p_request:data.request});
+   if(readinessError||!Array.isArray(readiness?.configurations))throw Error('Current generation readiness could not be checked. Refresh available models.');
+   const configurations=[];
+   for(const entry of readiness.configurations){
+    const request=entry?.request;
+    if(!request||mediaRequestIdentity({...request,settings:data.request.settings,output_count:data.request.output_count,prompt_checksum:data.request.prompt_checksum})!==mediaRequestIdentity(data.request))throw Error('Readiness scope changed');
+    try{requireSupportedMediaSelection(request.provider,request.model_id,request.settings,request.output_count,request.input_versions);
+     if(LINEUP_CONTRACTS[model])buildLineupInput(model,data.prompt,request.settings,request.output_count,LINEUP_CONTRACTS[model].input?'https://validated.invalid/original':undefined);
+    }catch{continue}
+    if(!['estimated','verified'].includes(entry.price_basis)||!Number.isSafeInteger(entry.total_microusd)||entry.total_microusd<=0||!Number.isFinite(Date.parse(entry.valid_until))||Date.parse(entry.valid_until)<=Date.now())continue;
+    configurations.push(entry);
+   }
+   const executionDisabled=c.provider==='higgsfield'&&Deno.env.get('DESIGN_VIDEO_PAID_EXECUTION_ENABLED')!=='true';
+   choices.push({id:c.id+':'+model,label:(c.display_name||c.provider)+' · '+(LINEUP_LABELS[model]||model),kind:mediaKind(model),selection:data.request,configurations:executionDisabled?[]:configurations,unavailable_reason:executionDisabled?'execution_disabled':configurations.length?null:readiness.reason||'input_contract'});
   }
  }
  return {choices:choices.sort((a,b)=>modelOrder(a.selection.model_id)-modelOrder(b.selection.model_id))};
