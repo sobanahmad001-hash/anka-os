@@ -1,0 +1,47 @@
+begin;
+create or replace function pg_temp.ok(value boolean,label text) returns void language plpgsql as $$begin if value is distinct from true then raise exception 'FAIL %',label;end if;raise notice 'PASS %',label;end;$$;
+do $$
+declare org uuid:=gen_random_uuid();actor uuid:=gen_random_uuid();conversation uuid:=gen_random_uuid();brief uuid:=gen_random_uuid();version uuid:=gen_random_uuid();connection uuid:=gen_random_uuid();op uuid:=gen_random_uuid();request jsonb;prepared jsonb;quote jsonb;rate jsonb;acceptance jsonb;job jsonb;again jsonb;manifest jsonb;source jsonb;video_request jsonb;total bigint;
+begin
+ insert into auth.users(id,email) values(actor,actor::text||'@example.invalid');
+ insert into public.organizations(id,name,slug) values(org,'Transactional Design media QA','design-media-qa-'||org::text);
+ insert into public.organization_memberships(organization_id,user_id,role,department_id,status) values(org,actor,'operations_admin','design','active');
+ insert into public.department_chat_conversations(id,organization_id,department_id,owner_id,title,context_kind) values(conversation,org,'design',actor,'Rollback media QA','department_private');
+ insert into public.design_creative_briefs(id,organization_id,visibility,created_by,updated_by) values(brief,org,'private',actor,actor);
+ insert into public.design_creative_brief_versions(id,organization_id,creative_brief_id,version_number,content,content_checksum,validation_snapshot,operation_key,created_by) values(version,org,brief,1,'{"title":"Synthetic","purpose":"Test","instructions":"Synthetic local-only image","audience":"QA"}',repeat('a',64),'{"valid":true}',gen_random_uuid(),actor);
+ update public.design_creative_briefs set current_version_id=version,frozen_version_id=version,revision=2 where id=brief;
+ insert into public.integration_connections(id,organization_id,provider,display_name,secret_name,status,created_by) values(connection,org,'higgsfield','Rollback no-credential fixture','ANKA_HIGGSFIELD_LOCAL_QA_NO_CREDENTIAL','verified',actor);
+ insert into private.ai_execution_budget_limits(organization_id,monthly_limit_microusd,spend_guard_mode) values(org,null,'provider_managed');
+ request:=jsonb_build_object('organization_id',org,'context',jsonb_build_object('kind','private','id',conversation),'creative_brief_version_id',version,'connector_connection_id',connection,'provider','higgsfield','model_id','higgsfield-ai/soul/v2/standard','settings','{"resolution":"720p","aspect_ratio":"16:9","enhance_prompt":false}'::jsonb,'output_count',1,'input_versions','[]'::jsonb,'prompt_checksum',repeat('0',64));
+
+ request:=request||'{"model_id":"ideogram/v4.0","settings":{"aspect_ratio":"1:1","rendering_speed":"DEFAULT"}}'::jsonb;
+ perform pg_temp.ok(public.read_design_media_readiness(org,actor,request)->>'reason'='pricing','unpriced model has no runnable configuration');
+ insert into private.design_media_test_budgets(organization_id) values(org);
+ perform public.set_design_estimated_test_mode(org,actor,true,true,clock_timestamp()+interval '6 days');
+ perform public.configure_design_media_reference_rate(org,actor,'higgsfield','ideogram/v4.0',request->'settings',30000,'https://open.higgsfield.ai/models/ideogram/v4.0/playground',clock_timestamp(),clock_timestamp()+interval '6 days');
+ prepared:=public.read_design_media_readiness(org,actor,request);
+ perform pg_temp.ok(jsonb_array_length(prepared->'configurations')=1 and prepared#>>'{configurations,0,request,settings,aspect_ratio}'='1:1' and prepared#>>'{configurations,0,request,output_count}'='1','square DEFAULT only supported output count returned');
+ perform pg_temp.ok(prepared#>>'{configurations,0,total_microusd}'='30000','exact reference estimate retained');
+ perform pg_temp.ok((select consumed_microusd=0 from private.design_media_test_budgets where organization_id=org) and not exists(select 1 from private.design_media_quotes where organization_id=org),'readiness creates no quote or debit');
+ prepared:=public.prepare_design_media_request(org,actor,request);request:=prepared->'request';
+ quote:=public.quote_design_media_request(org,actor,request);
+ acceptance:=jsonb_build_object('generate',true,'quote_id',quote->>'id','request_checksum',quote->>'request_checksum','total_max_charge_microusd',30000,'accept_estimated_price_risk',true);
+ job:=public.claim_design_media_generation(org,actor,op,(quote->>'id')::uuid,request,prepared->>'prompt',acceptance);
+ again:=public.claim_design_media_generation(org,actor,op,(quote->>'id')::uuid,request,prepared->>'prompt',acceptance);
+ perform pg_temp.ok((again->>'must_not_submit')::boolean and (select consumed_microusd=30000 from private.design_media_test_budgets where organization_id=org),'exact square quote reaches native claim and replay debits once; no provider');
+ update private.ai_execution_budget_limits set spend_guard_mode='local_monthly_cap',monthly_limit_microusd=40000 where organization_id=org;
+ perform pg_temp.ok(public.read_design_media_readiness(org,actor,request)->>'reason'='allowance','remaining monthly headroom below exact cost is an allowance blocker');
+ update private.ai_execution_budget_limits set spend_guard_mode='provider_managed',monthly_limit_microusd=null where organization_id=org;
+ begin perform public.read_design_media_readiness(org,gen_random_uuid(),request);raise exception 'FAIL cross actor';exception when insufficient_privilege then raise notice 'PASS wrong actor rejected';end;
+ perform public.configure_design_media_reference_rate(org,actor,'higgsfield','ideogram/v4.0','{"aspect_ratio":"16:9","rendering_speed":"DEFAULT"}',30000,'https://open.higgsfield.ai/models/ideogram/v4.0/playground',clock_timestamp(),clock_timestamp()+interval '6 days');
+ perform pg_temp.ok(jsonb_array_length(public.read_design_media_readiness(org,actor,request)->'configurations')=2,'two exact combinations, no cross product');
+ insert into private.design_media_rates(organization_id,provider,model_id,settings,unit_max_charge_microusd,source_url,verified_at,valid_until,created_by,price_basis) values(org,'higgsfield','ideogram/v4.0',request->'settings',30000,'https://open.higgsfield.ai/models/ideogram/v4.0/playground',clock_timestamp()-interval '2 hours',clock_timestamp()-interval '1 hour',actor,'estimated');
+ prepared:=public.read_design_media_readiness(org,actor,request);
+ perform pg_temp.ok(jsonb_array_length(prepared->'configurations')=1 and prepared#>>'{configurations,0,request,settings,aspect_ratio}'='16:9','expired latest square rate does not revive older entry');
+ update private.design_media_test_budgets set consumed_microusd=10000000 where organization_id=org;
+ perform pg_temp.ok(public.read_design_media_readiness(org,actor,request)->>'reason'='allowance','exhausted allowance blocks eligibility');
+ perform public.set_design_estimated_test_mode(org,actor,false,false,null);
+ perform pg_temp.ok(public.read_design_media_readiness(org,actor,request)->>'reason'='test_mode','inactive mode distinguished');
+ perform pg_temp.ok(not has_function_privilege('authenticated','public.read_design_media_readiness(uuid,uuid,jsonb)','EXECUTE') and not has_function_privilege('anon','public.read_design_media_readiness(uuid,uuid,jsonb)','EXECUTE') and has_function_privilege('service_role','public.read_design_media_readiness(uuid,uuid,jsonb)','EXECUTE'),'service-only entry point');
+end;$$;
+rollback;

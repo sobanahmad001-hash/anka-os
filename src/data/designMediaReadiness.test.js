@@ -1,0 +1,6 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import {configurationKey,currentConfigurations,readinessMessage} from './designMediaReadiness.js'
+import {LINEUP_CONTRACTS} from '../../supabase/functions/_shared/designModelLineup.js'
+for(const [model,spec] of Object.entries(LINEUP_CONTRACTS))test('exact combination identity and expiry: '+model,()=>{const a={request:{settings:spec.defaults,output_count:1},valid_until:'2099-01-01T00:00:00Z'};const b={request:{settings:{...spec.defaults,...('aspect_ratio' in spec.defaults?{aspect_ratio:'1:1'}:{duration:3})},output_count:1},valid_until:'2000-01-01T00:00:00Z'};assert.deepEqual(currentConfigurations({configurations:[a,b]}),[a]);assert.notEqual(configurationKey(a.request),configurationKey({...a.request,output_count:4}));assert.equal(configurationKey(a.request),configurationKey({...a.request,settings:Object.fromEntries(Object.entries(spec.defaults).reverse())}));assert.deepEqual(currentConfigurations({}),[])});
+test('setup, reconciliation and transient failures are distinct',()=>{assert.match(readinessMessage('pricing'),/price/);assert.match(readinessMessage('reconciliation'),/reconciliation/);assert.match(readinessMessage('unknown'),/Refresh/)});
