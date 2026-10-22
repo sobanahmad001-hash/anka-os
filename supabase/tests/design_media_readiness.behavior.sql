@@ -23,6 +23,15 @@ begin
  perform pg_temp.ok(jsonb_array_length(prepared->'configurations')=1 and prepared#>>'{configurations,0,request,settings,aspect_ratio}'='1:1' and prepared#>>'{configurations,0,request,output_count}'='1','square DEFAULT only supported output count returned');
  perform pg_temp.ok(prepared#>>'{configurations,0,total_microusd}'='30000','exact reference estimate retained');
  perform pg_temp.ok((select consumed_microusd=0 from private.design_media_test_budgets where organization_id=org) and not exists(select 1 from private.design_media_quotes where organization_id=org),'readiness creates no quote or debit');
+ prepared:=public.prepare_design_media_request(org,actor,request);request:=prepared->'request';
+ quote:=public.quote_design_media_request(org,actor,request);
+ acceptance:=jsonb_build_object('generate',true,'quote_id',quote->>'id','request_checksum',quote->>'request_checksum','total_max_charge_microusd',30000,'accept_estimated_price_risk',true);
+ job:=public.claim_design_media_generation(org,actor,op,(quote->>'id')::uuid,request,prepared->>'prompt',acceptance);
+ again:=public.claim_design_media_generation(org,actor,op,(quote->>'id')::uuid,request,prepared->>'prompt',acceptance);
+ perform pg_temp.ok((again->>'must_not_submit')::boolean and (select consumed_microusd=30000 from private.design_media_test_budgets where organization_id=org),'exact square quote reaches native claim and replay debits once; no provider');
+ update private.ai_execution_budget_limits set spend_guard_mode='local_monthly_cap',monthly_limit_microusd=40000 where organization_id=org;
+ perform pg_temp.ok(public.read_design_media_readiness(org,actor,request)->>'reason'='allowance','remaining monthly headroom below exact cost is an allowance blocker');
+ update private.ai_execution_budget_limits set spend_guard_mode='provider_managed',monthly_limit_microusd=null where organization_id=org;
  begin perform public.read_design_media_readiness(org,gen_random_uuid(),request);raise exception 'FAIL cross actor';exception when insufficient_privilege then raise notice 'PASS wrong actor rejected';end;
  perform public.configure_design_media_reference_rate(org,actor,'higgsfield','ideogram/v4.0','{"aspect_ratio":"16:9","rendering_speed":"DEFAULT"}',30000,'https://open.higgsfield.ai/models/ideogram/v4.0/playground',clock_timestamp(),clock_timestamp()+interval '6 days');
  perform pg_temp.ok(jsonb_array_length(public.read_design_media_readiness(org,actor,request)->'configurations')=2,'two exact combinations, no cross product');
