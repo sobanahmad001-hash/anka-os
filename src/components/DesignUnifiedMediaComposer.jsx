@@ -1,3 +1,4 @@
+import {watchOriginalMedia} from '../data/designMediaCompletion.js'
 import {configurationKey,currentConfigurations,configurationLabel,readinessMessage} from '../data/designMediaReadiness.js'
 import {mediaKind,requiresImage} from '../../supabase/functions/_shared/designModelLineup.js'
 import {useEffect,useRef,useState} from 'react'
@@ -6,9 +7,11 @@ import {requireMediaQuote,mediaRequestIdentity} from '../../supabase/functions/_
 const money=value=>new Intl.NumberFormat(undefined,{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:6}).format(value/1000000)
 export default function DesignUnifiedMediaComposer({studio,mode,organizationId,userId,context,brief,signal,onBusyChange,onOutput,onEditBrief,toolbarTarget,outputKind=mode,officialImages=[],canManagePricing=false}){
  const [choices,setChoices]=useState([]),[selection,setSelection]=useState(null),[quote,setQuote]=useState(null),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[operation,setOperation]=useState(null),[job,setJob]=useState(null),[confirmation,setConfirmation]=useState(false)
+ const [automaticRevision,setAutomaticRevision]=useState(0)
  const [estimateConsent,setEstimateConsent]=useState(false),[readinessTime,setReadinessTime]=useState(Date.now())
  useEffect(()=>{const timer=setInterval(()=>setReadinessTime(Date.now()),1000);return()=>clearInterval(timer)},[])
  const [history,setHistory]=useState([]),[cursor,setCursor]=useState(null),[source,setSource]=useState(null),[consent,setConsent]=useState(false)
+ const completion=useRef({operation:null,checks:0,paused:false}),refreshOriginal=useRef(null)
  const flight=useRef(false),alive=useRef(true),generation=useRef(0),dialog=useRef(null),generateButton=useRef(null)
  const motion=outputKind==='motion'
  const [guided,setGuided]=useState(false),[privateSources,setPrivateSources]=useState([]),[pricingUnavailable,setPricingUnavailable]=useState(false)
@@ -32,7 +35,7 @@ export default function DesignUnifiedMediaComposer({studio,mode,organizationId,u
   if(mediaRequestIdentity({...result.request,prompt_checksum:selection.prompt_checksum})!==mediaRequestIdentity(selection))throw Error('Selection changed. Choose Generate again.');
   const cost=requireMediaQuote(result.request,result.quote);setSelection(result.request);setQuote(result.quote);return {...result,cost};
  }
- async function showResult(result,current){if(!current())return;setJob(result);if(result.status==='ready'){const signed=await studio.signMediaGeneration({operation_key:result.operation_key});if(current()){setJob(signed);onOutput?.(signed)}}else setNotice(result.status==='outcome_unknown'?'The provider outcome is uncertain. Recover this original request; do not generate again.':'Request recorded. Check the original request for its output.')}
+ async function showResult(result,current){if(!current())return;setJob(result);setHistory(items=>items.map(item=>item.operation_key===result.operation_key?{...item,...result}:item));if(result.status==='ready'){const signed=await studio.signMediaGeneration({operation_key:result.operation_key});if(current()){setJob(signed);onOutput?.(signed)}}else setNotice(result.status==='outcome_unknown'?'The provider outcome is uncertain. Recover this original request; do not generate again.':'Request recorded. Check the original request for its output.')}
  async function submit(above=false){await run(async current=>{
   if(operation)throw Error('Recover the original request before starting another.');
   if(!readyConfiguration)throw Error('These exact settings are not currently ready. Choose an available configuration or refresh models.');
@@ -49,7 +52,25 @@ export default function DesignUnifiedMediaComposer({studio,mode,organizationId,u
   const result=await studio.generateMediaRequest({creative_brief_id:brief.id,selection:request,operation_key:id,quote_id:cost.quoteId,acceptance:{generate:true,quote_id:cost.quoteId,request_checksum:cost.requestChecksum,total_max_charge_microusd:cost.totalMicrousd,...(cost.estimated?{accept_estimated_price_risk:estimateConsent}:{}),...(above?{confirm_above_threshold:true}:{})}});
   await showResult(result,current)
  })}
- async function recover(){await run(async current=>{let result=await studio.recoverMediaGeneration({operation_key:operation});if(!current())return;if(result.status==='provider_pending')result=await studio.pollMediaGeneration({operation_key:operation});if(!current())return;if(result.status==='provider_completed')result=await studio.ingestMediaGeneration({operation_key:operation});await showResult(result,current)})}
+ async function recover(automatic=false){
+  if(!automatic){completion.current={operation,checks:0,paused:false};setAutomaticRevision(value=>value+1)}
+  await run(async current=>{try{
+   let result=await studio.recoverMediaGeneration({operation_key:operation});if(!current())return;
+   if(result.operation_key!==operation)throw Error('Original request identity changed. Reopen this workspace.');
+   if(result.status==='provider_pending')result=await studio.pollMediaGeneration({operation_key:operation});if(!current())return;
+   if(result.operation_key!==operation)throw Error('Original request identity changed. Reopen this workspace.');
+   if(result.status==='provider_completed')result=await studio.ingestMediaGeneration({operation_key:operation});if(!current())return;
+   if(result.operation_key!==operation)throw Error('Original request identity changed. Reopen this workspace.');
+   await showResult(result,current);
+  }catch(error){if(current())completion.current.paused=true;throw error}})
+ }
+ refreshOriginal.current=()=>recover(true)
+ const completionStatus=job?.status
+ useEffect(()=>{
+  if(signal?.aborted||!operation||completionStatus==='ready'||(completionStatus&&!['provider_pending','provider_completed'].includes(completionStatus)))return;
+  if(completion.current.operation!==operation)completion.current={operation,checks:0,paused:false};
+  return watchOriginalMedia({state:completion.current,canCheck:()=>alive.current&&!signal?.aborted&&!flight.current,check:()=>refreshOriginal.current(),onLimit:()=>{if(alive.current&&!signal?.aborted)setNotice('Automatic checks paused after several minutes. Use Recover original request to continue checking the same request.')}})
+ },[operation,scope,completionStatus,automaticRevision,signal])
  const generatedOriginals=history.filter(item=>item.status==='ready').flatMap(item=>(item.outputs||[]).filter(output=>['image/png','image/jpeg'].includes(output.mime_type)).map(output=>({...output,kind:'media_output',label:item.request.model_id+' · '+new Date(item.created_at).toLocaleString()+' · image '+(Number(output.id.split(':')[1])+1)})))
  const originals=[...(context?.kind==='engagement'?officialImages:[]),...generatedOriginals,...(motion&&context?.kind==='private'?privateSources:[])]
  useEffect(()=>{if(source?.kind==='design_asset_version'&&!officialImages.some(item=>item.id===source.id&&item.checksum===source.checksum)){generation.current++;setSource(null);setConsent(false);setChoices([]);setSelection(null);setQuote(null);setConfirmation(false);setNotice('The selected project image is no longer available. Choose an eligible exact version.')}},[officialImages,source])
@@ -69,7 +90,7 @@ export default function DesignUnifiedMediaComposer({studio,mode,organizationId,u
  {toolbarTarget ? createPortal(<>{modelControl}{settingsControl}</>,toolbarTarget) : <>{modelControl}{settingsControl}</>}
  {selection&&<div className="design-media-settings"><label><input type="checkbox" checked={estimateConsent} disabled={busy||Boolean(operation)} onChange={e=>setEstimateConsent(e.target.checked)}/>Allow reference-price estimates for this selection. Actual charges may exceed the estimate and the shared $10 allowance.</label>{cost?<p>{cost.estimated?'Estimated total:':'Maximum total:'} <strong>{money(cost.totalMicrousd)}</strong> for {selection.output_count} output{selection.output_count===1?'':'s'}.</p>:<p>Generate checks the current total first. Up to $2 proceeds; above $2 asks for confirmation before charging.</p>}
  <button type="button" ref={generateButton} disabled={busy||!!operation||!selected||!readyConfiguration} onClick={()=>submit(false)}>Generate</button></div>}
- {operation&&<button type="button" disabled={busy} onClick={recover}>Recover original request</button>}{job&&<p role="status">{job.status==='ready'?'Original output saved.':job.status==='provider_pending'?'Generation is in progress.':'Original request: '+job.status.replaceAll('_',' ')}</p>}
+ {operation&&<button type="button" disabled={busy} onClick={()=>recover(false)}>Recover original request</button>}{job&&<p role="status">{job.status==='ready'?'Original output saved.':job.status==='provider_pending'?'Generation is in progress. Output will appear automatically when it is ready.':'Original request: '+job.status.replaceAll('_',' ')}</p>}
  {job?.status==='ready'&&(job.outputs||[]).filter(output=>output.signed_url).map(output=><figure key={output.id}>{output.mime_type.startsWith('image/')?<img style={{maxWidth:'100%'}} src={output.signed_url} alt="Saved original image"/>:<video style={{maxWidth:'100%'}} controls src={output.signed_url}/>}<figcaption>Original output · {job.request.model_id}</figcaption></figure>)}
  {job?.status==='ready'&&<button type="button" disabled={busy} onClick={()=>{sessionStorage.removeItem(storageKey);setOperation(null);setJob(null);setQuote(null)}}>Prepare another request</button>}
  {available.some(c=>!currentConfigurations(c,readinessTime).length)&&<details><summary>Unavailable models</summary>{available.filter(c=>!currentConfigurations(c,readinessTime).length).map(c=><p key={c.id}>{c.label}: {readinessMessage(c.unavailable_reason)}</p>)}</details>}{notice&&<p role="status">{notice}</p>}{pricingUnavailable&&<p>{canManagePricing?<a href="/sphere/settings#design-media-pricing">Open Admin pricing setup</a>:'Ask an organization administrator to configure a current reviewed price for these exact settings.'}</p>}{busy&&<p role="status">Working…</p>}
