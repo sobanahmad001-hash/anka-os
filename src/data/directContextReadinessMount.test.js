@@ -58,7 +58,7 @@ async function mount(t, options = {}) {
   const click = async name => { const node = button(name); assert.ok(node, `Button ${name} exists`); assert.equal(node.disabled, false); await act(async () => { props(node).onClick?.({ preventDefault() {} }) }); await flush() }
   const type = async (text, name = 'Message') => { await act(async () => props(named(name)).onChange({ target: { value: text } })) }
   const send = async (twice = false) => { await act(async () => { const submit = props(named('Chat composer')).onSubmit; submit({ preventDefault() {} }); if (twice) submit({ preventDefault() {} }) }); await flush() }
-  const consent = async () => click('Allow and ask Anka AI')
+  const consent = async () => { if (button('Allow and ask Anka AI')) await click('Allow and ask Anka AI') }
   return { scopeController, fixture, storage, environment, render, named, button, click, type, send, consent, reload: async () => { key++; await render() } }
 }
 

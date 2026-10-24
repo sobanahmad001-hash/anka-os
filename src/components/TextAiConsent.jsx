@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { hasTextAiConsent } from '../data/textAiConsent.js'
+import { hasTextAiConsent, textAiConsentNeedsReview, readTextAiConsent, rememberTextAiConsent } from '../data/textAiConsent.js'
 
 export function useTextAiConsent(scopeKey) {
   const grant = useRef(null)
@@ -13,13 +13,20 @@ export function useTextAiConsent(scopeKey) {
   }, [scopeKey])
   const confirm = () => {
     if (activeKey.current !== scopeKey) return Promise.resolve(false)
+    if (!textAiConsentNeedsReview(scopeKey)) return Promise.resolve(true)
+    let saved = null
+    try { saved = readTextAiConsent(scopeKey, globalThis.sessionStorage) } catch { /* Review when storage is blocked. */ }
+    if (hasTextAiConsent(saved, scopeKey)) return Promise.resolve(true)
     if (hasTextAiConsent(grant.current, scopeKey)) return Promise.resolve(true)
     pending.current?.(false)
     return new Promise(resolve => { pending.current = resolve; setRequest({ key: scopeKey }) })
   }
   const finish = accepted => {
     const valid = Boolean(accepted && pending.current && request?.key === activeKey.current)
-    if (valid) grant.current = { key: activeKey.current }
+    if (valid) {
+      grant.current = { key: activeKey.current }
+      try { rememberTextAiConsent(activeKey.current, globalThis.sessionStorage) } catch { /* Keep mounted consent only. */ }
+    }
     pending.current?.(valid); pending.current = null; setRequest(null)
   }
   return { confirm, dialog: request?.key === scopeKey ? { onConfirm: () => finish(true), onCancel: () => finish(false) } : null }
@@ -37,10 +44,10 @@ export default function TextAiConsent({ onConfirm, onCancel, provider, model, sc
     if (event.key === 'Escape') { event.preventDefault(); onCancel() }
     if (event.key === 'Tab') { event.preventDefault(); (document.activeElement === cancel.current ? accept : cancel).current?.focus() }
   }}><section className="max-w-lg rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-6 text-[var(--anka-ink)]">
-    <h2 className="text-lg font-semibold">Allow AI replies in this conversation?</h2>
+    <h2 className="text-lg font-semibold">Include these additional sources?</h2>
     <p className="mt-3">Send {engagementHistory ? "your prompt and this conversation’s existing messages, including any participant messages already in it," : "up to 12 recent completed messages through the selected message, containing your messages and verified AI replies (subject to text limits),"} to {provider} · {model} for organization-billed replies in {scope}.</p>
-    <p className="mt-3">{!engagementHistory && "Teammate-authored messages, private files and private memory are excluded. "}{canonical ? 'Include the bounded OpenAI canonical summary selected for this reply. Record IDs, emails, contact details, task and work-item descriptions, files, transcripts, private memory, and teammate messages are excluded. The sample may be incomplete.' : 'No canonical summary is included.'} {sources ? 'Your explicitly selected approved artifact versions are included as sources, under their existing permissions.' : 'No approved artifact versions are selected.'} {engagementHistory ? <>{selectedAttachmentIds.length > 0 ? 'Only validated text from selected TXT/MD/DOCX files is sent; selecting other file types does not include text.' : 'No attachments are selected; no attachment content is sent.'} PNG/JPEG are reference-only and are never sent to the model. PDF and scanned/OCR documents remain unavailable.</> : 'No files are included.'}</p>
-    <p className="mt-3">This acknowledgement stays in memory while this scoped conversation is open. Material changes to the sharing scope or recipients require confirmation again. Switching models on the same approved provider connection does not.</p>
+    <p className="mt-3">{!engagementHistory && "Teammate-authored messages, private files and private memory are excluded. "}{canonical ? 'Include the bounded OpenAI canonical summary selected for this reply. Record IDs, emails, contact details, task and work-item descriptions, files, transcripts, private memory, and teammate messages are excluded. The sample may be incomplete.' : 'No canonical summary is included.'} {sources ? 'Your explicitly selected approved artifact versions are included as sources, under their existing permissions.' : 'No approved artifact versions are selected.'} {engagementHistory ? <>{selectedAttachmentIds.length > 0 ? 'Only validated text from selected supported documents is sent; reference-only files do not contribute text.' : 'No attachments are selected; no attachment content is sent.'} PNG/JPEG are reference-only and are never sent to the model. File support and extraction limits are shown in the attachment panel; scanned/OCR content is not extracted.</> : 'No files are included.'}</p>
+    <p className="mt-3">This choice is remembered in this browser tab for these exact sources, conversation, provider connection and recipients. Changed sources or sharing scope need a new review. Server access checks still apply on every Send.</p>
     <div className="mt-4 flex gap-3"><button ref={cancel} type="button" onClick={onCancel}>Cancel</button><button ref={accept} type="button" onClick={onConfirm}>Allow and ask Anka AI</button></div>
   </section></div>
 }

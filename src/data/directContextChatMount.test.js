@@ -95,7 +95,7 @@ async function mount(t, options = {}) {
   const click = async name => { const node = button(name); assert.ok(node, `Button ${name} exists`); assert.equal(node.disabled, false); await act(async () => { props(node).onClick?.({ preventDefault() {} }) }); await flush() }
   const type = async (text, name = 'Message') => { await act(async () => props(named(name)).onChange({ target: { value: text } })) }
   const send = async (twice = false) => { await act(async () => { const submit = props(named('Chat composer')).onSubmit; submit({ preventDefault() {} }); if (twice) submit({ preventDefault() {} }) }); await flush() }
-  const consent = async () => click('Allow and ask Anka AI')
+  const consent = async () => { if (button('Allow and ask Anka AI')) await click('Allow and ask Anka AI') }
   return { fixture, storage, environment, render, named, button, click, type, send, consent, reload: async () => { key++; await render() } }
 }
 
@@ -105,9 +105,8 @@ test('empty composer First Send is single-flight through consent/save/run; later
   assert.equal(ui.fixture.data.rows.length, 0)
   await ui.type('First idea')
   await ui.send(true)
-  assert.equal(ui.fixture.data.counters.created, 0)
-  assert.ok(ui.named('Confirm AI data sharing'))
-  await ui.consent()
+  assert.equal(ui.fixture.data.counters.created, 1)
+  assert.equal(ui.named('Confirm AI data sharing'), undefined)
   assert.deepEqual(ui.fixture.data.counters, { created: 1, messages: 1, run: 1, recover: 0 })
   assert.equal(ui.fixture.data.rows[0].title, 'First idea')
   assert.equal(ui.storage.size, 0)
@@ -126,9 +125,9 @@ test('empty composer First Send is single-flight through consent/save/run; later
   assert.equal(ui.named('Saved reply output'), undefined)
 })
 
-test('cancelled consent creates nothing and retains draft', async t => {
+test('typing without Send creates nothing and retains draft', async t => {
   const ui = await mount(t)
-  await ui.type('Keep this draft'); await ui.send(); await ui.click('Cancel')
+  await ui.type('Keep this draft')
   assert.equal(ui.fixture.data.rows.length, 0)
   assert.equal(ui.storage.size, 1)
   await ui.reload()
@@ -249,13 +248,13 @@ test('late save callback after context switch cannot dispatch or leak messages',
   assert.equal(ui.named('Message').value, '')
 })
 
-test('late consent after context switch cannot save or dispatch', async t => {
+test('ordinary Send requires current context and ignores a late save after switching', async t => {
   const ui = await mount(t)
-  await ui.type('Old consent'); await ui.send()
-  const accept = props(ui.button('Allow and ask Anka AI')).onClick
+  const gate = defer()
+  ui.fixture.beforeStart = () => gate.promise
+  await ui.type('Old context'); await ui.send()
   await ui.render({ contextKind: 'project_team', projectId, departmentId: '' })
-  await act(async () => accept()); await flush()
-  assert.equal(ui.fixture.data.counters.created, 0)
+  gate.resolve(); await flush()
   assert.equal(ui.fixture.data.counters.run, 0)
 })
 
@@ -398,7 +397,7 @@ for (const [surface, models, expected] of [
   assert.equal(ui.fixture.data.counters.run, 0, 'preference never dispatches')
 })
 
-test('Content compact layout keeps one approved model above composer and preserves consent cancellation', async t => {
+test('Content compact layout keeps one approved model and ordinary Send needs no redundant confirmation', async t => {
   const ui = await mount(t)
   await ui.render({ departmentId: 'content', conversationLayout: true })
   const toolbar = ui.named('Content conversation tools')
@@ -408,8 +407,7 @@ test('Content compact layout keeps one approved model above composer and preserv
   assert.equal(ui.button('Video tools'), undefined)
   await ui.type('Preserve this Content draft')
   await ui.send()
-  assert.ok(ui.named('Confirm AI data sharing'))
-  await ui.click('Cancel')
-  assert.equal(ui.named('Message').value, 'Preserve this Content draft')
-  assert.deepEqual(ui.fixture.data.counters, { created: 0, messages: 0, run: 0, recover: 0 })
+  assert.equal(ui.named('Confirm AI data sharing'), undefined)
+  assert.equal(ui.named('Message').value, '')
+  assert.deepEqual(ui.fixture.data.counters, { created: 1, messages: 1, run: 1, recover: 0 })
 })
