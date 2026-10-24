@@ -1,0 +1,33 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import {act,createElement} from 'react'
+import {createRoot} from 'react-dom/client'
+import {createServer} from 'vite'
+import {mountedEnvironment} from './testSupport/n1bMountedDom.js'
+const all=n=>[n,...n.childNodes.flatMap(all)],props=n=>n?.[Object.keys(n).find(k=>k.startsWith('__reactProps$'))]
+async function fixture(t,{restored=false,status='provider_pending'}={}){
+ const env=mountedEnvironment(),before={},storage=new Map(),timers=new Map();let timerId=0;
+ for(const [key,value] of Object.entries({document:env.document,window:env.window,Event:env.window.Event,Node:env.window.Node,HTMLElement:env.window.HTMLElement,IS_REACT_ACT_ENVIRONMENT:true,sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)}})){before[key]=globalThis[key];globalThis[key]=value}
+ const vite=await createServer({server:{middlewareMode:true},appType:'custom',logLevel:'silent'}),root=createRoot(env.container),{default:Panel}=await vite.ssrLoadModule('/src/components/DesignUnifiedMediaComposer.jsx');
+ const nativeSet=setTimeout,nativeClear=clearTimeout;globalThis.setTimeout=(fn,delay,...args)=>{if(delay>=2000&&delay<=10000){const id={auto:++timerId};timers.set(id,fn);return id}return nativeSet(fn,delay,...args)};globalThis.clearTimeout=id=>timers.delete(id)||nativeClear(id);
+ t.after(async()=>{await act(async()=>root.unmount());globalThis.setTimeout=nativeSet;globalThis.clearTimeout=nativeClear;await vite.close();Object.assign(globalThis,before)});
+ const context={kind:'private',id:'chat'},selection={organization_id:'org',context,creative_brief_version_id:'v1',connector_connection_id:'connector',provider:'higgsfield',model_id:'ideogram/v4.0',settings:{aspect_ratio:'1:1',rendering_speed:'DEFAULT'},output_count:1,input_versions:[],prompt_checksum:'a'.repeat(64)};
+ const state={submits:0,recover:0,poll:0,ingest:0,sign:0,outputs:[],status,fail:false,hold:null};let op='11111111-1111-4111-8111-111111111111';
+ const job=()=>({id:'job',operation_key:op,status:state.status,request:selection,outputs:state.status==='ready'?[{id:'out',mime_type:'image/png',signed_url:'https://example.invalid/original.png'}]:[]});
+ const studio={listMediaChoices:async()=>({choices:[{id:'model',label:'Ideogram',kind:'image',selection,configurations:[{request:selection,price_basis:'verified',total_microusd:30000,valid_until:new Date(Date.now()+60000).toISOString()}]}]}),quoteMediaRequest:async()=>({request:selection,quote:{id:'quote',request:selection,currency:'USD',unit_max_charge_microusd:30000,total_max_charge_microusd:30000,request_checksum:'b'.repeat(64),verified_at:new Date(Date.now()-1000).toISOString(),valid_until:new Date(Date.now()+60000).toISOString()}}),generateMediaRequest:async body=>{state.submits++;op=body.operation_key;return job()},recoverMediaGeneration:async()=>{state.recover++;if(state.fail)throw Error('Status unavailable');if(state.hold)await state.hold;return job()},pollMediaGeneration:async()=>{state.poll++;return {...job(),status:state.status}},ingestMediaGeneration:async()=>{state.ingest++;state.status='ready';return job()},signMediaGeneration:async()=>{state.sign++;return job()}};
+ const base={studio,mode:'image',organizationId:'org',userId:'actor',context,brief:{id:'brief',frozen_version_id:'v1'},onOutput:j=>state.outputs.push(j)};
+ if(restored)storage.set('anka:design-media:'+JSON.stringify(['org','actor',context,'brief','v1','image','image']),op);
+ const render=async extra=>act(async()=>root.render(createElement(Panel,{...base,...extra}))),button=text=>all(env.container).find(n=>n.tagName==='BUTTON'&&n.textContent===text),click=text=>act(async()=>props(button(text)).onClick());
+ const tick=async()=>{const item=timers.entries().next().value;if(item){timers.delete(item[0]);await act(async()=>item[1]())}};
+ const startTick=async()=>{const item=timers.entries().next().value;let pending;if(item){timers.delete(item[0]);await act(async()=>{pending=item[1]()})}return {pending}};
+ await render();return {state,env,render,click,tick,startTick,button,storage,timers};
+}
+test('pending generated image is polled, retained, signed and sent to Output automatically once',async t=>{
+ const f=await fixture(t);await f.click('Load available models');await f.click('Generate');assert.equal(f.state.submits,1);assert.match(f.env.container.textContent,/Output will appear automatically/);await f.tick();assert.equal(f.state.poll,1);f.state.status='provider_completed';await f.tick();assert.equal(f.state.ingest,1);assert.equal(f.state.sign,1);assert.equal(f.state.outputs.length,1);assert.ok(all(f.env.container).some(n=>n.tagName==='IMG'));assert.equal(f.state.submits,1);assert.equal(f.timers.size,0)
+})
+test('restored operation and selected completed original publish without Generate',async t=>{const f=await fixture(t,{restored:true,status:'ready'});await f.tick();assert.equal(f.state.outputs.length,1);assert.equal(f.state.submits,0);assert.equal(f.state.poll,0)})
+test('transient failure stops checks; manual recovery resumes same identity without submit',async t=>{const f=await fixture(t,{restored:true});f.state.fail=true;await f.tick();assert.equal(f.timers.size,0);assert.match(f.env.container.textContent,/Status unavailable/);f.state.fail=false;f.state.status='provider_completed';await f.click('Recover original request');assert.equal(f.state.outputs.length,1);assert.equal(f.state.submits,0)})
+test('uncertain provider outcome is never automatically resubmitted or polled',async t=>{const f=await fixture(t,{restored:true,status:'outcome_unknown'});await f.tick();assert.equal(f.state.recover,1);assert.equal(f.state.poll,0);assert.equal(f.state.submits,0);assert.equal(f.timers.size,0)})
+test('scope change while readback is in flight discards old output and never polls it',async t=>{const f=await fixture(t,{restored:true});let release;f.state.hold=new Promise(r=>{release=r});const {pending}=await f.startTick();await f.render({context:{kind:'private',id:'other-chat'}});await act(async()=>{release();await pending});assert.equal(f.state.outputs.length,0);assert.equal(f.state.poll,0);assert.equal(f.state.submits,0)})
+
+test('aborted scope cancels scheduled completion without provider calls',async t=>{const f=await fixture(t,{restored:true});const controller=new AbortController();controller.abort();await f.render({signal:controller.signal});await f.tick();assert.equal(f.state.recover,0);assert.equal(f.state.poll,0);assert.equal(f.state.outputs.length,0);assert.equal(f.timers.size,0)})

@@ -1,0 +1,7 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import {watchOriginalMedia} from './designMediaCompletion.js'
+function harness(extra={}){let scheduled=[],limit=0,calls=0;const state={checks:0,paused:false};const stop=watchOriginalMedia({state,canCheck:()=>true,check:async()=>{calls++},onLimit:()=>limit++,schedule:(fn,delay)=>{const task={fn,delay};scheduled.push(task);return task},cancel:t=>{scheduled=scheduled.filter(x=>x!==t)},...extra});return {state,stop,step:async()=>{const task=scheduled.shift();if(task)await task.fn()},get calls(){return calls},get limit(){return limit},get pending(){return scheduled.length}}}
+test('completion checks are bounded and use no submit callback',async()=>{const h=harness();for(let n=0;n<61;n++)await h.step();assert.equal(h.calls,60);assert.equal(h.limit,1);assert.equal(h.pending,0)})
+test('busy guard does not consume an attempt and cancellation drops scheduled work',async()=>{const h=harness({canCheck:()=>false});await h.step();assert.equal(h.state.checks,0);h.stop();assert.equal(h.pending,0)})
+test('error pauses further checking and in-flight cancellation cannot schedule another',async()=>{const h=harness({check:async()=>{throw Error('offline')}});await h.step();assert.equal(h.state.paused,true);assert.equal(h.pending,0);let release;const g=harness({check:()=>new Promise(r=>{release=r})});const pending=g.step();g.stop();release();await pending;assert.equal(g.pending,0)})
