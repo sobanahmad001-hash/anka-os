@@ -1,3 +1,4 @@
+import DesignVideoReferencePanel from './DesignVideoReferencePanel.jsx'
 import { createPortal } from 'react-dom'
 import { WorkshopChatHistoryContext } from '../context/WorkshopChatHistoryContext.jsx'
 import { openAiModelLabel } from '../data/openaiModelPolicy.js'
@@ -1338,6 +1339,7 @@ export function ScopedDepartmentChat({
           <p className="mt-2 text-xs text-[var(--anka-muted)]">{selectedSourceVersionIds.length} of 5 exact versions selected. Permission and approval are rechecked at send.</p>
         </SourcePanel>}
 
+        {designWorkspace?.attachmentTarget && isConversationOwner && createPortal(<DesignVideoReferencePanel conversationKey={conversationId} conversationId={!draftConversation?conversationId:null} requestScope={requestScope} busy={busy || historyBusy || attachmentBusy || draftSaving} ensureConversation={async()=>{if(draftConversation||!currentConversation||currentConversation.state!=='active')throw Error('Choose a saved active Design chat');return currentConversation}} run={async action=>{if(attachmentBusy||busy||historyBusy)return;setAttachmentBusy(true);try{await action()}finally{if(!requestSignal?.aborted)setAttachmentBusy(false)}}}/>,designWorkspace.attachmentTarget)}
         {supportsSavedConversations && capabilities?.attachments?.supported && (designWorkspace ? (designWorkspace.attachmentTarget ? createPortal(attachmentPanel, designWorkspace.attachmentTarget) : null) : attachmentPanel)}
 
         <label className="department-chat-prompt block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]"><span className={compactWorkbench ? 'sr-only' : undefined}>{isAnswerMode ? 'Message' : 'Draft request'}</span>

@@ -128,6 +128,26 @@ export function createDepartmentChatRepository(client) {
     renameConversation: (departmentId, input, scope) => invoke('rename_conversation', { ...input, department_id: departmentId }, scope),
     setConversationState: (departmentId, input, scope) => invoke('set_conversation_state', { ...input, department_id: departmentId }, scope),
     getCapabilities: (departmentId, input, scope) => invoke('get_capabilities', { ...input, department_id: departmentId }, scope),
+    uploadDesignVideoReference: async (input, scope) => {
+      const { file, ...metadata } = input
+      if (!(file instanceof Blob) || !file.size || file.size > 20 * 1024 * 1024) throw new Error('Choose a local reference file up to 20 MiB')
+      const reserved = await invoke('design_video_reference_reserve', metadata, scope)
+      scope?.signal?.throwIfAborted()
+      if (reserved.upload) {
+        const { bucket, path, token } = reserved.upload
+        const uploaded = await client.storage.from(bucket).uploadToSignedUrl(path, token, file, { contentType: metadata.claimed_mime, upsert: false })
+        // An interrupted prior upload can already exist. Finalization validates
+        // exact bytes/checksum; never overwrite, discard or allocate another ID.
+        if (uploaded.error) {
+          try { return await invoke('design_video_reference_finalize', metadata, scope) }
+          catch { throw failure(uploaded.error, uploaded) }
+        }
+      }
+      return invoke('design_video_reference_finalize', metadata, scope)
+    },
+    listDesignVideoReferences: (input, scope) => invoke('design_video_reference_list', input, scope),
+    revokeDesignVideoReference: (input, scope) => invoke('design_video_reference_revoke', input, scope),
+    downloadDesignVideoReference: (input, scope) => invoke('design_video_reference_download', input, scope),
     uploadDesignPrivateAttachment: async (input, scope) => {
       const { file, ...metadata } = input
       if (!(file instanceof Blob) || !file.size || file.size > 5 * 1024 * 1024) throw new Error('Choose a local reference file up to 5 MiB')
