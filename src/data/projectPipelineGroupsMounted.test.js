@@ -6,7 +6,7 @@ import {createServer} from 'vite'
 import {mountedEnvironment,elements} from './testSupport/designVideoDom.js'
 const org='a0000000-0000-4000-8000-000000000001',actor='a0000000-0000-4000-8000-000000000002',engagement='a0000000-0000-4000-8000-000000000003',website='a0000000-0000-4000-8000-000000000004',marketing='a0000000-0000-4000-8000-000000000005',preset='a0000000-0000-4000-8000-000000000006'
 const props=node=>node?.[Object.keys(node).find(key=>key.startsWith('__reactProps$'))]
-async function mount(t,{lost=false,initialStorage=new Map(),panel='configuration',hideRecent=false,stages=false,declared=false,initialRunRows=[],captureChildren=false}={}) {
+async function mount(t,{lost=false,initialStorage=new Map(),panel='configuration',hideRecent=false,stages=false,declared=false,initialRunRows=[],captureChildren=false,role='operations_admin',onReviewServices}={}) {
  const records={available:[],publishedDefinitions:[{id:'a0000000-0000-4000-8000-000000000007',definition:{name:'Published Website',version_number:1,preset_publication_id:preset,steps:[]}}],groups:[{id:website,name:'Website',kind:'website',preset_publication_id:preset},{id:marketing,name:'Marketing',kind:'marketing',preset_publication_id:preset}],configurations:[{id:'legacy',revision:9,selected_steps:[{key:'Legacy',quantity:1}],max_ai_cost_microusd:0},{id:'web',pipeline_group_id:website,revision:10,group_revision:2,selected_steps:[{key:'Website',quantity:1}],max_ai_cost_microusd:0},{id:'mkt',pipeline_group_id:marketing,revision:11,group_revision:3,selected_steps:[{key:'Marketing',quantity:1}],max_ai_cost_microusd:0}],activations:[{configuration_id:'mkt',pipeline_group_id:marketing,activation_number:11,group_activation_number:3},{configuration_id:'legacy',activation_number:9},{configuration_id:'web',pipeline_group_id:website,activation_number:10,group_activation_number:2}]}
  if(stages)records.publishedDefinitions[0].definition.steps=[{key:'brief',label:'Project brief',kind:'human',department_id:'content',service_id:preset,depends_on:[]},{key:'draft',label:'Draft copy',kind:'human',department_id:'content',service_id:preset,depends_on:['brief']}]
  if(declared){
@@ -27,15 +27,15 @@ async function mount(t,{lost=false,initialStorage=new Map(),panel='configuration
  t.after(async()=>{await server.close()})
  const {default:Panel}=await server.ssrLoadModule(panel==='definition' ? '/src/components/PipelineExecutionDefinitionPanel.jsx' : panel==='run' ? '/src/components/PipelineRunIntentPanel.jsx' : '/src/components/ProjectPipelineConfigurationPanel.jsx'),env=mountedEnvironment(),storage=initialStorage
  const names=['document','window','Event','Node','HTMLElement','IS_REACT_ACT_ENVIRONMENT','sessionStorage','fetch'];const previous=Object.fromEntries(names.map(name=>[name,globalThis[name]]));Object.assign(globalThis,{document:env.document,window:env.window,Event:env.window.Event,Node:env.window.Node,HTMLElement:env.window.HTMLElement,IS_REACT_ACT_ENVIRONMENT:true,sessionStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},fetch:()=>{throw new Error('Network forbidden')}})
- const root=createRoot(env.container);const render=async()=>act(async()=>root.render(createElement(Panel,{organizationId:org,engagement:{id:engagement,status:'active',project_id:captureChildren?'a0000000-0000-4000-8000-000000000099':undefined},catalog:{publications:[{id:preset,pipeline_template_version_id:preset}],versions:[{id:preset,name:'Website',version_number:1}],selections:[{pipeline_template_version_id:preset,service_id:preset}]},services:panel==='definition' ? [{id:preset,name:'Content',department_id:'content',is_active:true}] : (stages || declared) ? [{service_id:preset,status:'active'}] : [],assets:[],membership:{role:'operations_admin'}})))
+ let activeRole=role;const root=createRoot(env.container);const render=async()=>act(async()=>root.render(createElement(Panel,{organizationId:org,engagement:{id:engagement,status:'active',project_id:captureChildren?'a0000000-0000-4000-8000-000000000099':undefined},catalog:{publications:[{id:preset,pipeline_template_version_id:preset}],versions:[{id:preset,name:'Website',version_number:1}],selections:[{pipeline_template_version_id:preset,service_id:preset}]},services:panel==='definition' ? [{id:preset,name:'Content',department_id:'content',is_active:true}] : (stages || declared) ? [{service_id:preset,status:'active'}] : [],assets:[],membership:{role:activeRole},onReviewServices})))
  t.after(async()=>{await act(async()=>root.unmount());Object.assign(globalThis,previous);globalThis.__pipelineGroupFixture=previousFixture})
  await render()
  const button=name=>elements(env.container,'button').find(node=>node.textContent===name),field=name=>['select','input','textarea'].flatMap(tag=>elements(env.container,tag)).find(node=>props(node)?.['aria-label']===name)
  const click=async name=>act(async()=>{const node=button(name);assert.ok(node,name);assert.notEqual(props(node).disabled,true);props(node).onClick()})
  const change=async(name,value)=>act(async()=>props(field(name)).onChange({target:{value}}))
- const prepare=async()=>{await change('Pipeline name','Second Website');await change('Independent pipeline preset',preset);await click('Review pipeline creation')}
+ const prepare=async()=>{await change('Pipeline name','Second Website');await change('Independent pipeline preset',preset);await click('Review pipeline plan')}
  const previewDraft=async()=>act(async()=>{const form=elements(env.container,'form')[0];props(form).onSubmit({preventDefault(){}})})
- return {children:globalThis.__pipelineGroupFixture.children,env,storage,records,artifact,calls,definitionCalls,definitionRecords,configCalls,previewDraft,reads,runCalls,runReads,runRows,button,field,click,change,prepare,setGate(){gate=new Promise(done=>{release=done})},release:async()=>act(async()=>release())}
+ return {setRole:async value=>{activeRole=value;await render()},children:globalThis.__pipelineGroupFixture.children,env,storage,records,artifact,calls,definitionCalls,definitionRecords,configCalls,previewDraft,reads,runCalls,runReads,runRows,button,field,click,change,prepare,setGate(){gate=new Promise(done=>{release=done})},release:async()=>act(async()=>release())}
 }
 test('actual panel selects Website, Marketing and Legacy independently with no latest-global fallback',async t=>{
  const ui=await mount(t);assert.match(ui.env.container.textContent,/Active revision 9 · Legacy/)
@@ -45,12 +45,12 @@ test('actual panel selects Website, Marketing and Legacy independently with no l
 })
 test('creation review writes nothing, edits invalidate it, and a double Confirm writes one scoped group',async t=>{
  const ui=await mount(t);await ui.prepare();assert.equal(ui.calls.length,0)
- await ui.change('Pipeline name','Edited Website');assert.equal(ui.button('Confirm independent pipeline'),undefined)
- await ui.click('Review pipeline creation');ui.setGate();const click=props(ui.button('Confirm independent pipeline')).onClick;await act(async()=>{void click();void click()});assert.equal(ui.calls.length,1);assert.equal(ui.calls[0].organizationId,org);assert.equal(ui.calls[0].engagementId,engagement);assert.equal(ui.calls[0].name,'Edited Website');assert.equal(ui.calls[0].presetPublicationId,preset);assert.equal(ui.storage.size,1)
+ await ui.change('Pipeline name','Edited Website');assert.equal(ui.button('Use plan and create pipeline'),undefined)
+ await ui.click('Review pipeline plan');ui.setGate();const click=props(ui.button('Use plan and create pipeline')).onClick;await act(async()=>{void click();void click()});assert.equal(ui.calls.length,1);assert.equal(ui.calls[0].organizationId,org);assert.equal(ui.calls[0].engagementId,engagement);assert.equal(ui.calls[0].name,'Edited Website');assert.equal(ui.calls[0].presetPublicationId,preset);assert.equal(ui.storage.size,1)
  await ui.release();assert.equal(ui.calls.length,1);assert.equal(ui.storage.size,0);assert.match(ui.env.container.textContent,/Choose steps and review activation separately/)
 })
 test('lost group response stays blocked until read-only exact immutable request recovery',async t=>{
- const ui=await mount(t,{lost:true});await ui.prepare();await ui.click('Confirm independent pipeline');assert.equal(ui.calls.length,1);assert.equal(ui.storage.size,1);assert.equal(props(ui.field('Pipeline selection')).disabled,true)
+ const ui=await mount(t,{lost:true});await ui.prepare();await ui.click('Use plan and create pipeline');assert.equal(ui.calls.length,1);assert.equal(ui.storage.size,1);assert.equal(props(ui.field('Pipeline selection')).disabled,true)
  const stored=[...ui.storage.values()][0];assert.equal(stored.includes('Second Website'),false);assert.equal(JSON.parse(stored).requestId,ui.calls[0].requestId)
  await ui.click('Refresh');assert.equal(ui.calls.length,1);assert.equal(ui.storage.size,0);assert.equal(props(ui.field('Pipeline selection')).disabled,false);assert.match(ui.env.container.textContent,/Original command recovered/)
 })
@@ -74,20 +74,20 @@ test('stage preview writes nothing; exact reviewed dependency order and scope ar
  const publication=elements(ui.env.container,'select').find(node=>props(node).required)
  await act(async()=>props(publication).onChange({target:{value:'a0000000-0000-4000-8000-000000000007'}}))
  await ui.change('Project brief quantity','1');await ui.change('Draft copy quantity','2');await ui.previewDraft()
- assert.equal(ui.configCalls.length,0);assert.match(ui.env.container.textContent,/Dependencies: brief/);assert.match(ui.env.container.textContent,/Output: not specified/);assert.match(ui.env.container.textContent,/Required inputs: not specified/)
- ui.setGate();const confirm=props(ui.button('Confirm draft revision')).onClick;await act(async()=>{void confirm();void confirm()});assert.equal(ui.configCalls.length,1);assert.deepEqual(ui.configCalls[0].selectedSteps,[{key:'brief',quantity:1},{key:'draft',quantity:2}]);assert.equal(ui.configCalls[0].pipelineGroupId,website);await ui.release();assert.equal(ui.storage.size,0)
+ assert.equal(ui.configCalls.length,0);assert.match(ui.env.container.textContent,/Dependencies: Project brief/);assert.match(ui.env.container.textContent,/Output: not specified/);assert.match(ui.env.container.textContent,/Required inputs: not specified/)
+ ui.setGate();const confirm=props(ui.button('4. Save pipeline')).onClick;await act(async()=>{void confirm();void confirm()});assert.equal(ui.configCalls.length,1);assert.deepEqual(ui.configCalls[0].selectedSteps,[{key:'brief',quantity:1},{key:'draft',quantity:2}]);assert.equal(ui.configCalls[0].pipelineGroupId,website);await ui.release();assert.equal(ui.storage.size,0)
 })
 test('omitted required dependency fails preview; editing invalidates a retained confirmation callback',async t=>{
  const ui=await mount(t,{stages:true});await ui.change('Pipeline selection',website)
  await act(async()=>props(elements(ui.env.container,'select').find(node=>props(node).required)).onChange({target:{value:'a0000000-0000-4000-8000-000000000007'}}))
- await ui.change('Draft copy quantity','1');await ui.previewDraft();assert.match(ui.env.container.textContent,/requires its earlier steps/);assert.equal(ui.button('Confirm draft revision'),undefined);assert.equal(ui.configCalls.length,0)
- await ui.change('Project brief quantity','1');await ui.previewDraft();const oldConfirm=props(ui.button('Confirm draft revision')).onClick
- await ui.change('Draft copy quantity','3');assert.equal(ui.button('Confirm draft revision'),undefined);await act(async()=>oldConfirm());assert.equal(ui.configCalls.length,0)
+ await ui.change('Draft copy quantity','1');await ui.previewDraft();assert.match(ui.env.container.textContent,/requires its earlier steps/);assert.equal(ui.button('4. Save pipeline'),undefined);assert.equal(ui.configCalls.length,0)
+ await ui.change('Project brief quantity','1');await ui.previewDraft();const oldConfirm=props(ui.button('4. Save pipeline')).onClick
+ await ui.change('Draft copy quantity','3');assert.equal(ui.button('4. Save pipeline'),undefined);await act(async()=>oldConfirm());assert.equal(ui.configCalls.length,0)
 })
 test('lost configuration response blocks editing until immutable exact request read recovery',async t=>{
  const ui=await mount(t,{stages:true,lost:true});await ui.change('Pipeline selection',website)
  await act(async()=>props(elements(ui.env.container,'select').find(node=>props(node).required)).onChange({target:{value:'a0000000-0000-4000-8000-000000000007'}}))
- await ui.change('Project brief quantity','1');await ui.previewDraft();await ui.click('Confirm draft revision');assert.equal(ui.configCalls.length,1);assert.equal(ui.storage.size,1);assert.equal(props(ui.field('Pipeline selection')).disabled,true)
+ await ui.change('Project brief quantity','1');await ui.previewDraft();await ui.click('4. Save pipeline');assert.equal(ui.configCalls.length,1);assert.equal(ui.storage.size,1);assert.equal(props(ui.field('Pipeline selection')).disabled,true)
  await ui.click('Refresh');assert.equal(ui.configCalls.length,1);assert.equal(ui.storage.size,0);assert.match(ui.env.container.textContent,/Original command recovered/)
 })
 
@@ -95,19 +95,19 @@ test('declared stage plan reviews exact reuse, omission reason and missing appro
  const ui=await mount(t,{declared:true});await ui.change('Pipeline selection',website)
  await act(async()=>props(elements(ui.env.container,'select').find(node=>props(node).required)).onChange({target:{value:'a0000000-0000-4000-8000-000000000007'}}))
  await ui.change('Project brief decision','reuse');await ui.change('Draft copy decision','run');await ui.change('Additional proof decision','omit');await ui.change('Additional proof omission reason','Covered by approved source')
- await ui.previewDraft();assert.equal(props(ui.button('Confirm draft revision')).disabled,true);assert.match(ui.env.container.textContent,/missing or incompatible Approved source/);assert.equal(ui.configCalls.length,0)
+ await ui.previewDraft();assert.equal(props(ui.button('4. Save pipeline')).disabled,true);assert.match(ui.env.container.textContent,/missing or incompatible Approved source/);assert.equal(ui.configCalls.length,0)
  await ui.click('Find approved versions');await ui.change('Project brief approved version',ui.artifact.artifact_version_id);await ui.change('Draft copy input Approved source',ui.artifact.artifact_version_id);await ui.previewDraft()
- assert.match(ui.env.container.textContent,/Approved launch source · exact v2/);assert.match(ui.env.container.textContent,/Reason: Covered by approved source/);assert.equal(ui.configCalls.length,0);await ui.click('Confirm draft revision')
+ assert.match(ui.env.container.textContent,/Approved launch source · exact v2/);assert.match(ui.env.container.textContent,/Reason: Covered by approved source/);assert.equal(ui.configCalls.length,0);await ui.click('4. Save pipeline')
  assert.equal(ui.configCalls.length,1);assert.deepEqual(ui.configCalls[0].stageDecisions,[{key:'brief',action:'reuse',artifact_version_id:ui.artifact.artifact_version_id},{key:'draft',action:'run',quantity:1,inputs:[{key:'article',artifact_version_id:ui.artifact.artifact_version_id}]},{key:'proof',action:'omit',reason:'Covered by approved source'}]);assert.deepEqual(ui.configCalls[0].selectedSteps,[{key:'brief',quantity:1},{key:'draft',quantity:1}])
 })
 test('retained draft field and confirm callbacks cannot edit or redispatch an unknown stage save',async t=>{
  const ui=await mount(t,{stages:true,lost:true});await ui.change('Pipeline selection',website)
  await act(async()=>props(elements(ui.env.container,'select').find(node=>props(node).required)).onChange({target:{value:'a0000000-0000-4000-8000-000000000007'}}));await ui.change('Project brief quantity','1');await ui.previewDraft()
- const oldField=props(ui.field('Project brief quantity')).onChange,oldConfirm=props(ui.button('Confirm draft revision')).onClick;await ui.click('Confirm draft revision')
+ const oldField=props(ui.field('Project brief quantity')).onChange,oldConfirm=props(ui.button('4. Save pipeline')).onClick;await ui.click('4. Save pipeline')
  await act(async()=>{oldField({target:{value:'4'}});await oldConfirm()});assert.equal(ui.configCalls.length,1);assert.equal(props(ui.field('Project brief quantity')).value,'1');assert.equal(ui.storage.size,1)
 })
 test('retained group confirmation is invalidated by edited group fields',async t=>{
- const ui=await mount(t);await ui.prepare();const oldConfirm=props(ui.button('Confirm independent pipeline')).onClick;await ui.change('Pipeline name','Changed later');await act(async()=>oldConfirm());assert.equal(ui.calls.length,0)
+ const ui=await mount(t);await ui.prepare();const oldConfirm=props(ui.button('Use plan and create pipeline')).onClick;await ui.change('Pipeline name','Changed later');await act(async()=>oldConfirm());assert.equal(ui.calls.length,0)
 })
 
 async function authorDraft(ui){
@@ -151,4 +151,26 @@ test('actual pipeline host aggregates child locks and blocks retained group/refr
  await act(async()=>web.onNavigationBusyChange(false));assert.equal(props(ui.button('Refresh')).disabled,true)
  await act(async()=>resources.onNavigationBusyChange(false));assert.equal(props(ui.button('Refresh')).disabled,false)
  await ui.change('Pipeline selection',marketing);await act(async()=>web.onNavigationBusyChange(true));assert.equal(props(ui.field('Pipeline selection')).value,marketing);assert.equal(props(ui.button('Refresh')).disabled,false)
+})
+
+
+test('simple selector excludes Legacy, exact reviewed plan remains selected after explicit creation',async t=>{
+ const ui=await mount(t,{stages:true});const primary=ui.field('Saved pipeline');assert.ok(primary);assert.doesNotMatch(primary.textContent,/Legacy/);const history=elements(ui.env.container,'details').find(n=>props(n)?.['aria-label']==='Pipeline history');assert.equal(props(history).open,false)
+ await ui.prepare();assert.equal(ui.calls.length,0);await ui.click('Use plan and create pipeline');assert.equal(ui.calls.length,1);assert.equal(props(ui.field('Published pipeline plan')).value,'a0000000-0000-4000-8000-000000000007');assert.equal(ui.configCalls.length,0);assert.equal(ui.runCalls.length,0)
+})
+
+test('non-admin manager preserves only the selected active pipeline cap and cannot edit spending',async t=>{
+ const ui=await mount(t,{stages:true,role:'executive'});ui.records.publishedDefinitions[0].definition.steps[1].kind='ai_assisted';ui.records.configurations.find(r=>r.id==='web').max_ai_cost_microusd=1500000;ui.records.configurations.find(r=>r.id==='legacy').max_ai_cost_microusd=9000000;await ui.click('Refresh');await ui.change('Saved pipeline',website);await ui.change('Published pipeline plan','a0000000-0000-4000-8000-000000000007');await ui.change('Project brief quantity','1');await ui.change('Draft copy quantity','2');assert.equal(ui.field('Pipeline AI limit'),undefined);await ui.previewDraft();await ui.click('4. Save pipeline');assert.equal(ui.configCalls.length,1);assert.equal(ui.configCalls[0].maxAiCostMicrousd,1500000);assert.equal(ui.configCalls[0].pipelineGroupId,website);assert.equal(ui.runCalls.length,0)
+})
+
+test('AI stages without this pipeline active cap require Admin setup instead of using Legacy limits',async t=>{
+ const ui=await mount(t,{stages:true,role:'executive'});ui.records.publishedDefinitions[0].definition.steps[0].kind='ai_assisted';ui.records.configurations.find(r=>r.id==='legacy').max_ai_cost_microusd=9000000;await ui.click('Refresh');await ui.change('Saved pipeline',website);await ui.change('Published pipeline plan','a0000000-0000-4000-8000-000000000007');await ui.change('Project brief quantity','1');await ui.previewDraft();assert.match(ui.env.container.textContent,/An Admin must set an approved spending limit/);assert.equal(ui.button('4. Save pipeline'),undefined);assert.equal(ui.configCalls.length,0)
+})
+
+test('retained Admin spending handler loses authority immediately on role change',async t=>{
+ const ui=await mount(t,{stages:true});ui.records.publishedDefinitions[0].definition.steps[0].kind='ai_assisted';ui.records.configurations.find(r=>r.id==='web').max_ai_cost_microusd=700000;await ui.click('Refresh');await ui.change('Saved pipeline',website);await ui.change('Published pipeline plan','a0000000-0000-4000-8000-000000000007');await ui.change('Project brief quantity','1');const old=props(ui.field('Pipeline AI limit')).onChange;await ui.setRole('executive');await act(async()=>old({target:{value:'999'}}));assert.equal(ui.field('Pipeline AI limit'),undefined);await ui.previewDraft();await ui.click('4. Save pipeline');assert.equal(ui.configCalls[0].maxAiCostMicrousd,700000)
+})
+
+test('empty plan path opens service review locally and restricts Administration link to Admins',async t=>{
+ let reviews=0;const ui=await mount(t,{onReviewServices:()=>reviews++});ui.records.publishedDefinitions=[];await ui.click('Refresh');await ui.click('Review project services');assert.equal(reviews,1);const link=elements(ui.env.container,'a').find(n=>n.textContent==='Open published plans in Administration');assert.equal(props(link).href,'/sphere/engagements?view=services');assert.equal(props(link).target,'_blank');await ui.setRole('executive');assert.equal(elements(ui.env.container,'a').find(n=>n.textContent==='Open published plans in Administration'),undefined);assert.equal(ui.calls.length,0);assert.equal(ui.configCalls.length,0)
 })
