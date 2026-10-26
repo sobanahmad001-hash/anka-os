@@ -15,7 +15,7 @@ export default function ProjectServiceScopePanel(props) {
   return <ServiceScopePanel key={contextKey} {...props} user={user} />
 }
 
-function ServiceScopePanel({ project, organizationId, membership, scopeRevision, requestSignal, onChanged, onAccessError, user }) {
+function ServiceScopePanel({ project, organizationId, membership, scopeRevision, requestSignal, onChanged, onAccessError, onNavigationBusyChange, user }) {
   const admin = canShowAuthorityAdministration(membership)
   const [snapshot, setSnapshot] = useState(null)
   const [canManage, setCanManage] = useState(admin)
@@ -27,6 +27,7 @@ function ServiceScopePanel({ project, organizationId, membership, scopeRevision,
   const [serviceQuery, setServiceQuery] = useState('')
   const [results, setResults] = useState({})
   const [queue, setQueue] = useState(createProjectServiceProposalQueue)
+  useEffect(() => { onNavigationBusyChange?.(saving); return () => onNavigationBusyChange?.(false) }, [saving, onNavigationBusyChange])
   const dispatching = useRef(false)
   const [review, setReview] = useState(null)
   const [proposalReview, setProposalReview] = useState(null)

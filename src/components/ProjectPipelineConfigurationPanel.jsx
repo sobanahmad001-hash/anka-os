@@ -16,11 +16,11 @@ export default function ProjectPipelineConfigurationPanel(props) {
   return <ScopedProjectPipelineConfigurationPanel key={`${user?.id}:${props.organizationId}:${props.engagement.id}`} {...props} actorId={user?.id} />
 }
 // eslint-disable-next-line no-unused-vars -- JSX components are not counted by this lint configuration.
-function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, services, membership, signal, actorId }) {
+function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, services, membership, signal, actorId, initialKind = 'website', onNavigationBusyChange }) {
   const [records, setRecords] = useState({ available: [], publishedDefinitions: [], configurations: [], activations: [], groups: [] })
   const [publicationId, setPublicationId] = useState('')
   const [presetQuery, setPresetQuery] = useState('')
-  const [groupId,setGroupId]=useState(''),[groupName,setGroupName]=useState(''),[groupKind,setGroupKind]=useState('website'),[groupPreset,setGroupPreset]=useState(''),[groupReview,setGroupReview]=useState(null)
+  const [groupId,setGroupId]=useState(''),[groupName,setGroupName]=useState(''),[groupKind,setGroupKind]=useState(initialKind),[groupPreset,setGroupPreset]=useState(''),[groupReview,setGroupReview]=useState(null)
   const recoveryKey=`anka-pipeline-command:${actorId}:${organizationId}:${engagement.id}`
   const [pending,setPending]=useState(()=>{try { const value=JSON.parse(sessionStorage.getItem(recoveryKey)||'null');if (!value) return null;if (['group','configuration','activation'].includes(value.kind) && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value.requestId)) return value;return {kind:'unreadable',requestId:''} } catch {return {kind:'unreadable',requestId:''}}}); const flight=useRef(false),groupRequest=useRef('')
   const [quantities, setQuantities] = useState({})
@@ -42,6 +42,7 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
   const childBlocked=childState.groupId===groupId&&(childState.website||childState.marketing||childState.resources)
   const nativeLocked=busy || Boolean(pending) || Boolean(view.error)
   const locked=nativeLocked || childBlocked
+  useEffect(() => { onNavigationBusyChange?.(Boolean(busy || pending || childBlocked)); return () => onNavigationBusyChange?.(false) }, [busy, pending, childBlocked, onNavigationBusyChange])
 
   const createRequest = useRef('')
   const activationRequest = useRef('')
