@@ -153,3 +153,47 @@
 .design-private-attachments li span{color:var(--anka-muted);font-size:12px;line-height:1.5}
 .design-private-attachments li button{justify-self:start;padding:8px 12px;border:1px solid var(--anka-line);border-radius:8px}
 .design-private-attachments [role=alert]{color:var(--anka-danger,#c24141)}
+
+/* One attachment controller lives beside the message draft, outside the brief. */
+.design-composer-attachments{max-height:50dvh;overflow:auto;margin:8px 0;padding:12px;flex:none}
+.design-composer-attachments[data-open=false]:not(:has(li)):not(:has(.design-composer-file-card)){display:none}
+.design-composer-attachments [hidden]{display:none!important}
+.design-composer-attachments .design-private-attachments{margin-top:8px}
+.design-composer-attachments .design-private-attachments:has(>div[hidden]):not(:has(li)){display:none}
+.design-composer-attachments li{min-width:0;overflow-wrap:anywhere}
+.design-composer-attachments img{max-width:100%;max-height:180px;object-fit:contain;border-radius:8px}
+.design-composer-attachments button{min-height:44px}
+.design-composer-attachments :focus-visible{outline:2px solid var(--anka-focus);outline-offset:2px}
+
+.design-composer-file-card{border:1px solid var(--anka-line);border-radius:10px;padding:10px;min-width:0}
+.design-reference-original{display:flex;flex-wrap:wrap;gap:8px;min-width:0}
+.design-reference-original figure,.design-reference-original [role=alert]{flex-basis:100%}
+.design-composer-attachments [data-open=false]{display:none}
+
+.design-composer-attachments[popover]{display:block;color:var(--anka-ink);box-sizing:border-box;width:auto;min-width:0;flex:0 1 auto;max-height:180px;margin:8px 14px}
+.design-composer-attachments[data-open=true]{position:fixed;inset:12dvh max(16px,calc((100vw - 680px)/2)) auto;z-index:1000;max-height:76dvh;margin:0;box-shadow:0 16px 60px #0005;background:var(--anka-surface);border:1px solid var(--anka-line)}
+.design-composer-attachments[data-open=false]{position:relative;inset:auto;max-height:180px;overflow:auto}
+.design-reference-thumbnail{width:64px;height:48px;object-fit:cover!important}
+.design-reference-preview{max-width:min(90vw,680px);max-height:85dvh;padding:20px;border:1px solid var(--anka-line);border-radius:12px;background:var(--anka-surface);color:var(--anka-ink)}
+.design-reference-preview::backdrop{background:#0008}
+.design-reference-preview img{max-width:100%;max-height:65dvh!important;object-fit:contain}
+@media(max-width:600px){.design-composer-attachments[data-open=true]{inset:12dvh 12px auto;max-height:74dvh}.design-composer-attachments[data-open=false]{max-height:160px;margin:6px 10px}}
+
+/* Preserve explicit composer grid rows; new Attach must never overlap Message or Send. */
+.design-unified-workspace .department-chat-footer-body>.design-composer-attach{grid-row:2;grid-column:1;justify-self:start;width:auto}
+.design-unified-workspace .department-chat-footer-actions>.department-chat-submit{grid-row:2;grid-column:-2}
+.design-unified-workspace .department-chat-footer{flex-shrink:0;min-height:215px;max-height:320px}
+.design-composer-attachments[data-open=false] .design-composer-source-files{padding:0;border:0}
+.design-composer-attachments[data-open=false] .design-composer-source-files>p:last-child,.design-composer-attachments[data-open=false] .design-private-attachments>[role=status],.design-composer-attachments[data-open=false] .design-purpose-reference{display:none}
+.design-composer-attachments[data-open=false] .design-private-attachments li{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.design-composer-attachments[data-open=false] .design-private-attachments li>label,.design-composer-attachments[data-open=false] .design-private-attachments li>span{flex-basis:100%}
+.design-composer-attachments[data-open=false] .design-private-attachments li button{padding:6px 10px}
+
+.design-composer-attachments[data-open=false]:not(:has(.design-private-attachments li)):not(:has(.design-composer-file-card)):not(:has(.design-selected-input)){display:none}
+
+.design-composer-attachments[data-open=false]{flex-shrink:0;min-height:140px;max-height:180px}
+.design-unified-workspace .department-chat-main:has(.design-composer-attachments li) .department-chat-messages{min-height:60px}
+
+/* A project chat with cards must size to its composer, so the following context panel cannot cover actions. */
+.design-unified-workspace .department-chat-main:has(.design-composer-attachments li){height:auto!important;min-height:clamp(430px,calc(100dvh - 310px),760px);max-height:none}
+.design-unified-workspace .department-chat-main:has(.design-composer-attachments li) .department-chat-messages{max-height:260px;overflow:auto}

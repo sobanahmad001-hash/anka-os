@@ -4,8 +4,9 @@ import {mediaKind,requiresImage} from '../../supabase/functions/_shared/designMo
 import {useEffect,useRef,useState} from 'react'
 import {createPortal} from 'react-dom'
 import {requireMediaQuote,mediaRequestIdentity} from '../../supabase/functions/_shared/designMediaCost.js'
+const EMPTY_IMAGES=[]
 const money=value=>new Intl.NumberFormat(undefined,{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:6}).format(value/1000000)
-export default function DesignUnifiedMediaComposer({studio,mode,organizationId,userId,context,brief,signal,onBusyChange,onOutput,onEditBrief,toolbarTarget,outputKind=mode,officialImages=[],canManagePricing=false}){
+export default function DesignUnifiedMediaComposer({studio,mode,organizationId,userId,context,brief,signal,onBusyChange,onOutput,onEditBrief,toolbarTarget,outputKind=mode,officialImages=EMPTY_IMAGES,preferredInput=null,canManagePricing=false}){
  const [choices,setChoices]=useState([]),[selection,setSelection]=useState(null),[quote,setQuote]=useState(null),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[operation,setOperation]=useState(null),[job,setJob]=useState(null),[confirmation,setConfirmation]=useState(false)
  const [automaticRevision,setAutomaticRevision]=useState(0)
  const [estimateConsent,setEstimateConsent]=useState(false),[readinessTime,setReadinessTime]=useState(Date.now())
@@ -14,6 +15,7 @@ export default function DesignUnifiedMediaComposer({studio,mode,organizationId,u
  const completion=useRef({operation:null,checks:0,paused:false}),refreshOriginal=useRef(null)
  const flight=useRef(false),alive=useRef(true),generation=useRef(0),dialog=useRef(null),generateButton=useRef(null)
  const motion=outputKind==='motion'
+ const preferredApplied=useRef(null)
  const [guided,setGuided]=useState(false),[privateSources,setPrivateSources]=useState([]),[pricingUnavailable,setPricingUnavailable]=useState(false)
  const useImage=motion||(mode==='image'&&guided)
  const scope=JSON.stringify([organizationId,userId,context,brief?.id,brief?.frozen_version_id,mode,outputKind]),storageKey='anka:design-media:'+scope
@@ -73,6 +75,16 @@ export default function DesignUnifiedMediaComposer({studio,mode,organizationId,u
  },[operation,scope,completionStatus,automaticRevision,signal])
  const generatedOriginals=history.filter(item=>item.status==='ready').flatMap(item=>(item.outputs||[]).filter(output=>['image/png','image/jpeg'].includes(output.mime_type)).map(output=>({...output,kind:'media_output',label:item.request.model_id+' · '+new Date(item.created_at).toLocaleString()+' · image '+(Number(output.id.split(':')[1])+1)})))
  const originals=[...(context?.kind==='engagement'?officialImages:[]),...generatedOriginals,...(motion&&context?.kind==='private'?privateSources:[])]
+ useEffect(()=>{
+  const preferred=preferredInput?.source
+  if(!preferred||preferredInput.purpose!==outputKind||busy||operation)return
+  const identity=JSON.stringify([scope,preferredInput]);if(preferredApplied.current===identity)return
+  let active=true;const revision=generation.current
+  const accept=item=>{if(active&&alive.current&&!signal?.aborted&&generation.current===revision){preferredApplied.current=identity;setGuided(outputKind==='image');setSource(item);setConsent(false);setEstimateConsent(false);setChoices([]);setSelection(null);setQuote(null);setConfirmation(false)}}
+  if(preferred.kind==='design_asset_version'){const item=officialImages.find(item=>item.id===preferred.id&&item.checksum===preferred.checksum);if(item)accept(item)}
+  else if(preferred.kind==='private_attachment'&&motion&&context?.kind==='private'&&preferredInput.conversationId===context.id){studio.listPrivateAnimationSources({context}).then(rows=>{if(!active||!alive.current||signal?.aborted||generation.current!==revision)return;setPrivateSources(rows);const item=rows.find(item=>item.id===preferred.id&&item.checksum===preferred.checksum);if(item)accept(item);else setNotice('This private image is no longer eligible. Choose another saved original.')}).catch(()=>{if(active&&alive.current&&!signal?.aborted)setNotice('Private image access could not be verified. Nothing was sent.')})}
+  return()=>{active=false}
+ },[preferredInput,scope,busy,operation,context,motion,officialImages,outputKind,studio,signal])
  useEffect(()=>{if(source?.kind==='design_asset_version'&&!officialImages.some(item=>item.id===source.id&&item.checksum===source.checksum)){generation.current++;setSource(null);setConsent(false);setChoices([]);setSelection(null);setQuote(null);setConfirmation(false);setNotice('The selected project image is no longer available. Choose an eligible exact version.')}},[officialImages,source])
  const available=choices.filter(x=>x.kind===mode&&(mode!=='image'||(guided?requiresImage(x.selection.model_id):!requiresImage(x.selection.model_id)))&&(mode!=='video'||(motion?requiresImage(x.selection.model_id):!requiresImage(x.selection.model_id)))),selected=choices.find(x=>x.selection.connector_connection_id===selection?.connector_connection_id&&x.selection.model_id===selection?.model_id)
  const configs=currentConfigurations(selected,readinessTime),readyConfiguration=configs.find(c=>configurationKey(c.request)===configurationKey(selection))
