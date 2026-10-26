@@ -55,6 +55,10 @@ test('mounted project defaults to Chat, preserves explicit tabs and rejects late
     ['unknown', 'overview'], ['', 'overview']]) {
     params = new URLSearchParams({ tab }); await render()
     assert.equal(selected(), `project-tab-${primary}`, tab)
+    if(tab==='overview'){
+      const rendered=nodes(env.container),nav=rendered.find(n=>propsOf(n)?.role==='tablist'),metrics=rendered.find(n=>propsOf(n)?.['aria-label']==='Workspace summary')
+      assert.ok(nav&&metrics);assert.ok(rendered.indexOf(nav)<rendered.indexOf(metrics),'primary navigation precedes overview metric cards')
+    }
   }
   params = new URLSearchParams(); defer = true
   projectId = 'project-delayed'; await render()
