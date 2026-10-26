@@ -1,3 +1,4 @@
+import DescriptionDisclosure from '../components/DescriptionDisclosure.jsx'
 import _WorkspaceDialog from '../components/WorkspaceDialog.jsx'
 import WorkshopModelMappingPanel from '../components/WorkshopModelMappingPanel.jsx'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -386,7 +387,8 @@ function EngagementWorkspace({ workspace, owners, organizationId, membership, si
 
   return <div className="h-full overflow-y-auto bg-[var(--anka-canvas)] text-[var(--anka-ink)]"><div className="workspace-page workspace-container">
     <button onClick={onBack} className="text-sm text-[var(--anka-muted)] hover:text-[var(--anka-ink)]">← Back to engagements</button>{returnProjectId && <Link to={`/sphere/workspace/projects/${encodeURIComponent(returnProjectId)}`} className="ml-4 text-sm text-[var(--anka-violet)] hover:text-[var(--anka-ink)]">Back to project</Link>}
-    <header className="mt-5 flex flex-wrap items-start justify-between gap-5"><div><p className="text-xs text-[var(--anka-violet)]">{workspace.engagement.agency_clients?.name} · {workspace.engagement.brands?.name}</p><h1 className="workspace-title">{workspace.engagement.name}</h1><p className="workspace-description">{workspace.engagement.objective || 'No objective recorded.'}</p></div><Badge>{labelize(workspace.engagement.status)}</Badge></header>
+    <header className="mt-5 flex items-start justify-between gap-3"><div className="min-w-0 flex-1 [overflow-wrap:anywhere]"><p className="text-xs text-[var(--anka-violet)]">{workspace.engagement.agency_clients?.name} · {workspace.engagement.brands?.name}</p><h1 className="workspace-title">{workspace.engagement.name}</h1></div><div className="shrink-0"><Badge>{labelize(workspace.engagement.status)}</Badge></div></header>
+    <DescriptionDisclosure key={workspace.engagement.id} text={workspace.engagement.objective || 'No objective recorded.'} label="Engagement objective" />
     <div className="mt-7 grid gap-3 sm:grid-cols-4"><Metric label="Services" value={workspace.services.length} /><Metric label="Journey stages" value={workspace.stages.length} /><Metric label="Dependencies" value={workspace.dependencies.length} /><Metric label="Scoped connectors" value={workspace.connectors.length} /></div>
     <WorkshopModelMappingPanel organizationId={organizationId} projectId={workspace.engagement.project_id} engagementId={workspace.engagement.id} membership={membership} />
     <nav className="mt-7 flex gap-2 overflow-x-auto border-b border-[var(--anka-line)]">
