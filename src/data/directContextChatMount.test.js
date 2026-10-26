@@ -227,7 +227,7 @@ test('project owner first and later Send use approved model and canonical is opt
   ui.fixture.beforeRun = input => inputs.push(input)
   await ui.type('Project direction'); await ui.send(); await ui.consent()
   assert.equal(inputs[0].include_canonical_context, false)
-  await ui.click('Details')
+  await ui.click('Chat settings')
   const checkbox = descendants(ui.environment.container).find(node => node.tagName === 'INPUT' && props(node)?.type === 'checkbox')
   await act(async () => props(checkbox).onChange({ target: { checked: true } }))
   await ui.type('Use current project context'); await ui.send(); await ui.consent()
@@ -267,7 +267,7 @@ test('shared project collaborator can save human replies but cannot run AI, rena
   assert.equal(ui.fixture.data.counters.run, 0)
   assert.equal(ui.button('Share'), undefined)
   assert.equal(ui.named('Approved model'), undefined)
-  await ui.click('Details')
+  await ui.click('Chat settings')
   assert.equal(ui.named('Rename chat'), undefined)
 })
 
@@ -388,6 +388,7 @@ for (const [surface, models, expected] of [
   ['project', ['gpt-6-astra'], ''],
 ]) test(`direct ${surface} chooses eligible preference ${expected || 'none'}`, async t => {
   const ui = await mount(t, { surface, allowlist: approvedPreferenceModels(models) })
+  if (surface === 'project') await ui.click('Chat settings')
   assert.equal(props(ui.named('Approved model')).value, expected)
   if (models.includes('gpt-6-luna') && expected !== 'gpt-6-luna') {
     await ui.type('gpt-6-luna', 'Approved model')
@@ -410,4 +411,31 @@ test('Content compact layout keeps one approved model and ordinary Send needs no
   assert.equal(ui.named('Confirm AI data sharing'), undefined)
   assert.equal(ui.named('Message').value, '')
   assert.deepEqual(ui.fixture.data.counters, { created: 1, messages: 1, run: 1, recover: 0 })
+})
+
+
+test('Project Chat has one composer Attach and moves model selection into settings without changing Send scope', async t => {
+  const ui = await mount(t, { surface: 'project', state: 'populated', initial: true })
+  assert.equal(ui.named('Approved model'), undefined)
+  assert.equal(ui.named('Work type'), undefined)
+  assert.equal(ui.named('Chat history'), undefined)
+  assert.ok(ui.button('Attach files'))
+  assert.ok(descendants(ui.named('Chat composer')).includes(ui.button('Attach files')))
+  await ui.click('Chat settings')
+  assert.ok(ui.named('Approved model'))
+  assert.equal(descendants(ui.named('Chat composer')).includes(ui.named('Approved model')), false)
+  const settings = ui.named('Chat details')
+  const canonical = descendants(settings).find(node => node.tagName === 'INPUT' && props(node)?.type === 'checkbox')
+  assert.equal(props(canonical).checked, false)
+  await ui.click('Close settings')
+  assert.equal(ui.named('Approved model'), undefined)
+  await ui.type('Project note with normal Send')
+  const before = { ...ui.fixture.data.counters }
+  await ui.send(true)
+  assert.equal(ui.named('Confirm AI data sharing'), undefined)
+  assert.equal(ui.fixture.data.counters.run, before.run + 1)
+  assert.equal(ui.fixture.data.counters.created, before.created)
+  assert.equal(ui.fixture.scope.project_id, projectId)
+  await ui.click('Chat history')
+  assert.ok(ui.named('Chat history'))
 })
