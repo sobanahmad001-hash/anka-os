@@ -256,6 +256,7 @@ export function createDesignWorkshopScope(organizationId, { signal, client = sup
   },
 
   listMediaGenerations: input => invoke('list_media_generations',input),
+  listMediaConversationResults: input => invoke('list_media_conversation_results',input),
   listPrivateAnimationSources: input => invoke('list_private_animation_sources',input),
   listMediaChoices: input => invoke('list_media_choices',input),
   quoteMediaRequest: input => invoke('quote_media_request',input),

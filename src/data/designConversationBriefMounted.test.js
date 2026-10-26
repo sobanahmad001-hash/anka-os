@@ -1,3 +1,4 @@
+import {createGeneratedOriginalAccess} from './designGeneratedOriginal.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import * as React from 'react'
@@ -15,7 +16,7 @@ test('conversation brief preserves media lock and requires clean latest confirme
  const Editor=({onDirtyChange})=>React.createElement('button',{onClick:()=>onDirtyChange(true)},'Edit draft fixture')
  let finish;const Media=({onBusyChange})=>React.createElement('button',{onClick:()=>{onBusyChange(true);return new Promise(resolve=>{finish=()=>{onBusyChange(false);resolve()}})}},'Start pending fixture')
  const signal=new AbortController().signal
- const C=new Function('React','useCallback','useEffect','useMemo','useRef','useState','useAuth','useOrganization','designWorkshop','designCapabilities','creativeBriefForContext','latestBriefVersion','eligibleDesignVersions','DesignCreativeBriefWorkspace','DesignUnifiedMediaComposer',code+';return DesignUnifiedWorkspace')(React,React.useCallback,React.useEffect,React.useMemo,React.useRef,React.useState,()=>({user:{id:'actor'}}),()=>({activeOrganizationId:'org',scopeRevision:1,activeMembership:{},requestSignal:signal}),{forOrganization:()=>studio},()=>({createDraft:true}),()=>brief,()=>version,()=>[],Editor,Media)
+ const C=new Function('React','useCallback','useEffect','useMemo','useRef','useState','useAuth','useOrganization','designWorkshop','designCapabilities','creativeBriefForContext','latestBriefVersion','eligibleDesignVersions','DesignCreativeBriefWorkspace','DesignUnifiedMediaComposer','createGeneratedOriginalAccess','DesignGeneratedConversationResults','DesignGeneratedMediaResult',code+';return DesignUnifiedWorkspace')(React,React.useCallback,React.useEffect,React.useMemo,React.useRef,React.useState,()=>({user:{id:'actor'}}),()=>({activeOrganizationId:'org',scopeRevision:1,activeMembership:{},requestSignal:signal}),{forOrganization:()=>studio},()=>({createDraft:true}),()=>brief,()=>version,()=>[],Editor,Media,createGeneratedOriginalAccess,()=>null,()=>null)
  const root=createRoot(env.container);t.after(async()=>{await React.act(async()=>root.unmount());Object.assign(globalThis,before)})
  const render=()=>React.act(async()=>root.render(React.createElement(C,{},bridge=>React.createElement('div',{},bridge.toolbar,bridge.starters,React.createElement('button',{onClick:()=>bridge.onConversationChange({id:'saved-chat',organization_id:'org',owner_id:'actor',department_id:'design',context_kind:'department_private',state:'active'},()=>{})},'Choose saved chat fixture')))))
  const buttons=()=>all(env.container).filter(n=>n.tagName==='BUTTON'),button=text=>buttons().find(n=>n.textContent===text)

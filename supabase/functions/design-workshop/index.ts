@@ -1,7 +1,7 @@
 import {readMediaSpending} from './mediaSpending.ts'
 import {privateAnimationSources} from './privateAnimationSources.ts'
 import {quoteMediaRequest,listMediaChoices} from './mediaRequests.ts'
-import {listMediaGenerations,generateMedia,recoverMediaGeneration,pollMediaGeneration,ingestMediaGeneration,signMediaGeneration} from './mediaExecution.ts'
+import {listMediaConversationResults,listMediaGenerations,generateMedia,recoverMediaGeneration,pollMediaGeneration,ingestMediaGeneration,signMediaGeneration} from './mediaExecution.ts'
 import { listMediaRates, configureMediaRate, setEstimatedTestMode, readEstimatedTestMode } from './mediaPricing.ts'
 import { namedKey } from '../_shared/googleOAuthTokens.ts'
 import { openAiTextOptions } from '../_shared/openaiModelPolicy.js'
@@ -247,7 +247,7 @@ async function callerDeliveryPackageRoot(userClient: Client, artifactId: string)
 export async function designWorkshopScope(userClient: Client, body: Json): Promise<ServerOrganizationScope> {
   const action = text(body.action, 80)
   const requestedOrganizationId = text(body.organization_id, 80) || null
-  if (['list_private_animation_sources','list_media_generations','recover_media_generation','poll_media_generation','ingest_media_generation','sign_media_generation'].includes(action)) return {root:null,requestedOrganizationId:requestedOrganizationId || ''}
+  if (['list_media_conversation_results','list_private_animation_sources','list_media_generations','recover_media_generation','poll_media_generation','ingest_media_generation','sign_media_generation'].includes(action)) return {root:null,requestedOrganizationId:requestedOrganizationId || ''}
   if (['list_media_choices','quote_media_request','generate_media_request'].includes(action)) {
     const root=await callerCreativeBriefRoot(userClient,requiredActionId(body.creative_brief_id,'Confirmed creative brief'));
     if(requestedOrganizationId&&requestedOrganizationId!==root.organizationId)throw Object.assign(new Error('Creative brief organization mismatch'),{status:403});
@@ -2079,6 +2079,7 @@ async function handler(req: Request, dependencies: HandlerDependencies = {}) {
       quote_media_request: () => quoteMediaRequest(admin,body,user.id),
       generate_media_request: () => generateMedia(admin,body,user.id),
       list_media_generations: () => listMediaGenerations(admin,body,user.id),
+      list_media_conversation_results: () => listMediaConversationResults(admin,body,user.id),
       recover_media_generation: () => recoverMediaGeneration(admin,body,user.id),
       poll_media_generation: () => pollMediaGeneration(admin,body,user.id),
       ingest_media_generation: () => ingestMediaGeneration(admin,body,user.id),
