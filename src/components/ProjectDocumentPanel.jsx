@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { departmentChat } from '../data/departmentChatRepository.js'
 
 const types = { txt: 'text/plain', md: 'text/markdown', pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  }
-export default function ProjectDocumentPanel({ conversationKey, conversationId, requestScope, busy, ensureConversation, run, selectedIds, onSelection, initialFile=null }) {
+export default function ProjectDocumentPanel({ conversationKey, conversationId, requestScope, busy, ensureConversation, run, selectedIds, onSelection, onReadyForChat, initialFile=null }) {
   const [rows, setRows] = useState([]), [file, setFile] = useState(initialFile), [classification, setClassification] = useState('internal'), [consent, setConsent] = useState(false)
   const [notice, setNotice] = useState(''), [error, setError] = useState('')
   const attempt = useRef(null), revision = useRef(0), fileInput = useRef(null)
@@ -37,8 +37,12 @@ export default function ProjectDocumentPanel({ conversationKey, conversationId, 
         const latestRows = await departmentChat.listProjectDocuments({ conversation_id: conversation.id }, requestScope)
         if (requestScope.signal?.aborted || token !== revision.current) return
         setRows(latestRows)
+        const readyRow=latestRows.find(row=>row.id===saved.id&&row.status==='ready'&&row.ai_use_allowed===true)
+        const nextIds=[...new Set([...selectedIds,saved.id])]
+        const canSelect=readyRow&&nextIds.length<=3&&latestRows.filter(row=>nextIds.includes(row.id)).reduce((sum,row)=>sum+(row.text_characters||0),0)<=24000
+        if(canSelect)onSelection(nextIds)
         attempt.current = null; setFile(initialFile); setConsent(false); if (fileInput.current) fileInput.current.value = ''
-        setNotice(`${saved.original_name} saved privately. Select it below before Send. No AI request was made.`)
+        setNotice(`${saved.original_name} saved privately. ${canSelect?'Selected for your next Send.':'Select eligible references below before Send.'} No AI request was made.`);if(canSelect)onReadyForChat?.(readyRow)
       } catch (reason) { if (!requestScope.signal?.aborted && token === revision.current) setError(reason.message + ' Retry Upload uses the same file request; it does not send to AI.') }
     })
   }
@@ -70,13 +74,13 @@ export default function ProjectDocumentPanel({ conversationKey, conversationId, 
     setError(''); onSelection(ids)
   }
   return <div className="project-document-panel" aria-label="Project document references">
-    <p>Original files are private to you in this saved Project Chat. Shared teammates can see chat answers, but cannot download these originals. Uploading never calls AI.</p>
+    <p>Uploading in a new Chat first saves a private Chat with a human attachment note, without an AI reply. Original files are private to you in this saved Project Chat. Shared teammates can see chat answers, but cannot download these originals. Uploading never calls AI.</p>
     <p>PDF text (20 pages), DOCX main text, TXT or Markdown. Up to 5 MiB per file; DOCX 4 MiB. No scans, OCR, encrypted PDFs or video. Spreadsheets use the separate reviewed import flow.</p>
     {file && <p>Selected file: {file.name}</p>}
     <label>Reference file<input ref={fileInput} type="file" accept=".pdf,.docx,.txt,.md" disabled={busy} onChange={e => { setFile(e.target.files?.[0] || null); setConsent(false); attempt.current = null; setError('') }} /></label>
     <label>Classification<select value={classification} disabled={busy || Boolean(attempt.current)} onChange={e => setClassification(e.target.value)}><option value="public">Public</option><option value="internal">Internal</option><option value="confidential">Confidential</option></select></label>
-    <label><input type="checkbox" checked={consent} disabled={busy || Boolean(attempt.current)} onChange={e => setConsent(e.target.checked)} />I allow extracted text from this file to be sent to the selected AI provider when I select it and press Send.</label>
-    <button type="button" disabled={busy || !conversationId || !file || !mime || !consent} onClick={upload}>{attempt.current ? 'Retry same upload' : 'Upload reference'}</button>
+    <label><input type="checkbox" checked={consent} disabled={busy || Boolean(attempt.current)} onChange={e => setConsent(e.target.checked)} />I confirm private upload (and saving this Chat if new), and allow extracted text from this file to be sent to the selected AI provider when I select it and press Send.</label>
+    <button type="button" disabled={busy || !file || !mime || !consent} onClick={upload}>{attempt.current ? 'Retry same upload' : 'Upload reference'}</button>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     <ul>{rows.filter(a => a.status !== 'revoked').map(row => <li key={row.id}>
       <label><input type="checkbox" checked={selectedIds.includes(row.id)} disabled={busy || row.status !== 'ready'} onChange={e => select(row, e.target.checked)} />{row.original_name}</label>
