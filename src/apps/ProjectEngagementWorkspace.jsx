@@ -12,6 +12,7 @@ import ProjectDiscussionPanel from './ProjectDiscussionPanel.jsx'
 import ContextConversationPanel from '../components/ContextConversationPanel.jsx'
 import './projectConversationLayout.css'
 import ProjectDeliverySetup from '../components/ProjectDeliverySetup.jsx'
+import { projectWorkCard } from '../data/projectWorkCard.js'
 import _ProjectReviewEvidencePanel from './ProjectReviewEvidencePanel.jsx'
 import { appendWorkshopNavigation, parseWorkshopNavigation } from '../data/workshopNavigation.js'
 
@@ -208,8 +209,8 @@ export default function ProjectEngagementWorkspace() {
               <ContextConversationPanel directSend contextKind="project_team" projectId={project.id} label={`${project.name} · Project AI`} onNavigationBusyChange={reportChatBusy} onDraftDirtyChange={reportChatDirty} />
             </section>
           </div>}
-          {tab === 'project-tasks' && <ProjectTasks rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
-          {tab === 'engagement-work' && <EngagementWork rows={workspace.engagementWorkItems} hasEngagement={identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
+          {tab === 'project-tasks' && <ProjectTasks workspace={workspace} rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
+          {tab === 'engagement-work' && <EngagementWork workspace={workspace} rows={workspace.engagementWorkItems} hasEngagement={identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
           {tab === 'planning' && <ProjectPlanningPanel workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} onRefresh={load} />}
           {tab === 'retainer-planning' && showRetainerPlanning && <RetainerPlanningPanel project={project} engagement={workspace.engagement} services={workspace.services} />}
           {tab === 'outputs' && <Outputs workspace={workspace} />}
@@ -262,13 +263,13 @@ function recordWorkshopPath(link, item, kind, originTab, origin) {
   })
 }
 
-function ProjectTasks({ rows, workshopLinks, navigate, originTab = 'project-tasks', origin }) {
-  return <Panel title="Project Tasks" description="Canonical project-level planning and execution tasks. These are not Engagement Work Items."><RecordList rows={rows} empty="No Project Tasks recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="project_task" context={item.workstreamName} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'project_task', originTab, origin)} navigate={navigate} />} /></Panel>
+function ProjectTasks({ rows, workshopLinks, navigate, originTab = 'project-tasks', origin, workspace }) {
+  return <Panel title="Project Tasks" description="Canonical project-level planning and execution tasks. These are not Engagement Work Items."><RecordList rows={rows} empty="No Project Tasks recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="project_task" context={item.workstreamName} workspace={workspace} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'project_task', originTab, origin)} navigate={navigate} />} /></Panel>
 }
 
-function EngagementWork({ rows, hasEngagement, workshopLinks, navigate, originTab = 'engagement-work', origin }) {
+function EngagementWork({ rows, hasEngagement, workshopLinks, navigate, originTab = 'engagement-work', origin, workspace }) {
   if (!hasEngagement) return <Empty title="No engagement extension" note="Engagement Work Items do not apply to this project. Project Tasks remain available separately." />
-  return <Panel title="Engagement Work Items" description="Delivery work attached to the engagement extension. These are not Project Tasks."><RecordList rows={rows} empty="No Engagement Work Items recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="engagement_work_item" context={label(item.department_id)} automation={Boolean(item.automation_flagged_at)} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'engagement_work_item', originTab, origin)} navigate={navigate} />} /></Panel>
+  return <Panel title="Engagement Work Items" description="Delivery work attached to the engagement extension. These are not Project Tasks."><RecordList rows={rows} empty="No Engagement Work Items recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="engagement_work_item" context={label(item.department_id)} workspace={workspace} automation={Boolean(item.automation_flagged_at)} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'engagement_work_item', originTab, origin)} navigate={navigate} />} /></Panel>
 }
 
 const WORK_VIEWS = ['list', 'board', 'calendar']
@@ -305,7 +306,7 @@ function WorkViews({ workspace, navigate, searchParams, setSearchParams }) {
   const card = ({ kind, item, context }) => <WorkRecord key={`${kind}-${item.id}`} item={item} kind={kind}
     context={context} automation={kind === 'engagement_work_item' && Boolean(item.automation_flagged_at)}
     workshopPath={recordWorkshopPath(workspace.workshopLinks.find(link => link.department === item.department_id), item, kind, 'work', origin)}
-    navigate={navigate} showKind />
+    navigate={navigate} workspace={workspace} showKind />
   const monthStart = new Date(Date.UTC(year, monthNumber - 1, 1))
   const monthEnd = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate()
   const calendarDays = Array.from({ length: Math.ceil((monthStart.getUTCDay() + monthEnd) / 7) * 7 }, (_, index) => {
@@ -329,7 +330,7 @@ function WorkViews({ workspace, navigate, searchParams, setSearchParams }) {
       <label className="text-xs font-medium text-[var(--anka-muted)]">Record type<select value={kindFilter} onChange={event => setWorkParam('workKind', event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] px-3 py-2 text-sm text-[var(--anka-ink)]"><option value="all">All work</option><option value="project_task">Project Tasks</option><option value="engagement_work_item">Engagement Work Items</option></select></label>
       <label className="text-xs font-medium text-[var(--anka-muted)]">Recorded status<select value={statusFilter} onChange={event => setWorkParam('workStatus', event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] px-3 py-2 text-sm text-[var(--anka-ink)]"><option value="all">All statuses</option>{availableStatuses.map(status => <option key={status} value={status}>{label(status)}</option>)}</select></label>
     </div>
-    {view === 'list' && <><ProjectTasks rows={records.filter(({ kind }) => kind === 'project_task').map(({ item }) => item)} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" origin={origin} /><EngagementWork rows={records.filter(({ kind }) => kind === 'engagement_work_item').map(({ item }) => item)} hasEngagement={workspace.identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" origin={origin} /></>}
+    {view === 'list' && <><ProjectTasks workspace={workspace} rows={records.filter(({ kind }) => kind === 'project_task').map(({ item }) => item)} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" origin={origin} /><EngagementWork workspace={workspace} rows={records.filter(({ kind }) => kind === 'engagement_work_item').map(({ item }) => item)} hasEngagement={workspace.identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" origin={origin} /></>}
     {view === 'board' && (records.length
       ? <div className="flex gap-4 overflow-x-auto pb-3">{statuses.map(status => <section key={status} className="w-72 shrink-0 workspace-card p-3"><h3 className="mb-3 text-sm font-semibold">{label(status)} <span className="text-[var(--anka-muted)]">({records.filter(({ item }) => (item.status || 'unknown') === status).length})</span></h3><div className="space-y-3">{records.filter(({ item }) => (item.status || 'unknown') === status).map(card)}</div></section>)}</div>
       : <Empty title="No project work" note="No Project Tasks or Engagement Work Items have been recorded." />)}
@@ -337,8 +338,16 @@ function WorkViews({ workspace, navigate, searchParams, setSearchParams }) {
   </div>
 }
 
-function WorkRecord({ item, kind, context, automation = false, workshopPath, navigate, showKind = false }) {
-  return <div id={`work-record-${kind}-${item.id}`} tabIndex={-1} className={`rounded-xl border p-4 focus:ring-2 focus:ring-[var(--anka-focus)] ${item.overdue || item.status === 'blocked' ? 'border-[var(--anka-warning)] bg-[var(--anka-warning-soft)]' : 'border-[var(--anka-line)] bg-[var(--anka-surface-raised)]'}`}><div className="flex flex-wrap items-start justify-between gap-3"><div>{showKind && <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--anka-violet)]">{kind === 'project_task' ? 'Project Task' : 'Engagement Work Item'}</p>}<p className="font-medium text-[var(--anka-ink)]">{item.title}</p><p className="mt-1 text-xs text-[var(--anka-muted)]">{context} · {item.owner.name} · Due {date(item.due_date)}</p></div><Status value={item.status} /></div>{item.description && <p className="mt-3 text-sm leading-6 text-[var(--anka-muted)]">{item.description}</p>}<div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">{item.overdue && <Pill attention>Overdue</Pill>}{automation && <Pill attention>Automation flag</Pill>}<Pill>{label(item.priority)}</Pill>{workshopPath && <button type="button" onClick={() => navigate(workshopPath)} className="ml-auto rounded-lg border border-[var(--anka-violet)] px-2.5 py-1.5 font-semibold text-[var(--anka-violet)] hover:bg-[var(--anka-violet-soft)] focus:ring-2 focus:ring-[var(--anka-focus)]">Open in Workshop</button>}</div></div>
+export function WorkRecord({ item, kind, context, automation = false, workshopPath, navigate, showKind = false, workspace }) {
+  const details = workspace ? projectWorkCard(workspace, kind, item.id, workshopPath) : null
+  return <article id={`work-record-${kind}-${item.id}`} tabIndex={-1} aria-label={`${kind === 'project_task' ? 'Project Task' : 'Engagement Work Item'}: ${item.title}`} className={`rounded-xl border p-4 focus:ring-2 focus:ring-[var(--anka-focus)] ${item.overdue || item.status === 'blocked' ? 'border-[var(--anka-warning)] bg-[var(--anka-warning-soft)]' : 'border-[var(--anka-line)] bg-[var(--anka-surface-raised)]'}`}>
+    <div className="flex flex-wrap items-start justify-between gap-3"><div>{showKind && <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--anka-violet)]">{kind === 'project_task' ? 'Project Task' : 'Engagement Work Item'}</p>}<h3 className="font-medium text-[var(--anka-ink)]">{item.title}</h3><p className="mt-1 text-xs text-[var(--anka-muted)]">{context}</p></div><Status value={item.status} /></div>
+    <dl className="mt-3 grid gap-2 text-xs"><div><dt className="font-medium">Owner</dt><dd>{item.owner.name}</dd></div><div><dt className="font-medium">Due</dt><dd>{date(item.due_date)}</dd></div></dl>
+    {item.description && <p className="mt-3 text-sm leading-6 text-[var(--anka-muted)]">{item.description}</p>}
+    {details && <section aria-label={`Dependencies for ${item.title}`} className="mt-3 border-t border-[var(--anka-line)] pt-3 text-xs"><h4 className="font-semibold">Dependencies</h4>{details.dependencies.length ? <ul className="mt-2 space-y-2">{details.dependencies.map(row=><li key={row.id} className="break-words">{row.title} · {label(row.status)} · Owner: {row.owner?.name || 'Unassigned'}</li>)}</ul> : !details.unavailable && <p className="mt-1 text-[var(--anka-muted)]">No dependencies recorded in this loaded project view.</p>}{details.unavailable>0 && <p className="mt-2 text-[var(--anka-warning)]">{details.unavailable} prerequisite record(s) unavailable in this project view.</p>}</section>}
+    <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">{item.overdue && <Pill attention>Overdue</Pill>}{automation && <Pill attention>Automation flag</Pill>}<Pill>{label(item.priority)}</Pill></div>
+    {details ? <div className="mt-3 space-y-2 border-t border-[var(--anka-line)] pt-3"><p className="text-xs text-[var(--anka-muted)]"><strong>Next action: </strong>{details.next.reason}</p><button type="button" onClick={() => navigate(details.next.path)} className="workspace-button w-full whitespace-normal text-left">{details.next.label}</button></div> : workshopPath && <button type="button" onClick={() => navigate(workshopPath)} className="workspace-button mt-3">Open in Workshop</button>}
+  </article>
 }
 
 function Outputs({ workspace }) {

@@ -178,6 +178,10 @@ export function buildProjectEngagementWorkspace(snapshot, options = {}) {
     milestones,
     projectTasks: tasks,
     engagementWorkItems: workItems,
+    dependencyGaps: {
+      project_task: (snapshot.taskDependencies || []).filter(item => sameProject(item, project) && taskIds.has(item.task_id) && !taskIds.has(item.depends_on_task_id)).reduce((counts, item) => ({ ...counts, [item.task_id]: (counts[item.task_id] || 0) + 1 }), {}),
+      engagement_work_item: (snapshot.workItemDependencies || []).filter(item => sameOrg(item, project) && workItemIds.has(item.work_item_id) && !workItemIds.has(item.depends_on_work_item_id)).reduce((counts, item) => ({ ...counts, [item.work_item_id]: (counts[item.work_item_id] || 0) + 1 }), {}),
+    },
     taskDependencies: (snapshot.taskDependencies || []).filter(item => sameProject(item, project) && taskIds.has(item.task_id) && taskIds.has(item.depends_on_task_id)),
     workItemDependencies: (snapshot.workItemDependencies || []).filter(item => sameOrg(item, project) && workItemIds.has(item.work_item_id) && workItemIds.has(item.depends_on_work_item_id)),
     teamMembers: [...membershipKeys].map(id => ({ id, name: owner(id).name })),
