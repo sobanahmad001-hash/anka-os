@@ -25,10 +25,10 @@ test('Project Chat spreadsheet inspection stays local and creates no conversatio
   const data = new TextEncoder().encode('page key,title,path\npage:home,Home,/home')
   await act(async () => props(ui.named('Source spreadsheet')).onChange({ target: { files: [{ name: 'synthetic.csv', size: data.length, arrayBuffer: async () => data.buffer }] } }))
   const noInspectionError = () => assert.equal(descendants(ui.environment.container).find(node => props(node)?.role === 'alert')?.textContent, undefined, 'Local inspection must not render an error')
-  await waitForRendered(() => { noInspectionError(); return ui.named('Import sheet') && ui.button('Preview mapped rows')?.disabled === false }, 'inspected sheet and enabled preview')
+  await waitForRendered(() => { noInspectionError(); return ui.named('Import sheet') && ui.button('Inspect mapped rows locally')?.disabled === false }, 'inspected sheet and enabled preview')
   // The general click helper intentionally flushes one turn; it does not await
   // async handlers. Await this inspection handler before observing its result.
-  await act(async () => { await props(ui.button('Preview mapped rows')).onClick() })
+  await act(async () => { await props(ui.button('Inspect mapped rows locally')).onClick() })
   await waitForRendered(() => { noInspectionError(); return ui.named('Spreadsheet row preview') }, 'mapped source row preview')
   assert.match(ui.named('Spreadsheet row preview').textContent, /1 source rows/)
   assert.match(ui.named('Spreadsheet row preview').textContent, /Home/)
@@ -438,4 +438,34 @@ test('Project Chat has one composer Attach and moves model selection into settin
   assert.equal(ui.fixture.scope.project_id, projectId)
   await ui.click('Chat history')
   assert.ok(ui.named('Chat history'))
+})
+
+async function mappingReview(t) {
+  const ui=await mount(t,{surface:'project',state:'populated',initial:true})
+  ui.fixture.chat.listProjectDocuments=async()=>[]
+  const original=ui.fixture.runner.run
+  ui.fixture.runner.run=async input=>{const result=await original(input);result.message.body=JSON.stringify({mapping:{title:0,planned_path:1},questions:[],explanation:'The disclosed sample lists page titles and paths.'});return result}
+  await ui.type('Keep this unsent draft')
+  await ui.click('Chat settings')
+  const label=descendants(ui.environment.container).find(node=>node.tagName==='LABEL'&&node.textContent.startsWith('For this reply, also send OpenAI'))
+  const checkbox=descendants(label).find(node=>node.tagName==='INPUT')
+  await waitForRendered(()=>!checkbox.disabled,'approved model readiness')
+  await act(async()=>props(checkbox).onChange({target:{checked:true}}))
+  await ui.click('Close settings');await ui.click('Attach files');await waitForRendered(()=>ui.button('Open spreadsheet review or recovery'),'attachment route');await ui.click('Open spreadsheet review or recovery');await waitForRendered(()=>ui.named('Source spreadsheet'),'source inspector')
+  const data=new TextEncoder().encode('title,path\nHome,/home')
+  await act(async()=>props(ui.named('Source spreadsheet')).onChange({target:{files:[{name:'synthetic.csv',size:data.length,arrayBuffer:async()=>data.buffer}]}}))
+  await waitForRendered(()=>ui.button('Confirm sample and ask AI to explain and match'),'exact sample confirmation')
+  await ui.click('Confirm sample and ask AI to explain and match');await waitForRendered(()=>ui.named('Confirm AI data sharing'),'existing optional context consent')
+  assert.equal(ui.fixture.data.counters.messages,0);assert.equal(ui.fixture.data.counters.run,0)
+  return ui
+}
+test('Project Chat mapping survives consent rerender with the same exact scope and dispatches once',async t=>{
+  const ui=await mappingReview(t);await ui.consent();await waitForRendered(()=>ui.environment.container.textContent.includes('The disclosed sample lists page titles and paths.'),'mapping explanation after deliberate consent')
+  assert.equal(ui.fixture.data.counters.messages,1);assert.equal(ui.fixture.data.counters.run,1);assert.equal(props(ui.named('Message')).value,'Keep this unsent draft')
+})
+test('Project Chat mapping rejects changed current ownership after consent without saving or dispatch',async t=>{
+  const ui=await mappingReview(t),previous=ui.fixture.chat.getContextConversation
+  ui.fixture.chat.getContextConversation=async(...args)=>{const result=await previous(...args);return {...result,conversation:{...result.conversation,owner_id:crypto.randomUUID()}}}
+  await ui.consent();await waitForRendered(()=>ui.environment.container.textContent.includes('Mapping samples require an unshared active private source conversation'),'changed ownership denial')
+  assert.equal(ui.fixture.data.counters.messages,0);assert.equal(ui.fixture.data.counters.run,0)
 })

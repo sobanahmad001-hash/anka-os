@@ -4,7 +4,7 @@ const actionLabel = action => ({ create: 'Add', update: 'Update', skip: 'Keep un
 export function SpreadsheetRowReview({ preview, local=false }) {
  const rows=preview?.rows||[],commands=preview?.canonical_payload?.rows||[]
  return <section aria-label={local?'Spreadsheet row preview':'Reviewed changes'}>
-  <p>{rows.length} source rows · {local?'Local mapping inspection':'Review the exact changes before saving'}</p>
+  <p>{rows.length} source rows · {local?'Local mapping inspection':'Review the exact changes before applying'}</p>
   {preview?.engagement_label&&<p>Workstream: {preview.engagement_label}{preview.artifact_label?` · ${preview.artifact_label}`:''}</p>}
   <div className="project-import-rows">{rows.map((row,i)=>{
    const command=commands.find(x=>x.row_id===row.rowId),action=command?.action||row.action

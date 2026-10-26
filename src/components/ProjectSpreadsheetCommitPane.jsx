@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { SpreadsheetRowReview, SpreadsheetResults } from './ProjectSpreadsheetReview.jsx'
 import { createProjectImportRecoverySession } from '../data/projectSpreadsheetImportRepository.js'
 
@@ -18,7 +18,22 @@ export default function ProjectSpreadsheetCommitPane({ repository, scope, file, 
  if(originalSource.current===undefined){const id=globalThis.sessionStorage.getItem(sourceKey);if(id&&!/^[0-9a-f-]{36}$/.test(id))throw Error('Invalid original source recovery');originalSource.current=id?{id,sha:null}:null}
  const stamp=JSON.stringify({source:source?.sha256,sheetIndex,type,mapping,selected,engagement,artifact,architecture,title})
  const reviewCurrent=review?.stamp===stamp
- async function act(run){if(flight.current)return;flight.current=true;setBusy(true);setError('');try{await run()}catch(e){setError(e.message)}finally{flight.current=false;setBusy(false)}}
+ const alive=useRef(true),view=useRef(null)
+ const identity=JSON.stringify([scope.organizationId,scope.projectId,scope.conversationId,scope.actorId])
+ view.current={identity,stamp}
+ useEffect(()=>{alive.current=true;return()=>{alive.current=false}},[])
+ async function applyReviewed(){
+  const expected=view.current,active=()=>alive.current&&view.current.identity===expected.identity
+  if(proposal?.status==='pending'){const savedResult=await session.confirm(proposal.review_sha256,true);if(active())setResult(savedResult);return}
+  if(!reviewCurrent||session.pendingRequestId||!originalSave.current)throw Error('Review the current source and project changes before applying.')
+  const exact=originalSave.current,saved=await session.save(exact.input,exact.review)
+  if(!active())return
+  setProposal(saved)
+  if(view.current.stamp!==expected.stamp||saved.status!=='pending'||saved.review_sha256!==exact.review)throw Error('The saved review changed. Inspect it before applying; nothing was confirmed.')
+  const savedResult=await session.confirm(exact.review,true)
+  if(active())setResult(savedResult)
+ }
+ async function act(run){if(flight.current)return;flight.current=true;setBusy(true);setError('');try{await run()}catch(e){if(alive.current)setError(e.message)}finally{flight.current=false;if(alive.current)setBusy(false)}}
  function request(){return {attachment_id:originalSource.current.id,engagement_id:engagement,artifact_id:artifact||null,architecture_version_id:architecture||null,title,type,sheet_index:sheetIndex,mapping,selected_rows:selected}}
  async function upload(){
   if(!consent)throw Error('Confirm private source upload; AI use and sharing remain disabled')
@@ -33,7 +48,7 @@ export default function ProjectSpreadsheetCommitPane({ repository, scope, file, 
  }
  const hasSource=Boolean(file&&source&&sheet)
  return <section aria-label="Reviewed private import">
-  <p>Current Project Chat only. Source is private, excluded from AI and recipient sharing. Canonical confirmation shares only reviewed project work through its existing authority.</p>
+  <h4>Prepare project changes</h4><p>Keep the original file private, choose its project work and review changes before Apply. Uploading alone creates no project records, approval or publication.</p>
   {hasSource&&<><label><input type="checkbox" checked={consent} disabled={busy} onChange={e=>setConsent(e.target.checked)}/>I confirm uploading this source as a private reference.</label>
   <button disabled={busy||!consent||!!session.pendingRequestId} onClick={()=>act(upload)}>Upload reviewed private source</button>
 
@@ -56,12 +71,11 @@ export default function ProjectSpreadsheetCommitPane({ repository, scope, file, 
   <button disabled={busy||!!session.pendingRequestId} onClick={()=>setSelected(sheet.rows.slice(1,26).map(row=>row.row))}>Select first 25 visible rows</button>
   <details><summary>Choose source rows · {selected.length} selected</summary>
   {sheet.rows.slice(1).map(row=><label key={row.row}><input type="checkbox" checked={selected.includes(row.row)} disabled={busy||!selected.includes(row.row)&&selected.length>=25} onChange={e=>setSelected(old=>e.target.checked?[...old,row.row]:old.filter(x=>x!==row.row))}/>Source row {row.row} · {row.cells[mapping.title??mapping.term]||'Untitled source row'}</label>)}</details>
-  <button disabled={busy||receipt?.status!=='reference_only'||receipt.sha256_hex!==source.sha256||!selected.length||!engagementCurrent||type!=='content_calendar'&&(!title.trim()||choices.artifacts.length&&!artifact)||type==='keyword_plan'&&!architecture||!!session.pendingRequestId} onClick={()=>act(async()=>{const input=request(),data=await repository.preview(input);setReview({...data,stamp});setProposal(null);setResult(null);originalSave.current={input,review:data.review_sha256}})}>Review canonical differences</button>
-  {review&&<><SpreadsheetRowReview preview={review.preview}/><button disabled={busy||!reviewCurrent||!!session.pendingRequestId||!!result?.rows} onClick={()=>act(async()=>setProposal(await session.save(originalSave.current.input,originalSave.current.review)))}>Save private reviewed proposal</button></>}
+  <button disabled={busy||receipt?.status!=='reference_only'||receipt.sha256_hex!==source.sha256||!selected.length||!engagementCurrent||type!=='content_calendar'&&(!title.trim()||choices.artifacts.length&&!artifact)||type==='keyword_plan'&&!architecture||!!session.pendingRequestId} onClick={()=>act(async()=>{const input=request(),data=await repository.preview(input);setReview({...data,stamp});setProposal(null);setResult(null);originalSave.current={input,review:data.review_sha256}})}>Review project changes</button>
   </>}
   {session.pendingRequestId&&<><p>An import needs recovery. Check the original saved review before starting another batch.</p><button disabled={busy} onClick={()=>act(async()=>{const result=await session.recover();if(result?.status==='accepted'){setResult(result.result);setProposal(result)}else if(result){setProposal(result);if(result.status!=='pending')setError('This saved review is '+result.status+'. Make a fresh review before proceeding.')}else setError('No saved receipt was found yet. Retry the original save if this tab still has its review; do not start another import.')})}>Resume original import</button>
    {!proposal&&hasSource&&originalSave.current&&<button disabled={busy||!reviewCurrent} onClick={()=>act(async()=>setProposal(await session.retrySave(originalSave.current.input,originalSave.current.review)))}>Retry original proposal save</button>}</>}
-  {proposal?.status==='pending'&&<><SpreadsheetRowReview preview={proposal.preview}/><button disabled={busy} onClick={()=>act(async()=>setResult(await session.confirm(proposal.review_sha256,true)))}>Confirm exactly this saved proposal</button></>}
+  {(proposal?.status==='pending'||review)&&<><h4>Review changes</h4><SpreadsheetRowReview preview={proposal?.status==='pending'?proposal.preview:review.preview}/><p>Apply only these reviewed creates and updates. Skipped and attention rows remain unchanged. This does not approve or publish the work.</p><button className="project-import-apply" disabled={busy||Boolean(result?.rows)||(proposal?.status!=='pending'&&(!reviewCurrent||Boolean(session.pendingRequestId)))} onClick={()=>act(applyReviewed)}>Apply reviewed changes</button></>}
   {result?.rows&&<SpreadsheetResults result={result} preview={proposal?.preview||review?.preview}/>}
   {error&&<p role="alert">{error}</p>}
  </section>

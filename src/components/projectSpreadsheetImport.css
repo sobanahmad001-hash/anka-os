@@ -21,3 +21,15 @@
 .project-import-row dd { margin: 0; white-space: pre-wrap; }
 .project-import-warning { color: var(--anka-danger, #b42318); }
 @media (max-width: 480px) { .project-import { padding: 12px; } .project-import-mapping { grid-template-columns: minmax(0, 1fr); } .project-import-row dl > div { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+
+.project-import-header { position: sticky; top: 0; z-index: 2; padding-block: 8px; background: var(--anka-surface, #fff); border-bottom: 1px solid var(--anka-line, #ddd); }
+.project-import h3 { font-size: 1.1rem; font-weight: 650; }
+.project-import h4 { font-weight: 650; }
+.project-import button { border: 1px solid var(--anka-line, #ddd); border-radius: 8px; background: var(--anka-surface-raised, #fff); color: inherit; cursor: pointer; min-height: 40px; }
+.project-import button:disabled { opacity: .5; cursor: not-allowed; }
+.project-import :is(button,input,select,summary):focus-visible { outline: 3px solid var(--anka-focus, #7760cc); outline-offset: 3px; }
+.project-import :is(input:not([type=checkbox]),select) { border: 1px solid var(--anka-line, #ddd); border-radius: 8px; background: var(--anka-surface, #fff); color: inherit; }
+.project-import .project-import-apply { background: var(--anka-violet, #6935ed); color: var(--anka-on-violet, #fff); border-color: transparent; font-weight: 650; min-height: 44px; }
+.project-import-explanation { padding: 12px; border-left: 3px solid var(--anka-violet, #6935ed); background: var(--anka-violet-soft, #f3efff); border-radius: 6px; }
+
+.project-import-header { box-shadow: 0 -16px 0 var(--anka-surface, #fff); }

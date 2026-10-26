@@ -40,7 +40,7 @@ export default function TextAiConsent({ onConfirm, onCancel, provider, model, sc
     cancel.current?.focus()
     return () => previous?.focus?.()
   }, [])
-  return <div role="dialog" aria-modal="true" aria-label="Confirm AI data sharing" className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-5" onKeyDown={event => {
+  return <div role="dialog" aria-modal="true" aria-label="Confirm AI data sharing" className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-5" onKeyDown={event => {
     if (event.key === 'Escape') { event.preventDefault(); onCancel() }
     if (event.key === 'Tab') { event.preventDefault(); (document.activeElement === cancel.current ? accept : cancel).current?.focus() }
   }}><section className="max-w-lg rounded-xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-6 text-[var(--anka-ink)]">

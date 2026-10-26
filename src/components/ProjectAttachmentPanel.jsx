@@ -19,7 +19,7 @@ export default function ProjectAttachmentPanel({ onClose, documentProps, ...spre
   if (route === 'spreadsheet') return <Suspense fallback={<p role="status">Opening spreadsheet review…</p>}><Spreadsheet {...spreadsheetProps} initialFile={file} onClose={onClose}/></Suspense>
   return <div className="project-import-overlay"><aside ref={pane} className="project-import project-attachments" role="dialog" aria-modal="true" aria-label="Project attachments" onKeyDown={keydown}>
     <div className="project-import-header"><h3>Attach files · {spreadsheetProps.projectLabel || 'Project Chat'}</h3><button type="button" disabled={documentProps.busy} onClick={onClose}>Back to chat</button></div>
-    <p>Spreadsheets open the existing import review. Documents become selected references for a later Send. Choosing a file does not upload it or call AI.</p>
+    <p>Choose a spreadsheet to inspect and review project changes, or a document to use as a chat reference. File selection alone does not upload, call AI or create project work.</p>
     {!route && <><label>Choose attachment<input aria-label="Choose attachment" type="file" accept=".csv,.xlsx,.pdf,.docx,.txt,.md" onChange={e=>{try { const next=e.target.files?.[0];if(!next)return;setRoute(projectAttachmentRoute(next));setFile(next);setError('') }catch(reason){setError(reason.message)}}}/></label>
       <button type="button" onClick={()=>setRoute('spreadsheet')}>Open spreadsheet review or recovery</button>
       <button type="button" disabled={!documentProps.conversationId} onClick={()=>setRoute('document')}>Manage document references</button></>}
