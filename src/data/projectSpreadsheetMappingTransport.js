@@ -1,3 +1,4 @@
+import {parseSetupRequest} from './projectSetup.js'
 import {parseDocumentRequest,sameDocumentScope} from './projectDocumentProposal.js'
 import {parseAttachmentReadingRequest,sameAttachmentReadingScope} from './projectAttachmentReading.js'
 import { mappingPrompt, mappingPromptMatches } from './projectSpreadsheetMappingAssist.js'
@@ -12,7 +13,7 @@ export function createSpreadsheetMappingTransport({chat,runner,scope,storage,che
   const latest=await chat.getContextConversation({conversation_id:scope.conversationId},{organizationId:scope.organizationId})
   const reply=latest.messages?.find(m=>m.role==='assistant'&&m.in_reply_to_message_id===record.message_id&&m.status==='completed')
   if(!reply)throw Error('Original mapping reply remains unsettled; recover without a new provider call')
-  storage.removeItem(key);return disclosure?.mode==='document_proposal'?{body:reply.body,messageId:reply.id}:reply.body
+  storage.removeItem(key);return ['document_proposal','project_setup'].includes(disclosure?.mode)?{body:reply.body,messageId:reply.id}:reply.body
  }
  return Object.freeze({
   request(disclosure){return single(async()=>{
@@ -34,8 +35,8 @@ export function createSpreadsheetMappingTransport({chat,runner,scope,storage,che
   recover(disclosure){return single(async()=>{await checkCurrent({requiresExisting:true});const record=read();if(!record)return null
    if(!record.message_id){const latest=await chat.getContextConversation({conversation_id:scope.conversationId},{organizationId:scope.organizationId});const human=latest.messages?.find(m=>m.client_request_id===record.client_request_id);if(!human)throw Error('Original save outcome unknown; no request repeated');record.message_id=human.id;storage.setItem(key,JSON.stringify(record))}
    const original=await chat.getContextConversation({conversation_id:scope.conversationId},{organizationId:scope.organizationId})
-   const body=original.messages?.find(m=>m.id===record.message_id)?.body,stored=disclosure?.mode==='document_proposal'?parseDocumentRequest(body):disclosure?.mode==='attachment_read'?parseAttachmentReadingRequest(body):null
-   const expected=stored&&(disclosure.mode==='document_proposal'?sameDocumentScope(stored,disclosure):sameAttachmentReadingScope(stored,disclosure))?stored:disclosure
+   const body=original.messages?.find(m=>m.id===record.message_id)?.body,stored=disclosure?.mode==='project_setup'?parseSetupRequest(body):disclosure?.mode==='document_proposal'?parseDocumentRequest(body):disclosure?.mode==='attachment_read'?parseAttachmentReadingRequest(body):null
+   const expected=stored&&(disclosure.mode==='project_setup'?stored.token===disclosure.token&&stored.needs===disclosure.needs:disclosure.mode==='document_proposal'?sameDocumentScope(stored,disclosure):sameAttachmentReadingScope(stored,disclosure))?stored:disclosure
    if(!expected||!mappingPromptMatches(body,expected))throw Error('Recreate and review the exact original mapping scope before applying its response')
    await runner.recover(record.message_id,{organizationId:scope.organizationId});await checkCurrent({requiresExisting:true});return result(record,disclosure)
   })},

@@ -15,7 +15,7 @@ test('delivery guide retains exact project scope and existing controllers; focus
   Object.assign(globalThis,{document:env.document,window:env.window,IS_REACT_ACT_ENVIRONMENT:true})
   const compiled=transformSync(readFileSync(new URL('../components/ProjectDeliverySetup.jsx',import.meta.url),'utf8'),{loader:'jsx',format:'cjs',jsxFactory:'React.createElement'}).code
   const module={exports:{}}, bridges={}, opened=[], reported=[]
-  const require=name=>name.includes('ProjectServiceScopePanel')||name.includes('ProjectPipelineConfigurationPanel')?{__esModule:true,default:input=>{bridges[name]=input;return React.createElement('span',null,name)}}:nativeRequire(name)
+  const require=name=>name.includes('AuthContext')?{useAuth:()=>({user:{id:'actor'}})}:name.includes('ProjectSetupPanel')?{__esModule:true,default:()=>null}:name.includes('ProjectServiceScopePanel')||name.includes('ProjectPipelineConfigurationPanel')?{__esModule:true,default:input=>{bridges[name]=input;return React.createElement('span',null,name)}}:nativeRequire(name)
   new Function('require','module','exports','React',compiled)(require,module,module.exports,React)
   const root=createRoot(env.container),Component=module.exports.default
   t.after(async()=>{await act(async()=>root.unmount());Object.assign(globalThis,previous)})
