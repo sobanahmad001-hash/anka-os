@@ -1,0 +1,9 @@
+.project-setup { min-width:0; overflow-wrap:anywhere; }
+.project-setup button { min-height:44px; padding:.5rem .75rem; border:1px solid var(--anka-line); border-radius:.5rem; background:var(--anka-surface); color:var(--anka-ink); cursor:pointer; }
+.project-setup button:disabled { opacity:.5; cursor:default; }
+.project-setup input:not([type=checkbox]),.project-setup textarea,.project-setup select { display:block; max-width:100%; min-height:44px; padding:.5rem; border:1px solid var(--anka-line); border-radius:.5rem; background:var(--anka-surface); color:var(--anka-ink); }
+.project-setup textarea { min-height:90px; }
+.project-setup input[type=checkbox] { min-width:18px; min-height:18px; accent-color:var(--anka-violet); }
+.project-setup legend { padding:.25rem; }
+.project-setup :is(button,input,textarea,select):focus-visible { outline:2px solid var(--anka-violet); outline-offset:2px; }
+@media(max-width:600px) { .project-setup label:not(:has(input[type=checkbox])) { width:100%; } .project-setup input:not([type=checkbox]),.project-setup select { width:100%; } }

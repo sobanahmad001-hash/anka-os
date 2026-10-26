@@ -1,7 +1,13 @@
+import {parseSetupRequest} from '../data/projectSetup.js'
 import {parseDocumentRequest,validateDocumentProposal} from '../data/projectDocumentProposal.js'
 import {attachmentReadPresentation,ATTACHMENT_TYPES} from '../data/projectAttachmentReading.js'
-export default function ProjectAttachmentMessage({message,messages,onReview,canReview}){
+export default function ProjectAttachmentMessage({message,messages,onReview,canReview,onSetupReview}){
  const human=message.role==='assistant'?messages.find(x=>x.id===message.in_reply_to_message_id):message,document=parseDocumentRequest(human?.body)
+ const setup=parseSetupRequest(human?.body)
+ if(setup&&Array.isArray(setup.catalogue)&&typeof setup.needs==='string'){
+  let proposal=null;try{if(message.role==='assistant'&&message.body.length<=22000){const p=JSON.parse(message.body);if(typeof p.explanation==='string'&&Array.isArray(p.items)&&p.items.length<=50&&p.items.every(x=>x&&Number.isInteger(x.service_index)&&setup.catalogue[x.service_index]&&(x.quantity===null||Number.isSafeInteger(x.quantity))&&typeof x.cadence==='string')&&Array.isArray(p.questions)&&p.questions.length<=8&&p.questions.every(x=>typeof x==='string'&&x.length<=300))proposal=p}}catch{}
+  return <section aria-label="Project setup findings"><p>{proposal?proposal.explanation:'Project needs: '+setup.needs}</p>{proposal&&<><p>Setup suggestion only. No project changes applied.</p>{proposal.items.map((x,i)=><p key={i}>{setup.catalogue[x.service_index]?.[2]||'Unresolved service'} · {x.quantity??'quantity to clarify'} · {typeof x.cadence==='string'?x.cadence:'cadence to clarify'}</p>)}{proposal.questions.map((q,i)=><p key={i}>Clarify: {q}</p>)}{onSetupReview&&<button type="button" onClick={()=>onSetupReview({messageId:message.id,request:human.body,answer:message.body})}>Review saved setup proposal</button>}</>}<details><summary>Advanced: exact setup request</summary><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{human.body}</pre></details></section>
+ }
  if(document){let result=null;try{if(message.role==='assistant')result=validateDocumentProposal(message.body,document)}catch{}
  return <section aria-label="Document findings"><p>{result?result.explanation:document.clarification?'Document clarification: '+document.clarification:'Read document: '+document.source.name}</p>{result&&<><p>{result.rows.length} proposed row(s) · {result.type}. No project changes applied.</p>{result.questions.map((q,i)=><p key={i}>Please clarify: {q}</p>)}{result.suggestions.map((q,i)=><p key={i}>Suggestion only: {q}</p>)}</>}<details><summary>Exact disclosed document passages</summary>{document.segments.map(s=><p key={s.id}>{s.id}: {s.text}</p>)}</details>{canReview?.(document)&&<button type="button" onClick={onReview}>Review document and project changes</button>}</section>}
  const reading=attachmentReadPresentation(message,messages)
