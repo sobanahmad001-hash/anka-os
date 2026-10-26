@@ -1,0 +1,7 @@
+import {attachmentReadPresentation,ATTACHMENT_TYPES} from '../data/projectAttachmentReading.js'
+export default function ProjectAttachmentMessage({message,messages,onReview,canReview}){
+ const reading=attachmentReadPresentation(message,messages)
+ if(!reading)return <p>{message.body}</p>
+ if(reading.kind==='source')return <><p>{reading.text}</p><details><summary>Confirmed attachment sample</summary><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{JSON.stringify(reading.disclosure.payload,null,2)}</pre></details></>
+ return <section aria-label="Attachment findings"><p>{reading.explanation}</p><p>Proposed use: {ATTACHMENT_TYPES[reading.type]}</p>{Object.keys(reading.mapping).length>0&&<details><summary>Proposed column matches</summary><ul>{Object.entries(reading.disclosedMapping).map(([field,index])=><li key={field}>{field.replaceAll('_',' ')} ← {reading.disclosure.payload.headers[index]}</li>)}</ul></details>}{reading.questions.length>0&&<><p>Please clarify:</p><ul>{reading.questions.map((question,i)=><li key={i}>{question}</li>)}</ul></>}<p>{reading.type==='reference_only'?'This attachment stays discussion context; no supported record import was established.':'No project changes are applied. Source privacy and validated preview/Apply remain separate.'}</p>{canReview?.(reading.disclosure)&&<button type="button" onClick={onReview}>{reading.type==='reference_only'?'Review attachment reference':reading.questions.length?'Review disclosed attachment':'Review source and project changes'}</button>}</section>
+}

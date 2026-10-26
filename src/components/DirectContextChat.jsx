@@ -1,3 +1,5 @@
+import {attachmentChatTitle,attachmentConversationHint,rememberAttachmentConversation,clearAttachmentConversation} from '../data/projectAttachmentReading.js'
+import ProjectAttachmentMessage from './ProjectAttachmentMessage.jsx'
 import DesignVideoReferencePanel from './DesignVideoReferencePanel.jsx'
 import DesignPrivateAttachmentPanel from './DesignPrivateAttachmentPanel.jsx'
 import { createPortal } from 'react-dom'
@@ -27,14 +29,20 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   const projectChat = contextKind === 'project_team' && Boolean(projectId)
   const projectToolsRef = useRef(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [attachmentRecoveryRequired,setAttachmentRecoveryRequired]=useState(false)
+  const [importOpened,setImportOpened]=useState(false),[attachmentReading,setAttachmentReading]=useState(null),[attachmentAnswer,setAttachmentAnswer]=useState('')
+  const registerAttachmentReading=useCallback(value=>setAttachmentReading(value),[])
+  const returnFromAttachment=useCallback(()=>{setImportOpen(false);globalThis.requestAnimationFrame?.(()=>{const messages=rootRef.current?.querySelector('.direct-chat-messages');if(messages)messages.scrollTop=messages.scrollHeight;rootRef.current?.querySelector('textarea[aria-label="Attachment clarification"],textarea[aria-label="Message"]')?.focus()})},[])
+  useEffect(()=>{if(importOpen||!attachmentReading)return;const frame=globalThis.requestAnimationFrame?.(()=>{const stream=rootRef.current?.querySelector?.('.direct-chat-messages');if(stream)stream.scrollTop=stream.scrollHeight;rootRef.current?.querySelector?.('textarea[aria-label="Attachment clarification"]')?.focus()});return()=>{if(frame)globalThis.cancelAnimationFrame?.(frame)}},[attachmentReading,importOpen])
   const [designAttachmentIds, setDesignAttachmentIds] = useState([])
   const [projectDocumentIds, setProjectDocumentIds] = useState([])
   const scope = useMemo(() => ({ context_kind: contextKind, ...(departmentId ? { department_id: departmentId } : {}), ...(projectId ? { project_id: projectId } : {}) }), [contextKind, departmentId, projectId])
   const requestScope = useMemo(() => ({ organizationId, signal }), [organizationId, signal])
   const recoveryKey = directChatRecoveryKey(actorId, organizationId, contextKind, projectId, departmentId)
   const initial = useRef({ conversation: initialConversation, recovery: readDirectChatRecovery(recoveryKey), draft: readDirectChatDraft(recoveryKey) }).current
+  const initialAttachmentHint=useRef(attachmentConversationHint(recoveryKey)).current
   const restoredDraft = !initial.conversation || initial.conversation.id === initial.draft?.conversation_id ? initial.draft : null
-  const [newId, setNewId] = useState(() => initial.recovery?.conversation_id || restoredDraft?.new_conversation_id || crypto.randomUUID())
+  const [newId, setNewId] = useState(() => initial.recovery?.conversation_id || restoredDraft?.new_conversation_id || initialAttachmentHint || crypto.randomUUID())
   const [selected, setSelected] = useState(null)
   const [rows, setRows] = useState([])
   const [historyLoading, setHistoryLoading] = useState(true)
@@ -102,15 +110,25 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   const ready = readiness?.model_configuration_id === modelId && readiness?.paid_execution_enabled === true
     && readiness?.spend_tracking_configured === true && readiness?.model_status === 'configured'
   const canCanonical = model?.provider === 'openai' && contextKind === 'project_team'
-  useEffect(() => { setProjectDocumentIds([]); setImportOpen(false) }, [selected?.id, projectId, organizationId, actorId])
+  const attachmentScopeKey=[actorId,organizationId,projectId,selected?.id||newId].join(':')
+  useEffect(() => { setProjectDocumentIds([]); setImportOpen(false);setImportOpened(false);setAttachmentReading(null);setAttachmentAnswer('');setAttachmentRecoveryRequired(Boolean(globalThis.sessionStorage?.getItem(`anka:import-mapping:${organizationId}:${projectId}:${selected?.id||newId}:${actorId}`))) }, [attachmentScopeKey])
   const ensureProjectDocumentConversation = async () => {
-    if (!selected || !owner || contextKind !== 'project_team') throw new Error('An existing owned Project Chat is required')
+    if (!owner || contextKind !== 'project_team' || !current()) throw new Error('An owned Project Chat is required')
+    if(!selected){
+      if(pendingRef.current)throw Error('Recover the original Chat save before uploading a document')
+      const token=revision.current,target=newId,text='I am adding a private document reference to this Project Chat. Uploading does not request an AI reply.',client_request_id=crypto.randomUUID()
+      remember({conversation_id:target,client_request_id});attempt.current={text,isNew:true,conversation_id:target,client_request_id,project_document_ids:[]}
+      writeDirectChatDraft(recoveryKey,{new_conversation_id:target,conversation_id:null,text:draft,attempt:attempt.current})
+      const saved=await departmentChat.startContextConversation({...scope,conversation_id:target,client_request_id,message:text},requestScope)
+      if(!current()||token!==revision.current||mappingState.current.organizationId!==organizationId||mappingState.current.projectId!==projectId||mappingState.current.actorId!==actorId||(mappingState.current.selected?.id||mappingState.current.newId)!==target||!validConversation(saved.conversation)||saved.conversation.id!==target||saved.conversation.owner_id!==actorId||saved.conversation.state!=='active')throw Error('Document Chat identity changed')
+      apply({conversation:saved.conversation,messages:[saved.message]});clearPending();writeDirectChatDraft(recoveryKey,{new_conversation_id:target,conversation_id:target,text:draft,attempt:null});onConversationListChange?.();return saved.conversation
+    }
     const latest = await read(selected.id)
     if (!current() || !validConversation(latest.conversation) || latest.conversation.id !== selected.id || latest.conversation.owner_id !== actorId || latest.conversation.state !== 'active') throw new Error('Project Chat access changed')
     return latest.conversation
   }
-  const importScope=useMemo(()=>contextKind==='project_team'&&selected?.id?{organizationId,projectId,conversationId:selected.id,actorId}:null,[contextKind,organizationId,projectId,selected?.id,actorId])
-  const importRepository=useMemo(()=>PROJECT_IMPORT_RELEASE_READY&&importScope&&selected.owner_id===actorId?createProjectSpreadsheetImportRepository(supabase,importScope):null,[importScope,selected?.owner_id,actorId])
+  const importScope=useMemo(()=>contextKind==='project_team'&&projectId?{organizationId,projectId,conversationId:selected?.id||newId,actorId}:null,[contextKind,organizationId,projectId,selected?.id,newId,actorId])
+  const importRepository=useMemo(()=>PROJECT_IMPORT_RELEASE_READY&&importScope&&selected?.owner_id===actorId?createProjectSpreadsheetImportRepository(supabase,importScope):null,[importScope,selected?.owner_id,actorId])
   const consent = useTextAiConsent(textAiConsentKey({ userId: actorId, organizationId, contextKind, departmentId, projectId,
     conversationId: selected?.id || newId, connectionId: model?.connectionId, provider: model?.provider,
     canonical: canonical && canCanonical, recipients: sharing?.recipients.map(row => row.recipient_id) || [] }))
@@ -137,25 +155,28 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   }, [requestScope, validConversation, contextKind, actorId])
   const mappingState=useRef(null)
   const mappingActive=useRef(false)
-  mappingState.current={modelId,ready,selected,organizationId,projectId,busy,pending}
-  const mappingTransport=useMemo(()=>PROJECT_IMPORT_RELEASE_READY&&importRepository?createSpreadsheetMappingTransport({chat:departmentChat,runner:contextChatRunner,scope:importScope,storage:globalThis.sessionStorage,
-    consent:()=>consent.confirm(),checkCurrent:async()=>{
+  mappingState.current={modelId,ready,selected,organizationId,projectId,actorId,busy,pending,newId}
+  const mappingTransport=useMemo(()=>PROJECT_IMPORT_RELEASE_READY&&importScope&&owner?createSpreadsheetMappingTransport({chat:departmentChat,runner:contextChatRunner,scope:importScope,storage:globalThis.sessionStorage,startConversation:!selected,
+    consent:()=>consent.confirm(),checkCurrent:async({requiresExisting=false}={})=>{
       // Consent can rerender without changing authority; compare the exact live scope after the read.
       const snapshot=mappingState.current
-      const inScope=value=>alive.current&&!signal.aborted&&value?.ready&&(!value.busy||mappingActive.current)&&!value.pending&&!pendingRef.current&&value.organizationId===importScope.organizationId&&value.projectId===importScope.projectId&&value.selected?.id===importScope.conversationId&&value.selected?.owner_id===importScope.actorId&&(!value.selected.state||value.selected.state==='active')
+      const inScope=value=>alive.current&&!signal.aborted&&value?.ready&&(!value.busy||mappingActive.current)&&!value.pending&&!pendingRef.current&&value.organizationId===importScope.organizationId&&value.projectId===importScope.projectId&&value.actorId===importScope.actorId&&(value.selected?value.selected.id===importScope.conversationId&&value.selected.owner_id===importScope.actorId&&(!value.selected.state||value.selected.state==='active'):value.newId===importScope.conversationId)
       if(!inScope(snapshot))throw Error('Owned idle Project Chat and approved model required')
-      const latest=await read(importScope.conversationId)
-      if(latest.conversation.owner_id!==importScope.actorId||latest.conversation.state!=='active'||latest.sharing?.recipients?.length)throw Error('Mapping samples require an unshared active private source conversation')
+      let latest
+      try{latest=await read(importScope.conversationId)}catch(reason){if(snapshot.selected||requiresExisting||reason.status!==404)throw reason}
+      if(latest&&(latest.conversation.owner_id!==importScope.actorId||latest.conversation.state!=='active'||latest.sharing?.recipients?.length))throw Error('Mapping samples require an unshared active private source conversation')
       if(!inScope(mappingState.current)||mappingState.current.modelId!==snapshot.modelId)throw Error('Mapping context changed during access check')
       return snapshot.modelId
-    }}):null,[importRepository,importScope,read,consent,signal])
+    }}):null,[importScope,owner,selected,read,consent,signal])
   async function mappingAction(kind,disclosure){
     if(!mappingTransport||lock.current||pendingRef.current||!current())throw Error('Finish the current Chat operation before mapping')
     mappingActive.current=true;lock.current=true;setBusy(true)
-    try{return await mappingTransport[kind](disclosure)}finally{mappingActive.current=false;lock.current=false;if(current())setBusy(false)}
+    const token=revision.current,expectedModel=mappingState.current.modelId
+    const active=()=>current()&&token===revision.current&&mappingState.current.organizationId===importScope.organizationId&&mappingState.current.projectId===importScope.projectId&&mappingState.current.actorId===importScope.actorId&&mappingState.current.modelId===expectedModel&&(mappingState.current.selected?mappingState.current.selected.id===importScope.conversationId&&mappingState.current.selected.owner_id===importScope.actorId:mappingState.current.newId===importScope.conversationId)
+    try{rememberAttachmentConversation(recoveryKey,importScope.conversationId);if(!selected){writeDirectChatDraft(recoveryKey,{new_conversation_id:newId,conversation_id:null,text:draft,attempt:null})}const answer=await mappingTransport[kind](disclosure);if(!active())throw Error('Attachment reading context changed');if(answer){const latest=await read(importScope.conversationId);if(!active()||latest.conversation.owner_id!==actorId||latest.conversation.state!=='active')throw Error('Attachment reading context changed');apply(latest);writeDirectChatDraft(recoveryKey,{new_conversation_id:newId,conversation_id:latest.conversation.id,text:draft,attempt:null});onConversationListChange?.()}setAttachmentRecoveryRequired(false);clearAttachmentConversation(recoveryKey);return answer}catch(reason){if(current()){setError(reason.message);setAttachmentRecoveryRequired(Boolean(globalThis.sessionStorage?.getItem(`anka:import-mapping:${organizationId}:${projectId}:${importScope.conversationId}:${actorId}`)))}throw reason}finally{mappingActive.current=false;lock.current=false;if(current())setBusy(false)}
   }
   const apply = useCallback(result => {
-    setSelected(result.conversation); setRename(result.conversation.title)
+    setSelected(result.conversation); setRename(attachmentChatTitle(result.conversation,result.messages||[]))
     setMessages(result.messages || []); setHasOlder(Boolean(result.has_older))
     setSharing(result.sharing || null)
     setRows(previous => [result.conversation, ...previous.filter(row => row.id !== result.conversation.id)])
@@ -198,9 +219,9 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   }, [outputId])
   useEffect(() => { onDraftDirtyChange?.(Boolean(draft.trim()) || videoDirty); return () => onDraftDirtyChange?.(false) }, [draft,videoDirty,onDraftDirtyChange])
   useEffect(() => {
-    onNavigationBusyChange?.(busy || Boolean(pending) || videoBusy)
+    onNavigationBusyChange?.(busy || Boolean(pending) || videoBusy || attachmentRecoveryRequired)
     return () => onNavigationBusyChange?.(false)
-  }, [busy, pending, videoBusy, onNavigationBusyChange])
+  }, [busy, pending, videoBusy, attachmentRecoveryRequired, onNavigationBusyChange])
   useEffect(() => {
     let active = true
     if (!hasExternalHistory) departmentChat.listContextConversations(scope, requestScope).then(result => {
@@ -252,7 +273,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   }
   useEffect(() => {
     let active = true
-    const target = initial.recovery?.conversation_id || initial.conversation?.id || restoredDraft?.conversation_id
+    const target = initial.recovery?.conversation_id || initial.conversation?.id || restoredDraft?.conversation_id || initialAttachmentHint
     if (!target) return
     lock.current = true; setBusy(true)
     ;(async () => {
@@ -271,7 +292,8 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
         if (!active || signal.aborted) return
         apply(latest)
       }
-      clearDirectChatRecovery(recoveryKey); pendingRef.current = null; setPending(null); attempt.current = null; setDraft(''); clearDirectChatDraft(recoveryKey)
+      const attachmentDraft=attempt.current?.isNew&&Array.isArray(attempt.current.project_document_ids)&&attempt.current.text==='I am adding a private document reference to this Project Chat. Uploading does not request an AI reply.'?restoredDraft?.text||'':null
+      clearDirectChatRecovery(recoveryKey); pendingRef.current = null; setPending(null); attempt.current = null; setDraft(attachmentDraft??''); clearDirectChatDraft(recoveryKey);if(attachmentDraft!==null)writeDirectChatDraft(recoveryKey,{new_conversation_id:newId,conversation_id:target,text:attachmentDraft,attempt:null})
       setNotice('Previous send recovered from saved messages. No new AI request was sent.')
     })().catch(reason => {
       if (active && !signal.aborted) { onAccessError?.(reason); setError(reason.message); setNotice('Check recovery before sending again. Your scoped draft remains available in this browser tab for one hour.') }
@@ -311,7 +333,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
   }
   async function openConversation(row) {
-    if (lock.current || videoLock.current || pendingRef.current) return
+    if (lock.current || videoLock.current || pendingRef.current||attachmentRecoveryRequired) return
     if (videoDirty) { setError('Clear the unsent video prompt before opening another chat.'); return }
     await exclusive(async () => {
       const token = ++revision.current
@@ -324,7 +346,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     })
   }
   function newChat() {
-    if (lock.current || videoLock.current || pendingRef.current) return
+    if (lock.current || videoLock.current || pendingRef.current||attachmentRecoveryRequired) return
     if (videoDirty) { setError('Clear the unsent video prompt before starting a new chat.'); return }
     clearDirectChatDraft(recoveryKey)
     drafts.current.set(selected?.id || newId, draft)
@@ -349,7 +371,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   }
   async function send(event) {
     event.preventDefault()
-    if (!draft.trim() || draft.trim().length > 8000 || pendingRef.current || selected?.state && selected.state !== 'active') return
+    if (!draft.trim() || draft.trim().length > 8000 || attachmentRecoveryRequired || pendingRef.current || selected?.state && selected.state !== 'active') return
     await exclusive(async () => {
       const text = draft.trim(), target = selected?.id || newId, token = revision.current
       const ai = owner && ready
@@ -404,6 +426,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     await exclusive(async () => {
       const record = pendingRef.current
       if (!record) return
+      const attachmentDraft=attempt.current?.isNew&&Array.isArray(attempt.current.project_document_ids)&&attempt.current.text==='I am adding a private document reference to this Project Chat. Uploading does not request an AI reply.'?draft:null
       const token = revision.current
       let latest
       try { latest = await read(record.conversation_id, record.client_request_id) }
@@ -434,7 +457,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
         if (!current() || token !== revision.current) return
         apply(latest)
       }
-      clearPending(); setDraft(''); setNotice('Send recovered. No new AI request was sent.'); onConversationListChange?.()
+      clearPending(); setDraft(attachmentDraft??'');if(attachmentDraft!==null)writeDirectChatDraft(recoveryKey,{new_conversation_id:newId,conversation_id:record.conversation_id,text:attachmentDraft,attempt:null}); setNotice('Send recovered. No new AI request was sent.'); onConversationListChange?.()
     })
   }
   async function loadSharing() {
@@ -448,12 +471,12 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   const output = messages.find(row => row.id === outputId && row.role === 'assistant' && row.status === 'completed')
   const reportDesignConversation=designWorkspace?.onConversationChange
   useEffect(()=>{reportDesignConversation?.(selected,checkPrivateVideoContext)},[selected,checkPrivateVideoContext,reportDesignConversation])
-  const newChatControl = <button type="button" className="workshop-new-chat" aria-label="New chat" disabled={busy || videoBusy || Boolean(pending)} onClick={newChat}>+ New chat</button>
+  const newChatControl = <button type="button" className="workshop-new-chat" aria-label="New chat" disabled={busy || videoBusy || Boolean(pending)||attachmentRecoveryRequired} onClick={newChat}>+ New chat</button>
   const modelControl=owner && <label><span className={compactConversation ? 'sr-only' : undefined}>Model</span><select aria-label="Approved model" value={modelId} disabled={busy || videoBusy || !models.length} onChange={event => { setModelId(event.target.value); setCanonical(false) }}>{!modelId && <option value="">{models.length ? 'Choose a model' : 'Unavailable'}</option>}{models.map(row => <option key={row.id} value={row.id}>{row.label}</option>)}</select></label>
   return <>{privateDesign && designWorkspace?.attachmentTarget && createPortal(<DesignVideoReferencePanel conversationKey={selected?.id || newId} conversationId={selected?.id || null} requestScope={requestScope} uploadOpen={designWorkspace.attachmentsOpen} busy={busy || Boolean(pending)} ensureConversation={async()=>{if(!selected?.id)throw Error('Choose a saved Design chat');const latest=await read(selected.id);if(!current()||latest.conversation.owner_id!==actorId||latest.conversation.state!=='active')throw Error('Design chat access changed');return latest.conversation}} run={exclusive}/>,designWorkspace.attachmentTarget)}{privateDesign && designWorkspace?.attachmentTarget && createPortal(<DesignPrivateAttachmentPanel conversationKey={selected?.id || newId} conversationId={selected?.id || null} requestScope={requestScope} busy={busy || Boolean(pending)} uploadOpen={designWorkspace.attachmentsOpen} onUseImage={designWorkspace.onUseImage} ensureConversation={ensurePrivateAttachmentConversation} run={exclusive} selectedIds={designAttachmentIds} onSelection={setDesignAttachmentIds} />, designWorkspace.attachmentTarget)}{compactConversation && workshopHistory?.newChatTarget && createPortal(newChatControl,workshopHistory.newChatTarget)}<section ref={rootRef} inert={importOpen && contextKind === 'project_team' && projectId ? true : undefined} className={`direct-chat ${projectChat ? 'direct-project-chat' : ''} ${historyOpen ? 'history-open' : ''} ${output ? 'output-open' : ''}`} aria-label={label} onKeyDown={event => {
     if (event.key === 'Escape' && !consent.dialog) { if (projectChat) { closeProjectTools(); historyButtonRef.current?.focus() }; setHistoryOpen(false); setOutputId(''); setShareOpen(false); setDetailsOpen(false) }
   }}>
-    <header className="direct-chat-header" inert={drawerOpen ? true : undefined}><div><h2>{compactConversation ? selected?.title || 'New chat' : label}</h2><p>{!compactConversation && <>{selected?.title || 'New chat'} · </>} {contextKind === 'department_private' ? 'Only you' : sharing?.recipients.length ? 'Shared with selected teammates' : 'Private unless explicitly shared'}</p></div>
+    <header className="direct-chat-header" inert={drawerOpen ? true : undefined}><div><h2>{compactConversation ? attachmentChatTitle(selected,messages) : label}</h2><p>{!compactConversation && <>{attachmentChatTitle(selected,messages)} · </>} {contextKind === 'department_private' ? 'Only you' : sharing?.recipients.length ? 'Shared with selected teammates' : 'Private unless explicitly shared'}</p></div>
       <div className="direct-chat-actions">{privateDesign && !designWorkspace && <button ref={videoButton} type="button" disabled={busy || videoBusy || Boolean(pending) || !selected || !owner || selected.state !== 'active'} title={!selected ? "Send a message to save this private chat before opening video tools." : undefined} aria-expanded={videoOpen} onClick={() => { if (lock.current || videoLock.current || pendingRef.current) return; setVideoOpen(!videoOpen); setVideoOpened(true) }}>Video tools</button>}{!compactConversation && <button type="button" ref={historyButtonRef} aria-expanded={historyOpen} onClick={() => { setOutputId(''); setHistoryOpen(!historyOpen) }}>History</button>}{!historyOpen && !(compactConversation && workshopHistory?.newChatTarget) && newChatControl}{projectChat ? <details ref={projectToolsRef} className="direct-project-tools"><summary ref={historyButtonRef}>Tools</summary><div className="direct-project-tools-list" aria-label="Project chat tools">
           <button type="button" aria-expanded={historyOpen} onClick={() => { closeProjectTools(); setOutputId(''); setHistoryOpen(!historyOpen) }}>Chat history</button>
           <button type="button" aria-expanded={detailsOpen} onClick={() => { closeProjectTools(); setShareOpen(false); setDetailsOpen(!detailsOpen) }}>Chat settings</button>
@@ -465,6 +488,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     </header>{conversationLayout && <div className="content-conversation-toolbar" aria-label={`${departmentId ? departmentId[0].toUpperCase() + departmentId.slice(1) : 'Private'} conversation tools`}>{modelControl}<span>Text conversation</span></div>}{designWorkspace && <div className="design-conversation-top-toolbar" aria-label="Design conversation tools">{designWorkspace.toolbar}{designWorkspace.mode === 'chat' && (designWorkspace.toolbarTarget ? createPortal(modelControl,designWorkspace.toolbarTarget) : modelControl)}</div>}
     {error && <p role="alert" className="direct-chat-error">{error}</p>}
     {notice && !pending && <p role="status" className="direct-chat-notice">{notice}</p>}
+    {attachmentRecoveryRequired&&<p role="status" className="direct-chat-notice">An attachment reading needs recovery. Reopen Attach files and recover the original reading before another AI request. No request is repeated automatically.</p>}
     {pending && <div className="direct-chat-notice direct-chat-recovery"><p>Check this send before sending again. Recovery never requests another AI reply.</p><button type="button" disabled={busy || videoBusy} onClick={recover}>Check recovery</button></div>}
     {detailsOpen && <aside className="direct-chat-details" aria-label="Chat details">
       {projectChat && <><div className="direct-project-settings-heading"><h3>Chat settings</h3><button type="button" onClick={() => { setDetailsOpen(false); historyButtonRef.current?.focus() }}>Close settings</button></div>{modelControl}<p>This conversation belongs to the current project. Extra project and organization data is shared only when you select it below.</p></>}
@@ -492,8 +516,8 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
         if (current()) { setSharing(result); setShareOpen(false) }
       })}>Save sharing</button><button type="button" onClick={() => setShareOpen(false)}>Close sharing</button></aside>}
     <div className="direct-chat-layout">
-      {historyOpen && <aside ref={historyOpen && (mobileDrawer || projectChat) ? drawerRef : undefined} className="direct-chat-history" role={mobileDrawer ? 'dialog' : undefined} aria-modal={mobileDrawer ? true : undefined} aria-label="Chat history" onKeyDown={drawerKeyDown}>{mobileDrawer && <button ref={historyClose} type="button" onClick={() => setHistoryOpen(false)}>Close history</button>}<button type="button" disabled={busy || videoBusy || Boolean(pending)} onClick={newChat}>New chat</button>{workshopHistory?.render ? workshopHistory.render(item => { if (!lock.current && !videoLock.current && !pendingRef.current) workshopHistory.onOpen(item); if (mobileDrawer) setHistoryOpen(false) }) : <><label>Search loaded chats<input aria-label="Search loaded chats" value={search} onChange={event => setSearch(event.target.value)} /></label>
-        {rows.filter(row => row.title.toLowerCase().includes(search.toLowerCase())).map(row => <button type="button" key={row.id} disabled={busy || videoBusy || Boolean(pending)} aria-pressed={selected?.id === row.id} onClick={() => openConversation(row)}>{row.title}</button>)}
+      {historyOpen && <aside ref={historyOpen && (mobileDrawer || projectChat) ? drawerRef : undefined} className="direct-chat-history" role={mobileDrawer ? 'dialog' : undefined} aria-modal={mobileDrawer ? true : undefined} aria-label="Chat history" onKeyDown={drawerKeyDown}>{mobileDrawer && <button ref={historyClose} type="button" onClick={() => setHistoryOpen(false)}>Close history</button>}<button type="button" disabled={busy || videoBusy || Boolean(pending)||attachmentRecoveryRequired} onClick={newChat}>New chat</button>{workshopHistory?.render ? workshopHistory.render(item => { if (!lock.current && !videoLock.current && !pendingRef.current) workshopHistory.onOpen(item); if (mobileDrawer) setHistoryOpen(false) }) : <><label>Search loaded chats<input aria-label="Search loaded chats" value={search} onChange={event => setSearch(event.target.value)} /></label>
+        {rows.filter(row => attachmentChatTitle(row,messages).toLowerCase().includes(search.toLowerCase())).map(row => <button type="button" key={row.id} disabled={busy || videoBusy || Boolean(pending)} aria-pressed={selected?.id === row.id} onClick={() => openConversation(row)}>{attachmentChatTitle(row,messages)}</button>)}
         {historyLoading ? <p role="status">Loading history…</p> : !rows.length && <p>No saved chats yet.</p>}{hasMore && <button type="button" disabled={busy || videoBusy} onClick={() => exclusive(async () => {
           const result = await departmentChat.listContextConversations({ ...scope, offset }, requestScope)
           if (!current()) return
@@ -507,17 +531,17 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
           if (!validConversation(result.conversation) || result.conversation.id !== selected.id) throw new Error('Conversation context changed')
           setMessages(previous => [...result.messages, ...previous]); setHasOlder(result.has_older)
         })}>Load older messages</button>}
-        {messages.map(message => <article key={message.id} className={`direct-chat-message ${message.role}`}><strong>{message.role === 'assistant' ? 'Anka AI' : message.author_id === actorId ? 'You' : 'Teammate'}</strong><p>{message.body}</p>{message.role === 'assistant' && message.status === 'completed' && <button type="button" onClick={event => { replyButtonRef.current = event.currentTarget; if (mobileDrawer) setHistoryOpen(false); setOutputId(message.id) }}>Open reply</button>}</article>)}
-      {selected?.id===designWorkspace?.generatedConversationId&&selected?.owner_id===user?.id?designWorkspace?.generatedMedia:null}</div></div>{designWorkspace?.media}{designWorkspace?.composerAttachments}<form hidden={Boolean(designWorkspace && designWorkspace.mode!=='chat')} className="direct-chat-composer" onSubmit={send} aria-label="Chat composer"><label className="direct-chat-draft-label"><span className="sr-only">Message</span><textarea aria-label="Message" placeholder="Ask or explore an idea…" value={draft} maxLength={8000} disabled={busy || videoBusy || Boolean(pending)} onChange={event => { if (pendingRef.current) return; const text = event.target.value; setDraft(text); try { writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: selected?.id || null, text, attempt: attempt.current }) } catch { setError('Draft recovery is unavailable in this tab. Keep this page open until your message is saved.') } }} /></label>
-        <div className="direct-chat-toolbar">{designWorkspace?.attachControl}{projectChat && <button type="button" disabled={busy || videoBusy || Boolean(pending) || !owner || Boolean(selected && selected.state !== 'active')} onClick={() => { closeProjectTools(); setImportOpen(true) }}>Attach files</button>}{!compactConversation && <label>Work type<select aria-label="Work type" value="text" disabled><option value="text">Text</option></select></label>}
+        {messages.map(message => <article key={message.id} className={`direct-chat-message ${message.role}`}><strong>{message.role === 'assistant' ? 'Anka AI' : message.author_id === actorId ? 'You' : 'Teammate'}</strong><ProjectAttachmentMessage message={message} messages={messages} canReview={disclosure=>attachmentReading?.sourceSha===disclosure.source.sha256} onReview={()=>{setImportOpened(true);setImportOpen(true)}}/>{message.role === 'assistant' && message.status === 'completed' && <button type="button" onClick={event => { replyButtonRef.current = event.currentTarget; if (mobileDrawer) setHistoryOpen(false); setOutputId(message.id) }}>Open reply</button>}</article>)}
+      {selected?.id===designWorkspace?.generatedConversationId&&selected?.owner_id===user?.id?designWorkspace?.generatedMedia:null}</div></div>{designWorkspace?.media}{designWorkspace?.composerAttachments}{projectChat&&attachmentReading?.questions?.length>0&&<form aria-label="Attachment clarification" className="direct-chat-attachment-clarification" onSubmit={async event=>{event.preventDefault();if(!attachmentAnswer.trim()||busy||pendingRef.current||!current())return;try{await attachmentReading.clarify(attachmentAnswer.trim());if(current())setAttachmentAnswer('')}catch(reason){if(current())setError(reason.message)}}}><p>Clarify {attachmentReading.sourceName}</p><label>Answer the attachment questions<textarea aria-label="Attachment clarification" maxLength={1200} value={attachmentAnswer} disabled={busy||Boolean(pending)} onChange={event=>setAttachmentAnswer(event.target.value)}/></label><button type="submit" disabled={busy||Boolean(pending)||!attachmentAnswer.trim()}>Send attachment clarification</button></form>}<form hidden={Boolean(designWorkspace && designWorkspace.mode!=='chat')} className="direct-chat-composer" onSubmit={send} aria-label="Chat composer"><label className="direct-chat-draft-label"><span className="sr-only">Message</span><textarea aria-label="Message" placeholder="Ask or explore an idea…" value={draft} maxLength={8000} disabled={busy || videoBusy || Boolean(pending)} onChange={event => { if (pendingRef.current) return; const text = event.target.value; setDraft(text); try { writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: selected?.id || null, text, attempt: attempt.current }) } catch { setError('Draft recovery is unavailable in this tab. Keep this page open until your message is saved.') } }} /></label>
+        <div className="direct-chat-toolbar">{designWorkspace?.attachControl}{projectChat && <button type="button" disabled={busy || videoBusy || Boolean(pending) || !owner || Boolean(selected && selected.state !== 'active')} onClick={() => { closeProjectTools(); setImportOpened(true);setImportOpen(true) }}>Attach files</button>}{!compactConversation && <label>Work type<select aria-label="Work type" value="text" disabled><option value="text">Text</option></select></label>}
           {!compactConversation && modelControl}
-          <button type="submit" className="direct-chat-send" disabled={busy || videoBusy || Boolean(pending) || !draft.trim() || Boolean(selected && selected.state !== 'active')}>{busy ? 'Working…' : owner && ready ? 'Send' : 'Save message'}</button></div>
+          <button type="submit" className="direct-chat-send" disabled={busy || videoBusy || Boolean(pending) || attachmentRecoveryRequired || !draft.trim() || Boolean(selected && selected.state !== 'active')}>{busy ? 'Working…' : owner && ready ? 'Send' : 'Save message'}</button></div>
         <p>{owner ? readinessState === 'failed' ? 'AI availability could not be checked. Sending saves a human message only.' : !readiness ? 'Checking AI availability. Human messages can still be saved.' : ready ? projectChat ? 'Organization-billed AI reply' : `${model?.provider} · Organization-billed replies` : 'AI unavailable. Sending saves a human message only.' : 'Shared chat · Human replies only'} · {privateDesign && designWorkspace ? `${designAttachmentIds.length} selected reference(s)` : contextKind === 'project_team' ? `${projectDocumentIds.length} selected document(s)` : 'Attachments unavailable'}</p>{owner && readinessState === 'failed' && <button type="button" onClick={retryReadiness}>Retry AI availability</button>}
       </form></div>
       {output && <aside ref={outputId && mobileDrawer ? drawerRef : undefined} className="direct-chat-output" role={mobileDrawer ? 'dialog' : undefined} aria-modal={mobileDrawer ? true : undefined} onKeyDown={drawerKeyDown} aria-label="Saved reply output" data-source-message-id={output.id}><div><h3>Saved reply</h3><button ref={outputClose} type="button" onClick={() => setOutputId('')}>Close output</button></div><p>{output.body}</p><small>Saved conversation reply · Read-only preview</small></aside>}
     </div>
   </section>
-      {importOpen && contextKind === 'project_team' && projectId && <Suspense fallback={<p role="status">Opening local spreadsheet inspector…</p>}><ProjectAttachmentPanel documentProps={{ conversationKey: selected?.id || newId, conversationId: owner ? selected?.id : null, requestScope, busy: busy || Boolean(pending), ensureConversation: ensureProjectDocumentConversation, run: exclusive, selectedIds: projectDocumentIds, onSelection: setProjectDocumentIds }} key={`${projectId}:${selected?.id||'local'}`} projectId={projectId} projectLabel={label} repository={importRepository} recoveryScope={importScope} onMappingAssist={mappingTransport?disclosure=>mappingAction('request',disclosure):null} onMappingRecover={mappingTransport?disclosure=>mappingAction('recover',disclosure):null} onClose={() => setImportOpen(false)} /></Suspense>}
+      {importOpened && contextKind === 'project_team' && projectId && <div hidden={!importOpen}><Suspense fallback={<p role="status">Opening local spreadsheet inspector…</p>}><ProjectAttachmentPanel documentProps={{ conversationKey: selected?.id || newId, conversationId: owner ? selected?.id : null, requestScope, busy: busy || Boolean(pending),canReturnToChat:!busy,recoveryPending:Boolean(pending), ensureConversation: ensureProjectDocumentConversation, run: exclusive, selectedIds: projectDocumentIds, onSelection: setProjectDocumentIds,onReadyForChat:()=>{if(!current())return;setDraft(old=>old.trim()?old:'Explain what the selected document contains and ask about any real ambiguities. Treat it as a Chat reference; do not create or change project records.');setNotice(mappingState.current?.ready?'Document selected. Review your message and press Send to request its reading; no AI call was made by upload.':'Document selected privately. AI reading is unavailable until an approved model is ready; upload made no AI call.');returnFromAttachment()} }} key={attachmentScopeKey} projectId={projectId} projectLabel={label} repository={importRepository} recoveryScope={importScope} onMappingAssist={ready&&mappingTransport?disclosure=>mappingAction('request',disclosure):null} onMappingRecover={mappingTransport?disclosure=>mappingAction('recover',disclosure):null} onClose={returnFromAttachment} onReturnToChat={returnFromAttachment} onReadingState={registerAttachmentReading} /></Suspense></div>}
     {consent.dialog && <TextAiConsent {...consent.dialog} provider={model?.provider} model={`${model?.connectionName} · ${model?.label}`} scope={`${contextKind} conversation`} canonical={canonical && canCanonical} />}
     {privateDesign && videoOpened && selected && owner && <section ref={videoPane} hidden={!videoOpen} className="direct-chat-video workspace-card p-4 mt-3" aria-label="Private video workbench">
       <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">Private video · {selected.title}</h3><button type="button" disabled={videoBusy} onClick={() => { if (videoLock.current) return; setVideoOpen(false); videoButton.current?.focus() }}>Back to chat</button></div>

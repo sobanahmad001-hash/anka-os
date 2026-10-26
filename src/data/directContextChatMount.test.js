@@ -469,3 +469,16 @@ test('Project Chat mapping rejects changed current ownership after consent witho
   await ui.consent();await waitForRendered(()=>ui.environment.container.textContent.includes('Mapping samples require an unshared active private source conversation'),'changed ownership denial')
   assert.equal(ui.fixture.data.counters.messages,0);assert.equal(ui.fixture.data.counters.run,0)
 })
+
+async function chooseAutoReadFile(ui){
+ await ui.click('Attach files');await waitForRendered(()=>ui.named('Project attachments'),'attachment picker')
+ const input=descendants(ui.named('Project attachments')).find(n=>props(n)?.type==='file'),bytes=new TextEncoder().encode('page_key,title,path\nhome,Private old source,/home')
+ await act(async()=>props(input).onChange({target:{files:[{name:'source.csv',size:bytes.length,arrayBuffer:async()=>bytes.buffer}]}}))
+ await waitForRendered(()=>ui.named('Read project attachment')&&ui.button('Read disclosed attachment in Chat')&&!ui.button('Read disclosed attachment in Chat').disabled,'auto-read source scope')
+}
+test('actual auto-read consent rechecks owner before saving or dispatching disclosed samples',async t=>{
+ const ui=await mount(t,{surface:'project',state:'populated',initial:true});await ui.click('Chat settings');const label=descendants(ui.environment.container).find(n=>n.tagName==='LABEL'&&n.textContent.startsWith('For this reply, also send OpenAI')),checkbox=descendants(label).find(n=>n.tagName==='INPUT');await waitForRendered(()=>!checkbox.disabled,'current model');await act(async()=>props(checkbox).onChange({target:{checked:true}}));await ui.click('Close settings');await chooseAutoReadFile(ui);await ui.click('Read disclosed attachment in Chat');await waitForRendered(()=>ui.button('Allow and ask Anka AI'),'source AI consent');ui.fixture.data.rows[0].owner_id=crypto.randomUUID();await ui.consent();await waitForRendered(()=>descendants(ui.environment.container).some(n=>props(n)?.role==='alert'),'changed owner alert');assert.equal(ui.fixture.data.counters.run,0);assert.equal(ui.fixture.data.counters.messages,0)
+})
+test('actual late attachment reply cannot populate a switched project or its reading controls',async t=>{
+ const ui=await mount(t,{surface:'project'}),gate=defer();ui.fixture.beforeRun=()=>gate.promise;await chooseAutoReadFile(ui);await ui.click('Read disclosed attachment in Chat');await ui.consent();await waitForRendered(()=>ui.fixture.data.counters.run===1,'one original read dispatch');await ui.render({contextKind:'project_team',projectId:crypto.randomUUID(),departmentId:''});await act(async()=>gate.resolve());await flush();assert.equal(ui.named('Read project attachment'),undefined);assert.doesNotMatch(ui.named('Chat messages').textContent,/Private old source|Project attachment reading v1/);assert.equal(ui.fixture.data.counters.run,1)
+})
