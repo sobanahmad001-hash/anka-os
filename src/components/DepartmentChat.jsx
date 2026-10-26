@@ -1086,6 +1086,8 @@ export function ScopedDepartmentChat({
   const requiresContentLanguage = departmentId === 'content' && ['discovery', 'vision', 'audience'].includes(artifactType)
   const currentConversation = conversations.find(item => item.id === conversationId) || null
   const isConversationOwner = currentConversation?.owner_id === userId
+  const reportDesignConversation = designWorkspace?.onConversationChange
+  useEffect(() => { reportDesignConversation?.(!draftConversation ? currentConversation : null, null) }, [currentConversation, draftConversation, reportDesignConversation])
   const consent = useTextAiConsent(textAiConsentKey({ userId, organizationId, departmentId, projectId, engagementId: engagement.id, contextKind: 'engagement', conversationId, connectionId: selectedModel?.connector_connection_id || capabilities?.connector_connection_id, provider: selectedProvider, recipients: (sharing.recipients || []).map(row => row.recipient_id), sources: selectedSourceVersionIds, selectedAttachmentIds }))
   const conversationHasRecipients = Boolean(currentConversation && (!isConversationOwner || (sharing.recipients || []).length > 0))
 
@@ -1263,7 +1265,7 @@ export function ScopedDepartmentChat({
         {compactWorkbench && supportsSavedConversations && currentConversation && <button type="button" disabled={busy || historyBusy || attachmentBusy || draftSaving || !prompt.trim()} onClick={saveUnsentDraft} className="w-full rounded-xl border border-[var(--anka-info)] px-4 py-2.5 text-sm font-semibold text-[var(--anka-info)] disabled:opacity-50">{draftSaving ? 'Saving draft…' : 'Save draft to this conversation'}</button>}
         {compactWorkbench && <p className="mt-2 text-xs text-[var(--anka-muted)]">Optional: save unsent text for later without asking AI. Send already saves each submitted message.</p>}
       </ConversationControls>}
-      <div ref={messageViewport} className={compactWorkbench ? 'department-chat-messages' : undefined} aria-label="Engagement chat messages">{supportsSavedConversations && <ConversationHistory emptyState={designWorkspace?.starters} draftConversation={draftConversation} messages={messages} userId={userId} busy={busy} onConfirm={proposal => decide('confirm', proposal)} onReject={proposal => decide('reject', proposal)} />}</div>
+      <div ref={messageViewport} className={compactWorkbench ? 'department-chat-messages' : undefined} aria-label="Engagement chat messages">{supportsSavedConversations && <ConversationHistory emptyState={designWorkspace?.starters} draftConversation={draftConversation} messages={messages} userId={userId} busy={busy} onConfirm={proposal => decide('confirm', proposal)} onReject={proposal => decide('reject', proposal)} />}{!draftConversation&&isConversationOwner&&currentConversation?.id===designWorkspace?.generatedConversationId?designWorkspace?.generatedMedia:null}</div>
       {designWorkspace?.media}
       {designWorkspace?.composerAttachments}
       <ChatComposer onSubmit={compactConversation?submit:undefined} hidden={Boolean(designWorkspace&&designWorkspace.mode!=='chat')} className={compactWorkbench ? 'department-chat-footer' : 'mt-6 space-y-5'}>

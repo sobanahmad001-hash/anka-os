@@ -7,17 +7,18 @@ import {imageOutput,fetchDesignImageOutput} from '../_shared/designImageOutput.t
 import {fetchDesignVideoOutput} from '../_shared/designVideoOutput.ts'
 type Json=Record<string,any>
 const uuid=(value:any)=>{if(typeof value!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value))throw Error('Original operation identity required');return value}
-const publicJob=(job:Json)=>({id:job.id,operation_key:job.operation_key,status:job.status,request:job.request,created_at:job.created_at,outputs:job.output_manifest||job.outputs||[]})
+const publicJob=(job:Json)=>({...((job.conversation_id)?{conversation_id:job.conversation_id,chat_binding:job.chat_binding}:{}),...(Number.isInteger(job.brief_version_number)?{brief_version_number:job.brief_version_number}:{}),id:job.id,operation_key:job.operation_key,status:job.status,request:job.request,created_at:job.created_at,outputs:job.output_manifest||job.outputs||[]})
 async function rpc(admin:any,name:string,args:Json){const {data,error}=await admin.rpc(name,args);if(error||!data)throw Object.assign(new Error('Media request could not be confirmed; recover the original operation'),{status:409});return data}
 export async function recoverMediaGeneration(admin:any,body:Json,actor:string){return publicJob(await loadJob(admin,body,actor))}
-async function loadJob(admin:any,body:Json,actor:string){return rpc(admin,'get_design_media_generation',{p_org:admin.organizationId,p_actor:actor,p_operation:uuid(body.operation_key)})}
+async function loadJob(admin:any,body:Json,actor:string){return rpc(admin,'get_design_media_conversation_result',{p_org:admin.organizationId,p_actor:actor,p_operation:uuid(body.operation_key),p_conversation:body.conversation_id?uuid(body.conversation_id):null})}
 async function connection(admin:any,request:Json){
  const {data,error}=await admin.from('integration_connections').select('id,provider,status,secret_name').eq('organization_id',admin.organizationId).eq('id',request.connector_connection_id).eq('provider',request.provider).eq('status','verified').is('archived_at',null).maybeSingle();
  const pattern=request.provider==='higgsfield'?/^ANKA_HIGGSFIELD_[A-Z0-9_]+$/:/^ANKA_OPENAI_[A-Z0-9_]+$/;
  if(error||!data||!pattern.test(data.secret_name||''))throw Error('Pinned media connection is unavailable');const credential=Deno.env.get(data.secret_name);if(!credential)throw Error('Pinned media credential is unavailable');return credential;
 }
 async function adapter(credential:string,reader:typeof fetch){const {createHiggsfieldClient}=await import('npm:@higgsfield/client@0.2.6/v2');return createDesignMediaAdapter(createHiggsfieldClient,credential,reader)}
-async function record(admin:any,job:Json,actor:string,state:string,receipt:Json|null){return rpc(admin,'record_design_media_generation',{p_org:admin.organizationId,p_actor:actor,p_job:job.id,p_claim:job.claim_id,p_state:state,p_receipt:receipt})}
+const withChat=(source:Json,result:Json)=>({...result,...(source.conversation_id?{conversation_id:source.conversation_id,chat_binding:source.chat_binding}:{}),...(Number.isInteger(source.brief_version_number)?{brief_version_number:source.brief_version_number}:{})});
+async function record(admin:any,job:Json,actor:string,state:string,receipt:Json|null){return withChat(job,await rpc(admin,'record_design_media_generation',{p_org:admin.organizationId,p_actor:actor,p_job:job.id,p_claim:job.claim_id,p_state:state,p_receipt:receipt}))}
 export async function originalInputUrl(admin:any,request:Json,actor:string){
  const input=request.input_versions[0];let path:string,bucket='design-generated-media';
  if(input.kind==='private_attachment'){
@@ -48,7 +49,7 @@ export async function generateMedia(admin:any,body:Json,actor:string,deps:Json={
  const credential=deps.credential?await deps.credential(request):await connection(admin,request),reader=deps.fetch||fetch;
  const media=request.provider==='higgsfield'?(deps.adapter||await adapter(credential,reader)):null;
  const source=requiresImage(request.model_id)?(deps.inputUrl?await deps.inputUrl(request):await originalInputUrl(admin,request,actor)):null;
- const job=await rpc(admin,'claim_design_media_generation',{p_org:admin.organizationId,p_actor:actor,p_operation:operation,p_quote:quote,p_request:request,p_prompt:prepared.prompt,p_acceptance:body.acceptance});
+ const job=await rpc(admin,body.conversation_id?'claim_design_media_in_conversation':'claim_design_media_generation',{p_org:admin.organizationId,p_actor:actor,...(body.conversation_id?{p_conversation:uuid(body.conversation_id)}:{}),p_operation:operation,p_quote:quote,p_request:request,p_prompt:prepared.prompt,p_acceptance:body.acceptance});
  if(job.must_not_submit===true)return publicJob(job);
  let receipt:Json,inline:any[]|null=null;
  try{
@@ -77,7 +78,7 @@ async function storeOriginals(admin:any,job:Json,actor:string,outputs:any[],alre
   if(error){const {data:existing,error:readError}=await store.download(path);if(readError||!existing||existing.size!==output.byteLength||existing.type.split(';')[0]!==output.contentType)throw Error('Original storage needs recovery');const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await existing.arrayBuffer())),x=>x.toString(16).padStart(2,'0')).join('');if(hash!==output.checksum)throw Error('Original storage conflict')}
   manifest.push({id:job.id+':'+i,bucket,path,extension,mime_type:output.contentType,checksum:output.checksum,byte_length:output.byteLength});
  }
- return rpc(admin,'complete_design_media_storage',{p_org:admin.organizationId,p_actor:actor,p_job:job.id,p_claim:job.claim_id,p_manifest:manifest});
+ return withChat(job,await rpc(admin,'complete_design_media_storage',{p_org:admin.organizationId,p_actor:actor,p_job:job.id,p_claim:job.claim_id,p_manifest:manifest}));
 }
 export async function pollMediaGeneration(admin:any,body:Json,actor:string,reader:typeof fetch=fetch){
  const job=await loadJob(admin,body,actor);if(!['provider_pending','outcome_unknown'].includes(job.status)||job.request.provider!=='higgsfield'||!job.provider_receipt?.requestId||!job.provider_receipt?.statusUrl)return publicJob(job);
@@ -102,9 +103,30 @@ export async function ingestMediaGeneration(admin:any,body:Json,actor:string,rea
  else outputs.push(await fetchDesignVideoOutput(job.provider_receipt.outputUrl,hosts,LINEUP_CONTRACTS[job.request.model_id]?'original':job.request.settings.output_format,reader));
  return publicJob(await storeOriginals(admin,job,actor,outputs));
 }
+export function originalMediaDescriptor(job:Json,original:Json,index:number,org:string,actor:string){
+ const types:Record<string,string[]>={'image/png':['png'],'image/jpeg':['jpg','jpeg'],'video/mp4':['mp4'],'video/quicktime':['mov']};
+ const extensions=types[original.mime_type];
+ if(!extensions?.includes(original.extension)||original.id!==job.id+':'+index||!Number.isSafeInteger(original.byte_length)||original.byte_length<1||!/^[a-f0-9]{64}$/.test(original.checksum||''))throw Error('Original output metadata is invalid');
+ const filename=index+'.'+original.extension,bucket=original.mime_type.startsWith('image/')?'design-generated-media':'design-generated-video';
+ if(original.bucket!==bucket||original.path!==org+'/private/'+actor+'/media/'+job.id+'/'+filename)throw Error('Original storage scope mismatch');
+ return {filename,bucket,path:original.path};
+}
 export async function signMediaGeneration(admin:any,body:Json,actor:string){
- const job=await loadJob(admin,body,actor);if(job.status!=='ready'||!Array.isArray(job.output_manifest))throw Error('Ready original media required');const outputs=[];
- for(const original of job.output_manifest){if(!original.path.startsWith(admin.organizationId+'/private/'+actor+'/media/'+job.id+'/'))throw Error('Original storage scope mismatch');const {data,error}=await admin.storage.from(original.bucket).createSignedUrl(original.path,60);if(error||!data?.signedUrl)throw Error('Original preview unavailable');outputs.push({...original,signed_url:data.signedUrl})}return {...publicJob(job),outputs};
+ const job=await loadJob(admin,body,actor);if(job.status!=='ready'||!Array.isArray(job.output_manifest)||job.output_manifest.length!==job.request.output_count)throw Error('Ready complete original media required');
+ const outputs=[],expires_at=new Date(Date.now()+60000).toISOString();
+ for(const [index,original] of job.output_manifest.entries()){
+  const descriptor=originalMediaDescriptor(job,original,index,admin.organizationId,actor);
+  const {data,error}=await admin.storage.from(descriptor.bucket).createSignedUrl(descriptor.path,60,...(body.download===true?[{download:descriptor.filename}]:[]));
+  if(error||!data?.signedUrl)throw Error('Original file unavailable');
+  outputs.push({...original,filename:descriptor.filename,expires_at,...(body.download===true?{download_url:data.signedUrl}:{signed_url:data.signedUrl})});
+ }
+ return {...publicJob(job),outputs};
+}
+
+export async function listMediaConversationResults(admin:any,body:Json,actor:string){
+ const conversation=uuid(body.conversation_id),items=await rpc(admin,'list_design_media_conversation_results',{p_org:admin.organizationId,p_actor:actor,p_conversation:conversation,p_before:body.before_created_at||null,p_before_id:body.before_id?uuid(body.before_id):null});
+ if(!Array.isArray(items)||items.length>25||items.some(job=>job.conversation_id!==conversation||job.request?.organization_id!==admin.organizationId))throw Error('Media conversation scope could not be confirmed');
+ return {items:items.map(publicJob),next:items.length===25?{created_at:items[24].created_at,id:items[24].id}:null};
 }
 
 export async function readBoundedImageResponse(response:Response,count:number){
