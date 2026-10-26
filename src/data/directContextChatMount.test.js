@@ -25,10 +25,10 @@ test('Project Chat spreadsheet inspection stays local and creates no conversatio
   const data = new TextEncoder().encode('page key,title,path\npage:home,Home,/home')
   await act(async () => props(ui.named('Source spreadsheet')).onChange({ target: { files: [{ name: 'synthetic.csv', size: data.length, arrayBuffer: async () => data.buffer }] } }))
   const noInspectionError = () => assert.equal(descendants(ui.environment.container).find(node => props(node)?.role === 'alert')?.textContent, undefined, 'Local inspection must not render an error')
-  await waitForRendered(() => { noInspectionError(); return ui.named('Import sheet') && ui.button('Preview mapped rows')?.disabled === false }, 'inspected sheet and enabled preview')
+  await waitForRendered(() => { noInspectionError(); return ui.named('Import sheet') && ui.button('Inspect mapped rows locally')?.disabled === false }, 'inspected sheet and enabled preview')
   // The general click helper intentionally flushes one turn; it does not await
   // async handlers. Await this inspection handler before observing its result.
-  await act(async () => { await props(ui.button('Preview mapped rows')).onClick() })
+  await act(async () => { await props(ui.button('Inspect mapped rows locally')).onClick() })
   await waitForRendered(() => { noInspectionError(); return ui.named('Spreadsheet row preview') }, 'mapped source row preview')
   assert.match(ui.named('Spreadsheet row preview').textContent, /1 source rows/)
   assert.match(ui.named('Spreadsheet row preview').textContent, /Home/)
