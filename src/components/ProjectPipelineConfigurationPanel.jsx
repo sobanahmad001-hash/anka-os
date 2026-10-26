@@ -16,10 +16,11 @@ export default function ProjectPipelineConfigurationPanel(props) {
   return <ScopedProjectPipelineConfigurationPanel key={`${user?.id}:${props.organizationId}:${props.engagement.id}`} {...props} actorId={user?.id} />
 }
 // eslint-disable-next-line no-unused-vars -- JSX components are not counted by this lint configuration.
-function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, services, membership, signal, actorId, initialKind = 'website', onNavigationBusyChange }) {
+function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, services, membership, signal, actorId, initialKind = 'website', onReviewServices, onNavigationBusyChange }) {
   const [records, setRecords] = useState({ available: [], publishedDefinitions: [], configurations: [], activations: [], groups: [] })
   const [publicationId, setPublicationId] = useState('')
   const [presetQuery, setPresetQuery] = useState('')
+  const [historyOpen,setHistoryOpen]=useState(false)
   const [groupId,setGroupId]=useState(''),[groupName,setGroupName]=useState(''),[groupKind,setGroupKind]=useState(initialKind),[groupPreset,setGroupPreset]=useState(''),[groupReview,setGroupReview]=useState(null)
   const recoveryKey=`anka-pipeline-command:${actorId}:${organizationId}:${engagement.id}`
   const [pending,setPending]=useState(()=>{try { const value=JSON.parse(sessionStorage.getItem(recoveryKey)||'null');if (!value) return null;if (['group','configuration','activation'].includes(value.kind) && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value.requestId)) return value;return {kind:'unreadable',requestId:''} } catch {return {kind:'unreadable',requestId:''}}}); const flight=useRef(false),groupRequest=useRef('')
@@ -48,16 +49,22 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
   const activationRequest = useRef('')
   // Exact project-manager bindings are checked by the RPC, not inferred from an organization role.
   const canManage = Boolean(membership)
+  const canConfigureSpending = ['system_owner','operations_admin'].includes(membership?.role)
   const publication = view.available.find(row => row.id === publicationId)
   const definitionSteps = publication?.definition.steps || []
   const active = view.activations[0]
   const activeConfig = view.configurations.find(row => row.id === active?.configuration_id)
+  const approvedLimit=Number.isSafeInteger(activeConfig?.max_ai_cost_microusd)&&activeConfig.max_ai_cost_microusd>=0?activeConfig.max_ai_cost_microusd:0
   const serviceIds = new Set(services.filter(row => ['planned', 'active'].includes(row.status)).map(row => row.service_id))
   const eligibleSteps = definitionSteps.filter(step => serviceIds.has(step.service_id))
   const aiSelected = eligibleSteps.some(step => (quantities[step.key] || stageActions[step.key]==='reuse') && ['ai_assisted', 'automatic'].includes(step.kind))
-  const reviewSignature=JSON.stringify([actorId,organizationId,engagement.id,groupId,publicationId,publication?.definition,quantities,stageActions,omissionReasons,stageValues,stageArtifacts,cost,services,membership])
+  // UI spending edits are Admin-only; other managers retain only this group's active limit.
+  const effectiveCost=canConfigureSpending?cost:((aiSelected?approvedLimit:0)/1000000).toFixed(6)
+  const reviewSignature=JSON.stringify([actorId,organizationId,engagement.id,groupId,publicationId,publication?.definition,quantities,stageActions,omissionReasons,stageValues,stageArtifacts,effectiveCost,services,membership])
   const currentReviewSignature=useRef('');currentReviewSignature.current=reviewSignature
-  const commandState=useRef(null);commandState.current={pending,locked,nativeLocked,busy,loading,preview,acknowledged,reviewSignature,groupSignature:JSON.stringify([groupName.trim(),groupKind,groupPreset]),configIds:view.configurations.map(row=>row.id)}
+  const presets=[...new Map((records.publishedDefinitions || []).map(row=>[row.definition.preset_publication_id,{...row.definition,publication_id:row.id}])).values()]
+  const selectedPreset=presets.find(row=>row.preset_publication_id===groupPreset)
+  const commandState=useRef(null);commandState.current={pending,locked,nativeLocked,busy,loading,preview,acknowledged,reviewSignature,canConfigureSpending,groupSignature:JSON.stringify([groupName.trim(),groupKind,groupPreset,selectedPreset?.publication_id||'']),configIds:view.configurations.map(row=>row.id)}
 
   const reportChildBusy=useCallback((slot,value)=>{const current=childScope.current;if(!scopeActive.current||signal?.aborted||current.groupId!==groupId||current[slot]===Boolean(value))return;const next={...current,[slot]:Boolean(value)};childScope.current=next;setChildState(next);if(commandState.current)commandState.current.locked=commandState.current.nativeLocked||next.website||next.marketing||next.resources},[groupId,signal])
   const reportWebsiteBusy=useCallback(value=>reportChildBusy('website',value),[reportChildBusy])
@@ -136,7 +143,8 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
       const selectedSteps = declared ? stagePlan.selectedSteps : normalizeSelectedSteps(definitionSteps, quantities)
       if (selectedSteps.some(selected => !serviceIds.has(definitionSteps.find(step => step.key === selected.key)?.service_id)))
         throw new TypeError('A selected service is not active in this project')
-      const micro = parseMicrousd(cost)
+      const micro = parseMicrousd(effectiveCost)
+      if(aiSelected&&micro===0&&!canConfigureSpending)throw new TypeError('An Admin must set an approved spending limit for this pipeline before saving AI-capable stages')
       if ((aiSelected && micro === 0) || (!aiSelected && micro !== 0))
         throw new TypeError('AI-capable steps need a positive local limit; human-only plans use zero')
       setCreationReview({signature:reviewSignature,selectedSteps,micro,stagePlan,stageDecisions:declared ? stagePlan.decisions : undefined,definitionPublicationId:publicationId,pipelineGroupId:groupId||null})
@@ -156,6 +164,7 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
       }, { signal })
       if (signal?.aborted) return
       createRequest.current = ''; clearPending();setCreationReview(null)
+      setHistoryOpen(true)
       setNotice('Configuration revision ' + (saved.group_revision || saved.revision) + ' saved as a draft. Review impact before activation.')
       await refresh()
     } catch (failure) {
@@ -204,7 +213,7 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
     }
   }
   async function createGroup() {
-    if (flight.current || !scopeActive.current || signal?.aborted || commandState.current.locked || !groupReview || JSON.stringify([groupReview.name,groupReview.kind,groupReview.preset])!==commandState.current.groupSignature) return
+    if (flight.current || !scopeActive.current || signal?.aborted || commandState.current.locked || !groupReview || JSON.stringify([groupReview.name,groupReview.kind,groupReview.preset,groupReview.definitionPublicationId])!==commandState.current.groupSignature) return
     flight.current=true;setBusy(true);setError('');setNotice('')
     try {
       groupRequest.current ||= crypto.randomUUID()
@@ -213,24 +222,90 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
       if (signal?.aborted) return
       clearPending();groupRequest.current='';setGroupReview(null)
       await refresh()
-      if (!signal?.aborted) { setGroupId(result.group.id);setPublicationId('');setQuantities({});setStageActions({});setOmissionReasons({});setStageValues({});setCost('0');setCreationReview(null);setNotice('Independent '+result.group.name+' pipeline created. Choose steps and review activation separately.') }
+      if (!signal?.aborted) { setGroupId(result.group.id);setPublicationId(groupReview.definitionPublicationId||'');setQuantities({});setStageActions({});setOmissionReasons({});setStageValues({});setCost('0');setCreationReview(null);setNotice('Independent '+result.group.name+' pipeline created. Choose steps and review activation separately.') }
     } catch (failure) { if (!signal?.aborted) {if (failure.knownRollback) clearPending();setError(failure.message)} }
     finally { flight.current=false;if (!signal?.aborted) setBusy(false) }
   }
   function chooseGroup(value) { if (commandState.current.locked || flight.current || !scopeActive.current || signal?.aborted) return;setGroupId(value);changePublication('');setPreview(null);setAcknowledged(false);activationRequest.current='' }
-  const presets=[...new Map((records.publishedDefinitions || []).map(row => [row.definition.preset_publication_id,row.definition])).values()]
+
+  function selectPipeline(value) {
+    if(commandState.current.locked||flight.current||!scopeActive.current||signal?.aborted)return
+    const selected=(records.groups||[]).find(row=>row.id===value&&['website','marketing'].includes(row.kind))
+    if(value&&!selected){setError('This pipeline is unavailable in the current project. No other pipeline was selected.');return}
+    if(selected)setGroupKind(selected.kind)
+    setGroupReview(null);groupRequest.current='';chooseGroup(value)
+  }
+  function selectKind(value) {
+    if(commandState.current.locked||flight.current||!scopeActive.current||signal?.aborted||!['website','marketing'].includes(value)||value===groupKind)return
+    setGroupKind(value);setGroupReview(null);groupRequest.current='';chooseGroup('')
+  }
+  function inspectGroup() {
+    if(commandState.current.locked||flight.current||!scopeActive.current||signal?.aborted||!selectedPreset||!groupName.trim())return
+    setGroupReview({name:groupName.trim(),kind:groupKind,preset:groupPreset,definitionPublicationId:selectedPreset.publication_id,definition:selectedPreset})
+  }
+  const draftEditor=<>      {canManage && <fieldset disabled={locked}><form onSubmit={inspectCreation} className="mt-5 space-y-3 border-t border-[var(--anka-line)] pt-4">
+        <h3 className="text-sm font-semibold">2. Choose plan</h3>
+        <label className="block text-xs text-[var(--anka-muted)]">Published plan
+          <select aria-label="Published pipeline plan" required className={INPUT} value={publicationId} onChange={event => changePublication(event.target.value)}>
+            <option value="">Choose a plan</option>
+            {view.available.map(row => <option key={row.id} value={row.id}>{row.definition.name} · v{row.definition.version_number}</option>)}
+          </select>
+        </label>
+        {publication && <div className="space-y-3">{definitionSteps.map(step=>{const contract=step.stage_contract,action=stageActions[step.key] || (quantities[step.key] ? 'run' : 'outside_scope');const sources=stageArtifacts.filter(row=>row.artifact_type===contract?.artifact_type && row.output_type===contract?.output_type);return <fieldset key={step.key} className="space-y-2 rounded-lg border border-[var(--anka-line)] p-3 text-xs text-[var(--anka-ink)]">
+          <legend className="px-1 font-medium">{step.label}</legend><p>{step.kind.replaceAll('_',' ')}{step.depends_on?.length ? ' · after '+step.depends_on.map(key=>definitionSteps.find(row=>row.key===key)?.label||key).join(', ') : ''}{!serviceIds.has(step.service_id) ? ' · service unavailable' : ''}</p>
+          {contract && <><p>Output: {contract.output_label}</p><label className="block">Stage decision<select aria-label={step.label+' decision'} className={INPUT} value={action} disabled={!serviceIds.has(step.service_id)} onChange={event=>changeStageAction(step,event.target.value)}><option value="outside_scope">Outside this pipeline's selected services</option><option value="run">Include work</option>{contract.optional && <option value="omit">Omit optional stage with reason</option>}{contract.reuse_allowed && step.kind!=='approval_gate' && <option value="reuse">Satisfied by an exact approved version</option>}</select></label></>}
+          {(!contract || action==='run') && <label className="flex items-center justify-between gap-3">Quantity<input aria-label={step.label+' quantity'} type="number" min="1" max="50" placeholder="Off" disabled={!serviceIds.has(step.service_id)} className="w-16 shrink-0 rounded border border-[var(--anka-line)] bg-[var(--anka-surface)] p-1 text-[var(--anka-ink)]" value={quantities[step.key] ?? ''} onChange={event=>changeSelection(step.key,event.target.value)} /></label>}
+          {action==='omit' && <label className="block">Omission reason<textarea aria-label={step.label+' omission reason'} className={INPUT} maxLength={1000} value={omissionReasons[step.key]||''} onChange={event=>editStage(setOmissionReasons,step.key,event.target.value)} /></label>}
+          {action==='reuse' && <label className="block">Exact approved version<select aria-label={step.label+' approved version'} className={INPUT} value={stageValues[step.key]?.artifact_version_id||''} onChange={event=>changeStageValue(step.key,'artifact_version_id',event.target.value)}><option value="">Find and choose an approved version below</option>{sources.map(source=><option key={source.artifact_version_id} value={source.artifact_version_id}>{source.title} · v{source.version_number} · {source.artifact_version_id}</option>)}</select><span>Uses the existing immutable version. No new output, approval, delivery or provider request is created.</span></label>}
+          {action==='run' && (contract?.required_inputs||[]).map(required=><label key={required.key} className="block">Required input: {required.label}{required.kind==='manual' ? <textarea aria-label={step.label+' input '+required.label} maxLength={1000} className={INPUT} value={stageValues[step.key]?.[required.key]||''} onChange={event=>changeStageValue(step.key,required.key,event.target.value)} /> : <select aria-label={step.label+' input '+required.label} className={INPUT} value={stageValues[step.key]?.[required.key]||''} onChange={event=>changeStageValue(step.key,required.key,event.target.value)}><option value="">Choose exact approved input</option>{stageArtifacts.filter(row=>row.artifact_type===required.artifact_type && row.output_type===required.output_type && (!['ai_assisted','automatic'].includes(step.kind) || row.ai_use_allowed===true)).map(source=><option key={source.artifact_version_id} value={source.artifact_version_id}>{source.title} · v{source.version_number} · {source.artifact_version_id}</option>)}</select>}</label>)}
+        </fieldset>})}
+        {definitionSteps.some(step=>step.stage_contract?.reuse_allowed || step.stage_contract?.required_inputs?.some(input=>input.kind==='approved_artifact')) && <section aria-label="Find approved stage sources" className="space-y-2 rounded-lg border border-[var(--anka-line)] p-3 text-xs"><label className="block">Find an approved artifact by title or exact version<input aria-label="Approved stage artifact search" maxLength={120} className={INPUT} value={artifactQuery} onChange={event=>{if(flight.current || commandState.current.locked || !scopeActive.current || signal?.aborted)return;setArtifactQuery(event.target.value)}} /></label><button type="button" className="workspace-button" disabled={artifactLoading} onClick={()=>searchArtifacts(0)}>Find approved versions</button>{artifactError && <p role="alert">{artifactError}</p>}<p>{artifactLoading ? 'Checking current project sources…' : stageArtifacts.length+' exact approved versions loaded. Confirmation rechecks their current approval.'}</p>{artifactPage.offset>0 && <button type="button" className="workspace-button" disabled={artifactLoading} onClick={()=>searchArtifacts(Math.max(0,artifactPage.offset-25))}>Previous source page</button>}{artifactPage.has_more && <button type="button" className="workspace-button" disabled={artifactLoading} onClick={()=>searchArtifacts(artifactPage.offset+25)}>Next source page</button>}</section>}
+        </div>}
+        {canConfigureSpending?<details><summary>Advanced · spending setup</summary>        <label className="block text-xs text-[var(--anka-muted)]">Local AI cost limit (USD)
+          <input aria-label="Pipeline AI limit" required inputMode="decimal" className={INPUT} value={cost} onChange={event => { if(flight.current || commandState.current.locked || !commandState.current.canConfigureSpending || !scopeActive.current || signal?.aborted)return;setCreationReview(null);createRequest.current = ''; setCost(event.target.value) }} disabled={!aiSelected} />
+          <span className="mt-1 block text-[var(--anka-muted)]">{aiSelected ? 'A positive limit is required for AI-capable steps; this does not authorize provider use.' : 'Human-only plans use zero.'}</span>
+        </label></details>:<p className="text-xs text-[var(--anka-muted)]">Spending setup is managed by Admin. This draft keeps the selected pipeline's current approved limit ({money(approvedLimit)}); human-only stages use zero. A new limit requires Admin setup.</p>}
+
+        <button type="submit" disabled={locked || !publication} className="rounded-lg bg-[var(--anka-violet)] px-3 py-2 text-xs font-semibold text-[var(--anka-on-violet)] disabled:opacity-40">3. Review stages</button>
+      </form>
+      {creationReview && creationReview.signature===reviewSignature && <section aria-label="Review pipeline stages" className="mt-4 space-y-3 rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] p-3 text-sm">
+        <h3 className="font-semibold">Review this exact plan</h3>
+        <p>{view.group?.name || 'Legacy'} · {publication.definition.name} · v{publication.definition.version_number} · local AI limit {money(creationReview.micro)}</p>
+        <ol className="space-y-3">{creationReview.stagePlan.rows.map(({step,contract,action,source,inputs})=>{const selected=creationReview.selectedSteps.find(item=>item.key===step.key);return <li key={step.key} className="rounded border border-[var(--anka-line)] p-2">
+          <p className="font-medium">{step.label} · {action==='reuse' ? 'Satisfied by approved source' : action==='omit' ? 'Optional stage omitted' : selected ? `Included ×${selected.quantity}` : 'Outside this draft'}</p>
+          <p>Dependencies: {step.depends_on?.map(key=>definitionSteps.find(row=>row.key===key)?.label||key).join(', ') || 'none'}</p><p>Output: {contract?.output_label || 'not specified by this published definition.'}</p>
+          {contract ? inputs.map(input=><p key={input.required.key} className={input.missing ? 'text-[var(--anka-warning)]' : ''}>{input.required.label}: {input.missing ? 'Missing or incompatible input' : input.source ? input.source.title+' · v'+input.source.version_number+' · '+input.source.artifact_version_id : input.value}</p>) : <p>Required inputs: not specified by this published definition. Review linked records before activation.</p>}
+          {contract && action==='run' && !contract.required_inputs.length && <p>Required inputs: none declared.</p>}
+          {action==='omit' && <p>Reason: {omissionReasons[step.key] || 'Missing omission reason'}</p>}
+          {source && <p>{source.title} · exact v{source.version_number} · {source.artifact_version_id}</p>}
+          {!serviceIds.has(step.service_id) && <p className="text-[var(--anka-warning)]">Missing eligible planned or active service.</p>}
+        </li>})}</ol>
+        {creationReview.stagePlan.errors.length>0 && <ul role="alert" className="space-y-1 text-[var(--anka-warning)]">{creationReview.stagePlan.errors.map((message,n)=><li key={n}>{message}</li>)}</ul>}
+        <p>Save pipeline records this reviewed draft only. Activation, work planning, assignment and provider use require their separate reviews.</p>
+        <button type="button" disabled={locked || !creationReview.stagePlan.ready} onClick={save} className="workspace-button workspace-button-primary">4. Save pipeline</button>
+      </section>}</fieldset>}
+  </>
   return <section className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-5" aria-labelledby="project-config-heading">
     <div className="flex items-start justify-between gap-3"><div>
-      <h2 id="project-config-heading" className="font-semibold">Project pipeline configuration</h2>
-      <p className="mt-1 text-xs text-[var(--anka-muted)]">Exact project managers and owner/admin may choose steps, review impact, and activate a draft. This does not start AI work.</p>
+      <h2 id="project-config-heading" className="font-semibold">Set up a pipeline</h2>
+      <p className="mt-1 text-xs text-[var(--anka-muted)]">Choose a Website or Marketing pipeline, review a published plan and save its stages as a draft. Saving does not activate it or start AI work.</p>
     </div><button type="button" onClick={()=>{const child=childScope.current;if(!flight.current&&!commandState.current.busy&&!child.website&&!child.marketing&&!child.resources&&!signal?.aborted&&scopeActive.current)void refresh()}} disabled={busy||childBlocked} className="text-xs text-[var(--anka-violet)] disabled:opacity-40">Refresh</button></div>
     {view.error && <p role="alert">{view.error}. No other pipeline was selected.</p>}
     {error && <p role="alert" className="mt-3 text-sm text-[var(--anka-danger)]">{error}</p>}
     {pending && <p role="status" className="mt-3 text-[var(--anka-warning)]">The original command needs history reconciliation. Refresh inspects its exact request; editing and new commands stay blocked.</p>}
     {notice && <p role="status" className="mt-3 text-sm text-[var(--anka-success)]">{notice}</p>}
     {loading ? <p className="mt-4 text-sm text-[var(--anka-muted)]">Loading project configurations…</p> : <>
-      <label className="mt-4 block text-xs text-[var(--anka-muted)]">Pipeline
-        <select aria-label="Pipeline selection" className={INPUT} value={groupId} disabled={locked} onChange={event=>chooseGroup(event.target.value)}>
+      <section aria-label="Pipeline setup" className="mt-4 space-y-3">
+        <p className="text-sm">Website / Marketing → Choose plan → Review stages → Save pipeline</p>
+        <label className="block text-sm font-medium">1. Website or Marketing<select aria-label="Pipeline kind" className={INPUT} value={groupKind} disabled={locked} onChange={event=>selectKind(event.target.value)}><option value="website">Website</option><option value="marketing">Marketing</option></select></label>
+        <label className="block text-xs">Saved pipeline<select aria-label="Saved pipeline" className={INPUT} value={groupId} disabled={locked} onChange={event=>selectPipeline(event.target.value)}><option value="">Choose a saved pipeline</option>{(records.groups||[]).filter(row=>row.kind===groupKind).map(row=><option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
+        {!groupId&&<p className="text-sm text-[var(--anka-muted)]">Choose a saved pipeline or start one below. Legacy records stay in History.</p>}
+        {groupId&&<p className="text-sm text-[var(--anka-muted)]">{activeConfig?'An active plan is saved for this pipeline. New saves stay drafts until reviewed activation.':'No plan is active yet. Save a draft, then review activation in History.'}</p>}
+      </section>
+      {groupId&&draftEditor}
+      <details aria-label="Pipeline history" className="mt-4 rounded-lg border border-[var(--anka-line)] p-3" open={historyOpen} onToggle={event=>setHistoryOpen(event.currentTarget.open)}><summary className="font-semibold">History · Legacy and saved revisions</summary>
+      <label className="mt-4 block text-xs text-[var(--anka-muted)]">History scope
+        <select aria-label="Pipeline selection" className={INPUT} value={groupId} disabled={locked} onChange={event=>selectPipeline(event.target.value)}>
           <option value="">Legacy · preserved existing history</option>
           {(records.groups || []).map(group=><option key={group.id} value={group.id}>{group.name} · {group.kind==='website' ? 'Website' : 'Marketing'}</option>)}
         </select>
@@ -255,58 +330,20 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
         <label className="mt-3 flex items-start gap-2"><input type="checkbox" disabled={locked} checked={acknowledged} onChange={event => setAcknowledged(event.target.checked)} />I reviewed this exact impact and approve activation.</label>
         <button type="button" disabled={locked || !acknowledged} onClick={activate} className="mt-3 rounded-lg bg-[var(--anka-violet)] px-3 py-2 font-semibold text-[var(--anka-on-violet)] disabled:opacity-40">Activate reviewed configuration</button>
       </div>}
-      {canManage && <fieldset disabled={locked}><form onSubmit={inspectCreation} className="mt-5 space-y-3 border-t border-[var(--anka-line)] pt-4">
-        <h3 className="text-sm font-semibold">Draft a new revision</h3>
-        <label className="block text-xs text-[var(--anka-muted)]">Published execution definition
-          <select required className={INPUT} value={publicationId} onChange={event => changePublication(event.target.value)}>
-            <option value="">Choose a definition</option>
-            {view.available.map(row => <option key={row.id} value={row.id}>{row.definition.name} · v{row.definition.version_number}</option>)}
-          </select>
-        </label>
-        {publication && <div className="space-y-3">{definitionSteps.map(step=>{const contract=step.stage_contract,action=stageActions[step.key] || (quantities[step.key] ? 'run' : 'outside_scope');const sources=stageArtifacts.filter(row=>row.artifact_type===contract?.artifact_type && row.output_type===contract?.output_type);return <fieldset key={step.key} className="space-y-2 rounded-lg border border-[var(--anka-line)] p-3 text-xs text-[var(--anka-ink)]">
-          <legend className="px-1 font-medium">{step.label}</legend><p>{step.kind.replaceAll('_',' ')}{step.depends_on?.length ? ' · after '+step.depends_on.join(', ') : ''}{!serviceIds.has(step.service_id) ? ' · service unavailable' : ''}</p>
-          {contract && <><p>Output: {contract.output_label}</p><label className="block">Stage decision<select aria-label={step.label+' decision'} className={INPUT} value={action} disabled={!serviceIds.has(step.service_id)} onChange={event=>changeStageAction(step,event.target.value)}><option value="outside_scope">Outside this pipeline's selected services</option><option value="run">Include work</option>{contract.optional && <option value="omit">Omit optional stage with reason</option>}{contract.reuse_allowed && step.kind!=='approval_gate' && <option value="reuse">Satisfied by an exact approved version</option>}</select></label></>}
-          {(!contract || action==='run') && <label className="flex items-center justify-between gap-3">Quantity<input aria-label={step.label+' quantity'} type="number" min="1" max="50" placeholder="Off" disabled={!serviceIds.has(step.service_id)} className="w-16 shrink-0 rounded border border-[var(--anka-line)] bg-[var(--anka-surface)] p-1 text-[var(--anka-ink)]" value={quantities[step.key] ?? ''} onChange={event=>changeSelection(step.key,event.target.value)} /></label>}
-          {action==='omit' && <label className="block">Omission reason<textarea aria-label={step.label+' omission reason'} className={INPUT} maxLength={1000} value={omissionReasons[step.key]||''} onChange={event=>editStage(setOmissionReasons,step.key,event.target.value)} /></label>}
-          {action==='reuse' && <label className="block">Exact approved version<select aria-label={step.label+' approved version'} className={INPUT} value={stageValues[step.key]?.artifact_version_id||''} onChange={event=>changeStageValue(step.key,'artifact_version_id',event.target.value)}><option value="">Find and choose an approved version below</option>{sources.map(source=><option key={source.artifact_version_id} value={source.artifact_version_id}>{source.title} · v{source.version_number} · {source.artifact_version_id}</option>)}</select><span>Uses the existing immutable version. No new output, approval, delivery or provider request is created.</span></label>}
-          {action==='run' && (contract?.required_inputs||[]).map(required=><label key={required.key} className="block">Required input: {required.label}{required.kind==='manual' ? <textarea aria-label={step.label+' input '+required.label} maxLength={1000} className={INPUT} value={stageValues[step.key]?.[required.key]||''} onChange={event=>changeStageValue(step.key,required.key,event.target.value)} /> : <select aria-label={step.label+' input '+required.label} className={INPUT} value={stageValues[step.key]?.[required.key]||''} onChange={event=>changeStageValue(step.key,required.key,event.target.value)}><option value="">Choose exact approved input</option>{stageArtifacts.filter(row=>row.artifact_type===required.artifact_type && row.output_type===required.output_type && (!['ai_assisted','automatic'].includes(step.kind) || row.ai_use_allowed===true)).map(source=><option key={source.artifact_version_id} value={source.artifact_version_id}>{source.title} · v{source.version_number} · {source.artifact_version_id}</option>)}</select>}</label>)}
-        </fieldset>})}
-        {definitionSteps.some(step=>step.stage_contract?.reuse_allowed || step.stage_contract?.required_inputs?.some(input=>input.kind==='approved_artifact')) && <section aria-label="Find approved stage sources" className="space-y-2 rounded-lg border border-[var(--anka-line)] p-3 text-xs"><label className="block">Find an approved artifact by title or exact version<input aria-label="Approved stage artifact search" maxLength={120} className={INPUT} value={artifactQuery} onChange={event=>{if(flight.current || commandState.current.locked || !scopeActive.current || signal?.aborted)return;setArtifactQuery(event.target.value)}} /></label><button type="button" className="workspace-button" disabled={artifactLoading} onClick={()=>searchArtifacts(0)}>Find approved versions</button>{artifactError && <p role="alert">{artifactError}</p>}<p>{artifactLoading ? 'Checking current project sources…' : stageArtifacts.length+' exact approved versions loaded. Confirmation rechecks their current approval.'}</p>{artifactPage.offset>0 && <button type="button" className="workspace-button" disabled={artifactLoading} onClick={()=>searchArtifacts(Math.max(0,artifactPage.offset-25))}>Previous source page</button>}{artifactPage.has_more && <button type="button" className="workspace-button" disabled={artifactLoading} onClick={()=>searchArtifacts(artifactPage.offset+25)}>Next source page</button>}</section>}
-        </div>}
-        <label className="block text-xs text-[var(--anka-muted)]">Local AI cost limit (USD)
-          <input required inputMode="decimal" className={INPUT} value={cost} onChange={event => { if(flight.current || commandState.current.locked || !scopeActive.current || signal?.aborted)return;setCreationReview(null);createRequest.current = ''; setCost(event.target.value) }} disabled={!aiSelected} />
-          <span className="mt-1 block text-[var(--anka-muted)]">{aiSelected ? 'A positive limit is required for AI-capable steps; this does not authorize provider use.' : 'Human-only plans use zero.'}</span>
-        </label>
-        <button type="submit" disabled={locked || !publication} className="rounded-lg bg-[var(--anka-violet)] px-3 py-2 text-xs font-semibold text-[var(--anka-on-violet)] disabled:opacity-40">Preview stages before creation</button>
-      </form>
-      {creationReview && creationReview.signature===reviewSignature && <section aria-label="Review pipeline stages" className="mt-4 space-y-3 rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] p-3 text-sm">
-        <h3 className="font-semibold">Review this exact draft</h3>
-        <p>{view.group?.name || 'Legacy'} · {publication.definition.name} · v{publication.definition.version_number} · local AI limit {money(creationReview.micro)}</p>
-        <ol className="space-y-3">{creationReview.stagePlan.rows.map(({step,contract,action,source,inputs})=>{const selected=creationReview.selectedSteps.find(item=>item.key===step.key);return <li key={step.key} className="rounded border border-[var(--anka-line)] p-2">
-          <p className="font-medium">{step.label} · {action==='reuse' ? 'Satisfied by approved source' : action==='omit' ? 'Optional stage omitted' : selected ? `Included ×${selected.quantity}` : 'Outside this draft'}</p>
-          <p>Dependencies: {step.depends_on?.join(', ') || 'none'}</p><p>Output: {contract?.output_label || 'not specified by this published definition.'}</p>
-          {contract ? inputs.map(input=><p key={input.required.key} className={input.missing ? 'text-[var(--anka-warning)]' : ''}>{input.required.label}: {input.missing ? 'Missing or incompatible input' : input.source ? input.source.title+' · v'+input.source.version_number+' · '+input.source.artifact_version_id : input.value}</p>) : <p>Required inputs: not specified by this published definition. Review linked records before activation.</p>}
-          {contract && action==='run' && !contract.required_inputs.length && <p>Required inputs: none declared.</p>}
-          {action==='omit' && <p>Reason: {omissionReasons[step.key] || 'Missing omission reason'}</p>}
-          {source && <p>{source.title} · exact v{source.version_number} · {source.artifact_version_id}</p>}
-          {!serviceIds.has(step.service_id) && <p className="text-[var(--anka-warning)]">Missing eligible planned or active service.</p>}
-        </li>})}</ol>
-        {creationReview.stagePlan.errors.length>0 && <ul role="alert" className="space-y-1 text-[var(--anka-warning)]">{creationReview.stagePlan.errors.map((message,n)=><li key={n}>{message}</li>)}</ul>}
-        <p>This saves a draft only. Activation, work planning, assignment and provider use require their separate reviews.</p>
-        <button type="button" disabled={locked || !creationReview.stagePlan.ready} onClick={save} className="workspace-button workspace-button-primary">Confirm draft revision</button>
-      </section>}</fieldset>}
-      {canManage && <details className="mt-4 border-t border-[var(--anka-line)] pt-4"><summary>Create an independent pipeline</summary><fieldset disabled={locked} className="mt-3 space-y-3">
-        <label className="block text-xs">Pipeline kind<select aria-label="Pipeline kind" className={INPUT} value={groupKind} onChange={event=>{setGroupKind(event.target.value);setGroupReview(null);groupRequest.current=''}}><option value="website">Website</option><option value="marketing">Marketing</option></select></label>
+      {!groupId&&<details className="mt-3"><summary>Advanced · Legacy configuration</summary>{draftEditor}</details>}
+      </details>
+      {canManage && <details open={!groupId} className="mt-4 border-t border-[var(--anka-line)] pt-4"><summary>{groupId?'Start another pipeline':'Start a pipeline'}</summary><fieldset disabled={locked} className="mt-3 space-y-3">
+
         <label className="block text-xs">Pipeline name<input aria-label="Pipeline name" className={INPUT} maxLength={80} value={groupName} onChange={event=>{setGroupName(event.target.value);setGroupReview(null);groupRequest.current=''}} /></label>
-        <label className="block text-xs">Find a published preset<input type="search" className={INPUT} value={presetQuery} onChange={event=>setPresetQuery(event.target.value)} placeholder="Search preset names" /></label>
-        <label className="block text-xs">Published preset<select aria-label="Independent pipeline preset" className={INPUT} value={groupPreset} onChange={event=>{setGroupPreset(event.target.value);setGroupReview(null);groupRequest.current=''}}><option value="">Choose an explicit published preset</option>{presets.filter(definition=>definition.preset_publication_id===groupPreset || definition.name.toLowerCase().includes(presetQuery.trim().toLowerCase())).map(definition=><option key={definition.preset_publication_id} value={definition.preset_publication_id}>{definition.name} · execution v{definition.version_number}</option>)}</select></label>
-        <button type="button" className="workspace-button" disabled={!groupPreset || !groupName.trim()} onClick={()=>setGroupReview({name:groupName.trim(),kind:groupKind,preset:groupPreset})}>Review pipeline creation</button>
-        {groupReview && <section aria-label="Review independent pipeline" className="rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] p-3 space-y-2"><p>{groupReview.name} · {groupReview.kind==='website' ? 'Website' : 'Marketing'} · {presets.find(row=>row.preset_publication_id===groupReview.preset)?.name}</p><p>Preserves Legacy and other pipelines. Creates no work, activation, publication or provider request. Services and steps are selected in a separate draft.</p><button type="button" className="workspace-button workspace-button-primary" onClick={createGroup}>Confirm independent pipeline</button></section>}
+        <label className="block text-xs">Find a published plan<input type="search" className={INPUT} value={presetQuery} onChange={event=>setPresetQuery(event.target.value)} placeholder="Search plan names" /></label>
+        <label className="block text-xs">Published plan<select aria-label="Independent pipeline preset" className={INPUT} value={groupPreset} onChange={event=>{setGroupPreset(event.target.value);setGroupReview(null);groupRequest.current=''}}><option value="">Choose a published plan</option>{presets.filter(definition=>definition.preset_publication_id===groupPreset || definition.name.toLowerCase().includes(presetQuery.trim().toLowerCase())).map(definition=><option key={definition.preset_publication_id} value={definition.preset_publication_id}>{definition.name} · v{definition.version_number}</option>)}</select></label>
+        <button type="button" className="workspace-button" disabled={!selectedPreset || !groupName.trim()} onClick={inspectGroup}>Review pipeline plan</button>
+        {groupReview&&JSON.stringify([groupReview.name,groupReview.kind,groupReview.preset,groupReview.definitionPublicationId])===commandState.current.groupSignature&&<section aria-label="Review independent pipeline" className="rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] p-3 space-y-2"><p>{groupReview.name} · {groupReview.kind==='website' ? 'Website' : 'Marketing'} · {presets.find(row=>row.preset_publication_id===groupReview.preset)?.name}</p><ol className="my-3 space-y-1">{groupReview.definition.steps.map(step=><li key={step.key}>{step.label} · {step.kind.replaceAll('_',' ')}</li>)}</ol><p>Creates this named pipeline only and keeps the exact chosen plan selected. Next, review its quantities and inputs before saving a draft. Existing pipelines and Legacy remain unchanged; no work, activation, publication or provider request is created.</p><button type="button" className="workspace-button workspace-button-primary" onClick={createGroup}>Use plan and create pipeline</button></section>}
       </fieldset></details>}
       {view.group?.kind==='website' && engagement.project_id && <_ProjectWebsitePagesPanel onNavigationBusyChange={reportWebsiteBusy} organizationId={organizationId} engagement={engagement} group={view.group} membership={membership} signal={signal} />}
       {view.group?.kind==='marketing' && engagement.project_id && <_ProjectCampaignPlanningPanel onNavigationBusyChange={reportMarketingBusy} organizationId={organizationId} engagement={engagement} group={view.group} membership={membership} signal={signal} /> }
       {['website','marketing'].includes(view.group?.kind) && engagement.project_id && <_ProjectReportingBindingsPanel onNavigationBusyChange={reportResourcesBusy} organizationId={organizationId} engagement={engagement} group={view.group} membership={membership} signal={signal} />}
-      {!view.available.length && <p className="mt-4 text-xs text-[var(--anka-muted)]">This project has no matching published execution definition yet.</p>}
+      {(!presets.length||!view.available.length||(publication&&!eligibleSteps.length))&&<section aria-label="No available pipeline plan" className="mt-4 space-y-2 rounded-lg border border-[var(--anka-line)] p-3 text-sm"><p>No eligible published plan is available for the current pipeline and services. Review service scope, or have an Admin publish a suitable plan.</p>{onReviewServices&&<button type="button" className="workspace-button" disabled={locked} onClick={()=>{if(!commandState.current.locked&&!flight.current&&scopeActive.current&&!signal?.aborted)onReviewServices()}}>Review project services</button>}{canConfigureSpending&&<a className="workspace-button" href="/sphere/engagements?view=services" target="_blank" rel="noopener noreferrer" title="Opens Administration in another tab; this draft stays here" aria-disabled={locked} onClick={event=>{if(commandState.current.locked||!commandState.current.canConfigureSpending||flight.current||!scopeActive.current||signal?.aborted)event.preventDefault()}}>Open published plans in Administration</a>}</section>}
     </>}
   </section>
 }

@@ -45,7 +45,7 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
   const requestedEngagementId = searchParams.get('engagement') || ''
   const requestedWorkspaceTab = searchParams.get('tab') || 'overview'
   const returnProjectId = searchParams.get('project') || ''
-  const [view, setView] = useState(initialView)
+  const [view, setView] = useState(()=>searchParams.get('view')==='services'&&canShowAuthorityAdministration(activeMembership)?'services':initialView)
   const [clients, setClients] = useState([])
   const [services, setServices] = useState([])
   const [owners, setOwners] = useState([])
@@ -361,7 +361,7 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
 
         {view === 'engagements' && <PortfolioDashboard snapshot={portfolioSnapshot} owners={ownerOptions} onOpen={openEngagement} onRefresh={() => loadAll()} supportNote="Partial journeys supported." />}
         {view === 'clients' && <ClientRegistry clients={clients} onNewBrand={clientId => { setBrandForm({ ...INITIAL_BRAND, clientId }); setModal('brand') }} />}
-        {view === 'services' && <><ServiceCatalogue services={services} /><PipelineTemplateDraftPanel catalog={templateCatalog} services={services} membership={activeMembership} onCreate={createPipelineDraft} onApprove={approvePipelineDepartment} onPublish={publishPipelineVersion} onRefresh={() => loadAll()} busy={saving} loadError={templateLoadError} /><PipelineExecutionDefinitionPanel organizationId={activeOrganizationId} catalog={templateCatalog} services={services} membership={activeMembership} signal={requestSignal} /></>}
+        {view === 'services' && <><ServiceCatalogue services={services} /><PipelineTemplateDraftPanel catalog={templateCatalog} services={services} membership={activeMembership} onCreate={createPipelineDraft} onApprove={approvePipelineDepartment} onPublish={publishPipelineVersion} onRefresh={() => loadAll()} busy={saving} loadError={templateLoadError} /><details id="advanced-execution-definitions" className="workspace-card p-4"><summary className="font-semibold">Advanced · execution definitions</summary><PipelineExecutionDefinitionPanel organizationId={activeOrganizationId} catalog={templateCatalog} services={services} membership={activeMembership} signal={requestSignal} /></details></>}
       </div>
 
       {modal === 'client' && <Modal busy={Boolean(saving)} title="Create client and first brand" onClose={() => setModal('')}><ClientForm form={clientForm} setForm={setClientForm} onSubmit={createClient} saving={saving} /></Modal>}
