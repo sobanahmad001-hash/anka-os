@@ -42,7 +42,7 @@ jobs:
       - run: python3 tools/check-reporting-facebook-manifest.py
       - run: deno check --frozen supabase/functions/reporting-worker/index.ts supabase/functions/_shared/reportingMetaCredentials.js
       - run: deno check --frozen --config supabase/functions/project-chat-import/deno.json supabase/functions/project-chat-import/index.ts
-      - run: deno test --frozen supabase/functions/department-chat/designPrivateAttachments.test.ts supabase/functions/_shared/designPdfInspection.test.ts
+      - run: deno test --frozen supabase/functions/department-chat/designPrivateAttachments.test.ts supabase/functions/_shared/designPdfInspection.test.ts supabase/functions/_shared/projectDocumentImport.test.ts
       - name: Project document source and owner boundaries
         run: deno test --frozen --node-modules-dir=none supabase/functions/department-chat/projectDocumentAttachments.test.ts supabase/functions/department-chat/contextChatActions.test.ts
       - run: npm run build

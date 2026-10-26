@@ -1,5 +1,9 @@
+import {parseDocumentRequest,validateDocumentProposal} from '../data/projectDocumentProposal.js'
 import {attachmentReadPresentation,ATTACHMENT_TYPES} from '../data/projectAttachmentReading.js'
 export default function ProjectAttachmentMessage({message,messages,onReview,canReview}){
+ const human=message.role==='assistant'?messages.find(x=>x.id===message.in_reply_to_message_id):message,document=parseDocumentRequest(human?.body)
+ if(document){let result=null;try{if(message.role==='assistant')result=validateDocumentProposal(message.body,document)}catch{}
+ return <section aria-label="Document findings"><p>{result?result.explanation:document.clarification?'Document clarification: '+document.clarification:'Read document: '+document.source.name}</p>{result&&<><p>{result.rows.length} proposed row(s) · {result.type}. No project changes applied.</p>{result.questions.map((q,i)=><p key={i}>Please clarify: {q}</p>)}{result.suggestions.map((q,i)=><p key={i}>Suggestion only: {q}</p>)}</>}<details><summary>Exact disclosed document passages</summary>{document.segments.map(s=><p key={s.id}>{s.id}: {s.text}</p>)}</details>{canReview?.(document)&&<button type="button" onClick={onReview}>Review document and project changes</button>}</section>}
  const reading=attachmentReadPresentation(message,messages)
  if(!reading)return <p>{message.body}</p>
  if(reading.kind==='source')return <><p>{reading.text}</p><details><summary>Confirmed attachment sample</summary><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{JSON.stringify(reading.disclosure.payload,null,2)}</pre></details></>

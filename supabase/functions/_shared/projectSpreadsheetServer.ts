@@ -1,3 +1,5 @@
+import {DOCUMENT_MIMES} from './projectDocumentProposal.js'
+import {inspectProjectDocument,reconstructDocumentProposal} from './projectDocumentImport.ts'
 import { DOMParser } from '@xmldom/xmldom'
 import { parseImportCsv, parseImportXlsx, IMPORT_LIMITS } from './projectSpreadsheetSource.js'
 import { previewSpreadsheetImport, spreadsheetSourceIdentity } from './projectSpreadsheetPreview.js'
@@ -44,7 +46,7 @@ async function loadSource(admin:any,scope:Json,attachmentId:string) {
   if(data.size!==attachment.byte_size||data.size>IMPORT_LIMITS.bytes)fail('Stored source size changed')
   const bytes=new Uint8Array(await data.arrayBuffer())
   if(await spreadsheetSourceIdentity(bytes)!==attachment.sha256_hex)fail('Stored source checksum changed')
-  return {attachment,workbook:inspectProjectImportBytes(bytes,attachment.verified_mime)}
+  return DOCUMENT_MIMES.includes(attachment.verified_mime)?{attachment,documentInspection:await inspectProjectDocument(bytes,attachment.verified_mime),workbook:null}:{attachment,documentInspection:null,workbook:inspectProjectImportBytes(bytes,attachment.verified_mime)}
 }
 async function artifactHead(admin:any,scope:Json,engagementId:string,type:string,id:string|null) {
   const roots=await many(admin.from('artifacts').select('id,organization_id,project_id,engagement_id,artifact_type,title').eq('organization_id',scope.organizationId).eq('project_id',scope.projectId).eq('engagement_id',engagementId).eq('artifact_type',type).limit(101))
@@ -55,11 +57,20 @@ async function artifactHead(admin:any,scope:Json,engagementId:string,type:string
   if(!versions.length)fail('Existing root has no available exact head')
   return {artifact,latestVersion:versions[0]}
 }
-export async function preparePrivateProjectImport(admin:any,scope:Json,request:Json) {
+export async function preparePrivateProjectImport(admin:any,scope:Json,request:Json):Promise<Json> {
   if(!UUID.test(request.engagement_id||'')||!['website_pages','keyword_plan','content_calendar'].includes(request.type))fail('Explicit supported target and engagement required',400)
   const engagement=await one(admin.from('engagements').select('id,name,project_id,organization_id').eq('id',request.engagement_id).eq('project_id',scope.projectId).eq('organization_id',scope.organizationId).neq('status','cancelled'))
   if(!engagement)fail('Exact current engagement required',403)
-  const {attachment,workbook}=await loadSource(admin,scope,request.attachment_id)
+  const loaded=await loadSource(admin,scope,request.attachment_id),{attachment}=loaded
+  let workbook:{sheets:Json[],disclosures:string[]}|null=loaded.workbook,documentEvidence:any=null
+  if(loaded.documentInspection){
+    if(!UUID.test(request.document_message_id||''))fail('Exact saved document proposal required',400)
+    const reconstructed=await reconstructDocumentProposal(admin,scope,attachment,loaded.documentInspection,request.document_message_id)
+    if(request.type!==reconstructed.type||request.sheet_index!==0||JSON.stringify(request.mapping)!==JSON.stringify(reconstructed.mapping))fail('Document proposal mapping changed')
+    if(!reconstructed.sheet)throw Error('Resolve document proposal before canonical review')
+    documentEvidence=reconstructed.document;workbook={sheets:[reconstructed.sheet],disclosures:[loaded.documentInspection.notice,'Only the explicit disclosed passages and saved proposal are included; not full-document understanding.']}
+  }
+  if(!workbook)throw Object.assign(Error('Readable source required'),{status:400})
   if(!Number.isInteger(request.sheet_index)||request.sheet_index<0||request.sheet_index>=workbook.sheets.length)fail('Choose a visible sheet',400)
   const sheet=workbook.sheets[request.sheet_index]
   if(sheet.hidden||!sheet.rows.length)fail('Hidden or empty sheet unavailable',400)
@@ -108,8 +119,14 @@ export async function preparePrivateProjectImport(admin:any,scope:Json,request:J
     }
   }
   const preview=await previewSpreadsheetImport({projectId:scope.projectId,sourceSha256:attachment.sha256_hex,sourceName:attachment.original_name,sheet:selectedSheet,mapping:request.mapping,type:request.type,existing,existingComplete:true})
+  if(documentEvidence)for(const row of preview.rows)(row.source as any).document=documentEvidence.rows.find((x:any)=>x.row===row.source.row)
+  if(documentEvidence&&preview.rows.some((row:Json)=>row.action==='error')){
+    const attention={project_id:scope.projectId,conversation_id:scope.conversation.id,actor_id:scope.actorId,engagement_id:engagement.id,attention_only:true,preview:{rows:preview.rows,disclosures:workbook.disclosures,excluded:sheet.excluded||[]},zero_write:true,provider_request_made:false}
+    return {...attention,review_sha256:await spreadsheetSourceIdentity(new TextEncoder().encode(JSON.stringify(canonical(attention))))}
+  }
   const input={...scope,...head,conversation:scope.conversation,actorId:scope.actorId,organizationId:scope.organizationId,projectId:scope.projectId,attachment,preview,expectedParentVersionId:head.latestVersion?.id||null,architecture,targets,engagement,planningTimezone:scope.project.planning_timezone}
   const draft=request.type==='website_pages'?prepareProjectWebsiteImportDraft(input):request.type==='keyword_plan'?prepareProjectKeywordImportDraft(input):prepareProjectCalendarImport(input)
+  if(documentEvidence){;(draft.privateReceipt as any).document=documentEvidence;for(const row of draft.privateReceipt.rows){;(row.source as any).document=documentEvidence.rows.find((x:any)=>x.row===row.source.row)}}
   const payload='rows' in draft?{rows:draft.rows}:{title:request.title,content:draft.content,expected_parent_version_id:input.expectedParentVersionId}
   if(request.type!=='content_calendar'&&(typeof request.title!=='string'||!request.title.trim()||request.title.length>240))fail('Review an explicit canonical draft title',400)
   const result={project_id:scope.projectId,conversation_id:scope.conversation.id,actor_id:scope.actorId,engagement_id:engagement.id,artifact_id:head.artifact?.id||null,
@@ -143,7 +160,7 @@ export async function loadProjectImportTargets(admin:any,scope:Json,type:string,
   const versions=ids.length?await many(admin.from('artifact_versions').select('id,artifact_id,version_number,created_at').eq('organization_id',scope.organizationId).in('artifact_id',ids).order('version_number',{ascending:false}).limit(201)):[]
   if(versions.length>200)fail('Too many version choices; narrow canonical context')
   result.artifacts=roots.map((r:Json)=>({id:r.id,label:r.title,version_number:versions.find((v:Json)=>v.artifact_id===r.id)?.version_number||null}))
-  result.architectures=architectures.flatMap((r:Json)=>versions.filter((v:Json)=>v.artifact_id===r.id).map((v:Json)=>({id:v.id,label:r.title+' · version '+v.version_number,version_number:v.version_number})))
+  result.architectures=architectures.flatMap((r:Json)=>versions.filter((v:Json)=>v.artifact_id===r.id).map((v:Json)=>({id:v.id,label:r.title+' ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚· version '+v.version_number,version_number:v.version_number})))
   return result
 }
 export async function projectImportAction(admin:any,identity:Json,body:Json,releaseReady=false) {
@@ -151,12 +168,14 @@ export async function projectImportAction(admin:any,identity:Json,body:Json,rele
   // enable uploads, proposal persistence or confirmation.
   if(!releaseReady)fail('Spreadsheet upload and confirmation are unavailable until acceptance gates pass',503)
   const scope=await loadOwnedImportScope(admin,identity.organizationId,identity.actorId,body.conversation_id)
+  if(body.action==='document_proposal'){if(!UUID.test(body.message_id||''))fail('Exact saved document reply required',400);const loaded=await loadSource(admin,scope,body.attachment_id);if(!loaded.documentInspection)fail('Document source required',400);const restored=await reconstructDocumentProposal(admin,scope,loaded.attachment,loaded.documentInspection,body.message_id,false);return {project_id:scope.projectId,conversation_id:scope.conversation.id,actor_id:scope.actorId,attachment_id:loaded.attachment.id,sha256_hex:loaded.attachment.sha256_hex,message_id:body.message_id,proposal:restored.proposal,disclosure:restored.disclosure,read_only:true,provider_request_made:false}}
+  if(body.action==='document_source'){const loaded=await loadSource(admin,scope,body.attachment_id);if(!loaded.documentInspection||loaded.attachment.data_classification==='restricted')fail('Eligible document extraction required',403);return {project_id:scope.projectId,conversation_id:scope.conversation.id,actor_id:scope.actorId,attachment_id:loaded.attachment.id,sha256_hex:loaded.attachment.sha256_hex,name:loaded.attachment.original_name,mime:loaded.attachment.verified_mime,classification:loaded.attachment.data_classification,...loaded.documentInspection}}
   if(body.action==='targets')return loadProjectImportTargets(admin,scope,body.type,body.engagement_id||null)
   if(body.action==='reserve_source') {
     if(!UUID.test(body.attachment_id||'')||typeof body.original_name!=='string'||!body.original_name.trim()||body.original_name.length>200||/[\u0000-\u001f]/.test(body.original_name)
       ||!['public','internal','confidential','restricted'].includes(body.data_classification)
-      ||!['text/csv','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'].includes(body.claimed_mime)
-      ||!(body.claimed_mime==='text/csv'?/\.csv$/i:/\.xlsx$/i).test(body.original_name))fail('Review exact supported source name, type and classification',400)
+      ||!['text/csv','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',...DOCUMENT_MIMES].includes(body.claimed_mime)
+      ||!(body.claimed_mime==='text/csv'?/\.csv$/i:body.claimed_mime===DOCUMENT_MIMES[0]?/\.pdf$/i:body.claimed_mime===DOCUMENT_MIMES[1]?/\.docx$/i:/\.xlsx$/i).test(body.original_name))fail('Review exact supported source name, type and classification',400)
     const prior=await one(admin.from('department_chat_attachments').select('upload_expires_at').eq('id',body.attachment_id).eq('organization_id',scope.organizationId).eq('conversation_id',scope.conversation.id).eq('uploaded_by',scope.actorId))
     const saved=await rpc(admin,'reserve_project_chat_import_attachment',{p_attachment_id:body.attachment_id,p_conversation_id:scope.conversation.id,p_organization_id:scope.organizationId,p_actor_id:scope.actorId,
       p_original_name:body.original_name,p_claimed_mime:body.claimed_mime,p_data_classification:body.data_classification,p_upload_expires_at:prior?.upload_expires_at||new Date(Date.now()+2*60*60*1000).toISOString()})
@@ -179,9 +198,9 @@ export async function projectImportAction(admin:any,identity:Json,body:Json,rele
       const {data,error}=await admin.storage.from('department-chat-attachments').download(saved.staging_path)
       if(error)throw error
       if(data.size<1||data.size>IMPORT_LIMITS.bytes)fail('Source exceeds two-MB bound',400)
-      const bytes=new Uint8Array(await data.arrayBuffer()),workbook=inspectProjectImportBytes(bytes,saved.claimed_mime)
+      const bytes=new Uint8Array(await data.arrayBuffer()),document=DOCUMENT_MIMES.includes(saved.claimed_mime)?await inspectProjectDocument(bytes,saved.claimed_mime):null,workbook=document?null:inspectProjectImportBytes(bytes,saved.claimed_mime)
       const sha=await spreadsheetSourceIdentity(bytes)
-      const inspection={sheets:workbook.sheets.map((s:Json)=>({name:s.name,hidden:s.hidden,rows:s.rows.length,columns:s.rows[0]?.cells.length||0,excluded:s.excluded||[],formula_cells:s.formulas?.length||0})),disclosures:workbook.disclosures}
+      const inspection=document?{revision:document.revision,characters:document.characters,segments:document.segments.length,notice:document.notice}:{sheets:workbook!.sheets.map((s:Json)=>({name:s.name,hidden:s.hidden,rows:s.rows.length,columns:s.rows[0]?.cells.length||0,excluded:s.excluded||[],formula_cells:s.formulas?.length||0})),disclosures:workbook!.disclosures}
       if(new TextEncoder().encode(JSON.stringify(inspection)).length>32768)fail('Inspection metadata exceeds bounds',400)
       const finalPath=`${scope.organizationId}/${scope.conversation.id}/final/${saved.id}`
       const copy=await admin.storage.from('department-chat-attachments').copy(saved.staging_path,finalPath)
@@ -208,8 +227,10 @@ export async function projectImportAction(admin:any,identity:Json,body:Json,rele
   if(!['preview','save_proposal'].includes(body.action))fail('Unsupported importer action',400)
   const prepared=await preparePrivateProjectImport(admin,scope,body)
   if(body.action==='preview')return prepared
+  if(prepared.attention_only)fail('Resolve attention rows before proposal save',400)
   if(!UUID.test(body.request_id||'')||body.review_sha256!==prepared.review_sha256)fail('Review changed; preview the exact batch again')
-  return rpc(admin,'save_project_chat_import_proposal',{p_org:scope.organizationId,p_conversation:scope.conversation.id,p_actor:scope.actorId,p_attachment:body.attachment_id,
+  const saved=await rpc(admin,'save_project_chat_import_proposal',{p_org:scope.organizationId,p_conversation:scope.conversation.id,p_actor:scope.actorId,p_attachment:body.attachment_id,
     p_engagement:prepared.engagement_id,p_target:prepared.target,p_request:body.request_id,p_artifact:prepared.artifact_id,p_parent:prepared.parent_version_id,
     p_payload:prepared.payload,p_preview:prepared.preview,p_source_receipt:prepared.source_receipt})
+  return {...saved,input_review_sha256:prepared.review_sha256}
 }

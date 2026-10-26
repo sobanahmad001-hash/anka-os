@@ -4,7 +4,7 @@ import { createProjectImportRecoverySession } from '../data/projectSpreadsheetIm
 
 // Capability is injected only by the closed importer release gate. Opening this
 // pane performs no reads, uploads, proposal saves or canonical writes.
-export default function ProjectSpreadsheetCommitPane({ repository, scope, file, source, sheetIndex, sheet, type, mapping, classification='internal',onSourceReserved=()=>{} }) {
+export default function ProjectSpreadsheetCommitPane({ repository, scope, file, source, sheetIndex, sheet, type, mapping, classification='internal',onSourceReserved=()=>{},sourceAttachmentId=null,documentMessageId=null }) {
  const session=useMemo(()=>createProjectImportRecoverySession(repository,scope,globalThis.sessionStorage),[repository,scope])
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[receipt,setReceipt]=useState(null),[review,setReview]=useState(null),[proposal,setProposal]=useState(null)
  const [engagement,setEngagement]=useState(''),[artifact,setArtifact]=useState(''),[architecture,setArchitecture]=useState(''),[title,setTitle]=useState('')
@@ -15,26 +15,28 @@ export default function ProjectSpreadsheetCommitPane({ repository, scope, file, 
  const [selected,setSelected]=useState([]),[consent,setConsent]=useState(false)
  const sourceKey=`anka:import-source:${scope.organizationId}:${scope.projectId}:${scope.conversationId}:${scope.actorId}`
  const originalSource=useRef(undefined),originalSave=useRef(null),flight=useRef(false)
- if(originalSource.current===undefined){const id=globalThis.sessionStorage.getItem(sourceKey);if(id&&!/^[0-9a-f-]{36}$/.test(id))throw Error('Invalid original source recovery');originalSource.current=id?{id,sha:null}:null}
+ if(originalSource.current===undefined){const id=sourceAttachmentId||globalThis.sessionStorage.getItem(sourceKey);if(id&&!/^[0-9a-f-]{36}$/.test(id))throw Error('Invalid original source recovery');originalSource.current=id?{id,sha:null}:null}
  const stamp=JSON.stringify({source:source?.sha256,sheetIndex,type,mapping,selected,engagement,artifact,architecture,title})
  const reviewCurrent=review?.stamp===stamp
+ const restoredDocumentMatches=!documentMessageId||!proposal||proposal.preview?.rows?.every(row=>row.source?.fileSha256===source?.sha256&&row.source?.sheet==='Document proposal '+documentMessageId)
  const alive=useRef(true),view=useRef(null)
  const identity=JSON.stringify([scope.organizationId,scope.projectId,scope.conversationId,scope.actorId])
  view.current={identity,stamp}
  useEffect(()=>{alive.current=true;return()=>{alive.current=false}},[])
  async function applyReviewed(){
   const expected=view.current,active=()=>alive.current&&view.current.identity===expected.identity
+  if(proposal?.status==='pending'&&!restoredDocumentMatches)throw Error('Restore the exact original document and saved AI reply before Apply')
   if(proposal?.status==='pending'){const savedResult=await session.confirm(proposal.review_sha256,true);if(active())setResult(savedResult);return}
-  if(!reviewCurrent||session.pendingRequestId||!originalSave.current)throw Error('Review the current source and project changes before applying.')
+  if(review?.attention_only||!reviewCurrent||session.pendingRequestId||!originalSave.current)throw Error('Review the current source and project changes before applying.')
   const exact=originalSave.current,saved=await session.save(exact.input,exact.review)
   if(!active())return
   setProposal(saved)
-  if(view.current.stamp!==expected.stamp||saved.status!=='pending'||saved.review_sha256!==exact.review)throw Error('The saved review changed. Inspect it before applying; nothing was confirmed.')
-  const savedResult=await session.confirm(exact.review,true)
+  if(view.current.stamp!==expected.stamp||saved.status!=='pending'||(saved.input_review_sha256??saved.review_sha256)!==exact.review)throw Error('The saved review changed. Inspect it before applying; nothing was confirmed.')
+  const savedResult=await session.confirm(saved.review_sha256,true)
   if(active())setResult(savedResult)
  }
  async function act(run){if(flight.current)return;flight.current=true;setBusy(true);setError('');try{await run()}catch(e){if(alive.current)setError(e.message)}finally{flight.current=false;if(alive.current)setBusy(false)}}
- function request(){return {attachment_id:originalSource.current.id,engagement_id:engagement,artifact_id:artifact||null,architecture_version_id:architecture||null,title,type,sheet_index:sheetIndex,mapping,selected_rows:selected}}
+ function request(){return {attachment_id:originalSource.current.id,engagement_id:engagement,artifact_id:artifact||null,architecture_version_id:architecture||null,title,type,sheet_index:sheetIndex,mapping,selected_rows:selected,...(documentMessageId?{document_message_id:documentMessageId}:{})}}
  async function upload(){
   if(!consent)throw Error('Confirm private source upload; AI use and sharing remain disabled')
   if(!originalSource.current){const id=crypto.randomUUID();globalThis.sessionStorage.setItem(sourceKey,id);originalSource.current={id,sha:source.sha256};onSourceReserved()}
@@ -46,6 +48,7 @@ export default function ProjectSpreadsheetCommitPane({ repository, scope, file, 
   await repository.uploadSource(file,reserved)
   setReceipt(await repository.finishSource(id,source.sha256))
  }
+ useEffect(()=>{if(!sourceAttachmentId)return;let active=true;repository.sourceStatus(sourceAttachmentId).then(data=>{if(active&&data?.sha256_hex===source.sha256)setReceipt(data)}).catch(e=>{if(active)setError(e.message)});return()=>{active=false}},[repository,sourceAttachmentId,source?.sha256])
  const hasSource=Boolean(file&&source&&sheet)
  return <section aria-label="Reviewed private import">
   <h4>Prepare project changes</h4><p>Keep the original file private, choose its project work and review changes before Apply. Uploading alone creates no project records, approval or publication.</p>
@@ -75,7 +78,7 @@ export default function ProjectSpreadsheetCommitPane({ repository, scope, file, 
   </>}
   {session.pendingRequestId&&<><p>An import needs recovery. Check the original saved review before starting another batch.</p><button disabled={busy} onClick={()=>act(async()=>{const result=await session.recover();if(result?.status==='accepted'){setResult(result.result);setProposal(result)}else if(result){setProposal(result);if(result.status!=='pending')setError('This saved review is '+result.status+'. Make a fresh review before proceeding.')}else setError('No saved receipt was found yet. Retry the original save if this tab still has its review; do not start another import.')})}>Resume original import</button>
    {!proposal&&hasSource&&originalSave.current&&<button disabled={busy||!reviewCurrent} onClick={()=>act(async()=>setProposal(await session.retrySave(originalSave.current.input,originalSave.current.review)))}>Retry original proposal save</button>}</>}
-  {(proposal?.status==='pending'||review)&&<><h4>Review changes</h4><SpreadsheetRowReview preview={proposal?.status==='pending'?proposal.preview:review.preview}/><p>Apply only these reviewed creates and updates. Skipped and attention rows remain unchanged. This does not approve or publish the work.</p><button className="project-import-apply" disabled={busy||Boolean(result?.rows)||(proposal?.status!=='pending'&&(!reviewCurrent||Boolean(session.pendingRequestId)))} onClick={()=>act(applyReviewed)}>Apply reviewed changes</button></>}
+  {(proposal?.status==='pending'||review)&&<><h4>Review changes</h4>{!restoredDocumentMatches&&<p role="alert">This saved review belongs to another document or AI reply. Restore its exact original before Apply.</p>}{review?.attention_only&&<p role="alert">Resolve or deselect attention rows and review again. This batch cannot be applied.</p>}<SpreadsheetRowReview preview={proposal?.status==='pending'?proposal.preview:review.preview}/><p>Apply only these reviewed creates and updates. Skipped and attention rows remain unchanged. This does not approve or publish the work.</p><button className="project-import-apply" disabled={busy||!restoredDocumentMatches||review?.attention_only||Boolean(result?.rows)||(proposal?.status!=='pending'&&(!reviewCurrent||Boolean(session.pendingRequestId)))} onClick={()=>act(applyReviewed)}>Apply reviewed changes</button></>}
   {result?.rows&&<SpreadsheetResults result={result} preview={proposal?.preview||review?.preview}/>}
   {error&&<p role="alert">{error}</p>}
  </section>

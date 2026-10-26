@@ -62,6 +62,7 @@ export function attachmentReadPresentation(message,messages){
 // Presentation only: retain the original saved title and machine-readable request.
 export function attachmentChatTitle(row,messages=[]){
  const title=row?.title||'New chat'
+ if(title.startsWith('Project document proposal v1'))return 'Document proposal discussion'
  if(!title.startsWith('Project attachment reading v1')||!title.includes('"mode":"attachment_read"'))return title
  const original=messages.find(message=>message.conversation_id===row.id&&message.role!=='assistant'&&message.body?.startsWith(ATTACHMENT_READ_PREFIX))
  const reading=original?attachmentReadPresentation(original,messages):null
