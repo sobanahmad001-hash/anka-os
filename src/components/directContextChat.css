@@ -86,3 +86,13 @@
 .direct-chat-toolbar :is(button, select) { padding-block: 6px; }
 
 .direct-chat-video { scroll-margin-top: 112px; }
+
+/* Project Chat keeps occasional actions above the conversation and one composer. */
+.direct-project-chat .direct-project-tools { position: relative; }
+.direct-project-chat .direct-project-tools > summary { cursor: pointer; padding: 8px 12px; border: 1px solid var(--anka-line); border-radius: 8px; background: var(--anka-canvas); }
+.direct-project-chat .direct-project-tools-list { position: absolute; right: 0; top: calc(100% + 6px); z-index: 4; display: grid; gap: 6px; width: 190px; padding: 8px; border: 1px solid var(--anka-line); border-radius: 12px; background: var(--anka-surface); box-shadow: 0 8px 24px #0003; }
+.direct-project-chat .direct-project-tools-list button { text-align: left; }
+.direct-project-chat .direct-project-settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.direct-project-chat .direct-chat-toolbar { display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; }
+.direct-project-chat .direct-chat-toolbar .direct-chat-send { width: auto; margin-left: auto; }
+.direct-project-chat .direct-chat-details select { width: 100%; max-width: 360px; }
