@@ -140,13 +140,15 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   mappingState.current={modelId,ready,selected,organizationId,projectId,busy,pending}
   const mappingTransport=useMemo(()=>PROJECT_IMPORT_RELEASE_READY&&importRepository?createSpreadsheetMappingTransport({chat:departmentChat,runner:contextChatRunner,scope:importScope,storage:globalThis.sessionStorage,
     consent:()=>consent.confirm(),checkCurrent:async()=>{
-      const current=mappingState.current
-      if(!current.ready||current.busy&&!mappingActive.current||current.pending||current.organizationId!==importScope.organizationId||current.projectId!==importScope.projectId||current.selected?.id!==importScope.conversationId||current.selected?.owner_id!==importScope.actorId)throw Error('Owned idle Project Chat and approved model required')
+      // Consent can rerender without changing authority; compare the exact live scope after the read.
+      const snapshot=mappingState.current
+      const inScope=value=>alive.current&&!signal.aborted&&value?.ready&&(!value.busy||mappingActive.current)&&!value.pending&&!pendingRef.current&&value.organizationId===importScope.organizationId&&value.projectId===importScope.projectId&&value.selected?.id===importScope.conversationId&&value.selected?.owner_id===importScope.actorId&&(!value.selected.state||value.selected.state==='active')
+      if(!inScope(snapshot))throw Error('Owned idle Project Chat and approved model required')
       const latest=await read(importScope.conversationId)
       if(latest.conversation.owner_id!==importScope.actorId||latest.conversation.state!=='active'||latest.sharing?.recipients?.length)throw Error('Mapping samples require an unshared active private source conversation')
-      if(mappingState.current!==current)throw Error('Mapping context changed during access check')
-      return current.modelId
-    }}):null,[importRepository,importScope,read,consent])
+      if(!inScope(mappingState.current)||mappingState.current.modelId!==snapshot.modelId)throw Error('Mapping context changed during access check')
+      return snapshot.modelId
+    }}):null,[importRepository,importScope,read,consent,signal])
   async function mappingAction(kind,disclosure){
     if(!mappingTransport||lock.current||pendingRef.current||!current())throw Error('Finish the current Chat operation before mapping')
     mappingActive.current=true;lock.current=true;setBusy(true)
