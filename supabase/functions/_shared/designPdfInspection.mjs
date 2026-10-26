@@ -39,10 +39,10 @@ export async function inspectDesignPdf(bytes, load = () => import('npm:unpdf@1.9
     if (await doc.getAttachments()) throw reject('PDFs with embedded files are not supported.')
     if (await doc.getJSActions()) throw reject('PDFs with executable actions are not supported.')
     if (await doc.getOpenAction()) throw reject('PDFs with opening actions are not supported.')
-    let text = '', items = 0
+    let text = '', items = 0; const segments = []
     for (let number = 1; number <= doc.numPages; number++) {
       check()
-      const page = await doc.getPage(number)
+      const page = await doc.getPage(number); const pageStart = text.length
       try {
         if (await page.getJSActions()) throw reject('PDF page actions are not supported.')
         const annotations = await page.getAnnotations()
@@ -55,7 +55,7 @@ export async function inspectDesignPdf(bytes, load = () => import('npm:unpdf@1.9
           text += item.str + (item.hasEOL ? '\n' : ' ')
           if (text.length > DESIGN_PDF_LIMITS.characters) throw reject('PDF exceeds 16,000 extracted characters; nothing was truncated.')
         }
-        text += '\n'
+        segments.push({id:'page:'+number,text:text.slice(pageStart).trim()}); text += '\n'
         if (text.length > DESIGN_PDF_LIMITS.characters) throw reject('PDF exceeds 16,000 extracted characters; nothing was truncated.')
       } finally { page.cleanup() }
     }
@@ -63,7 +63,7 @@ export async function inspectDesignPdf(bytes, load = () => import('npm:unpdf@1.9
     text = text.trim()
     if (!text || /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(text)) throw reject('PDF has no supported readable text. Scans and OCR are not supported.')
     return { verifiedMime: 'application/pdf', extractionKind: 'pdf_text', extractedText: text,
-      extractionNotice: 'PDF text only; layout, pictures and handwriting are not read. No OCR. Original retained.', pages: doc.numPages }
+      extractionNotice: 'PDF text only; layout, pictures and handwriting are not read. No OCR. Original retained.', pages: doc.numPages, segments }
   } catch (error) {
     if (error?.code === 'DESIGN_PDF_REJECTED') throw error
     throw reject('PDF is malformed, encrypted or unsupported; no text was saved.')

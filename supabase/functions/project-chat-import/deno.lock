@@ -3,7 +3,8 @@
   "specifiers": {
     "npm:@supabase/supabase-js@2.112.4": "2.112.4",
     "npm:@xmldom/xmldom@0.9.12": "0.9.12",
-    "npm:fflate@0.8.3": "0.8.3"
+    "npm:fflate@0.8.3": "0.8.3",
+    "npm:unpdf@1.9.0": "1.9.0"
   },
   "npm": {
     "@supabase/auth-js@2.112.4": {
@@ -62,6 +63,9 @@
     },
     "tslib@2.8.1": {
       "integrity": "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=="
+    },
+    "unpdf@1.9.0": {
+      "integrity": "sha512-YIXl+jZUBneP22IkRUwFA1b71l+Ad2uX7o7dMfxLSLuCOtaKAQvak7Sz3MtdVsWTsocblznSIGidfXyhnBgBMA=="
     }
   },
   "workspace": {

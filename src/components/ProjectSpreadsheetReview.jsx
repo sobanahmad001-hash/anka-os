@@ -1,5 +1,5 @@
 const label = field => ({ original_date: 'Source date', historical_status: 'Source status', status_evidence: 'Status evidence', due_date: 'Reviewed deadline', start_date: 'Reviewed start', calendar_key: 'Import key', planned_path: 'Page path', record_kind: 'Work record' }[field] || field.replaceAll('_', ' '))
-const text = value => value === null || value === undefined || value === '' ? 'Not provided' : ({engagement_work_item:'Marketing engagement work item',project_task:'Project task',not_started:'Not started'}[value]||String(value))
+const text = value => value === null || value === undefined || value === '' ? 'Not provided' : (Object.hasOwn({engagement_work_item:1,project_task:1,not_started:1},value)?{engagement_work_item:'Marketing engagement work item',project_task:'Project task',not_started:'Not started'}[value]:String(value))
 const actionLabel = action => ({ create: 'Add', update: 'Update', skip: 'Keep unchanged', error: 'Resolve before import' }[action] || 'Review')
 export function SpreadsheetRowReview({ preview, local=false }) {
  const rows=preview?.rows||[],commands=preview?.canonical_payload?.rows||[]
@@ -10,7 +10,8 @@ export function SpreadsheetRowReview({ preview, local=false }) {
    const command=commands.find(x=>x.row_id===row.rowId),action=command?.action||row.action
    return <article className="project-import-row" key={row.rowId||i}>
     <h4>{row.values?.title||row.values?.term||`Source row ${row.source?.row||i+2}`}</h4>
-    <p><strong>{actionLabel(action)}</strong> · {row.source?.sheet||'Selected sheet'}, row {row.source?.row||i+2}</p>
+    <p><strong>{actionLabel(action)}</strong> · {row.source?.sheet?.startsWith('Document proposal ')?`${row.source.fileName||'Document'} · proposal ${(row.source.row||i+2)-1}`:`${row.source?.sheet||'Selected sheet'}, row ${row.source?.row||i+2}`}</p>
+    {row.source?.document?.citations?.length>0&&<details><summary>Source evidence</summary>{row.source.document.citations.map((c,j)=><p key={j}>{c.segment.replaceAll(':',' ')}: “{c.quote}”</p>)}</details>}
     <dl>{Object.entries(row.values||{}).filter(([field])=>field!=='record_id').map(([field,value])=><div key={field}><dt>{label(field)}</dt><dd>{row.before&&Object.hasOwn(row.before,field)&&row.before[field]!==value?<><span>{text(row.before[field])}</span> → <strong>{text(value)}</strong></>:text(value)}</dd></div>)}</dl>
     {(row.errors||[]).map((error,j)=><p key={'e'+j} className="project-import-warning">{error}</p>)}
     {(row.warnings||[]).map((warning,j)=><p key={'w'+j}>{warning}</p>)}
