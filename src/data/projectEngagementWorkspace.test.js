@@ -145,3 +145,12 @@ test('WKS2 route and UI preserve distinct Project Task and Engagement Work Item 
 })
 
 test('conditional pipeline metadata retains only exact Project/engagement/org identities and supported explicit kinds',()=>{const base={organization_id:'org-a',project_id:'project-a',engagement_id:'engagement-a',kind:'website',name:'Existing Website'};const result=buildProjectEngagementWorkspace(fixture({pipelineGroups:[{...base,id:'group-a'},{...base,id:'foreign',organization_id:'org-b'},{...base,id:'wrong-project',project_id:'project-b'},{...base,id:'wrong-engagement',engagement_id:'engagement-b'},{...base,id:'guessed',kind:'content'}],pipelineGroupsState:'available'}));assert.deepEqual(result.pipelineGroups.map(row=>row.id),['group-a']);for(const state of ['limited','unavailable'])assert.equal(buildProjectEngagementWorkspace(fixture({pipelineGroups:[{...base,id:'group-a'}],pipelineGroupsState:state})).pipelineGroups.length,0)})
+
+
+test('unavailable source-kind dependencies retain only safe per-record gap counts',()=>{
+ const data=fixture();data.taskDependencies=[{organization_id:'org-a',project_id:'project-a',task_id:'task-a',depends_on_task_id:'unavailable-private-task'},{organization_id:'org-b',project_id:'project-a',task_id:'task-a',depends_on_task_id:'foreign'}]
+ const w=buildProjectEngagementWorkspace(data)
+ assert.equal(w.dependencyGaps.project_task['task-a'],1)
+ assert.equal(w.taskDependencies.length,0)
+ assert.doesNotMatch(JSON.stringify(w.dependencyGaps),/unavailable-private-task|foreign/)
+})
