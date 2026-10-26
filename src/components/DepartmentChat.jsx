@@ -1,3 +1,4 @@
+import DesignReferenceOriginal from './DesignReferenceOriginal.jsx'
 import DesignVideoReferencePanel from './DesignVideoReferencePanel.jsx'
 import { createPortal } from 'react-dom'
 import { WorkshopChatHistoryContext } from '../context/WorkshopChatHistoryContext.jsx'
@@ -1140,7 +1141,8 @@ export function ScopedDepartmentChat({
   </>
   const ConversationControls = compactWorkbench ? 'details' : 'div'
   const AttachmentPanel = designWorkspace ? 'section' : SourcePanel
-  const attachmentPanel = <AttachmentPanel className="rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-4">
+  const attachmentPanel = <AttachmentPanel className="design-composer-source-files rounded-xl border border-[var(--anka-line)] bg-[var(--anka-canvas)] p-4">
+          <div hidden={Boolean(designWorkspace&&!designWorkspace.attachmentsOpen)}>
           {!designWorkspace && presentation === 'workbench' ? <summary>Source files · {selectedAttachmentIds.length} selected</summary> : <p>Source files · {selectedAttachmentIds.length} selected</p>}
           {!designWorkspace && isAnswerMode && <p className="text-xs text-[var(--anka-muted)]">Ordinary engagement answers send your prompt, existing conversation history (including participant messages), selected approved artifact versions, and validated text from explicitly selected TXT/MD/DOCX files.</p>}
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]">{designWorkspace ? 'Choose chat files' : 'Explicit source files'}</p>
@@ -1175,15 +1177,16 @@ export function ScopedDepartmentChat({
             <label className="flex items-start gap-2 text-xs text-[var(--anka-warning)]"><input type="checkbox" checked={attachmentAiUse} disabled={attachmentClassification === 'restricted'} onChange={event => setAttachmentAiUse(event.target.checked)} />I approve sending validated text from text-bearing files to the configured AI. Images remain reference-only.</label>
             <button type="button" disabled={attachmentBusy || draftSaving} onClick={uploadPendingAttachments} className="rounded-lg border border-[var(--anka-info)] px-3 py-2 text-xs font-semibold text-[var(--anka-info)] disabled:opacity-50">{attachmentBusy ? 'Validating privately…' : 'Upload and validate'}</button>
           </div>}
+          </div>
           {attachments.length > 0 && <div className="mt-4 space-y-2">
             {attachments.map(item => {
               const ready = ['extracted', 'reference_only'].includes(item.status) && item.data_classification !== 'restricted'
                 && (!conversationHasRecipients || item.share_with_recipients)
               const selected = selectedAttachmentIds.includes(item.id)
-              return <label key={item.id} className={`flex items-start gap-3 rounded-lg border p-3 text-xs ${ready ? 'border-[var(--anka-line)] text-[var(--anka-ink)]' : 'border-[var(--anka-surface-raised)] text-[var(--anka-muted)]'}`}>
+              return <div key={item.id} className={designWorkspace?"design-composer-file-card":undefined}><label className={`flex items-start gap-3 rounded-lg border p-3 text-xs ${ready ? 'border-[var(--anka-line)] text-[var(--anka-ink)]' : 'border-[var(--anka-surface-raised)] text-[var(--anka-muted)]'}`}>
                 <input type="checkbox" disabled={!ready || busy || attachmentBusy} checked={selected} onChange={() => setSelectedAttachmentIds(current => selected ? current.filter(id => id !== item.id) : current.length < 3 ? [...current, item.id] : current)} />
                 <span className="min-w-0"><span className="block truncate font-medium">{item.original_name}</span><span className="mt-1 block text-[var(--anka-muted)]">{item.verified_mime || item.claimed_mime} · {Number.isFinite(item.byte_size) ? `${item.byte_size.toLocaleString()} bytes` : 'Size pending validation'}</span><span className="mt-1 block capitalize text-[var(--anka-muted)]">{item.status.replaceAll('_', ' ')} · {item.data_classification} · {item.share_with_recipients ? 'source shared' : 'uploader only'} · {item.extraction_notice}</span></span>
-              </label>
+              </label>{designWorkspace&&['extracted','reference_only'].includes(item.status)&&<><DesignReferenceOriginal key={`${conversationId}:${item.id}`} row={item} busy={busy||historyBusy||attachmentBusy||draftSaving} signal={requestSignal} run={async action=>{if(attachmentBusy||busy||historyBusy||draftSaving)return;setAttachmentBusy(true);try{await action()}finally{if(!requestSignal?.aborted)setAttachmentBusy(false)}}} read={()=>departmentChat.downloadAttachment(departmentId,{conversation_id:conversationId,project_id:projectId,engagement_id:engagement.id,attachment_id:item.id},requestScope)}/>{selected&&<button type="button" disabled={busy||attachmentBusy} onClick={()=>setSelectedAttachmentIds(ids=>ids.filter(id=>id!==item.id))}>Remove from message</button>}<p>Brief/chat reference only. Use a project PNG version for generation input.</p></>}</div>
             })}
           </div>}
           <p className="mt-3 text-xs text-[var(--anka-muted)]">Choose up to three files for this turn. Only checked files are linked to the request; rejected limits never truncate content. Revocation blocks later server reads and replies, but cannot recall copies someone already saved.</p>
@@ -1262,6 +1265,7 @@ export function ScopedDepartmentChat({
       </ConversationControls>}
       <div ref={messageViewport} className={compactWorkbench ? 'department-chat-messages' : undefined} aria-label="Engagement chat messages">{supportsSavedConversations && <ConversationHistory emptyState={designWorkspace?.starters} draftConversation={draftConversation} messages={messages} userId={userId} busy={busy} onConfirm={proposal => decide('confirm', proposal)} onReject={proposal => decide('reject', proposal)} />}</div>
       {designWorkspace?.media}
+      {designWorkspace?.composerAttachments}
       <ChatComposer onSubmit={compactConversation?submit:undefined} hidden={Boolean(designWorkspace&&designWorkspace.mode!=='chat')} className={compactWorkbench ? 'department-chat-footer' : 'mt-6 space-y-5'}>
         <div className={compactWorkbench ? 'department-chat-footer-body' : 'space-y-5'}>
         {!compactConversation && modelControl}
@@ -1339,9 +1343,10 @@ export function ScopedDepartmentChat({
           <p className="mt-2 text-xs text-[var(--anka-muted)]">{selectedSourceVersionIds.length} of 5 exact versions selected. Permission and approval are rechecked at send.</p>
         </SourcePanel>}
 
-        {designWorkspace?.attachmentTarget && isConversationOwner && createPortal(<DesignVideoReferencePanel conversationKey={conversationId} conversationId={!draftConversation?conversationId:null} requestScope={requestScope} busy={busy || historyBusy || attachmentBusy || draftSaving} ensureConversation={async()=>{if(draftConversation||!currentConversation||currentConversation.state!=='active')throw Error('Choose a saved active Design chat');return currentConversation}} run={async action=>{if(attachmentBusy||busy||historyBusy)return;setAttachmentBusy(true);try{await action()}finally{if(!requestSignal?.aborted)setAttachmentBusy(false)}}}/>,designWorkspace.attachmentTarget)}
+        {designWorkspace?.attachmentTarget && isConversationOwner && createPortal(<DesignVideoReferencePanel uploadOpen={designWorkspace.attachmentsOpen} conversationKey={conversationId} conversationId={!draftConversation?conversationId:null} requestScope={requestScope} busy={busy || historyBusy || attachmentBusy || draftSaving} ensureConversation={async()=>{if(draftConversation||!currentConversation||currentConversation.state!=='active')throw Error('Choose a saved active Design chat');return currentConversation}} run={async action=>{if(attachmentBusy||busy||historyBusy)return;setAttachmentBusy(true);try{await action()}finally{if(!requestSignal?.aborted)setAttachmentBusy(false)}}}/>,designWorkspace.attachmentTarget)}
         {supportsSavedConversations && capabilities?.attachments?.supported && (designWorkspace ? (designWorkspace.attachmentTarget ? createPortal(attachmentPanel, designWorkspace.attachmentTarget) : null) : attachmentPanel)}
 
+        {designWorkspace&&<div className="design-composer-attach">{designWorkspace.attachControl}</div>}
         <label className="department-chat-prompt block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]"><span className={compactWorkbench ? 'sr-only' : undefined}>{isAnswerMode ? 'Message' : 'Draft request'}</span>
           <textarea ref={composerRef} required maxLength={8000} rows={compactWorkbench ? 2 : 10} className={`${INPUT} mt-2 normal-case tracking-normal`} value={prompt} onInput={event => setPrompt(event.currentTarget.value)} placeholder={isAnswerMode ? 'Ask a question or explore the work context. This will not create an official output.' : 'Describe the draft you need, the evidence to prioritize, known constraints, tone, and gaps the team should keep visible.'} />
         </label>

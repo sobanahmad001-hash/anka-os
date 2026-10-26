@@ -2,7 +2,7 @@ import {useEffect,useRef,useState} from 'react'
 import {departmentChat} from '../data/departmentChatRepository.js'
 const types={mp4:'video/mp4',mov:'video/quicktime'},maxBytes=20*1024*1024
 const sha=async blob=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer())),n=>n.toString(16).padStart(2,'0')).join('')
-export default function DesignVideoReferencePanel({conversationKey,conversationId,requestScope,busy,ensureConversation,run}){
+export default function DesignVideoReferencePanel({uploadOpen=true,conversationKey,conversationId,requestScope,busy,ensureConversation,run}){
  const [rows,setRows]=useState([]),[file,setFile]=useState(null),[classification,setClassification]=useState('internal'),[notice,setNotice]=useState(''),[error,setError]=useState(''),[working,setWorking]=useState(false),[preview,setPreview]=useState(null)
  const attempt=useRef(null),revision=useRef(0),flight=useRef(false),fileInput=useRef(null),previewUrl=useRef(null)
  const locked=busy||working,mime=file?types[file.name.split('.').pop().toLowerCase()]:''
@@ -57,11 +57,12 @@ export default function DesignVideoReferencePanel({conversationKey,conversationI
   else{if(previewUrl.current)URL.revokeObjectURL(previewUrl.current);previewUrl.current=url;setPreview({id:row.id,name:row.original_name,url})}
  })}
  return <section className="design-private-attachments" aria-label="Private video references">
-  <h4>Video references</h4><p>MP4 or MOV, up to 20 MiB. Originals stay private to you, including in project chats. No AI transfer, transcription, frame extraction, animation or video editing. Preview playback depends on your browser’s codecs; the original is always retained.</p>
+  <div hidden={!uploadOpen}><h4>Video references</h4><p>MP4 or MOV, up to 20 MiB. Originals stay private to you, including in project chats. No AI transfer, transcription, frame extraction, animation or video editing. Preview playback depends on your browser’s codecs; the original is always retained.</p>
   {!conversationId&&<p>Choose an existing saved Design conversation before uploading a video.</p>}
   <label>Video reference<input ref={fileInput} type="file" accept=".mp4,.mov" disabled={locked||!conversationId} onChange={e=>{setFile(e.target.files?.[0]||null);attempt.current=null;setError('')}}/></label>
   <label>Video classification<select value={classification} disabled={locked||Boolean(attempt.current)} onChange={e=>setClassification(e.target.value)}><option value="public">Public</option><option value="internal">Internal</option><option value="confidential">Confidential</option></select></label><p>Classification does not share the original with teammates.</p>
   <button type="button" disabled={locked||!conversationId||!file||!mime} onClick={upload}>{attempt.current?'Retry same video upload':'Upload private video reference'}</button>
+  </div>
   {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}{working&&<p role="status">Working with your video reference…</p>}
   <ul>{rows.filter(row=>row.status!=='revoked').map(row=><li key={row.id}><strong>{row.original_name}</strong><span>{row.status==='ready'?'Private reference only; never sent to AI.':'Upload unfinished: choose the same file to recover.'}</span>{row.status==='ready'&&<><button type="button" disabled={locked} onClick={()=>openOriginal(row,false)}>Preview video</button><button type="button" disabled={locked} onClick={()=>openOriginal(row,true)}>Download original video</button></>}<button type="button" disabled={locked} onClick={()=>remove(row)}>Remove video reference</button></li>)}</ul>
   {preview&&<figure><video aria-label="Private video reference preview" controls preload="metadata" style={{maxWidth:'100%'}} src={preview.url} onError={()=>setNotice('This browser cannot play this original. Use Download original video; no conversion was performed.')}/><figcaption>{preview.name} — owner-private original; reference only</figcaption></figure>}
