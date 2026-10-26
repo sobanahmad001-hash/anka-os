@@ -1,4 +1,4 @@
-import { mappingPrompt } from './projectSpreadsheetMappingAssist.js'
+import { mappingPrompt, mappingPromptMatches } from './projectSpreadsheetMappingAssist.js'
 // Reuse approved Project Chat execution; never select/configure a model here.
 // Only original IDs enter recovery persistence; no headers/samples/prompt bodies.
 export function createSpreadsheetMappingTransport({chat,runner,scope,storage,checkCurrent,consent}) {
@@ -30,7 +30,7 @@ export function createSpreadsheetMappingTransport({chat,runner,scope,storage,che
   recover(disclosure){return single(async()=>{await checkCurrent();const record=read();if(!record)return null
    if(!record.message_id){const latest=await chat.getContextConversation({conversation_id:scope.conversationId},{organizationId:scope.organizationId});const human=latest.messages?.find(m=>m.client_request_id===record.client_request_id);if(!human)throw Error('Original save outcome unknown; no request repeated');record.message_id=human.id;storage.setItem(key,JSON.stringify(record))}
    const original=await chat.getContextConversation({conversation_id:scope.conversationId},{organizationId:scope.organizationId})
-   if(!disclosure||original.messages?.find(m=>m.id===record.message_id)?.body!==mappingPrompt(disclosure))throw Error('Recreate and review the exact original mapping scope before applying its response')
+   if(!disclosure||!mappingPromptMatches(original.messages?.find(m=>m.id===record.message_id)?.body,disclosure))throw Error('Recreate and review the exact original mapping scope before applying its response')
    await runner.recover(record.message_id,{organizationId:scope.organizationId});await checkCurrent();return result(record)
   })},
  })
