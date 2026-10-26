@@ -1,9 +1,8 @@
 import {inspectDesignPdf} from './designPdfInspection.mjs'
-import {inspectDepartmentChatAttachment} from './departmentChatAttachments.ts'
 import {DOCUMENT_MIMES,parseDocumentRequest,validateDocumentProposal,documentProposalSheet} from './projectDocumentProposal.js'
 export async function inspectProjectDocument(bytes:Uint8Array,mime:string){
  if(!DOCUMENT_MIMES.includes(mime)||bytes.length>2097152)throw Error('Document proposal originals are limited to 2 MiB; PDF/DOCX only')
- const result=mime==='application/pdf'?await inspectDesignPdf(bytes):inspectDepartmentChatAttachment(bytes,mime)
+ const result=mime==='application/pdf'?await inspectDesignPdf(bytes):(await import('./departmentChatAttachments.ts')).inspectDepartmentChatAttachment(bytes,mime)
  if(!result.extractedText)throw Error('Readable complete document extraction required')
  const rawSegments='segments' in result?result.segments:result.extractedText.split(/\n+/).filter(Boolean).map((text:string,i:number)=>({id:'extracted-paragraph:'+(i+1),text}))
  const segments=rawSegments.flatMap((segment:any)=>{if(segment.text.length<=2000)return [segment];const parts=[];for(let start=0;start<segment.text.length;){let end=Math.min(start+1800,segment.text.length);if(/[\uD800-\uDBFF]/.test(segment.text[end-1]))end--;parts.push({id:segment.id+':chars:'+start+'-'+end,text:segment.text.slice(start,end)});start=end}return parts})
