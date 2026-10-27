@@ -48,4 +48,6 @@ jobs:
         run: deno test --frozen --node-modules-dir=none supabase/functions/department-chat/projectDocumentAttachments.test.ts supabase/functions/department-chat/contextChatActions.test.ts
       - run: deno test --frozen supabase/functions/website-native-design/index.test.ts
       - run: deno check --frozen supabase/functions/website-native-design/index.ts
+      - run: deno test --frozen supabase/functions/website-native-build/index.test.ts
+      - run: deno check --frozen supabase/functions/website-native-build/index.ts supabase/functions/website-native-build/index.test.ts
       - run: npm run build

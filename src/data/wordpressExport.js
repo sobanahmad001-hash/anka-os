@@ -7,7 +7,7 @@ export const WORDPRESS_SEO_CHECKS = Object.freeze([
 
 export function latestWordPressExportJob(jobs, websitePageDesignId) {
   return [...(jobs || [])]
-    .filter(job => job.website_page_design_id === websitePageDesignId)
+    .filter(job => job.website_page_design_id === websitePageDesignId && job.provider_job_id !== 'anka-native-block-v1')
     .sort((left, right) => new Date(right.requested_at) - new Date(left.requested_at))[0] || null
 }
 

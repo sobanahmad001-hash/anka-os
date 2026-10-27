@@ -305,7 +305,7 @@ export function createOperatingSpineRepository(client) {
         : []
       const designExportJobs = pageDesigns.length
         ? await dataOrThrow(client.from('wordpress_export_jobs')
-          .select('id, website_page_design_id, status, provider, requested_at, completed_at, failure_reason')
+          .select('id, website_page_design_id, status, provider, provider_job_id, requested_at, completed_at, failure_reason')
           .eq('organization_id', organizationId)
           .in('website_page_design_id', pageDesigns.map((item) => item.id))
           .order('requested_at', { ascending: false }), signal)
@@ -320,7 +320,7 @@ export function createOperatingSpineRepository(client) {
           workItems,
           design: {
             pageDesigns,
-            wordpressExportJobs: designExportJobs,
+            wordpressExportJobs: designExportJobs.filter(job=>job.provider_job_id!=='anka-native-block-v1'),
           },
         },
       }
