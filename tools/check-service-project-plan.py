@@ -1,5 +1,6 @@
 """Owned PG17 contract QA. Synthetic base records; exact installed authority helpers plus new migration."""
 import argparse,json,subprocess,socket,uuid,os,time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 p=argparse.ArgumentParser();p.add_argument('--repo',required=True);p.add_argument('--pgbin',required=True);p.add_argument('--qa',required=True);p.add_argument('--helpers',required=True);p.add_argument('--scope-helper',required=True);a=p.parse_args()
 repo=Path(a.repo);qa=Path(a.qa).resolve();qa.mkdir(parents=True,exist_ok=True);data=qa/'data';port=29926;flags=getattr(subprocess,'CREATE_NO_WINDOW',0)
@@ -97,12 +98,14 @@ run(f"update public.projects set archived_at=now() where id={q(project)}");denie
 def concurrent(sql):return subprocess.Popen(base+['-d',database],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',creationflags=flags)
 def start(sql):
  process=concurrent(sql);process.stdin.write('begin;set local role authenticated;'+claim()+sql+';commit;');process.stdin.close();process.stdin=None;return process
+def collect(writers):
+ with ThreadPoolExecutor(max_workers=len(writers)) as pool:return list(pool.map(lambda process:(*process.communicate(timeout=20),process.returncode),writers))
 same=value(get());same_op=uid(90);writers=[start(apply(same,same_op)) for _ in range(2)];answers=[]
-for process in writers:
- out,err=process.communicate(timeout=20);assert process.returncode==0,err;answers.append(json.loads(out.splitlines()[-1]))
+for out,err,status in collect(writers):
+ assert status==0,err;answers.append(json.loads(out.splitlines()[-1]))
 assert answers[0]['id']==answers[1]['id'];passed('concurrent identical requests settle one immutable plan version')
 run(f"update public.project_service_scopes set quantity=101,revision=3 where id={q(scope1)}")
-review=value(get());writers=[start(apply(review,uid(n))) for n in [91,92]];results=[(*p.communicate(timeout=20),p.returncode) for p in writers]
+review=value(get());writers=[start(apply(review,uid(n))) for n in [91,92]];results=collect(writers)
 assert sorted(r[2] for r in results)==[0,3] and any('40001' in r[1] for r in results);passed('concurrent different deltas reject the stale reviewed parent')
 e2=uid(93);run(f"insert into public.engagements values({q(e2)},{q(org)},{q(project)},'Separate exact context','active')")
 fresh=value(get(eng=e2));run("create function private.fail_plan_qa() returns trigger language plpgsql as $$begin raise exception 'Owned QA rollback';end$$;create trigger plan_qa_failure before insert on private.project_delivery_plan_versions for each row execute function private.fail_plan_qa()")
