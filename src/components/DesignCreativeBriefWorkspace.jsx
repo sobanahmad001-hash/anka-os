@@ -19,7 +19,7 @@ function hasEdits(draft) {
 }
 
 const DesignCreativeBriefWorkspace = forwardRef(function DesignCreativeBriefWorkspace({
-  workspace, activeServiceId, workRecord, busy, canSave, onSave, onFreeze, onDirtyChange,
+  workspace, activeServiceId, workRecord, busy, canSave, onSave, onFreeze, onDirtyChange, onSummaryChange,
   outputTypeLabel = 'Output type', visibility = 'official', selectedPrivateBriefId = '', useBriefLabel = 'Use exact saved version for generation later',
 }, ref) {
   const brief = visibility === 'private'
@@ -64,6 +64,7 @@ const DesignCreativeBriefWorkspace = forwardRef(function DesignCreativeBriefWork
   }, [scopeKey, latest?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { preserveChatConflict.current = false; adoptedVersion.current = null; appliedReceipts.current.clear(); setChatConflict('') }, [scopeKey])
   useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
+  useEffect(() => { onSummaryChange?.({briefId:brief?.id||'',serviceId:activeServiceId||'',title:content.title,missing:validation.missing.length,conflict:conflict||Boolean(chatConflict),error:saveError||chatConflict}) }, [onSummaryChange,brief?.id,activeServiceId,content.title,validation.missing.length,conflict,chatConflict,saveError])
   function set(field, value) {
     localRevision.current += 1; operation.current = null; setSaveError('')
     setDraft(current => ({ ...current, content: { ...current.content, [field]: value } }))
