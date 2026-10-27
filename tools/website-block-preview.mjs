@@ -5,6 +5,7 @@ export async function startBlockPreview(){
  '/src/context/AuthContext.jsx':"import {actor} from '/tools/website-block-fixture.js';export const useAuth=()=>({user:{id:actor},profile:{full_name:'Preview member',role:'admin'},signOut:()=>{}})",
  '/src/context/OrganizationContext.jsx':'export const useOrganization=()=>globalThis.__blockPreview.organization',
  '/src/data/websiteBlocks.js':'export const websiteBlocks=new Proxy({},{get:(_,key)=>(...args)=>globalThis.__blockPreview.fixture.repository[key](...args)})',
+ '/src/data/websiteStagingClient.js':'export const websiteStaging={workspace:async(s)=>({organization_id:s.organizationId,project_id:s.projectId,engagement_id:s.engagementId,targets:[],jobs:[],runs:[],issues:[],connections:[],has_more:false})}',
  '/src/components/DepartmentChat.jsx':'export default function ChatFixture(){return null}',
  '/src/data/developmentStudioRepository.js':'export const developmentStudio=new Proxy({},{get:()=>()=>{throw Error("No synthetic Development tracking writes")}})',
  '/src/hooks/useNotifications.js':'export const useNotifications=()=>({notifications:[],unread:0,markRead:()=>{},markAllRead:()=>{}})',
