@@ -1,4 +1,4 @@
-const ProjectSetupPanel = lazy(() => import('./ProjectSetupPanel.jsx'))
+import {appendWebsiteLayoutRequest} from '../data/websiteChatLayoutContext.js'
 import {attachmentChatTitle,attachmentConversationHint,rememberAttachmentConversation,clearAttachmentConversation} from '../data/projectAttachmentReading.js'
 import ProjectAttachmentMessage from './ProjectAttachmentMessage.jsx'
 import DesignVideoReferencePanel from './DesignVideoReferencePanel.jsx'
@@ -6,6 +6,7 @@ import DesignPrivateAttachmentPanel from './DesignPrivateAttachmentPanel.jsx'
 import { createPortal } from 'react-dom'
 import { preferredApprovedModel, openAiModelLabel } from '../data/openaiModelPolicy.js'
 import { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+const ProjectSetupPanel = lazy(() => import('./ProjectSetupPanel.jsx'))
 import TextAiConsent, { useTextAiConsent } from './TextAiConsent.jsx'
 import { textAiConsentKey } from '../data/textAiConsent.js'
 import { departmentChat } from '../data/departmentChatRepository.js'
@@ -89,6 +90,9 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   const revision = useRef(0)
   const briefSend = useRef(null)
   const pendingRef = useRef(initial.recovery)
+  const [websiteSendContext,setWebsiteSendContext]=useState(null)
+  useEffect(()=>{setWebsiteSendContext(null)},[recoveryKey,selected?.id,newId])
+  const websitePromptSeen=useRef('')
   const attempt = useRef(restoredDraft?.attempt && restoredDraft.attempt.client_request_id === initial.recovery?.client_request_id && restoredDraft.attempt.conversation_id === initial.recovery?.conversation_id ? restoredDraft.attempt : null)
   const drafts = useRef(new Map())
   const historyClose = useRef(null)
@@ -112,6 +116,14 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   const ready = readiness?.model_configuration_id === modelId && readiness?.paid_execution_enabled === true
     && readiness?.spend_tracking_configured === true && readiness?.model_status === 'configured'
   const canCanonical = model?.provider === 'openai' && contextKind === 'project_team'
+  useEffect(()=>{
+    const suggestion=designWorkspace?.draftSuggestion
+    if(!suggestion?.id){setWebsiteSendContext(null);return}
+    if(websitePromptSeen.current===suggestion.id||busy||pending||signal?.aborted||(suggestion.conversationId||null)!==(selected?.id||null))return
+    websitePromptSeen.current=suggestion.id;setWebsiteSendContext(suggestion.layoutContext||null)
+    if(typeof suggestion.text!=='string'||suggestion.text.length>8000){setError('Website layout request is too long.');return}
+    setDraft(previous=>{const text=previous?previous+'\n\n'+suggestion.text:suggestion.text;if(text.length>8000){setError('Keep your existing message or shorten it before adding a Website request.');return previous}try{writeDirectChatDraft(recoveryKey,{new_conversation_id:newId,conversation_id:selected?.id||null,text,attempt:attempt.current})}catch{setError('Draft recovery is unavailable. Keep this page open.')}return text})
+  },[designWorkspace?.draftSuggestion,busy,pending,signal,recoveryKey,newId,selected?.id])
   const attachmentScopeKey=[actorId,organizationId,projectId,selected?.id||newId].join(':')
   useEffect(() => { setSetupOpen(false);setSetupRestored(null);setProjectDocumentIds([]); setImportOpen(false);setImportOpened(false);setAttachmentReading(null);setAttachmentAnswer('');setAttachmentRecoveryRequired(Boolean(globalThis.sessionStorage?.getItem(`anka:import-mapping:${organizationId}:${projectId}:${selected?.id||newId}:${actorId}`))) }, [attachmentScopeKey])
   const ensureProjectDocumentConversation = async () => {
@@ -341,7 +353,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
       const token = ++revision.current
       drafts.current.set(selected?.id || newId, draft)
       setVideoOpen(false); setVideoOpened(false)
-      setMessages([]); setSelected(null); setDraft(''); setNewId(crypto.randomUUID()); setOutputId(''); setSharing(null); setShareOpen(false); setCanonical(false)
+      setMessages([]); setSelected(null); setDraft('');setWebsiteSendContext(null); setNewId(crypto.randomUUID()); setOutputId(''); setSharing(null); setShareOpen(false); setCanonical(false)
       const result = await read(row.id)
       if (!current() || token !== revision.current) return
       apply(result); const text = drafts.current.get(row.id) || ''; setDraft(text); writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: row.id, text, attempt: null }); if (globalThis.matchMedia?.('(max-width: 900px)').matches) setHistoryOpen(false)
@@ -353,7 +365,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     clearDirectChatDraft(recoveryKey)
     drafts.current.set(selected?.id || newId, draft)
     setVideoOpen(false); setVideoOpened(false)
-    revision.current++; setNewId(crypto.randomUUID()); setSelected(null); setMessages([]); setDraft('')
+    revision.current++; setNewId(crypto.randomUUID()); setSelected(null); setMessages([]); setDraft('');setWebsiteSendContext(null)
     setOutputId(''); setCanonical(false); setSharing(null); setShareOpen(false); setHistoryOpen(false); setNotice(''); setError('')
   }
   async function ensurePrivateAttachmentConversation() {
@@ -375,7 +387,8 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     event.preventDefault()
     if (!draft.trim() || draft.trim().length > 8000 || attachmentRecoveryRequired || pendingRef.current || selected?.state && selected.state !== 'active') return
     await exclusive(async () => {
-      const text = draft.trim(), target = selected?.id || newId, token = revision.current
+      const text = websiteSendContext?appendWebsiteLayoutRequest(draft.trim(),websiteSendContext):draft.trim(), target = selected?.id || newId, token = revision.current
+      if(text.length>8000)throw Error('The message plus Website context exceeds the limit; shorten it without truncation.')
       const ai = owner && ready
       // Recheck current access and sharing before opening the unchanged disclosure.
       if (selected) {
@@ -420,7 +433,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
       }
       const latest = await read(target)
       if (!current() || token !== revision.current) return
-      apply(latest); clearPending(); setDraft(''); drafts.current.delete(target)
+      apply(latest); clearPending(); setDraft('');setWebsiteSendContext(null); drafts.current.delete(target)
       setNotice(ai ? 'Reply saved.' : 'Message saved. No AI request was sent.')
     })
   }
@@ -473,6 +486,8 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   const output = messages.find(row => row.id === outputId && row.role === 'assistant' && row.status === 'completed')
   const reportDesignConversation=designWorkspace?.onConversationChange
   useEffect(()=>{reportDesignConversation?.(selected,checkPrivateVideoContext)},[selected,checkPrivateVideoContext,reportDesignConversation])
+  const reportWebsiteMessages=designWorkspace?.onConversationMessages
+  useEffect(()=>{reportWebsiteMessages?.(selected,messages)},[selected,messages,reportWebsiteMessages])
   const newChatControl = <button type="button" className="workshop-new-chat" aria-label="New chat" disabled={busy || videoBusy || Boolean(pending)||attachmentRecoveryRequired} onClick={newChat}>+ New chat</button>
   const modelControl=owner && <label><span className={compactConversation ? 'sr-only' : undefined}>Model</span><select aria-label="Approved model" value={modelId} disabled={busy || videoBusy || !models.length} onChange={event => { setModelId(event.target.value); setCanonical(false) }}>{!modelId && <option value="">{models.length ? 'Choose a model' : 'Unavailable'}</option>}{models.map(row => <option key={row.id} value={row.id}>{row.label}</option>)}</select></label>
   return <>{privateDesign && designWorkspace?.attachmentTarget && createPortal(<DesignVideoReferencePanel conversationKey={selected?.id || newId} conversationId={selected?.id || null} requestScope={requestScope} uploadOpen={designWorkspace.attachmentsOpen} busy={busy || Boolean(pending)} ensureConversation={async()=>{if(!selected?.id)throw Error('Choose a saved Design chat');const latest=await read(selected.id);if(!current()||latest.conversation.owner_id!==actorId||latest.conversation.state!=='active')throw Error('Design chat access changed');return latest.conversation}} run={exclusive}/>,designWorkspace.attachmentTarget)}{privateDesign && designWorkspace?.attachmentTarget && createPortal(<DesignPrivateAttachmentPanel conversationKey={selected?.id || newId} conversationId={selected?.id || null} requestScope={requestScope} busy={busy || Boolean(pending)} uploadOpen={designWorkspace.attachmentsOpen} onUseImage={designWorkspace.onUseImage} ensureConversation={ensurePrivateAttachmentConversation} run={exclusive} selectedIds={designAttachmentIds} onSelection={setDesignAttachmentIds} />, designWorkspace.attachmentTarget)}{compactConversation && workshopHistory?.newChatTarget && createPortal(newChatControl,workshopHistory.newChatTarget)}<section ref={rootRef} inert={importOpen && contextKind === 'project_team' && projectId ? true : undefined} className={`direct-chat ${projectChat ? 'direct-project-chat' : ''} ${historyOpen ? 'history-open' : ''} ${output ? 'output-open' : ''}`} aria-label={label} onKeyDown={event => {
@@ -534,7 +549,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
           setMessages(previous => [...result.messages, ...previous]); setHasOlder(result.has_older)
         })}>Load older messages</button>}
         {messages.map(message => <article key={message.id} className={`direct-chat-message ${message.role}`}><strong>{message.role === 'assistant' ? 'Anka AI' : message.author_id === actorId ? 'You' : 'Teammate'}</strong><ProjectAttachmentMessage onSetupReview={value=>{setSetupRestored(value);setSetupOpen(true)}} message={message} messages={messages} canReview={disclosure=>attachmentReading?.sourceSha===disclosure.source.sha256} onReview={()=>{setImportOpened(true);setImportOpen(true)}}/>{message.role === 'assistant' && message.status === 'completed' && <button type="button" onClick={event => { replyButtonRef.current = event.currentTarget; if (mobileDrawer) setHistoryOpen(false); setOutputId(message.id) }}>Open reply</button>}</article>)}
-      {selected?.id===designWorkspace?.generatedConversationId&&selected?.owner_id===user?.id?designWorkspace?.generatedMedia:null}</div></div>{designWorkspace?.media}{designWorkspace?.composerAttachments}{projectChat&&attachmentReading?.questions?.length>0&&<form aria-label="Attachment clarification" className="direct-chat-attachment-clarification" onSubmit={async event=>{event.preventDefault();if(!attachmentAnswer.trim()||busy||pendingRef.current||!current())return;try{await attachmentReading.clarify(attachmentAnswer.trim());if(current())setAttachmentAnswer('')}catch(reason){if(current())setError(reason.message)}}}><p>Clarify {attachmentReading.sourceName}</p><label>Answer the attachment questions<textarea aria-label="Attachment clarification" maxLength={1200} value={attachmentAnswer} disabled={busy||Boolean(pending)} onChange={event=>setAttachmentAnswer(event.target.value)}/></label><button type="submit" disabled={busy||Boolean(pending)||!attachmentAnswer.trim()}>Send attachment clarification</button></form>}<form hidden={Boolean(designWorkspace && designWorkspace.mode!=='chat')} className="direct-chat-composer" onSubmit={send} aria-label="Chat composer"><label className="direct-chat-draft-label"><span className="sr-only">Message</span><textarea aria-label="Message" placeholder="Ask or explore an idea…" value={draft} maxLength={8000} disabled={busy || videoBusy || Boolean(pending)} onChange={event => { if (pendingRef.current) return; const text = event.target.value; setDraft(text); try { writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: selected?.id || null, text, attempt: attempt.current }) } catch { setError('Draft recovery is unavailable in this tab. Keep this page open until your message is saved.') } }} /></label>
+      {selected?.id===designWorkspace?.generatedConversationId&&selected?.owner_id===user?.id?designWorkspace?.generatedMedia:null}</div></div>{designWorkspace?.media}{designWorkspace?.composerAttachments}{projectChat&&attachmentReading?.questions?.length>0&&<form aria-label="Attachment clarification" className="direct-chat-attachment-clarification" onSubmit={async event=>{event.preventDefault();if(!attachmentAnswer.trim()||busy||pendingRef.current||!current())return;try{await attachmentReading.clarify(attachmentAnswer.trim());if(current())setAttachmentAnswer('')}catch(reason){if(current())setError(reason.message)}}}><p>Clarify {attachmentReading.sourceName}</p><label>Answer the attachment questions<textarea aria-label="Attachment clarification" maxLength={1200} value={attachmentAnswer} disabled={busy||Boolean(pending)} onChange={event=>setAttachmentAnswer(event.target.value)}/></label><button type="submit" disabled={busy||Boolean(pending)||!attachmentAnswer.trim()}>Send attachment clarification</button></form>}<form hidden={Boolean(designWorkspace && designWorkspace.mode!=='chat')} className="direct-chat-composer" onSubmit={send} aria-label="Chat composer">{websiteSendContext&&<details className="website-layout-chat-context"><summary>Selected Website layout context will be included</summary><p>Your normal Send and AI consent checks still apply. This proposes a layout; it does not save or publish a Website.</p><pre>{websiteSendContext.instructions}</pre><button type="button" onClick={()=>setWebsiteSendContext(null)}>Remove Website layout context</button></details>}<label className="direct-chat-draft-label"><span className="sr-only">Message</span><textarea aria-label="Message" placeholder="Ask or explore an idea…" value={draft} maxLength={8000} disabled={busy || videoBusy || Boolean(pending)} onChange={event => { if (pendingRef.current) return; const text = event.target.value; setDraft(text); try { writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: selected?.id || null, text, attempt: attempt.current }) } catch { setError('Draft recovery is unavailable in this tab. Keep this page open until your message is saved.') } }} /></label>
         <div className="direct-chat-toolbar">{designWorkspace?.attachControl}{projectChat&&<button type="button" disabled={busy||videoBusy||Boolean(pending)||!owner} aria-expanded={setupOpen} onClick={()=>setSetupOpen(x=>!x)}>Set up project</button>}{projectChat && <button type="button" disabled={busy || videoBusy || Boolean(pending) || !owner || Boolean(selected && selected.state !== 'active')} onClick={() => { closeProjectTools(); setImportOpened(true);setImportOpen(true) }}>Attach files</button>}{!compactConversation && <label>Work type<select aria-label="Work type" value="text" disabled><option value="text">Text</option></select></label>}
           {!compactConversation && modelControl}
           <button type="submit" className="direct-chat-send" disabled={busy || videoBusy || Boolean(pending) || attachmentRecoveryRequired || !draft.trim() || Boolean(selected && selected.state !== 'active')}>{busy ? 'Working…' : owner && ready ? 'Send' : 'Save message'}</button></div>

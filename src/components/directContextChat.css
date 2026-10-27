@@ -103,3 +103,5 @@
 .direct-chat-attachment-clarification textarea { display: block; width: 100%; min-height: 54px; max-height: 120px; resize: vertical; margin: 6px 0; padding: 8px; border: 1px solid var(--anka-line); border-radius: 8px; background: var(--anka-surface); color: var(--anka-ink); }
 .direct-chat-attachment-clarification button { min-height: 40px; border: 1px solid var(--anka-line); border-radius: 8px; padding: 6px 12px; }
 .direct-chat-attachment-clarification :is(textarea,button):focus-visible { outline: 2px solid var(--anka-focus); outline-offset: 2px; }
+
+.website-layout-chat-context{grid-column:1/-1;flex-basis:100%;font-size:12px;color:var(--anka-muted)}.website-layout-chat-context summary{cursor:pointer}.website-layout-chat-context pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:160px;overflow:auto}

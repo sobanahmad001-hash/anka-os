@@ -381,3 +381,5 @@ Deno.test('all caller denials occur before resolver, admin, storage, or provider
   }
   assert.equal(callerCalls, 0)
 })
+
+Deno.test('native drafts cannot enter legacy review before the native build gate', async()=>{const rows=fixtures();Object.assign(rows.website_page_designs[0],{native_input_checksum:'a'.repeat(64)});await assertRejects(()=>preflightWebsitePageDesignRequest(new FixtureClient(rows) as never,'user-1',{action:'submit_review',website_page_design_id:rows.website_page_designs[0].id}),'Native Website drafts')})

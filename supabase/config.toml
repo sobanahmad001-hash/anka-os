@@ -149,3 +149,8 @@ entrypoint = "./functions/context-chat-runner/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/reporting-worker/index.ts"
+
+[functions.website-native-design]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/website-native-design/index.ts"

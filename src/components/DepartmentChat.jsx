@@ -1,3 +1,4 @@
+import {appendWebsiteLayoutRequest} from '../data/websiteChatLayoutContext.js'
 import DesignReferenceOriginal from './DesignReferenceOriginal.jsx'
 import DesignVideoReferencePanel from './DesignVideoReferencePanel.jsx'
 import { createPortal } from 'react-dom'
@@ -111,6 +112,10 @@ export function ScopedDepartmentChat({
   const [artifactType, setArtifactType] = useState(artifactTypes[0] || '')
   const [proposalMode, setProposalMode] = useState(['content', 'design', 'marketing'].includes(departmentId) ? 'answer' : 'artifact')
   const [prompt, setPrompt] = useState('')
+  const [websiteSendContext,setWebsiteSendContext]=useState(null)
+  const websiteSuggestion=designWorkspace?.draftSuggestion
+  const consumedWebsiteSuggestion=useRef(null)
+
   const [safe, setSafe] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -230,7 +235,7 @@ export function ScopedDepartmentChat({
   }
 
   function clearComposer() {
-    setPrompt('')
+    setPrompt('');setWebsiteSendContext(null)
     setSafe(false)
     setProposalMode(supportsSavedConversations ? 'answer' : 'artifact')
     setArtifactType(artifactTypes[0] || '')
@@ -519,7 +524,7 @@ export function ScopedDepartmentChat({
       firstSendAttempt.current = null
       setPendingFirstSend(null)
       setDraftConversation(false)
-      setPrompt('')
+      setPrompt('');setWebsiteSendContext(null)
       const settledBrief = (data.design_brief || []).find(receipt => receipt.client_request_id === savedAttempt.requestId && ['saved','question_only','conflict','invalid'].includes(receipt.status))
       setObservationNotice(settledBrief ? 'Saved reply and brief status loaded.' : 'The first Send is saved. Reload its durable status before repeating that request.')
       onConversationListChange?.()
@@ -933,6 +938,8 @@ export function ScopedDepartmentChat({
       setError('Artifact and work-item previews currently require an approved OpenAI model. Choose one or switch to a conversational answer.')
       return
     }
+    let websitePrompt=prompt
+    try{if(websiteSendContext)websitePrompt=appendWebsiteLayoutRequest(prompt,websiteSendContext)}catch(reason){setError(reason.message);return}
     let briefSnapshot = null
     try { briefSnapshot = isAnswerMode && designWorkspace?.captureBriefForSend ? designWorkspace.captureBriefForSend() : null }
     catch (reason) { setError(reason.message || 'Brief context is unavailable.'); return }
@@ -959,7 +966,7 @@ export function ScopedDepartmentChat({
       project_id: supportsSavedConversations ? projectId : undefined,
       engagement_id: engagement.id,
       model_configuration_id: modelConfigurationId,
-      prompt,
+      prompt:websitePrompt,
       prompt_safe_for_ai: isAnswerMode || safe,
     }
     setBusy(true)
@@ -1005,7 +1012,7 @@ export function ScopedDepartmentChat({
         })
       }
       if (!isCurrent()) return
-      setPrompt('')
+      setPrompt('');setWebsiteSendContext(null)
       setTitle('')
       setLanguage('')
       setSafe(false)
@@ -1086,8 +1093,16 @@ export function ScopedDepartmentChat({
   const requiresContentLanguage = departmentId === 'content' && ['discovery', 'vision', 'audience'].includes(artifactType)
   const currentConversation = conversations.find(item => item.id === conversationId) || null
   const isConversationOwner = currentConversation?.owner_id === userId
+
+
+
+
+  useEffect(()=>{if(!websiteSuggestion||websiteSuggestion.id===consumedWebsiteSuggestion.current||websiteSuggestion.conversationId!==(conversationId||null))return;consumedWebsiteSuggestion.current=websiteSuggestion.id;setPrompt(previous=>previous.trim()?previous+'\n\n'+websiteSuggestion.text:websiteSuggestion.text);setWebsiteSendContext(websiteSuggestion.layoutContext)},[websiteSuggestion,conversationId])
+  useEffect(()=>{setWebsiteSendContext(null)},[conversationId])
   const reportDesignConversation = designWorkspace?.onConversationChange
   useEffect(() => { reportDesignConversation?.(!draftConversation ? currentConversation : null, null) }, [currentConversation, draftConversation, reportDesignConversation])
+  const reportWebsiteMessages=designWorkspace?.onConversationMessages
+  useEffect(()=>{reportWebsiteMessages?.(!draftConversation?currentConversation:null,messages)},[currentConversation,draftConversation,messages,reportWebsiteMessages])
   const consent = useTextAiConsent(textAiConsentKey({ userId, organizationId, departmentId, projectId, engagementId: engagement.id, contextKind: 'engagement', conversationId, connectionId: selectedModel?.connector_connection_id || capabilities?.connector_connection_id, provider: selectedProvider, recipients: (sharing.recipients || []).map(row => row.recipient_id), sources: selectedSourceVersionIds, selectedAttachmentIds }))
   const conversationHasRecipients = Boolean(currentConversation && (!isConversationOwner || (sharing.recipients || []).length > 0))
 
@@ -1349,8 +1364,9 @@ export function ScopedDepartmentChat({
         {supportsSavedConversations && capabilities?.attachments?.supported && (designWorkspace ? (designWorkspace.attachmentTarget ? createPortal(attachmentPanel, designWorkspace.attachmentTarget) : null) : attachmentPanel)}
 
         {designWorkspace&&<div className="design-composer-attach">{designWorkspace.attachControl}</div>}
+        {websiteSendContext&&<details className="text-xs text-[var(--anka-muted)]"><summary>Selected Website layout context will be included</summary><pre className="whitespace-pre-wrap break-words">{websiteSendContext.instructions}</pre><button type="button" onClick={()=>setWebsiteSendContext(null)}>Remove Website context</button></details>}
         <label className="department-chat-prompt block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--anka-muted)]"><span className={compactWorkbench ? 'sr-only' : undefined}>{isAnswerMode ? 'Message' : 'Draft request'}</span>
-          <textarea ref={composerRef} required maxLength={8000} rows={compactWorkbench ? 2 : 10} className={`${INPUT} mt-2 normal-case tracking-normal`} value={prompt} onInput={event => setPrompt(event.currentTarget.value)} placeholder={isAnswerMode ? 'Ask a question or explore the work context. This will not create an official output.' : 'Describe the draft you need, the evidence to prioritize, known constraints, tone, and gaps the team should keep visible.'} />
+          <textarea aria-label={isAnswerMode ? 'Message' : 'Draft request'} ref={composerRef} required maxLength={8000} rows={compactWorkbench ? 2 : 10} className={`${INPUT} mt-2 normal-case tracking-normal`} value={prompt} onInput={event => setPrompt(event.currentTarget.value)} placeholder={isAnswerMode ? 'Ask a question or explore the work context. This will not create an official output.' : 'Describe the draft you need, the evidence to prioritize, known constraints, tone, and gaps the team should keep visible.'} />
         </label>
 
         {!isAnswerMode && <label className="flex items-start gap-3 rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] p-4 text-sm leading-6 text-[var(--anka-warning)]">

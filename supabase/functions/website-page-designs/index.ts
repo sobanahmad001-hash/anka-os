@@ -193,8 +193,9 @@ async function callerDirectionVersionRoot(userClient: Client, directionVersionId
 
 async function callerPageDesignRoot(userClient: Client, designId: string): Promise<PageDesignRoot> {
   const { data: design, error } = await userClient.from('website_page_designs')
-    .select('id, organization_id, design_direction_version_id, slug, status').eq('id', designId).maybeSingle()
+    .select('id, organization_id, design_direction_version_id, slug, status, native_input_checksum').eq('id', designId).maybeSingle()
   if (error || !design) throw httpError('Website page design not found or not visible', 404)
+  if (design.native_input_checksum) throw httpError('Native Website drafts need their exact source review and native build flow before delivery or export', 409)
   const root = await callerDirectionVersionRoot(
     userClient,
     requiredId(design.design_direction_version_id, 'Design direction version'),

@@ -112,9 +112,10 @@ async function callerDirectionVersionRoot(userClient: Client, directionVersionId
 
 async function callerApprovedDesignRoot(userClient: Client, designId: string): Promise<ExportRoot> {
   const { data: design, error } = await userClient.from('website_page_designs')
-    .select('id, organization_id, design_direction_version_id, slug, html_content, css_content, status')
+    .select('id, organization_id, design_direction_version_id, slug, html_content, css_content, status, native_input_checksum')
     .eq('id', designId).maybeSingle()
   if (error || !design) throw httpError('Website page design not found or not visible', 404)
+  if (design.native_input_checksum) throw httpError('Native Website drafts need their exact source review and native build flow before delivery or export', 409)
   const root = await callerDirectionVersionRoot(userClient, requiredId(design.design_direction_version_id, 'Design direction version'))
   if (design.organization_id !== root.organizationId
     || design.design_direction_version_id !== root.directionVersionId) {
@@ -237,10 +238,10 @@ async function markFailed(admin: ScopedClient, jobId: string, designId: string, 
 
 async function loadExactApprovedDesign(admin: ScopedClient, preflight: ExportPreflight) {
   const { data, error } = await admin.from('website_page_designs')
-    .select('id, organization_id, design_direction_version_id, slug, html_content, css_content, status')
+    .select('id, organization_id, design_direction_version_id, slug, html_content, css_content, status, native_input_checksum')
     .eq('id', preflight.design.id).eq('organization_id', admin.organizationId)
     .eq('design_direction_version_id', preflight.directionVersionId).eq('status', 'approved').maybeSingle()
-  if (error || !data) throw httpError('Approved WordPress export source changed after caller validation', 409)
+  if (error || !data || data.native_input_checksum) throw httpError('Approved WordPress export source changed after caller validation', 409)
   return data
 }
 
