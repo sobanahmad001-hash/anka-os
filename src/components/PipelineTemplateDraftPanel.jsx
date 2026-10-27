@@ -56,7 +56,7 @@ export default function PipelineTemplateDraftPanel({ catalog, services, membersh
           <span className="font-medium">{templateById.get(version.pipeline_template_id)?.slug || 'Pipeline'} · v{version.version_number} · {version.name}</span>
           <span className="ml-2 text-xs text-slate-500">{isPublished ? 'Published' : 'Draft'}</span>
           <p className="mt-1 text-xs text-slate-500">Departments: {departments.join(', ') || 'Selection unavailable'}</p>
-          {crossDepartment && <p className="mt-1 text-xs text-slate-400">Recorded head approvals: {departments.map(id => `${id} ${recorded.has(id) ? 'recorded' : 'pending'}`).join(' · ')}. Current head roles are rechecked at publication.</p>}
+          {crossDepartment && !isPublished && <p className="mt-1 text-xs text-slate-400">Recorded head approvals: {departments.map(id => `${id} ${recorded.has(id) ? 'recorded' : 'pending'}`).join(' · ')}. Current head roles are rechecked at publication.</p>}
           {!isPublished && (canApprove || canPublish) && <div className="mt-3 flex flex-wrap gap-2">
             {canApprove && <button type="button" disabled={busy} onClick={() => onApprove(version.id, membership.departmentId)} className="rounded-lg border border-violet-500/40 px-3 py-1.5 text-xs font-semibold text-violet-200 disabled:opacity-40">Approve exact v{version.version_number} for {membership.departmentId}</button>}
             {canPublish && <button type="button" disabled={busy} onClick={() => onPublish(version.id)} className="rounded-lg bg-violet-500 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">Publish exact v{version.version_number}</button>}
