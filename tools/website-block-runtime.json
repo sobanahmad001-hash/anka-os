@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "purpose": "Local synthetic WordPress compatibility QA only; no production worker or client connection.",
+  "playground": {
+    "package": "@wp-playground/cli",
+    "version": "3.1.61",
+    "integrity": "sha512-Vss8SNGokydNmbr1EFhe632GywmMsHjFEk9JIy/jEjFECVxusPmMLK+RNTV6ivG+cdmTPhw0T3sYmmVgPP93Yg=="
+  },
+  "wordpress": "7.1.3",
+  "php_selector": "8.3",
+  "observed_php": "8.3.33",
+  "runtime_limits": {
+    "php_workers": 1,
+    "node_old_space_mb": 512,
+    "qa_parent_timeout_seconds": 240,
+    "php_networking": false
+  },
+  "bootstrap_sources": [
+    "https://wordpress.org/download/releases/",
+    "https://developer.wordpress.org/playground/handbook/guides/programmatic-playground-cli/"
+  ],
+  "production_package_compiler": {
+    "tasks": [
+      "resolve_exact_pinned_source",
+      "validate_declarative_manifest",
+      "compile_fixed_native_files",
+      "store_private_source_and_zip"
+    ],
+    "arbitrary_shell": false,
+    "arbitrary_code": false,
+    "archive_input": false,
+    "remote_assets": false,
+    "maximum_files": 9,
+    "maximum_zip_bytes": 1048576,
+    "maximum_source_bytes": 524288
+  }
+}

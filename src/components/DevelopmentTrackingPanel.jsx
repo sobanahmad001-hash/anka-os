@@ -1,3 +1,4 @@
+import WebsiteBlockBuildPanel from './WebsiteBlockBuildPanel.jsx'
 import { useState } from 'react'
 
 import {
@@ -17,7 +18,7 @@ import DepartmentChat from './DepartmentChat.jsx'
 const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20'
 const PRIMARY = 'rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50'
 
-export default function DevelopmentTrackingPanel({ workspace, onRefresh }) {
+export default function DevelopmentTrackingPanel({ workspace, onRefresh, organizationId, actorId, membership, signal, onNavigationBusyChange }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -37,9 +38,10 @@ export default function DevelopmentTrackingPanel({ workspace, onRefresh }) {
   }
 
   return <div className="mt-6 space-y-6">
+    {organizationId&&actorId&&workspace.engagement.project_id&&<WebsiteBlockBuildPanel organizationId={organizationId} projectId={workspace.engagement.project_id} engagementId={workspace.engagement.id} actorId={actorId} signal={signal} canBuild={["system_owner","operations_admin","executive"].includes(membership?.role)||membership?.department_id==="development"||membership?.departmentId==="development"} onNavigationBusyChange={onNavigationBusyChange}/>}
     <section className="rounded-2xl border border-blue-900/40 bg-blue-950/15 p-5">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-400">Development tracking only</p>
-      <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">Record stage progress, concise team notes, and immutable technical or launch artifacts. Source code, builds, deployments, and engineering tickets remain outside Anka Sphere.</p>
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-400">Development delivery</p>
+      <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">Record stage progress, concise team notes, and immutable technical or launch artifacts. Native Website review packages are available above. Client-site installation, staging, publication and engineering tickets keep their separate reviews.</p>
     </section>
     {(error || notice) && <div className={`rounded-xl border px-4 py-3 text-sm ${error ? 'border-red-900/60 bg-red-950/40 text-red-300' : 'border-emerald-900/60 bg-emerald-950/30 text-emerald-300'}`}>{error || notice}</div>}
     <section>
