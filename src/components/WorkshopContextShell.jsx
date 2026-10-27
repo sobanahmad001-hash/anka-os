@@ -15,6 +15,8 @@ export default function WorkshopContextShell({
 
   const usable = Boolean(validation.context) && ['ready', 'stale'].includes(validation.status)
   const context = validation.context || navigation
+  const projectChatTarget=usable&&validation.status==='ready'&&context.projectId?`/sphere/workspace/projects/${encodeURIComponent(context.projectId)}?tab=discussion`:null
+  const projectChatLink=projectChatTarget?<Link to={projectChatTarget} className="workspace-button">Project Chat · progress & results</Link>:null
   const recordLabel = context.workRecord
     ? `${label(context.workRecord.kind)} / ${context.workRecord.id}`
     : 'No work record selected'
@@ -31,6 +33,7 @@ export default function WorkshopContextShell({
       <Link to={returnTarget}>Back to work</Link>
     </details>}
     {validation.status === 'stale' && <p role="status" className="text-[var(--anka-warning)]">{navigationRecoveryMessage(validation.reason)}</p>}
+    {projectChatLink}
     {children}
   </div>
 
@@ -49,6 +52,7 @@ export default function WorkshopContextShell({
           <Link to={returnTarget} className="shrink-0 rounded-xl border border-violet-500/30 px-4 py-2 text-center text-sm font-semibold text-violet-200 hover:bg-violet-500/10 focus:outline-none focus:ring-2 focus:ring-violet-400">Back to work</Link>
         </div>
       </aside>
+      {projectChatLink}
       {usable ? children : (
         <section role="alert" className="rounded-2xl border border-dashed border-amber-500/30 px-6 py-14 text-center">
           <h2 className="font-semibold text-amber-100">Workshop context not opened</h2>
