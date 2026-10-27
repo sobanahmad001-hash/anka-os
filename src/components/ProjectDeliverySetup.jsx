@@ -25,9 +25,11 @@ function DeliverySetup({ workspace, organizationId, membership, scopeRevision, r
   return <section aria-label="Project delivery setup" className="space-y-5">
     <div className="workspace-card p-4">
       <h2 className="font-semibold">Set up project delivery</h2>
-      <p className="mt-1 text-sm text-[var(--anka-muted)]">Choose your delivery focus, review services, then configure each pipeline. This guide does not add services or start work.</p>
+      <p className="mt-1 text-sm text-[var(--anka-muted)]">Select services and review the assembled pipeline plan together below. Optional stage configuration and starting work keep their existing reviews.</p>
+      <details><summary>Advanced visual pipeline focus</summary>
       <fieldset disabled={busy} className="mt-4 flex flex-wrap gap-3"><legend className="mb-2 text-sm font-medium">Delivery focus</legend>{[['website','Website'],['marketing','Marketing'],['both','Website & Marketing']].map(([id,label]) => <label key={id} className="flex items-center gap-2 rounded-lg border border-[var(--anka-line)] px-3 py-2 text-sm"><input type="radio" name="project-delivery-focus" value={id} checked={intent===id} onChange={()=>{if(!Object.values(busySlots.current).some(Boolean))setIntent(id)}} />{label}</label>)}</fieldset>
       {intent==='both' && <p className="mt-3 text-sm text-[var(--anka-muted)]">Create or choose a Website pipeline and a Marketing pipeline separately. Each retains its own stages, revisions, activation and history.</p>}
+      </details>
       <nav aria-label="Delivery setup steps" className="mt-4 flex flex-wrap gap-2">{[['services','1. Select services'],['pipelines','2. Review pipelines & stages'],['work','3. Open work']].map(([id,label])=><button type="button" key={id} disabled={busy} aria-current={step===id?'step':undefined} className={step===id?'workspace-button workspace-button-primary':'workspace-button'} onClick={()=>changeStep(id)}>{label}</button>)}</nav>
       <p className="mt-3 text-xs text-[var(--anka-muted)]">Saved proposals, service activation, draft pipeline revisions, activation impact and manual run review remain separate actions. An independent reviewer is still required for manual run requests.</p>
     </div>

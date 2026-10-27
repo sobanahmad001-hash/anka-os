@@ -1,3 +1,4 @@
+import ProjectDeliveryContextPanel from './ProjectDeliveryContextPanel.jsx'
 import {useCallback,useEffect,useRef,useState} from 'react'
 import _ProjectWebsitePagesPanel from './ProjectWebsitePagesPanel.jsx'
 import _ProjectCampaignPlanningPanel from './ProjectCampaignPlanningPanel.jsx'
@@ -15,6 +16,7 @@ export default function ProjectScopedPipelineView({workspace,organizationId,memb
  if(['unavailable','limited'].includes(workspace.pipelineGroupsState))return <p role="alert">{title} unavailable: current pipeline identities {workspace.pipelineGroupsState==='limited'?'exceed this bounded view':'could not be loaded'}. Refresh the project; existing work and history remain.</p>
  return <section aria-label={title} className="space-y-4">
   <h2 className="text-lg font-semibold">{title}</h2>
+  {!resources&&<ProjectDeliveryContextPanel workspace={workspace} compact busy={blocked}/>}
   <p className="text-sm text-[var(--anka-muted)]">Choose an existing exact pipeline. Service scope, permissions, assignments and approvals remain in their existing workflows.</p>
   <label className="block text-xs">Project pipeline<select aria-label={title+' pipeline'} className="mt-2 w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface)] px-3 py-2 text-sm" value={group?.id||''} disabled={blocked} onChange={event=>{if(!alive.current||latest.current.blocked||latest.current.signal?.aborted||(event.target.value!==''&&!latest.current.groups.some(row=>row.id===event.target.value)))return;selected.current=event.target.value;setGroupId(event.target.value)}}><option value="">Choose an exact existing pipeline</option>{groups.map(row=><option key={row.id} value={row.id}>{row.name} · {row.kind==='website'?'Website':'Marketing'}</option>)}</select></label>
   {!groups.length&&<p role="status" className="text-sm text-[var(--anka-muted)]">No existing {kind||'Website or Marketing'} pipeline is available. Use Services & Pipelines to review scope; Legacy work remains in All work.</p>}

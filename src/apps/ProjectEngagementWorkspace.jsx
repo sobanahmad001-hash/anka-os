@@ -1,3 +1,5 @@
+import ProjectDeliveryContextPanel from '../components/ProjectDeliveryContextPanel.jsx'
+import {projectDeliveryIntent} from '../data/projectDeliveryContext.js'
 import DescriptionDisclosure from '../components/DescriptionDisclosure.jsx'
 import _ProjectScopedPipelineView from '../components/ProjectScopedPipelineView.jsx'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -68,6 +70,8 @@ export default function ProjectEngagementWorkspace() {
   const [error, setError] = useState('')
   const [failureKind, setFailureKind] = useState('')
   const [loadedAt, setLoadedAt] = useState(null)
+  const [deliveryRequest,setDeliveryRequest]=useState(null)
+  const recordProjectRequest=useCallback(request=>{const intent=projectDeliveryIntent(request.text);if(intent)setDeliveryRequest({intent,organizationId:request.organizationId,projectId:request.projectId,messageId:request.messageId})},[])
   const [projectChatMode, setProjectChatMode] = useState('team')
   const workspace=loadedWorkspace?.project.id===projectId && loadedWorkspace?.project.organization_id===activeOrganizationId ? loadedWorkspace : null
   const reportChatBusy=useCallback(value=>{if(projectChatMode==='private')reportNavigationBusy(value)},[projectChatMode,reportNavigationBusy])
@@ -195,6 +199,7 @@ export default function ProjectEngagementWorkspace() {
           {['website-work','marketing-work','resources'].includes(tab)&&<_ProjectScopedPipelineView key={[navigationOwner,tab,searchParams.get('resourceGroupId')||''].join(':')} workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} signal={requestSignal} kind={tab==='website-work'?'website':tab==='marketing-work'?'marketing':undefined} resources={tab==='resources'} initialGroupId={tab==='resources'?searchParams.get('resourceGroupId')||'':''} onOpenResources={groupId=>selectTab('resources',groupId)} onNavigationBusyChange={reportNavigationBusy}/>}
           {tab === 'work' && <WorkViews workspace={workspace} navigate={navigate} searchParams={searchParams} setSearchParams={setSearchParams} />}
           {tab === 'discussion' && <div className="space-y-4">
+            <ProjectDeliveryContextPanel key={navigationOwner} workspace={workspace} compact busy={isNavigationBusy} stale={Boolean(error)} onRefresh={load} onOpen={selectTab} request={deliveryRequest?.organizationId===activeOrganizationId&&deliveryRequest.projectId===projectId?deliveryRequest:null} onClearRequest={()=>setDeliveryRequest(null)}/>
             <div className={projectChatMode === 'team' ? 'workspace-card p-4' : ''}>
               {projectChatMode === 'team' && <p className="text-xs font-semibold uppercase tracking-wide text-[var(--anka-violet)]">{project.name} · Chat</p>}
               {projectChatMode === 'team' && <><h2 className="mt-1 text-lg font-semibold">Talk with your project team</h2>
@@ -208,7 +213,7 @@ export default function ProjectEngagementWorkspace() {
               <ProjectDiscussionPanel organizationId={activeOrganizationId} projectId={project.id} tasks={workspace.projectTasks} workstreams={workspace.workstreams} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={handleOrganizationAccessError} onApplied={load} />
             </section>
             <section className="project-ai-conversations" hidden={projectChatMode !== 'private'} aria-label="Project AI conversations">
-              <ContextConversationPanel directSend contextKind="project_team" projectId={project.id} label={`${project.name} · Project AI`} onNavigationBusyChange={reportChatBusy} onDraftDirtyChange={reportChatDirty} />
+              <ContextConversationPanel directSend contextKind="project_team" projectId={project.id} label={`${project.name} · Project AI`} onProjectRequest={recordProjectRequest} onProjectChanged={load} onNavigationBusyChange={reportChatBusy} onDraftDirtyChange={reportChatDirty} />
             </section>
           </div>}
           {tab === 'project-tasks' && <ProjectTasks workspace={workspace} rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
