@@ -1,3 +1,4 @@
+import WebsiteStarterPanel from '../components/WebsiteStarterPanel.jsx'
 import DescriptionDisclosure from '../components/DescriptionDisclosure.jsx'
 import _WorkspaceDialog from '../components/WorkspaceDialog.jsx'
 import WorkshopModelMappingPanel from '../components/WorkshopModelMappingPanel.jsx'
@@ -362,7 +363,7 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
 
         {view === 'engagements' && <PortfolioDashboard snapshot={portfolioSnapshot} owners={ownerOptions} onOpen={openEngagement} onRefresh={() => loadAll()} supportNote="Partial journeys supported." />}
         {view === 'clients' && <ClientRegistry clients={clients} onNewBrand={clientId => { setBrandForm({ ...INITIAL_BRAND, clientId }); setModal('brand') }} />}
-        {view === 'services' && <><ServiceCatalogue services={services} /><PipelineTemplateDraftPanel catalog={templateCatalog} services={services} membership={activeMembership} onCreate={createPipelineDraft} onApprove={approvePipelineDepartment} onPublish={publishPipelineVersion} onRefresh={() => loadAll()} busy={saving} loadError={templateLoadError} /><details id="advanced-execution-definitions" className="workspace-card p-4"><summary className="font-semibold">Advanced · execution definitions</summary><PipelineExecutionDefinitionPanel organizationId={activeOrganizationId} catalog={templateCatalog} services={services} membership={activeMembership} signal={requestSignal} /></details></>}
+        {view === 'services' && <><WebsiteStarterPanel key={`${activeOrganizationId}/${user?.id}/${scopeRevision}`} organizationId={activeOrganizationId} actorId={user?.id} membership={activeMembership} signal={requestSignal} onPublished={() => loadAll()} /><ServiceCatalogue services={services} /><PipelineTemplateDraftPanel catalog={templateCatalog} services={services} membership={activeMembership} onCreate={createPipelineDraft} onApprove={approvePipelineDepartment} onPublish={publishPipelineVersion} onRefresh={() => loadAll()} busy={saving} loadError={templateLoadError} /><details id="advanced-execution-definitions" className="workspace-card p-4"><summary className="font-semibold">Advanced · execution definitions</summary><PipelineExecutionDefinitionPanel organizationId={activeOrganizationId} catalog={templateCatalog} services={services} membership={activeMembership} signal={requestSignal} /></details></>}
       </div>
 
       {modal === 'client' && <Modal busy={Boolean(saving)} title="Create client and first brand" onClose={() => setModal('')}><ClientForm form={clientForm} setForm={setClientForm} onSubmit={createClient} saving={saving} /></Modal>}

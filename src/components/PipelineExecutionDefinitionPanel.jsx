@@ -171,7 +171,7 @@ function DefinitionEditor({ organizationId, catalog, services, membership, signa
             <p className="mt-1 text-xs text-[var(--anka-muted)]">{presetName} · {definition.steps.length} ordered steps · {definition.steps_sha256.slice(0, 12)}</p>
             <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs text-[var(--anka-ink)]">{definition.steps.map(step =>
               <li key={step.key}>{step.label} · {step.kind.replaceAll('_', ' ')} · {step.department_id}{step.depends_on.length ? ` · after ${step.depends_on.join(', ')}` : ''}</li>)}</ol>
-            <p className="mt-2 text-xs text-[var(--anka-muted)]">Head signoffs: {departments.map(department => `${department} ${signed.has(department) ? 'recorded' : 'pending'}`).join(' · ')}. Current roles are rechecked at publication.</p>
+            {!published && <p className="mt-2 text-xs text-[var(--anka-muted)]">Head signoffs: {departments.map(department => `${department} ${signed.has(department) ? 'recorded' : 'pending'}`).join(' · ')}. Current roles are rechecked at publication.</p>}
             {!published && <div className="mt-3 flex gap-2">
               {role === 'department_manager' && departments.includes(membership.departmentId) && <button type="button" disabled={busy || Boolean(pendingRequest)} onClick={() => act('approve', definition.id)} className="rounded-lg border border-violet-500/40 px-3 py-1.5 text-xs text-[var(--anka-accent)] disabled:opacity-40">Approve for {membership.departmentId}</button>}
               {canPublish && <button type="button" disabled={busy || Boolean(pendingRequest)} onClick={() => act('publish', definition.id)} className="rounded-lg bg-violet-500 px-3 py-1.5 text-xs text-white disabled:opacity-40">Publish exact version</button>}
