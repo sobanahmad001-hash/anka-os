@@ -98,6 +98,7 @@ wp=(repo/'supabase/migrations/20260831151956_rp5_native_wordpress_export.sql').r
 ddl=wp[wp.index('create table public.wordpress_export_jobs'):wp.index('create index idx_wordpress_export_jobs_design_requested')]
 run(ddl+"alter table public.wordpress_export_jobs enable row level security;revoke all on public.wordpress_export_jobs from public,anon,authenticated;")
 run((repo/'supabase/migrations/20261027190648_website_native_block_builds.sql').read_text(encoding='utf-8'))
+run((repo/'supabase/migrations/20261027194656_website_block_execution_window.sql').read_text(encoding='utf-8'))
 builder=uid(61);dev_service=uid(62);dev_catalog=uid(63)
 run(f"insert into auth.users values({q(builder)});insert into public.organization_memberships values({q(org)},{q(builder)},'team','active','contributor','development');insert into public.service_catalog values({q(dev_catalog)},{q(org)},'development','setup_development_website_page_build',true);insert into public.engagement_services values({q(dev_service)},{q(org)},{q(engagement)},{q(dev_catalog)},'active');")
 design=draft['design_id']
@@ -134,6 +135,21 @@ check('revoked member cannot read package',download,True);check('revoked member 
 run(f"update public.organization_memberships set status='active' where user_id={q(builder)};update public.engagement_services set status='paused' where id={q(dev_service)}")
 check('inactive Development implementation service blocks new builds',start(uid(76)),True)
 run(f"update public.engagement_services set status='active' where id={q(dev_service)}")
+# Expired worker fixtures are inserted with an old immutable creation time; no trigger bypass.
+expired_job,expired_request=uid(90),uid(91)
+run(f"insert into public.wordpress_export_jobs(id,organization_id,website_page_design_id,provider,provider_job_id,status,requested_by) values({q(expired_job)},{q(org)},{q(design)},'native','anka-native-block-v1','processing',{q(builder)});insert into private.website_block_inputs(job_id,organization_id,project_id,engagement_id,design_id,page_id,request_id,request_sha256,review_sha256,source,created_by,created_at) select {q(expired_job)},organization_id,project_id,engagement_id,design_id,page_id,{q(expired_request)},request_sha256,review_sha256,source,created_by,clock_timestamp()-interval '11 minutes' from private.website_block_inputs where job_id={q(job)};")
+def recover(request=expired_request,a=builder):return auth(a)+f"select public.get_website_block_workspace({q(org)},{q(project)},{q(engagement)},null,{q(request)},0);"
+snapshot=lambda:run(f"select md5(row_to_json(j)::text||row_to_json(i)::text) from public.wordpress_export_jobs j join private.website_block_inputs i on i.job_id=j.id where j.id={q(expired_job)}").stdout.strip()
+original=snapshot();recovered=json.loads(check('expired original request recovers a terminal projection without writes',recover()))['jobs'][0]
+assert recovered['status']=='failed' and recovered['original_status']=='processing' and recovered['execution_window_expired'] is True and snapshot()==original
+check('expired worker cannot complete after read-only recovery',finish(expired_job),True);assert snapshot()==original
+assert json.loads(check('completed historical request remains complete with original identity',recover(uid(70))))['jobs'][0]['status']=='complete'
+assert json.loads(check('request recovery is scoped to the original actor',recover(a=reader)))['jobs']==[]
+check('expired recovery still denies anonymous callers',recover().replace('set role authenticated','set role anon'),True)
+run(f"update public.organization_memberships set status='revoked' where user_id={q(builder)}")
+check('expired recovery still denies revoked members',recover(),True)
+run(f"update public.organization_memberships set status='active' where user_id={q(builder)}")
+
 # Concurrent original claims drain both pipes concurrently to avoid host stdout deadlock.
 def process(sql):
  p=subprocess.Popen([str(Path(args.pgbin)/'psql.exe'),*map(str,base),'-d',database],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',creationflags=flags)
@@ -144,6 +160,18 @@ assert all(r[2]==0 for r in results),results
 answers=[json.loads(r[0].splitlines()[-1]) for r in results];assert answers[0]['job']['id']==answers[1]['job']['id'] and sorted(x['created'] for x in answers)==[False,True]
 checks.append('concurrent identical claims create exactly one immutable source and canonical job')
 processing=answers[0]['job']['id']
+
+fresh=json.loads(check('nonexpired processing recovery retains processing status',recover(uid(77))))['jobs'][0];assert fresh['status']=='processing' and fresh['execution_window_expired'] is False
+locker=process(f"set application_name='website_w3_window_lock';update public.wordpress_export_jobs set status='failed',failure_reason='Synthetic worker terminal receipt' where id={q(expired_job)};select pg_sleep(2);")
+import time
+for _ in range(60):
+ if run("select exists(select 1 from pg_stat_activity where application_name='website_w3_window_lock' and wait_event='PgSleep')").stdout.strip()=='t':break
+ time.sleep(.02)
+else:raise AssertionError('Original job lock was not observed')
+started=time.monotonic();after=json.loads(check('recovery waits for original job writer and observes its committed terminal receipt',recover()))['jobs'][0]
+out,err=locker.communicate(timeout=10);assert locker.returncode==0,err
+assert time.monotonic()-started>0.5 and after['status']=='failed' and after['original_status']=='failed' and after['execution_window_expired'] is False and after['failure_reason']=='Synthetic worker terminal receipt'
+
 run(f"insert into public.artifact_versions(id,organization_id,artifact_id,version_number,content,content_checksum) select {q(uid(80))},organization_id,artifact_id,2,content,content_checksum from public.artifact_versions where id={q(contentv)}")
 stale=json.loads(run(download).stdout);assert 'Content' in stale['stale_sources'];checks.append('historical package reports changed source head without rebinding or deletion')
 check('source head change rejects processing completion',finish(processing),True)
