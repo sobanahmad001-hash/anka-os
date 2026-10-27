@@ -42,12 +42,12 @@ create table public.work_items(id uuid primary key,state text,output_id uuid);
 create table public.pipeline_outputs(id uuid primary key,status text,content jsonb);
 create table public.project_pipeline_configurations(id uuid primary key,state text);
 """
-run(bootstrap);run(Path(a.scope_helper).read_text())
-helpers=json.loads(Path(a.helpers).read_text())
+run(bootstrap);run(Path(a.scope_helper).read_text(encoding='utf-8'))
+helpers=json.loads(Path(a.helpers).read_text(encoding='utf-8'))
 for name in ['private.n1b_preserve_receipt','private.n1e_exact_project_manager','private.n2_scope_require_member','private.n6_project_configuration_authorized','create_project_pipeline_group','get_project_setup']:
  row=next(h for h in helpers if h['signature'].startswith(name+'('));run(row['definition']);signature=row['signature'];run(f'revoke all on function {signature} from public,anon,authenticated,service_role;')
 run("grant execute on function public.get_project_setup(uuid,uuid),public.create_project_pipeline_group(uuid,uuid,uuid,text,text,uuid) to authenticated")
-run((repo/'supabase/migrations/20261027180506_service_driven_project_plans.sql').read_text())
+run((repo/'supabase/migrations/20261027180506_service_driven_project_plans.sql').read_text(encoding='utf-8'))
 uid=lambda n:f'd0000000-0000-4000-8000-{n:012d}';org,actor,project,engagement,copy,design,caption,preset,definition,publication=[uid(n) for n in range(1,11)];scope1=uid(20)
 q=lambda v:"'"+str(v).replace("'","''")+"'"
 j=lambda v:q(json.dumps(v))+'::jsonb'
