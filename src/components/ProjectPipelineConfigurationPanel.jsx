@@ -1,3 +1,5 @@
+import ProjectDeliveryPlanPanel from './ProjectDeliveryPlanPanel.jsx'
+import {planStageDefaults} from '../data/serviceDrivenPlan.js'
 import _ProjectCampaignPlanningPanel from './ProjectCampaignPlanningPanel.jsx'
 import _ProjectReportingBindingsPanel from './ProjectReportingBindingsPanel.jsx'
 import _ProjectWebsitePagesPanel from './ProjectWebsitePagesPanel.jsx'
@@ -18,6 +20,8 @@ export default function ProjectPipelineConfigurationPanel(props) {
 // eslint-disable-next-line no-unused-vars -- JSX components are not counted by this lint configuration.
 function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, services, membership, signal, actorId, initialKind = 'website', onReviewServices, onNavigationBusyChange }) {
   const [records, setRecords] = useState({ available: [], publishedDefinitions: [], configurations: [], activations: [], groups: [] })
+  const [boundPlan,setBoundPlan]=useState(null)
+  const [planBusy,setPlanBusy]=useState(false)
   const [publicationId, setPublicationId] = useState('')
   const [presetQuery, setPresetQuery] = useState('')
   const [historyOpen,setHistoryOpen]=useState(false)
@@ -42,8 +46,8 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
   if(childScope.current.groupId!==groupId)childScope.current={groupId,website:false,marketing:false,resources:false}
   const childBlocked=childState.groupId===groupId&&(childState.website||childState.marketing||childState.resources)
   const nativeLocked=busy || Boolean(pending) || Boolean(view.error)
-  const locked=nativeLocked || childBlocked
-  useEffect(() => { onNavigationBusyChange?.(Boolean(busy || pending || childBlocked)); return () => onNavigationBusyChange?.(false) }, [busy, pending, childBlocked, onNavigationBusyChange])
+  const locked=nativeLocked || childBlocked || planBusy
+  useEffect(() => { onNavigationBusyChange?.(Boolean(busy || pending || childBlocked || planBusy)); return () => onNavigationBusyChange?.(false) }, [busy, pending, childBlocked, planBusy, onNavigationBusyChange])
 
   const createRequest = useRef('')
   const activationRequest = useRef('')
@@ -64,9 +68,9 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
   const currentReviewSignature=useRef('');currentReviewSignature.current=reviewSignature
   const presets=[...new Map((records.publishedDefinitions || []).map(row=>[row.definition.preset_publication_id,{...row.definition,publication_id:row.id}])).values()]
   const selectedPreset=presets.find(row=>row.preset_publication_id===groupPreset)
-  const commandState=useRef(null);commandState.current={pending,locked,nativeLocked,busy,loading,preview,acknowledged,reviewSignature,canConfigureSpending,groupSignature:JSON.stringify([groupName.trim(),groupKind,groupPreset,selectedPreset?.publication_id||'']),configIds:view.configurations.map(row=>row.id)}
+  const commandState=useRef(null);commandState.current={pending,locked,nativeLocked,planBusy,busy,loading,preview,acknowledged,reviewSignature,canConfigureSpending,groupSignature:JSON.stringify([groupName.trim(),groupKind,groupPreset,selectedPreset?.publication_id||'']),configIds:view.configurations.map(row=>row.id)}
 
-  const reportChildBusy=useCallback((slot,value)=>{const current=childScope.current;if(!scopeActive.current||signal?.aborted||current.groupId!==groupId||current[slot]===Boolean(value))return;const next={...current,[slot]:Boolean(value)};childScope.current=next;setChildState(next);if(commandState.current)commandState.current.locked=commandState.current.nativeLocked||next.website||next.marketing||next.resources},[groupId,signal])
+  const reportChildBusy=useCallback((slot,value)=>{const current=childScope.current;if(!scopeActive.current||signal?.aborted||current.groupId!==groupId||current[slot]===Boolean(value))return;const next={...current,[slot]:Boolean(value)};childScope.current=next;setChildState(next);if(commandState.current)commandState.current.locked=commandState.current.nativeLocked||commandState.current.planBusy||next.website||next.marketing||next.resources},[groupId,signal])
   const reportWebsiteBusy=useCallback(value=>reportChildBusy('website',value),[reportChildBusy])
   const reportMarketingBusy=useCallback(value=>reportChildBusy('marketing',value),[reportChildBusy])
   const reportResourcesBusy=useCallback(value=>reportChildBusy('resources',value),[reportChildBusy])
@@ -226,7 +230,7 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
     } catch (failure) { if (!signal?.aborted) {if (failure.knownRollback) clearPending();setError(failure.message)} }
     finally { flight.current=false;if (!signal?.aborted) setBusy(false) }
   }
-  function chooseGroup(value) { if (commandState.current.locked || flight.current || !scopeActive.current || signal?.aborted) return;setGroupId(value);changePublication('');setPreview(null);setAcknowledged(false);activationRequest.current='' }
+  function chooseGroup(value) { if (commandState.current.locked || flight.current || !scopeActive.current || signal?.aborted) return;setGroupId(value);setBoundPlan(null);changePublication('');setPreview(null);setAcknowledged(false);activationRequest.current='' }
 
   function selectPipeline(value) {
     if(commandState.current.locked||flight.current||!scopeActive.current||signal?.aborted)return
@@ -239,18 +243,30 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
     if(commandState.current.locked||flight.current||!scopeActive.current||signal?.aborted||!['website','marketing'].includes(value)||value===groupKind)return
     setGroupKind(value);setGroupReview(null);groupRequest.current='';chooseGroup('')
   }
+  async function chooseServicePlan(group){
+    if(commandState.current.locked||flight.current||!scopeActive.current||signal?.aborted)return
+    const next=await projectPipelineConfigurations.list(organizationId,engagement.id,{signal})
+    if(!scopeActive.current||signal?.aborted||commandState.current.locked)return
+    const exact=next.groups.find(g=>g.id===group.pipeline_group_id&&g.preset_publication_id===group.preset_publication_id)
+    if(!exact){setError('The exact reviewed pipeline is unavailable. Refresh the service plan.');return}
+    setRecords(next);setGroupKind(exact.kind);setGroupId(exact.id);setPublicationId(group.definition_publication_id);setBoundPlan(group)
+    const suggestion=planStageDefaults(group,services);setQuantities(suggestion.quantities);setStageActions(suggestion.actions);setOmissionReasons({});setStageValues({});setCost('0');setCreationReview(null);setPreview(null);setAcknowledged(false)
+    setNotice('Service plan selected. Review inputs and quantities for this batch; completed work is not restarted or treated as a new approval. Larger quantities retain the existing 50-step batch limit.')
+  }
   function inspectGroup() {
     if(commandState.current.locked||flight.current||!scopeActive.current||signal?.aborted||!selectedPreset||!groupName.trim())return
     setGroupReview({name:groupName.trim(),kind:groupKind,preset:groupPreset,definitionPublicationId:selectedPreset.publication_id,definition:selectedPreset})
   }
   const draftEditor=<>      {canManage && <fieldset disabled={locked}><form onSubmit={inspectCreation} className="mt-5 space-y-3 border-t border-[var(--anka-line)] pt-4">
-        <h3 className="text-sm font-semibold">2. Choose plan</h3>
+        <h3 className="text-sm font-semibold">Review service plan stages</h3>
+        {boundPlan&&boundPlan.pipeline_group_id===groupId?<p>Using the exact published template supplied by your reviewed project plan. Review every selected stage and input below.</p>:<details><summary>Advanced · manual published plan selection</summary>        <h3 className="text-sm font-semibold">2. Choose plan</h3>
         <label className="block text-xs text-[var(--anka-muted)]">Published plan
           <select aria-label="Published pipeline plan" required className={INPUT} value={publicationId} onChange={event => changePublication(event.target.value)}>
             <option value="">Choose a plan</option>
             {view.available.map(row => <option key={row.id} value={row.id}>{row.definition.name} · v{row.definition.version_number}</option>)}
           </select>
         </label>
+</details>}
         {publication && <div className="space-y-3">{definitionSteps.map(step=>{const contract=step.stage_contract,action=stageActions[step.key] || (quantities[step.key] ? 'run' : 'outside_scope');const sources=stageArtifacts.filter(row=>row.artifact_type===contract?.artifact_type && row.output_type===contract?.output_type);return <fieldset key={step.key} className="space-y-2 rounded-lg border border-[var(--anka-line)] p-3 text-xs text-[var(--anka-ink)]">
           <legend className="px-1 font-medium">{step.label}</legend><p>{step.kind.replaceAll('_',' ')}{step.depends_on?.length ? ' · after '+step.depends_on.map(key=>definitionSteps.find(row=>row.key===key)?.label||key).join(', ') : ''}{!serviceIds.has(step.service_id) ? ' · service unavailable' : ''}</p>
           {contract && <><p>Output: {contract.output_label}</p><label className="block">Stage decision<select aria-label={step.label+' decision'} className={INPUT} value={action} disabled={!serviceIds.has(step.service_id)} onChange={event=>changeStageAction(step,event.target.value)}><option value="outside_scope">Outside this pipeline's selected services</option><option value="run">Include work</option>{contract.optional && <option value="omit">Omit optional stage with reason</option>}{contract.reuse_allowed && step.kind!=='approval_gate' && <option value="reuse">Satisfied by an exact approved version</option>}</select></label></>}
@@ -294,9 +310,10 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
     {error && <p role="alert" className="mt-3 text-sm text-[var(--anka-danger)]">{error}</p>}
     {pending && <p role="status" className="mt-3 text-[var(--anka-warning)]">The original command needs history reconciliation. Refresh inspects its exact request; editing and new commands stay blocked.</p>}
     {notice && <p role="status" className="mt-3 text-sm text-[var(--anka-success)]">{notice}</p>}
+    <ProjectDeliveryPlanPanel organizationId={organizationId} projectId={engagement.project_id} engagementId={engagement.id} actorId={actorId} signal={signal} disabled={nativeLocked||childBlocked} onNavigationBusyChange={setPlanBusy} onChanged={refresh} onChoosePipeline={chooseServicePlan}/>
     {loading ? <p className="mt-4 text-sm text-[var(--anka-muted)]">Loading project configurations…</p> : <>
       <section aria-label="Pipeline setup" className="mt-4 space-y-3">
-        <p className="text-sm">Website / Marketing → Choose plan → Review stages → Save pipeline</p>
+        <p className="text-sm">Select services → Review assembled plan → Review stages → Save pipeline</p>
         <label className="block text-sm font-medium">1. Website or Marketing<select aria-label="Pipeline kind" className={INPUT} value={groupKind} disabled={locked} onChange={event=>selectKind(event.target.value)}><option value="website">Website</option><option value="marketing">Marketing</option></select></label>
         <label className="block text-xs">Saved pipeline<select aria-label="Saved pipeline" className={INPUT} value={groupId} disabled={locked} onChange={event=>selectPipeline(event.target.value)}><option value="">Choose a saved pipeline</option>{(records.groups||[]).filter(row=>row.kind===groupKind).map(row=><option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
         {!groupId&&<p className="text-sm text-[var(--anka-muted)]">Choose a saved pipeline or start one below. Legacy records stay in History.</p>}
@@ -332,7 +349,7 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
       </div>}
       {!groupId&&<details className="mt-3"><summary>Advanced · Legacy configuration</summary>{draftEditor}</details>}
       </details>
-      {canManage && <details open={!groupId} className="mt-4 border-t border-[var(--anka-line)] pt-4"><summary>{groupId?'Start another pipeline':'Start a pipeline'}</summary><fieldset disabled={locked} className="mt-3 space-y-3">
+      {canManage && <details className="mt-4 border-t border-[var(--anka-line)] pt-4"><summary>{groupId?'Advanced · start another pipeline manually':'Advanced · start a pipeline manually'}</summary><fieldset disabled={locked} className="mt-3 space-y-3">
 
         <label className="block text-xs">Pipeline name<input aria-label="Pipeline name" className={INPUT} maxLength={80} value={groupName} onChange={event=>{setGroupName(event.target.value);setGroupReview(null);groupRequest.current=''}} /></label>
         <label className="block text-xs">Find a published plan<input type="search" className={INPUT} value={presetQuery} onChange={event=>setPresetQuery(event.target.value)} placeholder="Search plan names" /></label>
