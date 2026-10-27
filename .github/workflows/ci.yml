@@ -46,4 +46,6 @@ jobs:
       - run: deno test --frozen --config supabase/functions/project-chat-import/deno.json supabase/functions/_shared/projectDocumentImport.test.ts
       - name: Project document source and owner boundaries
         run: deno test --frozen --node-modules-dir=none supabase/functions/department-chat/projectDocumentAttachments.test.ts supabase/functions/department-chat/contextChatActions.test.ts
+      - run: deno test --frozen supabase/functions/website-native-design/index.test.ts
+      - run: deno check --frozen supabase/functions/website-native-design/index.ts
       - run: npm run build

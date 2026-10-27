@@ -1,0 +1,5 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import {appendWebsiteLayoutRequest,parseWebsiteLayoutRequest} from './websiteChatLayoutContext.js'
+test('Website Chat keeps the human request separate from inspectable selected-source instructions',()=>{const context={binding_key:'a'.repeat(64),instructions:'Reply with a proposal only'};const body=appendWebsiteLayoutRequest('Suggest a calmer page.',context);assert.deepEqual(parseWebsiteLayoutRequest(body),{text:'Suggest a calmer page.',context});assert.equal(parseWebsiteLayoutRequest('An ordinary message'),null)})
+test('Website context cannot silently truncate or accept malformed source envelopes',()=>{assert.throws(()=>appendWebsiteLayoutRequest('x'.repeat(7900),{binding_key:'a'.repeat(64),instructions:'y'.repeat(1000)}),/nothing is truncated/);assert.throws(()=>appendWebsiteLayoutRequest('Message',{binding_key:'wrong',instructions:'Text'}));assert.equal(parseWebsiteLayoutRequest('Message\n\n[Anka Website layout request v1]\n{"binding_key":"wrong"}'),null)})

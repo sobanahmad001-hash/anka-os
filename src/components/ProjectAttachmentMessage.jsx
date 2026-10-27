@@ -1,8 +1,12 @@
+import {parseWebsiteLayoutRequest} from '../data/websiteChatLayoutContext.js'
+import {readWebsiteLayoutProposal} from '../../supabase/functions/_shared/websiteNativeDraft.js'
 import {parseSetupRequest} from '../data/projectSetup.js'
 import {parseDocumentRequest,validateDocumentProposal} from '../data/projectDocumentProposal.js'
 import {attachmentReadPresentation,ATTACHMENT_TYPES} from '../data/projectAttachmentReading.js'
 export default function ProjectAttachmentMessage({message,messages,onReview,canReview,onSetupReview}){
  const human=message.role==='assistant'?messages.find(x=>x.id===message.in_reply_to_message_id):message,document=parseDocumentRequest(human?.body)
+ const website=human?.body?.includes('[Anka Website layout request v1]')?parseWebsiteLayoutRequest(human.body):null
+ if(website){let layout=null;try{if(message.role==='assistant')layout=readWebsiteLayoutProposal(message.body,website.context.binding_key,['copy'])}catch{/* Ordinary clarification stays ordinary text. */}return <section aria-label="Website layout discussion">{message.role==='user'?<p>{website.text}</p>:layout?<><p>Website layout proposal · {layout.template}</p><p>{layout.sections.map(s=>`${s.component} · ${s.motion}${s.heading?' · '+s.heading:''}`).join('; ')}</p><p>Review this reply in Website design before Apply. No Website changes were saved.</p></>:<p>{message.body}</p>}<details><summary>Exact selected Website layout context</summary><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{website.context.instructions}</pre></details></section>}
  const setup=parseSetupRequest(human?.body)
  if(setup&&Array.isArray(setup.catalogue)&&typeof setup.needs==='string'){
   let proposal=null;try{if(message.role==='assistant'&&message.body.length<=22000){const p=JSON.parse(message.body);if(typeof p.explanation==='string'&&Array.isArray(p.items)&&p.items.length<=50&&p.items.every(x=>x&&Number.isInteger(x.service_index)&&setup.catalogue[x.service_index]&&(x.quantity===null||Number.isSafeInteger(x.quantity))&&typeof x.cadence==='string')&&Array.isArray(p.questions)&&p.questions.length<=8&&p.questions.every(x=>typeof x==='string'&&x.length<=300))proposal=p}}catch{}

@@ -245,3 +245,5 @@ Deno.test('all caller denials occur before resolver, admin, storage, or provider
   }
   assert.equal(callerCalls, 0)
 })
+
+Deno.test('native drafts cannot enter legacy export even with an approved status', async()=>{const rows=fixtures();Object.assign(rows.website_page_designs[0],{native_input_checksum:'a'.repeat(64)});await assertRejectsMessage(()=>preflightWordPressExportRequest(new FixtureClient(rows) as never,'user-1',{action:'export',website_page_design_id:'design-1'}),'Native Website drafts')})
