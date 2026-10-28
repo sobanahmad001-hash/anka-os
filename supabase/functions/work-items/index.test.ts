@@ -1,4 +1,4 @@
-import { normalizeWorkItemInput, marketingCalendarScheduleArgs, projectTaskProposalDecisionArgs, requireGenerateContentScope, selectedOrganizationId, staleWrite } from './index.ts'
+import { projectWorkCommandArgs, normalizeWorkItemInput, marketingCalendarScheduleArgs, projectTaskProposalDecisionArgs, requireGenerateContentScope, selectedOrganizationId, staleWrite } from './index.ts'
 
 function equal(actual: unknown, expected: unknown) {
   if (actual !== expected) throw new Error(`Expected ${String(expected)}, received ${String(actual)}`)
@@ -138,4 +138,17 @@ Deno.test('Marketing calendar schedule pins a verified actor and date-only typed
     startDate: '2026-09-23', dueDate: '2026-09-22' }, 'org', 'actor'), /date-only/)
   throws(() => marketingCalendarScheduleArgs({ projectId: 'p', engagementId: 'e', requestId: 'r',
     recordKind: 'engagement_work_item', recordId: 'w', dueDate: '2026-09-22' }, 'org', 'actor'), /Expected row version/)
+})
+
+Deno.test('project work command binds authenticated actor and selected organization, ignoring body identity', () => {
+ const args=projectWorkCommandArgs({projectId:'p',engagementId:'e',activeServiceId:'s',requestId:'r',actorId:'spoof',expectedActorId:'real-actor',organizationId:'spoof',command:{action:'create',title:'Reviewed',description:''}},'selected-org','real-actor')!
+ equal(args.p_actor_id,'real-actor');equal(args.p_organization_id,'selected-org');equal(args.p_request_id,'r')
+})
+Deno.test('project work command requires the exact selected service and original request', () => {
+ equal(projectWorkCommandArgs({projectId:'p',engagementId:'e',requestId:'r'},'org','actor'),null)
+ equal(projectWorkCommandArgs({projectId:'p',engagementId:'e',activeServiceId:'s'},'org','actor'),null)
+})
+
+Deno.test('project work command rejects a changed signed-in actor before dispatch', () => {
+ equal(projectWorkCommandArgs({projectId:'p',engagementId:'e',activeServiceId:'s',requestId:'r',expectedActorId:'old'},'org','new'),null)
 })

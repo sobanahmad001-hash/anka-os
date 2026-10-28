@@ -47,6 +47,9 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
   const approvedVersionIds = new Set((workspace.approvals || []).map(item => item.artifact_version_id))
   const qualityIssues = contentQualityConfigurationIssues(form)
   const counts = contentCounts(form.body)
+  const linkedWork = workspace.navigationWorkRecord?.kind === 'engagement_work_item' && workspace.navigationWorkRecord?.department_id === 'content' ? workspace.navigationWorkRecord : null
+  const linkedOutput = linkedWork && outputs.find(o => o.artifact.id === linkedWork.linked_artifact_id)
+  const linkedVersion = linkedWork && (workspace.versions || []).find(v => v.id === linkedWork.linked_artifact_version_id && v.artifact_id === linkedWork.linked_artifact_id)
   const currentOutput = continuation && outputs.find(item => item.artifact.id === continuation.artifactId)
   const staleContinuation = continuation && currentOutput?.latest.id !== continuation.baseVersionId
   const copySourceCurrent = copyPreview && outputs.some(({ artifact, latest }) =>
@@ -198,6 +201,7 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
         <p className="text-xs text-slate-500" aria-live="polite">{counts.words} words · {counts.characters} characters. Counts are factual and do not imply quality or approval.</p>
   </>
   return <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
+    {linkedWork && <section className="rounded-xl border border-slate-700 p-4 space-y-2"><h2>Original Content work: {linkedWork.title}</h2><p className="whitespace-pre-wrap">{linkedWork.description}</p>{linkedOutput && linkedVersion ? <><p>Linked exact version {linkedVersion.version_number}. Open it explicitly to continue the same saved output. A newer saved version must be selected deliberately before saving.</p><button type="button" className={SECONDARY} disabled={saving || stale} onClick={() => continueOutput(linkedOutput.artifact, linkedVersion)}>Open work's exact saved version</button></> : <p>This work has no compatible saved writer version. Prepare a draft, save it, then review its exact result link in Project Chat. Saving text does not complete this work.</p>}</section>}
     {compactLabels && <label className="block text-sm">Saved writer output
       <select aria-label="Saved writer output" className={INPUT + ' mt-2'} value={continuation?.artifactId || ''} disabled={saving || stale} onChange={event => { const item = outputs.find(output => output.artifact.id === event.target.value); if (item) continueOutput(item.artifact, item.latest); else resetDraft() }}>
         <option value="">Start a new text draft</option>
