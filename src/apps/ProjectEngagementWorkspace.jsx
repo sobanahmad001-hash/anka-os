@@ -213,7 +213,7 @@ export default function ProjectEngagementWorkspace() {
               <ProjectDiscussionPanel organizationId={activeOrganizationId} projectId={project.id} tasks={workspace.projectTasks} workstreams={workspace.workstreams} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={handleOrganizationAccessError} onApplied={load} />
             </section>
             <section className="project-ai-conversations" hidden={projectChatMode !== 'private'} aria-label="Project AI conversations">
-              <ContextConversationPanel directSend contextKind="project_team" projectId={project.id} label={`${project.name} · Project AI`} onProjectRequest={recordProjectRequest} onProjectChanged={load} onNavigationBusyChange={reportChatBusy} onDraftDirtyChange={reportChatDirty} />
+              <ContextConversationPanel directSend contextKind="project_team" projectId={project.id} label={`${project.name} · Project AI`} projectJourney={workspace} onProjectRequest={recordProjectRequest} onProjectChanged={load} onNavigationBusyChange={reportChatBusy} onDraftDirtyChange={reportChatDirty} />
             </section>
           </div>}
           {tab === 'project-tasks' && <ProjectTasks workspace={workspace} rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} />}

@@ -100,3 +100,13 @@ test('original Content work opens its exact linked output only by explicit selec
   assert.equal(f.calls[0].expected_parent_version_id,humanId)
   assert.equal(data.navigationWorkRecord.linked_artifact_version_id,humanId)
 })
+
+
+test('saved canonical Writer result returns its exact version to the originating journey after refresh', async t => {
+  const saved = { artifact_id: requestId, version: { id: assistantId, artifact_id: requestId, version_number: 2 } }, seen = []
+  const f = await mount(t, { studio: { saveArtifact: async () => saved }, input: { onSaved: result => seen.push(result) } })
+  await act(async () => props(elements(f.env.container, 'form')[0]).onSubmit({ preventDefault() {} }))
+  await f.click(f.button('Confirm unapproved draft'))
+  assert.equal(f.refreshes(), 1)
+  assert.deepEqual(seen, [saved])
+})

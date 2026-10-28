@@ -24,7 +24,7 @@ const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-
 const PRIMARY = 'rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50'
 const SECONDARY = 'rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-50'
 
-export default function ContentWriterEditor({ workspace, studio, saving, act, onRefresh, refreshing = false, stale = false, stageId, defaultLanguage = '', onDirtyChange, compactLabels = false }) {
+export default function ContentWriterEditor({ workspace, studio, saving, act, onRefresh, refreshing = false, stale = false, stageId, defaultLanguage = '', onDirtyChange, compactLabels = false, onSaved }) {
   const [form, setForm] = useState(() => newContentWriterDraft({ language: defaultLanguage }))
   const [preview, setPreview] = useState(null)
   const [attempted, setAttempted] = useState(false)
@@ -190,6 +190,7 @@ export default function ContentWriterEditor({ workspace, studio, saving, act, on
       data_classification: continuation ? currentOutput?.latest.data_classification || 'internal' : 'internal',
       ai_use_allowed: false,
     }), 'Writer output saved as one unapproved immutable version. Earlier versions and approvals remain intact.')
+    if (result) await onSaved?.(result)
     if (result && draftRevision.current === submittedRevision) resetDraft(true)
   }
 
