@@ -1,0 +1,14 @@
+.project-work-actions { min-width: 0; }
+.project-work-actions > summary { cursor: pointer; padding: .5rem 0; }
+.project-work-actions label { display: grid; gap: .4rem; min-width: 0; font-size: .9rem; }
+.project-work-actions input,
+.project-work-actions select,
+.project-work-actions textarea {
+ display: block; width: 100%; min-width: 0; box-sizing: border-box;
+ padding: .65rem .8rem; border: 1px solid var(--anka-line); border-radius: .65rem;
+ color: var(--anka-ink); background: var(--anka-surface, transparent); font: inherit;
+}
+.project-work-actions option { background: var(--anka-panel, Canvas); color: var(--anka-ink, CanvasText); }
+.project-work-actions textarea { resize: vertical; }
+.project-work-actions :is(input,select,textarea):focus-visible { outline: 2px solid var(--anka-violet); outline-offset: 2px; }
+.project-work-actions :disabled { opacity: .6; }

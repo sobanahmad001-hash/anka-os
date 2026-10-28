@@ -50,7 +50,7 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
     const recordQuery = navigation.workRecord?.kind === 'project_task'
       ? dataOrThrow(supabase.from('tasks').select('id, organization_id, project_id').eq('organization_id', organizationId).eq('id', navigation.workRecord.id).is('archived_at', null).maybeSingle(), options)
       : navigation.workRecord?.kind === 'engagement_work_item'
-        ? dataOrThrow(supabase.from('work_items').select('id, organization_id, project_id, engagement_id').eq('organization_id', organizationId).eq('id', navigation.workRecord.id).is('deleted_at', null).maybeSingle(), options)
+        ? dataOrThrow(supabase.from('work_items').select('id, organization_id, project_id, engagement_id, department_id, title, description, linked_artifact_id, linked_artifact_version_id, row_version').eq('organization_id', organizationId).eq('id', navigation.workRecord.id).is('deleted_at', null).maybeSingle(), options)
         : Promise.resolve(null)
     const [engagement, stages, artifacts, versions, approvals, contentTasks, contentServices, navigationRecord, organization, copyRoots] = await Promise.all([
       dataOrThrow(supabase.from('engagements').select('*, agency_clients(name), brands(name), projects!engagements_project_organization_fkey(client_id)').eq('organization_id', organizationId).eq('id', engagementId).single(), options),
@@ -87,7 +87,7 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
     const blogEventLinks = await listBlogEventLinks(organizationId, engagement.brand_id, options)
     return { engagement, stages, artifacts, versions, approvals, contentTasks, contentServices, copyRoots,
       navigationWorkRecord: navigationRecord ? {
-        kind: navigation.workRecord.kind, id: navigationRecord.id,
+        ...navigationRecord, kind: navigation.workRecord.kind, id: navigationRecord.id,
         organizationId: navigationRecord.organization_id, projectId: navigationRecord.project_id,
         engagementId: navigationRecord.engagement_id,
       } : null,

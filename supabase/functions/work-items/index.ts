@@ -5,7 +5,7 @@ type Json = Record<string, unknown>
 
 const ACTIONS = new Set([
   'save', 'delete', 'add_dependency', 'remove_dependency',
-  'acknowledge_automation_flag', 'generate_content_tasks', 'move',
+  'acknowledge_automation_flag', 'generate_content_tasks', 'project_work_command', 'move',
   'update_project_task', 'transition_task', 'decide_project_task_change_proposal', 'set_timezone', 'schedule_marketing_calendar',
 ])
 const WORK_ITEM_TYPES = new Set(['task', 'bug', 'request'])
@@ -31,6 +31,14 @@ function text(value: unknown, max = 20000) {
 
 function optionalId(value: unknown) {
   return text(value, 80) || null
+}
+
+export function projectWorkCommandArgs(body: Json, organizationId: string, actorId: string) {
+  const projectId = optionalId(body.projectId), engagementId = optionalId(body.engagementId)
+  const serviceId = optionalId(body.activeServiceId), requestId = optionalId(body.requestId)
+  if (!projectId || !engagementId || !serviceId || !requestId || body.expectedActorId !== actorId) return null
+  return {p_organization_id: organizationId, p_project_id: projectId, p_engagement_id: engagementId,
+    p_active_service_id: serviceId, p_request_id: requestId, p_command: body.command, p_actor_id: actorId}
 }
 
 export function projectTaskProposalDecisionArgs(body: Json, organizationId: string, actorId: string) {
@@ -184,6 +192,13 @@ export async function handleRequest(request: Request) {
     const { admin, user, userClient } = await requireContext(request)
     const organizationId = selectedOrganizationId(body)
     if (!organizationId) return response({ error: 'Active organization is required' }, 400)
+    if (action === 'project_work_command') {
+      const args = projectWorkCommandArgs(body, organizationId, user.id)
+      if (!args) return response({error: 'Exact project, engagement, service and original request required'}, 400)
+      const {data, error} = await admin.rpc('apply_project_work_command', args)
+      if (error) throw error
+      return response({data})
+    }
     if (action === 'schedule_marketing_calendar') {
       const args = marketingCalendarScheduleArgs(body, organizationId, user.id)
       const { data, error } = await admin.rpc('schedule_marketing_calendar_entry', args)

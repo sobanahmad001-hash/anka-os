@@ -37,7 +37,7 @@ async function mount(t, overrides = {}) {
   const click = node => act(async () => props(node).onClick({ preventDefault() {} }))
   const field = label => elements(env.container, 'label').find(node => node.textContent.startsWith(label))
   const textarea = label => elements(field(label), 'textarea')[0]
-  await render(); await click(button('Continue from exact v1'))
+  await render(); if (!overrides.skipContinue) await click(button('Continue from exact v1'))
   return { env, calls, data, studio, states, input, render, button, click, textarea, organization: () => organization, setOrganization: value => { organization = value }, refreshes: () => refreshes }
 }
 test('canonical side writer applies only a selected range and appends the exact unapproved parent version once', async t => {
@@ -83,4 +83,20 @@ test('aborted or foreign scope rejects retained saves before the canonical repos
   await act(async () => confirm())
   assert.equal(f.calls.length, 0)
   assert.match(f.env.container.textContent, /unavailable in this context/)
+})
+
+test('original Content work opens its exact linked output only by explicit selection', async t => {
+  const data = workspace()
+  data.navigationWorkRecord = {kind:'engagement_work_item',id:'original-work',department_id:'content',title:'Original request',description:'Reviewed brief',linked_artifact_id:requestId,linked_artifact_version_id:humanId}
+  const f = await mount(t,{input:{workspace:data},skipContinue:true})
+  assert.match(f.env.container.textContent,/Original Content work: Original request/)
+  assert.equal(props(f.textarea('Draft text')).value,'')
+  assert.equal(f.calls.length,0)
+  await f.click(f.button("Open work's exact saved version"))
+  assert.equal(props(f.textarea('Draft text')).value,'Keep alpha and omega.')
+  await act(async()=>props(elements(f.env.container,'form')[0]).onSubmit({preventDefault(){}}))
+  await f.click(f.button('Confirm unapproved draft'))
+  assert.equal(f.calls[0].artifact_id,requestId)
+  assert.equal(f.calls[0].expected_parent_version_id,humanId)
+  assert.equal(data.navigationWorkRecord.linked_artifact_version_id,humanId)
 })
