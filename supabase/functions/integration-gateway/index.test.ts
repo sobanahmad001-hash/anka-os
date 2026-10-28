@@ -39,6 +39,7 @@ function fixture(options: {
   engagementMappings?: Array<Record<string, unknown>>
   connections?: Array<Record<string, unknown>>
   events?: Array<Record<string, unknown>>
+  verificationStatus?: number
   verificationBody?: Record<string, unknown>
 } = {}) {
   const calls: Array<{ client: string; table?: string; operation: string; value?: unknown }> = []
@@ -48,11 +49,13 @@ function fixture(options: {
     id: '44444444-4444-4444-8444-444444444444',
     organization_id: ORG_B,
     provider: options.provider || 'openai',
+    base_url: options.provider === 'wordpress' ? 'https://staging.example.test' : null,
     status: options.connectionStatus || 'verified',
     archived_at: null,
     secret_name: options.verificationBody ? 'ANKA_OPENAI_FIXTURE' : null,
     display_name: 'Organization B OpenAI',
     public_config: {
+      username: options.provider === 'wordpress' ? 'synthetic-agent' : '',
       model_id: 'gpt-default',
       verified_model_ids: options.verifiedModelIds || ['gpt-default', 'gpt-other'],
     },
@@ -152,7 +155,7 @@ function fixture(options: {
     env: name => name === 'ANKA_OPENAI_FIXTURE' ? 'fixture-secret' : undefined,
     fetcher: async () => {
       providerCalls++
-      return Response.json(options.verificationBody || {})
+      return Response.json(options.verificationBody || {}, { status: options.verificationStatus || 200 })
     },
   })
   return { request, adminClient, connection, calls, rpcCalls, providerCalls: () => providerCalls }
@@ -602,3 +605,18 @@ for (const action of ['list_workshop_execution', 'save_workshop_execution', 'rec
     assertEquals(leader.rpcCalls.length, 0)
   })
 }
+
+// WordPress auth diagnostics use synthetic provider responses only.
+for (const wordpressCode of ['application_passwords_disabled','rest_not_logged_in','unrecognized-private-value']) Deno.test(`WordPress test persists only a known authentication code: ${wordpressCode}`,async()=>{
+  const f=fixture({provider:'wordpress',verificationStatus:401,verificationBody:{code:wordpressCode,message:'synthetic-private-value',data:{private:'synthetic-private-value'}}})
+  const response=await f.request({action:'test',organization_id:ORG_B,connection_id:f.connection.id})
+  assertEquals(response.status,502)
+  const result=await response.json()
+  assertEquals(result.code,'HTTP_401')
+  assertEquals(result.wordpress_code,wordpressCode==='unrecognized-private-value'?undefined:wordpressCode)
+  assertEquals(JSON.stringify(result).includes('synthetic-private-value'),false)
+  const event=f.calls.find(c=>c.table==='integration_events'&&c.operation==='insert')?.value as Record<string,unknown>
+  assertEquals(event.error_code,'HTTP_401')
+  assertEquals(event.metadata,wordpressCode==='unrecognized-private-value'?{}:{wordpress_error_code:wordpressCode})
+  assertEquals(f.providerCalls(),1)
+})

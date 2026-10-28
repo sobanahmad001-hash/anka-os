@@ -217,6 +217,9 @@ export default function Settings() {
         : `${connectorLabel(connection.provider)} verified in ${result.latency_ms} ms.`)
       await loadConnections()
     } catch (testError) {
+      // A failed server test also persists its connection status. Refresh before
+      // restoring the error because loading connections clears transient errors.
+      await loadConnections()
       setError(testError.message)
     } finally {
       setTestingId('')
