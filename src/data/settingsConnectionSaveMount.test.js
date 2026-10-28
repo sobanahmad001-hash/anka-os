@@ -156,12 +156,12 @@ function nodes(node, predicate) { return [...(predicate(node) ? [node] : []), ..
 function props(node) { return node[Object.keys(node).find(key => key.startsWith('__reactProps$'))] }
 function input(environment, label) { return nodes(environment.container, n => n.tagName === 'LABEL' && n.textContent.startsWith(label)).flatMap(n => nodes(n, child => child.tagName === 'INPUT'))[0] }
 async function flush() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) }) }
-async function mount(t, reply, rows = []) {
+async function mount(t, reply, rows = [], testReply = null) {
   const environment = mountedEnvironment()
   const old = Object.fromEntries(['document','window','Event','Node','HTMLElement','IS_REACT_ACT_ENVIRONMENT','__saveHarness','fetch'].map(k => [k,globalThis[k]]))
   const calls=[]
   Object.assign(globalThis, {document:environment.document, window:environment.window, Event:TestEvent, Node:TestNode, HTMLElement:TestElement, IS_REACT_ACT_ENVIRONMENT:true,
-    fetch:()=>{throw Error('No network')}, __saveHarness:{org:ORG,calls,reply,rows}})
+    fetch:()=>{throw Error('No network')}, __saveHarness:{org:ORG,calls,reply,rows,testReply,testCalls:0,listCalls:0}})
   const server=await createServer({server:{middlewareMode:true},appType:'custom',logLevel:'silent',resolve:{alias:{'react-router-dom':'/src/data/__settings_router_stub.js'}},plugins:[{name:'save-stubs',enforce:'pre',resolveId(id){
     if(id.endsWith('OrganizationContext.jsx'))return '/save-org'
     if(id.endsWith('integrationRepository.js'))return '/save-repo'
@@ -171,7 +171,7 @@ async function mount(t, reply, rows = []) {
     if(id==='/save-org')return `export const useOrganization=()=>({activeOrganizationId:globalThis.__saveHarness.org,activeMembership:{role:'system_owner'},scopeRevision:1})`
     if(id==='/save-child')return 'export default function Child(){return null}'
     if(id==='/save-router')return 'const p=new URLSearchParams(); export const useSearchParams=()=>[p,()=>{}]'
-    if(id==='/save-repo')return `import {saveConnectionMetadata} from '/src/data/integrationSave.js';export const integrations={listForOrganization:async(_org,_department,options)=>{globalThis.__saveHarness.listOptions=options;return {connections:globalThis.__saveHarness.rows,can_manage:true}},listBrands:async()=>[],listModelAllowlist:async()=>({organization_id:globalThis.__saveHarness.org,connections:[],can_manage:true}),saveOrganizationTextConnection:(org,body)=>saveConnectionMetadata(async p=>{globalThis.__saveHarness.calls.push(p);return globalThis.__saveHarness.reply(p)}, {...body,organization_id:org,organization_only:true,department_ids:[]}),save:()=>{throw Error('Wrong save path')}}`
+    if(id==='/save-repo')return `import {saveConnectionMetadata} from '/src/data/integrationSave.js';export const integrations={listForOrganization:async(_org,_department,options)=>{globalThis.__saveHarness.listOptions=options;globalThis.__saveHarness.listCalls++;return {connections:globalThis.__saveHarness.rows,can_manage:true}},listBrands:async()=>[],listModelAllowlist:async()=>({organization_id:globalThis.__saveHarness.org,connections:[],can_manage:true}),saveOrganizationTextConnection:(org,body)=>saveConnectionMetadata(async p=>{globalThis.__saveHarness.calls.push(p);return globalThis.__saveHarness.reply(p)}, {...body,organization_id:org,organization_only:true,department_ids:[]}),testForOrganization:async(org,id)=>{globalThis.__saveHarness.testCalls++;return globalThis.__saveHarness.testReply(org,id)},save:()=>{throw Error('Wrong save path')}}`
   }}]})
   const root=createRoot(environment.container)
   t.after(async()=>{await act(async()=>root.unmount());await server.close();Object.assign(globalThis,old)})
@@ -225,4 +225,26 @@ test('disabled reserved connection is visible with original department scope and
   assert.equal(nodes(retained, n => n.tagName === 'BUTTON').length, 0)
   assert.match(m.environment.container.textContent, /0 configured · 1 retained/)
   assert.equal(m.calls.length, 0)
+})
+
+for (const [label,status,message] of [
+  ['provider authentication failure','error','Connection test failed'],
+  ['missing server secret','disconnected','The named Edge Function secret is not configured'],
+]) test(`failed connection test refreshes persisted ${label} status and retains the error`, async t => {
+  const row={id:ID,provider:'wordpress',display_name:'Synthetic staging',base_url:'https://staging.example.test',status:'configured',secret_configured:true,department_ids:['development']}
+  const m=await mount(t,()=>{throw Error('No save')},[row],async(org,id)=>{
+    assert.equal(org,ORG);assert.equal(id,ID)
+    globalThis.__saveHarness.rows=[{...row,status}]
+    throw Error(message)
+  })
+  const before=globalThis.__saveHarness.listCalls
+  const button=nodes(m.environment.container,n=>n.tagName==='BUTTON'&&n.textContent==='Test connection')[0]
+  await act(async()=>props(button).onClick())
+  assert.equal(globalThis.__saveHarness.testCalls,1)
+  assert.equal(globalThis.__saveHarness.listCalls,before+1)
+  assert.ok(m.environment.container.textContent.includes(message))
+  const statusLabel=status==='error'?'Error':'Disconnected'
+  assert.ok(nodes(m.environment.container,n=>n.tagName==='SPAN'&&n.textContent===statusLabel).length)
+  assert.equal(nodes(m.environment.container,n=>n.tagName==='SPAN'&&n.textContent==='Configured').length,0)
+  assert.equal(m.calls.length,0)
 })

@@ -1,3 +1,4 @@
+import { testConnectionMetadata } from './integrationConnectionTest.js'
 import { saveConnectionMetadata } from './integrationSave.js'
 import { supabase } from '../lib/supabase.js'
 
@@ -40,10 +41,11 @@ export const integrations = Object.freeze({
     body => supabase.functions.invoke('integration-gateway', { body }), {
       ...connection, action: 'save', organization_id: organizationId, organization_only: true, department_ids: [],
     }),
-  test: (connectionId) => invoke({ action: 'test', connection_id: connectionId }),
-  testForOrganization: (organizationId, connectionId, options = {}) => invoke({
-    action: 'test', organization_id: organizationId, connection_id: connectionId,
-  }, options),
+  test: (connectionId) => testConnectionMetadata(body => supabase.functions.invoke('integration-gateway', { body }), { action: 'test', connection_id: connectionId }),
+  testForOrganization: (organizationId, connectionId, options = {}) => testConnectionMetadata(
+    body => supabase.functions.invoke('integration-gateway', { body, signal: options.signal }), {
+      action: 'test', organization_id: organizationId, connection_id: connectionId,
+    }),
   disable: (connectionId) => invoke({ action: 'disable', connection_id: connectionId }),
   disableForOrganization: (organizationId, connectionId, options = {}) => invoke({
     action: 'disable', organization_id: organizationId, connection_id: connectionId,

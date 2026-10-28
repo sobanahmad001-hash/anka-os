@@ -158,6 +158,28 @@ function safeHttpsBaseUrl(value: unknown) {
   return url.toString().replace(/\/$/, '')
 }
 
+const WORDPRESS_AUTH_CODES = new Set(['rest_not_logged_in', 'invalid_username', 'invalid_email', 'incorrect_password', 'application_passwords_disabled', 'application_passwords_disabled_for_user'])
+async function wordpressAuthFailureCode(response: Response) {
+  if (![401, 403].includes(response.status) || !response.headers.get('content-type')?.includes('application/json') || !response.body) return null
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      size += value.byteLength
+      if (size > 4096) { await reader.cancel(); return null }
+      chunks.push(value)
+    }
+    const bytes = new Uint8Array(size)
+    let offset = 0
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
+    const code = JSON.parse(new TextDecoder().decode(bytes))?.code
+    return typeof code === 'string' && WORDPRESS_AUTH_CODES.has(code) ? code : null
+  } catch { return null } finally { reader.releaseLock() }
+}
+
 export async function testConnection(connection: Record<string, unknown>, secret: string, fetcher: typeof fetch = fetch) {
   const provider = String(connection.provider)
   const config = connection.public_config as Record<string, string>
@@ -264,7 +286,8 @@ export async function testConnection(connection: Record<string, unknown>, secret
   }
 
   if (!response.ok) {
-    throw Object.assign(new Error(`${provider} returned HTTP ${response.status}`), { code: `HTTP_${response.status}` })
+    const wordpressCode = provider === 'wordpress' ? await wordpressAuthFailureCode(response) : null
+    throw Object.assign(new Error(`${provider} returned HTTP ${response.status}`), { code: `HTTP_${response.status}`, wordpressCode })
   }
   return { latency_ms: Date.now() - startedAt, summary }
 }
@@ -671,6 +694,8 @@ export async function handleRequest(req: Request, dependencies: {
         return json({ success: true, summary: result.summary, latency_ms: result.latency_ms })
       } catch (testError) {
         const code = testError && typeof testError === 'object' && 'code' in testError ? String(testError.code) : 'CONNECTION_FAILED'
+        const rawWordPressCode = testError && typeof testError === 'object' && 'wordpressCode' in testError ? testError.wordpressCode : null
+        const wordpressCode = connection.provider === 'wordpress' && typeof rawWordPressCode === 'string' && WORDPRESS_AUTH_CODES.has(rawWordPressCode) ? rawWordPressCode : null
         await adminClient.from('integration_connections').update({
           status: 'error', last_checked_at: new Date().toISOString(), last_check_status: 'failed',
         }).eq('id', connection.id).eq('organization_id', connectionOrganizationId)
@@ -683,9 +708,9 @@ export async function handleRequest(req: Request, dependencies: {
           provider: connection.provider,
           latency_ms: Date.now() - startedAt,
           error_code: code,
-          metadata: {},
+          metadata: wordpressCode ? { wordpress_error_code: wordpressCode } : {},
         })
-        return json({ error: 'Connection test failed', code }, 502)
+        return json({ error: 'Connection test failed', code, ...(wordpressCode ? { wordpress_code: wordpressCode } : {}) }, 502)
       }
     }
 
