@@ -95,11 +95,15 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
       organizationSettings: organization?.settings || {} }
   },
 
-  async loadLibrary() {
-    const artifacts = await dataOrThrow(supabase.from('artifacts')
+  async loadLibrary(scope = {}) {
+    let artifactQuery = supabase.from('artifacts')
       .select('id, organization_id, brand_id, engagement_id, engagement_stage_instance_id, artifact_type, title, created_by, created_at, engagements!artifacts_engagement_project_organization_fkey!inner(id, name, project_id, organization_id, projects!engagements_project_organization_fkey(id, name))')
       .eq('organization_id', organizationId).in('artifact_type', CONTENT_WORKSPACE_TYPES)
-      .order('created_at', { ascending: false }), options)
+      .order('created_at', { ascending: false })
+    if (scope.engagementId) artifactQuery = artifactQuery.eq('engagement_id', scope.engagementId)
+    if (scope.artifactId) artifactQuery = artifactQuery.eq('id', scope.artifactId)
+    const artifacts = await dataOrThrow(artifactQuery, options)
+    if (scope.projectId && artifacts.some(a => { const e = Array.isArray(a.engagements) ? a.engagements[0] : a.engagements; return e?.project_id !== scope.projectId || e?.organization_id !== organizationId })) throw Object.assign(new Error('Exact project Content scope changed'), { membershipMismatch: true })
     if (!artifacts.length) return {
       artifacts: [], versions: [], approvals: [], approvalRequests: [], comments: [], profiles: [], sourceVersions: [],
       downstreamServices: [], downstreamWorkstreams: [], downstreamTasks: [], downstreamWorkItems: [],

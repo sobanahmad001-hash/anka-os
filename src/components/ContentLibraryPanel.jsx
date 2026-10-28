@@ -38,7 +38,7 @@ function contentValue(value) {
   return <span className="whitespace-pre-wrap">{String(value)}</span>
 }
 
-export default function ContentLibraryPanel({ repository, initialArtifactId = '', initialVersionId = '' }) {
+export default function ContentLibraryPanel({ repository, initialArtifactId = '', initialVersionId = '', compact = false, externalBusy = false }) {
   const [data, setData] = useState(null)
   const [filters, setFilters] = useState({ query: '', type: '', projectId: '', creatorId: '', reviewStage: '' })
   const [artifactId, setArtifactId] = useState(initialArtifactId)
@@ -48,7 +48,8 @@ export default function ContentLibraryPanel({ repository, initialArtifactId = ''
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const [stale, setStale] = useState(false)
+  const [snapshotStale, setStale] = useState(false)
+  const stale = snapshotStale || externalBusy
   const loadSequence = useRef(0)
   const mounted = useRef(true)
   const dataRef = useRef(data)
@@ -127,7 +128,7 @@ export default function ContentLibraryPanel({ repository, initialArtifactId = ''
   if (error && !data) return <div className="rounded-2xl border border-red-900/60 bg-red-950/30 p-6 text-sm text-red-300"><p>{error}</p><button type="button" onClick={load} className={`${SECONDARY} mt-4`}>Try again</button></div>
 
   return <section className="space-y-6">
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+    {!compact && <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
       <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-400">Content B06a</p><h2 className="mt-1 text-2xl font-semibold">Content library and review</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Find saved Content artifacts in your current authorized organization, open an exact immutable version, inspect its recorded sources, and use the existing review route. Submission is not approval.</p><p className="mt-2 max-w-3xl text-xs leading-5 text-amber-300">Owner filtering is unavailable because canonical artifacts do not record an owner. Creator is available as a factual filter; no ownership has been inferred.</p></div><button type="button" onClick={load} disabled={loading} className={SECONDARY}>{loading ? 'Refreshing...' : 'Refresh'}</button></div>
       <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <label className="text-xs text-slate-500">Search<input className={`${INPUT} mt-1`} value={filters.query} onChange={event => updateFilter('query', event.target.value)} placeholder="Title, project, owner" /></label>
@@ -136,16 +137,16 @@ export default function ContentLibraryPanel({ repository, initialArtifactId = ''
         <label className="text-xs text-slate-500">Creator<select className={`${INPUT} mt-1`} value={filters.creatorId} onChange={event => updateFilter('creatorId', event.target.value)}><option value="">All creators</option>{creators.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
         <label className="text-xs text-slate-500">Review state<select className={`${INPUT} mt-1`} value={filters.reviewStage} onChange={event => updateFilter('reviewStage', event.target.value)}><option value="">All states</option>{Object.entries(STAGE).map(([id, [label]]) => <option key={id} value={id}>{label}</option>)}</select></label>
       </div>
-    </div>
+    </div>}
 
     {error && data && <div className="rounded-2xl border border-red-900/60 bg-red-950/30 p-4 text-sm text-red-300"><p>{error}</p><p className="mt-1 text-xs text-red-200/80">The displayed library snapshot may be stale. Review and approval actions are unavailable until a refresh succeeds.</p><button type="button" onClick={load} className={`${SECONDARY} mt-3`}>Try again</button></div>}
 
-    {exactLinkUnavailable ? <div role="alert" className="rounded-2xl border border-red-900/60 bg-red-950/30 p-6"><h3 className="font-semibold text-red-200">Exact Content link unavailable</h3><p className="mt-2 text-sm leading-6 text-red-300">The requested artifact and version pair is not available in the current authorized organization. No different artifact or version has been substituted.</p></div> : !entries.length ? <div className="rounded-2xl border border-dashed border-slate-700 p-12 text-center text-sm text-slate-500">No saved Content artifacts are visible in this organization.</div> : !visible.length ? <div className="rounded-2xl border border-dashed border-slate-700 p-12 text-center text-sm text-slate-500">No Content artifacts match these filters. The library has not treated this as a loading error.</div> : <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
-      <div className="space-y-3">{visible.map(entry => { const itemStage = STAGE[entry.reviewStage] || STAGE.draft; return <button type="button" key={entry.artifact.id} onClick={() => { setFollowExactLink(false); setArtifactId(entry.artifact.id); setVersionId(entry.latest?.id || ''); setComparisonOpen(false) }} className={`w-full rounded-2xl border p-4 text-left ${selectedEntry?.artifact.id === entry.artifact.id ? 'border-amber-500/60 bg-amber-950/20' : 'border-slate-800 bg-slate-900/70 hover:border-slate-700'}`}>
+    {exactLinkUnavailable ? <div role="alert" className="rounded-2xl border border-red-900/60 bg-red-950/30 p-6"><h3 className="font-semibold text-red-200">Exact Content link unavailable</h3><p className="mt-2 text-sm leading-6 text-red-300">The requested artifact and version pair is not available in the current authorized organization. No different artifact or version has been substituted.</p></div> : !entries.length ? <div className="rounded-2xl border border-dashed border-slate-700 p-12 text-center text-sm text-slate-500">No saved Content artifacts are visible in this organization.</div> : !visible.length ? <div className="rounded-2xl border border-dashed border-slate-700 p-12 text-center text-sm text-slate-500">No Content artifacts match these filters. The library has not treated this as a loading error.</div> : <div className={compact ? "space-y-3" : "grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]"}>
+      {!compact && <div className="space-y-3">{visible.map(entry => { const itemStage = STAGE[entry.reviewStage] || STAGE.draft; return <button type="button" key={entry.artifact.id} onClick={() => { setFollowExactLink(false); setArtifactId(entry.artifact.id); setVersionId(entry.latest?.id || ''); setComparisonOpen(false) }} className={`w-full rounded-2xl border p-4 text-left ${selectedEntry?.artifact.id === entry.artifact.id ? 'border-amber-500/60 bg-amber-950/20' : 'border-slate-800 bg-slate-900/70 hover:border-slate-700'}`}>
         <div className="flex items-start justify-between gap-3"><h3 className="font-semibold text-white">{entry.artifact.title}</h3><span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase ${itemStage[1]}`}>{itemStage[0]}</span></div>
         <p className="mt-2 text-xs text-slate-400">{typeLabel(entry.artifact.artifact_type)} - {entry.latest ? `v${entry.latest.version_number}` : 'No saved version'}</p>
         <p className="mt-2 text-[11px] text-slate-600">{entry.project?.name || entry.engagement?.name || 'Project unavailable'} - created by {displayName(entry.creator)}</p>
-      </button> })}</div>
+      </button> })}</div>}
 
       {selectedEntry && selectedVersion && <div>
         <article className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">

@@ -3,13 +3,14 @@ import './projectWorkActions.css'
 import {supabase} from '../lib/supabase.js'
 import {createProjectWorkCommandRepository} from '../data/projectWorkCommandRepository.js'
 const defaultRepository=createProjectWorkCommandRepository(supabase)
-export default function ProjectWorkActions({context,busy=false,onChanged,repository=defaultRepository}){
+export default function ProjectWorkActions({context,busy=false,onChanged,onApplied,proposal=null,repository=defaultRepository}){
  const key=[context.organizationId,context.projectId,context.engagementId].join(':')
- return <Actions key={key} {...{context,busy,onChanged,repository}}/>
+ return <Actions key={key} {...{context,busy,onChanged,onApplied,proposal,repository}}/>
 }
-function Actions({context,busy,onChanged,repository}){
+function Actions({context,busy,onChanged,onApplied,proposal,repository}){
  const [open,setOpen]=useState(false),[actor,setActor]=useState(''),[service,setService]=useState(''),[title,setTitle]=useState(''),[description,setDescription]=useState(''),[work,setWork]=useState(''),[version,setVersion]=useState(''),[review,setReview]=useState(null),[pending,setPending]=useState(null),[working,setWorking]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('')
  const alive=useRef(false),flight=useRef(false),latest=useRef(null)
+ useEffect(()=>{if(proposal&&!flight.current&&!pending){setTitle(proposal.title);setDescription(proposal.description);setReview(null);setService('')}},[proposal,pending])
  const scope={organizationId:context.organizationId,projectId:context.projectId,engagementId:context.engagementId,activeServiceId:service,actorId:actor}
  const storageKey=actor?`anka:project-work:${scope.organizationId}:${scope.projectId}:${actor}`:''
  latest.current={review,busy,pending,service,work,version}
@@ -28,7 +29,7 @@ function Actions({context,busy,onChanged,repository}){
   setReview({scope:{...scope},command,label:action==='create'?title.trim():versions.find(v=>v.id===version).label})
  }
  async function run(fn){if(flight.current||busy)return;flight.current=true;setWorking(true);setError('');try{await fn()}catch(e){if(alive.current)setError(e.message)}finally{flight.current=false;if(alive.current)setWorking(false)}}
- async function apply(){const current=latest.current;if(!review||current.review!==review||current.busy||current.pending)return;const id=crypto.randomUUID();sessionStorage.setItem(storageKey,id);setPending(id);await repository.apply(review.scope,id,review.command);sessionStorage.removeItem(storageKey);if(!alive.current)return;setPending(null);setReview(null);setNotice('Reviewed work action saved. Ownership and approvals retain their existing review controls.');await onChanged?.()}
+ async function apply(){const current=latest.current;if(!review||current.review!==review||current.busy||current.pending)return;const id=crypto.randomUUID();sessionStorage.setItem(storageKey,id);setPending(id);const result=await repository.apply(review.scope,id,review.command);sessionStorage.removeItem(storageKey);if(!alive.current)return;setPending(null);setReview(null);setNotice('Reviewed work action saved. Ownership and approvals retain their existing review controls.');await onChanged?.();onApplied?.(result)}
  async function recover(){const result=await repository.recover(scope,pending);if(!result)throw Error('Original outcome remains unknown');sessionStorage.removeItem(storageKey);if(!alive.current)return;setPending(null);setReview(null);setNotice(result.status==='not_applied'?'Original command was not applied. Review a fresh action before saving.':'Original work action recovered without another write.');await onChanged?.()}
  const disabled=busy||working||Boolean(pending)||!actor
  return <details className="project-work-actions" onToggle={e=>setOpen(e.currentTarget.open)}><summary>Create work or connect a Content result</summary>{open&&<div className="mt-3 space-y-3">

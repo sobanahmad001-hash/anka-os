@@ -22,14 +22,14 @@ const MODEL_READINESS_MESSAGES = {
   price_unavailable: 'A fresh verified price for this exact model is unavailable.',
 }
 
-export default function ContextConversationPanel({ contextKind, departmentId = '', projectId = '', label = 'Conversation', workshopLayout = false, initialConversation = null, hideConversationList = false, onConversationListChange, onNavigationBusyChange, onDraftDirtyChange, directSend = false, designWorkspace, conversationLayout = false, onProjectRequest, onProjectChanged }) {
+export default function ContextConversationPanel({ contextKind, departmentId = '', projectId = '', label = 'Conversation', workshopLayout = false, initialConversation = null, hideConversationList = false, onConversationListChange, onNavigationBusyChange, onDraftDirtyChange, directSend = false, designWorkspace, conversationLayout = false, onProjectRequest, onProjectChanged, projectJourney }) {
   const { user } = useAuth()
   const { activeOrganizationId, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
   if (!user?.id || !activeOrganizationId || requestSignal.aborted) return null
   const identity = [user.id, activeOrganizationId, scopeRevision, contextKind, departmentId, projectId, initialConversation?.id || ''].join(':')
   if (directSend) return <DirectContextChat key={identity} contextKind={contextKind} departmentId={departmentId}
     projectId={projectId} label={label} organizationId={activeOrganizationId} user={user} signal={requestSignal}
-    designWorkspace={designWorkspace} conversationLayout={conversationLayout} onProjectRequest={onProjectRequest} onProjectChanged={onProjectChanged} onAccessError={handleOrganizationAccessError} initialConversation={initialConversation}
+    designWorkspace={designWorkspace} conversationLayout={conversationLayout} onProjectRequest={onProjectRequest} onProjectChanged={onProjectChanged} projectJourney={projectJourney} onAccessError={handleOrganizationAccessError} initialConversation={initialConversation}
     onConversationListChange={onConversationListChange} onNavigationBusyChange={onNavigationBusyChange} onDraftDirtyChange={onDraftDirtyChange} />
   return <ScopedContextConversation key={identity} contextKind={contextKind} departmentId={departmentId}
     projectId={projectId} label={label} organizationId={activeOrganizationId} user={user} signal={requestSignal}
