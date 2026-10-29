@@ -31,7 +31,7 @@ export default function WorkshopTabs({ departmentId, activeTab, onChange, tabs =
       aria-label="Department workspace sections"
       aria-orientation="horizontal"
       role="tablist"
-      className="mt-6 flex gap-1 overflow-x-auto border-b border-slate-800"
+      className="ux-workshop-tabs mt-6 flex gap-1 border-b"
     >
       {tabs.map(([id, label], index) => {
         const selected = activeTab === id

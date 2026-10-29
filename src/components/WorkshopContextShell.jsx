@@ -39,7 +39,7 @@ export default function WorkshopContextShell({
 
   return (
     <div className="space-y-6">
-      <aside aria-label="Workshop navigation context" aria-live="polite" className={`rounded-2xl border p-4 ${usable ? 'border-violet-500/25 bg-violet-500/[0.07]' : 'border-amber-500/30 bg-amber-500/[0.08]'}`}>
+      <aside aria-label="Workshop navigation context" aria-live="polite" className="ux-workshop-context rounded-2xl border p-4">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-violet-300">Shared Workshop context</p>

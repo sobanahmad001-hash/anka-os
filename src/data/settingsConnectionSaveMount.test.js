@@ -218,7 +218,7 @@ for(const [label,reply,expected] of [
 test('disabled reserved connection is visible with original department scope and no action controls', async t => {
   const m = await mount(t, () => { throw Error('No writes') }, [{ id: ID, provider: 'openai', display_name: 'OpenAI Sol Private', status: 'disabled', archived_at: '2026-10-05T16:40:00Z', organization_level: false, department_ids: ['content', 'design', 'development', 'marketing'] }])
   assert.equal(globalThis.__saveHarness.listOptions.includeRetained, true)
-  const retained = nodes(m.environment.container, n => n.tagName === 'DETAILS')[0]
+  const retained = nodes(m.environment.container, n => n.tagName === 'DETAILS' && n.textContent.includes('Disabled or archived connections'))[0]
   assert.ok(retained); assert.match(retained.textContent, /OpenAI Sol Private/)
   assert.match(retained.textContent, /Original department scope: Content, Design, Development, Marketing/)
   assert.match(retained.textContent, /Name reserved/)

@@ -46,7 +46,7 @@ test('mounted project defaults to Chat, preserves explicit tabs and rejects late
   const selected = () => propsOf(nodes(env.container).find(node => propsOf(node)?.role === 'tabpanel'))?.['aria-labelledby']
   await render()
   assert.equal(selected(), 'project-tab-discussion')
-  assert.deepEqual(nodes(env.container).filter(node=>propsOf(node)?.role==='tab').map(node=>node.textContent),['Chat','Overview','Work','Files & Outputs'])
+  assert.deepEqual(nodes(env.container).filter(node=>propsOf(node)?.role==='tab').map(node=>node.textContent),['Overview','Chat','Work','Files & outputs'])
   assert.match(env.container.textContent, /ProjectDiscussionPanel.jsx:org-a:project-a/)
   assert.match(env.container.textContent, /ContextConversationPanel.jsx::project-a:project_team/)
   for (const [tab, primary] of [['overview', 'overview'], ['discussion', 'discussion'], ['work', 'work'],

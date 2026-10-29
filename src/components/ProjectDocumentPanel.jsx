@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import AttachmentUseStatus from './AttachmentUseStatus.jsx'
 import { departmentChat } from '../data/departmentChatRepository.js'
 
 const types = { txt: 'text/plain', md: 'text/markdown', pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  }
@@ -84,6 +85,7 @@ export default function ProjectDocumentPanel({ conversationKey, conversationId, 
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     <ul>{rows.filter(a => a.status !== 'revoked').map(row => <li key={row.id}>
       <label><input type="checkbox" checked={selectedIds.includes(row.id)} disabled={busy || row.status !== 'ready'} onChange={e => select(row, e.target.checked)} />{row.original_name}</label>
+      <AttachmentUseStatus status={row.status} selected={selectedIds.includes(row.id)} referenceOnly={row.reference_only}/>
       <span>{row.status === 'ready' ? row.reference_only ? 'Reference only; image pixels are not sent to AI.' : `${row.text_characters} extracted characters` : 'Upload unfinished—choose the same file and retry.'}</span>
       {row.status === 'ready' && <button type="button" disabled={busy} onClick={() => download(row)}>Download original</button>}
       <button type="button" disabled={busy} onClick={() => remove(row)}>Remove reference</button>
