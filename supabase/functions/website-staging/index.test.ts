@@ -41,6 +41,13 @@ async function fixture(){
  const deploy=()=>call('deploy',{target_id:id(8),job_id:id(6),remote_head:null,review_sha256:'a'.repeat(64),previous_run_id:null,request_id:id(10)})
  return {state,call,deploy,checksum,dependencies}
 }
+Deno.test('inspection surfaces only the fixed receiver guard diagnostic without binding testing or staging',async()=>{
+ const f=await fixture();f.state.role='operations_admin';let calls=0
+ f.dependencies.fetcher=async()=>{calls++;return new Response(JSON.stringify({code:'anka_stage_runtime',message:'PRIVATE upstream text',data:{private:'PRIVATE'}}),{status:403,headers:{'Content-Type':'application/json'}})}
+ const result=await f.call('inspect',{connection_id:id(7)})
+ assert(result.status===400&&result.body.error.includes('(anka_stage_runtime)')&&!JSON.stringify(result.body).includes('PRIVATE'))
+ assert(calls===1&&f.state.calls.every((name:string)=>name==='get_website_staging_dispatch')&&!f.state.run&&!f.state.result)
+})
 Deno.test('unsupported publication and arbitrary-target fields are rejected before authority or transport',async()=>{const f=await fixture();assert((await f.call('publish')).status===400);assert((await f.call('dry-run',{target_id:id(8),job_id:id(6),url:'https://client.example.test'})).status===400);assert(f.state.calls.length===0&&f.state.requests.length===0)})
 Deno.test('dry run inspects exact remote staging identity and page without writes',async()=>{const f=await fixture(),r=await f.call('dry-run',{target_id:id(8),job_id:id(6)});assert(r.status===200&&r.body.data.published===false);assert(!f.state.calls.includes('start_website_staging_run'));assert(f.state.requests.every((x:any)=>x.method==='GET'))})
 Deno.test('production environment cannot be used as a staging target',async()=>{const f=await fixture();f.state.badIdentity=true;assert((await f.deploy()).status===400);assert(!f.state.requests.some((x:any)=>x.method==='POST'));assert(!f.state.run)})

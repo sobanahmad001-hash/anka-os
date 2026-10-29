@@ -14,6 +14,26 @@ export async function boundedResponse(response,limit=2097152){
  for(;;){const p=await stream.read();if(p.done)break;size+=p.value.byteLength;if(size>limit){await stream.cancel();throw Error('Staging response exceeds the bound')}parts.push(p.value)}
  const bytes=new Uint8Array(size);let offset=0;for(const p of parts){bytes.set(p,offset);offset+=p.byteLength}return new TextDecoder().decode(bytes)
 }
+// Return only fixed receiver diagnostics. Never reflect upstream messages, data,
+// headers, HTML or unknown codes; a hosting denial may not be a WordPress error.
+async function receiverFailure(response){
+ const messages={
+  anka_stage_environment:'The receiver requires staging environment and a valid staging site ID.',
+  anka_stage_runtime:'The receiver requires reviewed WordPress 7.1.3 and PHP 8.3.',
+  anka_stage_capability:'This receiver request lacks the dedicated staging capability.',
+  anka_stage_origin:'The receiver requires its canonical HTTPS staging origin.',
+  rest_not_logged_in:'WordPress did not authenticate this receiver request.',
+  rest_forbidden:'WordPress denied access to this receiver route.',
+ }
+ let code
+ try{
+  if([401,403].includes(response.status)&&response.headers.get('content-type')?.split(';')[0].trim().toLowerCase()==='application/json'){
+   const value=JSON.parse(await boundedResponse(response,4096))
+   if(value&&typeof value==='object'&&!Array.isArray(value)&&typeof value.code==='string'&&Object.hasOwn(messages,value.code))code=value.code
+  }else await response.body?.cancel()
+ }catch{/* Malformed, oversized and unavailable bodies retain the safe HTTP diagnostic. */}
+ return Error(code?'Staging receiver denied request ('+code+'): '+messages[code]:'Staging receiver request failed (HTTP '+response.status+'); no recognized receiver diagnostic was returned.')
+}
 export function publicAddress(ip){
  if(typeof ip!=='string')return false
  if(ip.includes(':')){
@@ -39,7 +59,7 @@ export function createStagingTransport(connection,{env,fetcher=fetch,resolver}){
   if(!/^\/wp-json\/anka-stage\/v1\/(?:identity|head(?:\?[^#]*)?|deploy|requests\/[0-9a-f-]+)$/.test(path)&&!/^\/\?anka_staging_preview=[0-9a-f-]+$/.test(path))throw Error('Unsupported staging-only route')
   if(resolver){const addresses=await resolver(new URL(origin).hostname);if(!addresses.length||addresses.some(x=>!publicAddress(x)))throw Error('Staging DNS target is not public')}
   const response=await fetcher(origin+path,{method,redirect:'error',signal:AbortSignal.timeout(12000),headers:{Authorization:auth,Accept:html?'text/html':'application/json',...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})})
-  if(!response.ok)throw Error('Staging receiver request failed (HTTP '+response.status+')')
+  if(!response.ok)throw await receiverFailure(response)
   const text=await boundedResponse(response)
   if(html){if(!response.headers.get('content-type')?.startsWith('text/html')||!response.headers.get('cache-control')?.includes('no-store'))throw Error('Private staging HTML verification unavailable');return text}
   if(!response.headers.get('content-type')?.includes('application/json'))throw Error('Staging receiver returned a different format')
