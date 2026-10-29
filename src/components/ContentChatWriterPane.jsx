@@ -3,8 +3,8 @@ import { useOrganization } from '../context/OrganizationContext.jsx'
 import ContentWriterEditor from './ContentWriterEditor.jsx'
 import { approvedVisionLanguage, bestContentStage, resolveContentLanguage } from '../data/contentStudio.js'
 
-// Reuses the canonical writer and scoped repository; chat text is never an input.
-export default function ContentChatWriterPane({ workspace, studio, refresh, refreshing = false, stale = false, onStateChange, onSaved }) {
+// Reuses the canonical writer; Chat text enters only through explicit source review.
+export default function ContentChatWriterPane({ workspace, studio, refresh, refreshing = false, stale = false, onStateChange, onSaved, reviewedChatSources, chatSourcesCurrent }) {
   const { activeOrganizationId, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
@@ -49,6 +49,6 @@ export default function ContentChatWriterPane({ workspace, studio, refresh, refr
     {error && <p role="alert" className="mt-3 text-sm text-[var(--anka-danger)]">{error}</p>}
     {notice && <p role="status" className="mt-3 text-sm text-[var(--anka-success)]">{notice}</p>}
     {uncertain && <p role="alert" className="mt-3 text-sm text-[var(--anka-warning)]">The save outcome needs review. Refresh the saved outputs and inspect the latest version. Close and reopen this editor before another save; no automatic retry is sent.</p>}
-    <ContentWriterEditor workspace={workspace} studio={studio} saving={saving} act={act} onRefresh={refresh} refreshing={refreshing} stale={stale || uncertain} stageId={bestContentStage(workspace.stages || [], 'content')?.id || null} onSaved={onSaved} compactLabels defaultLanguage={resolveContentLanguage({ approvedBrandLanguage: approvedVisionLanguage(workspace), organizationDefaultLanguage: workspace.organizationSettings?.content_language || workspace.organizationSettings?.default_language }).language} onDirtyChange={onDirtyChange} />
+    <ContentWriterEditor workspace={workspace} studio={studio} saving={saving} act={act} onRefresh={refresh} refreshing={refreshing} stale={stale || uncertain} stageId={bestContentStage(workspace.stages || [], 'content')?.id || null} onSaved={onSaved} reviewedChatSources={reviewedChatSources} chatSourcesCurrent={chatSourcesCurrent} compactLabels defaultLanguage={resolveContentLanguage({ approvedBrandLanguage: approvedVisionLanguage(workspace), organizationDefaultLanguage: workspace.organizationSettings?.content_language || workspace.organizationSettings?.default_language }).language} onDirtyChange={onDirtyChange} />
   </section>
 }
