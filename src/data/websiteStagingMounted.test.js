@@ -10,7 +10,7 @@ const requireNative=createRequire(import.meta.url),props=n=>n?.[Object.keys(n).f
 
 function loadQaPanel(){
  const code=transformSync(readFileSync(new URL('../components/WebsiteQaReviewPanel.jsx',import.meta.url),'utf8'),{loader:'jsx',format:'cjs',jsxFactory:'React.createElement'}).code,module={exports:{}}
- new Function('require','module','exports','React',code)(requireNative,module,module.exports,React)
+ new Function('require','module','exports','React',code)(name=>name.includes('WebsiteQaAcceptancePanel')?{default:()=>null}:requireNative(name),module,module.exports,React)
  return module.exports
 }
 

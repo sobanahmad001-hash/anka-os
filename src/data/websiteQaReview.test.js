@@ -86,7 +86,7 @@ test('mounted QA requires manual selection, recomputes changed receipts and remo
   const env = mountedEnvironment(), names = ['window', 'document', 'IS_REACT_ACT_ENVIRONMENT'], old = Object.fromEntries(names.map(name => [name, globalThis[name]]))
   Object.assign(globalThis, {window: env.window, document: env.document, IS_REACT_ACT_ENVIRONMENT: true})
   const native = createRequire(import.meta.url), module = {exports: {}}, code = transformSync(readFileSync(new URL('../components/WebsiteQaReviewPanel.jsx', import.meta.url), 'utf8'), {loader: 'jsx', format: 'cjs', jsxFactory: 'React.createElement'}).code
-  new Function('require', 'module', 'exports', 'React', code)(name => name.includes('websiteQaReview') ? {websiteQaReview} : native(name), module, module.exports, React)
+  new Function('require', 'module', 'exports', 'React', code)(name => name.includes('WebsiteQaAcceptancePanel') ? {default:()=>null} : name.includes('websiteQaReview') ? {websiteQaReview} : native(name), module, module.exports, React)
   const root = createRoot(env.container), Component = module.exports.default, d = fixture()
   t.after(async () => {await act(async () => root.unmount()); Object.assign(globalThis, old)})
   const render = async data => act(async () => root.render(React.createElement(Component, {data, scope})))
