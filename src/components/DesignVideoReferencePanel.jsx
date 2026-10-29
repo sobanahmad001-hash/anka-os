@@ -1,3 +1,4 @@
+import AttachmentUseStatus from './AttachmentUseStatus.jsx'
 import {useEffect,useRef,useState} from 'react'
 import {departmentChat} from '../data/departmentChatRepository.js'
 const types={mp4:'video/mp4',mov:'video/quicktime'},maxBytes=20*1024*1024
@@ -64,7 +65,7 @@ export default function DesignVideoReferencePanel({uploadOpen=true,conversationK
   <button type="button" disabled={locked||!conversationId||!file||!mime} onClick={upload}>{attempt.current?'Retry same video upload':'Upload private video reference'}</button>
   </div>
   {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}{working&&<p role="status">Working with your video reference…</p>}
-  <ul>{rows.filter(row=>row.status!=='revoked').map(row=><li key={row.id}><strong>{row.original_name}</strong><span>{row.status==='ready'?'Private reference only; never sent to AI.':'Upload unfinished: choose the same file to recover.'}</span>{row.status==='ready'&&<><button type="button" disabled={locked} onClick={()=>openOriginal(row,false)}>Preview video</button><button type="button" disabled={locked} onClick={()=>openOriginal(row,true)}>Download original video</button></>}<button type="button" disabled={locked} onClick={()=>remove(row)}>Remove video reference</button></li>)}</ul>
+  <ul>{rows.filter(row=>row.status!=='revoked').map(row=><li key={row.id}><strong>{row.original_name}</strong><AttachmentUseStatus status={row.status} referenceOnly/><span>{row.status==='ready'?'Private reference only; never sent to AI.':'Upload unfinished: choose the same file to recover.'}</span>{row.status==='ready'&&<><button type="button" disabled={locked} onClick={()=>openOriginal(row,false)}>Preview video</button><button type="button" disabled={locked} onClick={()=>openOriginal(row,true)}>Download original video</button></>}<button type="button" disabled={locked} onClick={()=>remove(row)}>Remove video reference</button></li>)}</ul>
   {preview&&<figure><video aria-label="Private video reference preview" controls preload="metadata" style={{maxWidth:'100%'}} src={preview.url} onError={()=>setNotice('This browser cannot play this original. Use Download original video; no conversion was performed.')}/><figcaption>{preview.name} — owner-private original; reference only</figcaption></figure>}
  </section>
 }

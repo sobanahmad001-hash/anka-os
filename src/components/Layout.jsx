@@ -5,6 +5,7 @@ import Sidebar from './Sidebar'
 import AssistantFloat from './AssistantFloat'
 import OrganizationGate from './OrganizationGate'
 import './workspaceShell.css'
+import './osDeliveryPresentation.css'
 
 export default function Layout() {
   const { pathname } = useLocation()

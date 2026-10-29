@@ -354,14 +354,16 @@ export default function Settings() {
     <div className="h-full overflow-y-auto bg-[var(--anka-canvas)] text-[var(--anka-ink)]">
       <header className="border-b border-[var(--anka-line)] px-6 py-5">
         <p className="workspace-eyebrow">Administration</p>
-        <h1 className="workspace-title">Connector Centre</h1>
+        <h1 className="workspace-title">Connections & administration</h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--anka-muted)]">Configure a provider once and assign it to the departments allowed to use it. Named provider secrets and encrypted OAuth tokens remain server-side. External writes remain human-controlled.</p>
       </header>
 
       <main className="workspace-page workspace-container space-y-6">
+        <section aria-label="Connection guidance" className="ux-settings-guidance"><h2 className="text-lg font-semibold">Connection, access and use</h2><ol><li><strong>Connection status</strong><p className="ux-secondary">Configured means saved. Verified records show a completed verification; retain their existing status.</p><a href="#configured-connections">Review saved connections</a></li><li><strong>Project access</strong><p className="ux-secondary">Department and project access are separate. WordPress project linking and exact target review stay in Development.</p></li><li><strong>Use & limits</strong><p className="ux-secondary">Available models, paid execution and source consent keep their own controls. A connection never approves a run or publication.</p><a href="#workspace-model-controls" onClick={()=>{const panel=document.getElementById('workspace-model-controls');if(panel){panel.open=true;panel.querySelector('summary')?.focus()}}}>View model and usage controls</a></li></ol></section>
         {error && <div className="rounded-xl border border-[var(--anka-danger)] bg-[var(--anka-danger-soft)] px-4 py-3 text-sm text-[var(--anka-danger)]">{error}</div>}
         {message && <div className="rounded-xl border border-[var(--anka-success)] bg-[var(--anka-success-soft)] px-4 py-3 text-sm text-[var(--anka-success)]">{message}</div>}
 
+        <details className="workspace-card p-5" id="workspace-model-controls"><summary className="font-semibold">Models, usage & advanced configuration</summary><div className="mt-5 space-y-5">
         <ContentCustomFieldSettings />
         <DepartmentChatModelAllowlist
           key={`${activeOrganizationId}:${scopeRevision}`}
@@ -381,7 +383,8 @@ export default function Settings() {
           requestSignal={requestSignal}
         />
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        </div></details>
+        <section aria-label="Connection providers" className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {Object.entries(CONNECTOR_CATALOG).map(([id, connector]) => {
             const providerConnections = configuredConnections.filter((connection) => connection.provider === id)
             const verified = providerConnections.filter((connection) => connection.status === 'verified').length
@@ -405,7 +408,7 @@ export default function Settings() {
         </details>}
 
         <div className="grid gap-6 xl:grid-cols-[1fr_400px]">
-          <section className="workspace-card p-5">
+          <section className="workspace-card p-5" id="configured-connections">
             <div className="flex items-center justify-between gap-3"><div><h2 className="font-semibold">Configured connections</h2><p className="mt-1 text-sm text-[var(--anka-muted)]">Department mappings are visible; credentials and provider response bodies are never returned.</p></div><span className="text-xs text-[var(--anka-muted)]">{configuredConnections.length} configured · {retainedConnections.length} retained</span></div>
             <div className="mt-5 space-y-3">
               {loading ? <p className="text-sm text-[var(--anka-muted)]">Loading connectors…</p> : configuredConnections.length === 0 ? (

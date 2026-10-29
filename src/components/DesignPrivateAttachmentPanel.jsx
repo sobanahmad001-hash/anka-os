@@ -1,4 +1,5 @@
 import DesignReferenceOriginal from './DesignReferenceOriginal.jsx'
+import AttachmentUseStatus from './AttachmentUseStatus.jsx'
 import { useEffect, useRef, useState } from 'react'
 import { departmentChat } from '../data/departmentChatRepository.js'
 
@@ -73,6 +74,7 @@ export default function DesignPrivateAttachmentPanel({ uploadOpen=true,onUseImag
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     <ul>{rows.filter(a => a.status !== 'revoked').map(row => <li key={row.id}>
       <label><input type="checkbox" checked={selectedIds.includes(row.id)} disabled={busy || row.status !== 'ready'} onChange={e => select(row, e.target.checked)} />{row.original_name}</label>
+      <AttachmentUseStatus status={row.status} selected={selectedIds.includes(row.id)} referenceOnly={row.reference_only}/>
       {row.status==='ready'&&<button className="design-purpose-reference" type="button" disabled={busy||selectedIds.includes(row.id)} onClick={()=>select(row,true)}>Use as brief reference</button>}
       <span>{row.status === 'ready' ? row.reference_only ? 'Reference only; image pixels are not sent to AI.' : `${row.text_characters} extracted characters` : 'Upload unfinished—choose the same file and retry.'}</span>
       {row.status === 'ready' && <><DesignReferenceOriginal key={`${conversationKey}:${row.id}`} row={row} busy={busy} run={run} signal={requestScope.signal} read={()=>departmentChat.downloadDesignPrivateAttachment({conversation_id:conversationId,attachment_id:row.id},requestScope)}/>{row.reference_only&&['image/png','image/jpeg'].includes(row.verified_mime)&&onUseImage&&<button type="button" disabled={busy} onClick={()=>onUseImage({kind:'private_attachment',id:row.id,checksum:row.expected_sha256,label:row.original_name},'motion')}>Animate selected image</button>}</>}

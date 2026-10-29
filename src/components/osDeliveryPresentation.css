@@ -1,0 +1,42 @@
+/* Shared presentation only; domain actions, permission checks and records stay owned by their existing components. */
+.anka-shell .workspace-page { padding:24px; }
+.anka-shell .workspace-container { max-width:1440px; }
+.anka-shell .workspace-title { line-height:1.25; letter-spacing:-.025em; }
+.anka-shell .workspace-button { min-height:40px; line-height:1.4; }
+.anka-shell .workspace-input { min-height:40px; }
+.anka-shell :is(.workspace-button,.workspace-input,summary):focus-visible { outline:3px solid var(--anka-focus); outline-offset:3px; }
+.anka-shell .workspace-eyebrow { letter-spacing:.05em; text-transform:none; font-size:12px; }
+.project-workspace .project-primary-tabs { flex-wrap:wrap; overflow:visible; }
+.project-workspace .project-primary-tabs button { flex:0 1 auto; }
+.project-workspace .project-advanced { margin-block:20px; padding:16px; border:1px solid var(--anka-line); border-radius:12px; }
+.ux-section-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:12px; }
+.ux-section-heading h2,.ux-stage-summary h2 { font-size:18px; font-weight:600; }
+.ux-output-card h3,.ux-summary-row h3 { font-size:15px; font-weight:600; overflow-wrap:anywhere; }
+.ux-secondary { color:var(--anka-muted); font-size:14px; line-height:1.6; margin-block:6px 12px; }
+.ux-next-action,.ux-output-card,.ux-stage-summary { background:var(--anka-surface); border:1px solid var(--anka-line); border-radius:12px; padding:20px; min-width:0; }
+.ux-next-action { border-left:3px solid var(--anka-violet); margin-bottom:24px; }
+.ux-next-action h2 { font-size:22px; font-weight:600; margin-block:8px; }
+.ux-overview-grid { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(0,1fr); gap:24px; align-items:start; }
+.project-output-cards { min-width:0; }
+.ux-output-card { margin-block:12px; }
+.ux-saved-label { background:var(--anka-violet-soft); color:var(--anka-violet); border-radius:6px; padding:4px 8px; font-size:12px; }
+.ux-version-row { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding-block:14px; border-top:1px solid var(--anka-line); }
+.ux-version-row>div { flex:1; min-width:130px; }
+.ux-version-provenance { flex-basis:100%; font-size:12px; overflow-wrap:anywhere; color:var(--anka-muted); }
+.ux-summary-row { margin-block:16px; padding-top:16px; border-top:1px solid var(--anka-line); }
+.ux-settings-guidance { padding:20px; border:1px solid var(--anka-line); border-radius:12px; background:var(--anka-surface); }
+.ux-settings-guidance ol { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; padding:0; list-style:none; }
+.ux-settings-guidance li { min-width:0; }
+.ux-settings-guidance a { color:var(--anka-violet); text-decoration:underline; }
+.ux-workshop-context { background:var(--anka-surface); border-color:var(--anka-line); color:var(--anka-ink); }
+.ux-workshop-context :is(p,span) { white-space:normal; overflow-wrap:anywhere; }
+.ux-workshop-context [class*="text-slate-"] { color:var(--anka-muted); }
+.ux-workshop-context [class*="text-violet-"] { color:var(--anka-violet); }
+.ux-workshop-context [class*="text-amber-"] { color:var(--anka-warning); }
+.ux-workshop-tabs { flex-wrap:wrap; overflow:visible; border-color:var(--anka-line); }
+.ux-workshop-tabs button { color:var(--anka-muted); min-height:44px; }
+.ux-workshop-tabs button[aria-selected="true"] { color:var(--anka-violet); border-color:var(--anka-violet); }
+.attachment-use-status { color:var(--anka-muted); font-size:12px; line-height:1.6; margin-block:6px; }
+.anka-shell .design-private-attachments li,.anka-shell .project-document-panel li { border-color:var(--anka-line); border-radius:10px; padding:12px; margin-block:8px; overflow-wrap:anywhere; }
+@media(max-width:900px){.ux-overview-grid{grid-template-columns:1fr}.ux-settings-guidance ol{grid-template-columns:1fr}}
+@media(max-width:600px){.anka-shell .workspace-page{padding:16px}.anka-shell :is(.workspace-button,.workspace-input){min-height:44px}.anka-shell :is(input,select,textarea){font-size:16px}.ux-next-action,.ux-output-card,.ux-stage-summary{padding:16px}.project-workspace .project-primary-tabs button{padding-inline:10px}.ux-version-row>div{flex-basis:100%}}

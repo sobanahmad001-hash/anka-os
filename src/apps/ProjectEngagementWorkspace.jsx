@@ -1,4 +1,5 @@
 import ProjectDeliveryContextPanel from '../components/ProjectDeliveryContextPanel.jsx'
+import ProjectOverviewSummary from '../components/ProjectOverviewSummary.jsx'
 import {projectDeliveryIntent} from '../data/projectDeliveryContext.js'
 import DescriptionDisclosure from '../components/DescriptionDisclosure.jsx'
 import _ProjectScopedPipelineView from '../components/ProjectScopedPipelineView.jsx'
@@ -20,8 +21,8 @@ import _ProjectReviewEvidencePanel from './ProjectReviewEvidencePanel.jsx'
 import { appendWorkshopNavigation, parseWorkshopNavigation } from '../data/workshopNavigation.js'
 
 const TABS = [
-  ['discussion', 'Chat'], ['overview', 'Overview'], ['work', 'Work'],
-  ['outputs', 'Files & Outputs'],
+  ['overview', 'Overview'], ['discussion', 'Chat'], ['work', 'Work'],
+  ['outputs', 'Files & outputs'],
 ]
 const WORK_TABS = [['work', 'All work'], ['website-work','Website'], ['marketing-work','Marketing'], ['project-tasks', 'Project Tasks'], ['engagement-work', 'Engagement Work Items'], ['planning', 'Schedule & Planning']]
 const SERVICES_TABS = [['services', 'Scope & Services'], ['journey', 'Journey']]
@@ -157,7 +158,7 @@ export default function ProjectEngagementWorkspace() {
     globalThis.requestAnimationFrame?.(() => globalThis.document?.getElementById(`project-tab-${nextTab}`)?.focus())
   }
   return (
-    <main className="workspace-page">
+    <main className="workspace-page project-workspace">
       <div className="workspace-container">
         <button type="button" onClick={() => {if(allowLeavingCurrentView())navigate('/sphere/portfolio')}} className="text-sm font-medium text-[var(--anka-muted)] hover:text-[var(--anka-ink)]">← Portfolio Workspace</button>
         <header className="mt-3 flex flex-wrap items-start justify-between gap-3">
@@ -168,22 +169,23 @@ export default function ProjectEngagementWorkspace() {
           </div>
           <div className="flex flex-wrap items-center gap-2"><button type="button" disabled={isNavigationBusy} onClick={() => selectTab('services')} className="workspace-button">Manage services</button>{identity.hasEngagement && workspace.engagement?.id && <Link to={`/sphere/engagements?engagement=${encodeURIComponent(workspace.engagement.id)}&tab=pipeline&project=${encodeURIComponent(projectId)}`} onClick={event=>{if(!allowLeavingCurrentView())event.preventDefault()}} className="rounded-xl border border-[var(--anka-violet)] px-4 py-2 text-sm text-[var(--anka-violet)]">Open Pipeline</Link>}<button type="button" onClick={load} disabled={loading||isNavigationBusy} className="workspace-button hover:bg-[var(--anka-surface-raised)] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={project.status} /><ProjectDraftActivation project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onActivated={load} onAccessError={handleOrganizationAccessError} /></div>
         </header>
-        {tab !== 'discussion' && <DescriptionDisclosure key={project.id} text={project.description || project.scope_statement || 'No project description recorded.'} label="Project description" />}
+        <DescriptionDisclosure key={project.id} text={project.description || project.scope_statement || 'No project description recorded.'} label="Project description" />
 
-        <details className="mt-3 text-sm"><summary className="cursor-pointer text-[var(--anka-muted)]">Project settings</summary><ProjectLifecyclePanel key={`${activeOrganizationId}:${project.id}:${scopeRevision}`} project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={(result) => { setWorkspace(current => current ? { ...current, project: { ...current.project, archived_at: result.archived_at } } : current); load() }} onDeleted={() => navigate('/sphere/portfolio')} /></details>
+        <details className="mt-3 text-sm"><summary className="cursor-pointer text-[var(--anka-muted)]">Project settings</summary><div className="mt-4 space-y-4"><nav aria-label="Project configuration" className="flex flex-wrap gap-2"><button type="button" className="workspace-button" disabled={isNavigationBusy} onClick={()=>selectTab('services')}>Services & pipeline plan</button><button type="button" className="workspace-button" disabled={isNavigationBusy} onClick={()=>selectTab('resources')}>Resources & connections</button></nav><ProjectLifecyclePanel key={`${activeOrganizationId}:${project.id}:${scopeRevision}`} project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={(result) => { setWorkspace(current => current ? { ...current, project: { ...current.project, archived_at: result.archived_at } } : current); load() }} onDeleted={() => navigate('/sphere/portfolio')} />
 
         {!project.archived_at && tab !== 'discussion' && <ProjectManagerAssignment project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onAssigned={load} onAccessError={handleOrganizationAccessError} />}
+        </div></details>
 
         {error && <div role="alert" className="mt-5 rounded-xl border border-[var(--anka-warning)] bg-[var(--anka-warning-soft)] p-4 text-sm text-[var(--anka-warning)]"><p className="font-medium">Refresh failed; showing previously loaded data.</p><p className="mt-1 text-xs text-[var(--anka-warning)]">{error}{loadedAt ? ` · Loaded ${loadedAt.toLocaleTimeString()}` : ''}</p></div>}
 
 
-        <nav role="tablist" aria-label="Project workspace sections" className="mt-4 flex gap-1 overflow-x-auto border-b border-[var(--anka-line)]">
+        <nav role="tablist" aria-label="Project workspace sections" className="project-primary-tabs mt-4 flex gap-1 border-b border-[var(--anka-line)]">
           {tabs.map(([id, title], index) => <button type="button" role="tab" disabled={isNavigationBusy} id={`project-tab-${id}`} aria-selected={selectedPrimaryTab === id} aria-controls="project-workspace-panel" tabIndex={selectedPrimaryTab === id ? 0 : -1} key={id} onClick={() => selectTab(id)} onKeyDown={(event) => onTabKeyDown(event, index)} className={`whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium focus-visible:ring-2 focus-visible:ring-[var(--anka-focus)] ${selectedPrimaryTab === id ? 'border-[var(--anka-violet)] text-[var(--anka-ink)]' : 'border-transparent text-[var(--anka-muted)] hover:text-[var(--anka-ink)]'}`}>{title}</button>)}
         </nav>
 
         {subTabs.length > 0 && <nav aria-label={`${selectedPrimaryTab === 'work' ? 'Work' : 'Services'} views`} className="mt-4 flex flex-wrap gap-2">{subTabs.map(([id, title]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => selectTab(id)} className={`rounded-lg border px-3 py-2 text-sm ${tab === id ? 'border-[var(--anka-violet)] bg-[var(--anka-violet-soft)] text-[var(--anka-violet)]' : 'border-[var(--anka-line)] text-[var(--anka-muted)]'}`}>{title}</button>)}</nav>}
-        <details className="mt-3 text-sm"><summary className="cursor-pointer text-[var(--anka-muted)]">Project tools</summary><nav aria-label="Project tools" className="mt-2 flex flex-wrap gap-2">{MORE_TABS.filter(([id])=>id!=='journey').map(([id,title])=><button key={id} type="button" disabled={isNavigationBusy} aria-pressed={tab===id} className="workspace-button" onClick={()=>selectTab(id)}>{title}</button>)}</nav></details>
-        {tab === 'overview' && <section aria-label="Workspace summary" className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+        <details className="mt-3 text-sm"><summary className="cursor-pointer text-[var(--anka-muted)]">History & advanced</summary><nav aria-label="Project tools" className="mt-2 flex flex-wrap gap-2">{MORE_TABS.filter(([id])=>id!=='journey').map(([id,title])=><button key={id} type="button" disabled={isNavigationBusy} aria-pressed={tab===id} className="workspace-button" onClick={()=>selectTab(id)}>{id==='activity'?'History':title}</button>)}</nav></details>
+        {tab === 'overview' && <details className="project-advanced"><summary>Recorded project statistics</summary><section aria-label="Workspace summary" className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
           <Metric title="Project Tasks" value={summary.openProjectTasks} note="Open canonical tasks" />
           <Metric title="Engagement Work Items" value={summary.openEngagementWorkItems} note="Open delivery items" />
           <Metric title="Active engagement services" value={workspace.activeServices.length} note={workspace.deliveryShape.label} />
@@ -191,9 +193,9 @@ export default function ProjectEngagementWorkspace() {
           <Metric title="Milestones" value={summary.openMilestones} note="Open checkpoints" />
           <Metric title="Review queue" value={summary.reviewQueue} note="Versions in review/revision" />
           <Metric title="Progress" value={summary.progress === null ? 'Not set' : `${summary.progress}%`} note={`Due ${date(project.due_date)}`} />
-        </section>}
+        </section></details>}
         <div id="project-workspace-panel" role="tabpanel" aria-labelledby={`project-tab-${selectedPrimaryTab}`} className="mt-6" tabIndex={0}>
-          {tab === 'overview' && <Overview workspace={workspace} onOpen={selectTab} />}
+          {tab === 'overview' && <><ProjectOverviewSummary workspace={workspace} onOpen={selectTab} busy={isNavigationBusy||Boolean(error)}/><details className="project-advanced"><summary>Project brief, scope & supporting context</summary><Overview workspace={workspace} onOpen={selectTab}/></details></>}
           {tab === 'services' && <ServicesAndScope workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={load} onAccessError={handleOrganizationAccessError} onOpen={selectTab} onNavigationBusyChange={reportNavigationBusy} />}
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
           {['website-work','marketing-work','resources'].includes(tab)&&<_ProjectScopedPipelineView key={[navigationOwner,tab,searchParams.get('resourceGroupId')||''].join(':')} workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} signal={requestSignal} kind={tab==='website-work'?'website':tab==='marketing-work'?'marketing':undefined} resources={tab==='resources'} initialGroupId={tab==='resources'?searchParams.get('resourceGroupId')||'':''} onOpenResources={groupId=>selectTab('resources',groupId)} onNavigationBusyChange={reportNavigationBusy}/>}
