@@ -154,3 +154,8 @@ entrypoint = "./functions/reporting-worker/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/website-native-design/index.ts"
+
+[functions.website-publication]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/website-publication/index.ts"

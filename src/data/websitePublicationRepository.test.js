@@ -1,0 +1,10 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import {createWebsitePublicationRepository} from './websitePublicationRepository.js'
+const id=n=>'b0000000-0000-4000-8000-'+String(n).padStart(12,'0'),scope={organizationId:id(1),projectId:id(2),engagementId:id(3),actorId:id(4)},row={organization_id:id(1),project_id:id(2),engagement_id:id(3)}
+function fixture(answer){const calls=[],repository=createWebsitePublicationRepository({functions:{invoke:async(_name,input)=>{calls.push(input.body);return{data:{data:typeof answer==='function'?await answer(input.body):answer}}}}});return{calls,repository}}
+test('unchecked live operation never reaches an invocation',async()=>{const f=fixture({});await assert.rejects(f.repository.execute(scope,{review_id:id(5)},id(6)),/Confirm/);assert.equal(f.calls.length,0)})
+test('review belonging to another project cannot reach confirmation',async()=>{const f=fixture({kind:'publication',review_id:id(5),review_sha256:'a'.repeat(64),snapshot:{scope:{...row,project_id:id(99)},target:{target_id:id(7)}}});await assert.rejects(f.repository.review(scope,id(7),[],{}),/context/)})
+test('recovery only reads original request and rejects a substituted receipt',async()=>{const f=fixture({...row,request_id:id(9),status:'succeeded'});await assert.rejects(f.repository.recover(scope,id(8)),/differs/);assert.deepEqual(f.calls.map(call=>call.action),['recover'])})
+test('historical binding recovery reads metadata without rebinding or regranting',async()=>{const f=fixture({...row,targets:[{id:id(7),request_id:id(8),created_by:scope.actorId,current:false}]});const record=await f.repository.recoverBinding(scope,id(8));assert.equal(record.current,false);assert.deepEqual(f.calls.map(call=>call.action),['workspace'])})
+test('late completion after abort cannot be accepted into a changed context',async()=>{const controller=new AbortController(),f=fixture(async()=>{controller.abort();return{...row,request_id:id(8),status:'succeeded'}});await assert.rejects(f.repository.recover(scope,id(8),{signal:controller.signal}),/context changed/);assert.deepEqual(f.calls.map(call=>call.action),['recover'])})

@@ -1,6 +1,7 @@
 import WebsiteBlockBuildPanel from './WebsiteBlockBuildPanel.jsx'
 import { useState, useEffect, useCallback } from 'react'
 import WebsiteStagingPanel from './WebsiteStagingPanel.jsx'
+import WebsitePublicationPanel from './WebsitePublicationPanel.jsx'
 
 import {
   DEVELOPMENT_ARTIFACTS,
@@ -20,9 +21,9 @@ const INPUT = 'w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-
 const PRIMARY = 'rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50'
 
 export default function DevelopmentTrackingPanel({ workspace, onRefresh, organizationId, actorId, membership, signal, onNavigationBusyChange }) {
-  const [buildBusy,setBuildBusy]=useState(false),[stagingBusy,setStagingBusy]=useState(false)
-  const buildBusyChanged=useCallback(value=>setBuildBusy(value),[]),stagingBusyChanged=useCallback(value=>setStagingBusy(value),[])
-  useEffect(()=>{onNavigationBusyChange?.(buildBusy||stagingBusy);return()=>onNavigationBusyChange?.(false)},[buildBusy,stagingBusy,onNavigationBusyChange])
+  const [buildBusy,setBuildBusy]=useState(false),[stagingBusy,setStagingBusy]=useState(false),[publicationBusy,setPublicationBusy]=useState(false)
+  const buildBusyChanged=useCallback(value=>setBuildBusy(value),[]),stagingBusyChanged=useCallback(value=>setStagingBusy(value),[]),publicationBusyChanged=useCallback(value=>setPublicationBusy(value),[])
+  useEffect(()=>{onNavigationBusyChange?.(buildBusy||stagingBusy||publicationBusy);return()=>onNavigationBusyChange?.(false)},[buildBusy,stagingBusy,publicationBusy,onNavigationBusyChange])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -44,6 +45,7 @@ export default function DevelopmentTrackingPanel({ workspace, onRefresh, organiz
   return <div className="mt-6 space-y-6">
     {organizationId&&actorId&&workspace.engagement.project_id&&<WebsiteBlockBuildPanel organizationId={organizationId} projectId={workspace.engagement.project_id} engagementId={workspace.engagement.id} actorId={actorId} signal={signal} canBuild={["system_owner","operations_admin","executive"].includes(membership?.role)||membership?.department_id==="development"||membership?.departmentId==="development"} onNavigationBusyChange={buildBusyChanged}/>}
     {organizationId&&actorId&&workspace.engagement.project_id&&<WebsiteStagingPanel organizationId={organizationId} projectId={workspace.engagement.project_id} engagementId={workspace.engagement.id} actorId={actorId} signal={signal} canStage={["system_owner","operations_admin","executive"].includes(membership?.role)||membership?.department_id==="development"||membership?.departmentId==="development"} canBind={['system_owner','operations_admin'].includes(membership?.role)} onNavigationBusyChange={stagingBusyChanged} onQaSaved={onRefresh}/>}
+    {organizationId&&actorId&&workspace.engagement.project_id&&<WebsitePublicationPanel organizationId={organizationId} projectId={workspace.engagement.project_id} engagementId={workspace.engagement.id} actorId={actorId} signal={signal} canManage={['system_owner','operations_admin'].includes(membership?.role)} onNavigationBusyChange={publicationBusyChanged}/>}
     <section className="rounded-2xl border border-blue-900/40 bg-blue-950/15 p-5">
       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-400">Development delivery</p>
       <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-400">Record stage progress, concise team notes, and immutable technical or launch artifacts. Native Website review packages are available above. Client-site installation, staging, publication and engineering tickets keep their separate reviews.</p>
