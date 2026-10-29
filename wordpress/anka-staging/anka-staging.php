@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Anka Staging Receiver
  * Description: Authenticated immutable core-block previews on an explicitly isolated staging WordPress site. No publication or theme activation.
- * Version: 1.0.0
+ * Version: 1.0.1
  */
 if (!defined('ABSPATH')) { exit; }
 define('ANKA_STAGE_PROTOCOL', 'anka-stage-v1');
@@ -10,7 +10,7 @@ function anka_stage_length($value) { return preg_match_all('/./us',$value,$match
 function anka_stage_uuid($value) { return is_string($value) && preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $value); }
 function anka_stage_permission() {
  if (wp_get_environment_type() !== 'staging' || !defined('ANKA_STAGING_SITE_ID') || !anka_stage_uuid(ANKA_STAGING_SITE_ID)) { return new WP_Error('anka_stage_environment', 'Explicit staging environment and site identity required.', array('status'=>403)); }
- if (get_bloginfo('version')!=='7.1.3'||PHP_MAJOR_VERSION!==8||PHP_MINOR_VERSION!==3) { return new WP_Error('anka_stage_runtime','Reviewed WordPress 7.1.3 / PHP 8.3 runtime required.',array('status'=>403)); }
+ if (!in_array(get_bloginfo('version'),array('7.1.3','7.1.4'),true)||PHP_MAJOR_VERSION!==8||PHP_MINOR_VERSION!==3) { return new WP_Error('anka_stage_runtime','Reviewed WordPress 7.1.3 or 7.1.4 / PHP 8.3 runtime required.',array('status'=>403)); }
  if (!current_user_can('anka_stage_packages')) { return new WP_Error('anka_stage_capability', 'The staging receiver capability is required.', array('status'=>403)); }
  if (!preg_match('~^https://[a-z0-9.-]+$~i', untrailingslashit(home_url()))) { return new WP_Error('anka_stage_origin', 'A canonical HTTPS staging origin is required.', array('status'=>403)); }
  return true;

@@ -1,10 +1,10 @@
-# Anka Staging Receiver 1.0.0
+# Anka Staging Receiver 1.0.1
 
 This receiver provides authenticated, immutable WordPress core-block previews on an isolated staging site. It does not activate themes, replace WordPress pages, approve delivery or publish to a client. W3 packages and canonical Anka page/build history remain the source of truth.
 
 ## Operator setup
 
-1. Use a dedicated HTTPS staging WordPress 7.1.3 / PHP 8.3 installation at an origin root. No URL credentials, redirects, alternate ports, IP literals or private-network destinations are accepted by Anka. Do not install or enable this receiver on a client production site.
+1. Use a dedicated HTTPS staging WordPress 7.1.3 or 7.1.4 / PHP 8.3 installation at an origin root. No URL credentials, redirects, alternate ports, IP literals or private-network destinations are accepted by Anka. Do not install or enable this receiver on a client production site.
 2. Set `WP_ENVIRONMENT_TYPE` to `staging` in that installation’s normal configuration. Set `ANKA_STAGING_SITE_ID` to an operator-generated UUID. Keep this identity stable for the site; changing it requires a new reviewed Anka binding.
 3. Install and activate the reviewed plugin using normal authorized WordPress access. Activation creates the `anka_staging_agent` role with `read` and `anka_stage_packages`; it assigns no users. Assign a dedicated account that role and create a revocable WordPress Application Password through normal account administration.
 4. Configure the existing Anka WordPress connection using its server-side `ANKA_WORDPRESS_*` credential reference. Keep the application password out of chat, drafts, browser receipts and source files. Verify the connection, grant Development access and explicitly link it to the intended project using the existing connection controls.
@@ -28,3 +28,5 @@ Add explicit page issue notes and append explicit resolutions. These do not edit
 Client-site publication is unavailable in this protocol. W5 requires its own exact-target publication approval, complete QA and rollback evidence. Functional forms, property databases and search remain separately modelled work.
 
 The portable `tools/check-website-staging-wordpress.mjs` harness exercises the receiver on pinned local WordPress 7.1.3/PHP 8.3 with networking disabled and synthetic local accounts. Native PostgreSQL and mocked Anka/browser tests verify their own bounded layers. None of these establish a signed-in production Anka write or a real staging-site deployment. Live acceptance requires a normally configured, authorized connection and its exact real target.
+
+Receiver 1.0.1 explicitly supports reviewed WordPress 7.1.3 and 7.1.4 only, with PHP 8.3 patches. Other WordPress versions and PHP minor versions remain denied. Both the receiver permission guard and Anka identity validator enforce this list. The local harness accepts optional WordPress version and isolated port arguments after the browser path; its default remains 7.1.3.
