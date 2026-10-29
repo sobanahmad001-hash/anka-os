@@ -6,7 +6,7 @@ import {uuid,stagingOrigin} from './websiteStagingContracts.js'
 export {uuid,stagingOrigin} from './websiteStagingContracts.js'
 export const sha=async bytes=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new Uint8Array(bytes).buffer))].map(x=>x.toString(16).padStart(2,'0')).join('')
 export function verifyIdentity(identity,origin,siteId){
- if(identity?.protocol!==STAGING_PROTOCOL||identity.wordpress_version!=='7.1.3'||!/^8\.3\.[0-9]+$/.test(identity.php_version||'')||identity.compiler!=='anka-native-block-v1'||identity.environment!=='staging'||!uuid(identity.site_id)||identity.base_url!==origin||identity.published!==false||(siteId&&identity.site_id!==siteId))throw Error('Exact staging-only WordPress identity differs')
+ if(identity?.protocol!==STAGING_PROTOCOL||!['7.1.3','7.1.4'].includes(identity.wordpress_version)||!/^8\.3\.[0-9]+$/.test(identity.php_version||'')||identity.compiler!=='anka-native-block-v1'||identity.environment!=='staging'||!uuid(identity.site_id)||identity.base_url!==origin||identity.published!==false||(siteId&&identity.site_id!==siteId))throw Error('Exact staging-only WordPress identity differs')
  return identity
 }
 export async function boundedResponse(response,limit=2097152){
@@ -19,7 +19,7 @@ export async function boundedResponse(response,limit=2097152){
 async function receiverFailure(response){
  const messages={
   anka_stage_environment:'The receiver requires staging environment and a valid staging site ID.',
-  anka_stage_runtime:'The receiver requires reviewed WordPress 7.1.3 and PHP 8.3.',
+  anka_stage_runtime:'The receiver requires reviewed WordPress 7.1.3 or 7.1.4 and PHP 8.3.',
   anka_stage_capability:'This receiver request lacks the dedicated staging capability.',
   anka_stage_origin:'The receiver requires its canonical HTTPS staging origin.',
   rest_not_logged_in:'WordPress did not authenticate this receiver request.',

@@ -1,5 +1,5 @@
-import {createStagingTransport} from './websiteStaging.js'
-import {assertEquals,assertRejects} from 'jsr:@std/assert@1.0.14'
+import {createStagingTransport,verifyIdentity} from './websiteStaging.js'
+import {assertEquals,assertRejects,assertThrows} from 'jsr:@std/assert@1.0.14'
 
 const origin='https://stage.example.test'
 function transport(response:Response){
@@ -33,4 +33,12 @@ Deno.test('oversized receiver diagnostics are cancelled at four KiB and never re
  const f=transport(new Response(stream,{status:403,headers:{'Content-Type':'application/json'}}))
  await assertRejects(()=>f.t.identity(),Error,'HTTP 403')
  assertEquals(cancelled,true);assertEquals(f.count(),1)
+})
+
+Deno.test('identity keeps explicit reviewed runtime and exact staging scope',()=>{
+ const identity={protocol:'anka-stage-v1',wordpress_version:'7.1.4',php_version:'8.3.36',compiler:'anka-native-block-v1',environment:'staging',site_id:'a0000000-0000-4000-8000-000000000009',base_url:origin,published:false}
+ for(const wordpress_version of ['7.1.3','7.1.4'])assertEquals(verifyIdentity({...identity,wordpress_version},origin,identity.site_id).wordpress_version,wordpress_version)
+ for(const wordpress_version of ['7.1.2','7.1.5','7.2','7.1.4-RC1','7.1.4 '])assertThrows(()=>verifyIdentity({...identity,wordpress_version},origin,identity.site_id))
+ for(const php_version of ['8.2.36','8.4.1','8.3','8.3.36-dev'])assertThrows(()=>verifyIdentity({...identity,php_version},origin,identity.site_id))
+ for(const change of [{environment:'production'},{site_id:'a0000000-0000-4000-8000-000000000010'},{base_url:'https://other.example.test'},{published:true}])assertThrows(()=>verifyIdentity({...identity,...change},origin,identity.site_id))
 })

@@ -24,7 +24,7 @@ async function fixture(){
   if(name==='bind_website_staging_target')return {data:{...target,request_id:args.p_request_id,connection_id:id(7)}}
   throw Error('Unexpected RPC '+name)
  },storage:{from:()=>({download:async()=>({data:new Blob([state.corrupt?new Uint8Array([0]):bytes],{type:'application/zip'})})})}}
- const identity=()=>({protocol:'anka-stage-v1',wordpress_version:'7.1.3',php_version:'8.3.33',compiler:'anka-native-block-v1',environment:state.badIdentity?'production':'staging',site_id:id(9),base_url:origin,published:false})
+ const identity=()=>({protocol:'anka-stage-v1',wordpress_version:state.wordpress||'7.1.3',php_version:'8.3.33',compiler:'anka-native-block-v1',environment:state.badIdentity?'production':'staging',site_id:id(9),base_url:origin,published:false})
  const receipt=()=>({...identity(),request_id:state.run.request_id,page_id:id(4),package_sha256:checksum,status:state.remote?'staged':'missing',preview_url:origin+'/?anka_staging_preview='+state.run.request_id,unresolved_paths:[]})
  const dependencies:any={resolveContext:async()=>({organizationId:id(1),projectId:id(2),engagementId:id(3),user:{id:id(12)},membership:{member_kind:'team',status:'active',role:state.role,department_id:state.department},admin}),env:(name:string)=>name==='WEBSITE_STAGING_ALLOWED_ORIGINS'?JSON.stringify(state.disabledOrigin?[]:[origin]):'private-fixture-app-password',resolver:async()=>[state.privateDns?'127.0.0.1':'93.184.216.34'],fetcher:async(url:string,options:any)=>{
   state.requests.push({url,method:options.method,body:options.body})
@@ -62,3 +62,5 @@ Deno.test('missing remote request before dispatch expiry is not resubmitted or m
 Deno.test('elapsed time alone never turns a missing remote receipt into a failed deployment',async()=>{const f=await fixture();f.state.lost=true;await f.deploy();f.state.remote=false;f.state.run.created_at=new Date(Date.now()-660000).toISOString();const r=await f.call('recover',{request_id:id(10)});assert(r.status===400&&!f.state.result);assert(f.state.requests.filter((x:any)=>x.method==='POST').length===1)})
 
 Deno.test('public DNS checks deny private reserved documentation and IPv6 relay addresses',()=>{for(const ip of ['127.0.0.1','10.1.2.3','169.254.169.254','172.16.0.1','192.168.1.1','100.64.0.1','198.18.0.1','224.0.0.1','1..2.3','0177.0.0.1','::1','fc00::1','fe80::1','2001:db8::1','2001::1','2002:7f00:1::1','3fff::1'])assert(!publicAddress(ip),ip);for(const ip of ['93.184.216.34','2606:4700:4700::1111','2001:4860:4860::8888'])assert(publicAddress(ip),ip)})
+
+Deno.test('reviewed WordPress 7.1.4 can inspect and dry run while unreviewed versions fail before staging',async()=>{for(const version of ['7.1.4','7.1.5','7.2']){const f=await fixture();f.state.wordpress=version;const r=await f.call('dry-run',{target_id:id(8),job_id:id(6)});assert(version==='7.1.4'?r.status===200:r.status===400);assert(!f.state.run&&f.state.requests.every((x:any)=>x.method==='GET'))}})
