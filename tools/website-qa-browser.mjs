@@ -1,0 +1,64 @@
+import assert from 'node:assert/strict'
+import {mkdir, writeFile} from 'node:fs/promises'
+import {createRequire} from 'node:module'
+import {fileURLToPath} from 'node:url'
+import {startStagingPreview} from './website-staging-preview.mjs'
+
+const {chromium} = createRequire(import.meta.url)('C:/Users/Soban/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright')
+const out = new URL('../outputs/website-qa-review/', import.meta.url)
+await mkdir(out, {recursive: true})
+const server = await startStagingPreview({port: 5226, cacheDir: fileURLToPath(new URL('vite-cache/', out))})
+let browser
+const cases = []
+try {
+  browser = await chromium.launch({headless: true, executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe'})
+  for (const width of [1440, 390]) for (const theme of ['light', 'dark']) {
+    const page = await browser.newPage({viewport: {width, height: 1000}}), errors = [], external = []
+    page.on('pageerror', error => errors.push(error.message))
+    await page.route('**/*', route => {
+      if (new URL(route.request().url()).hostname === '127.0.0.1') return route.continue()
+      external.push(route.request().url()); return route.abort()
+    })
+    await page.goto('http://127.0.0.1:5226/tools/website-staging-preview.html?theme=' + theme)
+    await page.getByLabel('Page preview for QA', {exact: true}).waitFor()
+    const canonical = await page.evaluate(() => JSON.stringify(globalThis.__blockPreview.fixture.canonical))
+    // Seed only the in-memory synthetic repository. No auth or external transport.
+    await page.evaluate(async () => {
+      const f = globalThis.__blockPreview.fixture.staging
+      const id = n => 'e0000000-0000-4000-8000-' + String(n).padStart(12, '0')
+      f.jobs[0].artifact_sha256 = 'c'.repeat(64)
+      const snapshot = await f.repository.workspace()
+      const target = {organization_id: snapshot.organization_id, project_id: snapshot.project_id, engagement_id: snapshot.engagement_id, id: id(91), site_id: id(94), base_url: 'https://staging.example.test', current: true, version_number: 1, display_name: 'Synthetic staging'}
+      f.targets.push(target)
+      const job = f.jobs[0]
+      const run = {organization_id: target.organization_id, project_id: target.project_id, engagement_id: target.engagement_id, id: id(92), request_id: id(93), target_id: target.id, job_id: job.id, page_id: job.page_id, page_key: job.page_key, created_at: '2026-10-29T08:00:00Z', status: 'staged', stale_sources: [], evidence: {environment: 'staging', published: false, preview_verified: true, package_sha256: job.artifact_sha256, base_url: target.base_url, preview_url: target.base_url + '/?anka_staging_preview=' + id(93), unresolved_paths: []}}
+      f.runs.push(run)
+      const workspace = f.repository.workspace
+      f.repository.workspace = async (...args) => ({...await workspace(...args), offset: 0})
+    })
+    await page.getByRole('button', {name: 'Refresh staging history', exact: true}).click()
+    const qa = page.getByRole('region', {name: 'Website page QA review', exact: true})
+    assert.equal(await qa.getByRole('link').count(), 0)
+    await qa.getByLabel('Page preview for QA', {exact: true}).selectOption({index: 1})
+    await qa.getByText('Receipt checked: Exact saved package', {exact: true}).waitFor()
+    assert.equal(await qa.getByRole('link', {name: 'Open this authenticated QA preview', exact: true}).count(), 1)
+    assert.equal(await qa.getByRole('button').count(), 0)
+    await qa.scrollIntoViewIfNeeded()
+    await page.screenshot({path: fileURLToPath(new URL(`${width}-${theme}.png`, out))})
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true)
+    await page.evaluate(() => {globalThis.__blockPreview.fixture.staging.jobs[0].artifact_sha256 = 'd'.repeat(64)})
+    await page.getByRole('button', {name: 'Refresh staging history', exact: true}).click()
+    await qa.getByText('Needs review: Exact saved package', {exact: true}).waitFor()
+    await page.evaluate(() => {globalThis.__blockPreview.fixture.staging.runs.splice(0)})
+    await page.getByRole('button', {name: 'Refresh staging history', exact: true}).click()
+    await qa.getByRole('alert').waitFor()
+    assert.equal(await qa.getByRole('link').count(), 0)
+    assert.deepEqual(await page.evaluate(() => globalThis.__blockPreview.fixture.staging.counts), {inspect: 0, bind: 0, dryRun: 0, deploy: 0, recover: 0, issue: 0})
+    assert.equal(await page.evaluate(() => JSON.stringify(globalThis.__blockPreview.fixture.canonical)), canonical)
+    assert.deepEqual(errors, []); assert.deepEqual(external, [])
+    cases.push({width, theme, manualSelection: true, checksumRefresh: true, removedVersion: true, overflow: false, providerCalls: 0, writes: 0})
+    await page.close()
+  }
+} finally {await browser?.close(); await server.close()}
+await writeFile(new URL('verification.json', out), JSON.stringify({synthetic: true, cases}, null, 2))
+console.log(JSON.stringify(cases))
