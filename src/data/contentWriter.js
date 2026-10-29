@@ -83,7 +83,7 @@ export function contentWriterIssues(form, versions = []) {
   return issues
 }
 
-export function serializeContentWriter(form, versions = []) {
+export function serializeContentWriter(form, versions = [], {preserveBody=false} = {}) {
   const issues = contentWriterIssues(form, versions)
   if (Object.keys(issues).length) throw new Error(Object.values(issues)[0])
   const website = form.output_type === 'website_page_copy'
@@ -94,14 +94,14 @@ export function serializeContentWriter(form, versions = []) {
     target_page_key: website ? clean(form.target_page_key) : null, target_page_path: null,
     destination: website ? null : clean(form.destination), objective: clean(form.objective),
     audience: clean(form.audience), language: clean(form.language), tone: clean(form.tone) || null,
-    body: clean(form.body), cta: clean(form.cta) || null,
+    body: preserveBody ? String(form.body) : clean(form.body), cta: clean(form.cta) || null,
     exclusions: String(form.exclusions || '').split(/[,\n]/).map(clean).filter(Boolean), variant_number: 1,
     ...quality,
   }
 }
 
-export function contentWriterPreview(form, versions = []) {
-  const content = serializeContentWriter(form, versions)
+export function contentWriterPreview(form, versions = [], options = {}) {
+  const content = serializeContentWriter(form, versions, options)
   const sourceVersion = versions.find(version => version.id === content.source_architecture_version_id)
   const page = architecturePages(sourceVersion).find(item => item.page_key === content.target_page_key)
   return {

@@ -110,3 +110,19 @@ test('saved canonical Writer result returns its exact version to the originating
   assert.equal(f.refreshes(), 1)
   assert.deepEqual(seen, [saved])
 })
+
+test('reviewed Chat draft transfers exact text once and saves through canonical unapproved Writer without rewriting history',async t=>{
+ const body='\n  Exact reviewed homepage copy.\n\nContact the team.  \n',review={key:'selected-exact-source',brief:{id:'reviewed-brief',body:'Owner reviewed homepage brief'},draft:{id:'reviewed-response',body}}
+ const f=await mount(t,{input:{reviewedChatSources:review,chatSourcesCurrent:()=>true}})
+ await f.click(f.button('Load reviewed Chat draft'));assert.equal(props(f.textarea('Draft text')).value,body);assert.equal(f.calls.length,0)
+ await act(async()=>props(elements(f.env.container,'form')[0]).onSubmit({preventDefault(){}}));await f.click(f.button('Confirm unapproved draft'))
+ assert.equal(f.calls.length,1);assert.equal(f.calls[0].content.body,body);assert.equal(f.calls[0].artifact_id,null);assert.equal(f.calls[0].expected_parent_version_id,null)
+ assert.match(f.calls[0].change_summary,/reviewed-brief.*reviewed-response/);assert.equal(f.data.versions[0].content.body,'Keep alpha and omega.');assert.equal(f.calls[0].ai_use_allowed,false)
+})
+
+test('retained Chat draft confirmation cannot save after its selected source becomes stale',async t=>{
+ let current=true;const review={key:'review',brief:{id:'brief',body:'Reviewed owner facts'},draft:{id:'draft',body:'Exact saved text'}}
+ const f=await mount(t,{input:{reviewedChatSources:review,chatSourcesCurrent:()=>current}});await f.click(f.button('Load reviewed Chat draft'))
+ await act(async()=>props(elements(f.env.container,'form')[0]).onSubmit({preventDefault(){}}));const retained=props(f.button('Confirm unapproved draft')).onClick
+ current=false;await f.render();await act(async()=>retained());assert.equal(f.calls.length,0);assert.match(f.env.container.textContent,/selected Chat source changed/)
+})
