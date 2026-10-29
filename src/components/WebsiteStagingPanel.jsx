@@ -1,5 +1,6 @@
 import {useEffect,useRef,useState} from 'react'
 import {websiteStaging} from '../data/websiteStagingClient.js'
+import WebsiteQaReviewPanel from './WebsiteQaReviewPanel.jsx'
 export default function WebsiteStagingPanel(props){return <Staging key={[props.organizationId,props.projectId,props.engagementId,props.actorId].join(':')} {...props}/>}
 function Staging({organizationId,projectId,engagementId,actorId,canStage=false,canBind=false,signal,repository=websiteStaging,onNavigationBusyChange}){
  const scope={organizationId,projectId,engagementId},key=['anka:staging',actorId,organizationId,projectId,engagementId].join(':')
@@ -28,6 +29,7 @@ function Staging({organizationId,projectId,engagementId,actorId,canStage=false,c
  <h2 className="font-semibold">WordPress staging and revisions</h2><p>Choose a private native package and an explicitly bound isolated WordPress staging site. A dry run checks exact versions and the remote page head. Deployment creates an authenticated preview; it does not activate a theme, replace WordPress pages or publish to a client.</p>
  {!data&&!error&&<p role="status">Loading staging history.</p>}
  {data&&<>
+ <WebsiteQaReviewPanel data={data} scope={scope} disabled={locked}/>
  {!data.targets.some(t=>t.current)&&<p role="status">No current staging target is bound. Configure and verify a WordPress connection in Settings, explicitly grant Development access for this project, and have an owner or operations admin inspect and bind the isolated staging receiver. Credentials stay outside chat and page drafts.</p>}
  <details><summary>Bind an authorized staging target</summary><p>The site must run the Anka staging receiver with a fixed site ID, staging environment and dedicated capability. The server operator must enable its exact HTTPS origin. Existing connection verification alone does not authorize staging.</p><label className="block">Verified project WordPress connection<select aria-label="Staging connection" className="w-full" value={connection} disabled={locked||!canBind} onChange={e=>change(()=>setConnection(e.target.value))}><option value="">Choose manually</option>{data.connections.map(c=><option key={c.id} value={c.id}>{c.display_name} · {c.base_url}</option>)}</select></label><button type="button" className="workspace-button" disabled={locked||!canBind||!connection} onClick={()=>act(inspect)}>Inspect staging identity</button>
  {inspection&&<div><p>{inspection.base_url} · staging only · site {inspection.site_id}</p><label><input type="checkbox" checked={confirmed} disabled={locked} onChange={e=>setConfirmed(e.target.checked)}/> I confirm this exact isolated staging site for this project.</label><button type="button" className="workspace-button" disabled={locked||!canBind||!confirmed} onClick={()=>act(bind)}>Bind reviewed staging target</button></div>}

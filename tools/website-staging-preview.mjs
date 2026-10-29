@@ -1,6 +1,6 @@
 import {createServer} from 'vite'
 import {fileURLToPath} from 'node:url'
-export async function startStagingPreview(){
+export async function startStagingPreview({port=5212,cacheDir}={}){
  const root=fileURLToPath(new URL('../',import.meta.url)),mocks={
  '/src/context/AuthContext.jsx':"import {actor} from '/tools/website-block-fixture.js';export const useAuth=()=>({user:{id:actor},profile:{full_name:'Preview member',role:'admin'},signOut:()=>{}})",
  '/src/context/OrganizationContext.jsx':'export const useOrganization=()=>globalThis.__blockPreview.organization',
@@ -12,6 +12,6 @@ export async function startStagingPreview(){
  '/src/components/AssistantFloat.jsx':'export default function FixtureAssistant(){return null}',
  '/src/lib/supabase.js':"export const supabase={from:table=>{if(table!=='user_preferences')throw Error('Unexpected fixture table '+table);const q={select:()=>q,eq:()=>q,maybeSingle:async()=>({data:null}),upsert:async()=>({})};return q}}"
  }
- const server=await createServer({root,cacheDir:root+'/node_modules/.vite-website-staging',server:{host:'127.0.0.1',port:5212,strictPort:true,watch:null},plugins:[{name:'synthetic-native-block',enforce:'pre',load(id){const path=id.replaceAll('\\','/').split('?')[0];for(const[suffix,source]of Object.entries(mocks))if(path.endsWith(suffix))return source}}]})
+ const server=await createServer({root,cacheDir:cacheDir||root+'/node_modules/.vite-website-staging',server:{host:'127.0.0.1',port,strictPort:true,watch:null},plugins:[{name:'synthetic-native-block',enforce:'pre',load(id){const path=id.replaceAll('\\','/').split('?')[0];for(const[suffix,source]of Object.entries(mocks))if(path.endsWith(suffix))return source}}]})
  await server.listen();return server
 }
