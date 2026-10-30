@@ -247,7 +247,7 @@ test('W6 consolidates parent, subtasks, dependencies, and RLS-filtered artifact 
   assert.match(connectionPicture, /This artifact has no other visible relations/)
   assert.match(artifactRepository, /\.from\('artifact_relations'\)[\s\S]*\.select\(relationSelect\)/)
   assert.doesNotMatch(`${workload}\n${connectionPicture}`, /supabase|workItems\.(save|remove|addDependency|removeDependency)|\.insert\(|\.update\(|\.upsert\(|\.delete\(/i)
-  assert.equal(migrationNames.some(name => /workload|relationship/i.test(name)), false)
+  assert.deepEqual(migrationNames.filter(name => /workload|relationship/i.test(name)), ['20261030122254_project_asset_relationships.sql'])
 })
 test('UW3 verifier returns every named check and always rolls back', () => {
   for (const check of [
