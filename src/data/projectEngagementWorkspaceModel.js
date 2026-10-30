@@ -199,6 +199,7 @@ export function buildProjectEngagementWorkspace(snapshot, options = {}) {
     deliverables: delivery,
     reviewQueue,
     workshopArtifacts,
+    artifactReviews: approvals,
     activity,
     workshopLinks,
     attentionSignals,
