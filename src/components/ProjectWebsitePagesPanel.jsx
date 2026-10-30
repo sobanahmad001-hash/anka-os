@@ -23,12 +23,12 @@ function ScopedWebsitePages({organizationId,engagement,group,actorId,signal,onNa
  const [pending,setPending]=useState(()=>{try{const v=JSON.parse(sessionStorage.getItem(recoveryKey)||'null');return v && UUID.test(v.requestId || '') ? v : v ? {requestId:''} : null}catch{return {requestId:''}}})
  const [query,setQuery]=useState(''),[sources,setSources]=useState([]),[sourcePage,setSourcePage]=useState({offset:0,has_more:false}),[versionId,setVersionId]=useState('')
  const [search,setSearch]=useState(''),[stateFilter,setStateFilter]=useState(''),[parentFilter,setParentFilter]=useState(''),[offset,setOffset]=useState(0),[data,setData]=useState(null)
- const [assetView,setAssetView]=useState(null)
+ const [assetView,setAssetView]=useState(null),[relationsBlocked,setRelationsBlocked]=useState(false)
  const [selected,setSelected]=useState([]),[review,setReview]=useState(null),[history,setHistory]=useState(null),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[editor,setEditor]=useState(null),[seo,setSeo]=useState(null),[seoBlocked,setSeoBlocked]=useState(false),[bulk,setBulk]=useState(null)
  const alive=useRef(true),flight=useRef(false),sequence=useRef(0),latest=useRef(null)
- latest.current={versionId,search,stateFilter,parentFilter,offset,pending,busy,signal,review,selected,data,query,editor,seo,seoBlocked,bulk,assetView}
+ latest.current={versionId,search,stateFilter,parentFilter,offset,pending,busy,signal,review,selected,data,query,editor,seo,seoBlocked,bulk,assetView,relationsBlocked}
  const allowed=()=>alive.current && !latest.current.signal?.aborted
- const locked=()=>Boolean(latest.current.editor) || Boolean(latest.current.bulk) || latest.current.seoBlocked || !allowed() || flight.current || latest.current.busy || Boolean(latest.current.pending)
+ const locked=()=>latest.current.relationsBlocked || Boolean(latest.current.editor) || Boolean(latest.current.bulk) || latest.current.seoBlocked || !allowed() || flight.current || latest.current.busy || Boolean(latest.current.pending)
  const setWorking=value=>{latest.current.busy=value;setBusy(value)}
  useEffect(()=>()=>{alive.current=false;sequence.current+=1},[])
  async function findSources(pageOffset=0){
@@ -99,7 +99,7 @@ function ScopedWebsitePages({organizationId,engagement,group,actorId,signal,onNa
    if(allowed()){sessionStorage.removeItem(recoveryKey);latest.current.pending=null;setPending(null)}
   }catch(cause){if(!dispatched)cause.knownRollback=true;if(allowed()&&cause.knownRollback){sessionStorage.removeItem(recoveryKey);latest.current.pending=null;setPending(null)}throw cause}finally{flight.current=false;if(allowed())setWorking(false)}
  }
- const isLocked=busy || Boolean(pending) || Boolean(editor) || Boolean(bulk) || seoBlocked,count=data?.counts,source=sources.find(row=>row.artifact_version_id===versionId)
+ const isLocked=relationsBlocked || busy || Boolean(pending) || Boolean(editor) || Boolean(bulk) || seoBlocked,count=data?.counts,source=sources.find(row=>row.artifact_version_id===versionId)
  const asset=assetView?.versionId===versionId&&data?.pages.includes(assetView.row)?websiteAsset(assetView.row,{...scope,engagementId:engagement.id,architectureVersionId:versionId},data.reference):null
  const assetActive=()=>allowed()&&!locked()&&latest.current.assetView===assetView&&assetView?.versionId===latest.current.versionId&&latest.current.data?.pages.includes(assetView.row)
  useEffect(()=>{onNavigationBusyChange?.(isLocked);return()=>onNavigationBusyChange?.(false)},[isLocked,onNavigationBusyChange])
@@ -113,7 +113,7 @@ function ScopedWebsitePages({organizationId,engagement,group,actorId,signal,onNa
    {sourcePage.offset>0 && <button type="button" className="workspace-button" onClick={()=>findSources(Math.max(0,sourcePage.offset-25))}>Previous architecture results</button>}{sourcePage.has_more && <button type="button" className="workspace-button" onClick={()=>findSources(sourcePage.offset+25)}>Next architecture results</button>}
   </fieldset>
   {busy && <p role="status" className="text-xs text-[var(--anka-muted)]">Checking exact current project records…</p>}
-  {asset&&<ProjectAssetWorkspace key={'asset:'+asset.id+':'+versionId} asset={asset} workspace={workspace} busy={isLocked||signal?.aborted} onClose={()=>{if(assetActive())setAssetView(null)}} onEdit={()=>{if(assetActive()){setAssetView(null);void openEditor(assetView.row)}}} onEvidence={()=>{if(assetActive())openSeo(assetView.row)}} onHistory={()=>{if(assetActive())void inspect(assetView.row)}}/>}
+  {asset&&<ProjectAssetWorkspace key={'asset:'+asset.id+':'+versionId} asset={asset} workspace={workspace} actorId={actorId} signal={signal} onRelationsLockChange={setRelationsBlocked} busy={isLocked||signal?.aborted} onClose={()=>{if(assetActive())setAssetView(null)}} onEdit={()=>{if(assetActive()){setAssetView(null);void openEditor(assetView.row)}}} onEvidence={()=>{if(assetActive())openSeo(assetView.row)}} onHistory={()=>{if(assetActive())void inspect(assetView.row)}}/>}
   {versionId && <_WebsiteSiteFindingsPanel key={versionId} organizationId={organizationId} projectId={engagement.project_id} engagementId={engagement.id} architectureVersionId={versionId} signal={signal} disabled={isLocked} onOpenPage={(row,selectedVersion)=>{if(locked()||selectedVersion!==latest.current.versionId||row.organization_id!==organizationId||row.project_id!==engagement.project_id||row.engagement_id!==engagement.id||!UUID.test(row.page_id||''))return;setSeo({row:{page_id:row.page_id,source:{title:row.page_title}},versionId:selectedVersion});setReview(null);setHistory(null)}}/>}
   {seo && <_WebsitePageSeoObservationsPanel key={seo.row.page_id+':'+seo.versionId} organizationId={organizationId} projectId={engagement.project_id} engagementId={engagement.id} pageId={seo.row.page_id} architectureVersionId={seo.versionId} pageTitle={seo.row.source.title} actorId={actorId} signal={signal} onNavigationBusyChange={value=>{if(allowed()&&latest.current.seo===seo){latest.current.seoBlocked=value;setSeoBlocked(value)}}} onClose={()=>{if(allowed()&&!latest.current.seoBlocked&&latest.current.seo===seo){latest.current.seo=null;setSeo(null)}}}/> }
   {bulk && <_WebsiteBulkOperations selection={bulk} disabled={Boolean(pending)&&!busy} isActive={bulkActive} onLoad={page=>{if(!bulkActive(bulk)||!bulk.pages.includes(page))throw new Error('The selected page is no longer active.');return projectWebsitePages.editor({...scope,pageId:page.page_id,architectureVersionId:bulk.versionId},{signal})}} onSave={saveBulk} onRecover={recover} onClose={()=>{if(bulkActive(bulk)){latest.current.bulk=null;setBulk(null);setSelected([]);void load()}}}/>}
