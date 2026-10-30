@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Anka Staging Receiver
  * Description: Authenticated immutable core-block previews on an explicitly isolated staging WordPress site. No publication or theme activation.
- * Version: 1.0.1
+ * Version: 1.0.2
  */
 if (!defined('ABSPATH')) { exit; }
 define('ANKA_STAGE_PROTOCOL', 'anka-stage-v1');
@@ -55,13 +55,29 @@ function anka_stage_receipt($id) {
  $status=in_array($id,$history,true)?'staged':($head!==$command->expected_head?'conflict':'pending');
  return array_merge($identity,array('request_id'=>$id,'page_id'=>$command->scope->page_id,'package_sha256'=>$command->package_sha256,'status'=>$status,'preview_url'=>$status==='staged'?untrailingslashit(home_url()).'/?anka_staging_preview='.$id:null,'unresolved_paths'=>$record['unresolved_paths']));
 }
+
+function anka_stage_https_navigation($value) {
+ if (!is_string($value)||strlen($value)>2048||!str_starts_with($value,'https://')||preg_match('~[\s\\\\<>"\x27`\x00-\x1f\x7f]|%(?![a-f0-9]{2})|%(?:0[0-9a-f]|1[0-9a-f]|7f|5c|22|27|3c|3e)~i',$value)) { return false; }
+ $url=parse_url($value);$host=$url['host']??'';$authority=preg_split('~[/?#]~',substr($value,8))[0];
+ if (!$url||($url['scheme']??'')!=='https'||isset($url['user'])||isset($url['pass'])||isset($url['port'])||$authority!==$host||strlen($host)>253||!preg_match('~\.[a-z]{2,63}$~',$host)||preg_match('~(?:^|\.)(?:localhost|local|internal|test|invalid|example|onion)$~',$host)) { return false; }
+ foreach (explode('.',$host) as $label) { if (!preg_match('~^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$~',$label)) { return false; } }
+ return true;
+}
+
 function anka_stage_safe_markup($html,$rendered=true) {
- if (!is_string($html)||preg_match('~<\?(?:php|=)|<(?:script|iframe|form|object|embed|svg|math|base|meta|link|style|img|input|video|audio)\b|\bon[a-z]+\s*=|\b(?:src|href)\s*=\s*["\x27](?:https?:|//|javascript:|data:)~i',$html)) { throw new Exception('Only escaped native block markup is accepted.'); }
+ if (!is_string($html)||preg_match('~<\?(?:php|=)|<(?:script|iframe|form|object|embed|svg|math|base|meta|link|style|img|input|video|audio)\b|\bon[a-z]+\s*=|\bsrc\s*=\s*["\x27](?:https?:|//|javascript:|data:)~i',$html)) { throw new Exception('Only escaped native block markup is accepted.'); }
  preg_match_all('~</?([a-z][a-z0-9-]*)\b~i',$html,$tags);
  foreach ($tags[1] as $tag) { if (!in_array(strtolower($tag),array('a','div','h1','h2','h3','h4','h5','h6','header','footer','main','nav','section','p','span','ul','ol','li','hr'),true)) { throw new Exception('Unsupported native markup element.'); } }
  $allowed=array('core/group','core/columns','core/column','core/heading','core/paragraph','core/buttons','core/button','core/list','core/list-item','core/separator','core/spacer','core/html');if (!$rendered) { $allowed=array_merge($allowed,array('core/template-part','core/post-content','core/post-title')); }
- preg_match_all('~\b(?:src|href)\s*=\s*(?:"([^"]*)"|\x27([^\x27]*)\x27|([^\s>]+))~i',$html,$links,PREG_SET_ORDER);
- foreach ($links as $link) { $value=html_entity_decode(isset($link[1])&&$link[1]!==''?$link[1]:(isset($link[2])&&$link[2]!==''?$link[2]:($link[3]??'')),ENT_QUOTES|ENT_HTML5,'UTF-8');if (!preg_match('~^(?:#[a-z0-9_-]*|/(?!/)[a-z0-9/_#?=&%-]*)$~i',$value)) { throw new Exception('Only reviewed local links are accepted.'); } }
+ preg_match_all('~<([a-z][a-z0-9-]*)\b[^>]*>~i',$html,$elements,PREG_SET_ORDER);
+ foreach ($elements as $element) {
+  preg_match_all('~\b(src|href)\s*=\s*(?:"([^"]*)"|\x27([^\x27]*)\x27|([^\s>]+))~i',$element[0],$links,PREG_SET_ORDER);
+  foreach ($links as $link) {
+   $value=html_entity_decode($link[2]!==''?$link[2]:($link[3]!==''?$link[3]:($link[4]??'')),ENT_QUOTES|ENT_HTML5,'UTF-8');
+   $local=preg_match('~^(?:#[a-z0-9_-]*|/(?!/)[a-z0-9/_#?=&%-]*)$~i',$value);
+   if (!$local&&!(strtolower($element[1])==='a'&&strtolower($link[1])==='href'&&anka_stage_https_navigation($value))) { throw new Exception('Only local resources and reviewed HTTPS navigation links are accepted.'); }
+  }
+ }
  $check=static function ($blocks) use (&$check,$allowed,$rendered) { foreach ($blocks as $block) { foreach (array_keys($block['attrs']) as $key) { if (!in_array($key,array_merge(array('tagName','anchor','className','level'),$rendered?array():array('slug','area')),true)) { throw new Exception('Unreviewed dynamic block attributes are not accepted.'); } } if ($block['blockName']===null) { if (trim($block['innerHTML'])!=='') { throw new Exception('Unwrapped markup is not accepted.'); } } elseif (!in_array($block['blockName'],$allowed,true)) { throw new Exception('Unsupported executable block.'); } if (!empty($block['innerBlocks'])) { $check($block['innerBlocks']); } } };
  $check(parse_blocks($html));
 }

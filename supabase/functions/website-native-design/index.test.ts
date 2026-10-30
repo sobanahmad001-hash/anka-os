@@ -13,3 +13,11 @@ Deno.test('stale reviewed source and rehashed content tampering never reach the 
 Deno.test('transaction failure proves rollback, while missing success receipt remains uncertain',async()=>{for(const rollback of [true,false]){const h=harness({admin:{rpc:async()=>rollback?{error:{message:'Conflict',code:'40001'}}:{data:{id:id(11)}}}}),response=await handler(request({...base(),action:'save_site',expected_version_id:null,identity_version_id:id(13),site:fixture().site_version.site}),h.dependencies);assertEquals(response.status,409);assertEquals((await response.json()).rollback_verified,rollback)}})
 Deno.test('project-only styles save explicitly without claiming an identity approval',async()=>{const h=harness(),response=await handler(request({...base(),action:'save_site',expected_version_id:null,identity_version_id:null,site:h.source.site_version.site}),h.dependencies);assertEquals(response.status,200);assertEquals(h.calls[0].args.p_identity_version_id,null)})
 Deno.test('oversized requests are rejected before authenticated resolution or writes',async()=>{let resolved=false;const response=await handler(request({padding:'x'.repeat(262145)}),{resolveContext:async()=>{resolved=true;throw Error('Must not resolve')}});assertEquals(response.status,413);assertEquals(resolved,false);assertEquals((await response.json()).rollback_verified,true)})
+
+Deno.test('exact HTTPS contact destination saves through current authenticated source verification; unsafe destination never writes',async()=>{
+ const h=harness(),manifest=await prepareWebsiteNativeManifest(h.source,{template:'home',sections:[{source_key:'copy',component:'prose',motion:'none'}],cta_path:'https://ankasphere.com/contact-anka-sphere/'})
+ const body={...base(),action:'save_design',direction_version_id:null,architecture_approval_id:id(9),review_sha256:h.source.review_sha256,manifest}
+ assertEquals((await handler(request(body),h.dependencies)).status,200);assertEquals(h.calls.length,1);assertMatch(h.calls[0].args.p_html as string,/href="https:\/\/ankasphere.com\/contact-anka-sphere\/"/)
+ manifest.content.sections[0].action.path='https://user:pass@example.com/'
+ assertEquals((await handler(request(body),h.dependencies)).status>=400,true);assertEquals(h.calls.length,1)
+})
