@@ -1,0 +1,12 @@
+const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const id=v=>{if(typeof v!=='string'||!UUID.test(v))throw Error('Exact keyword source/page identifier required');return v}
+const scope=v=>({p_organization_id:id(v.organizationId),p_project_id:id(v.projectId)})
+const page=v=>({...scope(v),p_page_id:id(v.pageId)})
+export function keywordTargets(value){if(!Array.isArray(value)||value.length>200||value.some(t=>!t||Object.keys(t).sort().join(',')!=='cluster,keyword_index,role'||!Number.isSafeInteger(t.keyword_index)||t.keyword_index<0||!['primary','supporting'].includes(t.role)||typeof t.cluster!=='string'||!t.cluster.trim()||t.cluster!==t.cluster.trim()||t.cluster.length>240||/[\u0000-\u001f\u007f]/.test(t.cluster))||new Set(value.map(t=>t.keyword_index)).size!==value.length)throw Error('Distinct exact keyword indices, clusters and primary/supporting roles required');return value.map(t=>({...t}))}
+const change=v=>{if(!Number.isSafeInteger(v.expectedRevision)||v.expectedRevision<0||!/^[0-9a-f]{64}$/.test(v.sourceChecksum||''))throw Error('Current revision and exact source checksum required');return {...page(v),p_expected_revision:v.expectedRevision,p_strategy_version_id:id(v.strategyVersionId),p_source_checksum:v.sourceChecksum,p_targets:keywordTargets(v.targets)}}
+export function createProjectPageKeywordTargetsRepository(client){
+ const call=async(n,args,o)=>{if(o?.signal?.aborted)throw new DOMException('Context changed','AbortError');let q=client.rpc(n,args);if(o?.signal&&q.abortSignal)q=q.abortSignal(o.signal);const {data,error}=await q;if(error)throw Object.assign(new Error(error.message||'Keyword request failed'),{cause:error,code:error.code});if(o?.signal?.aborted)throw new DOMException('Context changed','AbortError');return data}
+ return Object.freeze({read:(v,o)=>call('read_project_page_keyword_targets',page(v),o),source:(v,o)=>call('get_project_page_keyword_source',{...page(v),p_strategy_version_id:id(v.strategyVersionId)},o),review:(v,o)=>call('review_project_page_keyword_targets',change(v),o),
+ save(v,o){if(v.confirmed!==true||!/^[a-f0-9]{64}$/.test(v.reviewSha256||''))throw Error('Review and explicitly confirm the exact keyword targets');return call('save_project_page_keyword_targets',{...change(v),p_review_sha256:v.reviewSha256,p_request_id:id(v.requestId)},o)},
+ recover:(v,o)=>call('recover_project_page_keyword_targets',{...scope(v),p_request_id:id(v.requestId)},o)})
+}
