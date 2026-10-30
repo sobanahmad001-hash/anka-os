@@ -8,6 +8,8 @@ import {transformSync} from 'esbuild'
 import {mountedEnvironment} from './testSupport/n1bMountedDom.js'
 const nativeRequire=createRequire(import.meta.url),nodes=node=>[node,...node.childNodes.flatMap(nodes)],props=node=>node?.[Object.keys(node).find(key=>key.startsWith('__reactProps$'))]
 const group=(id,kind,extra={})=>({id,kind,name:id,organization_id:'org-a',project_id:'project-a',engagement_id:'eng-a',...extra})
+
+test('Marketing asset reporting link cannot retain a group after the current work area changes',async t=>{const ui=await mount(t,{kind:'marketing'});await ui.choose('marketing-a');const callback=ui.children.at(-1).props.onOpenResources;await act(async()=>callback());assert.deepEqual(ui.opened,['marketing-a']);await ui.render({kind:'website'});await act(async()=>callback());assert.deepEqual(ui.opened,['marketing-a'])})
 async function mount(t,extra={}){
  const env=mountedEnvironment(),prior={document:globalThis.document,window:globalThis.window,IS_REACT_ACT_ENVIRONMENT:globalThis.IS_REACT_ACT_ENVIRONMENT};Object.assign(globalThis,{document:env.document,window:env.window,IS_REACT_ACT_ENVIRONMENT:true});const children=[],opened=[],busy=[]
  const compiled=transformSync(readFileSync(new URL('../components/ProjectScopedPipelineView.jsx',import.meta.url),'utf8'),{loader:'jsx',format:'cjs',jsxFactory:'React.createElement'}).code,module={exports:{}}
