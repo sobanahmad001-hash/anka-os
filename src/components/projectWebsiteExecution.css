@@ -1,0 +1,8 @@
+.project-website-execution{min-width:0;margin-block:1rem;padding:1rem;border:1px solid var(--anka-line);border-radius:1rem;background:var(--anka-surface);color:var(--anka-ink);overflow-wrap:anywhere}
+.project-website-execution summary{font-weight:600;cursor:pointer}
+.project-website-execution p,.project-website-execution ol{margin-block:.75rem}
+.project-website-execution ol{padding-left:1.25rem}
+.project-website-execution nav{display:flex;gap:.5rem;flex-wrap:wrap}
+.project-website-execution label{display:block}
+.project-website-execution select,.project-website-execution textarea{max-width:100%;min-width:0;color:var(--anka-ink);background:var(--anka-surface);border:1px solid var(--anka-line);border-radius:.5rem;padding:.5rem}
+.project-website-execution button,.project-website-execution a{white-space:normal;height:auto;overflow-wrap:anywhere}

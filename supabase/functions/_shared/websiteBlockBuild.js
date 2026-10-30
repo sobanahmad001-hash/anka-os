@@ -1,5 +1,5 @@
 // W3 fixed-task compiler: no process, shell, network, user PHP/JS or archive input.
-import {compileWebsiteNativeDesign,websiteNativeSnapshotChecksum} from './websiteNativeDesign.js'
+import {compileWebsiteNativeDesign,websiteNativeSnapshotChecksum,validateWebsiteNavigationDestination} from './websiteNativeDesign.js'
 export const WEBSITE_BLOCK_COMPILER='anka-native-block-v1'
 export const WEBSITE_BLOCK_RUNTIME=Object.freeze({wordpress:'7.1.3',php:'8.3',network:false,arbitrary_code:false,maximum_files:10,maximum_bytes:1048576})
 export const WEBSITE_BLOCK_FUNCTIONS=String.raw`<?php
@@ -30,7 +30,11 @@ export function assertWebsiteBlockFiles(input){
  }
  if(total>WEBSITE_BLOCK_RUNTIME.maximum_bytes)throw Error('Native package output exceeds bound')
  if(input['functions.php']!==WEBSITE_BLOCK_FUNCTIONS)throw Error('Only the fixed Anka runtime adapter is executable')
- for(const name of names.filter(n=>n.endsWith('.html')))if(/<\?(?:php|=)|<script\b|<iframe\b|<form\b|\bon[a-z]+\s*=|\b(?:src|href)\s*=\s*["'](?:https?:|\/\/|javascript:|data:)/i.test(input[name]))throw Error('Unsupported code or remote asset in block markup')
+ for(const name of names.filter(n=>n.endsWith('.html')))if(/<\?(?:php|=)|<script\b|<iframe\b|<form\b|\bon[a-z]+\s*=|\bsrc\s*=\s*["'](?:https?:|\/\/|javascript:|data:)/i.test(input[name]))throw Error('Unsupported code or remote asset in block markup')
+ for(const name of names.filter(n=>n.endsWith('.html')))for(const tag of input[name].matchAll(/<([a-z][a-z0-9-]*)\b[^>]*>/gi))for(const attr of tag[0].matchAll(/\b(href|src)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)){
+  if(attr[1].toLowerCase()!=='href'||tag[1].toLowerCase()!=='a')throw Error('Navigation href is supported only on anchor elements')
+  validateWebsiteNavigationDestination((attr[2]??attr[3]??attr[4]).replaceAll('&amp;','&'))
+ }
  if(/@import|url\s*\(|expression\s*\(|<\?/i.test(input['style.css']))throw Error('Unsupported stylesheet resource')
  return {files:names.length,bytes:total,paths:[...names].sort()}
 }

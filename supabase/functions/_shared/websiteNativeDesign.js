@@ -9,6 +9,18 @@ function text(value,max,label){if(typeof value!=='string'||!value.trim()||value!
 function list(value,min,max,label){if(!Array.isArray(value)||value.length<min||value.length>max)throw new TypeError(`Bounded ${label} required`);return value}
 function key(value){if(typeof value!=='string'||!/^[a-z][a-z0-9_-]{0,63}$/.test(value))throw new TypeError('Stable local section key required');return value}
 function path(value){if(typeof value!=='string'||value.length>240||!(/^(?:\/(?!\/)[a-zA-Z0-9/_-]*|#[a-z][a-z0-9_-]*)$/.test(value))||value.split('/').includes('..'))throw new TypeError('Local site path or section anchor required');return value}
+
+// Navigation only: never use this validator for a fetch, image, stylesheet or receiver origin.
+export function validateWebsiteNavigationDestination(value){
+ if(typeof value!=='string')throw new TypeError('Local path, section anchor or public HTTPS navigation URL required')
+ if(!value.startsWith('https://'))return path(value)
+ if(value.length>2048||/[\s\\<>"'`\u0000-\u001f\u007f]/.test(value)||/%(?![a-f0-9]{2})/i.test(value)||/%(?:0[0-9a-f]|1[0-9a-f]|7f|5c|22|27|3c|3e)/i.test(value))throw new TypeError('Safe public HTTPS navigation URL required')
+ let url;try{url=new URL(value)}catch{throw new TypeError('Valid HTTPS navigation URL required')}
+ const authority=value.slice(8).split(/[/?#]/)[0],host=url.hostname
+ if(url.protocol!=='https:'||url.username||url.password||url.port||authority!==host||host.length>253||!host.split('.').every(label=>/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))||!/\.[a-z]{2,63}$/.test(host)||/(?:^|\.)(?:localhost|local|internal|test|invalid|example|onion)$/.test(host))throw new TypeError('Public DNS hostname without credentials or port required for HTTPS navigation')
+ return value
+}
+
 function reference(value){exact(value,['version_id','checksum'],'source reference');if(typeof value.version_id!=='string'||typeof value.checksum!=='string'||!uuid.test(value.version_id)||!hash.test(value.checksum))throw new TypeError('Exact source UUID and checksum required')}
 function luminance(color){const values=color.slice(1).match(/../g).map(part=>parseInt(part,16)/255).map(n=>n<=.04045?n/12.92:((n+.055)/1.055)**2.4);return values[0]*.2126+values[1]*.7152+values[2]*.0722}
 function contrast(a,b){const values=[luminance(a),luminance(b)].sort((x,y)=>y-x);return (values[0]+.05)/(values[1]+.05)}
@@ -24,7 +36,7 @@ export function validateWebsiteNativeSite(site){
  for(const color of Object.values(site.palette))if(!/^#[0-9a-f]{6}$/i.test(color))throw new TypeError('Six-digit palette colors required')
  const palette=site.palette
  if(contrast(palette.ink,palette.background)<4.5||contrast(palette.ink,palette.surface)<4.5||contrast(palette.accent,palette.background)<4.5)throw new TypeError('Readable text and link contrast required')
- list(site.navigation,1,8,'navigation').forEach(item=>{exact(item,['label','path'],'navigation item');text(item.label,60,'navigation label');path(item.path)})
+ list(site.navigation,1,8,'navigation').forEach(item=>{exact(item,['label','path'],'navigation item');text(item.label,60,'navigation label');validateWebsiteNavigationDestination(item.path)})
  return structuredClone(site)
 }
 
@@ -47,7 +59,7 @@ export function validateWebsiteNativeDesign(value){
   if(sections.has(section.key))throw new TypeError('Duplicate content section')
   list(section.paragraphs,0,32,'paragraphs').forEach(p=>text(p,3000,'paragraph'))
   list(section.items,0,12,'feature items').forEach(item=>{exact(item,['title','body'],'feature');text(item.title,100,'feature title');text(item.body,800,'feature body')})
-  if(section.action!==null){exact(section.action,['label','path'],'action');text(section.action.label,80,'action label');path(section.action.path)}
+  if(section.action!==null){exact(section.action,['label','path'],'action');text(section.action.label,80,'action label');validateWebsiteNavigationDestination(section.action.path)}
   sections.set(section.key,section)
  })
  exact(value.layout,['template','sections'],'page layout')

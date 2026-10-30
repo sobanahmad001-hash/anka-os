@@ -43,7 +43,6 @@ if (check) {
   await build({ ...config, build: { write: false, rollupOptions: { input: fileURLToPath(new URL('./direct-chat-preview.html', import.meta.url)) } } })
   console.log('B1 preview builds in memory with provider-free module mocks; no port binding.')
 } else {
-  const server = await createServer(config)
-  await server.listen()
-  console.log('Integration preview 5216');globalThis.__integrationServer=server
+  if(process.argv[1]?.replaceAll('\\','/').endsWith('/project-content-journey-preview.mjs')){await startContentJourneyPreview();console.log('Integration preview 5216')}
 }
+export async function startContentJourneyPreview({port=5216,plugins=[]}={}){const server=await createServer({...config,plugins:[...plugins,...config.plugins],server:{...config.server,port}});await server.listen();return server}

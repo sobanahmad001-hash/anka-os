@@ -1,4 +1,4 @@
-# Anka Staging Receiver 1.0.1
+# Anka Staging Receiver 1.0.2
 
 This receiver provides authenticated, immutable WordPress core-block previews on an isolated staging site. It does not activate themes, replace WordPress pages, approve delivery or publish to a client. W3 packages and canonical Anka page/build history remain the source of truth.
 
@@ -29,4 +29,6 @@ Client-site publication is unavailable in this protocol. W5 requires its own exa
 
 The portable `tools/check-website-staging-wordpress.mjs` harness exercises the receiver on pinned local WordPress 7.1.3/PHP 8.3 with networking disabled and synthetic local accounts. Native PostgreSQL and mocked Anka/browser tests verify their own bounded layers. None of these establish a signed-in production Anka write or a real staging-site deployment. Live acceptance requires a normally configured, authorized connection and its exact real target.
 
-Receiver 1.0.1 explicitly supports reviewed WordPress 7.1.3 and 7.1.4 only, with PHP 8.3 patches. Other WordPress versions and PHP minor versions remain denied. Both the receiver permission guard and Anka identity validator enforce this list. The local harness accepts optional WordPress version and isolated port arguments after the browser path; its default remains 7.1.3.
+Receiver 1.0.2 retains support for reviewed WordPress 7.1.3 and 7.1.4 only, with PHP 8.3 patches. Other WordPress versions and PHP minor versions remain denied. Both the receiver permission guard and Anka identity validator enforce this list. The local harness accepts optional WordPress version and isolated port arguments after the browser path; its default remains 7.1.3.
+
+Native anchor navigation can use an explicitly reviewed public HTTPS URL, including `https://ankasphere.com/contact-anka-sphere/`. It must have a lowercase public DNS hostname, no credentials or explicit port, and no malformed escapes, control characters or backslashes. Local paths and section anchors remain supported. This is browser navigation only: remote images, stylesheets, scripts, resource URLs and server fetches remain disallowed. Server dispatch still requires its separate origin allowlist, public DNS, connection, capability and exact-target checks. Installing this receiver version is separate from staging a package or publishing a client site.
