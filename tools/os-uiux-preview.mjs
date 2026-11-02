@@ -36,4 +36,4 @@ const config = { root, cacheDir: root+'/outputs/ux-vite-cache', server: { host: 
     // Actual private video UI uses the isolated repository above; generation is disabled.
   },
 }] }
-export async function startUxPreview(){const server=await createServer(config);await server.listen();return server}
+export async function startUxPreview({port=5244}={}){const server=await createServer({...config,server:{...config.server,port}});await server.listen();return server}

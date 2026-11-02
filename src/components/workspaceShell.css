@@ -18,6 +18,7 @@
 .anka-shell .shell-header button:hover, .anka-shell .shell-sidebar a:hover { background: var(--anka-violet-soft); color: var(--anka-violet); }
 .anka-shell .shell-header [aria-current="page"], .anka-shell .shell-sidebar [aria-current="page"] { background: var(--anka-violet-soft); color: var(--anka-violet); border-color: transparent; box-shadow: none; }
 .anka-shell .shell-sidebar a svg { color: currentColor; }
+.anka-shell .shell-sidebar > div:first-child > div > div:first-child { background: var(--anka-violet-soft); color: var(--anka-violet); border-color: var(--anka-line); }
 .anka-shell .shell-sidebar span[class*="rounded-full"] { background: var(--anka-violet-soft); color: var(--anka-violet); border-color: var(--anka-line); text-transform: none; letter-spacing: normal; }
 .anka-shell .shell-environment-link { padding: 10px 12px; font-size: 13px; border-radius: 8px; }
 .anka-shell .shell-header :is(button, select, a):focus-visible,

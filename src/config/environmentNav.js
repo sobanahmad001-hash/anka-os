@@ -10,7 +10,7 @@ export const environmentNav = [
     items: [
       { label: 'Overview', path: '/admin', legacyAdmin: true },
       { label: 'People & access', path: '/users', peopleAdmin: true },
-      { label: 'Connectors', path: '/settings', organizationAdmin: true },
+      { label: 'Integrations & accounts', path: '/settings', organizationAdmin: true },
       { label: 'Product Document', path: '/admin/living-product-document', legacyAdmin: true },
     ],
   },
@@ -22,8 +22,8 @@ export const environmentNav = [
     items: [
       { label: 'Workspace', path: null, isHeader: true },
       { label: 'Home', path: '/sphere/workspace' },
-      { label: 'My Work', path: '/sphere/my-work', activePrefixes: ['/sphere/workspace/items'] },
       { label: 'Projects', path: '/sphere/portfolio', activePrefixes: ['/sphere/workspace/projects', '/sphere/internal', '/sphere/engagements'] },
+      { label: 'My Work', path: '/sphere/my-work', activePrefixes: ['/sphere/workspace/items'] },
       { label: 'Clients', path: '/sphere/clients', activePrefixes: ['/sphere/clients'] },
       { label: 'Workshops', path: null, isHeader: true },
       { label: 'Content Workshop', path: '/sphere/content', dept: 'content', activePrefixes: ['/sphere/content'] },
