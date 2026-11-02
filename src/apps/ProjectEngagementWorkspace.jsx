@@ -1,3 +1,4 @@
+import StudioProjectContext from '../components/StudioProjectContext.jsx'
 import ProjectDeliveryContextPanel from '../components/ProjectDeliveryContextPanel.jsx'
 import ProjectOverviewSummary from '../components/ProjectOverviewSummary.jsx'
 import {projectDeliveryIntent} from '../data/projectDeliveryContext.js'
@@ -21,14 +22,14 @@ import _ProjectReviewEvidencePanel from './ProjectReviewEvidencePanel.jsx'
 import { appendWorkshopNavigation, parseWorkshopNavigation } from '../data/workshopNavigation.js'
 
 const TABS = [
-  ['overview', 'Overview'], ['discussion', 'Chat'], ['work', 'Work'],
-  ['outputs', 'Files & outputs'],
+  ['discussion', 'Chat'], ['work', 'Work'], ['outputs', 'Assets'],
+  ['reviews', 'Delivery'], ['overview', 'Overview'],
 ]
 const WORK_TABS = [['work', 'All work'], ['website-work','Website'], ['marketing-work','Marketing'], ['project-tasks', 'Project Tasks'], ['engagement-work', 'Engagement Work Items'], ['planning', 'Schedule & Planning']]
 const SERVICES_TABS = [['services', 'Scope & Services'], ['journey', 'Journey']]
 const MORE_TABS = [['services', 'Services & Pipelines'], ['journey', 'Journey'], ['reviews', 'Reviews & Delivery'], ['activity', 'Activity']]
 const primaryTab = id => WORK_TABS.some(([key]) => key === id) || id === 'retainer-planning'
-  ? 'work' : ['services','journey','reviews','activity','resources'].includes(id) ? 'overview' : id
+  ? 'work' : ['services','journey','activity','resources'].includes(id) ? 'overview' : id
 const label = (value) => value ? value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) : 'Unknown'
 const date = (value) => value ? new Date(`${value.slice(0, 10)}T00:00:00Z`).toLocaleDateString() : 'Not set'
 const loadFailureKind = (cause) => cause?.membershipMismatch || [401, 403].includes(Number(cause?.status))
@@ -73,7 +74,7 @@ export default function ProjectEngagementWorkspace() {
   const [loadedAt, setLoadedAt] = useState(null)
   const [deliveryRequest,setDeliveryRequest]=useState(null)
   const recordProjectRequest=useCallback(request=>{const intent=projectDeliveryIntent(request.text);if(intent)setDeliveryRequest({intent,organizationId:request.organizationId,projectId:request.projectId,messageId:request.messageId})},[])
-  const [projectChatMode, setProjectChatMode] = useState('team')
+  const [projectChatMode, setProjectChatMode] = useState('private')
   const workspace=loadedWorkspace?.project.id===projectId && loadedWorkspace?.project.organization_id===activeOrganizationId ? loadedWorkspace : null
   const reportChatBusy=useCallback(value=>{if(projectChatMode==='private')reportNavigationBusy(value)},[projectChatMode,reportNavigationBusy])
   const reportChatDirty=useCallback(value=>{if(projectChatMode==='private')reportDraftDirty(value)},[projectChatMode,reportDraftDirty])
@@ -158,20 +159,20 @@ export default function ProjectEngagementWorkspace() {
     globalThis.requestAnimationFrame?.(() => globalThis.document?.getElementById(`project-tab-${nextTab}`)?.focus())
   }
   return (
-    <main className="workspace-page project-workspace">
+    <main className="workspace-page project-workspace studio-project">
       <div className="workspace-container">
         <button type="button" onClick={() => {if(allowLeavingCurrentView())navigate('/sphere/portfolio')}} className="text-sm font-medium text-[var(--anka-muted)] hover:text-[var(--anka-ink)]">← Portfolio Workspace</button>
         <header className="mt-3 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">
-            <div className="flex flex-wrap items-center gap-2 text-xs"><Pill>{identity.workType}</Pill><Pill>{label(project.engagement_type)}</Pill>{identity.hasEngagement && <Pill>Engagement connected</Pill>}</div>
+            <div className={`flex flex-wrap items-center gap-2 text-xs ${tab === 'discussion' ? 'sr-only' : ''}`}><Pill>{identity.workType}</Pill><Pill>{label(project.engagement_type)}</Pill>{identity.hasEngagement && <Pill>Engagement connected</Pill>}</div>
             <h1 className="mt-1 break-words text-2xl font-semibold tracking-tight text-[var(--anka-ink)] sm:text-3xl">{project.name}</h1>
             <p className={`mt-2 text-sm text-[var(--anka-muted)] ${tab === 'discussion' ? 'sr-only' : ''}`}>{[identity.clientName, identity.brandName].filter(Boolean).join(' · ') || (identity.workType === 'Internal Work' ? 'Internal project; no client identity is required.' : 'No client or brand identity is attached.')}</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2"><button type="button" disabled={isNavigationBusy} onClick={() => selectTab('services')} className="workspace-button">Manage services</button>{identity.hasEngagement && workspace.engagement?.id && <Link to={`/sphere/engagements?engagement=${encodeURIComponent(workspace.engagement.id)}&tab=pipeline&project=${encodeURIComponent(projectId)}`} onClick={event=>{if(!allowLeavingCurrentView())event.preventDefault()}} className="rounded-xl border border-[var(--anka-violet)] px-4 py-2 text-sm text-[var(--anka-violet)]">Open Pipeline</Link>}<button type="button" onClick={load} disabled={loading||isNavigationBusy} className="workspace-button hover:bg-[var(--anka-surface-raised)] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={project.status} /><ProjectDraftActivation project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onActivated={load} onAccessError={handleOrganizationAccessError} /></div>
+          <div className="flex flex-wrap items-center gap-2"><button type="button" onClick={load} disabled={loading||isNavigationBusy} className="workspace-button hover:bg-[var(--anka-surface-raised)] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={project.status} /><ProjectDraftActivation project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onActivated={load} onAccessError={handleOrganizationAccessError} /></div>
         </header>
-        <DescriptionDisclosure key={project.id} text={project.description || project.scope_statement || 'No project description recorded.'} label="Project description" />
 
-        <details className="mt-3 text-sm"><summary className="cursor-pointer text-[var(--anka-muted)]">Project settings</summary><div className="mt-4 space-y-4"><nav aria-label="Project configuration" className="flex flex-wrap gap-2"><button type="button" className="workspace-button" disabled={isNavigationBusy} onClick={()=>selectTab('services')}>Services & pipeline plan</button><button type="button" className="workspace-button" disabled={isNavigationBusy} onClick={()=>selectTab('resources')}>Resources & connections</button></nav><ProjectLifecyclePanel key={`${activeOrganizationId}:${project.id}:${scopeRevision}`} project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={(result) => { setWorkspace(current => current ? { ...current, project: { ...current.project, archived_at: result.archived_at } } : current); load() }} onDeleted={() => navigate('/sphere/portfolio')} />
+
+        <details className="mt-3 text-sm"><summary className="cursor-pointer text-[var(--anka-muted)]">Project settings</summary><div className="mt-4 space-y-4"><DescriptionDisclosure key={project.id} text={project.description || project.scope_statement || 'No project description recorded.'} label="Project description" />{identity.hasEngagement && workspace.engagement?.id && <Link to={`/sphere/engagements?engagement=${encodeURIComponent(workspace.engagement.id)}&tab=pipeline&project=${encodeURIComponent(projectId)}`} onClick={event=>{if(!allowLeavingCurrentView())event.preventDefault()}} className="rounded-xl border border-[var(--anka-violet)] px-4 py-2 text-sm text-[var(--anka-violet)]">Open Pipeline</Link>}<nav aria-label="Project configuration" className="flex flex-wrap gap-2"><button type="button" className="workspace-button" disabled={isNavigationBusy} onClick={()=>selectTab('services')}>Services & pipeline plan</button><button type="button" className="workspace-button" disabled={isNavigationBusy} onClick={()=>selectTab('resources')}>Resources & connections</button></nav><ProjectLifecyclePanel key={`${activeOrganizationId}:${project.id}:${scopeRevision}`} project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={(result) => { setWorkspace(current => current ? { ...current, project: { ...current.project, archived_at: result.archived_at } } : current); load() }} onDeleted={() => navigate('/sphere/portfolio')} />
 
         {!project.archived_at && tab !== 'discussion' && <ProjectManagerAssignment project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onAssigned={load} onAccessError={handleOrganizationAccessError} />}
         </div></details>
@@ -200,13 +201,13 @@ export default function ProjectEngagementWorkspace() {
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
           {['website-work','marketing-work','resources'].includes(tab)&&<_ProjectScopedPipelineView key={[navigationOwner,tab,searchParams.get('resourceGroupId')||''].join(':')} workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} signal={requestSignal} kind={tab==='website-work'?'website':tab==='marketing-work'?'marketing':undefined} resources={tab==='resources'} initialGroupId={tab==='resources'?searchParams.get('resourceGroupId')||'':''} onOpenResources={groupId=>selectTab('resources',groupId)} onNavigationBusyChange={reportNavigationBusy}/>}
           {tab === 'work' && <WorkViews workspace={workspace} navigate={navigate} searchParams={searchParams} setSearchParams={setSearchParams} />}
-          {tab === 'discussion' && <div className="space-y-4">
-            <ProjectDeliveryContextPanel key={navigationOwner} workspace={workspace} compact busy={isNavigationBusy} stale={Boolean(error)} onRefresh={load} onOpen={selectTab} request={deliveryRequest?.organizationId===activeOrganizationId&&deliveryRequest.projectId===projectId?deliveryRequest:null} onClearRequest={()=>setDeliveryRequest(null)}/>
+          {tab === 'discussion' && <div className="studio-chat-layout">
+            <div className="studio-conversation">
             <div className={projectChatMode === 'team' ? 'workspace-card p-4' : ''}>
               {projectChatMode === 'team' && <p className="text-xs font-semibold uppercase tracking-wide text-[var(--anka-violet)]">{project.name} · Chat</p>}
               {projectChatMode === 'team' && <><h2 className="mt-1 text-lg font-semibold">Talk with your project team</h2>
               <p className="mt-1 text-sm leading-5 text-[var(--anka-muted)]">Team discussion is shared with this project. AI conversations start private; sharing stays under your control.</p></>}
-              <div className="mt-3 rounded-xl border border-[var(--anka-line)] p-3"><p>What does the client need? Describe the brief, quantities and frequency in a private Project AI conversation, or choose services manually. Review one setup proposal before applying.</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" className="workspace-button" disabled={isNavigationBusy} onClick={()=>{if(!navCurrent.current.busy)setProjectChatMode('private')}}>Describe project needs in Chat</button><button type="button" className="workspace-button" disabled={isNavigationBusy} onClick={()=>selectTab('services')}>Select services manually</button></div></div><nav aria-label="Project chat views" className={`flex flex-wrap gap-2 ${projectChatMode === 'team' ? 'mt-4' : ''}`}>
+              <details className="studio-setup-help"><summary>Project setup</summary><p>What does the client need? Describe the brief, quantities and frequency in a private Project AI conversation, or choose services manually. Review one setup proposal before applying.</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" className="workspace-button" disabled={isNavigationBusy} onClick={()=>{if(!navCurrent.current.busy)setProjectChatMode('private')}}>Describe project needs in Chat</button><button type="button" className="workspace-button" disabled={isNavigationBusy} onClick={()=>selectTab('services')}>Select services manually</button></div></details><nav aria-label="Project chat views" className={`flex flex-wrap gap-2 ${projectChatMode === 'team' ? 'mt-4' : ''}`}>
                 <button type="button" aria-pressed={projectChatMode === 'team'} disabled={isNavigationBusy} onClick={() => {if(!navCurrent.current.busy)setProjectChatMode('team')}} className={`rounded-xl border px-4 py-2 text-sm ${projectChatMode === 'team' ? 'border-[var(--anka-violet)] bg-[var(--anka-violet-soft)] text-[var(--anka-violet)]' : 'border-[var(--anka-line)] text-[var(--anka-muted)]'}`}>Team discussion · shared</button>
                 <button type="button" aria-pressed={projectChatMode === 'private'} disabled={isNavigationBusy} onClick={() => {if(!navCurrent.current.busy)setProjectChatMode('private')}} className={`rounded-xl border px-4 py-2 text-sm ${projectChatMode === 'private' ? 'border-[var(--anka-violet)] bg-[var(--anka-violet-soft)] text-[var(--anka-violet)]' : 'border-[var(--anka-line)] text-[var(--anka-muted)]'}`}>AI conversations</button>
               </nav>
@@ -217,13 +218,16 @@ export default function ProjectEngagementWorkspace() {
             <section className="project-ai-conversations" hidden={projectChatMode !== 'private'} aria-label="Project AI conversations">
               <ContextConversationPanel directSend contextKind="project_team" projectId={project.id} label={`${project.name} · Project AI`} projectJourney={workspace} onProjectRequest={recordProjectRequest} onProjectChanged={load} onNavigationBusyChange={reportChatBusy} onDraftDirtyChange={reportChatDirty} />
             </section>
+            <details className="studio-delivery-tools"><summary>Project actions, outputs & delivery history</summary><ProjectDeliveryContextPanel key={navigationOwner} workspace={workspace} compact busy={isNavigationBusy} stale={Boolean(error)} onRefresh={load} onOpen={selectTab} request={deliveryRequest?.organizationId===activeOrganizationId&&deliveryRequest.projectId===projectId?deliveryRequest:null} onClearRequest={()=>setDeliveryRequest(null)}/></details>
+            </div>
+            <StudioProjectContext key={navigationOwner} workspace={workspace} busy={isNavigationBusy} stale={Boolean(error)} onOpen={selectTab} canNavigate={allowLeavingCurrentView}/>
           </div>}
           {tab === 'project-tasks' && <ProjectTasks workspace={workspace} rows={workspace.projectTasks} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
           {tab === 'engagement-work' && <EngagementWork workspace={workspace} rows={workspace.engagementWorkItems} hasEngagement={identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} />}
           {tab === 'planning' && <ProjectPlanningPanel workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} onRefresh={load} />}
           {tab === 'retainer-planning' && showRetainerPlanning && <RetainerPlanningPanel project={project} engagement={workspace.engagement} services={workspace.services} />}
-          {tab === 'outputs' && <Outputs workspace={workspace} />}
-          {tab === 'reviews' && <_ProjectReviewEvidencePanel deliverables={workspace.deliverables} />}
+          {tab === 'outputs' && <><section className="workspace-card p-4"><h2 className="font-semibold">Project assets</h2><p>Open existing page and campaign assets with their work, versions, keywords and history.</p><div className="mt-3 flex flex-wrap gap-2">{(workspace.pipelineGroups||[]).some(group=>group.kind==='website')&&<button className="workspace-button" onClick={()=>selectTab('website-work')}>Website pages</button>}{(workspace.pipelineGroups||[]).some(group=>group.kind==='marketing')&&<button className="workspace-button" onClick={()=>selectTab('marketing-work')}>Marketing assets</button>}</div></section><Outputs workspace={workspace} /></>}
+          {tab === 'reviews' && <><section className="workspace-card p-4"><h2 className="font-semibold">Delivery & exact-version reviews</h2><p>Review recorded versions and release evidence. A prepared output or completed work item does not establish publication.</p><div className="mt-3 flex flex-wrap gap-2"><button className="workspace-button" onClick={()=>selectTab('outputs')}>Open outputs</button><button className="workspace-button" onClick={()=>selectTab('journey')}>Recorded pipeline</button></div></section><_ProjectReviewEvidencePanel deliverables={workspace.deliverables} /><details className="studio-delivery-tools"><summary>Work, Workshop results & recovery paths</summary><ProjectDeliveryContextPanel workspace={workspace} compact busy={isNavigationBusy} stale={Boolean(error)} onRefresh={load} onOpen={selectTab}/></details></>}
           {tab === 'activity' && <Activity rows={workspace.activity} />}
         </div>
       </div>
@@ -281,10 +285,10 @@ function EngagementWork({ rows, hasEngagement, workshopLinks, navigate, originTa
   return <Panel title="Engagement Work Items" description="Delivery work attached to the engagement extension. These are not Project Tasks."><RecordList rows={rows} empty="No Engagement Work Items recorded." render={(item) => <WorkRecord key={item.id} item={item} kind="engagement_work_item" context={label(item.department_id)} workspace={workspace} automation={Boolean(item.automation_flagged_at)} workshopPath={recordWorkshopPath(workshopLinks.find(link => link.department === item.department_id), item, 'engagement_work_item', originTab, origin)} navigate={navigate} />} /></Panel>
 }
 
-const WORK_VIEWS = ['list', 'board', 'calendar']
+const WORK_VIEWS = ['pipeline', 'list', 'board', 'calendar']
 const MONTH_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 function WorkViews({ workspace, navigate, searchParams, setSearchParams }) {
-  const view = WORK_VIEWS.includes(searchParams.get('workView')) ? searchParams.get('workView') : 'list'
+  const view = WORK_VIEWS.includes(searchParams.get('workView')) ? searchParams.get('workView') : 'pipeline'
   const suppliedMonth = searchParams.get('workMonth')
   const monthKey = /^\d{4}-(0[1-9]|1[0-2])$/.test(suppliedMonth || '')
     ? suppliedMonth : new Date().toISOString().slice(0, 7)
@@ -339,6 +343,7 @@ function WorkViews({ workspace, navigate, searchParams, setSearchParams }) {
       <label className="text-xs font-medium text-[var(--anka-muted)]">Record type<select value={kindFilter} onChange={event => setWorkParam('workKind', event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] px-3 py-2 text-sm text-[var(--anka-ink)]"><option value="all">All work</option><option value="project_task">Project Tasks</option><option value="engagement_work_item">Engagement Work Items</option></select></label>
       <label className="text-xs font-medium text-[var(--anka-muted)]">Recorded status<select value={statusFilter} onChange={event => setWorkParam('workStatus', event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] px-3 py-2 text-sm text-[var(--anka-ink)]"><option value="all">All statuses</option>{availableStatuses.map(status => <option key={status} value={status}>{label(status)}</option>)}</select></label>
     </div>
+    {view === 'pipeline' && <section aria-label="Recorded work pipeline" className="studio-work-pipeline"><p className="text-sm text-[var(--anka-muted)]">The same filtered work records, grouped by their recorded stage. Independent work remains available; status and dependency checks stay on each original work card.</p>{(workspace.journey||[]).filter(stage=>stage.organization_id===workspace.project.organization_id&&stage.engagement_id===workspace.engagement?.id).map(stage=>{const linked=records.filter(({item})=>item.linked_engagement_stage_instance_id===stage.id);return <section className="workspace-card p-4" key={stage.id}><h3 className="font-semibold">{stage.name}</h3><p className="text-sm text-[var(--anka-muted)]">{label(stage.status)} · {linked.length} matching work records</p><div className="grid gap-3 mt-3 lg:grid-cols-2">{linked.map(card)}</div></section>})}<section className="workspace-card p-4"><h3 className="font-semibold">Work without an accessible stage</h3><p className="text-sm text-[var(--anka-muted)]">These records retain their original scope and dependencies.</p><div className="grid gap-3 mt-3 lg:grid-cols-2">{records.filter(({item})=>!(workspace.journey||[]).some(stage=>stage.organization_id===workspace.project.organization_id&&stage.engagement_id===workspace.engagement?.id&&stage.id===item.linked_engagement_stage_instance_id)).map(card)}</div></section></section>}
     {view === 'list' && <><ProjectTasks workspace={workspace} rows={records.filter(({ kind }) => kind === 'project_task').map(({ item }) => item)} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" origin={origin} /><EngagementWork workspace={workspace} rows={records.filter(({ kind }) => kind === 'engagement_work_item').map(({ item }) => item)} hasEngagement={workspace.identity.hasEngagement} workshopLinks={workspace.workshopLinks} navigate={navigate} originTab="work" origin={origin} /></>}
     {view === 'board' && (records.length
       ? <div className="flex gap-4 overflow-x-auto pb-3">{statuses.map(status => <section key={status} className="w-72 shrink-0 workspace-card p-3"><h3 className="mb-3 text-sm font-semibold">{label(status)} <span className="text-[var(--anka-muted)]">({records.filter(({ item }) => (item.status || 'unknown') === status).length})</span></h3><div className="space-y-3">{records.filter(({ item }) => (item.status || 'unknown') === status).map(card)}</div></section>)}</div>

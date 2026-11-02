@@ -14,8 +14,8 @@ test('project Reviews tab renders the actual mount with empty and populated deli
   new Function('require', 'module', 'exports', 'React', panelCode)(createRequire(import.meta.url), panelModule, panelModule.exports, React)
   const Panel = panelModule.exports.default
   const source = readFileSync(new URL('../apps/ProjectEngagementWorkspace.jsx', import.meta.url), 'utf8')
-  const mount = source.match(/\{tab === 'reviews' && (<_ProjectReviewEvidencePanel[^\n]+?\/>)} /)?.[1]
-    || source.match(/\{tab === 'reviews' && (<_ProjectReviewEvidencePanel[^\n]+?\/>)}\s/)?.[1]
+  const route = source.split('\n').find(line => line.includes("{tab === 'reviews' &&"))
+  const mount = route?.match(/<_ProjectReviewEvidencePanel[^>]+\/>/)?.[0]
   assert.ok(mount, 'Reviews route has a renderable panel mount')
   const code = transformSync(`return (${mount})`, { loader: 'jsx', jsxFactory: 'React.createElement' }).code
   const renderMount = new Function('React', '_ProjectReviewEvidencePanel', 'workspace', code)
