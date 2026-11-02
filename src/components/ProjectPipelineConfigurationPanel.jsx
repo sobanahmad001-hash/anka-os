@@ -1,3 +1,4 @@
+import {inspectFoundationContext} from './pipelineFoundationReview.js'
 import ProjectDeliveryPlanPanel from './ProjectDeliveryPlanPanel.jsx'
 import {planStageDefaults} from '../data/serviceDrivenPlan.js'
 import _ProjectCampaignPlanningPanel from './ProjectCampaignPlanningPanel.jsx'
@@ -137,10 +138,11 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
     setQuantities({});setStageActions({});setOmissionReasons({});setStageValues({})
     setCost('0')
   }
-  function inspectCreation(event) {
+  async function inspectCreation(event) {
     event.preventDefault()
     if (flight.current || !scopeActive.current || signal?.aborted || commandState.current.locked || commandState.current.loading || !publication) return
-    setCreationReview(null);setError('');setNotice('')
+    setCreationReview(null);setError('');setNotice('');flight.current=true;setBusy(true)
+    const inspectedSignature=reviewSignature
     try {
       const declared=definitionSteps.some(step=>step.stage_contract!==undefined)
       const stagePlan=inspectPipelineStagePlan(definitionSteps,quantities,stageActions,omissionReasons,stageValues,stageArtifacts)
@@ -151,11 +153,15 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
       if(aiSelected&&micro===0&&!canConfigureSpending)throw new TypeError('An Admin must set an approved spending limit for this pipeline before saving AI-capable stages')
       if ((aiSelected && micro === 0) || (!aiSelected && micro !== 0))
         throw new TypeError('AI-capable steps need a positive local limit; human-only plans use zero')
-      setCreationReview({signature:reviewSignature,selectedSteps,micro,stagePlan,stageDecisions:declared ? stagePlan.decisions : undefined,definitionPublicationId:publicationId,pipelineGroupId:groupId||null})
-    } catch (failure) {setError(failure.message)}
+      const source=await projectPipelineConfigurations.readFoundationContext(organizationId,engagement.id,groupId||null,{signal})
+      if(!scopeActive.current||signal?.aborted||inspectedSignature!==currentReviewSignature.current)return
+      const foundationReview=inspectFoundationContext(source,{organizationId,engagementId:engagement.id,pipelineGroupId:groupId||null,projectId:engagement.project_id},declared)
+      setCreationReview({signature:inspectedSignature,selectedSteps,micro,stagePlan,foundationReview,stageDecisions:declared ? stagePlan.decisions : undefined,definitionPublicationId:publicationId,pipelineGroupId:groupId||null})
+    } catch (failure) {if(scopeActive.current&&!signal?.aborted&&inspectedSignature===currentReviewSignature.current)setError(failure.message)}
+    finally {flight.current=false;if(scopeActive.current&&!signal?.aborted)setBusy(false)}
   }
   async function save() {
-    if (flight.current || !scopeActive.current || signal?.aborted || commandState.current.locked || commandState.current.loading || !creationReview || !creationReview.stagePlan.ready || creationReview.signature!==currentReviewSignature.current || signal?.aborted) return
+    if (flight.current || !scopeActive.current || signal?.aborted || commandState.current.locked || commandState.current.loading || !creationReview || !creationReview.stagePlan.ready || !creationReview.foundationReview.canSave || creationReview.signature!==currentReviewSignature.current || signal?.aborted) return
     flight.current=true
     setBusy(true); setError(''); setNotice('')
     try {
@@ -164,7 +170,7 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
       persistPending({kind:'configuration',requestId:createRequest.current})
       const saved = await projectPipelineConfigurations.create({
         organizationId, engagementId: engagement.id, definitionPublicationId: creationReview.definitionPublicationId,pipelineGroupId:creationReview.pipelineGroupId,
-        requestId: createRequest.current, selectedSteps,stageDecisions:creationReview.stageDecisions, maxAiCostMicrousd: micro,
+        requestId: createRequest.current, selectedSteps,stageDecisions:creationReview.stageDecisions, ...(creationReview.stageDecisions!==undefined?{foundationContext:creationReview.foundationReview.context}:{}), maxAiCostMicrousd: micro,
       }, { signal })
       if (signal?.aborted) return
       createRequest.current = ''; clearPending();setCreationReview(null)
@@ -172,7 +178,7 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
       setNotice('Configuration revision ' + (saved.group_revision || saved.revision) + ' saved as a draft. Review impact before activation.')
       await refresh()
     } catch (failure) {
-      if (!signal?.aborted) {if (failure.knownRollback) clearPending();setError(failure.message)}
+      if (!signal?.aborted) {if (failure.knownRollback) {clearPending();setCreationReview(null);createRequest.current=''}setError(failure.message)}
     } finally {
       flight.current=false
       if (!signal?.aborted) setBusy(false)
@@ -284,8 +290,9 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
 
         <button type="submit" disabled={locked || !publication} className="rounded-lg bg-[var(--anka-violet)] px-3 py-2 text-xs font-semibold text-[var(--anka-on-violet)] disabled:opacity-40">3. Review stages</button>
       </form>
-      {creationReview && creationReview.signature===reviewSignature && <section aria-label="Review pipeline stages" className="mt-4 space-y-3 rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] p-3 text-sm">
+      {creationReview && creationReview.signature===reviewSignature && <section aria-label="Review pipeline stages" style={{overflowWrap:'anywhere'}} className="mt-4 space-y-3 rounded-lg border border-[var(--anka-line)] bg-[var(--anka-surface-raised)] p-3 text-sm">
         <h3 className="font-semibold">Review this exact plan</h3>
+        <section aria-label="Project guidance for stages" className="space-y-2"><h4 className="font-medium">Project guidance</h4>{creationReview.foundationReview.context?<><p>Written and visual guidance are included in this stage review.</p><details><summary>Source details</summary><p>Plan version: {creationReview.foundationReview.context.plan_version_id}</p><p>Binding checksum: {creationReview.foundationReview.context.foundation_checksum}</p>{Object.entries(creationReview.foundationReview.context.roles).map(([role,pin])=><div key={role}><strong>{role==='written'?'Written guidance':'Visual guidance'}</strong><p>{pin.mode==='minimum'?'Reviewed minimum guidance':'Approved source version'}</p>{pin.mode==='minimum'?<p>Guidance checksum: {pin.guidance_checksum}</p>:<><p>Asset: {pin.artifact_id}</p><p>Version: {pin.version_id}</p><p>Approval: {pin.approval_id}</p><p>Checksum: {pin.checksum}</p></>}</div>)}</details></>:creationReview.foundationReview.state==='not_required_for_this_pipeline'?<p>No foundation binding is required for this pipeline.</p>:creationReview.foundationReview.state==='legacy_unbound'?<p>Existing pipeline without project guidance. This draft keeps its existing stage-review rules.</p>:null}{creationReview.foundationReview.warnings.map((warning,index)=><p key={index}>{warning}</p>)}{creationReview.foundationReview.blockers.length>0&&<><ul role="alert">{creationReview.foundationReview.blockers.map((reason,index)=><li key={index}>{reason}</li>)}</ul>{onReviewServices&&<button type="button" className="workspace-button" disabled={locked} onClick={()=>{if(!commandState.current.locked&&!flight.current&&scopeActive.current&&!signal?.aborted)onReviewServices()}}>Review project guidance in setup</button>}</>}</section>
         <p>{view.group?.name || 'Legacy'} · {publication.definition.name} · v{publication.definition.version_number} · local AI limit {money(creationReview.micro)}</p>
         <ol className="space-y-3">{creationReview.stagePlan.rows.map(({step,contract,action,source,inputs})=>{const selected=creationReview.selectedSteps.find(item=>item.key===step.key);return <li key={step.key} className="rounded border border-[var(--anka-line)] p-2">
           <p className="font-medium">{step.label} · {action==='reuse' ? 'Satisfied by approved source' : action==='omit' ? 'Optional stage omitted' : selected ? `Included ×${selected.quantity}` : 'Outside this draft'}</p>
@@ -298,7 +305,7 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
         </li>})}</ol>
         {creationReview.stagePlan.errors.length>0 && <ul role="alert" className="space-y-1 text-[var(--anka-warning)]">{creationReview.stagePlan.errors.map((message,n)=><li key={n}>{message}</li>)}</ul>}
         <p>Save pipeline records this reviewed draft only. Activation, work planning, assignment and provider use require their separate reviews.</p>
-        <button type="button" disabled={locked || !creationReview.stagePlan.ready} onClick={save} className="workspace-button workspace-button-primary">4. Save pipeline</button>
+        <button type="button" disabled={locked || !creationReview.stagePlan.ready || !creationReview.foundationReview.canSave} onClick={save} className="workspace-button workspace-button-primary">4. Save pipeline</button>
       </section>}</fieldset>}
   </>
   return <section className="rounded-2xl border border-[var(--anka-line)] bg-[var(--anka-surface)] p-5" aria-labelledby="project-config-heading">
