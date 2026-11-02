@@ -1,0 +1,54 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import {readFileSync} from 'node:fs'
+import {createRequire} from 'node:module'
+import React,{act} from 'react'
+import {createRoot} from 'react-dom/client'
+import {transformSync} from 'esbuild'
+import {mountedEnvironment,elements} from './testSupport/designVideoDom.js'
+import * as setup from './projectSetup.js'
+import * as drafts from '../components/serviceLineDraft.js'
+import * as catalogue from './serviceCatalogue.js'
+import * as business from './serviceBusinessGroups.js'
+import * as protocol from './serviceDrivenPlan.js'
+const native=createRequire(import.meta.url),props=n=>n?.[Object.keys(n).find(k=>k.startsWith('__reactProps$'))]
+const id=n=>`c0000000-0000-4000-8000-${String(n).padStart(12,'0')}`
+async function mount(t,mode='combined',{canManage=true,missing=false,nonDefinition=false,duplicate=false}={}){
+ const env=mountedEnvironment(),keys=['window','document','sessionStorage','IS_REACT_ACT_ENVIRONMENT'],old=Object.fromEntries(keys.map(k=>[k,globalThis[k]])),storage=new Map()
+ Object.assign(globalThis,{window:env.window,document:env.document,IS_REACT_ACT_ENVIRONMENT:true,sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)}})
+ const leaf=catalogue.SERVICE_CATALOGUE.find(x=>x.name==='Discovery brief'),scope={organization_id:id(1),project_id:id(2),engagement_id:id(3)},choiceKey='definition:'+leaf.id,calls=[],state={stale:false,lost:false,receipt:null}
+ const snapshot={...scope,token:'a'.repeat(32),leaves:[leaf],catalog:[leaf],scopes:[],can_manage:canManage,state:null}
+ const contribution={scope_id:id(9),service_id:leaf.id,name:leaf.name,quantity:1,unit:leaf.unit}
+ const group={kind:'branding',work_partition:'brand_foundation',cadence:'once',bucket_key:'brand',contributions:[contribution],stages:[],group_options:[],binding_locked:false}
+ function result(choices={}){if(state.stale&&choices[choiceKey])throw Error('Choose an exact current matching published definition');const chosen=choices[choiceKey];return {...scope,review_sha256:'b'.repeat(64),history:[],history_total:0,draft:{...scope,can_manage:canManage,review_sha256:'b'.repeat(64),contributions:[contribution],changes:[{name:leaf.name,action:'add'}],groups:chosen?[{...group,definition_publication_id:chosen}]:[],unmapped:chosen?[]:[{...contribution,planning_issue:nonDefinition?'Choose a pipeline or resolve inactive catalogue service':'Choose an exact matching published plan',definition_choice_key:nonDefinition?undefined:choiceKey,definition_options:missing||nonDefinition?[]:[{publication_id:id(20),name:'Brand plan A',version_number:2},{publication_id:id(21),name:duplicate?'Brand plan A':'Brand plan B',version_number:2}]}]}}}
+ const repository={snapshot:async()=>structuredClone(snapshot),delivery:{review:async(_s,p,o)=>{calls.push({kind:'review',choices:structuredClone(o.choices),proposal:p});return {data:result(o.choices),args:{choices:structuredClone(o.choices)}}},apply:async(_s,r,requestId)=>{calls.push({kind:'apply',choices:r.args.choices,requestId});state.receipt={atomic:true,request_id:requestId};if(state.lost)throw Error('Lost response');return state.receipt},recover:async()=>{calls.push({kind:'recover'});return state.receipt}}}
+ const plans={read:async(_s,o={})=>{calls.push({kind:'read',choices:structuredClone(o.choices||{})});return {...result(o.choices),selected:o.requestId?state.receipt:null}},apply:async(_s,o)=>{calls.push({kind:'apply',choices:o.choices});return {}}}
+ const compile=file=>{const module={exports:{}},code=transformSync(readFileSync(new URL('../components/'+file,import.meta.url),'utf8'),{loader:'jsx',format:'cjs',jsxFactory:'React.createElement'}).code;new Function('require','module','exports','React',code)(n=>n.endsWith('.css')?{}:n.includes('ServiceLineFields')?compile('ServiceLineFields.jsx'):n.includes('serviceLineDraft')?drafts:n.includes('serviceBusinessGroups')?business:n.includes('ProjectDeliveryPlanPanel')?{__esModule:true,default:()=>null}:n.includes('projectSetupRepository')?{projectSetupRepository:repository}:n.includes('projectSetup.js')?setup:n.includes('serviceCatalogue')?catalogue:n.includes('projectDeliveryPlans')?{projectDeliveryPlans:plans}:n.includes('serviceDrivenPlan')?protocol:native(n),module,module.exports,React);return module.exports}
+ const Component=compile(mode==='combined'?'ProjectSetupPanel.jsx':'ProjectDeliveryPlanPanel.jsx').default,root=createRoot(env.container),controller=new AbortController(),input={organizationId:id(1),projectId:id(2),engagementId:id(3),actorId:id(4),repository:mode==='combined'?repository:plans,signal:controller.signal}
+ await act(async()=>{root.render(React.createElement(Component,input));await new Promise(r=>setTimeout(r,0))})
+ t.after(async()=>{await act(async()=>root.unmount());Object.assign(globalThis,old)})
+ const button=name=>elements(env.container,'button').find(n=>n.textContent===name),click=name=>act(async()=>props(button(name)).onClick()),change=(tag,predicate,value)=>act(async()=>props(elements(env.container,tag).find(predicate)).onChange({target:{value,checked:true}})),label=(name,value)=>change('select',n=>props(n)?.['aria-label']===name,value)
+ async function prepare(){await change('input',n=>props(n)?.type==='checkbox',true);await change('input',n=>props(n)?.['aria-label']==='Quantity Discovery brief','1');await click('Add dates and scope to this proposal');for(const [name,value,tag] of [['Service business scope','branding','select'],['Service start date','2026-11-02','input'],['Service timezone','Asia/Karachi','input'],['Service included work','Reviewed brand discovery','textarea']])await change(tag,n=>props(n)?.['aria-label']===name,value);await change('input',n=>props(n)?.type==='checkbox'&&n.parentNode.textContent==='Branding',true);await change('select',n=>elements(n,'option').some(o=>o.textContent==='undecided')&&elements(n,'option').some(o=>o.textContent==='branding'),'branding');await click('Review combined setup')}
+ return {env,calls,state,storage,button,click,change,label,prepare,choiceKey,controller}
+}
+test('Branding combined selection pins exact publication after fresh review; stale Apply cannot write',async t=>{
+ const ui=await mount(t);await ui.prepare();assert.equal(ui.calls[0].proposal.items[0].pipeline,'branding');assert.equal(ui.calls[0].proposal.service_line_version,2)
+ const stale=props(ui.button('Apply setup')).onClick;await ui.label('Combined published plan for Discovery brief',id(21));assert.equal(ui.button('Apply setup'),undefined);await act(async()=>stale());assert.equal(ui.calls.some(c=>c.kind==='apply'),false)
+ await ui.click('Review combined setup');assert.equal(ui.calls.at(-1).choices[ui.choiceKey],id(21));assert.match(ui.env.container.textContent,/Brand foundation plan/)
+ ui.state.lost=true;await ui.click('Apply setup');assert.equal(ui.calls.at(-1).choices[ui.choiceKey],id(21));assert.equal(ui.storage.size,1);assert.equal(Boolean(props(ui.button('Review combined setup')).disabled),true);await ui.click('Recover original setup save');assert.equal(ui.calls.filter(c=>c.kind==='apply').length,1);assert.equal(ui.storage.size,0)
+})
+test('combined removed publication fails fresh review without a fallback Apply',async t=>{
+ const ui=await mount(t);await ui.prepare();await ui.label('Combined published plan for Discovery brief',id(20));ui.state.stale=true;await ui.click('Review combined setup');assert.equal(ui.button('Apply setup'),undefined);assert.match(ui.env.container.textContent,/exact current matching published definition/);assert.equal(ui.calls.some(c=>c.kind==='apply'),false)
+})
+test('standalone exact choice invalidates review and stale handler, then uses exact reviewed choice',async t=>{
+ const ui=await mount(t,'standalone');await ui.click('Review project plan changes');const stale=props(ui.button('Apply reviewed project plan')).onClick;await ui.label('Published plan for Discovery brief',id(21));assert.equal(ui.button('Apply reviewed project plan'),undefined);await act(async()=>stale());assert.equal(ui.calls.some(c=>c.kind==='apply'),false);await ui.click('Review project plan changes');assert.match(ui.env.container.textContent,/Branding · once/);assert.match(ui.env.container.textContent,/Brand foundation plan/);await ui.click('Apply reviewed project plan');assert.equal(ui.calls.find(c=>c.kind==='apply').choices[ui.choiceKey],id(21))
+})
+test('standalone missing published plan stays explicit and readonly definition selection cannot change choices',async t=>{
+ const ui=await mount(t,'standalone',{canManage:false});const selector=elements(ui.env.container,'select')[0];assert.equal(Boolean(props(selector).disabled),true);await ui.label('Published plan for Discovery brief',id(20));await ui.click('Refresh assembled plan');assert.deepEqual(ui.calls.at(-1).choices,{});assert.equal(Boolean(props(ui.button('Review project plan changes')).disabled),true)
+})
+test('missing template exposes no selector or publication action',async t=>{const ui=await mount(t,'standalone',{missing:true});assert.match(ui.env.container.textContent,/No eligible published plan/);assert.equal(elements(ui.env.container,'select').length,0);assert.equal(ui.calls.some(c=>c.kind==='apply'),false)})
+
+for(const mode of ['combined','standalone']){
+ test(mode+' non-definition issue does not invent a missing publication',async t=>{const ui=await mount(t,mode,{nonDefinition:true});if(mode==='combined')await ui.prepare();assert.match(ui.env.container.textContent,/Choose a pipeline or resolve inactive catalogue service/);assert.doesNotMatch(ui.env.container.textContent,/No eligible published plan/);assert.equal(elements(ui.env.container,'select').filter(n=>props(n)?.['aria-label']?.toLowerCase().includes('published plan')).length,0)})
+ test(mode+' duplicate labels are readable and exact IDs stay in source details',async t=>{const ui=await mount(t,mode,{duplicate:true});if(mode==='combined')await ui.prepare();const selector=elements(ui.env.container,'select').find(n=>props(n)?.['aria-label']?.toLowerCase().includes('published plan'));const options=elements(selector,'option');assert.equal(options[1].textContent,'Brand plan A · v2 · option 1');assert.equal(options[2].textContent,'Brand plan A · v2 · option 2');assert.equal(props(options[2]).value,id(21));assert.doesNotMatch(selector.textContent,/c0000000/);assert.ok(elements(ui.env.container,'details').some(n=>n.textContent.includes(id(21))));await ui.label(mode==='combined'?'Combined published plan for Discovery brief':'Published plan for Discovery brief',id(21));await ui.click(mode==='combined'?'Review combined setup':'Review project plan changes');const source=elements(ui.env.container,'details').find(n=>n.textContent.includes(id(21)));assert.ok(source);assert.equal(Boolean(props(source).open),false)})
+}
