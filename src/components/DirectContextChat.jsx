@@ -5,6 +5,7 @@ import DesignVideoReferencePanel from './DesignVideoReferencePanel.jsx'
 import DesignPrivateAttachmentPanel from './DesignPrivateAttachmentPanel.jsx'
 import { createPortal } from 'react-dom'
 import { preferredApprovedModel, openAiModelLabel } from '../data/openaiModelPolicy.js'
+import { contextChatSendBlocker, readContextChatSendReadiness } from '../data/contextChatSendReadiness.js'
 import { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 const ProjectSetupPanel = lazy(() => import('./ProjectSetupPanel.jsx'))
 const ProjectContentJourney = lazy(() => import('./ProjectContentJourney.jsx'))
@@ -395,17 +396,29 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     onConversationListChange?.()
     return row
   }
-  async function send(event) {
+  async function send(event, { humanOnly = false } = {}) {
     event.preventDefault()
     if (!draft.trim() || draft.trim().length > 8000 || attachmentRecoveryRequired || pendingRef.current || selected?.state && selected.state !== 'active') return
     await exclusive(async () => {
       const text = websiteSendContext?appendWebsiteLayoutRequest(draft.trim(),websiteSendContext):draft.trim(), target = selected?.id || newId, token = revision.current
       if(text.length>8000)throw Error('The message plus Website context exceeds the limit; shorten it without truncation.')
-      const ai = owner && ready
+      const ai = owner && !humanOnly
+      const sameSend=()=>current()&&token===revision.current&&(!ai||mappingState.current.modelId===modelId)
+      if(ai){
+        setNotice('')
+        if(!model)throw Error('Choose an approved AI model. Your draft is kept. No message or AI request was sent.')
+        let fresh
+        try{fresh=await readContextChatSendReadiness((input,options)=>departmentChat.getContextChatReadiness(input,{...requestScope,...options}),model.id,{signal})}
+        catch{if(!sameSend())return;setReadiness(null);setReadinessState('failed');throw Error('AI availability could not be verified. Retry AI availability. Your draft is kept. No message or AI request was sent.')}
+        if(!sameSend())return
+        setReadiness({...fresh,model_configuration_id:modelId});setReadinessState('resolved')
+        const blocker=contextChatSendBlocker(fresh)
+        if(blocker)throw Error(blocker)
+      }
       // Recheck current access and sharing before opening the unchanged disclosure.
       if (selected) {
         const latest = await read(target)
-        if (!current() || token !== revision.current) return
+        if (!sameSend()) return
         if (latest.conversation.state !== 'active' || latest.conversation.owner_id !== selected.owner_id) throw new Error('Conversation access changed')
         if (owner && contextKind === 'project_team') {
           const latestSharing = latest.sharing
@@ -416,7 +429,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
       }
       const briefSnapshot = ai && designWorkspace?.captureBriefForSend ? designWorkspace.captureBriefForSend() : null
       if (ai && !await consent.confirm()) return
-      if (!current() || token !== revision.current) return
+      if (!sameSend()) return
       const metadata = { conversation_id: target, client_request_id: crypto.randomUUID(), ...(ai ? { dispatch_request_id: crypto.randomUUID() } : {}) }
       remember({ conversation_id: target, client_request_id: metadata.client_request_id })
       attempt.current = { text, isNew: !selected, conversation_id: target, client_request_id: metadata.client_request_id, ...(privateDesign ? { design_attachment_ids: [...designAttachmentIds] } : {}), ...(contextKind === 'project_team' && owner && selected ? { project_document_ids: [...projectDocumentIds] } : {}) }
@@ -424,11 +437,11 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
       let saved
       if (!selected) {
         const result = await departmentChat.startContextConversation({ ...scope, ...metadata, message: text }, requestScope)
-        if (!current() || token !== revision.current) return
+        if (!sameSend()) return
         if (!validConversation(result.conversation) || result.conversation.id !== target || result.conversation.owner_id !== actorId) throw new Error('Conversation identity mismatch')
         apply({ conversation: result.conversation, messages: [result.message] }); saved = result.message
       } else saved = await departmentChat.appendContextHumanMessage({ conversation_id: target, client_request_id: metadata.client_request_id, message: text, ...(privateDesign ? { design_attachment_ids: designAttachmentIds } : {}), ...(contextKind === 'project_team' && owner ? { project_document_ids: projectDocumentIds } : {}) }, requestScope)
-      if (!current() || token !== revision.current) return
+      if (!sameSend()) return
       if(projectChat)onProjectRequest?.({organizationId,projectId,messageId:saved.id,conversationId:target,text})
       briefSend.current = briefSnapshot ? { snapshot: briefSnapshot, conversationId: target, messageId: saved.id } : null
       remember({ ...metadata, message_id: saved.id })
@@ -439,15 +452,15 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
         setCanonical(false)
         const result = await contextChatRunner.run({ message_id: saved.id, model_configuration_id: modelId,
           dispatch_request_id: metadata.dispatch_request_id, include_canonical_context: include, ...(briefSnapshot ? { design_brief: briefSnapshot.binding } : {}) }, requestScope)
-        if (!current() || token !== revision.current) return
+        if (!sameSend()) return
         if (result.status !== 'completed') throw new Error('Reply outcome is uncertain. Check recovery; a second AI request will not be sent.')
         await designWorkspace?.applyBriefReceipt?.(briefSnapshot, result.design_brief)
         if(result.design_brief?.status === 'pending') throw new Error('Brief update is pending. Check recovery; no second reply will be requested.')
       }
       const latest = await read(target)
-      if (!current() || token !== revision.current) return
+      if (!sameSend()) return
       apply(latest); clearPending(); setDraft('');setWebsiteSendContext(null); drafts.current.delete(target)
-      setNotice(ai ? 'Reply saved.' : 'Message saved. No AI request was sent.')
+      setNotice(ai ? 'Reply saved.' : 'Message saved without an AI reply.')
     })
   }
   async function recover() {
@@ -525,7 +538,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
       {designWorkspace && <p>Sending includes the current editable brief for an unapproved draft update. Referenced files are not automatically sent. Media generation remains separate.</p>}
       <p>{privateDesign && designWorkspace ? 'Use Attach beside your message to upload and explicitly select sources. ' : contextKind === 'project_team' ? 'Use Attach files for spreadsheet import or selected document references. Originals stay owner-only; chat answers follow existing sharing. ' : 'Attachments are unavailable in this chat. '}Drafts stay only in this browser tab for up to one hour, including refresh; successful Send clears the draft. Closing this tab ends local draft recovery.</p>
       <p>AI replies are organization-billed. The service rechecks model approval, exact pricing, spend tracking and access before dispatch.</p>
-      <p>{readinessState === 'failed' ? 'AI availability could not be checked. You can still save a human message.' : !readiness ? 'Checking AI availability…' : ready ? 'AI configuration ready.' : `AI unavailable (${readiness.model_status || 'configuration unavailable'}). You can save a human message.`}</p>
+      <p>{readinessState === 'failed' ? 'AI availability could not be checked. Retry AI availability before requesting a reply.' : !readiness ? 'Checking AI availability...' : ready ? 'AI configuration ready.' : contextChatSendBlocker(readiness,{attempted:false})}</p>
       {readiness?.paid_execution_enabled === false && <p>AI execution is currently off.</p>}
       {readiness?.spend_tracking_configured === false && <p>Organization spend tracking is not configured.</p>}
       {readiness?.spend_guard_mode === 'provider_managed' && <p>Your provider-side spend limit is managed externally. Anka cannot verify or enforce it; each request is still priced and recorded.</p>}
@@ -565,8 +578,8 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
       {selected?.id===designWorkspace?.generatedConversationId&&selected?.owner_id===user?.id?designWorkspace?.generatedMedia:null}</div></div>{projectChat&&projectJourney&&selected?.id&&assetRelationsOpen&&<Suspense fallback={<p role="status">Opening conversation asset context…</p>}><ProjectAssetConversation key={selected.id} workspace={projectJourney} organizationId={organizationId} projectId={projectId} actorId={actorId} conversationId={selected.id} owner={owner} signal={signal} externallyBusy={busy||Boolean(pending)||setupBusy||videoBusy||journeyActivity.busy||journeyActivity.dirty||websiteActivity.busy||websiteActivity.dirty} onLockChange={reportAssetRelationsLock} onClose={()=>setAssetRelationsOpen(false)}/></Suspense>}{projectChat&&projectJourney&&selected?.id&&<Suspense fallback={<p role="status">Opening Content journey…</p>}><ProjectContentJourney key={selected.id} workspace={projectJourney} conversationId={selected.id} actorId={actorId} owner={owner} messages={messages} onStateChange={reportJourneyActivity} busy={busy||Boolean(pending)||setupBusy||videoBusy||assetRelationsLocked||websiteActivity.busy||websiteActivity.dirty} onChanged={onProjectChanged}/><ProjectWebsiteExecution key={"website:"+selected.id} workspace={projectJourney} conversationId={selected.id} actorId={actorId} owner={owner} onStateChange={reportWebsiteActivity} onChanged={onProjectChanged} busy={busy||Boolean(pending)||setupBusy||videoBusy||assetRelationsLocked||journeyActivity.dirty||journeyActivity.busy}/></Suspense>}{designWorkspace?.media}{designWorkspace?.composerAttachments}{projectChat&&attachmentReading?.questions?.length>0&&<form aria-label="Attachment clarification" className="direct-chat-attachment-clarification" onSubmit={async event=>{event.preventDefault();if(!attachmentAnswer.trim()||busy||pendingRef.current||!current())return;try{await attachmentReading.clarify(attachmentAnswer.trim());if(current())setAttachmentAnswer('')}catch(reason){if(current())setError(reason.message)}}}><p>Clarify {attachmentReading.sourceName}</p><label>Answer the attachment questions<textarea aria-label="Attachment clarification" maxLength={1200} value={attachmentAnswer} disabled={busy||Boolean(pending)} onChange={event=>setAttachmentAnswer(event.target.value)}/></label><button type="submit" disabled={busy||Boolean(pending)||!attachmentAnswer.trim()}>Send attachment clarification</button></form>}<form hidden={Boolean(designWorkspace && designWorkspace.mode!=='chat')} className="direct-chat-composer" onSubmit={send} aria-label="Chat composer">{websiteSendContext&&<details className="website-layout-chat-context"><summary>Selected Website layout context will be included</summary><p>Your normal Send and AI consent checks still apply. This proposes a layout; it does not save or publish a Website.</p><pre>{websiteSendContext.instructions}</pre><button type="button" onClick={()=>setWebsiteSendContext(null)}>Remove Website layout context</button></details>}<label className="direct-chat-draft-label"><span className="sr-only">Message</span><textarea aria-label="Message" placeholder="Ask or explore an idea…" value={draft} maxLength={8000} disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending)} onChange={event => { if (pendingRef.current) return; const text = event.target.value; setDraft(text); try { writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: selected?.id || null, text, attempt: attempt.current }) } catch { setError('Draft recovery is unavailable in this tab. Keep this page open until your message is saved.') } }} /></label>
         <div className="direct-chat-toolbar">{designWorkspace?.attachControl}{projectChat&&<button type="button" disabled={busy||videoBusy||setupBusy||journeyLocked||Boolean(pending)||!owner} aria-expanded={setupOpen} onClick={()=>setSetupOpen(x=>!x)}>Set up project</button>}{projectChat && <button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || !owner || Boolean(selected && selected.state !== 'active')} onClick={() => { closeProjectTools(); setImportOpened(true);setImportOpen(true) }}>Attach files</button>}{!compactConversation && <label>Work type<select aria-label="Work type" value="text" disabled><option value="text">Text</option></select></label>}
           {!compactConversation && modelControl}
-          <button type="submit" className="direct-chat-send" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || attachmentRecoveryRequired || !draft.trim() || Boolean(selected && selected.state !== 'active')}>{busy ? 'Working…' : owner && ready ? 'Send' : 'Save message'}</button></div>
-        <p>{owner ? readinessState === 'failed' ? 'AI availability could not be checked. Sending saves a human message only.' : !readiness ? 'Checking AI availability. Human messages can still be saved.' : ready ? projectChat ? 'Organization-billed AI reply' : `${model?.provider} · Organization-billed replies` : 'AI unavailable. Sending saves a human message only.' : 'Shared chat · Human replies only'} · {privateDesign && designWorkspace ? `${designAttachmentIds.length} selected reference(s)` : contextKind === 'project_team' ? `${projectDocumentIds.length} selected document(s)` : 'Attachments unavailable'}</p>{owner && readinessState === 'failed' && <button type="button" onClick={retryReadiness}>Retry AI availability</button>}
+          <button type="submit" className="direct-chat-send" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || attachmentRecoveryRequired || !draft.trim() || Boolean(selected && selected.state !== 'active')}>{busy ? 'Working…' : owner ? 'Send' : 'Save message'}</button></div>{owner&&!ready&&<button className="direct-chat-save-note" type="button" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || attachmentRecoveryRequired || !draft.trim() || Boolean(selected && selected.state !== 'active')} onClick={event=>send(event,{humanOnly:true})}>Save message without AI</button>}
+        <p>{owner ? readinessState === 'failed' ? 'AI availability could not be checked. Retry the check, or explicitly save without AI.' : !readiness ? 'Checking AI availability. Send will check again before requesting a reply.' : ready ? projectChat ? 'Organization-billed AI reply' : `${model?.provider} · Organization-billed replies` : contextChatSendBlocker(readiness,{attempted:false}) : 'Shared chat · Human replies only'} · {privateDesign && designWorkspace ? `${designAttachmentIds.length} selected reference(s)` : contextKind === 'project_team' ? `${projectDocumentIds.length} selected document(s)` : 'Attachments unavailable'}</p>{owner && readinessState !== 'loading' && !ready && <button type="button" disabled={busy||Boolean(pending)} onClick={retryReadiness}>Retry AI availability</button>}
       </form></div>
       {output && <aside ref={outputId && mobileDrawer ? drawerRef : undefined} className="direct-chat-output" role={mobileDrawer ? 'dialog' : undefined} aria-modal={mobileDrawer ? true : undefined} onKeyDown={drawerKeyDown} aria-label="Saved reply output" data-source-message-id={output.id}><div><h3>Saved reply</h3><button ref={outputClose} type="button" onClick={() => setOutputId('')}>Close output</button></div><p>{output.body}</p><small>Saved conversation reply · Read-only preview</small></aside>}
     </div>
