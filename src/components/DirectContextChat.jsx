@@ -75,7 +75,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   const [notice, setNotice] = useState(initial.recovery ? 'Checking the previous send. Your draft stays in this browser tab during recovery.' : '')
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
-  const [historyOpen, setHistoryOpen] = useState(() => designWorkspace || conversationLayout || projectChat ? false : globalThis.matchMedia?.('(min-width: 901px)').matches ?? true)
+  const [historyOpen, setHistoryOpen] = useState(() => projectChat ? (globalThis.matchMedia?.('(min-width: 901px)').matches ?? false) : designWorkspace || conversationLayout ? false : globalThis.matchMedia?.('(min-width: 901px)').matches ?? true)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [outputId, setOutputId] = useState('')
   const [rename, setRename] = useState('')
@@ -232,12 +232,12 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     return () => { alive.current = false }
   }, [])
   useEffect(() => {
-    if (!historyOpen) return
+    if (!historyOpen || (projectChat && !mobileDrawer)) return
     const previous = projectChat ? historyButtonRef.current : document.activeElement
     if (projectChat) drawerRef.current?.querySelector?.('input, button')?.focus()
     else historyClose.current?.focus()
     return () => previous?.focus?.()
-  }, [historyOpen, projectChat])
+  }, [historyOpen, projectChat, mobileDrawer])
   useEffect(() => {
     if (!outputId) return
     const previous = document.activeElement
@@ -340,10 +340,10 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   useEffect(() => {
     const media = globalThis.matchMedia?.('(max-width: 900px)')
     if (!media) return
-    const update = () => setMobileDrawer(media.matches)
+    const update = () => { setMobileDrawer(media.matches); if (projectChat) setHistoryOpen(!media.matches) }
     media.addEventListener('change', update)
     return () => media.removeEventListener('change', update)
-  }, [])
+  }, [projectChat])
   useEffect(() => {
     if (!drawerOpen) return
     const trigger = outputId ? replyButtonRef.current : historyButtonRef.current
@@ -379,7 +379,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     drafts.current.set(selected?.id || newId, draft)
     setVideoOpen(false); setVideoOpened(false)
     revision.current++; setNewId(crypto.randomUUID()); setSelected(null); setMessages([]); setDraft('');setWebsiteSendContext(null)
-    setOutputId(''); setCanonical(false); setSharing(null); setShareOpen(false); setHistoryOpen(false); setNotice(''); setError('')
+    setOutputId(''); setCanonical(false); setSharing(null); setShareOpen(false); if (!projectChat || mobileDrawer) setHistoryOpen(false); setNotice(''); setError('')
   }
   async function ensurePrivateAttachmentConversation() {
     if (!privateDesign || !current()) throw new Error('Private Design context changed')
@@ -520,8 +520,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     if (event.key === 'Escape' && !consent.dialog) { if (projectChat) { closeProjectTools(); historyButtonRef.current?.focus() }; setHistoryOpen(false); setOutputId(''); setShareOpen(false); setDetailsOpen(false) }
   }}>
     <header className="direct-chat-header" inert={drawerOpen ? true : undefined}><div><h2>{compactConversation ? attachmentChatTitle(selected,messages) : label}</h2><p>{!compactConversation && <>{attachmentChatTitle(selected,messages)} · </>} {contextKind === 'department_private' ? 'Only you' : sharing?.recipients.length ? 'Shared with selected teammates' : 'Private unless explicitly shared'}</p></div>
-      <div className="direct-chat-actions">{privateDesign && !designWorkspace && <button ref={videoButton} type="button" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || !selected || !owner || selected.state !== 'active'} title={!selected ? "Send a message to save this private chat before opening video tools." : undefined} aria-expanded={videoOpen} onClick={() => { if (lock.current || videoLock.current || setupLock.current || journeyLock.current || pendingRef.current) return; setVideoOpen(!videoOpen); setVideoOpened(true) }}>Video tools</button>}{!compactConversation && <button type="button" ref={historyButtonRef} aria-expanded={historyOpen} onClick={() => { setOutputId(''); setHistoryOpen(!historyOpen) }}>History</button>}{!historyOpen && !(compactConversation && workshopHistory?.newChatTarget) && newChatControl}{projectChat ? <details ref={projectToolsRef} className="direct-project-tools"><summary ref={historyButtonRef}>Tools</summary><div className="direct-project-tools-list" aria-label="Project chat tools">{selected?.id&&projectJourney&&<button type="button" aria-expanded={assetRelationsOpen} disabled={busy||Boolean(pending)||setupBusy||journeyLocked||videoBusy} onClick={()=>{if(lock.current||journeyLock.current||setupLock.current||pendingRef.current)return;closeProjectTools();setAssetRelationsOpen(v=>!v)}}>Asset links</button>}
-          <button type="button" aria-expanded={historyOpen} onClick={() => { closeProjectTools(); setOutputId(''); setHistoryOpen(!historyOpen) }}>Chat history</button>
+      <div className="direct-chat-actions">{privateDesign && !designWorkspace && <button ref={videoButton} type="button" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || !selected || !owner || selected.state !== 'active'} title={!selected ? "Send a message to save this private chat before opening video tools." : undefined} aria-expanded={videoOpen} onClick={() => { if (lock.current || videoLock.current || setupLock.current || journeyLock.current || pendingRef.current) return; setVideoOpen(!videoOpen); setVideoOpened(true) }}>Video tools</button>}{(!compactConversation || projectChat) && <button type="button" ref={historyButtonRef} aria-expanded={historyOpen} onClick={() => { setOutputId(''); setHistoryOpen(!historyOpen) }}>{projectChat ? 'Chat history' : 'History'}</button>}{!historyOpen && !(compactConversation && workshopHistory?.newChatTarget) && newChatControl}{projectChat ? <details ref={projectToolsRef} className="direct-project-tools"><summary>Tools</summary><div className="direct-project-tools-list" aria-label="Project chat tools">{selected?.id&&projectJourney&&<button type="button" aria-expanded={assetRelationsOpen} disabled={busy||Boolean(pending)||setupBusy||journeyLocked||videoBusy} onClick={()=>{if(lock.current||journeyLock.current||setupLock.current||pendingRef.current)return;closeProjectTools();setAssetRelationsOpen(v=>!v)}}>Asset links</button>}
           <button type="button" aria-expanded={detailsOpen} onClick={() => { closeProjectTools(); setShareOpen(false); setDetailsOpen(!detailsOpen) }}>Chat settings</button>
           {selected && owner && <button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy} onClick={() => { closeProjectTools(); setDetailsOpen(false); loadSharing() }}>Share chat</button>}
         </div></details> : <button type="button" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>Details</button>}
