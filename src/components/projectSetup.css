@@ -10,3 +10,12 @@
 
 .setup-business-groups { display:flex; flex-wrap:wrap; gap:8px; }
 .setup-business-groups button[aria-pressed="true"] { border-color:var(--anka-violet); background:var(--anka-violet-soft); color:var(--anka-violet); }
+.setup-service-line { display:grid; gap:12px; padding-block:16px; border-block:1px solid var(--anka-line); }
+.setup-service-line h4 { font-weight:600; }
+.setup-service-line-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; }
+.setup-service-line label { display:grid; gap:6px; }
+.setup-service-line textarea { width:100%; }
+.setup-service-intent { font-size:13px; color:var(--anka-muted); }
+.setup-service-diff { display:grid; gap:8px; padding:12px; margin-block:12px; background:var(--anka-canvas); }
+.setup-service-diff dt { font-size:12px; color:var(--anka-muted); }
+.setup-service-diff dd { white-space:pre-wrap; overflow-wrap:anywhere; }
