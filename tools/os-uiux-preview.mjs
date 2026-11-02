@@ -7,6 +7,7 @@ const config = { root, cacheDir: root+'/outputs/ux-vite-cache', server: { host: 
     const path = id.replaceAll('\\', '/').split('?')[0]
     if (['ContentCustomFieldSettings','DepartmentChatModelAllowlist','DesignMediaPricingSettings','DesignMediaSpendingSettings','PipelineAiTextRouteSettings'].some(name=>path.endsWith('/'+name+'.jsx')))return 'export default function UnrelatedAdminFixture(){return null}'
 
+    if(path.endsWith('/src/data/projectDefaultPlanRepository.js'))return 'export const createProjectDefaultPlanRepository=()=>({readContext:(...a)=>globalThis.__integration.foundation.readContext(...a)})'
     if(path.endsWith('/src/data/projectSetupRepository.js'))return 'export const projectSetupRepository={snapshot:(...a)=>globalThis.__integration.setup.snapshot(...a),delivery:new Proxy({},{get:(_,k)=>(...a)=>globalThis.__integration.setup.delivery[k](...a)})}'
     if(path.endsWith('/src/data/projectDeliveryPlans.js'))return 'export const projectDeliveryPlans={read:async(...a)=>globalThis.__integration?.plans?globalThis.__integration.plans.read(...a):({history:[],history_total:0,draft:null,engagements:[]}),apply:(...a)=>globalThis.__integration.plans.apply(...a)}'
     if(path.endsWith('/src/data/projectWorkshopResultsRepository.js'))return 'export const createProjectWorkshopResultsRepository=()=>({read:async()=>globalThis.__integration.results})'
