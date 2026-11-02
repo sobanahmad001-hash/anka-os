@@ -1,3 +1,4 @@
+import {foundationForSetup} from './projectFoundation.js'
 import {SERVICE_CADENCES} from './serviceCatalogue.js'
 import {validateServiceLineMetadata} from './projectServiceLineMetadata.js'
 export const SETUP_PREFIX='Project setup proposal v1\n'
@@ -5,9 +6,10 @@ export const SETUP_PIPELINES=Object.freeze(['branding','website','marketing'])
 const keys=(value,allowed)=>value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).every(k=>allowed.includes(k))
 const text=(value,max=500)=>typeof value==='string'&&value.length<=max
 export function validateProjectSetup(value,snapshot){
- if(!keys(value,['items','pipelines','questions','explanation','ready','service_line_version'])||!Array.isArray(value.items)||value.items.length>50||!Array.isArray(value.pipelines)||value.pipelines.length>SETUP_PIPELINES.length||new Set(value.pipelines).size!==value.pipelines.length||value.pipelines.some(x=>!SETUP_PIPELINES.includes(x)))throw Error('A bounded project setup proposal is required')
+ if(!keys(value,['items','pipelines','questions','explanation','ready','service_line_version','foundation'])||!Array.isArray(value.items)||value.items.length>50||!Array.isArray(value.pipelines)||value.pipelines.length>SETUP_PIPELINES.length||new Set(value.pipelines).size!==value.pipelines.length||value.pipelines.some(x=>!SETUP_PIPELINES.includes(x)))throw Error('A bounded project setup proposal is required')
  if(value.service_line_version!==undefined&&value.service_line_version!==2)throw Error('Unsupported service-line proposal version')
  if(!Array.isArray(value.questions)||value.questions.length>8||value.questions.some(q=>!text(q,300))||!text(value.explanation,1500))throw Error('Bounded questions and explanation required')
+ const foundation=foundationForSetup(value,snapshot)
  const seen=new Set(),leafMap=new Map(snapshot.leaves.map(x=>[x.id,x]))
  const items=value.items.map(input=>{
   let item=input
@@ -26,7 +28,7 @@ export function validateProjectSetup(value,snapshot){
   if(item.pipeline==='branding'&&(value.service_line_version!==2||item.service_line.service_group!=='branding'))throw Error('Review explicit version 2 Branding scope before selecting the Branding track')
   return {...item,channels:[...item.channels],unit:leaf.unit,expected_revision:existing?.revision??null}
  })
- return {items,pipelines:[...value.pipelines],questions:[...value.questions],explanation:value.explanation,...(value.service_line_version===2?{service_line_version:2}:{}),ready:items.length>0&&items.every(x=>x.quantity!==null)&&value.questions.length===0}
+ return {...(foundation===undefined?{}:{foundation}),items,pipelines:[...value.pipelines],questions:[...value.questions],explanation:value.explanation,...(value.service_line_version===2?{service_line_version:2}:{}),ready:items.length>0&&items.every(x=>x.quantity!==null)&&value.questions.length===0}
 }
 export function setupRequest(snapshot,needs,previous=null,departments=['content']){
  if(!text(needs,2200)||!needs.trim())throw Error('Describe the client needs or paste the selected non-sensitive brief passages')
