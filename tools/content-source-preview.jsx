@@ -2,7 +2,8 @@ import './project-content-journey-preview.jsx'
 import {actor,organizationId} from './direct-chat-fixture.js'
 const p=globalThis.__directChatPreview,w=p.projectWorkspace,j=globalThis.__journey
 const brief='Reviewed synthetic homepage brief\nAudience: local service teams.\nSix sections: introduction, services, process, benefits, proof and contact.'
-const draft='  Synthetic exact homepage copy\n\nIntroduction\nHelp your team move forward.\n\nServices\nClear practical support.\n\nProcess\nReview together.\n\nBenefits\nClarity for your next step.\n\nProof\nOnly approved evidence.\n\nContact\nStart a conversation.\n  '
+const baseDraft='  Synthetic exact homepage copy\n\nIntroduction\nHelp your team move forward.\n\nServices\nClear practical support.\n\nProcess\nReview together.\n\nBenefits\nClarity for your next step.\n\nProof\nOnly approved evidence.\n\nContact\nStart a conversation.\n  '
+const draft=baseDraft+(new URLSearchParams(location.search).has('longDraft')?'\n'+('Long synthetic paragraph for exact source review and mobile scrolling.\n\n').repeat(100):'')
 const run=p.fixture.runner.run;let turns=0
 p.fixture.runner.run=async input=>{const result=await run(input);turns++;Object.assign(result.message,{id:turns===1?'qa-brief':'qa-draft',body:turns===1?brief:draft});return result}
 w.engagementWorkItems=w.engagementWorkItems.filter(row=>row.department_id!=='content')

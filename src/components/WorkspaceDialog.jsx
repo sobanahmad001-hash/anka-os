@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef } from 'react'
 
 // Presentation only: command ownership and pending-state decisions stay with the caller.
-export default function WorkspaceDialog({ title, onClose, busy = false, wide = false, children }) {
+export default function WorkspaceDialog({ title, onClose, busy = false, wide = false, className = '', children }) {
   const titleId = useId()
   const panel = useRef(null)
   const current = useRef({ onClose, busy })
@@ -35,7 +35,7 @@ export default function WorkspaceDialog({ title, onClose, busy = false, wide = f
     }
   }, [])
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4">
-    <div ref={panel} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-busy={busy} tabIndex={-1} className={`max-h-[90dvh] w-full min-w-0 overflow-y-auto workspace-card p-4 shadow-2xl sm:p-6 ${wide ? 'max-w-6xl' : 'max-w-2xl'}`}>
+    <div ref={panel} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-busy={busy} tabIndex={-1} className={`max-h-[90dvh] w-full min-w-0 overflow-y-auto workspace-card p-4 shadow-2xl sm:p-6 ${wide ? 'max-w-6xl' : 'max-w-2xl'} ${className}`}>
       <div className="mb-5 flex items-start justify-between gap-4"><h2 id={titleId} className="min-w-0 break-words text-lg font-semibold">{title}</h2><button type="button" disabled={busy} onClick={() => { if (!current.current.busy) current.current.onClose() }} className="workspace-button shrink-0 disabled:opacity-50">Close</button></div>
       {busy && <p role="status" className="mb-3 text-sm text-[var(--anka-muted)]">Saving changes. Keep this window open until the result is confirmed.</p>}
       {children}

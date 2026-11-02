@@ -8,3 +8,17 @@
 @media(max-width:640px){.project-content-journey{padding:10px}.project-content-journey .p-6{padding:12px}.project-content-journey .grid{display:block}.project-content-journey button,.project-content-journey a{max-width:100%;white-space:normal}}
 
 .project-content-source-review{display:grid;gap:.75rem;min-width:0}.project-content-source-review label{display:grid;gap:.35rem}.project-content-source-review pre,.project-content-journey [aria-label="Reviewed Chat draft transfer"] pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:18rem;overflow:auto;padding:.75rem;background:var(--anka-surface-raised)}.project-content-source-review summary{overflow-wrap:anywhere}.project-content-source-review select{min-width:0;max-width:100%}.project-content-source-review input[type="checkbox"]{width:auto}.project-content-source-review button{white-space:normal}
+.studio-source-dialog { display:flex; flex-direction:column; overflow:hidden; }
+.studio-source-dialog > div:first-child { flex-shrink:0; }
+.studio-source-review { display:flex; flex-direction:column; gap:16px; min-height:0; }
+.studio-source-review-scroll { min-height:0; overflow:auto; display:grid; gap:12px; }
+.studio-source-review-actions { flex-shrink:0; display:grid; gap:12px; padding-top:12px; border-top:1px solid var(--anka-line); background:var(--anka-surface); }
+.studio-source-review details { padding:12px; border:1px solid var(--anka-line); border-radius:8px; }
+.studio-source-review pre { max-height:none; line-height:1.7; font-family:inherit; }
+.studio-source-review small { display:block; margin-top:8px; color:var(--anka-muted); overflow-wrap:anywhere; }
+.studio-source-review label { display:flex; align-items:flex-start; gap:10px; }
+.studio-source-review input[type="checkbox"] { flex:0 0 18px; width:18px; height:18px; margin-top:3px; padding:0; }
+.project-content-journey [class*="border-amber-"] { border-color:var(--anka-line)!important; }
+.project-content-journey [class*="text-amber-"] { color:var(--anka-violet)!important; }
+.project-content-journey [class*="bg-amber-"] { background:var(--anka-violet-soft)!important; }
+.project-content-journey button[class*="bg-amber-"] { background:var(--anka-violet)!important; color:var(--anka-on-violet)!important; }
