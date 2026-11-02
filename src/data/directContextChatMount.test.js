@@ -134,11 +134,15 @@ test('typing without Send creates nothing and retains draft', async t => {
   assert.equal(ui.named('Message').value, 'Keep this draft')
 })
 
-test('unavailable readiness saves human message without consent or provider dispatch', async t => {
+test('unavailable AI Send retains the draft; saving a human message requires an explicit choice', async t => {
   const ui = await mount(t)
   ui.fixture.readiness = { ...ui.fixture.readiness, paid_execution_enabled: false }
   await ui.reload()
   await ui.type('Human note'); await ui.send()
+  assert.deepEqual(ui.fixture.data.counters, { created: 0, messages: 0, run: 0, recover: 0 })
+  assert.equal(ui.named('Message').value,'Human note')
+  assert.match(ui.environment.container.textContent,/AI replies are currently disabled/)
+  await ui.click('Save message without AI')
   assert.deepEqual(ui.fixture.data.counters, { created: 1, messages: 1, run: 0, recover: 0 })
   assert.equal(ui.named('Confirm AI data sharing'), undefined)
 })

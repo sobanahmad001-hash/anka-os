@@ -67,7 +67,7 @@ test('readiness rejection ends loading; read-only retry restores Send without di
   const ui=await mount(t,{readiness:async()=>{calls++;if(fail)throw Error('offline');return {paid_execution_enabled:true,spend_tracking_configured:true,model_status:'configured'}}})
   assert.match(ui.environment.container.textContent,/AI availability could not be checked/)
   assert.doesNotMatch(ui.environment.container.textContent,/Checking AI availability/)
-  assert.ok(ui.button('Save message'))
+  assert.ok(ui.button('Send'));assert.ok(ui.button('Save message without AI'))
   fail=false;await ui.click('Retry AI availability')
   assert.ok(ui.button('Send'))
   assert.deepEqual(ui.fixture.data.counters,{created:0,messages:0,run:0,recover:0})
@@ -85,21 +85,58 @@ test('stalled readiness times out and ignores late success; aborted scope never 
   assert.match(ui.environment.container.textContent,/AI availability could not be checked/)
   assert.equal(pending.at(-1).signal.aborted,true)
   await act(async()=>pending.forEach(item=>item.resolve({paid_execution_enabled:true,spend_tracking_configured:true,model_status:'configured'})))
-  assert.ok(ui.button('Save message'));assert.equal(ui.button('Send'),undefined)
+  assert.ok(ui.button('Save message without AI'));assert.ok(ui.button('Send'))
   await ui.click('Retry AI availability')
   await act(async()=>ui.scopeController.abort())
   await act(async()=>pending.at(-1).resolve({paid_execution_enabled:true,spend_tracking_configured:true,model_status:'configured'}))
-  assert.equal(ui.button('Send'),undefined)
+  assert.ok(ui.button('Send'))
   assert.deepEqual(ui.fixture.data.counters,{created:0,messages:0,run:0,recover:0})
 })
 
-test('genuine unavailability stays save-only; malformed readiness is a failed check', async t=>{
+test('genuine unavailability keeps AI Send distinct from explicit human-only save; malformed readiness is a failed check', async t=>{
   const ui=await mount(t,{readiness:async()=>({paid_execution_enabled:false,spend_tracking_configured:true,model_status:'configured'})})
-  assert.ok(ui.button('Save message'));assert.equal(ui.button('Send'),undefined)
+  assert.ok(ui.button('Save message without AI'));assert.ok(ui.button('Send'))
   assert.doesNotMatch(ui.environment.container.textContent,/Checking AI availability/)
   ui.fixture.chat.getContextChatReadiness=async()=>null
   await ui.reload()
   assert.match(ui.environment.container.textContent,/AI availability could not be checked/)
-  assert.ok(ui.button('Save message'))
+  assert.ok(ui.button('Save message without AI'))
   assert.deepEqual(ui.fixture.data.counters,{created:0,messages:0,run:0,recover:0})
+})
+
+test('Project AI Send rechecks stale ready state and blocks expired pricing before saving a message',async t=>{
+ const ui=await mount(t,{surface:'project'});await ui.type('Please update me on the homepage')
+ ui.fixture.readiness={...ui.fixture.readiness,model_status:'price_unavailable'}
+ await ui.send()
+ assert.deepEqual(ui.fixture.data.counters,{created:0,messages:0,run:0,recover:0})
+ assert.equal(ui.named('Message').value,'Please update me on the homepage')
+ assert.match(ui.environment.container.textContent,/pricing.*unavailable or expired/)
+ assert.equal(ui.button('Allow and ask Anka AI'),undefined)
+ assert.ok(ui.button('Save message without AI'))
+})
+
+test('Project AI Send uses fresh eligibility after a failed background check and asks for exactly one reply',async t=>{
+ let available=false,reads=0
+ const ui=await mount(t,{surface:'project',readiness:async()=>{reads++;if(!available)throw Error('temporary read failure');return {paid_execution_enabled:true,spend_tracking_configured:true,model_status:'configured'}}})
+ await ui.type('Please update me on the homepage');const readsBefore=reads;available=true
+ await ui.send(true);assert.equal(ui.button('Allow and ask Anka AI'),undefined)
+ assert.deepEqual(ui.fixture.data.counters,{created:1,messages:1,run:1,recover:0});assert.equal(reads,readsBefore+1)
+ assert.match(ui.environment.container.textContent,/Reply saved/);assert.equal(ui.named('Message').value,'')
+})
+
+test('a delayed Send readiness check cannot save or dispatch into an aborted project',async t=>{
+ const pending=defer(),ui=await mount(t,{surface:'project'})
+ ui.fixture.chat.getContextChatReadiness=()=>pending.promise
+ await ui.type('Keep this unsent draft');await ui.send()
+ await act(async()=>ui.scopeController.abort());pending.resolve({paid_execution_enabled:true,spend_tracking_configured:true,model_status:'configured'});await flush()
+ assert.deepEqual(ui.fixture.data.counters,{created:0,messages:0,run:0,recover:0})
+ assert.equal(ui.named('Message').value,'Keep this unsent draft')
+})
+
+test('readiness failures preserve existing saved history and never request another reply for it',async t=>{
+ const ui=await mount(t,{surface:'project',state:'populated',initial:true}),original=structuredClone(ui.fixture.data.messages)
+ ui.fixture.readiness={...ui.fixture.readiness,paid_execution_enabled:false}
+ await ui.type('New unsent question');await ui.send()
+ assert.deepEqual(ui.fixture.data.messages,original);assert.deepEqual(ui.fixture.data.counters,{created:0,messages:0,run:0,recover:0})
+ assert.equal(ui.named('Message').value,'New unsent question')
 })

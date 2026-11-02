@@ -2,7 +2,7 @@ import { build, createServer } from 'vite'
 import { fileURLToPath } from 'node:url'
 const root = fileURLToPath(new URL('../', import.meta.url))
 const check = process.argv.includes('--check')
-const config = { root, cacheDir: '/tmp/anka-direct-chat-preview-vite-cache', server: { host: '127.0.0.1', port: 5188, strictPort: true }, plugins: [{
+const config = { root, cacheDir: process.env.ANKA_DIRECT_CHAT_PREVIEW_PORT ? fileURLToPath(new URL('../outputs/ai-send-vite-cache', import.meta.url)) : '/tmp/anka-direct-chat-preview-vite-cache', server: { host: '127.0.0.1', port: Number(process.env.ANKA_DIRECT_CHAT_PREVIEW_PORT || 5188), strictPort: true }, plugins: [{
   name: 'offline-direct-chat-only', enforce: 'pre',
   load(id) {
     const path = id.replaceAll('\\', '/').split('?')[0]
@@ -38,5 +38,5 @@ if (check) {
 } else {
   const server = await createServer(config)
   await server.listen()
-  console.log('Provider-free B1 preview: http://127.0.0.1:5188/tools/direct-chat-preview.html')
+  console.log(`Provider-free B1 preview: http://127.0.0.1:${config.server.port}/tools/direct-chat-preview.html`)
 }
