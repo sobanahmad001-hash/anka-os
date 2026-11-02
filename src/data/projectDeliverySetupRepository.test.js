@@ -8,3 +8,16 @@ test('single review/apply RPC uses exact frozen services and pipeline review; no
 test('uncertain combined save recovers original request with no apply resend',async()=>{const calls=[],repo=createProjectDeliverySetupRepository({rpc:async(name,args)=>{calls.push({name,args});if(name==='review_project_delivery_setup')return {data:draft};if(name==='apply_project_delivery_setup')throw Error('Response lost');return {data:{...scope,request_id:id(4),atomic:true}}}});const review=await repo.review(snapshot,proposal);await assert.rejects(repo.apply(snapshot,review,id(4)));await repo.recover(id(1),id(2),id(4));assert.deepEqual(calls.map(c=>c.name),['review_project_delivery_setup','apply_project_delivery_setup','recover_project_delivery_setup']);assert.equal(calls[2].args.p_request_id,id(4))})
 test('partial or foreign success cannot be represented as combined completion',async()=>{for(const result of [{...scope,request_id:id(4),atomic:false},{...scope,request_id:id(4),atomic:true,setup:scope,delivery:{...scope,project_id:id(9)}}]){const repo=createProjectDeliverySetupRepository({rpc:async(name)=>({data:name==='review_project_delivery_setup'?draft:result})}),review=await repo.review(snapshot,proposal);await assert.rejects(repo.apply(snapshot,review,id(4)),/unverified/)}})
 test('invalid and unresolved proposals never send a command; stale authority is known rollback',async()=>{let calls=0;const repo=createProjectDeliverySetupRepository({rpc:async()=>{calls++;return {error:{code:'42501',message:'Current PM required'}}}});await assert.rejects(repo.review(snapshot,{...proposal,questions:['Quantity?']}));assert.equal(calls,0);await assert.rejects(repo.review(snapshot,proposal),e=>e.knownRollback&&e.code==='42501')})
+
+test('version 2 scope and dates remain in one frozen review/apply command, with no scheduling side channel',async()=>{
+ const calls=[],repo=createProjectDeliverySetupRepository({rpc:async(name,args)=>{calls.push({name,args});return {data:name==='review_project_delivery_setup'?draft:{...scope,engagement_id:id(3),request_id:id(4),setup:scope,delivery:scope,atomic:true}}}})
+ const service=SERVICE_CATALOGUE.find(row=>row.slug==='setup_content_audience_research')
+ const serviceLine={catalogue_version:1,service_group:'branding',start_date:'2026-11-02',target_date:null,timezone:'Asia/Karachi',generation_horizon:null,scope_statement:'Reviewed audience foundation',exclusions:'No paid research'}
+ const plan={...proposal,service_line_version:2,items:[{...defaultSetupItem(service),quantity:1,service_line:serviceLine}]}
+ const review=await repo.review(snapshot,plan);await repo.apply(snapshot,review,id(4))
+ assert.deepEqual(calls.map(row=>row.name),['review_project_delivery_setup','apply_project_delivery_setup'])
+ assert.deepEqual(calls[0].args.p_plan,calls[1].args.p_plan)
+ assert.equal(calls[1].args.p_plan.service_line_version,2)
+ assert.deepEqual(calls[1].args.p_plan.items[0].service_line,serviceLine)
+ assert.equal(calls[1].args.p_plan.items[0].pipeline,'undecided')
+})
