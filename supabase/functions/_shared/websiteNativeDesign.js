@@ -51,15 +51,17 @@ export function validateWebsiteNativeDesign(value){
  exact(value.snapshot_checksums,['content','site_system'],'normalized snapshot checksums')
  for(const sha of Object.values(value.snapshot_checksums))if(typeof sha!=='string'||!hash.test(sha))throw new TypeError('Exact normalized snapshot checksum required')
  validateWebsiteNativeSite(value.site)
- exact(value.content,['title','summary','sections'],'page content')
+ exact(value.content,['title','summary','sections',...(Object.hasOwn(value.content,'format')?['format']:[])],'page content')
+ if(Object.hasOwn(value.content,'format')&&value.content.format!=='numbered_sections_v1')throw new TypeError('Unsupported page copy format')
  text(value.content.title,240,'page title');text(value.content.summary,800,'page summary')
  const sections=new Map()
  list(value.content.sections,1,16,'content sections').forEach(section=>{
-  exact(section,['key','heading','paragraphs','items','action'],'content section');key(section.key);text(section.heading,240,'section heading')
+  exact(section,['key','heading','paragraphs','items','action',...(Object.hasOwn(section,'secondary_action')?['secondary_action']:[])],'content section');key(section.key);text(section.heading,240,'section heading')
   if(sections.has(section.key))throw new TypeError('Duplicate content section')
   list(section.paragraphs,0,32,'paragraphs').forEach(p=>text(p,3000,'paragraph'))
   list(section.items,0,12,'feature items').forEach(item=>{exact(item,['title','body'],'feature');text(item.title,100,'feature title');text(item.body,800,'feature body')})
   if(section.action!==null){exact(section.action,['label','path'],'action');text(section.action.label,80,'action label');validateWebsiteNavigationDestination(section.action.path)}
+  if(Object.hasOwn(section,'secondary_action')){exact(section.secondary_action,['label','path'],'secondary action');text(section.secondary_action.label,80,'secondary action label');validateWebsiteNavigationDestination(section.secondary_action.path)}
   sections.set(section.key,section)
  })
  exact(value.layout,['template','sections'],'page layout')
@@ -75,7 +77,7 @@ export function validateWebsiteNativeDesign(value){
  })
  if(used.size!==sections.size)throw new TypeError('Every content section must be accounted for; no silent omission')
  const anchors=new Set(['main',...sections.keys()])
- for(const link of [...value.site.navigation,...value.content.sections.map(s=>s.action).filter(Boolean)])if(link.path.startsWith('#')&&!anchors.has(link.path.slice(1)))throw new TypeError('Anchor target does not exist in this page')
+ for(const link of [...value.site.navigation,...value.content.sections.flatMap(s=>[s.action,s.secondary_action]).filter(Boolean)])if(link.path.startsWith('#')&&!anchors.has(link.path.slice(1)))throw new TypeError('Anchor target does not exist in this page')
  if(new TextEncoder().encode(JSON.stringify(value)).length>128000)throw new TypeError('Website design exceeds bounded input size')
  return structuredClone(value)
 }
@@ -95,10 +97,12 @@ const block=(name,html,attrs={})=>`<!-- wp:${name}${Object.keys(attrs).length?' 
 const paragraph=p=>block('paragraph',`<p>${esc(p)}</p>`)
 const heading=(p,level)=>block('heading',`<h${level} class="wp-block-heading">${esc(p)}</h${level}>`,{level})
 const button=action=>block('buttons',`<div class="wp-block-buttons">${block('button',`<div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="${esc(action.path)}">${esc(action.label)}</a></div>`)}</div>`)
+const secondaryLink=action=>block('paragraph',`<p><a href="${esc(action.path)}">${esc(action.label)}</a></p>`)
 function bodyBlocks(value){
  const sections=new Map(value.content.sections.map(s=>[s.key,s]))
- return heading(value.content.title,1)+paragraph(value.content.summary)+value.layout.sections.map(layout=>{
-  const s=sections.get(layout.source_key),items=s.items.length?s.items.map(item=>heading(item.title,3)+paragraph(item.body)):layout.component==='feature_grid'?s.paragraphs.map(paragraph):[],features=layout.component==='feature_grid'?block('columns',`<div class="wp-block-columns">${items.map(html=>block('column',`<div class="wp-block-column">${html}</div>`)).join('')}</div>`):items.join(''),inner=heading(layout.heading||s.heading,2)+(layout.component==='feature_grid'?'':s.paragraphs.map(paragraph).join(''))+features+(s.action?button(s.action):'')
+ const structured=value.content.format==='numbered_sections_v1',hero=structured&&value.layout.sections[0]?.source_key==='hero'
+ return (hero?'':heading(value.content.title,1)+paragraph(value.content.summary))+value.layout.sections.map((layout,index)=>{
+  const s=sections.get(layout.source_key),items=s.items.length?s.items.map(item=>heading(item.title,3)+paragraph(item.body)):layout.component==='feature_grid'?s.paragraphs.map(paragraph):[],features=layout.component==='feature_grid'?block('columns',`<div class="wp-block-columns">${items.map(html=>block('column',`<div class="wp-block-column">${html}</div>`)).join('')}</div>`):items.join(''),inner=heading(layout.heading||s.heading,hero&&index===0?1:2)+(layout.component==='feature_grid'&&(!structured||!s.items.length)?'':s.paragraphs.map(paragraph).join(''))+features+(s.action?button(s.action):'')+(s.secondary_action?secondaryLink(s.secondary_action):'')
   return block('group',`<div id="${esc(s.key)}" class="wp-block-group anka-section anka-${layout.component}${layout.motion==='reveal'?' anka-reveal':''}">${inner}</div>`,{anchor:s.key,className:`anka-section anka-${layout.component}${layout.motion==='reveal'?' anka-reveal':''}`})
  }).join('')
 }
@@ -119,5 +123,5 @@ export async function compileWebsiteNativeDesign(input){
  const part=slug=>`<!-- wp:template-part {"slug":"${slug}","area":"${slug}"} /-->`
  const files={'style.css':`/*\nTheme Name: Anka Native Foundation\nVersion: 0.1.0\nRequires at least: 6.6\nText Domain: anka-native\n*/\n${css}`,'theme.json':JSON.stringify(theme,null,2),'templates/index.html':part('header')+'<!-- wp:post-content /-->'+part('footer'),[`templates/${templateName}.html`]:part('header')+main+part('footer'),'parts/header.html':header,'parts/footer.html':footer}
  // Package staging is not provided here. A worker must still validate/install/render it.
- return {compiler_version:2,scope:value.scope,sources:value.sources,snapshot_checksums:value.snapshot_checksums,input_checksum:await websiteNativeSnapshotChecksum(value),files,files_checksum:await websiteNativeSnapshotChecksum(files),blocks,preview:preview.replace(/<a href="(\/[^"]*)"/g,'<a target="_top" href="$1"'),capability:'provider_free_source_package',live:false}
+ return {compiler_version:value.content.format==='numbered_sections_v1'?3:2,scope:value.scope,sources:value.sources,snapshot_checksums:value.snapshot_checksums,input_checksum:await websiteNativeSnapshotChecksum(value),files,files_checksum:await websiteNativeSnapshotChecksum(files),blocks,preview:preview.replace(/<a href="(\/[^"]*)"/g,'<a target="_top" href="$1"'),capability:'provider_free_source_package',live:false}
 }

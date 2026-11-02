@@ -1,6 +1,6 @@
 import {assertEquals,assertMatch} from 'jsr:@std/assert@1.0.14'
 import {handler} from './index.ts'
-import {prepareWebsiteNativeManifest} from '../_shared/websiteNativeDraft.js'
+import {prepareWebsiteNativeManifest,websiteNativeLayout} from '../_shared/websiteNativeDraft.js'
 const id=(n:number)=>`a0000000-0000-4000-8000-${String(n).padStart(12,'0')}`
 const fixture=()=>({scope:{organization_id:id(1),project_id:id(2),engagement_id:id(3),page_id:id(4),page_key:'home'},architecture:{artifact_version_id:id(5),content_checksum:'a'.repeat(64),approval_id:id(9)},page:{title:'Home'},content_version:{id:id(6),content_checksum:'b'.repeat(64)},brief_version:{id:id(7),content_checksum:'c'.repeat(64)},site_version:{id:id(8),request_sha256:'d'.repeat(64),site:{title:'Brand',language:'en',description:'Brand description',palette:{background:'#ffffff',surface:'#eeeeee',ink:'#111111',accent:'#224466'},navigation:[{label:'Home',path:'/home'}],footer:'Footer'}},content_page:{page_brief:'Agreed brief',draft_copy:'Actual canonical copy',meta_title:'Page title',meta_description:'Page description',primary_cta:'Contact'},review_sha256:'e'.repeat(64)})
 function harness(change:Record<string,unknown>={}){const source=fixture(),calls:Array<{name:string;args:Record<string,unknown>}>=[];const context={organizationId:id(1),projectId:id(2),engagementId:id(3),user:{id:id(10)},membership:{member_kind:'team',status:'active',role:'contributor',department_id:'design'},userClient:{rpc:async()=>({data:source})},admin:{rpc:async(name:string,args:Record<string,unknown>)=>{calls.push({name,args});return {data:{organization_id:args.p_organization_id,project_id:args.p_project_id,engagement_id:args.p_engagement_id,created_by:args.p_actor_id,request_id:args.p_request_id,id:id(11)}}}},...change};return {source,calls,dependencies:{resolveContext:async()=>context} as unknown as Parameters<typeof handler>[1]}}
@@ -19,5 +19,15 @@ Deno.test('exact HTTPS contact destination saves through current authenticated s
  const body={...base(),action:'save_design',direction_version_id:null,architecture_approval_id:id(9),review_sha256:h.source.review_sha256,manifest}
  assertEquals((await handler(request(body),h.dependencies)).status,200);assertEquals(h.calls.length,1);assertMatch(h.calls[0].args.p_html as string,/href="https:\/\/ankasphere.com\/contact-anka-sphere\/"/)
  manifest.content.sections[0].action.path='https://user:pass@example.com/'
+ assertEquals((await handler(request(body),h.dependencies)).status>=400,true);assertEquals(h.calls.length,1)
+})
+
+Deno.test('numbered Content sections and both Hero actions are verified from current server sources before the authenticated writer',async()=>{
+ const h=harness();h.source.content_page.draft_copy=['Hero','Services','Selected work','How we work','FAQs','Contact'].map((name,i)=>`## ${i+1}. ${name}\n\n### ${name} heading\n\nExact section ${i+1} copy.\n\n**CTA:** [Connect with Anka](https://ankasphere.com/contact-anka-sphere/)${i===0?'\n**Secondary CTA:** [Explore our work](#selected-work)':''}`).join('\n\n')
+ const manifest=await prepareWebsiteNativeManifest(h.source,websiteNativeLayout(h.source)),body={...base(),action:'save_design',direction_version_id:null,architecture_approval_id:id(9),review_sha256:h.source.review_sha256,manifest}
+ assertEquals((await handler(request(body),h.dependencies)).status,200);assertEquals(h.calls.length,1)
+ assertMatch(h.calls[0].args.p_html as string,/id="selected-work"/);assertMatch(h.calls[0].args.p_html as string,/href="#selected-work">Explore our work/)
+ assertEquals((h.calls[0].args.p_manifest as typeof manifest).content.sections.length,6)
+ h.source.content_page.draft_copy=h.source.content_page.draft_copy.replace('Exact section 1 copy.','A newer source body.')
  assertEquals((await handler(request(body),h.dependencies)).status>=400,true);assertEquals(h.calls.length,1)
 })
