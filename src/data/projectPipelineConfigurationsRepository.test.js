@@ -77,3 +77,24 @@ test('reviewed decisions bind one native group or Legacy receipt, and source sea
  await repo.listStageArtifacts(A,B,{query:A,offset:25});assert.deepEqual(calls[1],{name:'list_project_pipeline_stage_artifacts',payload:{p_organization_id:A,p_engagement_id:B,p_query:A,p_offset:25,p_limit:25}})
  assert.throws(()=>repo.listStageArtifacts(A,B,{offset:10001}),/Bounded/);assert.equal(calls.length,2)
 })
+
+
+test('foundation review routes exact metadata to the unique endpoint without background adoption or retry',async()=>{
+ const calls=[],repo=createProjectPipelineConfigurationsRepository({from(){throw Error('No background reads')},rpc(name,args){calls.push({name,args});return Promise.resolve({data:null,error:{code:'40001',message:'Review current foundation'}})}})
+ const input={organizationId:A,engagementId:B,definitionPublicationId:C,pipelineGroupId:group,requestId:A,selectedSteps:[{key:'brief',quantity:1}],stageDecisions:[{key:'brief',action:'run'}],maxAiCostMicrousd:0}
+ const context={schema_version:1,plan_version_id:C,foundation_checksum:'a'.repeat(64),roles:{visual:{mode:'minimum',guidance_checksum:'b'.repeat(64)}}}
+ const saving=repo.create({...input,foundationContext:context});context.roles.visual.guidance_checksum='changed'
+ await assert.rejects(saving,error=>error.code==='40001' && error.knownRollback)
+ assert.equal(calls.length,1);assert.equal(calls[0].name,'create_foundation_reviewed_project_pipeline_configuration');assert.equal(calls[0].args.p_request_id,A);assert.equal(calls[0].args.p_foundation_context.roles.visual.guidance_checksum,'b'.repeat(64));assert.deepEqual(calls[0].args.p_stage_decisions,input.stageDecisions)
+ await assert.rejects(repo.create(input));assert.equal(calls[1].name,'create_reviewed_project_pipeline_configuration');assert.equal('p_foundation_context' in calls[1].args,false)
+ await assert.rejects(repo.create({...input,foundationContext:null}));assert.equal(calls[2].name,'create_foundation_reviewed_project_pipeline_configuration');assert.equal(calls[2].args.p_foundation_context,null)
+ for(const foundationContext of [[],true,'latest']) assert.throws(()=>repo.create({...input,foundationContext}),/Exact foundation/)
+ assert.throws(()=>repo.create({...input,stageDecisions:undefined,foundationContext:context}),/reviewed stage/);assert.equal(calls.length,3)
+})
+
+test('foundation context read is exact scoped metadata with abort support and no mutation',async()=>{
+ const calls=[],controller=new AbortController(),response={foundation_context:null,blockers:[{code:'foundation_review_required'}],ready_for_preparation:false,ready_for_traffic:false}
+ const repo=createProjectPipelineConfigurationsRepository({from(){throw Error('No table fallback')},rpc(name,args){calls.push({name,args});return {abortSignal(signal){assert.equal(signal,controller.signal);return Promise.resolve({data:response,error:null})}}}})
+ assert.equal(await repo.readFoundationContext(A,B,group,{signal:controller.signal}),response)
+ assert.deepEqual(calls,[{name:'get_project_pipeline_foundation_context',args:{p_organization_id:A,p_engagement_id:B,p_pipeline_group_id:group}}]);assert.throws(()=>repo.readFoundationContext(A,B,'other'),/UUID/);assert.equal(calls.length,1)
+})
