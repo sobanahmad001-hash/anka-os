@@ -1,3 +1,4 @@
+import _WorkBatchEntry from '../components/WorkBatchEntry.jsx'
 import _ProjectOutputLibrary from '../components/ProjectOutputLibrary.jsx'
 import StudioProjectContext from '../components/StudioProjectContext.jsx'
 import ProjectDeliveryContextPanel from '../components/ProjectDeliveryContextPanel.jsx'
@@ -201,7 +202,7 @@ export default function ProjectEngagementWorkspace() {
           {tab === 'services' && <ServicesAndScope workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={load} onAccessError={handleOrganizationAccessError} onOpen={selectTab} onNavigationBusyChange={reportNavigationBusy} />}
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
           {['website-work','marketing-work','resources'].includes(tab)&&<_ProjectScopedPipelineView key={[navigationOwner,tab,searchParams.get('resourceGroupId')||''].join(':')} workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} signal={requestSignal} kind={tab==='website-work'?'website':tab==='marketing-work'?'marketing':undefined} resources={tab==='resources'} initialGroupId={tab==='resources'?searchParams.get('resourceGroupId')||'':''} onOpenResources={groupId=>selectTab('resources',groupId)} onNavigationBusyChange={reportNavigationBusy}/>}
-          {tab === 'work' && <WorkViews workspace={workspace} navigate={navigate} searchParams={searchParams} setSearchParams={setSearchParams} />}
+          {tab === 'work' && <WorkViews onOpenPlan={()=>selectTab('services')} onChanged={load} onBusy={reportNavigationBusy} signal={requestSignal} workspace={workspace} navigate={navigate} searchParams={searchParams} setSearchParams={setSearchParams} />}
           {tab === 'discussion' && <div className="studio-chat-layout">
             <div className="studio-conversation">
             <div className={projectChatMode === 'team' ? 'workspace-card p-4' : ''}>
@@ -288,7 +289,7 @@ function EngagementWork({ rows, hasEngagement, workshopLinks, navigate, originTa
 
 const WORK_VIEWS = ['pipeline', 'list', 'board', 'calendar']
 const MONTH_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-function WorkViews({ workspace, navigate, searchParams, setSearchParams }) {
+function WorkViews({ onOpenPlan, onChanged, onBusy, signal, workspace, navigate, searchParams, setSearchParams }) {
   const view = WORK_VIEWS.includes(searchParams.get('workView')) ? searchParams.get('workView') : 'pipeline'
   const suppliedMonth = searchParams.get('workMonth')
   const monthKey = /^\d{4}-(0[1-9]|1[0-2])$/.test(suppliedMonth || '')
@@ -332,7 +333,7 @@ function WorkViews({ workspace, navigate, searchParams, setSearchParams }) {
     setWorkParam('workMonth', next)
   }
   const statuses = [...new Set(records.map(({ item }) => item.status || 'unknown'))].sort()
-  return <div className="space-y-5">
+  return <div className="space-y-5"><_WorkBatchEntry onOpenPlan={onOpenPlan} onChanged={onChanged} onBusy={onBusy} key={workspace.project.id+workspace.engagement?.id} workspace={workspace} signal={signal}/>
     <div className="flex flex-wrap items-center justify-between gap-3 workspace-card p-4">
       <div><h2 className="font-semibold">Project work</h2><p className="mt-1 text-xs text-[var(--anka-muted)]">Showing {records.length} of {allRecords.length} records. Statuses keep their source meaning; calendar dates are task due dates.</p></div>
       <div role="group" aria-label="Work view" className="flex gap-1 rounded-xl border border-[var(--anka-line)] p-1">

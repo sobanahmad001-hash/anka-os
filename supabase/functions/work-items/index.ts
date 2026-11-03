@@ -11,7 +11,7 @@ const ACTIONS = new Set([
 const WORK_ITEM_TYPES = new Set(['task', 'bug', 'request'])
 const PRIORITIES = new Set(['low', 'medium', 'high', 'urgent'])
 const STATUSES = new Set(['not_started', 'in_progress', 'blocked', 'done'])
-const CREATED_VIA = new Set(['manual', 'ai_chat_proposal', 'automation_rule', 'recurring_plan', 'quick_task_promotion'])
+const CREATED_VIA = new Set(['manual', 'ai_chat_proposal', 'automation_rule', 'recurring_plan', 'quick_task_promotion', 'pipeline_plan'])
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
