@@ -10,7 +10,9 @@ export default function WorkBatchEntry(props) {
   return <_ScopedWorkBatchEntry key={key} {...props} actorId={user.id}/>
 }
 
-function _ScopedWorkBatchEntry({workspace, signal, onBusy, onChanged, actorId, onOpenPlan}) {
+const _ScopedWorkBatchEntry = ScopedWorkBatchEntry
+
+function ScopedWorkBatchEntry({workspace, signal, onBusy, onChanged, actorId, onOpenPlan}) {
   const [records,setRecords]=useState(null)
   const [partitionId,setPartitionId]=useState('')
   const [batchBusy,setBatchBusy]=useState(false)
