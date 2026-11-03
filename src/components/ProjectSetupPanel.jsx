@@ -3,19 +3,21 @@ import _ServiceLineFields, {ServiceLineReview as _ServiceLineReview} from './Ser
 import {serviceLineDraft,retainServiceLineDrafts} from './serviceLineDraft.js'
 import ProjectDeliveryPlanPanel from './ProjectDeliveryPlanPanel.jsx'
 import './projectSetup.css'
-import {useEffect,useMemo,useRef,useState} from 'react'
+import {lazy,Suspense as _Suspense,useEffect,useMemo,useRef,useState} from 'react'
 import {projectSetupRepository} from '../data/projectSetupRepository.js'
 import {SETUP_PIPELINES,defaultSetupItem,validateProjectSetup,setupRequest,setupAnswer,parseSetupRequest,setupDiff,connectedDeliverables} from '../data/projectSetup.js'
 import {serviceBusinessCatalogue} from '../data/serviceBusinessGroups.js'
 import {SERVICE_CADENCES} from '../data/serviceCatalogue.js'
+const _ServiceRecurringReview=lazy(()=>import('./ServiceRecurringReview.jsx'))
 const empty=()=>({items:[],pipelines:[],questions:[],explanation:'Manual project setup proposal. Review before applying.'})
-export default function ProjectSetupPanel({organizationId,projectId,actorId,signal,onChanged,onAccessError,onNavigationBusyChange,onAssist,onRecover,restoredProposal,initialMode='manual',repository=projectSetupRepository}){
- const key=[organizationId,projectId,actorId].join(':')
- return <Setup key={key} {...{organizationId,projectId,actorId,signal,onChanged,onAccessError,onNavigationBusyChange,onAssist,onRecover,restoredProposal,initialMode,repository}}/>
+export default function ProjectSetupPanel({organizationId,projectId,engagementId,actorId,signal,onChanged,onAccessError,onNavigationBusyChange,onAssist,onRecover,restoredProposal,initialMode='manual',repository=projectSetupRepository}){
+ const key=[organizationId,projectId,engagementId,actorId].join(':')
+ return <Setup key={key} {...{organizationId,projectId,engagementId,actorId,signal,onChanged,onAccessError,onNavigationBusyChange,onAssist,onRecover,restoredProposal,initialMode,repository}}/>
 }
-function Setup({organizationId,projectId,actorId,signal,onChanged,onAccessError,onNavigationBusyChange,onAssist,onRecover,restoredProposal,initialMode,repository}){
+function Setup({organizationId,projectId,engagementId,actorId,signal,onChanged,onAccessError,onNavigationBusyChange,onAssist,onRecover,restoredProposal,initialMode,repository}){
  const [deliveryReview,setDeliveryReview]=useState(null),[deliveryChoices,setDeliveryChoices]=useState({}),[deliveryEngagement,setDeliveryEngagement]=useState(null)
- const [planBusy,setPlanBusy]=useState(false),[legacyPending,setLegacyPending]=useState(false)
+ const [standaloneBusy,setPlanBusy]=useState(false),[recurringBusy,setRecurringBusy]=useState(false),[legacyPending,setLegacyPending]=useState(false)
+ const planBusy=standaloneBusy||recurringBusy
  const [snapshot,setSnapshot]=useState(null),[plan,setPlan]=useState(empty),[mode,setMode]=useState(initialMode),[query,setQuery]=useState(''),[department,setDepartment]=useState('all'),[businessGroup,setBusinessGroup]=useState('all'),[needs,setNeeds]=useState(''),[departments,setDepartments]=useState(['content','design','marketing','development']),[ack,setAck]=useState([]),[review,setReview]=useState(null),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[pending,setPending]=useState(null)
  const alive=useRef(false),flight=useRef(false),view=useRef(null),generation=useRef(0),restored=useRef(null)
  const storageKey=`anka:project-delivery-setup:${organizationId}:${projectId}:${actorId}`,legacyStorageKey=`anka:project-setup:${organizationId}:${projectId}:${actorId}`
@@ -65,7 +67,8 @@ function Setup({organizationId,projectId,actorId,signal,onChanged,onAccessError,
  <p>Apply saves service proposals and this exact template-based pipeline plan in one transaction. Any failure rolls back both. Configuration stages, exact inputs, activation, assignments, approval and runs retain their existing reviews.</p><button type="button" disabled={busy||!!pending||planBusy||!snapshot.can_manage||!deliveryReview?.data?.review_sha256||deliveryReview.data.draft?.groups?.some(g=>g.choose_group)||overlaps.some(x=>!ack.includes(x))} onClick={()=>run(apply)}>Apply setup</button></section>}
  {pending&&<div role="status"><p>An original setup save may be committed. Recover its receipt before editing or starting another setup.</p><button type="button" disabled={busy} onClick={()=>run(recover)}>Recover original setup save</button></div>}
  {!snapshot.can_manage&&<p>Read-only setup. Applying requires current exact project-manager or organization administration authority.</p>}
- <details><summary>Saved plan history and advanced standalone plan changes</summary><ProjectDeliveryPlanPanel key={snapshot.token} organizationId={organizationId} projectId={projectId} actorId={actorId} signal={signal} disabled={busy||Boolean(pending)||!snapshot.can_manage} onNavigationBusyChange={setPlanBusy} onChanged={onChanged}/></details>
+ {engagementId&&actorId&&<_Suspense fallback={null}><_ServiceRecurringReview key={[organizationId,projectId,engagementId,actorId,snapshot.token].join(':')} scope={{organizationId,projectId,engagementId,actorId}} snapshot={snapshot} signal={signal} disabled={busy||Boolean(pending)||standaloneBusy||plan.items.length>0} onBusy={setRecurringBusy}/></_Suspense>}
+ <details><summary>Saved plan history and advanced standalone plan changes</summary><ProjectDeliveryPlanPanel key={snapshot.token} organizationId={organizationId} projectId={projectId} actorId={actorId} signal={signal} disabled={busy||Boolean(pending)||recurringBusy||!snapshot.can_manage} onNavigationBusyChange={setPlanBusy} onChanged={onChanged}/></details>
  </>}{notice&&<p role="status">{notice}</p>}{error&&<p role="alert">{error}</p>}{busy&&<p role="status">Checking this exact project…</p>}
  </section>
 }
