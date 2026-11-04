@@ -27,7 +27,7 @@ import {
 import { stableJson } from '../_shared/approvedArtifactContext.ts'
 import { validateMarketingArtifact } from '../marketing-studio/index.ts'
 import { dispatchWorkshopAnswer } from './workshopAnswerTransport.ts'
-import { selectFreshPipelineRate } from '../_shared/n6PipelineCost.ts'
+import { conservativePipelineCeiling, selectFreshPipelineRate } from '../_shared/n6PipelineCost.ts'
 import type { WorkshopAnswerRoute } from './workshopAnswerTransport.ts'
 import { namedKey, sha256 } from '../_shared/googleOAuthTokens.ts'
 import {
@@ -1524,7 +1524,14 @@ async function chatSpendGuardReadiness(admin: Client, organizationId: string, ac
   if (data.spend_tracking_configured !== (mode !== null)) {
     throw Object.assign(new Error('AI spend tracking readiness is inconsistent'), { status: 503 })
   }
+  const status = data.spend_readiness_status
+  if (!['ready','spend_tracking_unconfigured','prior_cycle_reconciliation_required','unmeasured_cost_reconciliation_required'].includes(status)
+    || !Array.isArray(data.reconciliation_sources)
+    || data.reconciliation_sources.some((source: unknown) => !['design_media','design_video','pipeline','context_chat','workshop_chat','other'].includes(String(source)))) {
+    throw Object.assign(new Error('AI spending reconciliation readiness is unavailable'), { status: 503 })
+  }
   return { spend_guard_mode: mode, spend_tracking_configured: mode !== null,
+    spend_readiness_status: status, reconciliation_sources: data.reconciliation_sources,
     external_provider_limit_verified: false }
 }
 
@@ -1563,6 +1570,47 @@ async function contextModelReadiness(admin: Client, organizationId: string, acto
   if (!readEnv(connection.secret_name)) return 'credential_unavailable'
   if (!freshChatPriceAvailable(connection.provider, model.model_id, readEnv)) return 'price_unavailable'
   return 'configured'
+}
+
+export async function projectChatAllowanceReadiness(admin: Client, organizationId: string, actorId: string,
+  conversationId: string, configurationId: string, spendGuard: Json, modelStatus: string,
+  readEnv: (name: string) => string | undefined): Promise<Json> {
+  // No project context or usable current price/model means no alternative.
+  if (spendGuard.spend_readiness_status !== 'prior_cycle_reconciliation_required'
+    || modelStatus !== 'configured' || !conversationId) return spendGuard
+  const { data: model, error: modelError } = await admin.from('context_chat_organization_models')
+    .select('id,model_id,connector_connection_id').eq('organization_id', organizationId).eq('id', configurationId).maybeSingle()
+  if (modelError || !model) throw Object.assign(new Error('Scoped text allowance readiness is unavailable'), { status: 503 })
+  const { data: connection, error: connectionError } = await admin.from('integration_connections')
+    .select('provider').eq('organization_id', organizationId).eq('id', model.connector_connection_id).maybeSingle()
+  if (connectionError || !connection || !CHAT_PRICING_ENV[connection.provider]) {
+    throw Object.assign(new Error('Scoped text allowance pricing is unavailable'), { status: 503 })
+  }
+  const price = selectFreshPipelineRate(readEnv(CHAT_PRICING_ENV[connection.provider]), model.model_id,
+    new Date(), connection.provider, readEnv('N6_OPENAI_APPROVED_MODELS_PRICING_JSON'))
+  // Advisory preflight requires room for the largest supported turn. Actual
+  // reservation rechecks the same SQL predicate with its exact verified ceiling.
+  const maximumTurn = conservativePipelineCeiling('x'.repeat(24000), price)
+  const { data, error } = await admin.rpc('read_project_chat_allowance', {
+    p_org: organizationId, p_actor: actorId, p_conversation: conversationId,
+    p_model: configurationId, p_cost: maximumTurn,
+  })
+  if (error || !data || typeof data !== 'object'
+    || !['available','exhausted','inactive','unavailable','not_required','scope_unavailable','authority_changed','scope_changed',
+      'source_changed','unmeasured_current_cost','unrelated_current_hold'].includes(data.status)) {
+    throw Object.assign(new Error('Scoped text allowance readiness could not be verified'), { status: 503 })
+  }
+  if (data.status !== 'available') return { ...spendGuard, prospective_allowance_status: data.status,
+    prospective_maximum_hold_microusd: maximumTurn }
+  if (!Number.isSafeInteger(data.cap_microusd) || data.cap_microusd < 1 || data.cap_microusd > 1000000
+    || !Number.isSafeInteger(data.remaining_microusd) || data.remaining_microusd < maximumTurn
+    || data.remaining_microusd > data.cap_microusd || data.historical_costs_unresolved !== true
+    || !Number.isFinite(Date.parse(data.expires_at)) || Date.parse(data.expires_at) <= Date.now()) {
+    throw Object.assign(new Error('Scoped text allowance evidence is inconsistent'), { status: 503 })
+  }
+  return { ...spendGuard, spend_readiness_status: 'ready', prospective_allowance_status: 'available',
+    prospective_allowance: { cap_microusd: data.cap_microusd, remaining_microusd: data.remaining_microusd,
+      expires_at: data.expires_at, historical_costs_unresolved: true, maximum_turn_microusd: maximumTurn } }
 }
 
 async function getCapabilities(
@@ -2140,11 +2188,15 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
     }
     if (action === 'get_context_chat_readiness') {
       const spendGuard = await chatSpendGuardReadiness(admin, organizationId, user.id)
-      const modelStatus = await contextModelReadiness(admin, organizationId, user.id, text(body.model_configuration_id, 80), dependencies.readinessEnv ?? (name => Deno.env.get(name)))
+      const readEnv = dependencies.readinessEnv ?? (name => Deno.env.get(name))
+      const modelId = text(body.model_configuration_id, 80)
+      const modelStatus = await contextModelReadiness(admin, organizationId, user.id, modelId, readEnv)
+      const scopedSpend = await projectChatAllowanceReadiness(admin, organizationId, user.id,
+        text(body.conversation_id, 80), modelId, spendGuard, modelStatus, readEnv)
       return response({ data: { paid_execution_enabled:
         dependencies.contextChatPaidExecutionEnabled
           ?? Deno.env.get('CONTEXT_CHAT_PAID_EXECUTION_ENABLED') === 'true',
-        ...spendGuard, model_status: modelStatus } })
+        ...scopedSpend, model_status: modelStatus } })
     }
     previewAttempt = ['propose_artifact', 'propose_work_item'].includes(action)
     if (previewAttempt) await auditAttempt(admin, organizationId, user.id, 'preview_requested', '')

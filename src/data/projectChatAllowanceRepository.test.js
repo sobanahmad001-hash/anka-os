@@ -1,0 +1,12 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import{createProjectChatAllowanceRepository}from './projectChatAllowanceRepository.js'
+const id=n=>`bb000000-0000-4000-8000-${String(n).padStart(12,'0')}`
+const scope={organizationId:id(1),projectId:id(3),modelConfigurationId:id(4)}
+function fixture(){const calls=[];const repo=createProjectChatAllowanceRepository({async rpc(name,args){calls.push({name,args});return{data:{status:'fixture'}}}},scope);return{repo,calls}}
+const review={organization_id:id(1),project_id:id(3),model_configuration_id:id(4),cap_microusd:1000000,duration_seconds:86400,
+ review_hash:'a'.repeat(64),historical_costs_unresolved:true,historical_charge_may_exceed_estimate:true}
+test('owner allowance read and preview remain read-only; no activation or automatic retry',async()=>{const{repo,calls}=fixture();await repo.read();await repo.preview({capMicrousd:1000000,durationSeconds:86400});assert.deepEqual(calls.map(c=>c.name),['read_owned_project_chat_allowance','preview_project_chat_allowance']);assert.equal(calls[1].args.p_cap,1000000)})
+test('owner explicitly applies exact scope, amount, duration and original reviewed hash once',async()=>{const{repo,calls}=fixture();await repo.apply({requestId:id(10),review});assert.deepEqual(calls,[{name:'apply_project_chat_allowance',args:{p_org:id(1),p_project:id(3),p_model:id(4),p_request:id(10),p_action:'activate',p_cap:1000000,p_seconds:86400,p_review_hash:'a'.repeat(64),p_policy:null}}])})
+test('foreign scope, absent liability acknowledgement and unbounded amount cannot dispatch an apply',()=>{const{repo,calls}=fixture();for(const change of[{project_id:id(8)},{historical_costs_unresolved:false},{historical_charge_may_exceed_estimate:false},{cap_microusd:1000001},{duration_seconds:86401}])assert.throws(()=>repo.apply({requestId:id(10),review:{...review,...change}}));assert.equal(calls.length,0)})
+test('revocation identifies original policy without resetting amount or source; errors never retry',async()=>{const{repo,calls}=fixture();await repo.revoke({requestId:id(11),policyId:id(12)});assert.equal(calls[0].args.p_policy,id(12));assert.equal(calls[0].args.p_cap,null);assert.equal(calls[0].args.p_action,'revoke');let attempted=0;const failing=createProjectChatAllowanceRepository({async rpc(){attempted++;return{error:Error('CAS')}}},scope);await assert.rejects(failing.apply({requestId:id(10),review}),/CAS/);assert.equal(attempted,1)})

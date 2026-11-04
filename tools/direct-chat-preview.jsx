@@ -29,10 +29,11 @@ const storageKey = `anka-offline-b1-fixture:${surface}:${state}`
 let stored
 try { stored = JSON.parse(sessionStorage.getItem(storageKey)) } catch { /* Empty fixture. */ }
 const fixture = createDirectChatFixture({ surface, state, stored, persist: data => { sessionStorage.setItem(storageKey, JSON.stringify(data)); window.dispatchEvent(new Event('fixture-counters')) } })
+if(globalThis.__allowanceFixture)fixture.chat.getContextChatReadiness=input=>globalThis.__allowanceFixture.readiness(input,fixture)
 fixture.allowEngagementAnswer = params.get('answer') === 'fixture'
 const scope = fixture.scope
 if (!stored && ['failed', 'uncertain'].includes(state)) writeDirectChatRecovery(directChatRecoveryKey(actor, organizationId, scope.context_kind, scope.project_id, scope.department_id), { conversation_id: threadId, client_request_id: requestId, dispatch_request_id: dispatchId, message_id: humanId })
-const membership = { organizationId, organization: { id: organizationId, name: 'Anka preview' }, role: 'operations_admin', departmentId: 'content', departmentIds: ['content'] }
+const membership = { organizationId, organization: { id: organizationId, name: 'Anka preview' }, role: params.get('allowance')==='owner'?'system_owner':'operations_admin', departmentId: 'content', departmentIds: ['content'] }
 if (params.has('theme')) writeThemePreference(browserStorage(), actor, params.get('theme'))
 globalThis.__directChatPreview = { fixture, pipeline:createPipelinePreviewFixture({declared:params.get('stage-contracts')==='1'}), organization: { activeOrganizationId: organizationId, memberships: [membership], activeMembership: membership, selectionRequired: false, loading: false, error: null, selectOrganization: () => {}, scopeRevision: 1, requestSignal: new AbortController().signal, handleOrganizationAccessError: () => {} } }
 

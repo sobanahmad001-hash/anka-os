@@ -116,11 +116,11 @@ test('Project AI Send rechecks stale ready state and blocks expired pricing befo
 })
 
 test('Project AI Send uses fresh eligibility after a failed background check and asks for exactly one reply',async t=>{
- let available=false,reads=0
- const ui=await mount(t,{surface:'project',readiness:async()=>{reads++;if(!available)throw Error('temporary read failure');return {paid_execution_enabled:true,spend_tracking_configured:true,model_status:'configured'}}})
- await ui.type('Please update me on the homepage');const readsBefore=reads;available=true
+ let available=false;const reads=[]
+ const ui=await mount(t,{surface:'project',readiness:async input=>{reads.push(input);if(!available)throw Error('temporary read failure');return {paid_execution_enabled:true,spend_tracking_configured:true,model_status:'configured'}}})
+ await ui.type('Please update me on the homepage');const readsBefore=reads.length;available=true
  await ui.send(true);assert.equal(ui.button('Allow and ask Anka AI'),undefined)
- assert.deepEqual(ui.fixture.data.counters,{created:1,messages:1,run:1,recover:0});assert.equal(reads,readsBefore+1)
+ assert.deepEqual(ui.fixture.data.counters,{created:1,messages:1,run:1,recover:0});assert.deepEqual(reads.slice(readsBefore).map(input=>input.conversation_id),[undefined,ui.fixture.data.rows[0].id])
  assert.match(ui.environment.container.textContent,/Reply saved/);assert.equal(ui.named('Message').value,'')
 })
 

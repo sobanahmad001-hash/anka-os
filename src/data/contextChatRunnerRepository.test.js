@@ -32,3 +32,25 @@ test('uncertain provider outcomes preserve must-not-submit for the UI', async ()
   await assert.rejects(repo.run({ message_id: 'source' }, { organizationId: 'selected' }),
     error => error.mustNotSubmit === true && error.outcome === 'outcome_unknown')
 })
+
+test('point-in-time original recovery explains reconciliation without exposing private detail or calling run',async()=>{
+ const calls=[]
+ const detail={status:'no_submission_recorded',must_not_submit:true,spend_readiness_status:'prior_cycle_reconciliation_required',reservation_id:'private-reservation',cost:123}
+ const repo=createContextChatRunnerRepository({functions:{invoke:async(name,input)=>{calls.push(input.body);return {data:detail,status:409}}}})
+ await assert.rejects(repo.recover('original-message',{organizationId:'selected'}),error=>{
+  assert.equal(error.mustNotSubmit,true);assert.equal(error.outcome,'no_submission_recorded');assert.equal(error.spendReadinessStatus,'prior_cycle_reconciliation_required')
+  assert.match(error.message,/message is saved/);assert.match(error.message,/recorded at this check/);assert.match(error.message,/may still be in progress/);assert.match(error.message,/reconciliation/);assert.doesNotMatch(error.message,/private-reservation|123/)
+  return true
+ })
+ assert.deepEqual(calls,[{message_id:'original-message',recover_only:true,organization_id:'selected'}])
+})
+
+test('contradictory recovery never gains not-submitted semantics',async()=>{
+ const repo=createContextChatRunnerRepository({functions:{invoke:async()=>({data:{status:'not_settled',must_not_submit:true},status:409})}})
+ await assert.rejects(repo.recover('original-message',{organizationId:'selected'}),error=>error.outcome==='not_settled'&&error.mustNotSubmit===true&&error.spendReadinessStatus===undefined)
+})
+
+test('recovery workflow labels are allowlisted and other private diagnostics are discarded',async()=>{
+ const repo=createContextChatRunnerRepository({functions:{invoke:async()=>({data:{status:'no_submission_recorded',must_not_submit:true,spend_readiness_status:'prior_cycle_reconciliation_required',reconciliation_sources:['context_chat','private-job-id','design_media'],private_cost:123},status:409})}})
+ await assert.rejects(repo.recover('original-message',{organizationId:'selected'}),error=>{assert.deepEqual(error.reconciliationSources,['context_chat','design_media']);assert.equal(error.private_cost,undefined);return true})
+})
