@@ -18,7 +18,7 @@ test('Universal Assistant opens on chat and keeps record tools explicit and sepa
 
 test('Project Chat keeps the shared team thread and private AI conversations in separate views', () => {
   assert.match(project, /const \[projectChatMode, setProjectChatMode\] = useState\('private'\)/)
-  assert.match(project, /Team discussion · shared/)
+  assert.match(project, /Team discussion ↗/)
   assert.match(project, /AI conversations/)
   assert.match(project, /<section hidden=\{projectChatMode !== 'team'\} aria-label="Shared project team discussion"/)
   assert.match(project, /<section\b[^>]* hidden=\{projectChatMode !== 'private'\} aria-label="Project AI conversations"/)

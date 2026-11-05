@@ -1,3 +1,6 @@
+import { readOnlyChatRequest } from '../data/readOnlyChatRequest.js'
+import WorkspaceDialog from './WorkspaceDialog.jsx'
+import {projectDeliveryContext,projectDeliveryIntent} from '../data/projectDeliveryContext.js'
 import {appendWebsiteLayoutRequest} from '../data/websiteChatLayoutContext.js'
 import {attachmentChatTitle,attachmentConversationHint,rememberAttachmentConversation,clearAttachmentConversation} from '../data/projectAttachmentReading.js'
 import ProjectAttachmentMessage from './ProjectAttachmentMessage.jsx'
@@ -42,7 +45,7 @@ function directSendBlocker(value, options) {
   return contextChatSendBlocker(value,options)
 }
 const ProjectChatAllowance = lazy(() => import('./ProjectChatAllowance.jsx'))
-export default function DirectContextChat({ systemOwner, contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError, initialConversation, onConversationListChange, onNavigationBusyChange, onDraftDirtyChange, designWorkspace, conversationLayout = false, onProjectRequest, onProjectChanged, projectJourney }) {
+export default function DirectContextChat({ systemOwner, contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError, initialConversation, onConversationListChange, onNavigationBusyChange, onDraftDirtyChange, designWorkspace, conversationLayout = false, onProjectRequest, onProjectChanged, projectJourney, onOpenProjectWork, onOpenManualSetup }) {
   const workshopHistory = useContext(WorkshopChatHistoryContext)
   const hasExternalHistory = Boolean(workshopHistory?.render || workshopHistory?.externalHistory)
   const actorId = user.id
@@ -57,6 +60,10 @@ export default function DirectContextChat({ systemOwner, contextKind, department
   const reportAssetRelationsLock=useCallback(value=>{journeyLock.asset=Boolean(value);journeyLock.current=Boolean(journeyLock.asset||journeyLock.content||journeyLock.website);setAssetRelationsLocked(Boolean(value))},[])
   const journeyLocked=journeyActivity.dirty||journeyActivity.busy||assetRelationsLocked||websiteActivity.dirty||websiteActivity.busy
   const reportSetupBusy=useCallback(value=>{setupLock.current=Boolean(value);setSetupBusy(Boolean(value))},[])
+  const [workDetailsOpen,setWorkDetailsOpen]=useState(false)
+  const deliveryContext=useMemo(()=>projectChat && projectJourney ? projectDeliveryContext(projectJourney) : null,[projectChat,projectJourney])
+  const currentStage=deliveryContext?.stages.find(stage=>['in_progress','active'].includes(stage.status))
+  const nextWork=deliveryContext?.records.find(row=>!row.closed)
   const [setupOpen,setSetupOpen]=useState(false),[setupRestored,setSetupRestored]=useState(null)
   const [importOpen, setImportOpen] = useState(false)
   const [attachmentRecoveryRequired,setAttachmentRecoveryRequired]=useState(false)
@@ -91,10 +98,12 @@ export default function DirectContextChat({ systemOwner, contextKind, department
     .filter(key=>key.startsWith(savedPrefix)).map(readDirectChatRecovery).filter(Boolean):[])
   const savedConversationHint=useRef(savedChecks.at(-1)?.conversation_id).current
   const [busy, setBusy] = useState(false)
+  const [timedOutRecovery, setTimedOutRecovery] = useState(null)
+  const recoveryWaitExpired = Boolean(pending && timedOutRecovery === JSON.stringify(pending))
   const [notice, setNotice] = useState(initial.recovery ? 'Checking the previous send. Your draft stays in this browser tab during recovery.' : '')
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
-  const [historyOpen, setHistoryOpen] = useState(() => projectChat ? (globalThis.matchMedia?.('(min-width: 901px)').matches ?? false) : designWorkspace || conversationLayout ? false : globalThis.matchMedia?.('(min-width: 901px)').matches ?? true)
+  const [historyOpen, setHistoryOpen] = useState(() => projectChat ? false : designWorkspace || conversationLayout ? false : globalThis.matchMedia?.('(min-width: 901px)').matches ?? true)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [outputId, setOutputId] = useState('')
   const [rename, setRename] = useState('')
@@ -190,19 +199,19 @@ export default function DirectContextChat({ systemOwner, contextKind, department
     && (row.project_id || '') === (projectId || '') && (row.department_id || '') === (departmentId || '')
     && !row.engagement_id && (contextKind === 'project_team' || row.owner_id === actorId)), [contextKind, organizationId, projectId, departmentId, actorId])
   const read = useCallback(async (id, requestId) => {
-    let result = await departmentChat.getContextConversation({ conversation_id: id }, requestScope)
+    let result = await readOnlyChatRequest(readSignal => departmentChat.getContextConversation({ conversation_id: id }, { ...requestScope, signal: readSignal }), requestScope)
     if (!validConversation(result.conversation) || result.conversation.id !== id) throw new Error('Conversation context changed')
     // Recovery must find the exact request even if a shared conversation grew while away.
     let all = result.messages || []
     while (requestId && !all.some(row => row.client_request_id === requestId) && result.has_older && all.length) {
       const cursor = all[0].sequence
-      result = await departmentChat.getContextConversation({ conversation_id: id, before_sequence: cursor }, requestScope)
+      result = await readOnlyChatRequest(readSignal => departmentChat.getContextConversation({ conversation_id: id, before_sequence: cursor }, { ...requestScope, signal: readSignal }), requestScope)
       if (!validConversation(result.conversation) || result.conversation.id !== id) throw new Error('Conversation context changed')
       if (!result.messages?.length || result.messages[0].sequence >= cursor) throw new Error('History recovery cursor did not advance')
       all = [...result.messages, ...all]
     }
     const sharing = contextKind === 'project_team' && result.conversation.owner_id === actorId
-      ? await departmentChat.getProjectContextSharing({ conversation_id: id }, requestScope) : null
+      ? await readOnlyChatRequest(readSignal => departmentChat.getProjectContextSharing({ conversation_id: id }, { ...requestScope, signal: readSignal }), requestScope) : null
     return { ...result, messages: all, sharing }
   }, [requestScope, validConversation, contextKind, actorId])
   const mappingState=useRef(null)
@@ -246,10 +255,13 @@ export default function DirectContextChat({ systemOwner, contextKind, department
     onAccessError?.(reason)
     setError(reason.message || 'Chat request failed')
   }
-  async function exclusive(action) {
+  async function exclusive(action, recoveryRecord = null) {
     if (lock.current || videoLock.current || setupLock.current || journeyLock.current || !current()) return
     lock.current = true; setBusy(true); setError('')
-    try { await action() } catch (reason) { report(reason) }
+    try { await action() } catch (reason) {
+      if (reason.code === 'CHAT_READ_TIMEOUT' && recoveryRecord && current() && JSON.stringify(pendingRef.current) === JSON.stringify(recoveryRecord)) setTimedOutRecovery(JSON.stringify(recoveryRecord))
+      report(reason)
+    }
     finally { lock.current = false; if (current()) setBusy(false) }
   }
   useEffect(() => {
@@ -271,9 +283,9 @@ export default function DirectContextChat({ systemOwner, contextKind, department
   }, [outputId])
   useEffect(() => { onDraftDirtyChange?.(Boolean(draft.trim()) || videoDirty || journeyActivity.dirty || websiteActivity.dirty); return () => onDraftDirtyChange?.(false) }, [draft,videoDirty,journeyActivity.dirty,websiteActivity.dirty,onDraftDirtyChange])
   useEffect(() => {
-    onNavigationBusyChange?.(busy || Boolean(pending) || videoBusy || attachmentRecoveryRequired || setupBusy || journeyLocked)
+    onNavigationBusyChange?.(busy || (Boolean(pending) && !recoveryWaitExpired) || videoBusy || attachmentRecoveryRequired || setupBusy || journeyLocked)
     return () => onNavigationBusyChange?.(false)
-  }, [busy, pending, videoBusy, attachmentRecoveryRequired, setupBusy, journeyLocked, onNavigationBusyChange])
+  }, [busy, pending, recoveryWaitExpired, videoBusy, attachmentRecoveryRequired, setupBusy, journeyLocked, onNavigationBusyChange])
   useEffect(() => {
     let active = true
     if (!hasExternalHistory) departmentChat.listContextConversations(scope, requestScope).then(result => {
@@ -336,7 +348,7 @@ export default function DirectContextChat({ systemOwner, contextKind, department
       if (!initial.recovery || !human) return
       if (initial.recovery.dispatch_request_id) {
         checkOriginalDispatch(initial.recovery, result.conversation, human, actorId)
-        const recovered = await contextChatRunner.recover(human.id, requestScope)
+        const recovered = await readOnlyChatRequest(readSignal => contextChatRunner.recover(human.id, { ...requestScope, signal: readSignal }), requestScope)
         if (!active || signal.aborted) return
         if (recovered.status !== 'completed') throw new Error('Reply outcome is uncertain. Check recovery again; no new AI request was sent.')
         await designWorkspace?.applyBriefReceipt?.(null, recovered.design_brief)
@@ -349,7 +361,7 @@ export default function DirectContextChat({ systemOwner, contextKind, department
       clearDirectChatRecovery(recoveryKey); pendingRef.current = null; setPending(null); attempt.current = null; setDraft(attachmentDraft??''); clearDirectChatDraft(recoveryKey);if(attachmentDraft!==null)writeDirectChatDraft(recoveryKey,{new_conversation_id:newId,conversation_id:target,text:attachmentDraft,attempt:null})
       setNotice('Previous send recovered from saved messages. No new AI request was sent.')
     })().catch(reason => {
-      if (active && !signal.aborted) { if (showRecoveryOutcome(reason)) return; onAccessError?.(reason); setError(reason.message); setNotice('Check recovery before sending again. Your scoped draft remains available in this browser tab for one hour.') }
+      if (active && !signal.aborted) { if (reason.code === 'CHAT_READ_TIMEOUT' && initial.recovery && JSON.stringify(pendingRef.current) === JSON.stringify(initial.recovery)) setTimedOutRecovery(JSON.stringify(initial.recovery)); if (showRecoveryOutcome(reason)) return; onAccessError?.(reason); setError(reason.message); setNotice('Check recovery before sending again. Your scoped draft remains available in this browser tab for one hour.') }
     }).finally(() => { if (active && !signal.aborted) { lock.current = false; setBusy(false) } })
     return () => { active = false }
   }, [initial, read, apply, actorId, requestScope, signal, recoveryKey, onAccessError, restoredDraft?.conversation_id])
@@ -529,16 +541,17 @@ export default function DirectContextChat({ systemOwner, contextKind, department
   async function checkSavedMessage(record) {
     await exclusive(async()=>{
       if(record.conversation_id!==ownedConversationId)return
+      const token=revision.current
       const latest=await read(record.conversation_id,record.client_request_id)
-      if(!current())return
+      if(!current() || token!==revision.current)return
       const human=latest.messages.find(row=>row.client_request_id===record.client_request_id && row.author_id===actorId)
       if(!human)throw Error('The original saved message is unavailable in this conversation.')
       checkOriginalDispatch(record,latest.conversation,human,actorId)
-      const result=await contextChatRunner.recover(human.id,requestScope)
-      if(!current())return
+      const result=await readOnlyChatRequest(readSignal => contextChatRunner.recover(human.id, { ...requestScope, signal: readSignal }), requestScope)
+      if(!current() || token!==revision.current)return
       if(result.status!=='completed' || result.message?.role!=='assistant' || result.message.conversation_id!==record.conversation_id || result.message.in_reply_to_message_id!==human.id)throw Error('The original reply is still uncertain. Check again later.')
       const updated=await read(record.conversation_id,record.client_request_id)
-      if(!current())return
+      if(!current() || token!==revision.current)return
       apply(updated)
       clearDirectChatRecovery(savedPrefix+record.dispatch_request_id)
       setSavedChecks(previous=>previous.filter(row=>row.dispatch_request_id!==record.dispatch_request_id))
@@ -573,7 +586,7 @@ export default function DirectContextChat({ systemOwner, contextKind, department
       if (record.dispatch_request_id) {
         checkOriginalDispatch(record, latest.conversation, human, actorId)
         let result
-        try { result = await contextChatRunner.recover(human.id, requestScope) }
+        try { result = await readOnlyChatRequest(readSignal => contextChatRunner.recover(human.id, { ...requestScope, signal: readSignal }), requestScope) }
         catch (reason) {
           if (!current() || token !== revision.current || showRecoveryOutcome(reason)) return
           throw reason
@@ -588,7 +601,7 @@ export default function DirectContextChat({ systemOwner, contextKind, department
         apply(latest)
       }
       clearPending(); setDraft(attachmentDraft??'');if(attachmentDraft!==null)writeDirectChatDraft(recoveryKey,{new_conversation_id:newId,conversation_id:record.conversation_id,text:attachmentDraft,attempt:null}); setNotice('Send recovered. No new AI request was sent.'); onConversationListChange?.()
-    })
+    }, pendingRef.current)
   }
   async function loadSharing() {
     await exclusive(async () => {
@@ -603,22 +616,31 @@ export default function DirectContextChat({ systemOwner, contextKind, department
   useEffect(()=>{reportDesignConversation?.(selected,checkPrivateVideoContext)},[selected,checkPrivateVideoContext,reportDesignConversation])
   const reportWebsiteMessages=designWorkspace?.onConversationMessages
   useEffect(()=>{reportWebsiteMessages?.(selected,messages)},[selected,messages,reportWebsiteMessages])
+  const latestHuman=messages.findLast(message=>message.role==='user')
+  const suggestedAction=latestHuman?.author_id===actorId ? projectDeliveryIntent(latestHuman.body) : null
+  const recoveryMessage = messages.find(message=>message.id===pending?.message_id || (pending?.client_request_id && message.client_request_id===pending.client_request_id))
+  const activeRecovery=<div className="direct-chat-notice direct-chat-recovery" aria-label="Message recovery">
+    <p role={error?'alert':'status'}>{error || 'The reply needs a status check.'}</p>
+    <button type="button" disabled={busy||setupBusy||journeyLocked||videoBusy} onClick={recover}>Check recovery</button>
+    {canComposeSeparately&&<button type="button" disabled={busy||setupBusy||journeyLocked||videoBusy} onClick={startSeparateMessage}>Write a separate new message</button>}
+  </div>
+  const savedMessageRecovery=message=>savedChecks.filter(row=>row.conversation_id===ownedConversationId && row.message_id===message.id && row.dispatch_request_id!==pending?.dispatch_request_id).map(row=><div className="direct-chat-notice direct-chat-recovery" key={row.dispatch_request_id}><p>Earlier reply unresolved.</p><button type="button" disabled={busy} onClick={()=>checkSavedMessage(row)}>Check earlier saved reply</button></div>)
   const newChatControl = <button type="button" className="workshop-new-chat" aria-label="New chat" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending)||attachmentRecoveryRequired||setupBusy} onClick={newChat}>+ New chat</button>
   const modelControl=owner && <label><span className={compactConversation ? 'sr-only' : undefined}>Model</span><select aria-label="Approved model" value={modelId} disabled={busy || setupBusy || journeyLocked || videoBusy || !models.length} onChange={event => { setModelId(event.target.value); setCanonical(false) }}>{!modelId && <option value="">{models.length ? 'Choose a model' : 'Unavailable'}</option>}{models.map(row => <option key={row.id} value={row.id}>{row.label}</option>)}</select></label>
   return <>{privateDesign && designWorkspace?.attachmentTarget && createPortal(<DesignVideoReferencePanel conversationKey={selected?.id || newId} conversationId={selected?.id || null} requestScope={requestScope} uploadOpen={designWorkspace.attachmentsOpen} busy={busy || Boolean(pending)} ensureConversation={async()=>{if(!selected?.id)throw Error('Choose a saved Design chat');const latest=await read(selected.id);if(!current()||latest.conversation.owner_id!==actorId||latest.conversation.state!=='active')throw Error('Design chat access changed');return latest.conversation}} run={exclusive}/>,designWorkspace.attachmentTarget)}{privateDesign && designWorkspace?.attachmentTarget && createPortal(<DesignPrivateAttachmentPanel conversationKey={selected?.id || newId} conversationId={selected?.id || null} requestScope={requestScope} busy={busy || Boolean(pending)} uploadOpen={designWorkspace.attachmentsOpen} onUseImage={designWorkspace.onUseImage} ensureConversation={ensurePrivateAttachmentConversation} run={exclusive} selectedIds={designAttachmentIds} onSelection={setDesignAttachmentIds} />, designWorkspace.attachmentTarget)}{compactConversation && workshopHistory?.newChatTarget && createPortal(newChatControl,workshopHistory.newChatTarget)}<section ref={rootRef} inert={importOpen && contextKind === 'project_team' && projectId ? true : undefined} className={`direct-chat ${projectChat ? 'direct-project-chat' : ''} ${historyOpen ? 'history-open' : ''} ${output ? 'output-open' : ''}`} aria-label={label} onKeyDown={event => {
     if (event.key === 'Escape' && !consent.dialog) { if (projectChat) { closeProjectTools(); historyButtonRef.current?.focus() }; setHistoryOpen(false); setOutputId(''); setShareOpen(false); setDetailsOpen(false) }
   }}>
     <header className="direct-chat-header" inert={drawerOpen ? true : undefined}><div><h2>{compactConversation ? attachmentChatTitle(selected,messages) : label}</h2><p>{!compactConversation && <>{attachmentChatTitle(selected,messages)} · </>} {contextKind === 'department_private' ? 'Only you' : sharing?.recipients.length ? 'Shared with selected teammates' : 'Private unless explicitly shared'}</p></div>
-      <div className="direct-chat-actions">{privateDesign && !designWorkspace && <button ref={videoButton} type="button" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || !selected || !owner || selected.state !== 'active'} title={!selected ? "Send a message to save this private chat before opening video tools." : undefined} aria-expanded={videoOpen} onClick={() => { if (lock.current || videoLock.current || setupLock.current || journeyLock.current || pendingRef.current) return; setVideoOpen(!videoOpen); setVideoOpened(true) }}>Video tools</button>}{(!compactConversation || projectChat) && <button type="button" ref={historyButtonRef} aria-expanded={historyOpen} onClick={() => { setOutputId(''); setHistoryOpen(!historyOpen) }}>{projectChat ? 'Chat history' : 'History'}</button>}{!historyOpen && !(compactConversation && workshopHistory?.newChatTarget) && newChatControl}{projectChat ? <details ref={projectToolsRef} className="direct-project-tools"><summary>Tools</summary><div className="direct-project-tools-list" aria-label="Project chat tools">{selected?.id&&projectJourney&&<button type="button" aria-expanded={assetRelationsOpen} disabled={busy||Boolean(pending)||setupBusy||journeyLocked||videoBusy} onClick={()=>{if(lock.current||journeyLock.current||setupLock.current||pendingRef.current)return;closeProjectTools();setAssetRelationsOpen(v=>!v)}}>Asset links</button>}
+      <div className="direct-chat-actions">{privateDesign && !designWorkspace && <button ref={videoButton} type="button" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || !selected || !owner || selected.state !== 'active'} title={!selected ? "Send a message to save this private chat before opening video tools." : undefined} aria-expanded={videoOpen} onClick={() => { if (lock.current || videoLock.current || setupLock.current || journeyLock.current || pendingRef.current) return; setVideoOpen(!videoOpen); setVideoOpened(true) }}>Video tools</button>}{(!compactConversation || projectChat) && <button type="button" ref={historyButtonRef} aria-expanded={historyOpen} onClick={() => { setOutputId(''); setHistoryOpen(!historyOpen) }}>{projectChat ? 'History' : 'History'}</button>}{!historyOpen && !(compactConversation && workshopHistory?.newChatTarget) && newChatControl}{projectChat ? <details ref={projectToolsRef} className="direct-project-tools"><summary aria-label="Chat tools">···</summary><div className="direct-project-tools-list" aria-label="Project chat tools">{projectChat&&<button type="button" disabled={busy||videoBusy||setupBusy||journeyLocked||Boolean(pending)||!owner} aria-expanded={setupOpen} onClick={()=>setSetupOpen(x=>!x)}>Set up project</button>}{onOpenManualSetup&&<button type="button" disabled={busy||setupBusy||journeyLocked} onClick={()=>{closeProjectTools();onOpenManualSetup()}}>Manual project setup</button>}{selected?.id&&projectJourney&&<button type="button" aria-expanded={assetRelationsOpen} disabled={busy||Boolean(pending)||setupBusy||journeyLocked||videoBusy} onClick={()=>{if(lock.current||journeyLock.current||setupLock.current||pendingRef.current)return;closeProjectTools();setAssetRelationsOpen(true);setWorkDetailsOpen(true)}}>Asset links</button>}
           <button type="button" aria-expanded={detailsOpen} onClick={() => { closeProjectTools(); setShareOpen(false); setDetailsOpen(!detailsOpen) }}>Chat settings</button>
           {selected && owner && <button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy} onClick={() => { closeProjectTools(); setDetailsOpen(false); loadSharing() }}>Share chat</button>}
         </div></details> : <button type="button" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>Details</button>}
 
         {!projectChat && selected && owner && contextKind === 'project_team' && <button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy} onClick={loadSharing}>Share</button>}</div>
 
-    </header>{conversationLayout && <div className="content-conversation-toolbar" aria-label={`${departmentId ? departmentId[0].toUpperCase() + departmentId.slice(1) : 'Private'} conversation tools`}>{modelControl}<span>Text conversation</span></div>}{designWorkspace && <div className="design-conversation-top-toolbar" aria-label="Design conversation tools">{designWorkspace.toolbar}{designWorkspace.mode === 'chat' && (designWorkspace.toolbarTarget ? createPortal(modelControl,designWorkspace.toolbarTarget) : modelControl)}</div>}
-    {error && <p role="alert" className="direct-chat-error">{error}</p>}
-    {projectChat && !usageOnly && owner && (!selected || ownedConversationId) && systemOwner && model && readiness?.spend_readiness_status==='prior_cycle_reconciliation_required' && <button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy} aria-expanded={detailsOpen} onClick={()=>setDetailsOpen(true)}>Review Project Chat allowance</button>}
+    </header>{projectChat&&deliveryContext&&<div className="studio-pipeline-bar"><button type="button" disabled={busy||setupBusy||videoBusy} onClick={()=>setWorkDetailsOpen(true)} aria-label="Open pipeline and work details"><span>Pipeline</span><strong>{currentStage?.name || nextWork?.title || 'Review project plan'}</strong><span aria-hidden="true">↗</span></button></div>}{conversationLayout && <div className="content-conversation-toolbar" aria-label={`${departmentId ? departmentId[0].toUpperCase() + departmentId.slice(1) : 'Private'} conversation tools`}>{modelControl}<span>Text conversation</span></div>}{designWorkspace && <div className="design-conversation-top-toolbar" aria-label="Design conversation tools">{designWorkspace.toolbar}{designWorkspace.mode === 'chat' && (designWorkspace.toolbarTarget ? createPortal(modelControl,designWorkspace.toolbarTarget) : modelControl)}</div>}
+    {!projectChat && <>    {error && <p role="alert" className="direct-chat-error">{error}</p>}
+
     {notice && <p role="status" className="direct-chat-notice">{notice}</p>}
     {attachmentRecoveryRequired&&<p role="status" className="direct-chat-notice">An attachment reading needs recovery. Reopen Attach files and recover the original reading before another AI request. No request is repeated automatically.</p>}
     {pending && <div className="direct-chat-notice direct-chat-recovery"><p>Check this send before sending again. Recovery never requests another AI reply.</p><button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy} onClick={recover}>Check recovery</button></div>}
@@ -626,6 +648,8 @@ export default function DirectContextChat({ systemOwner, contextKind, department
     {savedChecks.filter(row=>row.conversation_id===ownedConversationId && row.dispatch_request_id!==pending?.dispatch_request_id).map(row=>
       <div key={row.dispatch_request_id} className="direct-chat-notice"><p>Earlier saved message · {messages.find(message=>message.id===row.message_id)?.body?.slice(0,100) || 'Reply unresolved'}</p>
         <button type="button" disabled={busy} onClick={()=>checkSavedMessage(row)}>Check earlier saved reply</button></div>)}
+</>}
+    {projectChat && !usageOnly && owner && (!selected || ownedConversationId) && systemOwner && model && readiness?.spend_readiness_status==='prior_cycle_reconciliation_required' && <button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy} aria-expanded={detailsOpen} onClick={()=>setDetailsOpen(true)}>Review Project Chat allowance</button>}
     {detailsOpen && <aside className="direct-chat-details" aria-label="Chat details">{usageOnly && <p>{usageNotice}</p>}
       {projectChat && <><div className="direct-project-settings-heading"><h3>Chat settings</h3><button type="button" onClick={() => { setDetailsOpen(false); historyButtonRef.current?.focus() }}>Close settings</button></div>{modelControl}<p>This conversation belongs to the current project. Extra project and organization data is shared only when you select it below.</p></>}
       {designWorkspace && <p>Sending includes the current editable brief for an unapproved draft update. Referenced files are not automatically sent. Media generation remains separate.</p>}
@@ -664,24 +688,31 @@ export default function DirectContextChat({ systemOwner, contextKind, department
           setRows(previous => [...previous, ...result.slice(0, 50).filter(validConversation).filter(row => !previous.some(item => item.id === row.id))]); setOffset(offset + Math.min(result.length, 50)); setHasMore(result.length > 50)
         })}>Load older chats</button>}</>}</aside>}
       <div className="direct-chat-main" inert={drawerOpen ? true : undefined}><div className="direct-chat-messages" aria-label="Chat messages" aria-busy={busy}><div className="direct-chat-message-stream">
-        {!messages.length && <div className="direct-chat-empty"><h3>What would you like to work on?</h3><p>Start with a message. This chat is saved when you send.</p>{designWorkspace?.starters}</div>}
+        {!messages.length && <div className="direct-chat-empty"><h3>What would you like to work on?</h3><p>{projectChat?'Describe your goals. We can work through scope, services and timing together.':'Start with a message. This chat is saved when you send.'}</p>{designWorkspace?.starters}</div>}
         {hasOlder && <button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy} onClick={() => exclusive(async () => {
           const result = await departmentChat.getContextConversation({ conversation_id: selected.id, before_sequence: messages[0].sequence }, requestScope)
           if (!current()) return
           if (!validConversation(result.conversation) || result.conversation.id !== selected.id) throw new Error('Conversation context changed')
           setMessages(previous => [...result.messages, ...previous]); setHasOlder(result.has_older)
         })}>Load older messages</button>}
-        {messages.map(message => <article key={message.id} className={`direct-chat-message ${message.role}`}><strong>{message.role === 'assistant' ? 'Anka AI' : message.author_id === actorId ? 'You' : 'Teammate'}</strong><ProjectAttachmentMessage onSetupReview={value=>{setSetupRestored(value);setSetupOpen(true)}} message={message} messages={messages} canReview={disclosure=>attachmentReading?.sourceSha===disclosure.source.sha256} onReview={()=>{setImportOpened(true);setImportOpen(true)}}/>{message.role === 'assistant' && message.status === 'completed' && <button type="button" onClick={event => { replyButtonRef.current = event.currentTarget; if (mobileDrawer) setHistoryOpen(false); setOutputId(message.id) }}>Open reply</button>}</article>)}
-      {selected?.id===designWorkspace?.generatedConversationId&&selected?.owner_id===user?.id?designWorkspace?.generatedMedia:null}</div></div>{projectChat&&projectJourney&&selected?.id&&assetRelationsOpen&&<Suspense fallback={<p role="status">Opening conversation asset context…</p>}><ProjectAssetConversation key={selected.id} workspace={projectJourney} organizationId={organizationId} projectId={projectId} actorId={actorId} conversationId={selected.id} owner={owner} signal={signal} externallyBusy={busy||Boolean(pending)||setupBusy||videoBusy||journeyActivity.busy||journeyActivity.dirty||websiteActivity.busy||websiteActivity.dirty} onLockChange={reportAssetRelationsLock} onClose={()=>setAssetRelationsOpen(false)}/></Suspense>}{projectChat&&projectJourney&&selected?.id&&<Suspense fallback={<p role="status">Opening Content journey…</p>}><ProjectContentJourney key={selected.id} workspace={projectJourney} conversationId={selected.id} actorId={actorId} owner={owner} messages={messages} onStateChange={reportJourneyActivity} busy={busy||Boolean(pending)||setupBusy||videoBusy||assetRelationsLocked||websiteActivity.busy||websiteActivity.dirty} onChanged={onProjectChanged}/><ProjectWebsiteExecution key={"website:"+selected.id} workspace={projectJourney} conversationId={selected.id} actorId={actorId} owner={owner} onStateChange={reportWebsiteActivity} onChanged={onProjectChanged} busy={busy||Boolean(pending)||setupBusy||videoBusy||assetRelationsLocked||journeyActivity.dirty||journeyActivity.busy}/></Suspense>}{designWorkspace?.media}{designWorkspace?.composerAttachments}{projectChat&&attachmentReading?.questions?.length>0&&<form aria-label="Attachment clarification" className="direct-chat-attachment-clarification" onSubmit={async event=>{event.preventDefault();if(!attachmentAnswer.trim()||busy||pendingRef.current||!current())return;try{await attachmentReading.clarify(attachmentAnswer.trim());if(current())setAttachmentAnswer('')}catch(reason){if(current())setError(reason.message)}}}><p>Clarify {attachmentReading.sourceName}</p><label>Answer the attachment questions<textarea aria-label="Attachment clarification" maxLength={1200} value={attachmentAnswer} disabled={busy||Boolean(pending)} onChange={event=>setAttachmentAnswer(event.target.value)}/></label><button type="submit" disabled={busy||Boolean(pending)||!attachmentAnswer.trim()}>Send attachment clarification</button></form>}<form hidden={Boolean(designWorkspace && designWorkspace.mode!=='chat')} className="direct-chat-composer" onSubmit={send} aria-label="Chat composer">{websiteSendContext&&<details className="website-layout-chat-context"><summary>Selected Website layout context will be included</summary><p>Your normal Send and AI consent checks still apply. This proposes a layout; it does not save or publish a Website.</p><pre>{websiteSendContext.instructions}</pre><button type="button" onClick={()=>setWebsiteSendContext(null)}>Remove Website layout context</button></details>}<label className="direct-chat-draft-label"><span className="sr-only">Message</span><textarea aria-label="Message" placeholder="Ask or explore an idea…" value={draft} maxLength={8000} disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending)} onChange={event => { if (pendingRef.current) return; const text = event.target.value; setDraft(text); try { writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: selected?.id || null, text, attempt: attempt.current }) } catch { setError('Draft recovery is unavailable in this tab. Keep this page open until your message is saved.') } }} /></label>
-        <div className="direct-chat-toolbar">{designWorkspace?.attachControl}{projectChat&&<button type="button" disabled={busy||videoBusy||setupBusy||journeyLocked||Boolean(pending)||!owner} aria-expanded={setupOpen} onClick={()=>setSetupOpen(x=>!x)}>Set up project</button>}{projectChat && <button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || !owner || Boolean(selected && selected.state !== 'active')} onClick={() => { closeProjectTools(); setImportOpened(true);setImportOpen(true) }}>Attach files</button>}{!compactConversation && <label>Work type<select aria-label="Work type" value="text" disabled><option value="text">Text</option></select></label>}
+        {messages.map(message => <article key={message.id} className={`direct-chat-message ${message.role}`}><strong>{message.role === 'assistant' ? 'Anka AI' : message.author_id === actorId ? 'You' : 'Teammate'}</strong><ProjectAttachmentMessage onSetupReview={value=>{setSetupRestored(value);setSetupOpen(true)}} message={message} messages={messages} canReview={disclosure=>attachmentReading?.sourceSha===disclosure.source.sha256} onReview={()=>{setImportOpened(true);setImportOpen(true)}}/>{message.role === 'assistant' && message.status === 'completed' && <button type="button" onClick={event => { replyButtonRef.current = event.currentTarget; if (mobileDrawer) setHistoryOpen(false); setOutputId(message.id) }}>Open reply</button>}{projectChat&&pending&&message.id===recoveryMessage?.id&&activeRecovery}{projectChat&&savedMessageRecovery(message)}{projectChat&&projectJourney&&suggestedAction&&!pending&&message.role==='assistant'&&message.status==='completed'&&message.in_reply_to_message_id===latestHuman?.id&&<div className="studio-contextual-action"><button type="button" disabled={busy||setupBusy||journeyLocked} onClick={()=>suggestedAction==='planning'?setSetupOpen(true):setWorkDetailsOpen(true)}>{suggestedAction==='planning'?'Review project setup':'Continue in pipeline & work'} <span aria-hidden="true">↗</span></button></div>}</article>)}
+      {projectChat&&pending&&!recoveryMessage&&activeRecovery}{projectChat&&savedChecks.filter(row=>row.conversation_id===ownedConversationId&&!messages.some(message=>message.id===row.message_id)&&row.dispatch_request_id!==pending?.dispatch_request_id).map(row=><div className="direct-chat-notice direct-chat-recovery" key={row.dispatch_request_id}><p>Earlier reply unresolved.</p><button type="button" disabled={busy} onClick={()=>checkSavedMessage(row)}>Check earlier saved reply</button></div>)}
+      {projectChat&&!pending&&(error||notice)&&<p role={error?'alert':'status'} className={error?'direct-chat-error':'direct-chat-notice'}>{error||notice}</p>}
+      {projectChat&&attachmentRecoveryRequired&&<p role="status" className="direct-chat-notice">Reopen Attach to check the original reading.</p>}
+      {selected?.id===designWorkspace?.generatedConversationId&&selected?.owner_id===user?.id?designWorkspace?.generatedMedia:null}</div></div>{designWorkspace?.media}{designWorkspace?.composerAttachments}{projectChat&&attachmentReading?.questions?.length>0&&<form aria-label="Attachment clarification" className="direct-chat-attachment-clarification" onSubmit={async event=>{event.preventDefault();if(!attachmentAnswer.trim()||busy||pendingRef.current||!current())return;try{await attachmentReading.clarify(attachmentAnswer.trim());if(current())setAttachmentAnswer('')}catch(reason){if(current())setError(reason.message)}}}><p>Clarify {attachmentReading.sourceName}</p><label>Answer the attachment questions<textarea aria-label="Attachment clarification" maxLength={1200} value={attachmentAnswer} disabled={busy||Boolean(pending)} onChange={event=>setAttachmentAnswer(event.target.value)}/></label><button type="submit" disabled={busy||Boolean(pending)||!attachmentAnswer.trim()}>Send attachment clarification</button></form>}<form hidden={Boolean(designWorkspace && designWorkspace.mode!=='chat')} className="direct-chat-composer" onSubmit={send} aria-label="Chat composer">{websiteSendContext&&<details className="website-layout-chat-context"><summary>Selected Website layout context will be included</summary><p>Your normal Send and AI consent checks still apply. This proposes a layout; it does not save or publish a Website.</p><pre>{websiteSendContext.instructions}</pre><button type="button" onClick={()=>setWebsiteSendContext(null)}>Remove Website layout context</button></details>}<label className="direct-chat-draft-label"><span className="sr-only">Message</span><textarea aria-label="Message" placeholder={projectChat?'Ask about this project, or describe what you need…':'Ask or explore an idea…'} value={draft} maxLength={8000} disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending)} onChange={event => { if (pendingRef.current) return; const text = event.target.value; setDraft(text); try { writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: selected?.id || null, text, attempt: attempt.current }) } catch { setError('Draft recovery is unavailable in this tab. Keep this page open until your message is saved.') } }} /></label>
+        <div className="direct-chat-toolbar">{designWorkspace?.attachControl}{projectChat && <button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || !owner || Boolean(selected && selected.state !== 'active')} onClick={() => { closeProjectTools(); setImportOpened(true);setImportOpen(true) }} aria-label="Attach files">Attach</button>}{!compactConversation && <label>Work type<select aria-label="Work type" value="text" disabled><option value="text">Text</option></select></label>}
           {!compactConversation && modelControl}
           <button type="submit" className="direct-chat-send" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || attachmentRecoveryRequired || !draft.trim() || Boolean(selected && selected.state !== 'active')}>{busy ? 'Working…' : owner ? 'Send' : 'Save message'}</button></div>{owner&&!ready&&<button className="direct-chat-save-note" type="button" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || attachmentRecoveryRequired || !draft.trim() || Boolean(selected && selected.state !== 'active')} onClick={event=>send(event,{humanOnly:true})}>Save message without AI</button>}
-        <p>{owner ? readinessState === 'failed' ? 'AI availability could not be checked. Retry the check, or explicitly save without AI.' : !readiness ? 'Checking AI availability. Send will check again before requesting a reply.' : ready ? projectChat ? usageOnly ? usageNotice : 'Organization-billed AI reply' : `${model?.provider} · Organization-billed replies` : directSendBlocker(readiness,{attempted:false}) : 'Shared chat · Human replies only'} · {privateDesign && designWorkspace ? `${designAttachmentIds.length} selected reference(s)` : contextKind === 'project_team' ? `${projectDocumentIds.length} selected document(s)` : 'Attachments unavailable'}</p>{owner && readinessState !== 'loading' && !ready && <button type="button" disabled={busy||Boolean(pending)} onClick={retryReadiness}>Retry AI availability</button>}
+        <p>{owner ? readinessState === 'failed' ? 'AI availability could not be checked. Retry the check, or explicitly save without AI.' : !readiness ? 'Checking AI availability. Send will check again before requesting a reply.' : ready ? projectChat ? usageOnly ? 'Usage tracked' : 'Organization-billed AI reply' : `${model?.provider} · Organization-billed replies` : directSendBlocker(readiness,{attempted:false}) : 'Shared chat · Human replies only'} · {privateDesign && designWorkspace ? `${designAttachmentIds.length} selected reference(s)` : contextKind === 'project_team' ? projectDocumentIds.length ? `${projectDocumentIds.length} attached` : '' : 'Attachments unavailable'}</p>{owner && readinessState !== 'loading' && !ready && <button type="button" disabled={busy||Boolean(pending)} onClick={retryReadiness}>Retry AI availability</button>}
       </form></div>
       {output && <aside ref={outputId && mobileDrawer ? drawerRef : undefined} className="direct-chat-output" role={mobileDrawer ? 'dialog' : undefined} aria-modal={mobileDrawer ? true : undefined} onKeyDown={drawerKeyDown} aria-label="Saved reply output" data-source-message-id={output.id}><div><h3>Saved reply</h3><button ref={outputClose} type="button" onClick={() => setOutputId('')}>Close output</button></div><p>{output.body}</p><small>Saved conversation reply · Read-only preview</small></aside>}
     </div>
   </section>
-      {projectChat&&setupOpen&&<Suspense fallback={<p role="status">Opening project setup…</p>}><ProjectSetupPanel key={attachmentScopeKey} organizationId={organizationId} projectId={projectId} engagementId={projectJourney?.engagement?.id} actorId={actorId} signal={signal} initialMode="chat" onChanged={onProjectChanged} onNavigationBusyChange={reportSetupBusy} restoredProposal={setupRestored} onAccessError={onAccessError} onAssist={ready&&mappingTransport?disclosure=>mappingAction('request',disclosure):null} onRecover={mappingTransport?disclosure=>mappingAction('recover',disclosure):null}/></Suspense>}
+{projectChat&&workDetailsOpen&&<WorkspaceDialog wide title="Pipeline & work details" busy={journeyLocked||busy||setupBusy||videoBusy} onClose={()=>setWorkDetailsOpen(false)}>
+      {onOpenProjectWork&&<button type="button" className="workspace-button" disabled={journeyLocked||busy} onClick={()=>{if(onOpenProjectWork()!==false)setWorkDetailsOpen(false)}}>Open project pipeline & work</button>}
+      {projectChat&&projectJourney&&selected?.id&&assetRelationsOpen&&<Suspense fallback={<p role="status">Opening conversation asset context…</p>}><ProjectAssetConversation key={selected.id} workspace={projectJourney} organizationId={organizationId} projectId={projectId} actorId={actorId} conversationId={selected.id} owner={owner} signal={signal} externallyBusy={busy||Boolean(pending)||setupBusy||videoBusy||journeyActivity.busy||journeyActivity.dirty||websiteActivity.busy||websiteActivity.dirty} onLockChange={reportAssetRelationsLock} onClose={()=>setAssetRelationsOpen(false)}/></Suspense>}{projectChat&&projectJourney&&selected?.id&&<Suspense fallback={<p role="status">Opening Content journey…</p>}><ProjectContentJourney key={selected.id} workspace={projectJourney} conversationId={selected.id} actorId={actorId} owner={owner} messages={messages} onStateChange={reportJourneyActivity} busy={busy||Boolean(pending)||setupBusy||videoBusy||assetRelationsLocked||websiteActivity.busy||websiteActivity.dirty} onChanged={onProjectChanged}/><ProjectWebsiteExecution key={"website:"+selected.id} workspace={projectJourney} conversationId={selected.id} actorId={actorId} owner={owner} onStateChange={reportWebsiteActivity} onChanged={onProjectChanged} busy={busy||Boolean(pending)||setupBusy||videoBusy||assetRelationsLocked||journeyActivity.dirty||journeyActivity.busy}/></Suspense>}
+    </WorkspaceDialog>}
+      {projectChat&&setupOpen&&<WorkspaceDialog wide title="Review project setup" busy={setupBusy} onClose={()=>setSetupOpen(false)}><Suspense fallback={<p role="status">Opening project setup…</p>}><ProjectSetupPanel key={attachmentScopeKey} organizationId={organizationId} projectId={projectId} engagementId={projectJourney?.engagement?.id} actorId={actorId} signal={signal} initialMode="chat" onChanged={onProjectChanged} onNavigationBusyChange={reportSetupBusy} restoredProposal={setupRestored} onAccessError={onAccessError} onAssist={ready&&mappingTransport?disclosure=>mappingAction('request',disclosure):null} onRecover={mappingTransport?disclosure=>mappingAction('recover',disclosure):null}/></Suspense></WorkspaceDialog>}
       {importOpened && contextKind === 'project_team' && projectId && <div hidden={!importOpen}><Suspense fallback={<p role="status">Opening local spreadsheet inspector…</p>}><ProjectAttachmentPanel documentProps={{ conversationKey: selected?.id || newId, conversationId: owner ? selected?.id : null, requestScope, busy: busy || Boolean(pending),canReturnToChat:!busy,recoveryPending:Boolean(pending), ensureConversation: ensureProjectDocumentConversation, run: exclusive, selectedIds: projectDocumentIds, onSelection: setProjectDocumentIds,onReadyForChat:()=>{if(!current())return;setDraft(old=>old.trim()?old:'Explain what the selected document contains and ask about any real ambiguities. Treat it as a Chat reference; do not create or change project records.');setNotice(mappingState.current?.ready?'Document selected. Review your message and press Send to request its reading; no AI call was made by upload.':'Document selected privately. AI reading is unavailable until an approved model is ready; upload made no AI call.');returnFromAttachment()} }} key={attachmentScopeKey} projectId={projectId} projectLabel={label} repository={importRepository} recoveryScope={importScope} onMappingAssist={ready&&mappingTransport?disclosure=>mappingAction('request',disclosure):null} onMappingRecover={mappingTransport?disclosure=>mappingAction('recover',disclosure):null} onClose={returnFromAttachment} onReturnToChat={returnFromAttachment} onReadingState={registerAttachmentReading} /></Suspense></div>}
     {consent.dialog && <TextAiConsent {...consent.dialog} provider={model?.provider} model={`${model?.connectionName} · ${model?.label}`} scope={`${contextKind} conversation`} canonical={canonical && canCanonical} />}
     {privateDesign && videoOpened && selected && owner && <section ref={videoPane} hidden={!videoOpen} className="direct-chat-video workspace-card p-4 mt-3" aria-label="Private video workbench">
