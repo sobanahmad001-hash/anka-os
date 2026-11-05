@@ -261,3 +261,32 @@ test('usage-only separates a newly typed message while original check-only ident
  assert([...ui.storage.values()].some(value=>value===JSON.stringify(pendingBefore)),'newer exact identity unchanged after earlier recovery');
  assert(ui.fixture.data.messages.some(x=>x.role==='assistant'&&x.in_reply_to_message_id===original.id));
 });
+
+test('projection-accurate saved recovery refuses foreign message scope then checks the original without resending or losing an unresolved draft',async t=>{
+ const ui=await mount(t,{surface:'project',role:'system_owner',readiness:async()=>({
+  paid_execution_enabled:true,spend_tracking_configured:true,model_status:'configured',
+  spend_readiness_status:'ready',project_chat_spend_policy:'usage_only',unresolved_charges:true})});
+ ui.fixture.runFailure=true;await ui.type('Keep the original unsolved draft');await ui.send();
+ const original=ui.fixture.data.messages.find(row=>row.role==='user'),originalRead=ui.fixture.chat.getContextConversation;
+ let foreign=true;
+ const columns=['id','conversation_id','author_id','role','body','status','client_request_id','sequence','created_at','finished_at','in_reply_to_message_id'];
+ ui.fixture.chat.getContextConversation=async input=>{
+  const result=await originalRead(input);
+  return {...result,messages:result.messages.map(row=>Object.fromEntries(columns.filter(key=>key in row).map(key=>[key,key==='conversation_id'&&foreign?'c0000000-0000-4000-8000-000000000099':row[key]])))};
+ };
+ await ui.reload();
+ assert.match(ui.environment.container.textContent,/original AI request cannot be checked/);
+ assert.equal(ui.fixture.data.counters.run,1);assert.equal(ui.fixture.data.counters.recover,0);
+ assert.equal(ui.named('Message').value,'Keep the original unsolved draft');
+ foreign=false;ui.fixture.recoveryAvailable=false;
+ await ui.click('Check recovery');
+ assert.doesNotMatch(ui.environment.container.textContent,/original AI request cannot be checked/);
+ assert.equal(ui.fixture.data.counters.run,1);assert.equal(ui.fixture.data.counters.recover,1);
+ assert.equal(ui.named('Message').value,'Keep the original unsolved draft');
+ assert.ok([...ui.storage.values()].some(value=>{const record=JSON.parse(value);return record.message_id===original.id&&record.client_request_id===original.client_request_id}));
+ ui.fixture.recoveryAvailable=true;await ui.click('Check recovery');
+ assert.equal(ui.fixture.data.counters.run,1);assert.equal(ui.fixture.data.counters.recover,2);
+ assert.equal(ui.fixture.data.messages.filter(row=>row.role==='user').length,1);
+ assert(ui.fixture.data.messages.some(row=>row.role==='assistant'&&row.in_reply_to_message_id===original.id));
+ assert.equal(ui.button('Check recovery'),undefined);
+});
