@@ -69,8 +69,9 @@ async function mount(t, options = {}) {
   const { default: Panel } = await vite.ssrLoadModule('/src/components/ContextConversationPanel.jsx')
   const root = createRoot(environment.container)
   let key = 1
-  const render = async (overrides = {}) => { await act(async () => root.render(createElement(Panel, { key, directSend: true, ...scope, ...overrides }))); await flush() }
+  const render = async (overrides = {}) => { await act(async () => root.render(createElement(Panel, { key, directSend: true, onNavigationBusyChange: options.onNavigationBusyChange, ...scope, ...overrides }))); await flush() }
   if (options.readiness) fixture.chat.getContextChatReadiness = options.readiness
+  if (options.read) fixture.chat.getContextConversation = options.read
   await render(options.initial ? { initialConversation: fixture.data.rows[0] } : {})
   t.after(async () => { await act(async () => root.unmount()); await vite.close(); Object.assign(globalThis, previous); delete globalThis.__directChatTest })
   const all = () => descendants(environment.container)
@@ -222,8 +223,10 @@ test('initial empty Project Chat usage-only readiness needs no allowance or Send
   allowanceRpc:async()=>{throw Error('Usage-only must not call allowance APIs')}});
  assert.equal(ui.named('Message').value,'');assert.equal(ui.button('Send').disabled,true);
  assert.equal(ui.button('Review Project Chat allowance'),undefined);
- assert.match(ui.environment.container.textContent,/Costs are calculated from provider tokens and verified rates, not final invoices/);
+ assert.match(ui.environment.container.textContent,/Usage tracked/);
+ assert.doesNotMatch(ui.environment.container.textContent,/Costs are calculated from provider tokens and verified rates, not final invoices/);
  await ui.click('Chat settings');await flush();assert.equal(ui.button('Preview allowance'),undefined);
+ assert.match(ui.environment.container.textContent,/Costs are calculated from provider tokens and verified rates, not final invoices/);
  assert.deepEqual(ui.fixture.data.counters,{created:0,messages:0,run:0,recover:0});
  await ui.type('A new explicitly typed text request');await ui.send();
  assert.deepEqual(ui.fixture.data.counters,{created:1,messages:1,run:1,recover:0});
@@ -289,4 +292,82 @@ test('projection-accurate saved recovery refuses foreign message scope then chec
  assert.equal(ui.fixture.data.messages.filter(row=>row.role==='user').length,1);
  assert(ui.fixture.data.messages.some(row=>row.role==='assistant'&&row.in_reply_to_message_id===original.id));
  assert.equal(ui.button('Check recovery'),undefined);
+});
+
+test('stalled initial recovery releases busy after deadline without clearing original identity or draft',async t=>{
+ const real=globalThis.setTimeout,timers=[];
+ globalThis.setTimeout=(callback,delay,...args)=>delay===15000?(timers.push(callback),0):real(callback,delay,...args);
+ t.after(()=>{globalThis.setTimeout=real});
+ const ui=await mount(t,{surface:'project',role:'system_owner'});
+ ui.fixture.runFailure=true;await ui.type('Preserve stalled original draft');await ui.send();
+ const before=[...ui.storage.entries()];
+ const late=defer();ui.fixture.chat.getContextConversation=()=>late.promise;
+ await ui.reload();
+ assert.equal(ui.button('Check recovery').disabled,true);
+ await act(async()=>{for(const callback of timers.splice(0))callback()});await flush();
+ assert.equal(ui.button('Check recovery').disabled,false);
+ assert.match(ui.environment.container.textContent,/timed out/);
+ assert.equal(ui.named('Message').value,'Preserve stalled original draft');
+ for(const [key,value] of before)assert.equal(ui.storage.get(key),value);
+ assert.equal(ui.fixture.data.counters.run,1);
+ late.resolve({conversation:{id:'foreign'},messages:[]});await flush();
+ assert.equal(ui.named('Message').value,'Preserve stalled original draft');
+ for(const [key,value] of before)assert.equal(ui.storage.get(key),value);
+});
+
+test('stalled runner recovery times out, explicit check can recover, and late old success cannot clear preserved state',async t=>{
+ const real=globalThis.setTimeout,timers=[];
+ globalThis.setTimeout=(callback,delay,...args)=>delay===15000?(timers.push(callback),0):real(callback,delay,...args);
+ t.after(()=>{globalThis.setTimeout=real});
+ const ui=await mount(t,{surface:'project',role:'system_owner'});
+ ui.fixture.runFailure=true;await ui.type('Runner timeout draft');await ui.send();
+ const before=[...ui.storage.entries()],originalRecover=ui.fixture.runner.recover,late=defer();
+ ui.fixture.runner.recover=()=>late.promise;await ui.reload();
+ await act(async()=>{for(const callback of timers.splice(0))callback()});await flush();
+ assert.equal(ui.button('Check recovery').disabled,false);
+ assert.equal(ui.named('Message').value,'Runner timeout draft');
+ for(const [key,value] of before)assert.equal(ui.storage.get(key),value);
+ late.resolve({status:'completed'});await flush();
+ assert.equal(ui.named('Message').value,'Runner timeout draft');
+ for(const [key,value] of before)assert.equal(ui.storage.get(key),value);
+ ui.fixture.runner.recover=originalRecover;ui.fixture.recoveryAvailable=true;
+ await ui.click('Check recovery');assert.equal(ui.button('Check recovery'),undefined);
+ assert.equal(ui.fixture.data.counters.run,1);
+ assert.equal(ui.fixture.data.messages.filter(row=>row.role==='user').length,1);
+});
+
+test('timeout navigation exemption belongs only to its original pending request',async t=>{
+ const real=globalThis.setTimeout,timers=[];let navigationBusy;
+ globalThis.setTimeout=(callback,delay,...args)=>delay===15000?(timers.push(callback),0):real(callback,delay,...args);
+ t.after(()=>{globalThis.setTimeout=real});
+ const ui=await mount(t,{surface:'project',role:'system_owner',onNavigationBusyChange:value=>{navigationBusy=value}});
+ ui.fixture.runFailure=true;await ui.type('First explicit request');await ui.send();
+ const originalRecover=ui.fixture.runner.recover;
+ ui.fixture.runner.recover=()=>new Promise(()=>{});await ui.reload();
+ assert.equal(navigationBusy,true);
+ await act(async()=>{for(const callback of timers.splice(0))callback()});await flush();
+ assert.equal(navigationBusy,false);
+ ui.fixture.runner.recover=originalRecover;ui.fixture.recoveryAvailable=true;await ui.click('Check recovery');
+ assert.equal(ui.button('Check recovery'),undefined);
+ ui.fixture.recoveryAvailable=false;await ui.type('Second explicit request');await ui.send();
+ assert.ok(ui.button('Check recovery'));assert.equal(navigationBusy,true);
+ assert.equal(ui.fixture.data.counters.run,2);
+ ui.fixture.runner.recover=()=>new Promise(()=>{});
+ // Click without awaiting the intentionally stalled event promise.
+ await act(async()=>{props(ui.button('Check recovery')).onClick()});await flush();
+ await act(async()=>{for(const callback of timers.splice(0))callback()});await flush();
+ assert.equal(navigationBusy,false);
+ assert.equal(ui.named('Message').value,'Second explicit request');
+ assert.equal(ui.fixture.data.counters.run,2);
+});
+test('generic initial history timeout cannot exempt a later pending request',async t=>{
+ const real=globalThis.setTimeout,timers=[];let navigationBusy;
+ globalThis.setTimeout=(callback,delay,...args)=>delay===15000?(timers.push(callback),0):real(callback,delay,...args);
+ t.after(()=>{globalThis.setTimeout=real});
+ const ui=await mount(t,{surface:'project',initial:true,read:()=>new Promise(()=>{}),onNavigationBusyChange:value=>{navigationBusy=value}});
+ await act(async()=>{for(const callback of timers.splice(0))callback()});await flush();
+ assert.equal(navigationBusy,false);
+ ui.fixture.runFailure=true;await ui.type('New explicit request after history failure');await ui.send();
+ assert.ok(ui.button('Check recovery'));assert.equal(navigationBusy,true);
+ assert.equal(ui.fixture.data.counters.run,1);
 });
