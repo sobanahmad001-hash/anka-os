@@ -28,7 +28,21 @@ const PrivateDesignVideoTools = lazy(() => import('./PrivateDesignVideoTools.jsx
 const ProjectAttachmentPanel = lazy(() => import('./ProjectAttachmentPanel.jsx'))
 function VideoWorkbenchReady({ onReady }) { useEffect(onReady, [onReady]); return null }
 
-export default function DirectContextChat({ contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError, initialConversation, onConversationListChange, onNavigationBusyChange, onDraftDirtyChange, designWorkspace, conversationLayout = false, onProjectRequest, onProjectChanged, projectJourney }) {
+function checkOriginalDispatch(record, conversation, human, actorId) {
+  if (conversation.owner_id !== actorId || human.conversation_id !== record.conversation_id ||
+      human.role !== 'user' || (record.message_id && human.id !== record.message_id)) {
+    throw Error('The original AI request cannot be checked in this conversation.')
+  }
+}
+
+function directSendBlocker(value, options) {
+  if (value?.prospective_allowance_status && (!value.paid_execution_enabled || !value.spend_tracking_configured)) {
+    return contextChatSendBlocker({...value,spend_readiness_status:undefined,prospective_allowance_status:undefined},options)
+  }
+  return contextChatSendBlocker(value,options)
+}
+const ProjectChatAllowance = lazy(() => import('./ProjectChatAllowance.jsx'))
+export default function DirectContextChat({ systemOwner, contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError, initialConversation, onConversationListChange, onNavigationBusyChange, onDraftDirtyChange, designWorkspace, conversationLayout = false, onProjectRequest, onProjectChanged, projectJourney }) {
   const workshopHistory = useContext(WorkshopChatHistoryContext)
   const hasExternalHistory = Boolean(workshopHistory?.render || workshopHistory?.externalHistory)
   const actorId = user.id
@@ -71,6 +85,11 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
   const [readinessAttempt, setReadinessAttempt] = useState(0)
   const [canonical, setCanonical] = useState(false)
   const [pending, setPending] = useState(initial.recovery)
+  const [observedRequest,setObservedRequest]=useState(null)
+  const savedPrefix=recoveryKey+':saved-check:'
+  const [savedChecks,setSavedChecks]=useState(()=>projectChat?Object.keys(sessionStorage)
+    .filter(key=>key.startsWith(savedPrefix)).map(readDirectChatRecovery).filter(Boolean):[])
+  const savedConversationHint=useRef(savedChecks.at(-1)?.conversation_id).current
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState(initial.recovery ? 'Checking the previous send. Your draft stays in this browser tab during recovery.' : '')
   const [error, setError] = useState('')
@@ -125,9 +144,10 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     videoPane.current?.scrollIntoView?.({ block: 'start', behavior: 'instant' })
   }, [videoOpen])
 
+  const ownedConversationId = projectChat && selected?.state === 'active' && selected.owner_id === actorId ? selected.id : null
   const model = models.find(row => row.id === modelId)
   const ready = readiness?.model_configuration_id === modelId && readiness?.paid_execution_enabled === true
-    && readiness?.spend_tracking_configured === true && readiness?.model_status === 'configured'
+    && !directSendBlocker(readiness,{attempted:false})
   const canCanonical = model?.provider === 'openai' && contextKind === 'project_team'
   useEffect(()=>{
     const suggestion=designWorkspace?.draftSuggestion
@@ -213,7 +233,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     pendingRef.current = value; setPending(value)
   }
   function clearPending() {
-    clearDirectChatRecovery(recoveryKey); clearDirectChatDraft(recoveryKey)
+    clearDirectChatDraft(recoveryKey); clearDirectChatRecovery(recoveryKey)
     pendingRef.current = null; setPending(null); attempt.current = null
   }
   function report(reason) {
@@ -280,27 +300,27 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
     }, 15_000)
     if (signal.aborted) stop()
     else Promise.resolve().then(() => departmentChat.getContextChatReadiness(
-      { model_configuration_id: modelId }, { ...requestScope, signal: controller.signal },
+      { model_configuration_id: modelId, ...(ownedConversationId ? {conversation_id:ownedConversationId} : {}) }, { ...requestScope, signal: controller.signal },
     )).then(result => {
       if (!active || signal.aborted) return
       clearTimeout(timer)
       if (!result || typeof result.paid_execution_enabled !== 'boolean' || typeof result.spend_tracking_configured !== 'boolean' || typeof result.model_status !== 'string') {
         setReadinessState('failed'); return
       }
-      setReadiness({ ...result, model_configuration_id: modelId }); setReadinessState('resolved')
+      setReadiness({ ...result, model_configuration_id: modelId, conversation_id: ownedConversationId }); setReadinessState('resolved')
     }).catch(() => {
       if (!active || signal.aborted) return
       clearTimeout(timer); setReadiness(null); setReadinessState('failed')
     })
     return () => { clearTimeout(timer); signal.removeEventListener('abort', stop); stop() }
-  }, [modelId, requestScope, signal, readinessAttempt])
+  }, [modelId, ownedConversationId, requestScope, signal, readinessAttempt])
   const retryReadiness = () => {
     if (!current() || readinessState === 'loading') return
     setReadiness(null); setReadinessState('loading'); setReadinessAttempt(value => value + 1)
   }
   useEffect(() => {
     let active = true
-    const target = initial.recovery?.conversation_id || initial.conversation?.id || restoredDraft?.conversation_id || initialAttachmentHint
+    const target = initial.recovery?.conversation_id || initial.conversation?.id || restoredDraft?.conversation_id || initialAttachmentHint || savedConversationHint
     if (!target) return
     lock.current = true; setBusy(true)
     ;(async () => {
@@ -310,6 +330,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
       const human = result.messages.find(row => row.client_request_id === initial.recovery?.client_request_id && row.author_id === actorId)
       if (!initial.recovery || !human) return
       if (initial.recovery.dispatch_request_id) {
+        checkOriginalDispatch(initial.recovery, result.conversation, human, actorId)
         const recovered = await contextChatRunner.recover(human.id, requestScope)
         if (!active || signal.aborted) return
         if (recovered.status !== 'completed') throw new Error('Reply outcome is uncertain. Check recovery again; no new AI request was sent.')
@@ -323,7 +344,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
       clearDirectChatRecovery(recoveryKey); pendingRef.current = null; setPending(null); attempt.current = null; setDraft(attachmentDraft??''); clearDirectChatDraft(recoveryKey);if(attachmentDraft!==null)writeDirectChatDraft(recoveryKey,{new_conversation_id:newId,conversation_id:target,text:attachmentDraft,attempt:null})
       setNotice('Previous send recovered from saved messages. No new AI request was sent.')
     })().catch(reason => {
-      if (active && !signal.aborted) { onAccessError?.(reason); setError(reason.message); setNotice('Check recovery before sending again. Your scoped draft remains available in this browser tab for one hour.') }
+      if (active && !signal.aborted) { if (showRecoveryOutcome(reason)) return; onAccessError?.(reason); setError(reason.message); setNotice('Check recovery before sending again. Your scoped draft remains available in this browser tab for one hour.') }
     }).finally(() => { if (active && !signal.aborted) { lock.current = false; setBusy(false) } })
     return () => { active = false }
   }, [initial, read, apply, actorId, requestScope, signal, recoveryKey, onAccessError, restoredDraft?.conversation_id])
@@ -408,11 +429,11 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
         setNotice('')
         if(!model)throw Error('Choose an approved AI model. Your draft is kept. No message or AI request was sent.')
         let fresh
-        try{fresh=await readContextChatSendReadiness((input,options)=>departmentChat.getContextChatReadiness(input,{...requestScope,...options}),model.id,{signal})}
+        try{fresh=await readContextChatSendReadiness((input,options)=>departmentChat.getContextChatReadiness(input,{...requestScope,...options}),model.id,{signal,conversationId:ownedConversationId})}
         catch{if(!sameSend())return;setReadiness(null);setReadinessState('failed');throw Error('AI availability could not be verified. Retry AI availability. Your draft is kept. No message or AI request was sent.')}
         if(!sameSend())return
-        setReadiness({...fresh,model_configuration_id:modelId});setReadinessState('resolved')
-        const blocker=contextChatSendBlocker(fresh)
+        setReadiness({...fresh,model_configuration_id:modelId,conversation_id:ownedConversationId});setReadinessState('resolved')
+        const blocker=directSendBlocker(fresh)
         if(blocker)throw Error(blocker)
       }
       // Recheck current access and sharing before opening the unchanged disclosure.
@@ -463,6 +484,63 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
       setNotice(ai ? 'Reply saved.' : 'Message saved without an AI reply.')
     })
   }
+  function showRecoveryOutcome(reason) {
+    if (reason?.outcome === 'no_submission_recorded' && reason.mustNotSubmit === true) {
+      if(projectChat)setObservedRequest(pendingRef.current?.dispatch_request_id || null)
+      const held = ['prior_cycle_reconciliation_required','unmeasured_cost_reconciliation_required'].includes(reason.spendReadinessStatus)
+      let guidance = ''
+      if (held) {
+        const sources = reason.reconciliationSources
+        guidance = projectChat ? ' Earlier charges remain unresolved and may exceed estimates. Check current spending controls in Chat settings. An eligible owner can review a separate allowance for future messages.' : ' Ask an authorized administrator to verify the provider charges.'
+        if (Array.isArray(sources) && sources.includes('design_media')) {
+          guidance += ' The read-only Design media spending view is under Connections & administration → Models, usage & advanced configuration.'
+          if (sources.some(source => source !== 'design_media')) guidance += ' That view covers only the media portion.'
+        }
+      }
+      setNotice(reason.message + guidance)
+    } else if (reason?.outcome === 'not_settled') {
+      setObservedRequest(null)
+      setNotice('Your message is saved. Its AI outcome is still unknown. Check recovery again later.')
+    } else {
+      return false
+    }
+    setError('')
+    return true
+  }
+  const canComposeSeparately = projectChat && ownedConversationId && pending?.conversation_id===ownedConversationId &&
+    pending.message_id && observedRequest && observedRequest===pending.dispatch_request_id && ready &&
+    readiness?.conversation_id===ownedConversationId && readiness.prospective_allowance_status==='available'
+  function startSeparateMessage() {
+    if(!canComposeSeparately || lock.current || !current())return
+    const original=pendingRef.current
+    try {
+      writeDirectChatRecovery(savedPrefix+original.dispatch_request_id,original)
+      setSavedChecks(previous=>[...previous.filter(row=>row.dispatch_request_id!==original.dispatch_request_id),original])
+      clearPending()
+      setObservedRequest(null);setDraft('');setWebsiteSendContext(null);setCanonical(false);setProjectDocumentIds([])
+      setNotice('Write a new message. The earlier saved message remains available for Check recovery.')
+    } catch(reason) { report(reason) }
+  }
+  async function checkSavedMessage(record) {
+    await exclusive(async()=>{
+      if(record.conversation_id!==ownedConversationId)return
+      const latest=await read(record.conversation_id,record.client_request_id)
+      if(!current())return
+      const human=latest.messages.find(row=>row.client_request_id===record.client_request_id && row.author_id===actorId)
+      if(!human)throw Error('The original saved message is unavailable in this conversation.')
+      checkOriginalDispatch(record,latest.conversation,human,actorId)
+      const result=await contextChatRunner.recover(human.id,requestScope)
+      if(!current())return
+      if(result.status!=='completed' || result.message?.role!=='assistant' || result.message.conversation_id!==record.conversation_id || result.message.in_reply_to_message_id!==human.id)throw Error('The original reply is still uncertain. Check again later.')
+      const updated=await read(record.conversation_id,record.client_request_id)
+      if(!current())return
+      apply(updated)
+      clearDirectChatRecovery(savedPrefix+record.dispatch_request_id)
+      setSavedChecks(previous=>previous.filter(row=>row.dispatch_request_id!==record.dispatch_request_id))
+      setNotice('Earlier reply recovered from the original message.')
+    })
+  }
+
   async function recover() {
     await exclusive(async () => {
       const record = pendingRef.current
@@ -474,7 +552,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
       catch (reason) { if (reason.status !== 404) throw reason }
       if (!current() || token !== revision.current) return
       let human = latest?.messages.find(row => row.client_request_id === record.client_request_id && row.author_id === actorId)
-      if (!human && attempt.current) {
+      if (!human && attempt.current && !(projectChat && record.dispatch_request_id)) {
         // Only retry persistence, with the identical in-memory body and UUIDs.
         const input = { conversation_id: record.conversation_id, client_request_id: record.client_request_id, message: attempt.current.text, ...(attempt.current.design_attachment_ids ? { design_attachment_ids: attempt.current.design_attachment_ids } : {}), ...(attempt.current.project_document_ids ? { project_document_ids: attempt.current.project_document_ids } : {}) }
         const saved = attempt.current.isNew
@@ -488,7 +566,13 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
       if (!human) throw new Error('The original message is not visible yet. Check again. The original draft is kept in this tab when available; no replacement AI request was sent.')
       apply(latest)
       if (record.dispatch_request_id) {
-        const result = await contextChatRunner.recover(human.id, requestScope)
+        checkOriginalDispatch(record, latest.conversation, human, actorId)
+        let result
+        try { result = await contextChatRunner.recover(human.id, requestScope) }
+        catch (reason) {
+          if (!current() || token !== revision.current || showRecoveryOutcome(reason)) return
+          throw reason
+        }
         if (!current() || token !== revision.current) return
         if (result.status !== 'completed') throw new Error('Reply not settled. No second AI request was sent. Check again later.')
         const sentBrief = briefSend.current
@@ -529,17 +613,25 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
 
     </header>{conversationLayout && <div className="content-conversation-toolbar" aria-label={`${departmentId ? departmentId[0].toUpperCase() + departmentId.slice(1) : 'Private'} conversation tools`}>{modelControl}<span>Text conversation</span></div>}{designWorkspace && <div className="design-conversation-top-toolbar" aria-label="Design conversation tools">{designWorkspace.toolbar}{designWorkspace.mode === 'chat' && (designWorkspace.toolbarTarget ? createPortal(modelControl,designWorkspace.toolbarTarget) : modelControl)}</div>}
     {error && <p role="alert" className="direct-chat-error">{error}</p>}
-    {notice && !pending && <p role="status" className="direct-chat-notice">{notice}</p>}
+    {notice && <p role="status" className="direct-chat-notice">{notice}</p>}
     {attachmentRecoveryRequired&&<p role="status" className="direct-chat-notice">An attachment reading needs recovery. Reopen Attach files and recover the original reading before another AI request. No request is repeated automatically.</p>}
     {pending && <div className="direct-chat-notice direct-chat-recovery"><p>Check this send before sending again. Recovery never requests another AI reply.</p><button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy} onClick={recover}>Check recovery</button></div>}
+    {canComposeSeparately && <button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy} onClick={startSeparateMessage}>Write a separate new message</button>}
+    {savedChecks.filter(row=>row.conversation_id===ownedConversationId && row.dispatch_request_id!==pending?.dispatch_request_id).map(row=>
+      <div key={row.dispatch_request_id} className="direct-chat-notice"><p>Earlier saved message · {messages.find(message=>message.id===row.message_id)?.body?.slice(0,100) || 'Reply unresolved'}</p>
+        <button type="button" disabled={busy} onClick={()=>checkSavedMessage(row)}>Check earlier saved reply</button></div>)}
     {detailsOpen && <aside className="direct-chat-details" aria-label="Chat details">
       {projectChat && <><div className="direct-project-settings-heading"><h3>Chat settings</h3><button type="button" onClick={() => { setDetailsOpen(false); historyButtonRef.current?.focus() }}>Close settings</button></div>{modelControl}<p>This conversation belongs to the current project. Extra project and organization data is shared only when you select it below.</p></>}
       {designWorkspace && <p>Sending includes the current editable brief for an unapproved draft update. Referenced files are not automatically sent. Media generation remains separate.</p>}
       <p>{privateDesign && designWorkspace ? 'Use Attach beside your message to upload and explicitly select sources. ' : contextKind === 'project_team' ? 'Use Attach files for spreadsheet import or selected document references. Originals stay owner-only; chat answers follow existing sharing. ' : 'Attachments are unavailable in this chat. '}Drafts stay only in this browser tab for up to one hour, including refresh; successful Send clears the draft. Closing this tab ends local draft recovery.</p>
-      <p>AI replies are organization-billed. The service rechecks model approval, exact pricing, spend tracking and access before dispatch.</p>
-      <p>{readinessState === 'failed' ? 'AI availability could not be checked. Retry AI availability before requesting a reply.' : !readiness ? 'Checking AI availability...' : ready ? 'AI configuration ready.' : contextChatSendBlocker(readiness,{attempted:false})}</p>
+      {ownedConversationId && systemOwner && model && <Suspense fallback={null}><ProjectChatAllowance key={JSON.stringify([ownedConversationId,modelId])}
+        organizationId={organizationId} projectId={projectId} actorId={actorId} modelId={modelId} signal={signal}
+        projectLabel={projectJourney?.project?.name || label} modelLabel={model.label} readiness={readiness?.model_configuration_id===modelId && readiness.conversation_id===ownedConversationId ? readiness : null}
+        checkReadiness={()=>readContextChatSendReadiness((input,options)=>departmentChat.getContextChatReadiness(input,{...requestScope,...options}),modelId,{signal,conversationId:ownedConversationId})}
+        refresh={()=>setReadinessAttempt(n=>n+1)}/></Suspense>}      <p>AI replies are organization-billed. The service rechecks model approval, exact pricing, spend tracking and access before dispatch.</p>
+      <p>{readinessState === 'failed' ? 'AI availability could not be checked. Retry AI availability before requesting a reply.' : !readiness ? 'Checking AI availability...' : ready ? 'AI configuration ready.' : directSendBlocker(readiness,{attempted:false})}</p>
       {readiness?.paid_execution_enabled === false && <p>AI execution is currently off.</p>}
-      {readiness?.spend_tracking_configured === false && <p>Organization spend tracking is not configured.</p>}
+      {readiness?.spend_tracking_configured === false && !['prior_cycle_reconciliation_required','unmeasured_cost_reconciliation_required'].includes(readiness.spend_readiness_status) && <p>Organization spend tracking is not configured.</p>}
       {readiness?.spend_guard_mode === 'provider_managed' && <p>Your provider-side spend limit is managed externally. Anka cannot verify or enforce it; each request is still priced and recorded.</p>}
       {contextKind === 'project_team' && <p>Shared collaborators can reply as humans. Only the owner can request AI. Teammate-authored messages are not sent to a provider; a request that would include one is blocked.</p>}
       {owner && canCanonical && <label><input type="checkbox" checked={canonical} disabled={busy || setupBusy || journeyLocked || videoBusy || !ready} onChange={event => setCanonical(event.target.checked)} />For this reply, also send OpenAI the current organization name and this project’s name, description, status, health, scope, and exclusions, plus a bounded sample of accessible project names, status and health, task and work-item titles, status, deadlines and assignee display names, sampled progress counts, and review-state counts. Record IDs, emails, contact details, descriptions of tasks or work items, files, transcripts, private memory, and teammate messages are excluded. The sample may be incomplete.</label>}
@@ -578,7 +670,7 @@ export default function DirectContextChat({ contextKind, departmentId, projectId
         <div className="direct-chat-toolbar">{designWorkspace?.attachControl}{projectChat&&<button type="button" disabled={busy||videoBusy||setupBusy||journeyLocked||Boolean(pending)||!owner} aria-expanded={setupOpen} onClick={()=>setSetupOpen(x=>!x)}>Set up project</button>}{projectChat && <button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || !owner || Boolean(selected && selected.state !== 'active')} onClick={() => { closeProjectTools(); setImportOpened(true);setImportOpen(true) }}>Attach files</button>}{!compactConversation && <label>Work type<select aria-label="Work type" value="text" disabled><option value="text">Text</option></select></label>}
           {!compactConversation && modelControl}
           <button type="submit" className="direct-chat-send" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || attachmentRecoveryRequired || !draft.trim() || Boolean(selected && selected.state !== 'active')}>{busy ? 'Working…' : owner ? 'Send' : 'Save message'}</button></div>{owner&&!ready&&<button className="direct-chat-save-note" type="button" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || attachmentRecoveryRequired || !draft.trim() || Boolean(selected && selected.state !== 'active')} onClick={event=>send(event,{humanOnly:true})}>Save message without AI</button>}
-        <p>{owner ? readinessState === 'failed' ? 'AI availability could not be checked. Retry the check, or explicitly save without AI.' : !readiness ? 'Checking AI availability. Send will check again before requesting a reply.' : ready ? projectChat ? 'Organization-billed AI reply' : `${model?.provider} · Organization-billed replies` : contextChatSendBlocker(readiness,{attempted:false}) : 'Shared chat · Human replies only'} · {privateDesign && designWorkspace ? `${designAttachmentIds.length} selected reference(s)` : contextKind === 'project_team' ? `${projectDocumentIds.length} selected document(s)` : 'Attachments unavailable'}</p>{owner && readinessState !== 'loading' && !ready && <button type="button" disabled={busy||Boolean(pending)} onClick={retryReadiness}>Retry AI availability</button>}
+        <p>{owner ? readinessState === 'failed' ? 'AI availability could not be checked. Retry the check, or explicitly save without AI.' : !readiness ? 'Checking AI availability. Send will check again before requesting a reply.' : ready ? projectChat ? 'Organization-billed AI reply' : `${model?.provider} · Organization-billed replies` : directSendBlocker(readiness,{attempted:false}) : 'Shared chat · Human replies only'} · {privateDesign && designWorkspace ? `${designAttachmentIds.length} selected reference(s)` : contextKind === 'project_team' ? `${projectDocumentIds.length} selected document(s)` : 'Attachments unavailable'}</p>{owner && readinessState !== 'loading' && !ready && <button type="button" disabled={busy||Boolean(pending)} onClick={retryReadiness}>Retry AI availability</button>}
       </form></div>
       {output && <aside ref={outputId && mobileDrawer ? drawerRef : undefined} className="direct-chat-output" role={mobileDrawer ? 'dialog' : undefined} aria-modal={mobileDrawer ? true : undefined} onKeyDown={drawerKeyDown} aria-label="Saved reply output" data-source-message-id={output.id}><div><h3>Saved reply</h3><button ref={outputClose} type="button" onClick={() => setOutputId('')}>Close output</button></div><p>{output.body}</p><small>Saved conversation reply · Read-only preview</small></aside>}
     </div>

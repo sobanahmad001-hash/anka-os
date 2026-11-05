@@ -3,6 +3,78 @@ import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.1
 import { handleRequest, requireOpenAiCanonicalContextChoice, requirePrivateChatPaidExecution, requirePrivateConversationAccess } from './index.ts'
 import { buildPrivateConversationPrompt, canonicalOpenAiContext } from '../_shared/contextChatPrompt.js'
 
+Deno.test('actual Project Chat runner forwards full policy hold then keeps prior dispatch claim check-only',async()=>{
+ const id='bb000000-0000-4000-8000-000000000001'
+ const oldFetch=globalThis.fetch,oldGet=Deno.env.get,oldRefresh=GoTrueClient.prototype.startAutoRefresh
+ GoTrueClient.prototype.startAutoRefresh=async()=>{}
+ let providers=0;const calls:Array<{path:string,args:any}>=[]
+ const price={provider:'openai',model_id:'gpt-6.1-sol',verified_at:new Date().toISOString(),source_url:'https://developers.openai.com/api/docs/models/gpt-6.1-sol',input_usd_per_million:2,cached_input_usd_per_million:.1,cache_write_usd_per_million:2.5,output_usd_per_million:10}
+ const config:Record<string,string>={SUPABASE_URL:'http://127.0.0.1:54321',SUPABASE_ANON_KEY:'offline-public',SUPABASE_SERVICE_ROLE_KEY:'offline-service',CONTEXT_CHAT_PAID_EXECUTION_ENABLED:'true',ANKA_OPENAI_OFFLINE_POLICY:'offline-only',N6_OPENAI_MODEL_PRICING_JSON:JSON.stringify([{...price,model_id:'gpt-4.1'}]),N6_OPENAI_APPROVED_MODELS_PRICING_JSON:JSON.stringify([price])}
+ try{
+  Deno.env.get=name=>config[name]
+  globalThis.fetch=async(input,init)=>{
+   const url=new URL(input instanceof Request?input.url:String(input));if(url.origin!=='http://127.0.0.1:54321')throw Error('Remote forbidden')
+   const path=url.pathname,args=init?.body?JSON.parse(String(init.body)):{};calls.push({path,args});let data:unknown
+   if(path==='/auth/v1/user')data={id}
+   else if(path.endsWith('/organization_memberships'))data={status:'active',member_kind:'team',role:'system_owner'}
+   else if(path.endsWith('/department_chat_messages')){
+    const row={id,conversation_id:id,organization_id:id,owner_id:id,author_id:id,role:'user',status:'completed',sequence:1,body:'help',client_request_id:id}
+    data=url.searchParams.has('id')?row:[row]
+   }
+   else if(path.endsWith('/department_chat_conversations'))data={id,organization_id:id,owner_id:id,context_kind:'project_team',project_id:id,state:'active'}
+   else if(path.endsWith('/projects'))data={id,organization_id:id,archived_at:null}
+   else if(path.endsWith('/context_chat_organization_models'))data={id,organization_id:id,connector_connection_id:id,model_id:'gpt-6.1-sol',revoked_at:null}
+   else if(path.endsWith('/integration_connections'))data={id,organization_id:id,provider:'openai',status:'verified',archived_at:null,secret_name:'ANKA_OPENAI_OFFLINE_POLICY'}
+   else if(path.endsWith('/project_document_message_sources'))data=[]
+   else if(path.endsWith('/append_context_chat_audited_reply'))return new Response(JSON.stringify({message:'No audit'}),{status:400,headers:{'content-type':'application/json'}})
+   else if(path.endsWith('/recover_context_chat_completed_run'))data={status:'no_run'}
+   else if(path.endsWith('/read_project_chat_allowance'))data={status:'available',cap_microusd:1000000,remaining_microusd:1000000,historical_costs_unresolved:true,expires_at:new Date(Date.now()+3600000).toISOString()}
+   else if(path.endsWith('/reserve_context_chat_budget'))data={status:'reserved',reservation_id:id}
+   else if(path.endsWith('/claim_context_chat_dispatch'))data={status:'already_claimed',must_not_submit:true,claim_id:id}
+   else throw Error('Unexpected '+path)
+   return new Response(JSON.stringify(data),{headers:{'content-type':'application/json'}})
+  }
+  const response=await handleRequest(new Request('https://example.test',{method:'POST',headers:{Authorization:'Bearer offline'},body:JSON.stringify({organization_id:id,message_id:id,model_configuration_id:id,dispatch_request_id:id})}),(()=>{providers++;throw Error('No provider')}) as typeof fetch,{get:name=>config[name]})
+  const result=await response.json()
+  assertEquals(response.status,409,JSON.stringify({result,calls}));assertEquals(result.must_not_submit,true)
+  assertEquals(calls.find(call=>call.path.endsWith('/reserve_context_chat_budget'))?.args.p_max_cost_microusd,80480)
+  assertEquals(calls.find(call=>call.path.endsWith('/read_project_chat_allowance'))?.args.p_cost,80480)
+  assertEquals(providers,0)
+ }finally{await new Promise(r=>setTimeout(r,20));globalThis.fetch=oldFetch;Deno.env.get=oldGet;GoTrueClient.prototype.startAutoRefresh=oldRefresh}
+})
+
+Deno.test('read-only recovery reports point-in-time no-submission observation versus unknown and never reserves or dispatches',async()=>{
+ const id='11111111-1111-4111-8111-111111111111'
+ const oldFetch=globalThis.fetch,oldGet=Deno.env.get,oldRefresh=GoTrueClient.prototype.startAutoRefresh
+ GoTrueClient.prototype.startAutoRefresh=async()=>{}
+ let proof='no_submission_recorded',providers=0;const calls:string[]=[]
+ const config:Record<string,string>={SUPABASE_URL:'http://127.0.0.1:54321',SUPABASE_ANON_KEY:'offline-public',SUPABASE_SERVICE_ROLE_KEY:'offline-service'}
+ try{
+  Deno.env.get=name=>config[name]
+  globalThis.fetch=async(input)=>{
+   const url=new URL(input instanceof Request?input.url:String(input));if(url.origin!=='http://127.0.0.1:54321')throw Error('Remote forbidden')
+   const path=url.pathname;calls.push(path);let data:unknown
+   if(path==='/auth/v1/user')data={id}
+   else if(path.endsWith('/organization_memberships'))data={status:'active',member_kind:'team',role:'system_owner'}
+   else if(path.endsWith('/department_chat_messages'))data={id,conversation_id:id,organization_id:id,owner_id:id,author_id:id,role:'user',status:'completed'}
+   else if(path.endsWith('/department_chat_conversations'))data={id,organization_id:id,owner_id:id,context_kind:'organization',state:'active'}
+   else if(path.endsWith('/append_context_chat_audited_reply'))return new Response(JSON.stringify({message:'No audit'}),{status:400,headers:{'content-type':'application/json'}})
+   else if(path.endsWith('/recover_context_chat_completed_run'))data={status:'no_run',submission_status:proof}
+   else if(path.endsWith('/get_ai_spend_guard_readiness'))data={spend_readiness_status:'prior_cycle_reconciliation_required',reconciliation_sources:['design_media']}
+   else throw Error('Unexpected '+path)
+   return new Response(JSON.stringify(data),{headers:{'content-type':'application/json'}})
+  }
+  for(const candidate of ['no_submission_recorded','unverified']){
+   proof=candidate
+   const response=await handleRequest(new Request('https://example.test',{method:'POST',headers:{Authorization:'Bearer offline'},body:JSON.stringify({organization_id:id,message_id:id,recover_only:true})}),(()=>{providers++;throw Error('No provider')}) as typeof fetch,{get:name=>config[name]})
+   assertEquals(response.status,409)
+   const result=await response.json();assertEquals(result.must_not_submit,true);assertEquals(result.status,candidate==='no_submission_recorded'?'no_submission_recorded':'not_settled')
+   assertEquals('reservation_id' in result,false)
+  }
+  assertEquals(providers,0);assertEquals(calls.some(path=>/reserve_|claim_|reconcile_/.test(path)),false)
+ }finally{await new Promise(r=>setTimeout(r,20));globalThis.fetch=oldFetch;Deno.env.get=oldGet;GoTrueClient.prototype.startAutoRefresh=oldRefresh}
+})
+
 Deno.test('paid switch denies new submissions while the handler never calls a provider without auth', async () => {
   let calls = 0
   const result = await handleRequest(new Request('https://example.test/run', { method: 'POST' }),
