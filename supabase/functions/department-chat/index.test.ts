@@ -255,7 +255,7 @@ function selectedOrganizationFixture() {
       }
       if (name === 'get_workshop_execution_readiness') return { data: rows.activation_readiness?.[0] || null, error: null }
       if (name === 'get_ai_spend_guard_readiness') return { data: rows.spend_readiness?.[0] || { spend_guard_mode: null, spend_tracking_configured: false, local_monthly_cap_configured: false, external_provider_limit_verified: false, spend_readiness_status: 'spend_tracking_unconfigured', reconciliation_sources: [] }, error: null }
-      if (name === 'read_project_chat_allowance') return { data: rows.project_chat_allowance?.[0] || {status:'inactive'}, error:null }
+      if (name === 'read_project_chat_allowance' || name === 'read_new_project_chat_allowance') return { data: rows.project_chat_allowance?.[0] || {status:'inactive'}, error:null }
       if (name === 'assert_department_chat_model_dispatch' && modelDispatchError) {
         return { data: null, error: modelDispatchError }
       }
@@ -1895,7 +1895,7 @@ Deno.test('chat spending readiness denies malformed or unapproved workflow class
   const response=await fixture.request({action:'get_context_chat_readiness',organization_id:'B'})
   assertEquals(response.status,503);assertEquals(fixture.providerCalls(),0)
 })
-Deno.test('Project Chat handler scopes prospective readiness and preserves paid-off without persistence or dispatch', async () => {
+for (const newChat of [false,true]) Deno.test('Project Chat handler scopes '+(newChat?'new project':'saved conversation')+' readiness and preserves paid-off without persistence or dispatch', async () => {
   const fixture=selectedOrganizationFixture()
   fixture.rows.spend_readiness=[{spend_guard_mode:'provider_managed',spend_tracking_configured:true,spend_readiness_status:'prior_cycle_reconciliation_required',reconciliation_sources:['design_media']}]
   fixture.rows.integration_connections.push({id:'private-connection-B',organization_id:'B',provider:'openai',status:'verified',archived_at:null,secret_name:'ANKA_OPENAI_OFFLINE_POLICY_TEST',public_config:{model_id:'offline'}})
@@ -1903,14 +1903,14 @@ Deno.test('Project Chat handler scopes prospective readiness and preserves paid-
   fixture.readinessEnv.set('ANKA_OPENAI_OFFLINE_POLICY_TEST','offline-only')
   fixture.readinessEnv.set('N6_OPENAI_MODEL_PRICING_JSON',JSON.stringify([{provider:'openai',model_id:'offline',verified_at:new Date().toISOString(),source_url:'https://developers.openai.com/api/docs/pricing',input_usd_per_million:1,cached_input_usd_per_million:1,cache_write_usd_per_million:1,output_usd_per_million:1}]))
   fixture.rows.project_chat_allowance=[{status:'available',cap_microusd:1000000,remaining_microusd:1000000,expires_at:new Date(Date.now()+3600000).toISOString(),historical_costs_unresolved:true,private_hold_id:'discard'}]
-  const response=await fixture.request({action:'get_context_chat_readiness',organization_id:'B',model_configuration_id:'private-model-B',conversation_id:'owned-project-conversation-B'})
+  const response=await fixture.request({action:'get_context_chat_readiness',organization_id:'B',model_configuration_id:'private-model-B',...(newChat?{project_id:'project-B'}:{conversation_id:'owned-project-conversation-B'})})
   assertEquals(response.status,200)
   const data=(await response.json()).data
   assertEquals(data.spend_readiness_status,'ready');assertEquals(data.paid_execution_enabled,false)
   assertEquals(data.prospective_allowance.historical_costs_unresolved,true)
   assertEquals('private_hold_id' in data.prospective_allowance,false)
-  const scoped=fixture.rpcCalls.find(call=>call.name==='read_project_chat_allowance')!
-  assertEquals(scoped.args,{p_org:'B',p_actor:'actor',p_conversation:'owned-project-conversation-B',p_model:'private-model-B',p_cost:29120})
+  const scoped=fixture.rpcCalls.find(call=>call.name===(newChat?'read_new_project_chat_allowance':'read_project_chat_allowance'))!
+  assertEquals(scoped.args,{p_org:'B',p_actor:'actor',...(newChat?{p_project:'project-B'}:{p_conversation:'owned-project-conversation-B'}),p_model:'private-model-B',p_cost:29120})
   assertEquals(fixture.providerCalls(),0)
   assertEquals(fixture.rpcCalls.some(call=>/reserve_|claim_|begin_|append_|apply_project/.test(call.name)),false)
 })

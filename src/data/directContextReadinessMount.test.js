@@ -12,6 +12,27 @@ const props = node => node?.[Object.keys(node).find(key => key.startsWith('__rea
 const defer = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
 const flush = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
 
+test('New Project Chat missing model never exposes allowance controls',async t=>{
+ let calls=0;const ui=await mount(t,{surface:'project',role:'system_owner',allowlist:{connections:[]},allowanceRpc:async()=>{calls++;throw Error('unexpected')}});
+ await ui.click('Chat settings');await flush();assert.equal(ui.button('Preview allowance'),undefined);
+ assert.equal(ui.button('Review Project Chat allowance'),undefined);assert.equal(calls,0);
+ assert.deepEqual(ui.fixture.data.counters,{created:0,messages:0,run:0,recover:0});
+});
+
+test('New Project Chat switching projects ignores an old available response and keeps each draft scoped',async t=>{
+ const project='a0000000-0000-4000-8000-000000000077',late=defer(),requests=[];
+ const ui=await mount(t,{surface:'project',role:'system_owner',readiness:async input=>{
+  requests.push(input);if(input.project_id!==project)return late.promise;
+  return {paid_execution_enabled:true,spend_tracking_configured:true,model_status:'configured',spend_readiness_status:'prior_cycle_reconciliation_required',prospective_allowance_status:'inactive'};
+ },allowanceRpc:async()=>({data:{status:'none'}})});
+ await ui.type('Original project draft');await ui.render({projectId:project});await flush();
+ late.resolve({paid_execution_enabled:true,spend_tracking_configured:true,model_status:'configured',spend_readiness_status:'ready',prospective_allowance_status:'available'});await flush();
+ assert.equal(requests.at(-1).project_id,project);assert.equal(ui.named('Message').value,'');
+ assert.ok(ui.button('Review Project Chat allowance'));assert.deepEqual(ui.fixture.data.counters,{created:0,messages:0,run:0,recover:0});
+ await ui.render();await flush();assert.equal(ui.named('Message').value,'Original project draft');
+});
+
+
 async function mount(t, options = {}) {
   const environment = mountedEnvironment(), storage = new Map()
   const values = { document: environment.document, window: environment.window, Event: environment.window.Event,
@@ -23,7 +44,7 @@ async function mount(t, options = {}) {
   const scope = { contextKind: fixture.scope.context_kind, projectId: fixture.scope.project_id || '', departmentId: fixture.scope.department_id || '' }
   const accessError = () => {}
   const scopeController = new AbortController()
-  globalThis.__directChatTest = { fixture, actor, allowlist: options.allowlist || allowlist, organization: { activeOrganizationId: organizationId, scopeRevision: 1, requestSignal: scopeController.signal, handleOrganizationAccessError: accessError } }
+  globalThis.__directChatTest = { fixture, actor, allowlist: options.allowlist || allowlist, allowanceRpc: options.allowanceRpc, organization: { activeMembership: {role:options.role || 'member'}, activeOrganizationId: organizationId, scopeRevision: 1, requestSignal: scopeController.signal, handleOrganizationAccessError: accessError } }
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [{
     name: 'direct-chat-mounted-offline', enforce: 'pre',
     resolveId(source) {
@@ -36,7 +57,7 @@ async function mount(t, options = {}) {
       if (source.endsWith('PrivateDesignVideoTools.jsx')) return '\0direct-video'
     },
     load(id) {
-      if (id === '\0direct-import-client') return 'export const supabase = {functions:{invoke(){throw Error("Unexpected importer network request")}}}'
+      if (id === '\0direct-import-client') return 'export const supabase = {rpc:(...args)=>globalThis.__directChatTest.allowanceRpc(...args),functions:{invoke(){throw Error("Unexpected importer network request")}}}'
       if (id === '\0direct-auth') return 'export const useAuth = () => ({ user: { id: globalThis.__directChatTest.actor } })'
       if (id === '\0direct-org') return 'export const useOrganization = () => globalThis.__directChatTest.organization'
       if (id === '\0direct-chat') return 'export const departmentChat = new Proxy({}, {get: (_, key) => (...args) => globalThis.__directChatTest.fixture.chat[key](...args)})'
@@ -59,7 +80,7 @@ async function mount(t, options = {}) {
   const type = async (text, name = 'Message') => { await act(async () => props(named(name)).onChange({ target: { value: text } })) }
   const send = async (twice = false) => { await act(async () => { const submit = props(named('Chat composer')).onSubmit; submit({ preventDefault() {} }); if (twice) submit({ preventDefault() {} }) }); await flush() }
   const consent = async () => { if (button('Allow and ask Anka AI')) await click('Allow and ask Anka AI') }
-  return { scopeController, fixture, storage, environment, render, named, button, click, type, send, consent, reload: async () => { key++; await render() } }
+  return { all, scopeController, fixture, storage, environment, render, named, button, click, type, send, consent, reload: async () => { key++; await render() } }
 }
 
 test('readiness rejection ends loading; read-only retry restores Send without dispatch', async t => {
@@ -140,3 +161,55 @@ test('readiness failures preserve existing saved history and never request anoth
  assert.deepEqual(ui.fixture.data.messages,original);assert.deepEqual(ui.fixture.data.counters,{created:0,messages:0,run:0,recover:0})
  assert.equal(ui.named('Message').value,'New unsent question')
 })
+
+test('New Project Chat owner can review and explicitly activate before first Send, without losing draft or automatic writes',async t=>{
+ const requests=[],rpcs=[];let activated=false;
+ const ui=await mount(t,{surface:'project',role:'system_owner',
+  readiness:async input=>{requests.push(input);return {paid_execution_enabled:true,spend_tracking_configured:true,model_status:'configured',spend_guard_mode:'provider_managed',
+   spend_readiness_status:activated?'ready':'prior_cycle_reconciliation_required',prospective_allowance_status:activated?'available':'inactive',prospective_maximum_hold_microusd:80480,
+   ...(activated?{prospective_allowance:{remaining_microusd:1000000,expires_at:'2030-01-01',maximum_turn_microusd:80480}}:{})}},
+  allowanceRpc:async(name,args)=>{rpcs.push({name,args});if(name==='read_owned_project_chat_allowance')return {data:activated?{status:'active',policy_id:'policy',cap_microusd:1000000,expires_at:'2030-01-01'}:{status:'none'}};
+   if(name==='preview_project_chat_allowance')return {data:{organization_id:args.p_org,actor_id:actor,project_id:args.p_project,model_configuration_id:args.p_model,cap_microusd:args.p_cap,duration_seconds:args.p_seconds,review_hash:'a'.repeat(64),historical_costs_unresolved:true,historical_charge_may_exceed_estimate:true}};
+   assert.equal(name,'apply_project_chat_allowance');assert.equal(args.p_action,'activate');activated=true;return {data:{must_not_dispatch:true,action:{request_id:args.p_request,action:'activate',actor_id:actor,policy_id:'policy',project_id:args.p_project,model_configuration_id:args.p_model,cap_microusd:args.p_cap,duration_seconds:args.p_seconds}}};
+  }});
+ await ui.type('help me setup this project');await ui.send();assert.equal(ui.named('Message').value,'help me setup this project');
+ assert.equal(requests[0].project_id,ui.fixture.scope.project_id);assert.equal(requests[0].conversation_id,undefined);
+ await ui.click('Review Project Chat allowance');await flush();await flush();
+ for(let i=0;i<40&&!ui.button('Preview allowance');i++)await act(async()=>new Promise(resolve=>setTimeout(resolve,20)));
+ assert.ok(ui.button('Preview allowance'),ui.environment.container.textContent+JSON.stringify(rpcs));assert.equal(rpcs.filter(r=>r.name!=='read_owned_project_chat_allowance').length,0);
+ const labels=ui.all().filter(n=>n.tagName==='LABEL');
+ for(const [label,value] of [['New-text cap (USD)','1'],['Expires after (minutes)','60']]){
+  const input=descendants(labels.find(n=>n.textContent.includes(label))).find(n=>n.tagName==='INPUT');
+  await act(async()=>props(input).onChange({target:{value}}));
+ }
+ const form=ui.all().find(n=>n.tagName==='FORM'&&n.textContent.includes('Preview allowance'));
+ await act(async()=>props(form).onSubmit({preventDefault(){}}));await flush();
+ assert.equal(activated,false);assert.ok(ui.button('Accept exposure and activate allowance'));
+ await ui.click('Accept exposure and activate allowance');await flush();await flush();
+ assert.equal(activated,true);assert.equal(ui.named('Message').value,'help me setup this project');
+ assert.deepEqual(ui.fixture.data.counters,{created:0,messages:0,run:0,recover:0});
+ await ui.send();assert.deepEqual(ui.fixture.data.counters,{created:1,messages:1,run:1,recover:0});
+ assert.equal(rpcs.filter(r=>r.name==='apply_project_chat_allowance').length,1);
+});
+
+test('New Project Chat nonowner membership never exposes allowance controls or calls policy RPC',async t=>{
+ let calls=0;
+ const blocked=async()=>({paid_execution_enabled:true,spend_tracking_configured:true,model_status:'configured',spend_readiness_status:'prior_cycle_reconciliation_required',prospective_allowance_status:'inactive'});
+ const ui=await mount(t,{surface:'project',role:'operations_admin',readiness:blocked,allowanceRpc:async()=>{calls++;throw Error('unexpected')}});
+ await ui.click('Chat settings');await flush();assert.equal(ui.button('Preview allowance'),undefined);assert.equal(calls,0);
+ assert.deepEqual(ui.fixture.data.counters,{created:0,messages:0,run:0,recover:0});
+});
+
+test('New Project Chat model switch discards stale readiness and scopes allowance reads to the selected model',async t=>{
+ const second='a0000000-0000-4000-8000-000000000099',late=defer(),reads=[];
+ const models=structuredClone(allowlist);models.connections[0].context_model_configurations.push({id:second,model_id:'Second approved fixture'});
+ const ui=await mount(t,{surface:'project',role:'system_owner',allowlist:models,readiness:async input=>{reads.push(input);if(input.model_configuration_id!==second)return late.promise;
+  return {paid_execution_enabled:true,spend_tracking_configured:true,model_status:'configured',spend_readiness_status:'prior_cycle_reconciliation_required',prospective_allowance_status:'inactive'}},
+  allowanceRpc:async()=>({data:{status:'none'}})});
+ await ui.click('Chat settings');await act(async()=>props(ui.named('Approved model')).onChange({target:{value:second}}));await flush();await flush();
+ late.resolve({paid_execution_enabled:true,spend_tracking_configured:true,model_status:'configured',spend_readiness_status:'ready',prospective_allowance_status:'available'});await flush();
+ for(let i=0;i<40&&!ui.button('Preview allowance');i++)await act(async()=>new Promise(resolve=>setTimeout(resolve,20)));
+ assert.equal(props(ui.named('Approved model')).value,second);assert.ok(ui.button('Preview allowance'));
+ assert.match(ui.environment.container.textContent,/Review a separate Project Chat/);
+ assert.equal(reads.at(-1).model_configuration_id,second);assert.deepEqual(ui.fixture.data.counters,{created:0,messages:0,run:0,recover:0});
+});
