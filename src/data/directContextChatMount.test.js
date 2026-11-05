@@ -91,7 +91,7 @@ async function mount(t, options = {}) {
   t.after(async () => { await act(async () => root.unmount()); await vite.close(); Object.assign(globalThis, previous); delete globalThis.__directChatTest })
   const all = () => descendants(environment.container)
   const named = name => all().find(node => props(node)?.['aria-label'] === name)
-  const button = name => all().find(node => node.tagName === 'BUTTON' && node.textContent === name)
+  const button = name => all().find(node => node.tagName === 'BUTTON' && (props(node)?.['aria-label'] || node.textContent) === name)
   const click = async name => { const node = button(name); assert.ok(node, `Button ${name} exists`); assert.equal(node.disabled, false); await act(async () => { props(node).onClick?.({ preventDefault() {} }) }); await flush() }
   const type = async (text, name = 'Message') => { await act(async () => props(named(name)).onChange({ target: { value: text } })) }
   const send = async (twice = false) => { await act(async () => { const submit = props(named('Chat composer')).onSubmit; submit({ preventDefault() {} }); if (twice) submit({ preventDefault() {} }) }); await flush() }
@@ -440,7 +440,7 @@ test('Project Chat has one composer Attach and moves model selection into settin
   assert.equal(ui.fixture.data.counters.run, before.run + 1)
   assert.equal(ui.fixture.data.counters.created, before.created)
   assert.equal(ui.fixture.scope.project_id, projectId)
-  await ui.click('Chat history')
+  await ui.click('History')
   assert.ok(ui.named('Chat history'))
 })
 
