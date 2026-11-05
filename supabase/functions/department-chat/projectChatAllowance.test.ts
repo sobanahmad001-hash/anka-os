@@ -120,3 +120,29 @@ Deno.test('blocked policy readiness reports the public maximum hold, and a chang
     assertEquals('prospective_allowance' in result,false)
   }
 })
+
+Deno.test('Project Chat usage-only readiness replaces historical admission only after exact server policy and preserves source classifications',async()=>{
+ const {projectChatSpendReadiness}=await import('./index.ts');
+ for(const status of ['ready','prior_cycle_reconciliation_required','unmeasured_cost_reconciliation_required']){
+  const calls:any[]=[];
+  const admin:any={async rpc(name:string,args:any){calls.push({name,args});return {data:{mode:'usage_only',private_id:'discard'}}}};
+  const r=await projectChatSpendReadiness(admin,'org','actor','','model',{...prior,spend_readiness_status:status},'configured',()=>undefined,'project');
+  assertEquals(r.spend_readiness_status,'ready');assertEquals(r.project_chat_spend_policy,'usage_only');
+  assertEquals(r.unresolved_charges,status!=='ready');assertEquals('private_id' in r,false);
+  assertEquals(calls,[{name:'read_project_chat_spend_policy',args:{p_org:'org',p_actor:'actor',p_model:'model',p_conversation:null,p_project:'project'}}]);
+  assertEquals('paid_execution_enabled' in r,false);
+ }
+});
+Deno.test('Project Chat usage policy lookup fails closed, cannot cure model failure, and keeps guarded historical admission',async()=>{
+ const {projectChatSpendReadiness}=await import('./index.ts');
+ for(const data of [null,{mode:'invented'}]){
+  const admin:any={async rpc(){return {data}}};
+  await assertRejects(()=>projectChatSpendReadiness(admin,'o','a','c','m',prior,'configured',()=>undefined));
+ }
+ const {admin,calls,env}=setup();
+ const original=admin.rpc;admin.rpc=async(name:string,args:any)=>name==='read_project_chat_spend_policy'?{data:{mode:'guarded'}}:original(name,args);
+ const r=await projectChatSpendReadiness(admin,'org','owner','conversation','model',prior,'configured',env);
+ assertEquals(r.spend_readiness_status,'ready');assertEquals(r.prospective_allowance_status,'available');assertEquals(calls.length,1);
+ const invalid:any={rpc(){throw Error('Policy must not be read for an unavailable model')}};
+ assertEquals(await projectChatSpendReadiness(invalid,'o','a','c','m',prior,'price_unavailable',env),prior);
+});
