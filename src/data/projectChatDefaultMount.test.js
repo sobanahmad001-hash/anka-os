@@ -30,6 +30,7 @@ test('mounted project defaults to Chat, preserves explicit tabs and rejects late
     { loader: 'jsx', format: 'cjs', jsxFactory: 'React.createElement' }).code
   const module = { exports: {} }
   const require = name => {
+    if (name.includes('AuthContext')) return {useAuth:()=>({user:{id:'actor-a'}})}
     if (name.includes('OrganizationContext')) return { useOrganization: () => organization }
     if (name.includes('projectEngagementWorkspace')) return { projectEngagementWorkspace: repository }
     if (name.includes('workshopNavigation')) return navigation
@@ -46,12 +47,12 @@ test('mounted project defaults to Chat, preserves explicit tabs and rejects late
   const selected = () => propsOf(nodes(env.container).find(node => propsOf(node)?.role === 'tabpanel'))?.['aria-labelledby']
   await render()
   assert.equal(selected(), 'project-tab-discussion')
-  assert.deepEqual(nodes(env.container).filter(node=>propsOf(node)?.role==='tab').map(node=>node.textContent),['Chat','Work','Assets','Delivery','Overview'])
+  assert.deepEqual(nodes(env.container).filter(node=>propsOf(node)?.role==='tab').map(node=>node.textContent),['Chat','Plan & Work','Assets','Settings'])
   assert.match(env.container.textContent, /ProjectDiscussionPanel.jsx:org-a:project-a/)
   assert.match(env.container.textContent, /ContextConversationPanel.jsx::project-a:project_team/)
   for (const [tab, primary] of [['overview', 'overview'], ['discussion', 'discussion'], ['work', 'work'],
     ['project-tasks', 'work'], ['engagement-work', 'work'], ['planning', 'work'], ['retainer-planning', 'work'],
-    ['website-work','work'],['marketing-work','work'],['resources','overview'],['services', 'overview'], ['journey', 'overview'], ['outputs', 'outputs'], ['reviews', 'reviews'], ['activity', 'overview'],
+    ['website-work','work'],['marketing-work','work'],['resources','overview'],['services', 'overview'], ['journey', 'overview'], ['outputs', 'outputs'], ['reviews', 'work'], ['activity', 'overview'],
     ['unknown', 'overview'], ['', 'overview']]) {
     params = new URLSearchParams({ tab }); await render()
     assert.equal(selected(), `project-tab-${primary}`, tab)

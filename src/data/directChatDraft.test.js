@@ -24,3 +24,11 @@ test('private Design draft retains exact source IDs and rejects duplicates or ov
  assert.deepEqual(readDirectChatDraft(key,store,1001).attempt.design_attachment_ids,[source])
  for(const ids of [[source,source],[uuid(),uuid(),uuid(),uuid()],['not-a-uuid']])assert.throws(()=>writeDirectChatDraft(key,{...record,attempt:{...record.attempt,design_attachment_ids:ids}},store,1000))
 })
+test('stage draft retains immutable exact selection and rejects body/approval injection or attachment combination',()=>{
+ const store=storage(),key='stage-message',selection={version:1,organization_id:uuid(),project_id:uuid(),engagement_id:uuid(),plan_id:uuid(),group_id:uuid(),phase:'website.content',partition:{kind:'website_page',id:uuid(),architecture_version_id:uuid()},context_sha256:'a'.repeat(64)},version=uuid()
+ const record={new_conversation_id:uuid(),text:'Original request',attempt:{conversation_id:uuid(),client_request_id:uuid(),text:'Original request',isNew:true,project_stage_context:{selection,output_version_ids:[version]}}}
+ writeDirectChatDraft(key,record,store,1000);selection.context_sha256='b'.repeat(64)
+ const restored=readDirectChatDraft(key,store,1001);assert.equal(restored.attempt.project_stage_context.selection.context_sha256,'a'.repeat(64));assert.deepEqual(restored.attempt.project_stage_context.output_version_ids,[version])
+ for(const stage of [{...record.attempt.project_stage_context,body:'private'}, {...record.attempt.project_stage_context,output_version_ids:[version,version]}, {...record.attempt.project_stage_context,selection:{...selection,approved:true}}, {...record.attempt.project_stage_context,selection:{...selection,partition:{kind:'website_page',id:uuid()}}}])assert.throws(()=>writeDirectChatDraft(key,{...record,attempt:{...record.attempt,project_stage_context:stage}},store,1000))
+ for(const field of ['project_document_ids','design_attachment_ids'])assert.throws(()=>writeDirectChatDraft(key,{...record,attempt:{...record.attempt,[field]:[]}},store,1000))
+})

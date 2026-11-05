@@ -1,0 +1,272 @@
+{
+  "source": "Native SQL synthetic verification fixture, not production data",
+  "header": {
+    "state": "available",
+    "groups": [
+      {
+        "id": "cc000000-0000-4000-8000-000000000006",
+        "kind": "website",
+        "name": null,
+        "steps": [
+          {
+            "key": "draft",
+            "label": "Content",
+            "depends_on": [],
+            "service_id": "cc000000-0000-4000-8000-000000000012",
+            "department_id": "content",
+            "stage_contract": {
+              "output_type": null,
+              "artifact_type": "content"
+            },
+            "planned_quantity": 2,
+            "selected_service": true,
+            "source_review_required": true
+          }
+        ],
+        "cadence": null,
+        "bindings": [
+          {
+            "phase": "website.content",
+            "group_id": "cc000000-0000-4000-8000-000000000006",
+            "step_key": "draft",
+            "publication_id": "cc000000-0000-4000-8000-000000000007"
+          }
+        ],
+        "contributions": null,
+        "publication_id": "cc000000-0000-4000-8000-000000000007",
+        "configuration_id": "cc000000-0000-4000-8000-000000000021",
+        "configuration_current": true
+      }
+    ],
+    "phases": [
+      {
+        "key": "branding.brief",
+        "label": "Business brief",
+        "track": "branding",
+        "position": 1
+      },
+      {
+        "key": "branding.positioning",
+        "label": "Brand positioning and statement",
+        "track": "branding",
+        "position": 2
+      },
+      {
+        "key": "branding.services",
+        "label": "Product and service structure",
+        "track": "branding",
+        "position": 3
+      },
+      {
+        "key": "branding.identity",
+        "label": "Messaging and visual identity",
+        "track": "branding",
+        "position": 4
+      },
+      {
+        "key": "website.goals",
+        "label": "Goals and audience",
+        "track": "website",
+        "position": 5
+      },
+      {
+        "key": "website.keywords",
+        "label": "Keyword research and search intent",
+        "track": "website",
+        "position": 6
+      },
+      {
+        "key": "website.sitemap",
+        "label": "Sitemap and keyword-to-page mapping",
+        "track": "website",
+        "position": 7
+      },
+      {
+        "key": "website.content",
+        "label": "Page content",
+        "track": "website",
+        "position": 8
+      },
+      {
+        "key": "website.design",
+        "label": "Design",
+        "track": "website",
+        "position": 9
+      },
+      {
+        "key": "website.build",
+        "label": "Build",
+        "track": "website",
+        "position": 10
+      },
+      {
+        "key": "website.qa",
+        "label": "QA",
+        "track": "website",
+        "position": 11
+      },
+      {
+        "key": "website.publish",
+        "label": "Publish",
+        "track": "website",
+        "position": 12
+      },
+      {
+        "key": "website.marketing_ready",
+        "label": "Ready for marketing",
+        "track": "website",
+        "position": 13
+      },
+      {
+        "key": "marketing.goals",
+        "label": "Goals and baseline",
+        "track": "marketing",
+        "position": 14
+      },
+      {
+        "key": "marketing.opportunities",
+        "label": "Audience and keyword opportunities",
+        "track": "marketing",
+        "position": 15
+      },
+      {
+        "key": "marketing.plan",
+        "label": "Campaign and content plan",
+        "track": "marketing",
+        "position": 16
+      },
+      {
+        "key": "marketing.assets",
+        "label": "Create assets",
+        "track": "marketing",
+        "position": 17
+      },
+      {
+        "key": "marketing.review",
+        "label": "Review",
+        "track": "marketing",
+        "position": 18
+      },
+      {
+        "key": "marketing.launch",
+        "label": "Launch",
+        "track": "marketing",
+        "position": 19
+      },
+      {
+        "key": "marketing.measure",
+        "label": "Measure",
+        "track": "marketing",
+        "position": 20
+      },
+      {
+        "key": "marketing.improve",
+        "label": "Improve and next cycle",
+        "track": "marketing",
+        "position": 21
+      }
+    ],
+    "plan_id": "cc000000-0000-4000-8000-000000000030",
+    "version": 1,
+    "bindings": [
+      {
+        "phase": "website.content",
+        "group_id": "cc000000-0000-4000-8000-000000000006",
+        "step_key": "draft",
+        "publication_id": "cc000000-0000-4000-8000-000000000007"
+      }
+    ],
+    "read_only": true,
+    "can_manage": false,
+    "project_id": "cc000000-0000-4000-8000-000000000002",
+    "plan_version": 2,
+    "engagement_id": "cc000000-0000-4000-8000-000000000003",
+    "organization_id": "cc000000-0000-4000-8000-000000000001"
+  },
+  "unit": {
+    "page": {
+      "id": "cc000000-0000-4000-8000-000000000027",
+      "page_key": "home",
+      "initial_path": "home",
+      "architecture_artifact_id": "cc000000-0000-4000-8000-000000000025"
+    },
+    "state": "current",
+    "steps": [
+      {
+        "key": "draft",
+        "items": [
+          {
+            "output": {
+              "approval_id": "cc000000-0000-4000-8000-000000000042",
+              "approved_at": "2026-11-06T00:50:44.9456-08:00",
+              "artifact_id": "cc000000-0000-4000-8000-000000000040",
+              "output_type": null,
+              "artifact_type": "content",
+              "ai_use_allowed": false,
+              "version_number": 1,
+              "content_checksum": "b0f0d76a690a06713c8d91d6ab175c02074b3c4382d78daf17d9b0867e0038f6",
+              "approval_request_id": null,
+              "artifact_version_id": "cc000000-0000-4000-8000-000000000041"
+            },
+            "instance": 1,
+            "work_done": true,
+            "work_status": "done",
+            "missing_work": false,
+            "needs_update": false,
+            "work_item_id": "cc000000-0000-4000-8000-000000000051",
+            "work_required": true,
+            "output_approved": true,
+            "material_current": true,
+            "dependency_blocked": false
+          },
+          {
+            "output": {
+              "approval_id": "cc000000-0000-4000-8000-000000000042",
+              "approved_at": "2026-11-06T00:50:44.9456-08:00",
+              "artifact_id": "cc000000-0000-4000-8000-000000000040",
+              "output_type": null,
+              "artifact_type": "content",
+              "ai_use_allowed": false,
+              "version_number": 1,
+              "content_checksum": "b0f0d76a690a06713c8d91d6ab175c02074b3c4382d78daf17d9b0867e0038f6",
+              "approval_request_id": null,
+              "artifact_version_id": "cc000000-0000-4000-8000-000000000041"
+            },
+            "instance": 2,
+            "work_done": true,
+            "work_status": "done",
+            "missing_work": false,
+            "needs_update": false,
+            "work_item_id": "cc000000-0000-4000-8000-000000000052",
+            "work_required": true,
+            "output_approved": true,
+            "material_current": true,
+            "dependency_blocked": false
+          }
+        ],
+        "label": "Content",
+        "phase": "website.content",
+        "action": "run",
+        "reason": null,
+        "depends_on": []
+      }
+    ],
+    "plan_id": "cc000000-0000-4000-8000-000000000030",
+    "version": 1,
+    "group_id": "cc000000-0000-4000-8000-000000000006",
+    "keywords": null,
+    "partition": {
+      "id": "cc000000-0000-4000-8000-000000000027",
+      "kind": "website_page",
+      "architecture_version_id": "cc000000-0000-4000-8000-000000000026"
+    },
+    "read_only": true,
+    "occurrence": null,
+    "project_id": "cc000000-0000-4000-8000-000000000002",
+    "engagement_id": "cc000000-0000-4000-8000-000000000003",
+    "context_sha256": "9a4f03b5a280fcabbab33edd6489ef6050cbe557911c954fae6d6276e4a7ff7f",
+    "organization_id": "cc000000-0000-4000-8000-000000000001",
+    "configuration_id": "cc000000-0000-4000-8000-000000000021",
+    "performance_association": null
+  }
+}

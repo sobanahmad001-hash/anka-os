@@ -1,4 +1,4 @@
-import {useMemo,useState} from 'react'
+import {useEffect,useMemo,useState} from 'react'
 import {Link} from 'react-router-dom'
 import {projectDeliveryContext} from '../data/projectDeliveryContext.js'
 import WorkspaceDialog from './WorkspaceDialog.jsx'
@@ -8,9 +8,17 @@ export default function ProjectOutputLibrary(props){
  const project=props.workspace.project
  return <OutputLibrary key={[project.organization_id,project.id,props.workspace.engagement?.id].join(':')} {...props}/>
 }
-function OutputLibrary({workspace,busy=false,stale=false}){
+function OutputLibrary({workspace,busy=false,stale=false,exactSelection}){
  const context=useMemo(()=>projectDeliveryContext(workspace),[workspace])
  const [query,setQuery]=useState(''),[kind,setKind]=useState('all'),[selected,setSelected]=useState(null),[versionId,setVersionId]=useState('')
+ const [selectionError,setSelectionError]=useState('')
+ useEffect(()=>{
+  if(!exactSelection)return
+  if(exactSelection.scope?.organizationId!==context.organizationId||exactSelection.scope?.projectId!==context.projectId||exactSelection.scope?.engagementId!==context.engagementId)return
+  const item=context.outputs.find(row=>row.id===exactSelection.artifactId)
+  if(!item?.versions.some(row=>row.id===exactSelection.versionId)){setSelected(null);setVersionId('');setSelectionError('The selected exact output version is unavailable in this snapshot. Refresh project assets; no other version was substituted.');return}
+  setSelectionError('');setSelected({id:item.id,project:context.projectId,organization:context.organizationId});setVersionId(exactSelection.versionId)
+ },[exactSelection,context])
  const kinds=[...new Set(context.outputs.map(output=>output.artifact_type))].filter(Boolean).sort()
  const linked=id=>context.records.filter(record=>record.artifact?.id===id)
  const rows=context.outputs.filter(output=>(kind==='all'||output.artifact_type===kind)&&[output.title,output.artifact_type,...linked(output.id).map(record=>record.title)].some(value=>String(value||'').toLowerCase().includes(query.trim().toLowerCase())))
@@ -19,6 +27,7 @@ function OutputLibrary({workspace,busy=false,stale=false}){
  const open=row=>{setSelected({id:row.id,project:context.projectId,organization:context.organizationId});setVersionId('')}
  return <section className="workspace-card studio-output-library" aria-label="Project output library">
   <header><h2>Saved Workshop outputs</h2><p>Search the loaded project outputs and their linked work. Website pages and campaign assets keep their original workspaces above.</p></header>
+  {selectionError&&<p role="status">{selectionError}</p>}
   {stale&&<p role="status">This is the last loaded snapshot. Refresh the project before following an output or work link.</p>}
   <div className="studio-output-filters"><label>Search outputs<input type="search" maxLength={160} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Output or linked work title"/></label><label>Output type<select value={kind} onChange={e=>setKind(e.target.value)}><option value="all">All types</option>{kinds.map(type=><option key={type} value={type}>{label(type)}</option>)}</select></label></div>
   <p role="status">{rows.length} of {context.outputs.length} loaded outputs</p>

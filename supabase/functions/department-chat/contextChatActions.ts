@@ -1,5 +1,6 @@
 import type { createClient } from 'npm:@supabase/supabase-js@2.112.4'
 import { isContextChatUuid, validateContextChatListOffset, validateContextChatMessage, validateContextChatScope } from './contextChatScope.mjs'
+import { persistProjectStageChatMessage } from '../_shared/projectStageChatMessage.ts'
 
 type Client = ReturnType<typeof createClient<any>>
 type Json = Record<string, unknown>
@@ -50,7 +51,9 @@ async function accessibleConversation(admin: Client, organizationId: string, act
 export async function contextChatAction(
   action: string, admin: Client, body: Json, actorId: string,
   organizationId: string, membership: Json,
+  userClient?: Client,
 ) {
+  if (Object.hasOwn(body, 'project_stage_context') && !['start_context_conversation', 'append_context_human_message'].includes(action)) throw fail('Stage context belongs to an explicitly submitted human message')
   const activeMembership = { ...membership, user_id: actorId }
   if (action === 'start_context_conversation') {
     const scope = validateContextChatScope(body)
@@ -59,6 +62,10 @@ export async function contextChatAction(
     if (!isContextChatUuid(id) || !isContextChatUuid(requestId)) throw fail('Conversation and message request UUIDs are required')
     const message = validateContextChatMessage(body.message)
     await requireScopeAccess(admin, organizationId, activeMembership, scope)
+    if (Object.hasOwn(body, 'project_stage_context')) {
+      if (!userClient) throw fail('Authenticated stage transport is unavailable', 503)
+      return await persistProjectStageChatMessage(userClient, { ...body, organization_id: organizationId, project_id: scope.project_id, context_kind: scope.context_kind }, { start: true })
+    }
     const columns = 'id, organization_id, context_kind, project_id, engagement_id, department_id, owner_id, title, state, next_sequence, last_activity_at, created_at'
     const saved = await admin.rpc('start_context_chat_human_message', {
       p_conversation_id: id, p_organization_id: organizationId, p_actor_id: actorId,
@@ -174,7 +181,7 @@ export async function contextChatAction(
       throw fail('Conversation page cursor is invalid')
     }
     let query = admin.from('department_chat_messages')
-      .select('id, conversation_id, author_id, role, body, status, client_request_id, sequence, created_at, finished_at, in_reply_to_message_id')
+      .select('id, conversation_id, author_id, role, body, status, client_request_id, sequence, created_at, finished_at, in_reply_to_message_id, project_stage_context')
       .eq('organization_id', organizationId).eq('conversation_id', conversation.id)
     if (before !== undefined) query = query.lt('sequence', before)
     const { data, error } = await query.order('sequence', { ascending: false }).limit(101)
@@ -186,6 +193,12 @@ export async function contextChatAction(
     const requestId = string(body.client_request_id)
     if (!isContextChatUuid(requestId)) throw fail('Message request ID is required')
     const message = validateContextChatMessage(body.message)
+    if (Object.hasOwn(body, 'project_stage_context')) {
+      if (!userClient) throw fail('Authenticated stage transport is unavailable', 503)
+      if (conversation.context_kind !== 'project_team' || conversation.owner_id !== actorId || conversation.department_id || conversation.engagement_id
+        || body.project_id !== undefined && body.project_id !== conversation.project_id || body.context_kind !== undefined && body.context_kind !== conversation.context_kind) throw fail('Exact owned Project Chat stage context required', 403)
+      return await persistProjectStageChatMessage(userClient, { ...body, organization_id: organizationId, project_id: conversation.project_id, context_kind: conversation.context_kind }, { start: false })
+    }
     if (body.project_document_ids !== undefined) {
       if (body.design_attachment_ids !== undefined || conversation.context_kind !== 'project_team' || conversation.department_id || conversation.engagement_id || conversation.owner_id !== actorId
         || !Array.isArray(body.project_document_ids) || body.project_document_ids.length > 3 || body.project_document_ids.some(value => !isContextChatUuid(value))) throw fail('Exact owned Project Chat document sources required')

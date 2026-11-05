@@ -9,6 +9,7 @@ import { buildN7TextRequest, normalizeN7TextResult } from '../_shared/n7TextProv
 import type { N7TextProvider } from '../_shared/n7TextProvider.ts'
 import { buildPrivateConversationPrompt, canonicalOpenAiContext, privateConversationScope, requireOwnerAuthoredPromptTurns } from '../_shared/contextChatPrompt.js'
 import { loadVisibleWorkSummary } from '../_shared/contextChatRecordSummary.js'
+import { readProjectStageChatPromptContext } from '../_shared/projectStageChatMessage.ts'
 
 type Json = Record<string, any>
 type Client = ReturnType<typeof createClient<any>>
@@ -155,7 +156,7 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
       throw fail('Current team membership is required', 403)
     }
     const source = await one(admin.from('department_chat_messages')
-      .select('id,conversation_id,organization_id,owner_id,author_id,role,status,sequence')
+      .select('id,conversation_id,organization_id,owner_id,author_id,role,status,sequence,project_stage_context')
       .eq('id', messageId).eq('organization_id', organizationId)
       .eq('owner_id', user.id).maybeSingle(), 'Owner message')
     if (source.author_id !== user.id || source.role !== 'user' || source.status !== 'completed') {
@@ -294,6 +295,11 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
       ? await privateDesignMessageSources(admin, organizationId, user.id, conversation.id, messageId) : { manifest: [], text: '' }
     const projectSources = conversation.context_kind === 'project_team'
       ? await projectDocumentMessageSources(admin, organizationId, user.id, conversation.id, messageId) : { manifest: [], text: '' }
+    // Read the original server-pinned selection through the verified user client.
+    // Recovery above stays check-only; client-supplied stage flags never reach the prompt.
+    const stageContext = source.project_stage_context != null
+      ? await readProjectStageChatPromptContext(userClient, { organization_id: organizationId, project_id: conversation.project_id, conversation_id: conversation.id, message_id: messageId })
+      : { promptSuffix: '', manifest: {} }
     let briefTurn: Json | undefined
     if (body.design_brief !== undefined) {
       if (conversation.context_kind !== 'department_private' || conversation.department_id !== 'design') throw fail('Design draft assistance requires the private Design Workshop',403)
@@ -301,6 +307,7 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
         {visibility:'private',engagement_id:null},{kind:'private_design_chat',message_ids:orderedHistory.map(row=>row.id),source_message_id:messageId,attachment_sources:designSources.manifest})
     }
     const prompt = buildPrivateConversationPrompt(orderedHistory, messageId, conversation, canonicalContext) + designSources.text + projectSources.text
+      + stageContext.promptSuffix
       + (briefTurn ? '\nCURRENT UNAPPROVED DESIGN DRAFT JSON:\n'+briefTurn.snapshot : '')
     const turnInstruction=briefTurn?.instruction || instruction
     buildN7TextRequest({provider,model_id:configuration.model_id},'preflight',prompt,dispatchRequestId,await sha256(user.id),turnInstruction)
@@ -364,6 +371,7 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
     }
     const briefAudit=designBriefAudit(briefTurn,normalized.output_text)
     const manifest = {
+      ...stageContext.manifest,
       ...briefAudit.manifest,
       source_kind: 'private_context_conversation', context_kind: conversation.context_kind,
       canonical_context_included: includeCanonicalContext,
