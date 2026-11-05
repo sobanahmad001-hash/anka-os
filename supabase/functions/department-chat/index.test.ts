@@ -169,7 +169,7 @@ const ORGANIZATION_ID = '8a6d2c5e-2c99-4ec7-a92f-6d1bd877eb25'
 
 // Executes the real request, authorization, context, connector and RPC boundaries.
 // The query double honors predicates; RPC results are synthetic, not SQL execution.
-function selectedOrganizationFixture() {
+function selectedOrganizationFixture(options: {projectMessageProjection?: boolean} = {}) {
   const readinessEnv = new Map<string, string>()
   const rows: Record<string, any[]> = {}
   const queries: Array<{ table: string, filters: Array<[string, unknown]> }> = []
@@ -216,14 +216,17 @@ function selectedOrganizationFixture() {
   const admin: any = {
     from(table: string) {
       const filters: Array<[string, unknown]> = []
+      let selectedColumns: string[] | null = null
       const entry = { table, filters }; queries.push(entry)
       const path = (row: any, key: string) => key.split('.').reduce((value, field) => value?.[field], row)
       const result = (single = false) => {
         const matching = (rows[table] || []).filter(row => filters.every(([key, value]) => path(row, key) === value))
-        return { data: single ? matching[0] || null : matching, error: null, count: matching.length }
+        const projected = options.projectMessageProjection && table==='department_chat_messages' && selectedColumns
+          ? matching.map(row=>Object.fromEntries(selectedColumns!.filter(key=>key in row).map(key=>[key,row[key]]))) : matching
+        return { data: single ? projected[0] || null : projected, error: null, count: matching.length }
       }
       const query: any = {
-        select: (columns: string) => { if (table === 'profiles' && columns.split(',').map(x => x.trim()).includes('email')) throw new Error('column profiles.email does not exist'); return query },
+        select: (columns: string) => { selectedColumns=columns.split(',').map(key=>key.trim()); if (table === 'profiles' && columns.split(',').map(x => x.trim()).includes('email')) throw new Error('column profiles.email does not exist'); return query },
         eq: (key: string, value: unknown) => { filters.push([key, value]); return query },
         is: (key: string, value: unknown) => { filters.push([key, value]); return query },
         // No dated/approved rows are present in this fixture.
@@ -1922,3 +1925,28 @@ for (const newChat of [false,true]) for(const policyMode of ['guarded','usage_on
   assertEquals(fixture.providerCalls(),0)
   assertEquals(fixture.rpcCalls.some(call=>/reserve_|claim_|begin_|append_|apply_project/.test(call.name)),false)
 })
+
+Deno.test('saved context recovery DTO includes authoritative conversation identity under actual message projection without leaking cross-scope rows',async()=>{
+ const fixture=selectedOrganizationFixture({projectMessageProjection:true});
+ const conversation='b1000000-0000-4000-8000-000000000001',other='b1000000-0000-4000-8000-000000000002';
+ const message='b2000000-0000-4000-8000-000000000001',request='b3000000-0000-4000-8000-000000000001';
+ fixture.rows.department_chat_conversations.push({id:conversation,organization_id:'B',owner_id:'actor',context_kind:'project_team',project_id:'project-B',department_id:null,engagement_id:null,state:'active'});
+ fixture.rows.department_chat_messages=[
+  {id:message,organization_id:'B',conversation_id:conversation,owner_id:'actor',author_id:'actor',role:'user',status:'completed',client_request_id:request,sequence:1,body:'Synthetic saved turn'},
+  {id:'foreign-conversation',organization_id:'B',conversation_id:other,author_id:'actor',role:'user',status:'completed',client_request_id:request,sequence:1},
+  {id:'foreign-organization',organization_id:'A',conversation_id:conversation,author_id:'actor',role:'user',status:'completed',client_request_id:request,sequence:1},
+ ];
+ const response=await fixture.request({action:'get_context_conversation',organization_id:'B',conversation_id:conversation});
+ assertEquals(response.status,200);
+ const data=(await response.json()).data;
+ assertEquals(data.messages.length,1);assertEquals(data.conversation.id,conversation);assertEquals(data.conversation.owner_id,'actor');
+ const human=data.messages[0];
+ assertEquals(human.conversation_id,data.conversation.id);
+ assertEquals(human.id,message);assertEquals(human.client_request_id,request);assertEquals(human.author_id,'actor');assertEquals(human.role,'user');
+ assertEquals('owner_id' in human,false);assertEquals('organization_id' in human,false);
+ assertEquals(fixture.providerCalls(),0);assertEquals(fixture.rpcCalls.length,0);
+ const original=JSON.stringify(fixture.rows.department_chat_messages);
+ fixture.rows.department_chat_conversations.find(row=>row.id===conversation).owner_id='other-owner';
+ const denied=await fixture.request({action:'get_context_conversation',organization_id:'B',conversation_id:conversation});
+ assertEquals(denied.status,404);assertEquals(JSON.stringify(fixture.rows.department_chat_messages),original);
+});
