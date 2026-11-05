@@ -145,6 +145,7 @@ export default function DirectContextChat({ systemOwner, contextKind, department
   }, [videoOpen])
 
   const ownedConversationId = projectChat && selected?.state === 'active' && selected.owner_id === actorId ? selected.id : null
+  const allowanceProjectId = projectChat && systemOwner && !selected ? projectId : undefined
   const model = models.find(row => row.id === modelId)
   const ready = readiness?.model_configuration_id === modelId && readiness?.paid_execution_enabled === true
     && !directSendBlocker(readiness,{attempted:false})
@@ -300,20 +301,20 @@ export default function DirectContextChat({ systemOwner, contextKind, department
     }, 15_000)
     if (signal.aborted) stop()
     else Promise.resolve().then(() => departmentChat.getContextChatReadiness(
-      { model_configuration_id: modelId, ...(ownedConversationId ? {conversation_id:ownedConversationId} : {}) }, { ...requestScope, signal: controller.signal },
+      { model_configuration_id: modelId, ...(ownedConversationId ? {conversation_id:ownedConversationId} : allowanceProjectId ? {project_id:allowanceProjectId} : {}) }, { ...requestScope, signal: controller.signal },
     )).then(result => {
       if (!active || signal.aborted) return
       clearTimeout(timer)
       if (!result || typeof result.paid_execution_enabled !== 'boolean' || typeof result.spend_tracking_configured !== 'boolean' || typeof result.model_status !== 'string') {
         setReadinessState('failed'); return
       }
-      setReadiness({ ...result, model_configuration_id: modelId, conversation_id: ownedConversationId }); setReadinessState('resolved')
+      setReadiness({ ...result, model_configuration_id: modelId, conversation_id: ownedConversationId, project_id: allowanceProjectId }); setReadinessState('resolved')
     }).catch(() => {
       if (!active || signal.aborted) return
       clearTimeout(timer); setReadiness(null); setReadinessState('failed')
     })
     return () => { clearTimeout(timer); signal.removeEventListener('abort', stop); stop() }
-  }, [modelId, ownedConversationId, requestScope, signal, readinessAttempt])
+  }, [modelId, ownedConversationId, allowanceProjectId, requestScope, signal, readinessAttempt])
   const retryReadiness = () => {
     if (!current() || readinessState === 'loading') return
     setReadiness(null); setReadinessState('loading'); setReadinessAttempt(value => value + 1)
@@ -429,10 +430,10 @@ export default function DirectContextChat({ systemOwner, contextKind, department
         setNotice('')
         if(!model)throw Error('Choose an approved AI model. Your draft is kept. No message or AI request was sent.')
         let fresh
-        try{fresh=await readContextChatSendReadiness((input,options)=>departmentChat.getContextChatReadiness(input,{...requestScope,...options}),model.id,{signal,conversationId:ownedConversationId})}
+        try{fresh=await readContextChatSendReadiness((input,options)=>departmentChat.getContextChatReadiness(input,{...requestScope,...options}),model.id,{signal,conversationId:ownedConversationId,projectId:allowanceProjectId})}
         catch{if(!sameSend())return;setReadiness(null);setReadinessState('failed');throw Error('AI availability could not be verified. Retry AI availability. Your draft is kept. No message or AI request was sent.')}
         if(!sameSend())return
-        setReadiness({...fresh,model_configuration_id:modelId,conversation_id:ownedConversationId});setReadinessState('resolved')
+        setReadiness({...fresh,model_configuration_id:modelId,conversation_id:ownedConversationId,project_id:allowanceProjectId});setReadinessState('resolved')
         const blocker=directSendBlocker(fresh)
         if(blocker)throw Error(blocker)
       }
@@ -613,6 +614,7 @@ export default function DirectContextChat({ systemOwner, contextKind, department
 
     </header>{conversationLayout && <div className="content-conversation-toolbar" aria-label={`${departmentId ? departmentId[0].toUpperCase() + departmentId.slice(1) : 'Private'} conversation tools`}>{modelControl}<span>Text conversation</span></div>}{designWorkspace && <div className="design-conversation-top-toolbar" aria-label="Design conversation tools">{designWorkspace.toolbar}{designWorkspace.mode === 'chat' && (designWorkspace.toolbarTarget ? createPortal(modelControl,designWorkspace.toolbarTarget) : modelControl)}</div>}
     {error && <p role="alert" className="direct-chat-error">{error}</p>}
+    {projectChat && owner && (!selected || ownedConversationId) && systemOwner && model && readiness?.spend_readiness_status==='prior_cycle_reconciliation_required' && <button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy} aria-expanded={detailsOpen} onClick={()=>setDetailsOpen(true)}>Review Project Chat allowance</button>}
     {notice && <p role="status" className="direct-chat-notice">{notice}</p>}
     {attachmentRecoveryRequired&&<p role="status" className="direct-chat-notice">An attachment reading needs recovery. Reopen Attach files and recover the original reading before another AI request. No request is repeated automatically.</p>}
     {pending && <div className="direct-chat-notice direct-chat-recovery"><p>Check this send before sending again. Recovery never requests another AI reply.</p><button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy} onClick={recover}>Check recovery</button></div>}
@@ -624,10 +626,10 @@ export default function DirectContextChat({ systemOwner, contextKind, department
       {projectChat && <><div className="direct-project-settings-heading"><h3>Chat settings</h3><button type="button" onClick={() => { setDetailsOpen(false); historyButtonRef.current?.focus() }}>Close settings</button></div>{modelControl}<p>This conversation belongs to the current project. Extra project and organization data is shared only when you select it below.</p></>}
       {designWorkspace && <p>Sending includes the current editable brief for an unapproved draft update. Referenced files are not automatically sent. Media generation remains separate.</p>}
       <p>{privateDesign && designWorkspace ? 'Use Attach beside your message to upload and explicitly select sources. ' : contextKind === 'project_team' ? 'Use Attach files for spreadsheet import or selected document references. Originals stay owner-only; chat answers follow existing sharing. ' : 'Attachments are unavailable in this chat. '}Drafts stay only in this browser tab for up to one hour, including refresh; successful Send clears the draft. Closing this tab ends local draft recovery.</p>
-      {ownedConversationId && systemOwner && model && <Suspense fallback={null}><ProjectChatAllowance key={JSON.stringify([ownedConversationId,modelId])}
+      {projectChat && owner && (!selected || ownedConversationId) && systemOwner && model && <Suspense fallback={null}><ProjectChatAllowance key={JSON.stringify([projectId,ownedConversationId,modelId])}
         organizationId={organizationId} projectId={projectId} actorId={actorId} modelId={modelId} signal={signal}
-        projectLabel={projectJourney?.project?.name || label} modelLabel={model.label} readiness={readiness?.model_configuration_id===modelId && readiness.conversation_id===ownedConversationId ? readiness : null}
-        checkReadiness={()=>readContextChatSendReadiness((input,options)=>departmentChat.getContextChatReadiness(input,{...requestScope,...options}),modelId,{signal,conversationId:ownedConversationId})}
+        projectLabel={projectJourney?.project?.name || label} modelLabel={model.label} readiness={readiness?.model_configuration_id===modelId && readiness.conversation_id===ownedConversationId && readiness.project_id===allowanceProjectId ? readiness : null}
+        checkReadiness={()=>readContextChatSendReadiness((input,options)=>departmentChat.getContextChatReadiness(input,{...requestScope,...options}),modelId,{signal,conversationId:ownedConversationId,projectId:allowanceProjectId})}
         refresh={()=>setReadinessAttempt(n=>n+1)}/></Suspense>}      <p>AI replies are organization-billed. The service rechecks model approval, exact pricing, spend tracking and access before dispatch.</p>
       <p>{readinessState === 'failed' ? 'AI availability could not be checked. Retry AI availability before requesting a reply.' : !readiness ? 'Checking AI availability...' : ready ? 'AI configuration ready.' : directSendBlocker(readiness,{attempted:false})}</p>
       {readiness?.paid_execution_enabled === false && <p>AI execution is currently off.</p>}

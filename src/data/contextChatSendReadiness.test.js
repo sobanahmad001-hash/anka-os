@@ -3,6 +3,13 @@ import assert from 'node:assert/strict'
 import {contextChatSendBlocker,readContextChatSendReadiness} from './contextChatSendReadiness.js'
 const ready={paid_execution_enabled:true,spend_tracking_configured:true,model_status:'configured'}
 
+test('new-project readiness carries exact project without a conversation; saved conversation takes precedence',async()=>{
+ const seen=[];
+ await readContextChatSendReadiness(async value=>{seen.push(value);return ready},'model-A',{projectId:'project-A'});
+ await readContextChatSendReadiness(async value=>{seen.push(value);return ready},'model-A',{projectId:'project-B',conversationId:'conversation-A'});
+ assert.deepEqual(seen,[{model_configuration_id:'model-A',project_id:'project-A'},{model_configuration_id:'model-A',conversation_id:'conversation-A'}]);
+});
+
 test('project readiness carries only the selected conversation scope and never an allowance activation',async()=>{
  let input
  await readContextChatSendReadiness(async value=>{input=value;return ready},'model-A',{conversationId:'conversation-A'})

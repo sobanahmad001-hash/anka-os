@@ -2,6 +2,24 @@ import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.1
 import { projectChatAllowanceReadiness } from './index.ts'
 import { conservativePipelineCeiling, measuredPipelineTokenCost } from '../_shared/n6PipelineCost.ts'
 
+Deno.test('New Project Chat uses exact project authority without a saved conversation and retains all exposure checks', async () => {
+ for(const status of ['inactive','exhausted','scope_changed','source_changed','available']){
+  const {admin,calls,env}=setup('openai',{status});
+  const result=await projectChatAllowanceReadiness(admin,'org','owner','','model',prior,'configured',env,'project');
+  assertEquals(calls[0].name,'read_new_project_chat_allowance');
+  assertEquals(calls[0].args,{p_org:'org',p_actor:'owner',p_project:'project',p_model:'model',p_cost:Math.ceil(28096*3+1024*8)});
+  assertEquals(result.spend_readiness_status,status==='available'?'ready':'prior_cycle_reconciliation_required');
+ }
+});
+Deno.test('Saved Project Chat always retains exact conversation authority even if a project hint is supplied',async()=>{
+ const {admin,calls,env}=setup();
+ await projectChatAllowanceReadiness(admin,'org','owner','conversation','model',prior,'configured',env,'different-project');
+ assertEquals(calls[0].name,'read_project_chat_allowance');
+ assertEquals(calls[0].args.p_conversation,'conversation');
+ assertEquals('p_project' in calls[0].args,false);
+});
+
+
 const prior = { spend_guard_mode: 'provider_managed', spend_tracking_configured: true,
   spend_readiness_status: 'prior_cycle_reconciliation_required', reconciliation_sources: ['design_media'] }
 const prices: Record<string, any> = {

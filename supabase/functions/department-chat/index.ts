@@ -1574,10 +1574,10 @@ async function contextModelReadiness(admin: Client, organizationId: string, acto
 
 export async function projectChatAllowanceReadiness(admin: Client, organizationId: string, actorId: string,
   conversationId: string, configurationId: string, spendGuard: Json, modelStatus: string,
-  readEnv: (name: string) => string | undefined): Promise<Json> {
+  readEnv: (name: string) => string | undefined, projectId = ''): Promise<Json> {
   // No project context or usable current price/model means no alternative.
   if (spendGuard.spend_readiness_status !== 'prior_cycle_reconciliation_required'
-    || modelStatus !== 'configured' || !conversationId) return spendGuard
+    || modelStatus !== 'configured' || (!conversationId && !projectId)) return spendGuard
   const { data: model, error: modelError } = await admin.from('context_chat_organization_models')
     .select('id,model_id,connector_connection_id').eq('organization_id', organizationId).eq('id', configurationId).maybeSingle()
   if (modelError || !model) throw Object.assign(new Error('Scoped text allowance readiness is unavailable'), { status: 503 })
@@ -1591,8 +1591,9 @@ export async function projectChatAllowanceReadiness(admin: Client, organizationI
   // Advisory preflight requires room for the largest supported turn. Actual
   // reservation rechecks the same SQL predicate with its exact verified ceiling.
   const maximumTurn = conservativePipelineCeiling('x'.repeat(24000), price)
-  const { data, error } = await admin.rpc('read_project_chat_allowance', {
-    p_org: organizationId, p_actor: actorId, p_conversation: conversationId,
+  const { data, error } = await admin.rpc(conversationId ? 'read_project_chat_allowance' : 'read_new_project_chat_allowance', {
+    p_org: organizationId, p_actor: actorId,
+    ...(conversationId ? {p_conversation:conversationId} : {p_project:projectId}),
     p_model: configurationId, p_cost: maximumTurn,
   })
   if (error || !data || typeof data !== 'object'
@@ -2192,7 +2193,7 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
       const modelId = text(body.model_configuration_id, 80)
       const modelStatus = await contextModelReadiness(admin, organizationId, user.id, modelId, readEnv)
       const scopedSpend = await projectChatAllowanceReadiness(admin, organizationId, user.id,
-        text(body.conversation_id, 80), modelId, spendGuard, modelStatus, readEnv)
+        text(body.conversation_id, 80), modelId, spendGuard, modelStatus, readEnv, text(body.project_id,80))
       return response({ data: { paid_execution_enabled:
         dependencies.contextChatPaidExecutionEnabled
           ?? Deno.env.get('CONTEXT_CHAT_PAID_EXECUTION_ENABLED') === 'true',

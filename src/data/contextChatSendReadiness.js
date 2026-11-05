@@ -23,7 +23,7 @@ export function contextChatSendBlocker(value,{attempted=true}={}){
  return ''
 }
 // Advisory read only. The runner still rechecks authority, model, pricing and spend.
-export async function readContextChatSendReadiness(read,modelId,{signal,timeoutMs=15000,conversationId}={}){
+export async function readContextChatSendReadiness(read,modelId,{signal,timeoutMs=15000,conversationId,projectId}={}){
  if(!modelId)throw Error('Choose an approved AI model.'+unchanged)
  signal?.throwIfAborted()
  const controller=new AbortController()
@@ -34,6 +34,6 @@ export async function readContextChatSendReadiness(read,modelId,{signal,timeoutM
    signal?.addEventListener('abort',stop,{once:true})
    timer=setTimeout(()=>{controller.abort();reject(Error('AI availability check timed out. Retry AI availability.'+unchanged))},timeoutMs)
   })
-  return await Promise.race([Promise.resolve().then(()=>read({model_configuration_id:modelId,...(conversationId?{conversation_id:conversationId}:{})},{signal:controller.signal})),cancelled])
+  return await Promise.race([Promise.resolve().then(()=>read({model_configuration_id:modelId,...(conversationId?{conversation_id:conversationId}:projectId?{project_id:projectId}:{})},{signal:controller.signal})),cancelled])
  }finally{clearTimeout(timer);if(stop)signal?.removeEventListener('abort',stop)}
 }
