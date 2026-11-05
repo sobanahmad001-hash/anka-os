@@ -1572,6 +1572,25 @@ async function contextModelReadiness(admin: Client, organizationId: string, acto
   return 'configured'
 }
 
+export async function projectChatSpendReadiness(admin: Client, organizationId: string, actorId: string,
+  conversationId: string, modelId: string, spendGuard: Json, modelStatus: string,
+  readEnv: (name: string) => string | undefined, projectId = '') {
+  if ((!conversationId && !projectId) || !modelId || modelStatus !== 'configured') return spendGuard
+  const { data, error } = await admin.rpc('read_project_chat_spend_policy', {
+    p_org: organizationId, p_actor: actorId, p_model: modelId,
+    p_conversation: conversationId || null, p_project: conversationId ? null : projectId || null,
+  })
+  if (error || !data || !['guarded','usage_only'].includes(data.mode)) {
+    throw Object.assign(new Error('Project Chat spending policy could not be verified'), {status:503})
+  }
+  if (data.mode === 'usage_only') return {
+    ...spendGuard, spend_tracking_configured: true, spend_readiness_status: 'ready',
+    project_chat_spend_policy: 'usage_only',
+    unresolved_charges: ['prior_cycle_reconciliation_required','unmeasured_cost_reconciliation_required'].includes(String(spendGuard.spend_readiness_status)),
+  }
+  return projectChatAllowanceReadiness(admin,organizationId,actorId,conversationId,modelId,spendGuard,modelStatus,readEnv,projectId)
+}
+
 export async function projectChatAllowanceReadiness(admin: Client, organizationId: string, actorId: string,
   conversationId: string, configurationId: string, spendGuard: Json, modelStatus: string,
   readEnv: (name: string) => string | undefined, projectId = ''): Promise<Json> {
@@ -2192,7 +2211,7 @@ export async function handleRequest(request: Request, dependencies: { clients?: 
       const readEnv = dependencies.readinessEnv ?? (name => Deno.env.get(name))
       const modelId = text(body.model_configuration_id, 80)
       const modelStatus = await contextModelReadiness(admin, organizationId, user.id, modelId, readEnv)
-      const scopedSpend = await projectChatAllowanceReadiness(admin, organizationId, user.id,
+      const scopedSpend = await projectChatSpendReadiness(admin, organizationId, user.id,
         text(body.conversation_id, 80), modelId, spendGuard, modelStatus, readEnv, text(body.project_id,80))
       return response({ data: { paid_execution_enabled:
         dependencies.contextChatPaidExecutionEnabled

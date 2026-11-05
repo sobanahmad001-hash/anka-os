@@ -213,3 +213,51 @@ test('New Project Chat model switch discards stale readiness and scopes allowanc
  assert.match(ui.environment.container.textContent,/Review a separate Project Chat/);
  assert.equal(reads.at(-1).model_configuration_id,second);assert.deepEqual(ui.fixture.data.counters,{created:0,messages:0,run:0,recover:0});
 });
+
+test('initial empty Project Chat usage-only readiness needs no allowance or Send attempt and keeps paid-off/model gates',async t=>{
+ let allowed=true;
+ const ui=await mount(t,{surface:'project',role:'system_owner',readiness:async()=>({
+  paid_execution_enabled:allowed,spend_tracking_configured:true,model_status:'configured',
+  spend_readiness_status:'ready',project_chat_spend_policy:'usage_only',unresolved_charges:true}),
+  allowanceRpc:async()=>{throw Error('Usage-only must not call allowance APIs')}});
+ assert.equal(ui.named('Message').value,'');assert.equal(ui.button('Send').disabled,true);
+ assert.equal(ui.button('Review Project Chat allowance'),undefined);
+ assert.match(ui.environment.container.textContent,/Costs are calculated from provider tokens and verified rates, not final invoices/);
+ await ui.click('Chat settings');await flush();assert.equal(ui.button('Preview allowance'),undefined);
+ assert.deepEqual(ui.fixture.data.counters,{created:0,messages:0,run:0,recover:0});
+ await ui.type('A new explicitly typed text request');await ui.send();
+ assert.deepEqual(ui.fixture.data.counters,{created:1,messages:1,run:1,recover:0});
+ allowed=false;await ui.type('Keep this paid-off draft');await ui.send();
+ assert.equal(ui.named('Message').value,'Keep this paid-off draft');
+ assert.deepEqual(ui.fixture.data.counters,{created:1,messages:1,run:1,recover:0});
+ assert.match(ui.environment.container.textContent,/currently disabled/);
+});
+
+test('usage-only separates a newly typed message while original check-only identity and newer pending recovery survive late reply',async t=>{
+ const ui=await mount(t,{surface:'project',role:'system_owner',readiness:async()=>({
+  paid_execution_enabled:true,spend_tracking_configured:true,model_status:'configured',spend_readiness_status:'ready',
+  project_chat_spend_policy:'usage_only',unresolved_charges:true}),allowanceRpc:async()=>{throw Error('No allowance API')}});
+ const originalRecover=ui.fixture.runner.recover;
+ ui.fixture.runFailure=true;
+ await ui.type('Original saved request');await ui.send();
+ const original=ui.fixture.data.messages.find(x=>x.role==='user'),originalCalls=ui.fixture.data.counters.run;
+ ui.fixture.runner.recover=async()=>{ui.fixture.data.counters.recover++;throw Object.assign(Error('No submission recorded at check time'),{
+  outcome:'no_submission_recorded',mustNotSubmit:true,spendReadinessStatus:'prior_cycle_reconciliation_required',reconciliationSources:[]})};
+ await ui.click('Check recovery');await flush();
+ assert.ok(ui.button('Write a separate new message'));
+ assert.doesNotMatch(ui.environment.container.textContent,/review a separate allowance/i);
+ await ui.click('Write a separate new message');
+ assert.equal(ui.named('Message').value,'');assert.equal(ui.fixture.data.counters.run,originalCalls);
+ await ui.type('A separately typed newer request');await ui.send();
+ const newer=ui.fixture.data.messages.filter(x=>x.role==='user').at(-1);
+ assert.notEqual(newer.client_request_id,original.client_request_id);
+ const pendingBefore=[...ui.storage.values()].map(value=>JSON.parse(value)).find(record=>record.message_id===newer.id&&record.dispatch_request_id);
+ assert.ok(pendingBefore,'newer exact recovery identity stored before earlier reply arrives');
+ ui.fixture.recoveryAvailable=true;ui.fixture.runner.recover=originalRecover;
+ await ui.click('Check earlier saved reply');
+ assert.equal(ui.fixture.data.counters.run,originalCalls+1);
+ assert.ok(ui.button('Check recovery'),'newer pending request remains independently recoverable');
+ assert.equal(ui.named('Message').value,'A separately typed newer request');
+ assert([...ui.storage.values()].some(value=>value===JSON.stringify(pendingBefore)),'newer exact identity unchanged after earlier recovery');
+ assert(ui.fixture.data.messages.some(x=>x.role==='assistant'&&x.in_reply_to_message_id===original.id));
+});

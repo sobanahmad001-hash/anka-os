@@ -3,7 +3,7 @@ import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.1
 import { handleRequest, requireOpenAiCanonicalContextChoice, requirePrivateChatPaidExecution, requirePrivateConversationAccess } from './index.ts'
 import { buildPrivateConversationPrompt, canonicalOpenAiContext } from '../_shared/contextChatPrompt.js'
 
-Deno.test('actual Project Chat runner forwards full policy hold then keeps prior dispatch claim check-only',async()=>{
+for(const mode of ['guarded','usage_only']) Deno.test('actual Project Chat runner '+mode+' keeps prior dispatch claim check-only',async()=>{
  const id='bb000000-0000-4000-8000-000000000001'
  const oldFetch=globalThis.fetch,oldGet=Deno.env.get,oldRefresh=GoTrueClient.prototype.startAutoRefresh
  GoTrueClient.prototype.startAutoRefresh=async()=>{}
@@ -28,6 +28,7 @@ Deno.test('actual Project Chat runner forwards full policy hold then keeps prior
    else if(path.endsWith('/project_document_message_sources'))data=[]
    else if(path.endsWith('/append_context_chat_audited_reply'))return new Response(JSON.stringify({message:'No audit'}),{status:400,headers:{'content-type':'application/json'}})
    else if(path.endsWith('/recover_context_chat_completed_run'))data={status:'no_run'}
+   else if(path.endsWith('/read_project_chat_spend_policy'))data={mode}
    else if(path.endsWith('/read_project_chat_allowance'))data={status:'available',cap_microusd:1000000,remaining_microusd:1000000,historical_costs_unresolved:true,expires_at:new Date(Date.now()+3600000).toISOString()}
    else if(path.endsWith('/reserve_context_chat_budget'))data={status:'reserved',reservation_id:id}
    else if(path.endsWith('/claim_context_chat_dispatch'))data={status:'already_claimed',must_not_submit:true,claim_id:id}
@@ -37,8 +38,8 @@ Deno.test('actual Project Chat runner forwards full policy hold then keeps prior
   const response=await handleRequest(new Request('https://example.test',{method:'POST',headers:{Authorization:'Bearer offline'},body:JSON.stringify({organization_id:id,message_id:id,model_configuration_id:id,dispatch_request_id:id})}),(()=>{providers++;throw Error('No provider')}) as typeof fetch,{get:name=>config[name]})
   const result=await response.json()
   assertEquals(response.status,409,JSON.stringify({result,calls}));assertEquals(result.must_not_submit,true)
-  assertEquals(calls.find(call=>call.path.endsWith('/reserve_context_chat_budget'))?.args.p_max_cost_microusd,80480)
-  assertEquals(calls.find(call=>call.path.endsWith('/read_project_chat_allowance'))?.args.p_cost,80480)
+  assertEquals(calls.find(call=>call.path.endsWith('/reserve_context_chat_budget'))?.args.p_max_cost_microusd,mode==='usage_only'?20695:80480)
+  assertEquals(calls.find(call=>call.path.endsWith('/read_project_chat_allowance'))?.args.p_cost,mode==='usage_only'?undefined:80480)
   assertEquals(providers,0)
  }finally{await new Promise(r=>setTimeout(r,20));globalThis.fetch=oldFetch;Deno.env.get=oldGet;GoTrueClient.prototype.startAutoRefresh=oldRefresh}
 })

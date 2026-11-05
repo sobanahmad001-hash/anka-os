@@ -32,3 +32,20 @@ Deno.test('inactive or changed prospective policy cannot fall back to a cheaper 
   await assertRejects(()=>contextChatReservationCeiling(admin,'org','owner',scope,'model','help',price))
  }
 })
+
+Deno.test('usage-only Project Chat retains priced request ceiling without allowance while other contexts never select the policy',async()=>{
+ const {contextChatSpendReservationCeiling}=await import('./index.ts');const calls:any[]=[];
+ const admin:any={async rpc(name:string,args:any){calls.push({name,args});return{data:{mode:'usage_only'}}}};
+ assertEquals(await contextChatSpendReservationCeiling(admin,'org','owner',scope,'model','help',price),20490);
+ assertEquals(calls,[{name:'read_project_chat_spend_policy',args:{p_org:'org',p_actor:'owner',p_model:'model',p_conversation:'conversation',p_project:null}}]);
+ calls.length=0;for(const context_kind of ['department_private','organization'])
+  assertEquals(await contextChatSpendReservationCeiling(admin,'org','owner',{id:'c',context_kind},'model','help',price),20490);
+ assertEquals(calls.length,0);
+});
+Deno.test('Project Chat runner never accepts unknown policy or falls back after policy read failure',async()=>{
+ const {contextChatSpendReservationCeiling}=await import('./index.ts');
+ for(const response of [{data:null},{data:{mode:'unexpected'}},{data:{mode:'usage_only'},error:Error('denied')}]){
+  const admin:any={async rpc(){return response}};
+  await assertRejects(()=>contextChatSpendReservationCeiling(admin,'org','owner',scope,'model','help',price));
+ }
+});

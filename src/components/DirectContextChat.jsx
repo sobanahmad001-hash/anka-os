@@ -145,10 +145,14 @@ export default function DirectContextChat({ systemOwner, contextKind, department
   }, [videoOpen])
 
   const ownedConversationId = projectChat && selected?.state === 'active' && selected.owner_id === actorId ? selected.id : null
-  const allowanceProjectId = projectChat && systemOwner && !selected ? projectId : undefined
+  const allowanceProjectId = projectChat && !selected ? projectId : undefined
   const model = models.find(row => row.id === modelId)
   const ready = readiness?.model_configuration_id === modelId && readiness?.paid_execution_enabled === true
     && !directSendBlocker(readiness,{attempted:false})
+  const usageOnly = projectChat && readiness?.model_configuration_id===modelId
+    && readiness.conversation_id===ownedConversationId && readiness.project_id===allowanceProjectId
+    && readiness.project_chat_spend_policy==='usage_only'
+  const usageNotice = 'Usage tracking only. Costs are calculated from provider tokens and verified rates, not final invoices. No cumulative Project Chat spending limit. Unresolved charges remain recorded.'
   const canCanonical = model?.provider === 'openai' && contextKind === 'project_team'
   useEffect(()=>{
     const suggestion=designWorkspace?.draftSuggestion
@@ -492,7 +496,7 @@ export default function DirectContextChat({ systemOwner, contextKind, department
       let guidance = ''
       if (held) {
         const sources = reason.reconciliationSources
-        guidance = projectChat ? ' Earlier charges remain unresolved and may exceed estimates. Check current spending controls in Chat settings. An eligible owner can review a separate allowance for future messages.' : ' Ask an authorized administrator to verify the provider charges.'
+        guidance = usageOnly ? ' Earlier charges remain unresolved. New Project Chat text uses usage tracking only; the original request remains check-only.' : projectChat ? ' Earlier charges remain unresolved and may exceed estimates. Check current spending controls in Chat settings. An eligible owner can review a separate allowance for future messages.' : ' Ask an authorized administrator to verify the provider charges.'
         if (Array.isArray(sources) && sources.includes('design_media')) {
           guidance += ' The read-only Design media spending view is under Connections & administration → Models, usage & advanced configuration.'
           if (sources.some(source => source !== 'design_media')) guidance += ' That view covers only the media portion.'
@@ -510,7 +514,7 @@ export default function DirectContextChat({ systemOwner, contextKind, department
   }
   const canComposeSeparately = projectChat && ownedConversationId && pending?.conversation_id===ownedConversationId &&
     pending.message_id && observedRequest && observedRequest===pending.dispatch_request_id && ready &&
-    readiness?.conversation_id===ownedConversationId && readiness.prospective_allowance_status==='available'
+    readiness?.conversation_id===ownedConversationId && (usageOnly || readiness.prospective_allowance_status==='available')
   function startSeparateMessage() {
     if(!canComposeSeparately || lock.current || !current())return
     const original=pendingRef.current
@@ -614,7 +618,7 @@ export default function DirectContextChat({ systemOwner, contextKind, department
 
     </header>{conversationLayout && <div className="content-conversation-toolbar" aria-label={`${departmentId ? departmentId[0].toUpperCase() + departmentId.slice(1) : 'Private'} conversation tools`}>{modelControl}<span>Text conversation</span></div>}{designWorkspace && <div className="design-conversation-top-toolbar" aria-label="Design conversation tools">{designWorkspace.toolbar}{designWorkspace.mode === 'chat' && (designWorkspace.toolbarTarget ? createPortal(modelControl,designWorkspace.toolbarTarget) : modelControl)}</div>}
     {error && <p role="alert" className="direct-chat-error">{error}</p>}
-    {projectChat && owner && (!selected || ownedConversationId) && systemOwner && model && readiness?.spend_readiness_status==='prior_cycle_reconciliation_required' && <button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy} aria-expanded={detailsOpen} onClick={()=>setDetailsOpen(true)}>Review Project Chat allowance</button>}
+    {projectChat && !usageOnly && owner && (!selected || ownedConversationId) && systemOwner && model && readiness?.spend_readiness_status==='prior_cycle_reconciliation_required' && <button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy} aria-expanded={detailsOpen} onClick={()=>setDetailsOpen(true)}>Review Project Chat allowance</button>}
     {notice && <p role="status" className="direct-chat-notice">{notice}</p>}
     {attachmentRecoveryRequired&&<p role="status" className="direct-chat-notice">An attachment reading needs recovery. Reopen Attach files and recover the original reading before another AI request. No request is repeated automatically.</p>}
     {pending && <div className="direct-chat-notice direct-chat-recovery"><p>Check this send before sending again. Recovery never requests another AI reply.</p><button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy} onClick={recover}>Check recovery</button></div>}
@@ -622,11 +626,11 @@ export default function DirectContextChat({ systemOwner, contextKind, department
     {savedChecks.filter(row=>row.conversation_id===ownedConversationId && row.dispatch_request_id!==pending?.dispatch_request_id).map(row=>
       <div key={row.dispatch_request_id} className="direct-chat-notice"><p>Earlier saved message · {messages.find(message=>message.id===row.message_id)?.body?.slice(0,100) || 'Reply unresolved'}</p>
         <button type="button" disabled={busy} onClick={()=>checkSavedMessage(row)}>Check earlier saved reply</button></div>)}
-    {detailsOpen && <aside className="direct-chat-details" aria-label="Chat details">
+    {detailsOpen && <aside className="direct-chat-details" aria-label="Chat details">{usageOnly && <p>{usageNotice}</p>}
       {projectChat && <><div className="direct-project-settings-heading"><h3>Chat settings</h3><button type="button" onClick={() => { setDetailsOpen(false); historyButtonRef.current?.focus() }}>Close settings</button></div>{modelControl}<p>This conversation belongs to the current project. Extra project and organization data is shared only when you select it below.</p></>}
       {designWorkspace && <p>Sending includes the current editable brief for an unapproved draft update. Referenced files are not automatically sent. Media generation remains separate.</p>}
       <p>{privateDesign && designWorkspace ? 'Use Attach beside your message to upload and explicitly select sources. ' : contextKind === 'project_team' ? 'Use Attach files for spreadsheet import or selected document references. Originals stay owner-only; chat answers follow existing sharing. ' : 'Attachments are unavailable in this chat. '}Drafts stay only in this browser tab for up to one hour, including refresh; successful Send clears the draft. Closing this tab ends local draft recovery.</p>
-      {projectChat && owner && (!selected || ownedConversationId) && systemOwner && model && <Suspense fallback={null}><ProjectChatAllowance key={JSON.stringify([projectId,ownedConversationId,modelId])}
+      {projectChat && !usageOnly && owner && (!selected || ownedConversationId) && systemOwner && model && <Suspense fallback={null}><ProjectChatAllowance key={JSON.stringify([projectId,ownedConversationId,modelId])}
         organizationId={organizationId} projectId={projectId} actorId={actorId} modelId={modelId} signal={signal}
         projectLabel={projectJourney?.project?.name || label} modelLabel={model.label} readiness={readiness?.model_configuration_id===modelId && readiness.conversation_id===ownedConversationId && readiness.project_id===allowanceProjectId ? readiness : null}
         checkReadiness={()=>readContextChatSendReadiness((input,options)=>departmentChat.getContextChatReadiness(input,{...requestScope,...options}),modelId,{signal,conversationId:ownedConversationId,projectId:allowanceProjectId})}
@@ -672,7 +676,7 @@ export default function DirectContextChat({ systemOwner, contextKind, department
         <div className="direct-chat-toolbar">{designWorkspace?.attachControl}{projectChat&&<button type="button" disabled={busy||videoBusy||setupBusy||journeyLocked||Boolean(pending)||!owner} aria-expanded={setupOpen} onClick={()=>setSetupOpen(x=>!x)}>Set up project</button>}{projectChat && <button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || !owner || Boolean(selected && selected.state !== 'active')} onClick={() => { closeProjectTools(); setImportOpened(true);setImportOpen(true) }}>Attach files</button>}{!compactConversation && <label>Work type<select aria-label="Work type" value="text" disabled><option value="text">Text</option></select></label>}
           {!compactConversation && modelControl}
           <button type="submit" className="direct-chat-send" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || attachmentRecoveryRequired || !draft.trim() || Boolean(selected && selected.state !== 'active')}>{busy ? 'Working…' : owner ? 'Send' : 'Save message'}</button></div>{owner&&!ready&&<button className="direct-chat-save-note" type="button" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || attachmentRecoveryRequired || !draft.trim() || Boolean(selected && selected.state !== 'active')} onClick={event=>send(event,{humanOnly:true})}>Save message without AI</button>}
-        <p>{owner ? readinessState === 'failed' ? 'AI availability could not be checked. Retry the check, or explicitly save without AI.' : !readiness ? 'Checking AI availability. Send will check again before requesting a reply.' : ready ? projectChat ? 'Organization-billed AI reply' : `${model?.provider} · Organization-billed replies` : directSendBlocker(readiness,{attempted:false}) : 'Shared chat · Human replies only'} · {privateDesign && designWorkspace ? `${designAttachmentIds.length} selected reference(s)` : contextKind === 'project_team' ? `${projectDocumentIds.length} selected document(s)` : 'Attachments unavailable'}</p>{owner && readinessState !== 'loading' && !ready && <button type="button" disabled={busy||Boolean(pending)} onClick={retryReadiness}>Retry AI availability</button>}
+        <p>{owner ? readinessState === 'failed' ? 'AI availability could not be checked. Retry the check, or explicitly save without AI.' : !readiness ? 'Checking AI availability. Send will check again before requesting a reply.' : ready ? projectChat ? usageOnly ? usageNotice : 'Organization-billed AI reply' : `${model?.provider} · Organization-billed replies` : directSendBlocker(readiness,{attempted:false}) : 'Shared chat · Human replies only'} · {privateDesign && designWorkspace ? `${designAttachmentIds.length} selected reference(s)` : contextKind === 'project_team' ? `${projectDocumentIds.length} selected document(s)` : 'Attachments unavailable'}</p>{owner && readinessState !== 'loading' && !ready && <button type="button" disabled={busy||Boolean(pending)} onClick={retryReadiness}>Retry AI availability</button>}
       </form></div>
       {output && <aside ref={outputId && mobileDrawer ? drawerRef : undefined} className="direct-chat-output" role={mobileDrawer ? 'dialog' : undefined} aria-modal={mobileDrawer ? true : undefined} onKeyDown={drawerKeyDown} aria-label="Saved reply output" data-source-message-id={output.id}><div><h3>Saved reply</h3><button ref={outputClose} type="button" onClick={() => setOutputId('')}>Close output</button></div><p>{output.body}</p><small>Saved conversation reply · Read-only preview</small></aside>}
     </div>
