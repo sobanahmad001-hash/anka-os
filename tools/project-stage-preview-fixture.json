@@ -1,0 +1,398 @@
+{
+  "source": "Synthetic native SQL test result projected by manager adapter; not live project data",
+  "plan": {
+    "state": "available",
+    "planId": "cc000000-0000-4000-8000-000000000030",
+    "planVersion": 2,
+    "canManage": false,
+    "tracks": [
+      {
+        "id": "branding",
+        "title": "Branding foundation",
+        "description": "Shared direction for Website and Marketing.",
+        "stages": [
+          {
+            "id": "branding.brief",
+            "title": "Business brief",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          },
+          {
+            "id": "branding.positioning",
+            "title": "Brand positioning and statement",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          },
+          {
+            "id": "branding.services",
+            "title": "Product and service structure",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          },
+          {
+            "id": "branding.identity",
+            "title": "Messaging and visual identity",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          }
+        ]
+      },
+      {
+        "id": "website",
+        "title": "Website",
+        "description": "Each registered page progresses independently.",
+        "stages": [
+          {
+            "id": "website.goals",
+            "title": "Goals and audience",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          },
+          {
+            "id": "website.keywords",
+            "title": "Keyword research and search intent",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          },
+          {
+            "id": "website.sitemap",
+            "title": "Sitemap and keyword-to-page mapping",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          },
+          {
+            "id": "website.content",
+            "title": "Page content",
+            "configured": true,
+            "status": "done",
+            "progress": {
+              "completed": 2,
+              "total": 2,
+              "label": "current required items complete",
+              "approved": 2
+            },
+            "needsUpdate": false,
+            "outputs": [
+              {
+                "id": "cc000000-0000-4000-8000-000000000041",
+                "artifactId": "cc000000-0000-4000-8000-000000000040",
+                "versionId": "cc000000-0000-4000-8000-000000000041",
+                "title": "Recorded content",
+                "versionLabel": "Version 1",
+                "approved": true,
+                "scope": {
+                  "organizationId": "cc000000-0000-4000-8000-000000000001",
+                  "projectId": "cc000000-0000-4000-8000-000000000002",
+                  "engagementId": "cc000000-0000-4000-8000-000000000003"
+                },
+                "path": null
+              }
+            ],
+            "excluded": [],
+            "blockedReason": null,
+            "items": [
+              {
+                "id": "cc000000-0000-4000-8000-000000000006:website_page:cc000000-0000-4000-8000-000000000027",
+                "title": "home",
+                "configured": true,
+                "status": "done",
+                "progress": {
+                  "completed": 2,
+                  "total": 2,
+                  "label": "current required items complete",
+                  "approved": 2
+                },
+                "needsUpdate": false,
+                "outputs": [
+                  {
+                    "id": "cc000000-0000-4000-8000-000000000041",
+                    "artifactId": "cc000000-0000-4000-8000-000000000040",
+                    "versionId": "cc000000-0000-4000-8000-000000000041",
+                    "title": "Recorded content",
+                    "versionLabel": "Version 1",
+                    "approved": true,
+                    "scope": {
+                      "organizationId": "cc000000-0000-4000-8000-000000000001",
+                      "projectId": "cc000000-0000-4000-8000-000000000002",
+                      "engagementId": "cc000000-0000-4000-8000-000000000003"
+                    },
+                    "path": null
+                  }
+                ],
+                "excluded": [],
+                "blockedReason": null,
+                "partition": {
+                  "id": "cc000000-0000-4000-8000-000000000027",
+                  "kind": "website_page",
+                  "architecture_version_id": "cc000000-0000-4000-8000-000000000026"
+                },
+                "context": {
+                  "version": 1,
+                  "organization_id": "cc000000-0000-4000-8000-000000000001",
+                  "project_id": "cc000000-0000-4000-8000-000000000002",
+                  "engagement_id": "cc000000-0000-4000-8000-000000000003",
+                  "plan_id": "cc000000-0000-4000-8000-000000000030",
+                  "group_id": "cc000000-0000-4000-8000-000000000006",
+                  "phase": "website.content",
+                  "partition": {
+                    "id": "cc000000-0000-4000-8000-000000000027",
+                    "kind": "website_page",
+                    "architecture_version_id": "cc000000-0000-4000-8000-000000000026"
+                  },
+                  "context_sha256": "a1b418965950d27bf617ac015ca1857983bd8a843d40ca108ad08af0cbb887f3"
+                },
+                "keywords": [],
+                "intent": "",
+                "keywordTargets": null,
+                "performanceAssociation": null,
+                "occurrence": null
+              }
+            ],
+            "scopeLabel": "Only 1 loaded partition; not a whole-project total.",
+            "context": {
+              "version": 1,
+              "organization_id": "cc000000-0000-4000-8000-000000000001",
+              "project_id": "cc000000-0000-4000-8000-000000000002",
+              "engagement_id": "cc000000-0000-4000-8000-000000000003",
+              "plan_id": "cc000000-0000-4000-8000-000000000030",
+              "group_id": "cc000000-0000-4000-8000-000000000006",
+              "phase": "website.content",
+              "partition": {
+                "id": "cc000000-0000-4000-8000-000000000027",
+                "kind": "website_page",
+                "architecture_version_id": "cc000000-0000-4000-8000-000000000026"
+              },
+              "context_sha256": "a1b418965950d27bf617ac015ca1857983bd8a843d40ca108ad08af0cbb887f3"
+            }
+          },
+          {
+            "id": "website.design",
+            "title": "Design",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          },
+          {
+            "id": "website.build",
+            "title": "Build",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          },
+          {
+            "id": "website.qa",
+            "title": "QA",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          },
+          {
+            "id": "website.publish",
+            "title": "Publish",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          },
+          {
+            "id": "website.marketing_ready",
+            "title": "Ready for marketing",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          }
+        ]
+      },
+      {
+        "id": "marketing",
+        "title": "Marketing cycles",
+        "description": "Existing campaign assets and recurring cycles.",
+        "stages": [
+          {
+            "id": "marketing.goals",
+            "title": "Goals and baseline",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          },
+          {
+            "id": "marketing.opportunities",
+            "title": "Audience and keyword opportunities",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          },
+          {
+            "id": "marketing.plan",
+            "title": "Campaign and content plan",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          },
+          {
+            "id": "marketing.assets",
+            "title": "Create assets",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          },
+          {
+            "id": "marketing.review",
+            "title": "Review",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          },
+          {
+            "id": "marketing.launch",
+            "title": "Launch",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          },
+          {
+            "id": "marketing.measure",
+            "title": "Measure",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          },
+          {
+            "id": "marketing.improve",
+            "title": "Improve and next cycle",
+            "configured": false,
+            "status": null,
+            "progress": null,
+            "needsUpdate": false,
+            "outputs": [],
+            "blockedReason": null,
+            "items": [],
+            "scopeLabel": null,
+            "context": null
+          }
+        ]
+      }
+    ],
+    "readOnly": true
+  }
+}

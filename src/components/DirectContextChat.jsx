@@ -1,3 +1,5 @@
+import {createProjectStagePlanRepository} from '../data/projectStagePlanRepository.js'
+import {createRepositoryProjectStageChatContextAdapter,selectedProjectStageContext} from '../data/projectStageChatContext.js'
 import { readOnlyChatRequest } from '../data/readOnlyChatRequest.js'
 import WorkspaceDialog from './WorkspaceDialog.jsx'
 import {projectDeliveryContext,projectDeliveryIntent} from '../data/projectDeliveryContext.js'
@@ -10,6 +12,7 @@ import { createPortal } from 'react-dom'
 import { preferredApprovedModel, openAiModelLabel } from '../data/openaiModelPolicy.js'
 import { contextChatSendBlocker, readContextChatSendReadiness } from '../data/contextChatSendReadiness.js'
 import { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+const ProjectStagePlanPanel = lazy(() => import('./ProjectStagePlanPanel.jsx'))
 const ProjectSetupPanel = lazy(() => import('./ProjectSetupPanel.jsx'))
 const ProjectContentJourney = lazy(() => import('./ProjectContentJourney.jsx'))
 const ProjectWebsiteExecution = lazy(() => import('./ProjectWebsiteExecution.jsx'))
@@ -45,7 +48,7 @@ function directSendBlocker(value, options) {
   return contextChatSendBlocker(value,options)
 }
 const ProjectChatAllowance = lazy(() => import('./ProjectChatAllowance.jsx'))
-export default function DirectContextChat({ systemOwner, contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError, initialConversation, onConversationListChange, onNavigationBusyChange, onDraftDirtyChange, designWorkspace, conversationLayout = false, onProjectRequest, onProjectChanged, projectJourney, onOpenProjectWork, onOpenManualSetup }) {
+export default function DirectContextChat({ systemOwner, contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError, initialConversation, onConversationListChange, onNavigationBusyChange, onDraftDirtyChange, designWorkspace, conversationLayout = false, onProjectRequest, onProjectChanged, projectJourney, onOpenProjectWork, onOpenManualSetup, projectStageSelection, onProjectStageSelectionConsumed, onOpenStageOutput }) {
   const workshopHistory = useContext(WorkshopChatHistoryContext)
   const hasExternalHistory = Boolean(workshopHistory?.render || workshopHistory?.externalHistory)
   const actorId = user.id
@@ -55,11 +58,13 @@ export default function DirectContextChat({ systemOwner, contextKind, department
   const [journeyActivity,setJourneyActivity]=useState({dirty:false,busy:false}),journeyLock=useRef(false)
   const [assetRelationsOpen,setAssetRelationsOpen]=useState(false),[assetRelationsLocked,setAssetRelationsLocked]=useState(false)
   const [websiteActivity,setWebsiteActivity]=useState({dirty:false,busy:false})
-  const reportWebsiteActivity=useCallback(value=>{journeyLock.website=Boolean(value.dirty||value.busy);journeyLock.current=Boolean(journeyLock.content||journeyLock.asset||journeyLock.website);setWebsiteActivity(value)},[])
-  const reportJourneyActivity=useCallback(value=>{journeyLock.content=Boolean(value.dirty||value.busy);journeyLock.current=Boolean(journeyLock.content||journeyLock.asset||journeyLock.website);setJourneyActivity(value)},[])
-  const reportAssetRelationsLock=useCallback(value=>{journeyLock.asset=Boolean(value);journeyLock.current=Boolean(journeyLock.asset||journeyLock.content||journeyLock.website);setAssetRelationsLocked(Boolean(value))},[])
-  const journeyLocked=journeyActivity.dirty||journeyActivity.busy||assetRelationsLocked||websiteActivity.dirty||websiteActivity.busy
+  const reportWebsiteActivity=useCallback(value=>{journeyLock.website=Boolean(value.dirty||value.busy);journeyLock.current=Boolean(journeyLock.content||journeyLock.asset||journeyLock.website||journeyLock.stage);setWebsiteActivity(value)},[])
+  const reportJourneyActivity=useCallback(value=>{journeyLock.content=Boolean(value.dirty||value.busy);journeyLock.current=Boolean(journeyLock.content||journeyLock.asset||journeyLock.website||journeyLock.stage);setJourneyActivity(value)},[])
+  const reportAssetRelationsLock=useCallback(value=>{journeyLock.asset=Boolean(value);journeyLock.current=Boolean(journeyLock.asset||journeyLock.content||journeyLock.website||journeyLock.stage);setAssetRelationsLocked(Boolean(value))},[])
+  const [stageActivity,setStageActivity]=useState({busy:false,dirty:false})
+  const journeyLocked=stageActivity.busy||stageActivity.dirty||journeyActivity.dirty||journeyActivity.busy||assetRelationsLocked||websiteActivity.dirty||websiteActivity.busy
   const reportSetupBusy=useCallback(value=>{setupLock.current=Boolean(value);setSetupBusy(Boolean(value))},[])
+  const reportStageActivity=useCallback(value=>{journeyLock.stage=Boolean(value.busy||value.dirty);journeyLock.current=Boolean(journeyLock.stage||journeyLock.content||journeyLock.asset||journeyLock.website||journeyLock.stage);setStageActivity(value)},[])
   const [workDetailsOpen,setWorkDetailsOpen]=useState(false)
   const deliveryContext=useMemo(()=>projectChat && projectJourney ? projectDeliveryContext(projectJourney) : null,[projectChat,projectJourney])
   const currentStage=deliveryContext?.stages.find(stage=>['in_progress','active'].includes(stage.status))
@@ -133,6 +138,41 @@ export default function DirectContextChat({ systemOwner, contextKind, department
   const pendingRef = useRef(initial.recovery)
   const [websiteSendContext,setWebsiteSendContext]=useState(null)
   useEffect(()=>{setWebsiteSendContext(null)},[recoveryKey,selected?.id,newId])
+  const initialRestoreTarget=initial.recovery?.conversation_id || initial.conversation?.id || restoredDraft?.conversation_id || initialAttachmentHint || savedConversationHint
+  const [stageRestorePending,setStageRestorePending]=useState(Boolean(initialRestoreTarget))
+  const stageEvent=useRef({id:null,pending:null})
+  const [selectedStage,setSelectedStage]=useState(null)
+  const stageScope={organizationId,projectId,engagementId:projectJourney?.engagement?.id}
+  const stageScopeRef=useRef('');stageScopeRef.current=[organizationId,projectId,projectJourney?.engagement?.id].join(':')
+  const stageStorageKey=recoveryKey+':stage:'+ (selected?.id||newId)
+  useEffect(()=>{if(!projectChat)return;try{const saved=JSON.parse(sessionStorage.getItem(stageStorageKey));if(saved){selectedProjectStageContext(saved.context,{organization_id:organizationId,project_id:projectId,engagement_id:projectJourney?.engagement?.id});setSelectedStage(saved)}else setSelectedStage(null)}catch{setSelectedStage(null);setError('Saved stage context is unavailable. Select the stage again before using it.')}},[stageStorageKey,projectChat,organizationId,projectId,projectJourney?.engagement?.id])
+  async function chooseProjectStage(value){
+   if(lock.current||pendingRef.current||setupLock.current||journeyLock.current||videoLock.current||!current())return
+   const context=value.item?.context||value.stage?.context
+   if(!context){setError('Map this stage and load an exact page, cycle or foundation before continuing in Chat.');return}
+   await exclusive(async()=>{
+    const token=revision.current,scopeToken=stageScopeRef.current,adapter=createRepositoryProjectStageChatContextAdapter(createProjectStagePlanRepository(supabase))
+    const checked=await adapter.beforeSend({text:draft.trim()||'Inspect selected stage context.',selected:context,scope:stageScope,versionIds:[]},{signal})
+    if(!current()||revision.current!==token||stageScopeRef.current!==scopeToken)return
+    const next={context:checked.stage.context,inspection:checked.stage,stageTitle:value.stage.title,trackTitle:value.track.title,itemTitle:value.item?.title||'',availableOutputs:(value.item?.outputs||value.stage.outputs||[]).slice(0,20),versionIds:[]}
+    sessionStorage.setItem(stageStorageKey,JSON.stringify(next));setSelectedStage(next);setWorkDetailsOpen(false);setNotice('Stage selected. Your existing message is unchanged.');globalThis.requestAnimationFrame?.(()=>rootRef.current?.querySelector('textarea[aria-label="Message"]')?.focus())
+   })
+  }
+  useEffect(()=>{
+    const id=projectStageSelection?.selectionId
+    if(id && stageEvent.current.id!==id){
+      stageEvent.current={id,pending:{value:projectStageSelection,scope:stageScopeRef.current,revision:revision.current,target:stageRestorePending?initialRestoreTarget:(selected?.id||newId)}}
+    }
+    const event=stageEvent.current.pending
+    if(!event)return
+    if(event.scope!==stageScopeRef.current || event.revision!==revision.current){stageEvent.current.pending=null;onProjectStageSelectionConsumed?.(event.value.selectionId);return}
+    if(stageRestorePending || busy || pending || setupBusy || videoBusy || journeyActivity.busy)return
+    stageEvent.current.pending=null
+    if(event.target!==(selected?.id||newId)){onProjectStageSelectionConsumed?.(event.value.selectionId);setError('The conversation changed before the stage could be selected. Select the stage again.');return}
+    chooseProjectStage(event.value).finally(()=>onProjectStageSelectionConsumed?.(event.value.selectionId))
+  // A selection is consumed once in its original scope/conversation, after restoration.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[projectStageSelection?.selectionId,stageRestorePending,busy,pending,setupBusy,videoBusy,journeyActivity.busy,selected?.id,newId,organizationId,projectId,projectJourney?.engagement?.id])
   const websitePromptSeen=useRef('')
   const attempt = useRef(restoredDraft?.attempt && restoredDraft.attempt.client_request_id === initial.recovery?.client_request_id && restoredDraft.attempt.conversation_id === initial.recovery?.conversation_id ? restoredDraft.attempt : null)
   const drafts = useRef(new Map())
@@ -281,7 +321,7 @@ export default function DirectContextChat({ systemOwner, contextKind, department
     outputClose.current?.focus()
     return () => previous?.focus?.()
   }, [outputId])
-  useEffect(() => { onDraftDirtyChange?.(Boolean(draft.trim()) || videoDirty || journeyActivity.dirty || websiteActivity.dirty); return () => onDraftDirtyChange?.(false) }, [draft,videoDirty,journeyActivity.dirty,websiteActivity.dirty,onDraftDirtyChange])
+  useEffect(() => { onDraftDirtyChange?.(Boolean(draft.trim()) || videoDirty || journeyActivity.dirty || websiteActivity.dirty || stageActivity.dirty); return () => onDraftDirtyChange?.(false) }, [draft,videoDirty,journeyActivity.dirty,websiteActivity.dirty,stageActivity.dirty,onDraftDirtyChange])
   useEffect(() => {
     onNavigationBusyChange?.(busy || (Boolean(pending) && !recoveryWaitExpired) || videoBusy || attachmentRecoveryRequired || setupBusy || journeyLocked)
     return () => onNavigationBusyChange?.(false)
@@ -362,7 +402,7 @@ export default function DirectContextChat({ systemOwner, contextKind, department
       setNotice('Previous send recovered from saved messages. No new AI request was sent.')
     })().catch(reason => {
       if (active && !signal.aborted) { if (reason.code === 'CHAT_READ_TIMEOUT' && initial.recovery && JSON.stringify(pendingRef.current) === JSON.stringify(initial.recovery)) setTimedOutRecovery(JSON.stringify(initial.recovery)); if (showRecoveryOutcome(reason)) return; onAccessError?.(reason); setError(reason.message); setNotice('Check recovery before sending again. Your scoped draft remains available in this browser tab for one hour.') }
-    }).finally(() => { if (active && !signal.aborted) { lock.current = false; setBusy(false) } })
+    }).finally(() => { if (active && !signal.aborted) { lock.current = false; setBusy(false); setStageRestorePending(false) } })
     return () => { active = false }
   }, [initial, read, apply, actorId, requestScope, signal, recoveryKey, onAccessError, restoredDraft?.conversation_id])
 
@@ -439,6 +479,16 @@ export default function DirectContextChat({ systemOwner, contextKind, department
     if (!draft.trim() || draft.trim().length > 8000 || attachmentRecoveryRequired || pendingRef.current || selected?.state && selected.state !== 'active') return
     await exclusive(async () => {
       const text = websiteSendContext?appendWebsiteLayoutRequest(draft.trim(),websiteSendContext):draft.trim(), target = selected?.id || newId, token = revision.current
+      let stageWire=null
+      if(selectedStage){
+        if(!projectChat||!owner)throw Error('Stage context is available only in your own project conversation. Your draft is kept.')
+        if(projectDocumentIds.length||designAttachmentIds.length)throw Error('Choose stage context or attached references for this message. Remove stage context to keep attachments, or use Attach to deselect references. Your draft and files are kept.')
+        const scopeToken=stageScopeRef.current,versionIds=[...(selectedStage.versionIds||[])]
+        const adapter=createRepositoryProjectStageChatContextAdapter(createProjectStagePlanRepository(supabase))
+        const checked=await adapter.beforeSend({text,selected:selectedStage.context,scope:stageScope,versionIds},{signal})
+        if(!current()||token!==revision.current||stageScopeRef.current!==scopeToken)return
+        stageWire={selection:checked.stage.context,output_version_ids:versionIds}
+      }
       if(text.length>8000)throw Error('The message plus Website context exceeds the limit; shorten it without truncation.')
       const ai = owner && !humanOnly
       const sameSend=()=>current()&&token===revision.current&&(!ai||mappingState.current.modelId===modelId)
@@ -470,15 +520,15 @@ export default function DirectContextChat({ systemOwner, contextKind, department
       if (!sameSend()) return
       const metadata = { conversation_id: target, client_request_id: crypto.randomUUID(), ...(ai ? { dispatch_request_id: crypto.randomUUID() } : {}) }
       remember({ conversation_id: target, client_request_id: metadata.client_request_id })
-      attempt.current = { text, isNew: !selected, conversation_id: target, client_request_id: metadata.client_request_id, ...(privateDesign ? { design_attachment_ids: [...designAttachmentIds] } : {}), ...(contextKind === 'project_team' && owner && selected ? { project_document_ids: [...projectDocumentIds] } : {}) }
+      attempt.current = { text, isNew: !selected, conversation_id: target, client_request_id: metadata.client_request_id, ...(stageWire?{project_stage_context:stageWire}:{}), ...(!stageWire&&privateDesign ? { design_attachment_ids: [...designAttachmentIds] } : {}), ...(!stageWire&&contextKind === 'project_team' && owner && selected ? { project_document_ids: [...projectDocumentIds] } : {}) }
       writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: selected?.id || null, text: draft, attempt: attempt.current })
       let saved
       if (!selected) {
-        const result = await departmentChat.startContextConversation({ ...scope, ...metadata, message: text }, requestScope)
+        const result = await departmentChat.startContextConversation({ ...scope, ...metadata, message: text, ...(stageWire?{project_stage_context:stageWire}:{}) }, requestScope)
         if (!sameSend()) return
         if (!validConversation(result.conversation) || result.conversation.id !== target || result.conversation.owner_id !== actorId) throw new Error('Conversation identity mismatch')
         apply({ conversation: result.conversation, messages: [result.message] }); saved = result.message
-      } else saved = await departmentChat.appendContextHumanMessage({ conversation_id: target, client_request_id: metadata.client_request_id, message: text, ...(privateDesign ? { design_attachment_ids: designAttachmentIds } : {}), ...(contextKind === 'project_team' && owner ? { project_document_ids: projectDocumentIds } : {}) }, requestScope)
+      } else saved = await departmentChat.appendContextHumanMessage({ conversation_id: target, client_request_id: metadata.client_request_id, message: text, ...(stageWire?{project_stage_context:stageWire}:{}), ...(!stageWire&&privateDesign ? { design_attachment_ids: designAttachmentIds } : {}), ...(!stageWire&&contextKind === 'project_team' && owner ? { project_document_ids: projectDocumentIds } : {}) }, requestScope)
       if (!sameSend()) return
       if(projectChat)onProjectRequest?.({organizationId,projectId,messageId:saved.id,conversationId:target,text})
       briefSend.current = briefSnapshot ? { snapshot: briefSnapshot, conversationId: target, messageId: saved.id } : null
@@ -572,7 +622,7 @@ export default function DirectContextChat({ systemOwner, contextKind, department
       let human = latest?.messages.find(row => row.client_request_id === record.client_request_id && row.author_id === actorId)
       if (!human && attempt.current && !(projectChat && record.dispatch_request_id)) {
         // Only retry persistence, with the identical in-memory body and UUIDs.
-        const input = { conversation_id: record.conversation_id, client_request_id: record.client_request_id, message: attempt.current.text, ...(attempt.current.design_attachment_ids ? { design_attachment_ids: attempt.current.design_attachment_ids } : {}), ...(attempt.current.project_document_ids ? { project_document_ids: attempt.current.project_document_ids } : {}) }
+        const input = { conversation_id: record.conversation_id, client_request_id: record.client_request_id, message: attempt.current.text, ...(attempt.current.project_stage_context ? {project_stage_context:attempt.current.project_stage_context}:{}), ...(attempt.current.design_attachment_ids ? { design_attachment_ids: attempt.current.design_attachment_ids } : {}), ...(attempt.current.project_document_ids ? { project_document_ids: attempt.current.project_document_ids } : {}) }
         const saved = attempt.current.isNew
           ? await departmentChat.startContextConversation({ ...scope, ...input }, requestScope)
           : { message: await departmentChat.appendContextHumanMessage(input, requestScope) }
@@ -699,7 +749,7 @@ export default function DirectContextChat({ systemOwner, contextKind, department
       {projectChat&&pending&&!recoveryMessage&&activeRecovery}{projectChat&&savedChecks.filter(row=>row.conversation_id===ownedConversationId&&!messages.some(message=>message.id===row.message_id)&&row.dispatch_request_id!==pending?.dispatch_request_id).map(row=><div className="direct-chat-notice direct-chat-recovery" key={row.dispatch_request_id}><p>Earlier reply unresolved.</p><button type="button" disabled={busy} onClick={()=>checkSavedMessage(row)}>Check earlier saved reply</button></div>)}
       {projectChat&&!pending&&(error||notice)&&<p role={error?'alert':'status'} className={error?'direct-chat-error':'direct-chat-notice'}>{error||notice}</p>}
       {projectChat&&attachmentRecoveryRequired&&<p role="status" className="direct-chat-notice">Reopen Attach to check the original reading.</p>}
-      {selected?.id===designWorkspace?.generatedConversationId&&selected?.owner_id===user?.id?designWorkspace?.generatedMedia:null}</div></div>{designWorkspace?.media}{designWorkspace?.composerAttachments}{projectChat&&attachmentReading?.questions?.length>0&&<form aria-label="Attachment clarification" className="direct-chat-attachment-clarification" onSubmit={async event=>{event.preventDefault();if(!attachmentAnswer.trim()||busy||pendingRef.current||!current())return;try{await attachmentReading.clarify(attachmentAnswer.trim());if(current())setAttachmentAnswer('')}catch(reason){if(current())setError(reason.message)}}}><p>Clarify {attachmentReading.sourceName}</p><label>Answer the attachment questions<textarea aria-label="Attachment clarification" maxLength={1200} value={attachmentAnswer} disabled={busy||Boolean(pending)} onChange={event=>setAttachmentAnswer(event.target.value)}/></label><button type="submit" disabled={busy||Boolean(pending)||!attachmentAnswer.trim()}>Send attachment clarification</button></form>}<form hidden={Boolean(designWorkspace && designWorkspace.mode!=='chat')} className="direct-chat-composer" onSubmit={send} aria-label="Chat composer">{websiteSendContext&&<details className="website-layout-chat-context"><summary>Selected Website layout context will be included</summary><p>Your normal Send and AI consent checks still apply. This proposes a layout; it does not save or publish a Website.</p><pre>{websiteSendContext.instructions}</pre><button type="button" onClick={()=>setWebsiteSendContext(null)}>Remove Website layout context</button></details>}<label className="direct-chat-draft-label"><span className="sr-only">Message</span><textarea aria-label="Message" placeholder={projectChat?'Ask about this project, or describe what you need…':'Ask or explore an idea…'} value={draft} maxLength={8000} disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending)} onChange={event => { if (pendingRef.current) return; const text = event.target.value; setDraft(text); try { writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: selected?.id || null, text, attempt: attempt.current }) } catch { setError('Draft recovery is unavailable in this tab. Keep this page open until your message is saved.') } }} /></label>
+      {selected?.id===designWorkspace?.generatedConversationId&&selected?.owner_id===user?.id?designWorkspace?.generatedMedia:null}</div></div>{designWorkspace?.media}{designWorkspace?.composerAttachments}{projectChat&&attachmentReading?.questions?.length>0&&<form aria-label="Attachment clarification" className="direct-chat-attachment-clarification" onSubmit={async event=>{event.preventDefault();if(!attachmentAnswer.trim()||busy||pendingRef.current||!current())return;try{await attachmentReading.clarify(attachmentAnswer.trim());if(current())setAttachmentAnswer('')}catch(reason){if(current())setError(reason.message)}}}><p>Clarify {attachmentReading.sourceName}</p><label>Answer the attachment questions<textarea aria-label="Attachment clarification" maxLength={1200} value={attachmentAnswer} disabled={busy||Boolean(pending)} onChange={event=>setAttachmentAnswer(event.target.value)}/></label><button type="submit" disabled={busy||Boolean(pending)||!attachmentAnswer.trim()}>Send attachment clarification</button></form>}<form hidden={Boolean(designWorkspace && designWorkspace.mode!=='chat')} className="direct-chat-composer" onSubmit={send} aria-label="Chat composer">{selectedStage&&<details className="stage-chat-context"><summary>{selectedStage.trackTitle} · {selectedStage.stageTitle}{selectedStage.itemTitle?' · '+selectedStage.itemTitle:''}</summary><p>Selected stage metadata only. Your message stays unchanged; no source bodies or attachment consent are included.</p><p>Send asks for a contextual reply. It does not execute work, approve an output or publish anything.</p>{(projectDocumentIds.length>0||designAttachmentIds.length>0)&&<div role="status"><p>Choose stage context or attached references for this message. Your draft and files are kept.</p><button type="button" disabled={busy||Boolean(pending)} onClick={()=>{setImportOpened(true);setImportOpen(true)}}>Review attached references</button></div>}<dl><dt>Stage</dt><dd>{selectedStage.context.phase}</dd><dt>Saved plan</dt><dd>{selectedStage.context.plan_id}</dd><dt>Selected item</dt><dd>{selectedStage.context.partition.kind} · {selectedStage.context.partition.id}</dd></dl>{selectedStage.availableOutputs?.length>0&&<fieldset disabled={busy||Boolean(pending)}><legend>Include exact output references</legend>{selectedStage.availableOutputs.map(output=><label key={output.versionId}><input type="checkbox" checked={selectedStage.versionIds?.includes(output.versionId)||false} onChange={event=>{const ids=selectedStage.versionIds||[];const next={...selectedStage,versionIds:event.target.checked?[...ids,output.versionId]:ids.filter(id=>id!==output.versionId)};try{sessionStorage.setItem(stageStorageKey,JSON.stringify(next));setSelectedStage(next)}catch{setError('Stage selection could not be saved. Keep this page open.')}}}/>{output.title} · {output.versionLabel}</label>)}</fieldset>}<button type="button" disabled={busy||Boolean(pending)} onClick={()=>{sessionStorage.removeItem(stageStorageKey);setSelectedStage(null)}}>Remove stage context</button></details>}{websiteSendContext&&<details className="website-layout-chat-context"><summary>Selected Website layout context will be included</summary><p>Your normal Send and AI consent checks still apply. This proposes a layout; it does not save or publish a Website.</p><pre>{websiteSendContext.instructions}</pre><button type="button" onClick={()=>setWebsiteSendContext(null)}>Remove Website layout context</button></details>}<label className="direct-chat-draft-label"><span className="sr-only">Message</span><textarea aria-label="Message" placeholder={projectChat?'Ask about this project, or describe what you need…':'Ask or explore an idea…'} value={draft} maxLength={8000} disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending)} onChange={event => { if (pendingRef.current) return; const text = event.target.value; setDraft(text); try { writeDirectChatDraft(recoveryKey, { new_conversation_id: newId, conversation_id: selected?.id || null, text, attempt: attempt.current }) } catch { setError('Draft recovery is unavailable in this tab. Keep this page open until your message is saved.') } }} /></label>
         <div className="direct-chat-toolbar">{designWorkspace?.attachControl}{projectChat && <button type="button" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || !owner || Boolean(selected && selected.state !== 'active')} onClick={() => { closeProjectTools(); setImportOpened(true);setImportOpen(true) }} aria-label="Attach files">Attach</button>}{!compactConversation && <label>Work type<select aria-label="Work type" value="text" disabled><option value="text">Text</option></select></label>}
           {!compactConversation && modelControl}
           <button type="submit" className="direct-chat-send" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || attachmentRecoveryRequired || !draft.trim() || Boolean(selected && selected.state !== 'active')}>{busy ? 'Working…' : owner ? 'Send' : 'Save message'}</button></div>{owner&&!ready&&<button className="direct-chat-save-note" type="button" disabled={busy || setupBusy || journeyLocked || videoBusy || Boolean(pending) || attachmentRecoveryRequired || !draft.trim() || Boolean(selected && selected.state !== 'active')} onClick={event=>send(event,{humanOnly:true})}>Save message without AI</button>}
@@ -708,10 +758,10 @@ export default function DirectContextChat({ systemOwner, contextKind, department
       {output && <aside ref={outputId && mobileDrawer ? drawerRef : undefined} className="direct-chat-output" role={mobileDrawer ? 'dialog' : undefined} aria-modal={mobileDrawer ? true : undefined} onKeyDown={drawerKeyDown} aria-label="Saved reply output" data-source-message-id={output.id}><div><h3>Saved reply</h3><button ref={outputClose} type="button" onClick={() => setOutputId('')}>Close output</button></div><p>{output.body}</p><small>Saved conversation reply · Read-only preview</small></aside>}
     </div>
   </section>
-{projectChat&&workDetailsOpen&&<WorkspaceDialog wide title="Pipeline & work details" busy={journeyLocked||busy||setupBusy||videoBusy} onClose={()=>setWorkDetailsOpen(false)}>
-      {onOpenProjectWork&&<button type="button" className="workspace-button" disabled={journeyLocked||busy} onClick={()=>{if(onOpenProjectWork()!==false)setWorkDetailsOpen(false)}}>Open project pipeline & work</button>}
+{projectChat&&workDetailsOpen&&<WorkspaceDialog wide className="stage-plan-dialog" title="Project plan" busyMessage={stageActivity.dirty&&!stageActivity.busy?'Review or discard your stage mapping edits before closing.':undefined} busy={journeyLocked||busy||setupBusy||videoBusy} onClose={()=>setWorkDetailsOpen(false)}>
+      <Suspense fallback={<p role="status">Reading project plan…</p>}><ProjectStagePlanPanel scope={stageScope} actorId={actorId} signal={signal} busy={busy||Boolean(pending)||setupBusy||videoBusy||journeyActivity.dirty||journeyActivity.busy||websiteActivity.dirty||websiteActivity.busy||assetRelationsLocked} onStateChange={reportStageActivity} onAccessError={onAccessError} onContinue={chooseProjectStage} onManualSetup={onOpenManualSetup} onOpenWork={onOpenProjectWork} onOpenOutput={onOpenStageOutput}/></Suspense><details className="stage-legacy-tools"><summary>Existing execution tools</summary>{onOpenProjectWork&&<button type="button" className="workspace-button" disabled={journeyLocked||busy} onClick={()=>{if(onOpenProjectWork()!==false)setWorkDetailsOpen(false)}}>Open project pipeline & work</button>}
       {projectChat&&projectJourney&&selected?.id&&assetRelationsOpen&&<Suspense fallback={<p role="status">Opening conversation asset context…</p>}><ProjectAssetConversation key={selected.id} workspace={projectJourney} organizationId={organizationId} projectId={projectId} actorId={actorId} conversationId={selected.id} owner={owner} signal={signal} externallyBusy={busy||Boolean(pending)||setupBusy||videoBusy||journeyActivity.busy||journeyActivity.dirty||websiteActivity.busy||websiteActivity.dirty} onLockChange={reportAssetRelationsLock} onClose={()=>setAssetRelationsOpen(false)}/></Suspense>}{projectChat&&projectJourney&&selected?.id&&<Suspense fallback={<p role="status">Opening Content journey…</p>}><ProjectContentJourney key={selected.id} workspace={projectJourney} conversationId={selected.id} actorId={actorId} owner={owner} messages={messages} onStateChange={reportJourneyActivity} busy={busy||Boolean(pending)||setupBusy||videoBusy||assetRelationsLocked||websiteActivity.busy||websiteActivity.dirty} onChanged={onProjectChanged}/><ProjectWebsiteExecution key={"website:"+selected.id} workspace={projectJourney} conversationId={selected.id} actorId={actorId} owner={owner} onStateChange={reportWebsiteActivity} onChanged={onProjectChanged} busy={busy||Boolean(pending)||setupBusy||videoBusy||assetRelationsLocked||journeyActivity.dirty||journeyActivity.busy}/></Suspense>}
-    </WorkspaceDialog>}
+    </details></WorkspaceDialog>}
       {projectChat&&setupOpen&&<WorkspaceDialog wide title="Review project setup" busy={setupBusy} onClose={()=>setSetupOpen(false)}><Suspense fallback={<p role="status">Opening project setup…</p>}><ProjectSetupPanel key={attachmentScopeKey} organizationId={organizationId} projectId={projectId} engagementId={projectJourney?.engagement?.id} actorId={actorId} signal={signal} initialMode="chat" onChanged={onProjectChanged} onNavigationBusyChange={reportSetupBusy} restoredProposal={setupRestored} onAccessError={onAccessError} onAssist={ready&&mappingTransport?disclosure=>mappingAction('request',disclosure):null} onRecover={mappingTransport?disclosure=>mappingAction('recover',disclosure):null}/></Suspense></WorkspaceDialog>}
       {importOpened && contextKind === 'project_team' && projectId && <div hidden={!importOpen}><Suspense fallback={<p role="status">Opening local spreadsheet inspector…</p>}><ProjectAttachmentPanel documentProps={{ conversationKey: selected?.id || newId, conversationId: owner ? selected?.id : null, requestScope, busy: busy || Boolean(pending),canReturnToChat:!busy,recoveryPending:Boolean(pending), ensureConversation: ensureProjectDocumentConversation, run: exclusive, selectedIds: projectDocumentIds, onSelection: setProjectDocumentIds,onReadyForChat:()=>{if(!current())return;setDraft(old=>old.trim()?old:'Explain what the selected document contains and ask about any real ambiguities. Treat it as a Chat reference; do not create or change project records.');setNotice(mappingState.current?.ready?'Document selected. Review your message and press Send to request its reading; no AI call was made by upload.':'Document selected privately. AI reading is unavailable until an approved model is ready; upload made no AI call.');returnFromAttachment()} }} key={attachmentScopeKey} projectId={projectId} projectLabel={label} repository={importRepository} recoveryScope={importScope} onMappingAssist={ready&&mappingTransport?disclosure=>mappingAction('request',disclosure):null} onMappingRecover={mappingTransport?disclosure=>mappingAction('recover',disclosure):null} onClose={returnFromAttachment} onReturnToChat={returnFromAttachment} onReadingState={registerAttachmentReading} /></Suspense></div>}
     {consent.dialog && <TextAiConsent {...consent.dialog} provider={model?.provider} model={`${model?.connectionName} · ${model?.label}`} scope={`${contextKind} conversation`} canonical={canonical && canCanonical} />}

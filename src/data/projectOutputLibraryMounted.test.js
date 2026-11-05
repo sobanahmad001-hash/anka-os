@@ -28,3 +28,11 @@ test('project switch clears selected output and search rather than reusing same-
  const u=await mount(t);const search=u.all().find(n=>n.tagName==='INPUT');await act(async()=>props(search).onChange({target:{value:'Saved'}}));await u.click();await u.choose('v1')
  u.input.workspace={...u.input.workspace,project:{id:'other',organization_id:'org'},engagement:null,workshopArtifacts:[]};await u.render();assert.equal(u.link(),undefined);assert.equal(props(u.all().find(n=>n.tagName==='INPUT')).value,'');assert.match(u.env.container.textContent,/No saved Workshop outputs/)
 })
+test('stage output selection opens only the scoped exact version and reports an unavailable pin',async t=>{
+ const u=await mount(t)
+ u.input.exactSelection={scope:{organizationId:'org',projectId:'project',engagementId:'eng'},artifactId:'output',versionId:'v1'}
+ await u.render();assert.match(props(u.link()).href,/version=v1/)
+ u.input.exactSelection={...u.input.exactSelection,versionId:'missing'};await u.render()
+ assert.equal(u.link(),undefined);assert.match(u.env.container.textContent,/no other version was substituted/)
+ u.input.workspace={...u.input.workspace,project:{id:'other',organization_id:'org'},engagement:null,workshopArtifacts:[]};await u.render();assert.equal(u.link(),undefined)
+})
