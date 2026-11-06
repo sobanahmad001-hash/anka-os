@@ -359,14 +359,22 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
     }
     let normalized
     let measuredCost
+    // Internal fixed phase only: never retain provider payloads or exception text.
+    let validationPhase: 'json_decode' | 'normalize' | 'model_match' | 'token_cost' | 'reservation_ceiling' = 'json_decode'
     try {
-      normalized = normalizeN7TextResult(provider, await response.json())
+      const rawResult = await response.json()
+      validationPhase = 'normalize'
+      normalized = normalizeN7TextResult(provider, rawResult)
+      validationPhase = 'model_match'
       if (normalized.actual_model_id !== configuration.model_id) throw new Error('Provider model changed')
+      validationPhase = 'token_cost'
       measuredCost = measuredPipelineTokenCost(normalized.usage, price)
+      validationPhase = 'reservation_ceiling'
       if (measuredCost > maxCost) throw new Error('Measured cost exceeds reservation')
     } catch {
       await markUncertain(admin, organizationId, messageId,
-        'Provider output needs reconciliation; claim=' + claimId + '; provider_request=' + providerRequestId)
+        'Provider output needs reconciliation; claim=' + claimId + '; provider_request=' + providerRequestId
+          + '; validation_phase=' + validationPhase)
       return reply({ status: 'outcome_unknown', must_not_submit: true }, 503)
     }
     const briefAudit=designBriefAudit(briefTurn,normalized.output_text)

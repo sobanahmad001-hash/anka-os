@@ -3,6 +3,65 @@ import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.1
 import { handleRequest, requireOpenAiCanonicalContextChoice, requirePrivateChatPaidExecution, requirePrivateConversationAccess } from './index.ts'
 import { buildPrivateConversationPrompt, canonicalOpenAiContext } from '../_shared/contextChatPrompt.js'
 
+for (const phase of ['json_decode', 'normalize', 'model_match', 'token_cost', 'reservation_ceiling', 'ceiling_equal', 'valid']) {
+ Deno.test('claimed handler records only fixed validation phase: '+phase, async()=>{
+  const id='aa000000-0000-4000-8000-000000000001'
+  const oldFetch=globalThis.fetch,oldGet=Deno.env.get,oldRefresh=GoTrueClient.prototype.startAutoRefresh
+  GoTrueClient.prototype.startAutoRefresh=async()=>{}
+  const rate={provider:'openai',model_id:'verified',verified_at:new Date().toISOString(),source_url:'https://developers.openai.com/api/docs/pricing',input_usd_per_million:1,cached_input_usd_per_million:1,cache_write_usd_per_million:null,output_usd_per_million:1}
+  const config:Record<string,string>={SUPABASE_URL:'http://127.0.0.1:54321',SUPABASE_ANON_KEY:'offline-public',SUPABASE_SERVICE_ROLE_KEY:'offline-service',CONTEXT_CHAT_PAID_EXECUTION_ENABLED:'true',ANKA_OPENAI_TEST:'offline-key',N6_OPENAI_MODEL_PRICING_JSON:JSON.stringify([rate])}
+  const message={id,conversation_id:id,organization_id:id,owner_id:id,author_id:id,role:'user',status:'completed',sequence:1,body:'Synthetic diagnostic prompt'}
+  const success=['valid','ceiling_equal'].includes(phase)
+  let providers=0,audits=0,replies=0,claims=0,ceiling=0,settled=false
+  const reconciliations:Record<string,unknown>[]=[]
+  try {
+   Deno.env.get=name=>config[name]
+   globalThis.fetch=async(input,init)=>{
+    const url=new URL(input instanceof Request?input.url:String(input))
+    if(url.origin!=='http://127.0.0.1:54321')throw Error('Remote forbidden')
+    const path=url.pathname,args=init?.body?JSON.parse(String(init.body)):{};let data:unknown
+    if(path==='/auth/v1/user')data={id}
+    else if(path.endsWith('/organization_memberships'))data={status:'active',member_kind:'team',role:'system_owner'}
+    else if(path.endsWith('/department_chat_messages'))data=url.searchParams.has('limit')?[message]:message
+    else if(path.endsWith('/department_chat_conversations'))data={id,organization_id:id,owner_id:id,context_kind:'organization',project_id:null,department_id:null,state:'active'}
+    else if(path.endsWith('/context_chat_organization_models'))data={id,organization_id:id,connector_connection_id:id,model_id:'verified',revoked_at:null}
+    else if(path.endsWith('/integration_connections'))data={id,organization_id:id,provider:'openai',status:'verified',archived_at:null,secret_name:'ANKA_OPENAI_TEST'}
+    else if(path.endsWith('/append_context_chat_audited_reply')){
+     if(!settled)return new Response(JSON.stringify({message:'No audit'}),{status:400,headers:{'content-type':'application/json'}})
+     replies++;data={id,body:'Synthetic saved reply'}
+    }else if(path.endsWith('/recover_context_chat_completed_run'))data={status:'no_run'}
+    else if(path.endsWith('/reserve_context_chat_budget')){ceiling=args.p_max_cost_microusd;data={status:'reserved'}}
+    else if(path.endsWith('/claim_context_chat_dispatch')){claims++;assertEquals(args.p_message_id,id);assertEquals(args.p_dispatch_request_id,id);data={status:'claimed',claim_id:id,model_configuration_id:id}}
+    else if(path.endsWith('/ai_runs')){audits++;data={id}}
+    else if(path.endsWith('/reconcile_context_chat_budget')){reconciliations.push(args);settled=args.p_outcome==='settled';data={status:args.p_outcome}}
+    else throw Error('Unexpected '+path)
+    return new Response(JSON.stringify(data),{headers:{'content-type':'application/json'}})
+   }
+   const fetcher=(async()=>{
+    providers++
+    const raw={id:'synthetic-response',status:phase==='normalize'?'incomplete':'completed',model:phase==='model_match'?'other-model':'verified',output:[{type:'message',content:[{type:'output_text',text:'SENSITIVE_OUTPUT_SENTINEL'}]}],usage:{input_tokens:phase==='reservation_ceiling'?ceiling+1:phase==='ceiling_equal'?ceiling:10,output_tokens:0,input_tokens_details:{cached_tokens:0,cache_write_tokens:phase==='token_cost'?1:0}}}
+    return new Response(phase==='json_decode'?'SENSITIVE_INVALID_JSON_SENTINEL':JSON.stringify(raw),{headers:{'x-request-id':'synthetic-provider-reference'}})
+   }) as typeof fetch
+   const request=(recover=false)=>new Request('https://example.test',{method:'POST',headers:{Authorization:'Bearer offline'},body:JSON.stringify({organization_id:id,message_id:id,...(recover?{recover_only:true}:{model_configuration_id:id,dispatch_request_id:id})})})
+   const response=await handleRequest(request(),fetcher,{get:name=>config[name]});const body=await response.json()
+   assertEquals(response.status,success?200:503,JSON.stringify(body))
+   assertEquals(providers,1);assertEquals(claims,1);assertEquals(audits,success?1:0);assertEquals(replies,success?1:0)
+   assertEquals(reconciliations.length,1)
+   const record=reconciliations[0];assertEquals(record.p_message_id,id);assertEquals(record.p_organization_id,id)
+   if(success){assertEquals(body.status,'completed');assertEquals(record.p_outcome,'settled');if(phase==='ceiling_equal')assertEquals(record.p_actual_cost_microusd,ceiling)}
+   else {
+    assertEquals(body,{status:'outcome_unknown',must_not_submit:true})
+    assertEquals(record.p_outcome,'uncertain');assertEquals(record.p_actual_cost_microusd,null);assertEquals(record.p_ai_run_id,null)
+    assertEquals(record.p_evidence,'Provider output needs reconciliation; claim='+id+'; provider_request=synthetic-provider-reference; validation_phase='+phase)
+    assertEquals(JSON.stringify(record).includes('SENSITIVE_'),false)
+    const recovered=await handleRequest(request(true),fetcher,{get:name=>config[name]})
+    assertEquals(await recovered.json(),{status:'not_settled',must_not_submit:true})
+    assertEquals(providers,1);assertEquals(claims,1);assertEquals(audits,0);assertEquals(replies,0);assertEquals(reconciliations.length,1)
+   }
+  } finally {await new Promise(resolve=>setTimeout(resolve,20));globalThis.fetch=oldFetch;Deno.env.get=oldGet;GoTrueClient.prototype.startAutoRefresh=oldRefresh}
+ })
+}
+
 for(const mode of ['guarded','usage_only']) Deno.test('actual Project Chat runner '+mode+' keeps prior dispatch claim check-only',async()=>{
  const id='bb000000-0000-4000-8000-000000000001'
  const oldFetch=globalThis.fetch,oldGet=Deno.env.get,oldRefresh=GoTrueClient.prototype.startAutoRefresh
