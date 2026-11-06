@@ -32,6 +32,16 @@ Deno.test('native build resolves exact server sources, preserves canonical desig
  assert(Object.keys(zip).every(p=>/^anka-native-[a-f0-9]{16}\//.test(p)&&!p.includes('..')));assert(f.calls.find(c=>c.name==='start_website_block_build').args.p_actor_id===f.ctx.user.id)
  assert(!f.calls.some(c=>/approve|activate|publish|run|delete/.test(c.name||'')));assert(f.calls.filter(c=>c.kind==='upload').length===2)
 })
+Deno.test('Writer2 native Design builds through existing package flow without invented SEO or objective copy',async()=>{
+ const f=await fixture(),source:any=f.review.context
+ source.content_page={...source.content_page,source_format:'writer_v2',page_brief:'Context objective must not render',draft_copy:'Exact approved Writer2 body.',meta_title:'Exact title',meta_description:'',primary_cta:null}
+ f.review.manifest=await prepareWebsiteNativeManifest(source,{template:'home',sections:[{source_key:'copy',component:'prose',motion:'none'}],cta_path:''})
+ const response=await f.send();assert(response.status===200)
+ const upload=[...f.objects.entries()].find(([path])=>path.endsWith('native-block.zip'))!
+ const zip=unzipSync(new Uint8Array(await upload[1].arrayBuffer())),page=JSON.parse(new TextDecoder().decode(zip[Object.keys(zip).find(path=>path.endsWith('/anka-page.json'))!]))
+ assert(page.meta_description==='');assert(page.post_content.includes('Exact approved Writer2 body.'));assert(!page.post_content.includes('Context objective must not render'))
+ assert(!f.calls.some(call=>/approve|activate|publish|delete/.test(call.name||'')))
+})
 Deno.test('native package and source downloads verify original MIME size and checksum before signing',async()=>{
  const f=await fixture();await f.send()
  for(const kind of ['package','source']){const r=await f.send({action:'download',organization_id:f.body.organization_id,project_id:f.body.project_id,engagement_id:f.body.engagement_id,job_id:f.job.id,kind}),d=await r.json();assert(r.status===200,JSON.stringify(d));assert(d.data.checksum_verified===true&&d.data.download_expires_in===300)}
