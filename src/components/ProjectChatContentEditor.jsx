@@ -1,0 +1,15 @@
+import {CONTENT_WRITER_OUTPUT_TYPES,architectureVersions,architecturePages} from '../data/contentWriter.js'
+
+export default function ProjectChatContentEditor({form,onChange,data,disabled,sourceMessages,onCopy}) {
+ const field=(key,label,area=false)=><label key={key}>{label}{area?<textarea aria-label={label} rows={key==='body'?10:3} value={form[key]} disabled={disabled} onChange={e=>onChange(key,e.target.value)}/>:<input aria-label={label} value={form[key]} disabled={disabled} onChange={e=>onChange(key,e.target.value)}/>}</label>
+ const structures=architectureVersions(data),structure=structures.find(v=>v.id===form.source_architecture_version_id)
+ return <fieldset disabled={disabled} className="chat-content-editor"><legend>Content draft</legend>
+  <label>Output type<select aria-label="Output type" value={form.output_type} onChange={e=>onChange('output_type',e.target.value)}>{CONTENT_WRITER_OUTPUT_TYPES.map(([id,label])=><option key={id} value={id}>{label}</option>)}</select></label>
+  {field('working_title','Content title')}
+  {form.output_type==='website_page_copy'?<><label>Exact website structure<select aria-label="Exact website structure" value={form.source_architecture_version_id} onChange={e=>onChange('source_architecture_version_id',e.target.value)}><option value="">Choose structure version</option>{structures.map(v=><option key={v.id} value={v.id}>Structure v{v.version_number} · {v.id}</option>)}</select></label><label>Page<select aria-label="Page" value={form.target_page_key} onChange={e=>onChange('target_page_key',e.target.value)}><option value="">Choose page</option>{architecturePages(structure).map(p=><option key={p.page_key} value={p.page_key}>{p.title||p.page_key}</option>)}</select></label></>:field('destination','Content destination')}
+  {field('objective','Objective')}{field('audience','Audience')}{field('language','Language')}
+  <details><summary>Use text from this conversation</summary><p>Choose text explicitly, then edit and review it. Attachments and their consent are not copied.</p>{sourceMessages.map(m=><button type="button" key={m.id} onClick={()=>onCopy(m.body)}>{m.role==='user'?'Use original message text':'Use reply text'} · {m.id.slice(0,8)}</button>)}</details>
+  {field('body','Content text',true)}
+  <details><summary>Writing details and requirements</summary>{field('tone','Tone')}{field('cta','Call to action')}{field('exclusions','Exclusions',true)}{field('required_sections','Required sections',true)}{field('required_terms','Required terms',true)}<label>Length unit<select aria-label="Length unit" value={form.length_unit} onChange={e=>onChange('length_unit',e.target.value)}><option value="none">No limit</option><option value="words">Words</option><option value="characters">Characters</option></select></label>{field('min_length','Minimum length')}{field('max_length','Maximum length')}<label><input type="checkbox" checked={form.require_source_citations} onChange={e=>onChange('require_source_citations',e.target.checked)}/>Require source citations</label>{field('source_citations','Source citations',true)}</details>
+ </fieldset>
+}
