@@ -1,0 +1,23 @@
+.chat-content-actions {margin:12px 0;color:var(--anka-ink);font-size:13px;min-width:0}
+.chat-content-card {border:1px solid var(--anka-line);border-radius:12px;padding:14px;background:var(--anka-canvas);margin:10px 0;overflow-wrap:anywhere}
+.chat-content-card h3,.chat-content-card h4 {margin:0 0 8px;font-size:14px;font-weight:600}
+.chat-content-card p {margin:6px 0}
+.chat-content-card label {display:flex;flex-direction:column;gap:5px;margin:9px 0}
+.chat-content-card input,.chat-content-card textarea,.chat-content-card select {box-sizing:border-box;max-width:100%;width:100%;border:1px solid var(--anka-line);border-radius:7px;padding:8px;background:var(--anka-canvas);color:var(--anka-ink);font:inherit}
+.chat-content-card input[type=checkbox] {width:auto;align-self:flex-start}
+.chat-content-card button,.chat-content-card a {font:inherit;color:var(--anka-ink);margin:4px 8px 4px 0;max-width:100%;white-space:normal}
+.chat-content-card button {border:1px solid var(--anka-line);border-radius:7px;padding:7px 10px;background:var(--anka-canvas);cursor:pointer}
+.chat-content-card button.chat-content-confirm {background:#6750c9;color:#fff;border-color:#6750c9}
+.chat-content-card button:disabled {opacity:.5;cursor:default}
+.chat-content-card button:focus-visible,.chat-content-card summary:focus-visible {outline:2px solid var(--anka-focus);outline-offset:3px}
+.chat-content-card details {margin:8px 0}.chat-content-card summary {cursor:pointer}
+.chat-content-card pre {white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:320px;overflow:auto}
+.chat-content-card fieldset {border:0;padding:0;margin:8px 0;min-width:0}
+.chat-content-card legend {font-weight:600}
+.chat-content-editor {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:12px}
+.chat-content-editor label:has(textarea),.chat-content-editor details {grid-column:1/-1}
+.chat-content-card [role=alert] {color:var(--anka-danger,#b45309)}
+.chat-content-card dl {margin:8px 0}.chat-content-card dt {font-weight:600}.chat-content-card dd {margin:0 0 6px}
+.chat-content-review {max-height:70vh;overflow:auto;overscroll-behavior:contain}
+.chat-content-review section {background:var(--anka-canvas);color:var(--anka-ink)}
+@media(max-width:600px){.chat-content-card{padding:10px}.chat-content-card button{min-height:38px}.chat-content-card pre{max-height:240px}.chat-content-editor{grid-template-columns:minmax(0,1fr)}}
