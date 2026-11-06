@@ -17,13 +17,24 @@ export async function handler(req:Request,dependencies:{resolveContext?:typeof r
  try{
   const reader=req.body?.getReader();if(!reader)throw failure('Build request required',400)
   const decoder=new TextDecoder();let raw='',count=0
-  for(;;){const part=await reader.read();if(part.done)break;count+=part.value.byteLength;if(count>4096){await reader.cancel();throw failure('Build request exceeds bound',413)}raw+=decoder.decode(part.value,{stream:true})}raw+=decoder.decode()
+  for(;;){const part=await reader.read();if(part.done)break;count+=part.value.byteLength;if(count>12288){await reader.cancel();throw failure('Build request exceeds bound',413)}raw+=decoder.decode(part.value,{stream:true})}raw+=decoder.decode()
   const body:Json=JSON.parse(raw);if(!body||typeof body!=='object'||Array.isArray(body))throw failure('Build object required',400)
+  const chat=body.action==='build_chat'
+  if(!chat&&count>4096)throw failure('Build request exceeds bound',413)
   const common=['action','organization_id','project_id','engagement_id']
   if(body.action==='build')exact(body,[...common,'design_id','request_id','review_sha256'])
+  else if(chat)exact(body,[...common,'conversation_id','source_message_id','request_id','context','review_sha256','chat_review_sha256'])
   else if(body.action==='download')exact(body,[...common,'job_id','kind'])
   else throw failure('Unsupported native build action',400)
-  for(const k of ['organization_id','project_id','engagement_id',body.action==='build'?'design_id':'job_id'])if(!uuid(body[k]))throw failure('Exact native build context required',400)
+  const context=chat?body.context as Json:undefined
+  if(chat){
+   if(!context||typeof context!=='object'||Array.isArray(context)||new TextEncoder().encode(JSON.stringify(context)).length>8192)throw failure('Bounded Chat build context required',400)
+   exact(context,['engagement_id','selection','design_request_id','design_id','page_id'])
+   if(context.engagement_id!==body.engagement_id||!uuid(context.design_request_id)||!uuid(context.design_id)||!uuid(context.page_id)||!uuid(body.conversation_id)||!uuid(body.source_message_id)||typeof body.chat_review_sha256!=='string'||!/^[a-f0-9]{64}$/.test(body.chat_review_sha256))throw failure('Exact Chat build identity required',400)
+  }
+  const designId=chat?context!.design_id:body.design_id
+  for(const k of ['organization_id','project_id','engagement_id'])if(!uuid(body[k]))throw failure('Exact native build context required',400)
+  if(!uuid(body.action==='download'?body.job_id:designId))throw failure('Exact native build context required',400)
   ctx=await(dependencies.resolveContext||resolveServerOrganizationContext)(req,{root:{kind:'engagement',id:body.engagement_id as string},requestedOrganizationId:body.organization_id as string})
   if(ctx.organizationId!==body.organization_id||ctx.projectId!==body.project_id||ctx.engagementId!==body.engagement_id)throw failure('Native build context changed',403)
   const scope={p_organization_id:ctx.organizationId,p_project_id:ctx.projectId,p_engagement_id:ctx.engagementId}
@@ -44,12 +55,16 @@ export async function handler(req:Request,dependencies:{resolveContext?:typeof r
   }
   if(!uuid(body.request_id)||typeof body.review_sha256!=='string'||!/^[a-f0-9]{64}$/.test(body.review_sha256))throw failure('Exact reviewed build request required',400)
   if(ctx.membership.member_kind!=='team'||ctx.membership.status!=='active'||!(['system_owner','operations_admin','executive'].includes(ctx.membership.role)||ctx.membership.department_id==='development'))throw failure('Current Development build authority required',403)
-  const claim=await rpc(ctx.admin,'start_website_block_build',{...scope,p_actor_id:ctx.user.id,p_design_id:body.design_id,p_request_id:body.request_id,p_review_sha256:body.review_sha256})
+  const chatScope={p_actor_id:ctx.user.id,p_organization_id:ctx.organizationId,p_project_id:ctx.projectId,p_conversation_id:body.conversation_id,p_source_message_id:body.source_message_id,p_request_id:body.request_id}
+  const chatClaim=chat?await rpc(ctx.admin,'start_project_chat_native_build',{...chatScope,p_context:context,p_review_sha256:body.review_sha256,p_chat_review_sha256:body.chat_review_sha256}):undefined
+  if(chatClaim?.replayed===true)return reply({data:{receipt:chatClaim.receipt,state:chatClaim.state,replayed:true}})
+  const claim=chat?chatClaim?.native:await rpc(ctx.admin,'start_website_block_build',{...scope,p_actor_id:ctx.user.id,p_design_id:designId,p_request_id:body.request_id,p_review_sha256:body.review_sha256})
+  if(!claim)throw failure('Original Chat build claim unavailable; check original request',503)
   job=claim.job;claimed=claim.created===true
   if(!claimed)return reply({data:{...job,...scopeToRow(scope),request_id:body.request_id,replayed:true,delivery_approved:false,staging:false,published:false}})
   const reviewed=claim.source
-  if(reviewed.design_id!==body.design_id||reviewed.organization_id!==ctx.organizationId||reviewed.project_id!==ctx.projectId||reviewed.engagement_id!==ctx.engagementId)throw failure('Resolved native design belongs to another context',403)
-  if(reviewed.review_sha256!==body.review_sha256||job!.organization_id!==ctx.organizationId||job!.website_page_design_id!==body.design_id||job!.requested_by!==ctx.user.id)throw failure('Claimed build source changed',409)
+  if(reviewed.design_id!==designId||reviewed.organization_id!==ctx.organizationId||reviewed.project_id!==ctx.projectId||reviewed.engagement_id!==ctx.engagementId)throw failure('Resolved native design belongs to another context',403)
+  if(reviewed.review_sha256!==body.review_sha256||job!.organization_id!==ctx.organizationId||job!.website_page_design_id!==designId||job!.requested_by!==ctx.user.id)throw failure('Claimed build source changed',409)
   // Only the atomically pinned server source enters the fixed compiler. Replay never recompiles.
   await verifyWebsiteNativeManifest(reviewed.context,reviewed.manifest)
   const source=await buildWebsiteBlockSource(reviewed.manifest)
@@ -58,11 +73,13 @@ export async function handler(req:Request,dependencies:{resolveContext?:typeof r
   const sourceJson=encoded.encode(JSON.stringify({compiler:WEBSITE_BLOCK_COMPILER,manifest:reviewed.manifest,review_sha256:body.review_sha256,files_checksum:source.files_checksum,file_hashes:source.file_hashes,delivery_approved:false,staging:false,published:false}))
   const original=createStoredZip([{name:'source.json',bytes:sourceJson}])
   if(original.byteLength>524288)throw failure('Native source exceeds output bound',413)
-  const base=ctx.organizationId+'/'+body.design_id+'/'+job!.id+'/'
+  const base=ctx.organizationId+'/'+designId+'/'+job!.id+'/'
   for(const[path,bytes,type]of [[base+'source.zip',original,'application/zip'],[base+'native-block.zip',archive,'application/zip']] as const){
    const{error}=await ctx.admin.storage.from(bucket).upload(path,new Blob([new Uint8Array(bytes).buffer],{type}),{contentType:type,upsert:false,cacheControl:'3600'});if(error)throw failure('Private native artifact upload could not complete; original request retained',503)
   }
-  const result=await rpc(ctx.admin,'finish_website_block_build',{...scope,p_actor_id:ctx.user.id,p_job_id:job!.id,p_package_sha256:await sha(archive),p_source_sha256:await sha(original),p_package_bytes:archive.byteLength,p_source_bytes:original.byteLength,p_file_hashes:source.file_hashes})
+  const output={p_package_sha256:await sha(archive),p_source_sha256:await sha(original),p_package_bytes:archive.byteLength,p_source_bytes:original.byteLength,p_file_hashes:source.file_hashes}
+  const result=chat?await rpc(ctx.admin,'finish_project_chat_native_build',{...chatScope,...output}):await rpc(ctx.admin,'finish_website_block_build',{...scope,p_actor_id:ctx.user.id,p_job_id:job!.id,...output})
+  if(chat)return reply({data:{receipt:result.receipt,state:result.state,replayed:false}})
   return reply({data:{...result,delivery_approved:false,staging:false,published:false}})
  }catch(error){
   const e=error as Error&{status?:number;code?:string;knownRollback?:boolean}

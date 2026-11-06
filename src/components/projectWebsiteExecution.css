@@ -6,3 +6,4 @@
 .project-website-execution label{display:block}
 .project-website-execution select,.project-website-execution textarea{max-width:100%;min-width:0;color:var(--anka-ink);background:var(--anka-surface);border:1px solid var(--anka-line);border-radius:.5rem;padding:.5rem}
 .project-website-execution button,.project-website-execution a{white-space:normal;height:auto;overflow-wrap:anywhere}
+.project-website-execution pre{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%}

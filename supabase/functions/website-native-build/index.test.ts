@@ -68,3 +68,45 @@ Deno.test('upload failure preserves original source request, records failure and
 Deno.test('download membership is rechecked after byte verification before any signed URL',async()=>{
  const f=await fixture();await f.send();f.flags.revokeDownload=true;const r=await f.send({action:'download',organization_id:f.body.organization_id,project_id:f.body.project_id,engagement_id:f.body.engagement_id,job_id:f.job.id,kind:'package'});assert(r.status===403);assert(!f.calls.some(c=>c.kind==='sign'))
 })
+
+async function chatFixture(){
+ const f=await fixture(),nativeRpc=f.ctx.admin.rpc
+ const context={engagement_id:f.body.engagement_id,selection:null,design_request_id:id(20),design_id:f.body.design_id,page_id:f.review.page_id}
+ const body={action:'build_chat',organization_id:f.body.organization_id,project_id:f.body.project_id,engagement_id:f.body.engagement_id,conversation_id:id(21),source_message_id:id(22),request_id:f.body.request_id,context,review_sha256:f.body.review_sha256,chat_review_sha256:'c'.repeat(64)}
+ const receipt={version:1,kind:'build_native_package',status:'claimed',organization_id:body.organization_id,project_id:body.project_id,engagement_id:body.engagement_id,conversation_id:body.conversation_id,source_message_id:body.source_message_id,actor_id:f.ctx.user.id,request_id:body.request_id,selection:null,origin_request_id:context.design_request_id,output:{kind:'website_native_package',job_id:f.job.id,design_id:context.design_id,page_id:context.page_id}}
+ f.ctx.admin.rpc=async(name:string,args:any)=>{
+  if(name==='start_project_chat_native_build'){
+   f.calls.push({kind:'chat-rpc',name,args})
+   const result=await nativeRpc('start_website_block_build',args)
+   if(result.error)return result
+   return {data:{receipt,state:{kind:'website_native_package',status:'processing'},replayed:!result.data.created,native:{...result.data,private_marker:'SERVICE_ONLY'}}}
+  }
+  if(name==='finish_project_chat_native_build'){
+   f.calls.push({kind:'chat-rpc',name,args})
+   const result=await nativeRpc('finish_website_block_build',args)
+   return {data:{receipt,state:{kind:'website_native_package',status:result.data.status},replayed:false,private_marker:'SERVICE_ONLY'}}
+  }
+  return nativeRpc(name,args)
+ }
+ return {...f,chatBody:body,receipt,sendChat:()=>f.send(body)}
+}
+Deno.test('Chat package uses one atomic owned claim and original finish then strips all service source fields',async()=>{
+ const f=await chatFixture(),response=await f.sendChat(),body=await response.json()
+ assert(response.status===200,JSON.stringify(body));assert(JSON.stringify(body.data.receipt)===JSON.stringify(f.receipt));assert(body.data.state.status==='complete')
+ assert(f.calls.filter(c=>c.name==='start_project_chat_native_build').length===1&&f.calls.filter(c=>c.name==='finish_project_chat_native_build').length===1)
+ const args=f.calls.find(c=>c.name==='finish_project_chat_native_build').args
+ assert(args.p_actor_id===f.ctx.user.id&&args.p_request_id===f.chatBody.request_id&&args.p_source_message_id===f.chatBody.source_message_id)
+ assert(f.objects.size===2&&!JSON.stringify(body).includes('SERVICE_ONLY')&&Object.keys(body.data).sort().join(',')==='receipt,replayed,state')
+})
+Deno.test('Chat replay returns only original receipt/state and never recompiles or uploads',async()=>{
+ const f=await chatFixture();f.flags.duplicate=true;const r=await f.sendChat(),b=await r.json()
+ assert(r.status===200&&b.data.replayed===true&&!f.objects.size);assert(!f.calls.some(c=>c.name==='finish_project_chat_native_build'));assert(!JSON.stringify(b).includes('SERVICE_ONLY'))
+})
+Deno.test('Chat invalid foreign or extra context is rejected before claim without unscoped fallback',async()=>{
+ for(const context of [{},null,{engagement_id:id(999),selection:null,design_request_id:id(20),design_id:id(5),page_id:id(4)}, {engagement_id:id(3),selection:null,design_request_id:id(20),design_id:id(5),page_id:id(4),files:{}}]){
+  const f=await chatFixture(),r=await f.send({...f.chatBody,context});assert(r.status>=400&&!f.calls.length&&!f.objects.size)
+ }
+})
+Deno.test('Chat uncertain claim and upload errors preserve original check-only path without a replacement request',async()=>{
+ for(const flag of ['transport','upload'] as const){const f=await chatFixture();f.flags[flag]=true;const r=await f.sendChat(),b=await r.json();assert(r.status>=400&&b.rollback_verified===false);assert(f.calls.filter(c=>c.name==='start_project_chat_native_build').length===1);assert(flag==='transport'?!f.objects.size:b.request_retained===true)}
+})

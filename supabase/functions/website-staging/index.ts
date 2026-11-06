@@ -13,17 +13,29 @@ export async function handler(req:Request,dependencies:{resolveContext?:typeof r
  let retained=false,posted=false,localFailure:any=null,action='',ctx:ServerOrganizationContext|undefined
  try{
   const reader=req.body?.getReader();if(!reader)throw Error('Staging request required');let raw='',size=0;const decoder=new TextDecoder()
-  for(;;){const p=await reader.read();if(p.done)break;size+=p.value.byteLength;if(size>4096){await reader.cancel();return reply({error:'Staging request exceeds bound'},413)}raw+=decoder.decode(p.value,{stream:true})}raw+=decoder.decode()
+  for(;;){const p=await reader.read();if(p.done)break;size+=p.value.byteLength;if(size>12288){await reader.cancel();return reply({error:'Staging request exceeds bound'},413)}raw+=decoder.decode(p.value,{stream:true})}raw+=decoder.decode()
   const b=JSON.parse(raw);if(!b||typeof b!=='object'||Array.isArray(b))throw Error('Staging object required')
-  const common=['action','organization_id','project_id','engagement_id'],fields:Record<string,string[]>={inspect:['connection_id'],bind:['connection_id','site_id','base_url','connection_revision','inspection_sha256','request_id'],'dry-run':['target_id','job_id'],deploy:['target_id','job_id','remote_head','review_sha256','previous_run_id','request_id'],recover:['request_id']}
+  const chat=['dry-run-chat','deploy-chat','recover-chat'].includes(b.action)
+  if(!chat&&size>4096)return reply({error:'Staging request exceeds bound'},413)
+  const common=['action','organization_id','project_id','engagement_id'],fields:Record<string,string[]>={inspect:['connection_id'],bind:['connection_id','site_id','base_url','connection_revision','inspection_sha256','request_id'],'dry-run':['target_id','job_id'],deploy:['target_id','job_id','remote_head','review_sha256','previous_run_id','request_id'],recover:['request_id'],'dry-run-chat':['conversation_id','source_message_id','context'],'deploy-chat':['conversation_id','source_message_id','context','remote_head','review_sha256','chat_review_sha256','request_id'],'recover-chat':['conversation_id','source_message_id','request_id']}
   action=b.action
   if(!fields[b.action])throw Error('Unsupported staging action; client publication is unavailable');exact(b,[...common,...fields[b.action]])
   for(const k of ['organization_id','project_id','engagement_id',...fields[b.action].filter(k=>k.endsWith('_id'))])if(!(k==='previous_run_id'&&b[k]===null)&&!uuid(b[k]))throw Error('Exact staging identities required')
-  if(b.action==='deploy'&&b.remote_head!==null&&!uuid(b.remote_head))throw Error('Exact remote page head required')
+  if(chat&&b.action!=='recover-chat'){
+   const x=b.context
+   if(!x||typeof x!=='object'||Array.isArray(x)||new TextEncoder().encode(JSON.stringify(x)).length>8192)throw Error('Bounded Chat staging context required')
+   exact(x,['engagement_id','selection','build_request_id','job_id','design_id','page_id','target_id','previous_run_id'])
+   if(x.engagement_id!==b.engagement_id||['engagement_id','build_request_id','job_id','design_id','page_id','target_id'].some(k=>!uuid(x[k]))||(x.previous_run_id!==null&&!uuid(x.previous_run_id)))throw Error('Exact Chat staging context required')
+   b.target_id=x.target_id;b.job_id=x.job_id;b.previous_run_id=x.previous_run_id
+  }
+  if(chat)b.action=b.action.slice(0,-5)
+  if(b.action==='deploy'&&(b.remote_head!==null&&!uuid(b.remote_head)||typeof b.review_sha256!=='string'||!/^[a-f0-9]{64}$/.test(b.review_sha256)||chat&&(typeof b.chat_review_sha256!=='string'||!/^[a-f0-9]{64}$/.test(b.chat_review_sha256))))throw Error('Exact remote page review required')
   ctx=await(dependencies.resolveContext||resolveServerOrganizationContext)(req,{root:{kind:'engagement',id:b.engagement_id},requestedOrganizationId:b.organization_id})
   if(ctx.organizationId!==b.organization_id||ctx.projectId!==b.project_id||ctx.engagementId!==b.engagement_id)throw Error('Staging context changed')
   const scope={p_organization_id:ctx.organizationId,p_project_id:ctx.projectId,p_engagement_id:ctx.engagementId,p_actor_id:ctx.user.id},admin=ctx.admin
-  const dispatch=(target:any=null,job:any=null,connection:any=null,head:any=null)=>rpc(admin,'get_website_staging_dispatch',{...scope,p_connection_id:connection,p_target_id:target,p_job_id:job,p_remote_head:head})
+  const chatScope={p_actor_id:ctx.user.id,p_organization_id:ctx.organizationId,p_project_id:ctx.projectId,p_conversation_id:b.conversation_id,p_source_message_id:b.source_message_id,p_request_id:b.request_id}
+  const claimChat=()=>rpc(admin,'start_project_chat_native_staging',{...chatScope,p_context:b.context,p_remote_head:b.remote_head,p_review_sha256:b.review_sha256,p_chat_review_sha256:b.chat_review_sha256})
+  const dispatch=(target:any=null,job:any=null,connection:any=null,head:any=null)=>chat?rpc(admin,'get_project_chat_native_staging_dispatch',{p_actor_id:ctx!.user.id,p_organization_id:ctx!.organizationId,p_project_id:ctx!.projectId,p_conversation_id:b.conversation_id,p_source_message_id:b.source_message_id,p_context:b.context,p_remote_head:head}):rpc(admin,'get_website_staging_dispatch',{...scope,p_connection_id:connection,p_target_id:target,p_job_id:job,p_remote_head:head})
   const transport=(c:Json)=>createStagingTransport(c,{env:dependencies.env||realEnv,fetcher:dependencies.fetcher||fetch,resolver:dependencies.resolver||resolveHost})
   if(['inspect','bind'].includes(b.action)){
    if(ctx.membership.member_kind!=='team'||ctx.membership.status!=='active'||!['system_owner','operations_admin'].includes(ctx.membership.role))return reply({error:'Organization owner or operations admin must bind staging'},403)
@@ -36,7 +48,16 @@ export async function handler(req:Request,dependencies:{resolveContext?:typeof r
    return reply({data:{...row,published:false}})
   }
   if(b.action==='deploy'){
-   const original=await rpc(admin,'get_website_staging_recovery',{...scope,p_request_id:b.request_id})
+   if(chat){
+    const original=await rpc(ctx.userClient,'recover_project_chat_native_staging_action',{p_organization_id:ctx.organizationId,p_project_id:ctx.projectId,p_conversation_id:b.conversation_id,p_source_message_id:b.source_message_id,p_request_id:b.request_id})
+    if(original.status==='recorded'){
+     retained=true;const replay=await claimChat()
+     if(replay.replayed!==true)throw Error('Original Chat staging claim differs')
+     return reply({data:{receipt:replay.receipt,state:replay.state,replayed:true}})
+    }
+    if(original.status!=='not_recorded'||original.must_not_submit!==true)throw Error('Original Chat staging check unavailable')
+   }
+   const original=chat?null:await rpc(admin,'get_website_staging_recovery',{...scope,p_request_id:b.request_id})
    if(original){
     retained=true;const run=original.run
     if(run.created_by!==ctx.user.id||run.target_id!==b.target_id||run.job_id!==b.job_id||run.remote_head!==b.remote_head||run.review_sha256!==b.review_sha256||run.previous_run_id!==b.previous_run_id)throw Error('Original staging request owns different reviewed inputs')
@@ -44,7 +65,13 @@ export async function handler(req:Request,dependencies:{resolveContext?:typeof r
    }
   }
   if(b.action==='recover'){
-   const current=await rpc(admin,'get_website_staging_recovery',{...scope,p_request_id:b.request_id})
+   const chatRecord=chat?await rpc(admin,'get_project_chat_native_staging_recovery',chatScope):undefined
+   if(chat){
+    retained=true
+    if(chatRecord.status!=='recorded')throw Error('Original Chat staging claim was not observed; this check never permits resubmission')
+    if(['staged','failed'].includes(chatRecord.state?.status))return reply({data:{receipt:chatRecord.receipt,state:chatRecord.state,replayed:true}})
+   }
+   const current=chat?chatRecord.native:await rpc(admin,'get_website_staging_recovery',{...scope,p_request_id:b.request_id})
    if(!current)return reply({data:{organization_id:ctx.organizationId,project_id:ctx.projectId,engagement_id:ctx.engagementId,request_id:b.request_id,status:'failed',not_claimed:true,published:false}})
    if(current.result)return reply({data:{...current.run,status:current.result.outcome,evidence:current.result.evidence,published:false}})
    retained=true;const t=transport(current.connection);await t.identity(current.target.site_id)
@@ -58,19 +85,22 @@ export async function handler(req:Request,dependencies:{resolveContext?:typeof r
   if(head.protocol!==STAGING_PROTOCOL||head.site_id!==current.target.site_id||head.page_id!==current.page_id||head.published!==false||(head.head!==null&&!uuid(head.head)))throw Error('Exact staging page head differs')
   current=await dispatch(b.target_id,b.job_id,null,head.head)
   const bundle=await stagingBundle(current)
-  if(b.action==='dry-run')return reply({data:{organization_id:ctx.organizationId,project_id:ctx.projectId,engagement_id:ctx.engagementId,target_id:b.target_id,job_id:b.job_id,page_id:current.page_id,page_key:m.scope.page_key,page_path:current.source.context.page.path,title:m.content.title,site_id:current.target.site_id,base_url:t.origin,remote_head:head.head,review_sha256:current.review_sha256,package_sha256:current.job.artifact_sha256,files:9,environment:'staging',published:false}})
-  if(b.remote_head!==head.head||b.review_sha256!==current.review_sha256)throw Object.assign(Error('Staging target or source changed; repeat the dry run'),{knownRollback:true})
-  const claim=await rpc(admin,'start_website_staging_run',{...scope,p_target_id:b.target_id,p_job_id:b.job_id,p_remote_head:b.remote_head,p_review_sha256:b.review_sha256,p_previous_run_id:b.previous_run_id,p_request_id:b.request_id})
+  if(b.action==='dry-run')return reply({data:{organization_id:ctx.organizationId,project_id:ctx.projectId,engagement_id:ctx.engagementId,target_id:b.target_id,job_id:b.job_id,page_id:current.page_id,page_key:m.scope.page_key,page_path:current.source.context.page.path,title:m.content.title,site_id:current.target.site_id,base_url:t.origin,remote_head:head.head,review_sha256:current.review_sha256,package_sha256:current.job.artifact_sha256,files:9,environment:'staging',published:false,...(chat?{chat_context:current.chat_context,chat_review_sha256:current.chat_review_sha256}:{})}})
+  if(b.remote_head!==head.head||b.review_sha256!==current.review_sha256||chat&&b.chat_review_sha256!==current.chat_review_sha256)throw Object.assign(Error('Staging target or source changed; repeat the dry run'),{knownRollback:true})
+  const chatClaim=chat?await claimChat():undefined
+  if(chatClaim?.replayed===true){retained=true;return reply({data:{receipt:chatClaim.receipt,state:chatClaim.state,replayed:true}})}
+  const claim=chat?{created:true,run:chatClaim.native.run}:await rpc(admin,'start_website_staging_run',{...scope,p_target_id:b.target_id,p_job_id:b.job_id,p_remote_head:b.remote_head,p_review_sha256:b.review_sha256,p_previous_run_id:b.previous_run_id,p_request_id:b.request_id})
   retained=true
   if(!claim.created)return reply({data:{...claim.run,status:'processing',replayed:true,published:false}})
-  localFailure={scope,run:claim.run,current}
+  localFailure={scope,run:claim.run,current,chat,chatScope}
   // Recheck actual authority, source and connection immediately before the only external write.
   const bucket='wordpress-theme-exports',path=current.job.storage_path,expected=ctx.organizationId+'/'+current.job.website_page_design_id+'/'+current.job.id+'/native-block.zip'
   if(path!==expected)throw Error('Original private package path differs')
   const{data:blob,error}=await admin.storage.from(bucket).download(path)
   if(error||!blob||blob.type.split(';')[0]!=='application/zip'||blob.size!==current.job.seo_verification.package_bytes||blob.size>1048576||await sha(new Uint8Array(await blob.arrayBuffer()))!==current.job.artifact_sha256)throw Error('Original private package verification failed')
   const command=await stagingCommand(current,claim.run,bundle)
-  await dispatch(b.target_id,b.job_id,null,head.head)
+  const dispatchReview=await dispatch(b.target_id,b.job_id,null,head.head)
+  if(dispatchReview.review_sha256!==b.review_sha256||chat&&dispatchReview.chat_review_sha256!==b.chat_review_sha256)throw Error('Original staging review changed before dispatch')
   if(Date.now()>=Date.parse(claim.run.created_at)+600000)throw Error('Original dispatch window expired; recover before another attempt')
   posted=true
   const receipt=await t.request('/wp-json/anka-stage/v1/deploy',{method:'POST',body:command})
@@ -86,16 +116,18 @@ export async function handler(req:Request,dependencies:{resolveContext?:typeof r
     if(!html.includes('name="anka-staging-request" content="'+run.request_id+'"')||!html.includes('name="anka-package-sha256" content="'+current.job.artifact_sha256+'"')||!html.includes('name="anka-staging-site" content="'+current.target.site_id+'"'))throw Error('Working staging preview identity could not be verified')
     evidence={...evidence,preview_url:receipt.preview_url,preview_verified:true}
    }
-   const result=await rpc(admin,'record_website_staging_result',{...scope,p_run_id:run.id,p_outcome:staged?'staged':'failed',p_evidence:evidence})
+   const result=chat?await rpc(admin,'record_project_chat_native_staging_result',{...chatScope,p_outcome:staged?'staged':'failed',p_evidence:evidence}):await rpc(admin,'record_website_staging_result',{...scope,p_run_id:run.id,p_outcome:staged?'staged':'failed',p_evidence:evidence})
+   if(chat)return reply({data:{receipt:result.receipt,state:result.state,replayed:b.action==='recover'}})
    return reply({data:{...run,status:result.outcome,evidence:result.evidence,published:false}})
   }
  }catch(error){const e=error as Error&{status?:number;knownRollback?:boolean};
   // Only this live worker can prove it never attempted the external POST. A killed worker stays uncertain.
   if(retained&&!posted&&localFailure&&ctx){try{
-   const {scope,run,current}=localFailure,evidence={protocol:STAGING_PROTOCOL,environment:'staging',published:false,base_url:current.target.base_url,site_id:current.target.site_id,request_id:run.request_id,package_sha256:current.job.artifact_sha256,status:'not_dispatched'}
-   const result=await rpc(ctx.admin,'record_website_staging_result',{...scope,p_run_id:run.id,p_outcome:'failed',p_evidence:evidence})
+   const {scope,run,current,chat,chatScope}=localFailure,evidence={protocol:STAGING_PROTOCOL,environment:'staging',published:false,base_url:current.target.base_url,site_id:current.target.site_id,request_id:run.request_id,package_sha256:current.job.artifact_sha256,status:'not_dispatched'}
+   const result=chat?await rpc(ctx.admin,'record_project_chat_native_staging_result',{...chatScope,p_outcome:'failed',p_evidence:evidence}):await rpc(ctx.admin,'record_website_staging_result',{...scope,p_run_id:run.id,p_outcome:'failed',p_evidence:evidence})
+   if(chat)return reply({data:{receipt:result.receipt,state:result.state,replayed:false}})
    return reply({data:{...run,status:result.outcome,evidence:result.evidence,published:false}})
   }catch{/* Revocation or receipt uncertainty never permits a replacement write. */}}
-  return reply({error:e.message||'Staging could not be verified',request_retained:retained,rollback_verified:!retained&&!(['deploy','recover'].includes(action))&&e.knownRollback===true},e.status||400)}
+  return reply({error:e.message||'Staging could not be verified',request_retained:retained,rollback_verified:!retained&&!(['deploy','recover','deploy-chat','recover-chat'].includes(action))&&e.knownRollback===true},e.status||400)}
 }
 if(import.meta.main)Deno.serve(req=>handler(req))
