@@ -1,0 +1,223 @@
+{
+  "proposal": {
+    "version": 1,
+    "identity": {
+      "organization_id": "1880a14e-add6-4978-8853-156bf346bda4",
+      "project_id": "723aa82a-83c2-48d5-87e7-be9b109b406a",
+      "conversation_id": "d18d8cc4-1e95-44eb-8d47-8abb689901ff",
+      "source_message_id": "2e3b1378-e7d8-43e3-8910-2b755e33fc2c",
+      "request_id": "a0000000-0000-4000-8000-000000009002"
+    },
+    "context": {
+      "page_id": "375b7460-eeb4-4ed5-825b-f591d2a748ed",
+      "selection": {
+        "phase": "website.content",
+        "plan_id": "6a7a1ded-388e-4054-8af9-ea471b0fd849",
+        "version": 1,
+        "group_id": "3cb02f5c-b795-462a-8cd9-fa726bc1df28",
+        "partition": {
+          "id": "375b7460-eeb4-4ed5-825b-f591d2a748ed",
+          "kind": "website_page",
+          "architecture_version_id": "d1e7fdbb-63fa-4499-8373-55bbea98b4a9"
+        },
+        "project_id": "723aa82a-83c2-48d5-87e7-be9b109b406a",
+        "engagement_id": "0596b725-cb0a-4f56-8de8-da7f08a09895",
+        "context_sha256": "71db9fbede87bfb1c145b0a78e004c8c38cc49f63719d76c511aee3f0b07b35f",
+        "organization_id": "1880a14e-add6-4978-8853-156bf346bda4"
+      },
+      "source_work": {
+        "id": "124b734c-1ad3-48f9-855a-d29b463709f7",
+        "row_version": 2
+      },
+      "engagement_id": "0596b725-cb0a-4f56-8de8-da7f08a09895",
+      "receiving_work": {
+        "id": "dd3e39b3-dadc-4959-aa15-7b280b03e51d",
+        "row_version": 1
+      },
+      "site_version_id": "ebd31047-092f-44e2-a868-9c70c629c890",
+      "brief_version_id": "da60095c-36ed-45b2-80e1-b47c4775af43",
+      "handoff_request_id": "3f1ff59b-712b-47c2-8262-07678324d669",
+      "direction_version_id": null,
+      "architecture_version_id": "d1e7fdbb-63fa-4499-8373-55bbea98b4a9",
+      "expected_parent_design_id": "a65adb65-c16b-44f3-9939-2f82e16759fd"
+    },
+    "chat_review_sha256": "5e0f957ee804f0cc83db40f2dc954d4c9882764fcb3e5ed59108c0782d4cef6f",
+    "review_sha256": "5b82fd6170026cc6a6b00138161d3e7e01b08772d93af5668876774a7716289e",
+    "architecture_approval_id": "1159f9de-adc5-4884-a022-0a9d8050d512",
+    "manifest": {
+      "schema_version": 1,
+      "scope": {
+        "page_id": "375b7460-eeb4-4ed5-825b-f591d2a748ed",
+        "page_key": "home",
+        "project_id": "723aa82a-83c2-48d5-87e7-be9b109b406a",
+        "engagement_id": "0596b725-cb0a-4f56-8de8-da7f08a09895",
+        "organization_id": "1880a14e-add6-4978-8853-156bf346bda4"
+      },
+      "sources": {
+        "architecture": {
+          "version_id": "d1e7fdbb-63fa-4499-8373-55bbea98b4a9",
+          "checksum": "2cb662cada31e3816370c15017510120a6ad6d3a5429007340cbdcf4d949811e"
+        },
+        "content": {
+          "version_id": "eaf811a0-dfb6-4e64-8cd4-eab355711e8e",
+          "checksum": "15282951e2c6bedff26f949027562d4ba7769806a35d8ef7ebe34555d7a3ea1c"
+        },
+        "brief": {
+          "version_id": "da60095c-36ed-45b2-80e1-b47c4775af43",
+          "checksum": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "site_system": {
+          "version_id": "ebd31047-092f-44e2-a868-9c70c629c890",
+          "checksum": "87f218ce34f18d7c5428bd01cab664cc34eae793a4fbfbd3889b715208c25690"
+        }
+      },
+      "snapshot_checksums": {
+        "content": "baaec208f5442c6b3522a11620bdeb7ce95d5b45ea121fd3c1791eecf963bfda",
+        "site_system": "ac776bc0af2e251437fc158aed9e3b632724db06af49f2f6c77d350c82ed3994"
+      },
+      "site": {
+        "title": "Local site",
+        "footer": "Local fixture",
+        "palette": {
+          "ink": "#111111",
+          "accent": "#224466",
+          "surface": "#eeeeee",
+          "background": "#ffffff"
+        },
+        "language": "en",
+        "navigation": [
+          {
+            "path": "/home",
+            "label": "Home"
+          }
+        ],
+        "description": "Synthetic Design test"
+      },
+      "content": {
+        "title": "Reviewed page content",
+        "summary": "",
+        "sections": [
+          {
+            "key": "copy",
+            "heading": "Home",
+            "paragraphs": [
+              "Exact stage page draft\n"
+            ],
+            "items": [],
+            "action": null
+          }
+        ],
+        "format": "writer_v2_plain"
+      },
+      "layout": {
+        "template": "home",
+        "sections": [
+          {
+            "source_key": "copy",
+            "component": "prose",
+            "motion": "none"
+          }
+        ]
+      }
+    },
+    "sha256": "015d5b3cf6c60ee4197cafeb5fe2f88105a59fab3301bf7cf9037d8fe7944da0"
+  },
+  "receipt": {
+    "kind": "save_native_design",
+    "output": {
+      "kind": "website_native_design",
+      "page_id": "375b7460-eeb4-4ed5-825b-f591d2a748ed",
+      "design_id": "66155ced-e932-4393-836d-c0325e03e4c9",
+      "request_sha256": "98c78b9970c4fcdae23068559135b6b3d70960abbb1025a21e08bacb0fa60571",
+      "version_number": 2,
+      "parent_design_id": "a65adb65-c16b-44f3-9939-2f82e16759fd"
+    },
+    "status": "design_draft_saved",
+    "version": 1,
+    "actor_id": "d7c35bd0-1e98-4106-8769-6fb52349c23d",
+    "selection": {
+      "phase": "website.content",
+      "plan_id": "6a7a1ded-388e-4054-8af9-ea471b0fd849",
+      "version": 1,
+      "group_id": "3cb02f5c-b795-462a-8cd9-fa726bc1df28",
+      "partition": {
+        "id": "375b7460-eeb4-4ed5-825b-f591d2a748ed",
+        "kind": "website_page",
+        "architecture_version_id": "d1e7fdbb-63fa-4499-8373-55bbea98b4a9"
+      },
+      "project_id": "723aa82a-83c2-48d5-87e7-be9b109b406a",
+      "engagement_id": "0596b725-cb0a-4f56-8de8-da7f08a09895",
+      "context_sha256": "71db9fbede87bfb1c145b0a78e004c8c38cc49f63719d76c511aee3f0b07b35f",
+      "organization_id": "1880a14e-add6-4978-8853-156bf346bda4"
+    },
+    "project_id": "723aa82a-83c2-48d5-87e7-be9b109b406a",
+    "request_id": "a0000000-0000-4000-8000-000000009002",
+    "source_work": {
+      "id": "124b734c-1ad3-48f9-855a-d29b463709f7",
+      "row_version": 2
+    },
+    "engagement_id": "0596b725-cb0a-4f56-8de8-da7f08a09895",
+    "receiving_work": {
+      "id": "dd3e39b3-dadc-4959-aa15-7b280b03e51d",
+      "row_version": 1
+    },
+    "conversation_id": "d18d8cc4-1e95-44eb-8d47-8abb689901ff",
+    "organization_id": "1880a14e-add6-4978-8853-156bf346bda4",
+    "review_required": true,
+    "source_message_id": "2e3b1378-e7d8-43e3-8910-2b755e33fc2c",
+    "handoff_request_id": "3f1ff59b-712b-47c2-8262-07678324d669"
+  },
+  "recovery": {
+    "status": "recorded",
+    "receipt": {
+      "kind": "save_native_design",
+      "output": {
+        "kind": "website_native_design",
+        "page_id": "375b7460-eeb4-4ed5-825b-f591d2a748ed",
+        "design_id": "66155ced-e932-4393-836d-c0325e03e4c9",
+        "request_sha256": "98c78b9970c4fcdae23068559135b6b3d70960abbb1025a21e08bacb0fa60571",
+        "version_number": 2,
+        "parent_design_id": "a65adb65-c16b-44f3-9939-2f82e16759fd"
+      },
+      "status": "design_draft_saved",
+      "version": 1,
+      "actor_id": "d7c35bd0-1e98-4106-8769-6fb52349c23d",
+      "selection": {
+        "phase": "website.content",
+        "plan_id": "6a7a1ded-388e-4054-8af9-ea471b0fd849",
+        "version": 1,
+        "group_id": "3cb02f5c-b795-462a-8cd9-fa726bc1df28",
+        "partition": {
+          "id": "375b7460-eeb4-4ed5-825b-f591d2a748ed",
+          "kind": "website_page",
+          "architecture_version_id": "d1e7fdbb-63fa-4499-8373-55bbea98b4a9"
+        },
+        "project_id": "723aa82a-83c2-48d5-87e7-be9b109b406a",
+        "engagement_id": "0596b725-cb0a-4f56-8de8-da7f08a09895",
+        "context_sha256": "71db9fbede87bfb1c145b0a78e004c8c38cc49f63719d76c511aee3f0b07b35f",
+        "organization_id": "1880a14e-add6-4978-8853-156bf346bda4"
+      },
+      "project_id": "723aa82a-83c2-48d5-87e7-be9b109b406a",
+      "request_id": "a0000000-0000-4000-8000-000000009002",
+      "source_work": {
+        "id": "124b734c-1ad3-48f9-855a-d29b463709f7",
+        "row_version": 2
+      },
+      "engagement_id": "0596b725-cb0a-4f56-8de8-da7f08a09895",
+      "receiving_work": {
+        "id": "dd3e39b3-dadc-4959-aa15-7b280b03e51d",
+        "row_version": 1
+      },
+      "conversation_id": "d18d8cc4-1e95-44eb-8d47-8abb689901ff",
+      "organization_id": "1880a14e-add6-4978-8853-156bf346bda4",
+      "review_required": true,
+      "source_message_id": "2e3b1378-e7d8-43e3-8910-2b755e33fc2c",
+      "handoff_request_id": "3f1ff59b-712b-47c2-8262-07678324d669"
+    }
+  },
+  "counts": {
+    "designs": 1,
+    "receipts": 1
+  },
+  "provenance": "Actual local SQL transaction; synthetic base/confirmed brief. No signed-in/provider acceptance."
+}

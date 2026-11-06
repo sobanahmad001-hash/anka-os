@@ -1,0 +1,208 @@
+{
+  "identity": {
+    "organization_id": "1880a14e-add6-4978-8853-156bf346bda4",
+    "project_id": "723aa82a-83c2-48d5-87e7-be9b109b406a",
+    "conversation_id": "d18d8cc4-1e95-44eb-8d47-8abb689901ff",
+    "source_message_id": "2e3b1378-e7d8-43e3-8910-2b755e33fc2c",
+    "request_id": "a0000000-0000-4000-8000-000000009001"
+  },
+  "context": {
+    "page_id": "375b7460-eeb4-4ed5-825b-f591d2a748ed",
+    "selection": null,
+    "source_work": {
+      "id": "124b734c-1ad3-48f9-855a-d29b463709f7",
+      "row_version": 2
+    },
+    "engagement_id": "0596b725-cb0a-4f56-8de8-da7f08a09895",
+    "receiving_work": {
+      "id": "dd3e39b3-dadc-4959-aa15-7b280b03e51d",
+      "row_version": 1
+    },
+    "site_version_id": "ebd31047-092f-44e2-a868-9c70c629c890",
+    "brief_version_id": "da60095c-36ed-45b2-80e1-b47c4775af43",
+    "handoff_request_id": "3f1ff59b-712b-47c2-8262-07678324d669",
+    "direction_version_id": null,
+    "architecture_version_id": "d1e7fdbb-63fa-4499-8373-55bbea98b4a9",
+    "expected_parent_design_id": null
+  },
+  "source": {
+    "page": {
+      "path": "home",
+      "title": "Home",
+      "page_key": "home",
+      "position": 1,
+      "page_type": "hub",
+      "parent_slug": null,
+      "parent_page_key": null
+    },
+    "scope": {
+      "page_id": "375b7460-eeb4-4ed5-825b-f591d2a748ed",
+      "page_key": "home",
+      "project_id": "723aa82a-83c2-48d5-87e7-be9b109b406a",
+      "engagement_id": "0596b725-cb0a-4f56-8de8-da7f08a09895",
+      "organization_id": "1880a14e-add6-4978-8853-156bf346bda4"
+    },
+    "site_head": "ebd31047-092f-44e2-a868-9c70c629c890",
+    "design_head": null,
+    "architecture": {
+      "approval_id": "1159f9de-adc5-4884-a022-0a9d8050d512",
+      "approved_at": "2026-11-06T06:08:12.309532-08:00",
+      "artifact_id": "fac97472-5e07-4ef2-84d3-1f145b94851f",
+      "output_type": null,
+      "artifact_type": "website_architecture",
+      "ai_use_allowed": false,
+      "version_number": 1,
+      "content_checksum": "2cb662cada31e3816370c15017510120a6ad6d3a5429007340cbdcf4d949811e",
+      "approval_request_id": "4c4520f5-ee9c-48de-8444-21596111a8f6",
+      "artifact_version_id": "d1e7fdbb-63fa-4499-8373-55bbea98b4a9"
+    },
+    "chat_context": {
+      "context": {
+        "page_id": "375b7460-eeb4-4ed5-825b-f591d2a748ed",
+        "selection": null,
+        "source_work": {
+          "id": "124b734c-1ad3-48f9-855a-d29b463709f7",
+          "row_version": 2
+        },
+        "engagement_id": "0596b725-cb0a-4f56-8de8-da7f08a09895",
+        "receiving_work": {
+          "id": "dd3e39b3-dadc-4959-aa15-7b280b03e51d",
+          "row_version": 1
+        },
+        "site_version_id": "ebd31047-092f-44e2-a868-9c70c629c890",
+        "brief_version_id": "da60095c-36ed-45b2-80e1-b47c4775af43",
+        "handoff_request_id": "3f1ff59b-712b-47c2-8262-07678324d669",
+        "direction_version_id": null,
+        "architecture_version_id": "d1e7fdbb-63fa-4499-8373-55bbea98b4a9",
+        "expected_parent_design_id": null
+      },
+      "version": 1,
+      "actor_id": "d7c35bd0-1e98-4106-8769-6fb52349c23d",
+      "project_id": "723aa82a-83c2-48d5-87e7-be9b109b406a",
+      "source_work": {
+        "id": "124b734c-1ad3-48f9-855a-d29b463709f7",
+        "row_version": 2
+      },
+      "engagement_id": "0596b725-cb0a-4f56-8de8-da7f08a09895",
+      "receiving_work": {
+        "id": "dd3e39b3-dadc-4959-aa15-7b280b03e51d",
+        "row_version": 1
+      },
+      "conversation_id": "d18d8cc4-1e95-44eb-8d47-8abb689901ff",
+      "handoff_receipt": {
+        "kind": "handoff_design",
+        "output": {
+          "artifact_id": "e9f2ed39-1a5d-483e-b05b-37b0bdcb9b34",
+          "version_number": 1,
+          "content_checksum": "15282951e2c6bedff26f949027562d4ba7769806a35d8ef7ebe34555d7a3ea1c",
+          "artifact_version_id": "eaf811a0-dfb6-4e64-8cd4-eab355711e8e"
+        },
+        "status": "handoff_recorded",
+        "handoff": {
+          "request_id": "3f1ff59b-712b-47c2-8262-07678324d669",
+          "approval_id": "75e3bdf8-8e2f-49a9-bf52-2190fa01e40b",
+          "receiving_service_id": "24bc2cf9-e2ec-48d4-8cb9-85df0f09f0c3",
+          "receiving_work_item_id": "dd3e39b3-dadc-4959-aa15-7b280b03e51d",
+          "receiving_workstream_id": "9b5fbd4e-0647-4d4b-80db-e1c845fd8e71"
+        },
+        "version": 1,
+        "actor_id": "d7c35bd0-1e98-4106-8769-6fb52349c23d",
+        "selection": {
+          "phase": "website.content",
+          "plan_id": "6a7a1ded-388e-4054-8af9-ea471b0fd849",
+          "version": 1,
+          "group_id": "3cb02f5c-b795-462a-8cd9-fa726bc1df28",
+          "partition": {
+            "id": "375b7460-eeb4-4ed5-825b-f591d2a748ed",
+            "kind": "website_page",
+            "architecture_version_id": "d1e7fdbb-63fa-4499-8373-55bbea98b4a9"
+          },
+          "project_id": "723aa82a-83c2-48d5-87e7-be9b109b406a",
+          "engagement_id": "0596b725-cb0a-4f56-8de8-da7f08a09895",
+          "context_sha256": "71db9fbede87bfb1c145b0a78e004c8c38cc49f63719d76c511aee3f0b07b35f",
+          "organization_id": "1880a14e-add6-4978-8853-156bf346bda4"
+        },
+        "project_id": "723aa82a-83c2-48d5-87e7-be9b109b406a",
+        "request_id": "3f1ff59b-712b-47c2-8262-07678324d669",
+        "source_work": {
+          "id": "124b734c-1ad3-48f9-855a-d29b463709f7",
+          "row_version": 2
+        },
+        "engagement_id": "0596b725-cb0a-4f56-8de8-da7f08a09895",
+        "conversation_id": "d18d8cc4-1e95-44eb-8d47-8abb689901ff",
+        "organization_id": "1880a14e-add6-4978-8853-156bf346bda4",
+        "review_required": false,
+        "source_message_id": "2e3b1378-e7d8-43e3-8910-2b755e33fc2c"
+      },
+      "organization_id": "1880a14e-add6-4978-8853-156bf346bda4",
+      "content_approval": {
+        "approval_id": "75e3bdf8-8e2f-49a9-bf52-2190fa01e40b",
+        "artifact_id": "e9f2ed39-1a5d-483e-b05b-37b0bdcb9b34",
+        "content_checksum": "15282951e2c6bedff26f949027562d4ba7769806a35d8ef7ebe34555d7a3ea1c",
+        "artifact_version_id": "eaf811a0-dfb6-4e64-8cd4-eab355711e8e"
+      },
+      "source_message_id": "2e3b1378-e7d8-43e3-8910-2b755e33fc2c"
+    },
+    "content_head": "eaf811a0-dfb6-4e64-8cd4-eab355711e8e",
+    "content_page": {
+      "page_key": "home",
+      "page_path": "home",
+      "draft_copy": "Exact stage page draft\n",
+      "meta_title": "Reviewed page content",
+      "page_brief": "Explain",
+      "primary_cta": null,
+      "source_format": "writer_v2",
+      "meta_description": ""
+    },
+    "site_version": {
+      "id": "ebd31047-092f-44e2-a868-9c70c629c890",
+      "site": {
+        "title": "Local site",
+        "footer": "Local fixture",
+        "palette": {
+          "ink": "#111111",
+          "accent": "#224466",
+          "surface": "#eeeeee",
+          "background": "#ffffff"
+        },
+        "language": "en",
+        "navigation": [
+          {
+            "path": "/home",
+            "label": "Home"
+          }
+        ],
+        "description": "Synthetic Design test"
+      },
+      "created_at": "2026-11-06T06:09:21.265302-08:00",
+      "created_by": "d7c35bd0-1e98-4106-8769-6fb52349c23d",
+      "project_id": "723aa82a-83c2-48d5-87e7-be9b109b406a",
+      "request_id": "8a0e67e5-1a61-4b12-8bb8-a576d5e35c39",
+      "engagement_id": "0596b725-cb0a-4f56-8de8-da7f08a09895",
+      "request_sha256": "87f218ce34f18d7c5428bd01cab664cc34eae793a4fbfbd3889b715208c25690",
+      "version_number": 1,
+      "organization_id": "1880a14e-add6-4978-8853-156bf346bda4",
+      "parent_version_id": null,
+      "identity_version_id": null
+    },
+    "brief_version": {
+      "id": "da60095c-36ed-45b2-80e1-b47c4775af43",
+      "content_checksum": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "review_sha256": "66fc2535a452133390ab78afbf327937a7cdfd70cb9b070216bb024fa542d054",
+    "brief_revision": 1,
+    "content_version": {
+      "id": "eaf811a0-dfb6-4e64-8cd4-eab355711e8e",
+      "content_checksum": "15282951e2c6bedff26f949027562d4ba7769806a35d8ef7ebe34555d7a3ea1c"
+    },
+    "architecture_head": "d1e7fdbb-63fa-4499-8373-55bbea98b4a9",
+    "chat_review_sha256": "b341ed56869d31854c1b7d047a74c635ceeb7e9d446cb566e686dc02f6531c0f"
+  },
+  "provenance": {
+    "actual_local_source": true,
+    "actual_content_approval_and_handoff": true,
+    "synthetic_base_and_confirmed_brief": true,
+    "signed_in": false,
+    "provider_calls": false
+  }
+}

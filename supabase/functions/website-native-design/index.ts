@@ -17,6 +17,7 @@ export async function handler(req:Request,dependencies:{resolveContext?:typeof r
   const base=['action','organization_id','project_id','engagement_id','request_id']
   if(body.action==='save_site')exact(body,[...base,'expected_version_id','identity_version_id','site'])
   else if(body.action==='save_design')exact(body,[...base,'direction_version_id','architecture_approval_id','review_sha256','manifest'])
+  else if(body.action==='save_chat_design')exact(body,[...base,'conversation_id','source_message_id','context','chat_review_sha256','architecture_approval_id','review_sha256','manifest'])
   else throw Error('Unsupported Website draft action')
   for(const key of ['organization_id','project_id','engagement_id','request_id'])if(!uuid(body[key]))throw Error('Exact Website scope and request UUIDs required')
   const ctx:ServerOrganizationContext=await(dependencies.resolveContext||resolveServerOrganizationContext)(req,{root:{kind:'engagement',id:body.engagement_id as string},requestedOrganizationId:body.organization_id as string})
@@ -28,6 +29,17 @@ export async function handler(req:Request,dependencies:{resolveContext?:typeof r
    if(body.expected_version_id!==null&&!uuid(body.expected_version_id)||body.identity_version_id!==null&&!uuid(body.identity_version_id))throw Error('Exact site and identity version IDs required')
    const site=validateWebsiteNativeSite(body.site)
    writeStarted=true;result=await ctx.admin.rpc('save_website_native_site',{...args,p_expected_version_id:body.expected_version_id,p_identity_version_id:body.identity_version_id,p_site:site})
+  }else if(body.action==='save_chat_design'){
+   if(!uuid(body.conversation_id)||!uuid(body.source_message_id)||!uuid(body.architecture_approval_id)||typeof body.review_sha256!=='string'||!/^[a-f0-9]{64}$/.test(body.review_sha256)||typeof body.chat_review_sha256!=='string'||!/^[a-f0-9]{64}$/.test(body.chat_review_sha256))throw Error('Exact original Chat and reviewed Design sources required')
+   const context=body.context as Json
+   if(!context||Array.isArray(context)||typeof context!=='object'||context.engagement_id!==ctx.engagementId)throw failure('Chat Design engagement differs',403)
+   const manifest=body.manifest as {scope:Json;sources:Record<string,{version_id:string}>}
+   if(!manifest||manifest.scope?.organization_id!==ctx.organizationId||manifest.scope?.project_id!==ctx.projectId||manifest.scope?.engagement_id!==ctx.engagementId||manifest.scope?.page_id!==context.page_id)throw failure('Manifest belongs to another Chat context',403)
+   const source=await ctx.userClient.rpc('get_project_chat_native_design_source',{p_organization_id:ctx.organizationId,p_project_id:ctx.projectId,p_conversation_id:body.conversation_id,p_source_message_id:body.source_message_id,p_context:context})
+   if(source.error)throw failure(source.error.message,409)
+   if(source.data?.review_sha256!==body.review_sha256||source.data?.chat_review_sha256!==body.chat_review_sha256||source.data?.architecture?.approval_id!==body.architecture_approval_id||source.data?.chat_context?.actor_id!==ctx.user.id||source.data?.chat_context?.conversation_id!==body.conversation_id||source.data?.chat_context?.source_message_id!==body.source_message_id)throw failure('Chat Design sources changed; review current sources',409)
+   const verified=await verifyWebsiteNativeManifest(source.data,manifest),compiled=await compileWebsiteNativeDesign(verified)
+   writeStarted=true;result=await ctx.admin.rpc('apply_project_chat_native_design_action',{p_actor_id:ctx.user.id,p_organization_id:ctx.organizationId,p_project_id:ctx.projectId,p_conversation_id:body.conversation_id,p_source_message_id:body.source_message_id,p_request_id:body.request_id,p_context:context,p_chat_review_sha256:body.chat_review_sha256,p_review_sha256:body.review_sha256,p_architecture_approval_id:body.architecture_approval_id,p_manifest:verified,p_html:compiled.preview,p_css:compiled.files['style.css']})
   }else{
    if(body.direction_version_id!==null&&!uuid(body.direction_version_id)||!uuid(body.architecture_approval_id)||typeof body.review_sha256!=='string'||!/^[a-f0-9]{64}$/.test(body.review_sha256))throw Error('Exact reviewed Website sources required')
    const manifest=body.manifest as {scope:Json;sources:Record<string,{version_id:string}>}
@@ -39,7 +51,9 @@ export async function handler(req:Request,dependencies:{resolveContext?:typeof r
    writeStarted=true;result=await ctx.admin.rpc('save_website_native_design',{...args,p_direction_version_id:body.direction_version_id,p_architecture_approval_id:body.architecture_approval_id,p_review_sha256:body.review_sha256,p_manifest:verified,p_html:compiled.preview,p_css:compiled.files['style.css']})
   }
   if(result.error){code=result.error.code;rollback=['22023','42501','40001','55000','23505','23514'].includes(code||'');throw failure(result.error.message,['40001','23505'].includes(code||'')?409:403)}
-  if(result.data?.organization_id!==ctx.organizationId||result.data?.project_id!==ctx.projectId||result.data?.engagement_id!==ctx.engagementId||result.data?.created_by!==ctx.user.id||result.data?.request_id!==body.request_id)throw failure('Saved Website receipt could not be verified; recover the original request',409)
+  const savedActor=body.action==='save_chat_design'?result.data?.actor_id:result.data?.created_by
+  if(result.data?.organization_id!==ctx.organizationId||result.data?.project_id!==ctx.projectId||result.data?.engagement_id!==ctx.engagementId||savedActor!==ctx.user.id||result.data?.request_id!==body.request_id)throw failure('Saved Website receipt could not be verified; recover the original request',409)
+  if(body.action==='save_chat_design'&&(result.data?.kind!=='save_native_design'||result.data?.status!=='design_draft_saved'||result.data?.conversation_id!==body.conversation_id||result.data?.source_message_id!==body.source_message_id||result.data?.output?.kind!=='website_native_design'||!uuid(result.data?.output?.design_id)))throw failure('Saved Chat Design receipt could not be verified; recover original request',409)
   return reply({data:result.data})
  }catch(error){const status=error&&typeof error==='object'&&'status'in error?Number(error.status):400;return reply({error:error instanceof Error?error.message:'Website draft unavailable',rollback_verified:!writeStarted||rollback,code},Number.isFinite(status)?status:400)}
 }

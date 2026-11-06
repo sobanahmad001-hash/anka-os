@@ -121,6 +121,7 @@ test('actual Website workspace loads and reviews all six source sections, retain
  const repository={workspace:async()=>({sites:[{id:id(8),site:ctx.site_version.site,version_number:1}],designs:[]}),source:async()=>ctx,saveDesign:async input=>{calls.push(input);return {version_number:1}}}
  const nativeRequire=createRequire(import.meta.url),source=readFileSync(new URL('../components/DesignWebsiteWorkspace.jsx',import.meta.url),'utf8'),code=transformSync(source,{loader:'jsx',format:'cjs',jsxFactory:'React.createElement'}).code,module={exports:{}}
  new Function('require','module','exports','React',code)(name=>{
+  if(name.endsWith('/DesignWebsiteLayoutControls.jsx')){const child={exports:{}},compiled=transformSync(readFileSync(new URL('../components/DesignWebsiteLayoutControls.jsx',import.meta.url),'utf8'),{loader:'jsx',format:'cjs',jsxFactory:'React.createElement'}).code;new Function('require','module','exports','React',compiled)(()=>({WEBSITE_NATIVE_TEMPLATES:['home']}),child,child.exports,React);return child.exports}
   if(name.endsWith('.css'))return {}
   if(name.endsWith('/websiteNative.js'))return {websiteNative:repository}
   if(name.includes('projectWebsitePages'))return {projectWebsitePages:{list:async()=>({reference:{},pages:[{page_id:id(4),source:{title:'Home',path:''}}],counts:{filtered_total:1}})}}

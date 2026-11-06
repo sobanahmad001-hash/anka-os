@@ -8,6 +8,12 @@ export function nativeCopyParagraphs(value){
  if(parts.length>32)throw Error('Page copy exceeds the bounded preview; resolve it in Content without truncation')
  return parts
 }
+function writerCopyParagraphs(value){
+ if(typeof value!=='string'||!value.trim()||value.length>96000)throw Error('Complete bounded page copy in Content; it is not truncated or replaced')
+ const parts=[];let offset=0
+ while(offset<value.length){let end=Math.min(offset+3000,value.length);if(end<value.length&&/[\uD800-\uDBFF]/.test(value[end-1]))end--;parts.push(value.slice(offset,end));offset=end}
+ return parts
+}
 // A bounded source format, not a general Markdown/HTML interpreter. Legacy copy
 // remains available verbatim; structured layouts must account for every line.
 export function nativeWebsiteCopySections(value){
@@ -46,10 +52,16 @@ export function websiteNativeLayout(context){
 export async function prepareWebsiteNativeManifest(context,options){
  plain(options,['template','sections','cta_path'],'Website layout options')
  const page=context.content_page
- required(page?.page_brief,'page brief',128000);required(page?.primary_cta,'primary CTA',240)
- const structured=options.sections?.some(s=>s.source_key!=='copy')?nativeWebsiteCopySections(page?.draft_copy):null
+ const writer=page?.source_format==='writer_v2'
+ if(Object.hasOwn(page||{},'source_format')&&!writer)throw Error('Unsupported native Content source format')
+ required(page?.page_brief,'page brief',128000)
+ if(writer){
+  if(page.meta_description!==''||page.primary_cta!==null&&(typeof page.primary_cta!=='string'||!page.primary_cta.trim()||page.primary_cta.length>80||page.primary_cta!==page.primary_cta.trim()))throw Error('Writer v2 requires empty SEO summary and exact bounded CTA or null')
+ }else required(page?.primary_cta,'primary CTA',240)
+ const structured=writer?nativeWebsiteCopySections(page?.draft_copy):options.sections?.some(s=>s.source_key!=='copy')?nativeWebsiteCopySections(page?.draft_copy):null
  if(structured&&options.cta_path&&options.cta_path!==structured[0].action?.path)throw Error('Structured CTA destinations come from exact saved Content')
- const content={title:required(page?.meta_title,'meta title',240),summary:required(page?.meta_description,'meta description',800),sections:structured||[{key:'copy',heading:required(context.page?.title,'page heading',240),paragraphs:nativeCopyParagraphs(page?.draft_copy),items:[],action:options.cta_path?{label:required(page?.primary_cta,'primary CTA',80),path:options.cta_path}:null}],...(structured?{format:'numbered_sections_v1'}:{})}
+ if(writer&&!structured&&page.primary_cta===null&&options.cta_path)throw Error('A CTA destination requires an exact saved CTA label')
+ const content={title:writer?page.meta_title:required(page?.meta_title,'meta title',240),summary:writer?'':required(page?.meta_description,'meta description',800),sections:structured||[{key:'copy',heading:required(context.page?.title,'page heading',240),paragraphs:writer?writerCopyParagraphs(page?.draft_copy):nativeCopyParagraphs(page?.draft_copy),items:[],action:options.cta_path?{label:required(page?.primary_cta,'primary CTA',80),path:options.cta_path}:null}],...(writer?{format:structured?'writer_v2_numbered':'writer_v2_plain'}:structured?{format:'numbered_sections_v1'}:{})}
  const site=context.site_version?.site
  const value={schema_version:1,scope:context.scope,sources:{architecture:{version_id:context.architecture.artifact_version_id,checksum:context.architecture.content_checksum},content:{version_id:context.content_version.id,checksum:context.content_version.content_checksum},brief:{version_id:context.brief_version.id,checksum:context.brief_version.content_checksum},site_system:{version_id:context.site_version.id,checksum:context.site_version.request_sha256}},snapshot_checksums:{content:await websiteNativeSnapshotChecksum(content),site_system:await websiteNativeSnapshotChecksum(site)},site,content,layout:{template:options.template,sections:options.sections}}
  return validateWebsiteNativeDesign(value)

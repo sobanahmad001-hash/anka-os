@@ -52,13 +52,14 @@ export function validateWebsiteNativeDesign(value){
  for(const sha of Object.values(value.snapshot_checksums))if(typeof sha!=='string'||!hash.test(sha))throw new TypeError('Exact normalized snapshot checksum required')
  validateWebsiteNativeSite(value.site)
  exact(value.content,['title','summary','sections',...(Object.hasOwn(value.content,'format')?['format']:[])],'page content')
- if(Object.hasOwn(value.content,'format')&&value.content.format!=='numbered_sections_v1')throw new TypeError('Unsupported page copy format')
- text(value.content.title,240,'page title');text(value.content.summary,800,'page summary')
+ if(Object.hasOwn(value.content,'format')&&!['numbered_sections_v1','writer_v2_plain','writer_v2_numbered'].includes(value.content.format))throw new TypeError('Unsupported page copy format')
+ const writer=['writer_v2_plain','writer_v2_numbered'].includes(value.content.format)
+ text(value.content.title,240,'page title');if(writer){if(value.content.summary!=='')throw new TypeError('Writer v2 has no authored SEO summary')}else text(value.content.summary,800,'page summary')
  const sections=new Map()
  list(value.content.sections,1,16,'content sections').forEach(section=>{
   exact(section,['key','heading','paragraphs','items','action',...(Object.hasOwn(section,'secondary_action')?['secondary_action']:[])],'content section');key(section.key);text(section.heading,240,'section heading')
   if(sections.has(section.key))throw new TypeError('Duplicate content section')
-  list(section.paragraphs,0,32,'paragraphs').forEach(p=>text(p,3000,'paragraph'))
+  list(section.paragraphs,0,32,'paragraphs').forEach(p=>{if(writer){if(typeof p!=='string'||!p.length||p.length>3000||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(p))throw new TypeError('Bounded exact Writer v2 paragraph required')}else text(p,3000,'paragraph')})
   list(section.items,0,12,'feature items').forEach(item=>{exact(item,['title','body'],'feature');text(item.title,100,'feature title');text(item.body,800,'feature body')})
   if(section.action!==null){exact(section.action,['label','path'],'action');text(section.action.label,80,'action label');validateWebsiteNavigationDestination(section.action.path)}
   if(Object.hasOwn(section,'secondary_action')){exact(section.secondary_action,['label','path'],'secondary action');text(section.secondary_action.label,80,'secondary action label');validateWebsiteNavigationDestination(section.secondary_action.path)}
@@ -100,8 +101,8 @@ const button=action=>block('buttons',`<div class="wp-block-buttons">${block('but
 const secondaryLink=action=>block('paragraph',`<p><a href="${esc(action.path)}">${esc(action.label)}</a></p>`)
 function bodyBlocks(value){
  const sections=new Map(value.content.sections.map(s=>[s.key,s]))
- const structured=value.content.format==='numbered_sections_v1',hero=structured&&value.layout.sections[0]?.source_key==='hero'
- return (hero?'':heading(value.content.title,1)+paragraph(value.content.summary))+value.layout.sections.map((layout,index)=>{
+ const structured=['numbered_sections_v1','writer_v2_numbered'].includes(value.content.format),hero=structured&&value.layout.sections[0]?.source_key==='hero'
+ return (hero?'':heading(value.content.title,1)+(value.content.summary?paragraph(value.content.summary):''))+value.layout.sections.map((layout,index)=>{
   const s=sections.get(layout.source_key),items=s.items.length?s.items.map(item=>heading(item.title,3)+paragraph(item.body)):layout.component==='feature_grid'?s.paragraphs.map(paragraph):[],features=layout.component==='feature_grid'?block('columns',`<div class="wp-block-columns">${items.map(html=>block('column',`<div class="wp-block-column">${html}</div>`)).join('')}</div>`):items.join(''),inner=heading(layout.heading||s.heading,hero&&index===0?1:2)+(layout.component==='feature_grid'&&(!structured||!s.items.length)?'':s.paragraphs.map(paragraph).join(''))+features+(s.action?button(s.action):'')+(s.secondary_action?secondaryLink(s.secondary_action):'')
   return block('group',`<div id="${esc(s.key)}" class="wp-block-group anka-section anka-${layout.component}${layout.motion==='reveal'?' anka-reveal':''}">${inner}</div>`,{anchor:s.key,className:`anka-section anka-${layout.component}${layout.motion==='reveal'?' anka-reveal':''}`})
  }).join('')
@@ -116,12 +117,13 @@ export async function compileWebsiteNativeDesign(input){
  const footer=block('group',`<footer class="wp-block-group">${paragraph(value.site.footer)}</footer>`,{tagName:'footer'})
  const blocks=bodyBlocks(value),main=block('group',`<main id="main" class="wp-block-group">${blocks}</main>`,{tagName:'main',anchor:'main'})
  const csp="default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; script-src 'none'; form-action 'none'; base-uri 'none'"
- const preview=`<!doctype html><html lang="${esc(value.site.language)}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="${csp}"><title>${esc(value.content.title)}</title><meta name="description" content="${esc(value.content.summary)}"><style>${css}</style></head><body><a class="skip" href="#main">Skip to content</a>${header}${main}${footer}</body></html>`
+ const preview=`<!doctype html><html lang="${esc(value.site.language)}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="${csp}"><title>${esc(value.content.title)}</title>${value.content.summary?`<meta name="description" content="${esc(value.content.summary)}">`:''}<style>${css}</style></head><body><a class="skip" href="#main">Skip to content</a>${header}${main}${footer}</body></html>`
  const templateName=`anka-${value.layout.template}`
  const theme={version:3,$schema:'https://schemas.wp.org/wp/6.6/theme.json',settings:{layout:{contentSize:'1120px',wideSize:'1280px'},color:{palette:Object.entries(p).map(([slug,color])=>({slug,name:slug,color}))}},styles:{color:{background:p.background,text:p.ink},typography:{fontFamily:'system-ui, sans-serif'}},customTemplates:[{name:templateName,title:`Anka ${value.layout.template}`,postTypes:['page']}],templateParts:[{name:'header',title:'Site header',area:'header'},{name:'footer',title:'Site footer',area:'footer'}]}
  theme.styles.css=css
  const part=slug=>`<!-- wp:template-part {"slug":"${slug}","area":"${slug}"} /-->`
  const files={'style.css':`/*\nTheme Name: Anka Native Foundation\nVersion: 0.1.0\nRequires at least: 6.6\nText Domain: anka-native\n*/\n${css}`,'theme.json':JSON.stringify(theme,null,2),'templates/index.html':part('header')+'<!-- wp:post-content /-->'+part('footer'),[`templates/${templateName}.html`]:part('header')+main+part('footer'),'parts/header.html':header,'parts/footer.html':footer}
  // Package staging is not provided here. A worker must still validate/install/render it.
- return {compiler_version:value.content.format==='numbered_sections_v1'?3:2,scope:value.scope,sources:value.sources,snapshot_checksums:value.snapshot_checksums,input_checksum:await websiteNativeSnapshotChecksum(value),files,files_checksum:await websiteNativeSnapshotChecksum(files),blocks,preview:preview.replace(/<a href="(\/[^"]*)"/g,'<a target="_top" href="$1"'),capability:'provider_free_source_package',live:false}
+ return {compiler_version:writerCompilerVersion(value.content.format),scope:value.scope,sources:value.sources,snapshot_checksums:value.snapshot_checksums,input_checksum:await websiteNativeSnapshotChecksum(value),files,files_checksum:await websiteNativeSnapshotChecksum(files),blocks,preview:preview.replace(/<a href="(\/[^"]*)"/g,'<a target="_top" href="$1"'),capability:'provider_free_source_package',live:false}
 }
+function writerCompilerVersion(format){return ['writer_v2_plain','writer_v2_numbered'].includes(format)?4:format==='numbered_sections_v1'?3:2}
