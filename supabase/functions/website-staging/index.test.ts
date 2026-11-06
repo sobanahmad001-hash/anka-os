@@ -64,3 +64,77 @@ Deno.test('elapsed time alone never turns a missing remote receipt into a failed
 Deno.test('public DNS checks deny private reserved documentation and IPv6 relay addresses',()=>{for(const ip of ['127.0.0.1','10.1.2.3','169.254.169.254','172.16.0.1','192.168.1.1','100.64.0.1','198.18.0.1','224.0.0.1','1..2.3','0177.0.0.1','::1','fc00::1','fe80::1','2001:db8::1','2001::1','2002:7f00:1::1','3fff::1'])assert(!publicAddress(ip),ip);for(const ip of ['93.184.216.34','2606:4700:4700::1111','2001:4860:4860::8888'])assert(publicAddress(ip),ip)})
 
 Deno.test('reviewed WordPress 7.1.4 can inspect and dry run while unreviewed versions fail before staging',async()=>{for(const version of ['7.1.4','7.1.5','7.2']){const f=await fixture();f.state.wordpress=version;const r=await f.call('dry-run',{target_id:id(8),job_id:id(6)});assert(version==='7.1.4'?r.status===200:r.status===400);assert(!f.state.run&&f.state.requests.every((x:any)=>x.method==='GET'))}})
+
+async function chatFixture(){
+ const f=await fixture(),ctx=await f.dependencies.resolveContext(),nativeRpc=ctx.admin.rpc
+ const context={engagement_id:id(3),selection:null,build_request_id:id(30),job_id:id(6),design_id:id(5),page_id:id(4),target_id:id(8),previous_run_id:null},identity={conversation_id:id(31),source_message_id:id(32)}
+ const receipt={version:1,kind:'stage_native_package',status:'claimed',organization_id:id(1),project_id:id(2),engagement_id:id(3),...identity,actor_id:id(12),request_id:id(10),selection:null,origin_request_id:id(30),output:{kind:'website_private_staging',run_id:id(11),job_id:id(6),design_id:id(5),page_id:id(4),target_id:id(8),site_id:id(9),previous_run_id:null,package_sha256:f.checksum,base_url:origin}}
+ const observed=()=>({kind:'website_private_staging',status:f.state.result?.outcome||'uncertain',evidence:f.state.result?.evidence||null})
+ const chatContext={version:1,organization_id:id(1),project_id:id(2),engagement_id:id(3),...identity,actor_id:id(12),context,origin_receipt:{request_id:id(30)}}
+ ctx.userClient={rpc:async(name:string)=>{assert(name==='recover_project_chat_native_staging_action');f.state.calls.push(name);return {data:f.state.run?{status:'recorded',receipt,state:observed(),must_not_submit:true}:{status:'not_recorded',must_not_submit:true}}}}
+ ctx.admin.rpc=async(name:string,args:any)=>{
+  if(name==='get_project_chat_native_staging_dispatch'){
+   f.state.calls.push(name);const result=await nativeRpc('get_website_staging_dispatch',args)
+   if(result.error)return result
+   return {data:{...result.data,chat_context:chatContext,chat_review_sha256:f.state.changedChatReview&&f.state.run?'d'.repeat(64):'c'.repeat(64)}}
+  }
+  if(name==='start_project_chat_native_staging'){
+   f.state.calls.push(name)
+   if(f.state.run)return {data:{receipt,state:observed(),replayed:true,native:{private_marker:'SERVICE_ONLY'}}}
+   const result=await nativeRpc('start_website_staging_run',{...args,p_target_id:context.target_id,p_job_id:context.job_id,p_previous_run_id:null})
+   return {data:{receipt,state:observed(),replayed:false,native:result.data}}
+  }
+  if(name==='get_project_chat_native_staging_recovery'){
+   f.state.calls.push(name)
+   if(!f.state.run)return {data:{status:'not_recorded',must_not_submit:true}}
+   const result=await nativeRpc('get_website_staging_recovery',args)
+   return {data:{status:'recorded',receipt,state:observed(),native:result.data,must_not_submit:true}}
+  }
+  if(name==='record_project_chat_native_staging_result'){
+   f.state.calls.push(name);const result=await nativeRpc('record_website_staging_result',args)
+   return result.error?result:{data:{receipt,state:observed(),private_marker:'SERVICE_ONLY'}}
+  }
+  return nativeRpc(name,args)
+ }
+ f.dependencies.resolveContext=async()=>ctx
+ const deploy=()=>f.call('deploy-chat',{...identity,context,remote_head:null,review_sha256:'a'.repeat(64),chat_review_sha256:'c'.repeat(64),request_id:id(10)})
+ const recover=()=>f.call('recover-chat',{...identity,request_id:id(10)})
+ return {...f,context,identity,receipt,deployChat:deploy,recoverChat:recover}
+}
+Deno.test('Chat staging dry run exposes only reviewed public context and deploy settles the original receipt once',async()=>{
+ const f=await chatFixture(),dry=await f.call('dry-run-chat',{...f.identity,context:f.context});assert(dry.status===200,JSON.stringify(dry));assert(JSON.stringify(dry.body.data.chat_context.context)===JSON.stringify(f.context))
+ assert(dry.body.data.chat_review_sha256==='c'.repeat(64));assert(!JSON.stringify(dry.body).includes('secret_name'))
+ const done=await f.deployChat();assert(done.status===200,JSON.stringify(done));assert(done.body.data.state.status==='staged'&&done.body.data.receipt.request_id===f.receipt.request_id)
+ assert(Object.keys(done.body.data).sort().join(',')==='receipt,replayed,state'&&!JSON.stringify(done.body).includes('SERVICE_ONLY'))
+ assert(f.state.requests.filter((x:any)=>x.method==='POST').length===1)
+ const count=f.state.requests.length;const again=await f.deployChat();assert(again.body.data.replayed===true&&f.state.requests.length===count)
+})
+Deno.test('Chat lost staging response recovers original request using GET and preserves the immutable claim',async()=>{
+ const f=await chatFixture();f.state.lost=true;const lost=await f.deployChat();assert(lost.status>=400&&lost.body.request_retained===true)
+ const writes=f.state.requests.filter((x:any)=>x.method==='POST').length,result=await f.recoverChat()
+ assert(result.status===200&&result.body.data.state.status==='staged'&&JSON.stringify(result.body.data.receipt)===JSON.stringify(f.receipt))
+ assert(f.state.requests.filter((x:any)=>x.method==='POST').length===writes)
+})
+Deno.test('Chat staging missing original claim cannot invoke receiver or infer resubmission authority',async()=>{
+ const f=await chatFixture(),r=await f.recoverChat();assert(r.status>=400&&r.body.request_retained===true&&!f.state.requests.length&&!f.state.run)
+})
+Deno.test('Chat staging detects changed original review immediately before POST and retains exact failed claim',async()=>{
+ const f=await chatFixture();f.state.changedChatReview=true;const r=await f.deployChat()
+ assert(r.status===200&&r.body.data.state.status==='failed'&&r.body.data.receipt.request_id===id(10));assert(!f.state.requests.some((x:any)=>x.method==='POST'))
+})
+Deno.test('Chat staging invalid context and arbitrary destination are rejected before transport',async()=>{
+ for(const fields of [{...{conversation_id:id(31),source_message_id:id(32)},context:null},{conversation_id:id(31),source_message_id:id(32),context:{},base_url:'https://client.test'}]){
+  const f=await chatFixture(),r=await f.call('dry-run-chat',fields);assert(r.status>=400&&!f.state.calls.length&&!f.state.requests.length)
+ }
+})
+Deno.test('Chat known terminal recovery returns original local result without credentials or remote transport',async()=>{
+ const f=await chatFixture();assert((await f.deployChat()).status===200)
+ const before=f.state.requests.length;f.state.disabledOrigin=true;f.state.privateDns=true
+ const r=await f.recoverChat();assert(r.status===200&&r.body.data.state.status==='staged'&&r.body.data.replayed===true)
+ assert(f.state.requests.length===before&&JSON.stringify(r.body.data.receipt)===JSON.stringify(f.receipt))
+})
+Deno.test('Chat unresolved remote receipt stays uncertain after expiry and never redeploys',async()=>{
+ const f=await chatFixture();f.state.lost=true;await f.deployChat();f.state.remote=false;f.state.run.created_at=new Date(Date.now()-660000).toISOString()
+ const writes=f.state.requests.filter((x:any)=>x.method==='POST').length,r=await f.recoverChat()
+ assert(r.status>=400&&r.body.request_retained===true&&!f.state.result&&f.state.requests.filter((x:any)=>x.method==='POST').length===writes)
+})
