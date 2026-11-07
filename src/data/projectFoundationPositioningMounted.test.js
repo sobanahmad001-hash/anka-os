@@ -23,6 +23,7 @@ async function mount(t, pending = false) {
   if (pending) storage.set(directChatRecoveryKey(actor, organizationId, 'project_team', workspace.project.id), JSON.stringify({ conversation_id: fixture.data.rows[0].id, client_request_id: binding.request_id }))
   globalThis.__foundationUi = { fixture, allowlist, actor, rpc: async (name,args) => {
     calls.push({name,args})
+    if(name==='read_project_positioning_output')return {data:{organization_id:organizationId,project_id:workspace.project.id,engagement_id:workspace.engagement.id,actor_id:actor,binding_id:source.current_binding?.request_id??null,current:null,selected:null}}
     if(name==='read_project_stage_plan')return {data:{organization_id:organizationId,project_id:workspace.project.id,engagement_id:workspace.engagement.id,state:'unconfigured',groups:[],bindings:[],can_manage:true}}
     if(name==='bind_project_foundation_brief'){
       assert.equal(args.p_expected_binding_id,null)

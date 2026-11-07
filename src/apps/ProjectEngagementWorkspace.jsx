@@ -1,3 +1,6 @@
+import {directChatRecoveryKey,readDirectChatRecovery} from '../data/directChatRecovery.js'
+import {readDirectChatDraft} from '../data/directChatDraft.js'
+import {attachmentConversationHint} from '../data/projectAttachmentReading.js'
 import ProjectStagePlanPanel from '../components/ProjectStagePlanPanel.jsx'
 import {useAuth} from '../context/AuthContext.jsx'
 import _WorkBatchEntry from '../components/WorkBatchEntry.jsx'
@@ -44,12 +47,14 @@ const loadFailureKind = (cause) => cause?.membershipMismatch || [401, 403].inclu
 export default function ProjectEngagementWorkspace() {
   const { projectId } = useParams()
   const {user}=useAuth()
+  const [productEntry,setProductEntry]=useState(null)
   const [foundationSelection,setFoundationSelection]=useState(null)
   const [stageSelection,setStageSelection]=useState(null),[exactOutput,setExactOutput]=useState(null)
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const requestedTab = searchParams.get('tab') ?? 'discussion'
   const tab = [...TABS, ...MORE_TABS, ...WORK_TABS, ...SERVICES_TABS, ['retainer-planning'], ['resources']].some(([id]) => id === requestedTab) ? requestedTab : 'overview'
+  useEffect(()=>{if(tab!=='discussion')setProductEntry(null)},[tab])
   const focusedRecord = parseWorkshopNavigation(searchParams).workRecord
   const allowLeavingCurrentView=()=>{if(navCurrent.current.owner!==navigationOwner)return false;if(navCurrent.current.busy)return false;return !navCurrent.current.dirty||Boolean(globalThis.confirm?.('Leave the current chat draft? Keep working to finish it first.'))}
   const selectTab = (id,resourceGroupId='') => {
@@ -86,13 +91,24 @@ export default function ProjectEngagementWorkspace() {
   const [projectChatMode, setProjectChatMode] = useState('private')
   const workspace=loadedWorkspace?.project.id===projectId && loadedWorkspace?.project.organization_id===activeOrganizationId ? loadedWorkspace : null
   const reportStageState=useCallback(value=>{reportNavigationBusy(value.busy);reportDraftDirty(value.dirty)},[reportNavigationBusy,reportDraftDirty])
+  const activeProductEntry=productEntry?.owner===briefKey&&productEntry.engagementId===workspace?.engagement?.id?productEntry:null
+  const continueProductStructure=output=>{
+    if(!workspace?.engagement?.id||!user?.id||!output.conversation_id)return
+    const key=directChatRecoveryKey(user.id,activeOrganizationId,'project_team',projectId)
+    const draft=readDirectChatDraft(key),attachment=attachmentConversationHint(key)
+    if(readDirectChatRecovery(key))return 'Resolve the pending private Chat request before continuing.'
+    if((draft&&draft.conversation_id!==output.conversation_id)||(attachment&&attachment!==output.conversation_id))return 'Finish the draft in the other private conversation before continuing.'
+    if(selectTab('discussion')===false)return
+    setStageSelection(null);setFoundationSelection(null);setProjectChatMode('private')
+    setProductEntry({owner:briefKey,engagementId:workspace.engagement.id,conversation:{id:output.conversation_id},selection:{selectionId:crypto.randomUUID(),actorId:user.id,organizationId:activeOrganizationId,projectId,engagementId:workspace.engagement.id,output}})
+  }
   const continueFoundation=binding=>{
     if(!workspace?.engagement?.id||!user?.id||selectTab('discussion')===false)return
-    setStageSelection(null)
+    setProductEntry(null);setStageSelection(null)
     setFoundationSelection({scopeRevision,selectionId:crypto.randomUUID(),actorId:user.id,organizationId:activeOrganizationId,projectId,engagementId:workspace.engagement.id,binding})
     setProjectChatMode('private')
   }
-  const continueStage=value=>{if(selectTab('discussion')===false)return;setFoundationSelection(null);setProjectChatMode('private');setStageSelection({...value,selectionId:crypto.randomUUID(),projectId,organizationId:activeOrganizationId,engagementId:workspace.engagement.id})}
+  const continueStage=value=>{if(selectTab('discussion')===false)return;setProductEntry(null);setFoundationSelection(null);setProjectChatMode('private');setStageSelection({...value,selectionId:crypto.randomUUID(),projectId,organizationId:activeOrganizationId,engagementId:workspace.engagement.id})}
   const openStageOutput=value=>{if(value.scope?.projectId!==projectId||value.scope?.organizationId!==activeOrganizationId||value.scope?.engagementId!==workspace?.engagement?.id)return;if(selectTab('outputs')!==false)setExactOutput(value)}
   const reportChatBusy=useCallback(value=>{if(projectChatMode==='private')reportNavigationBusy(value)},[projectChatMode,reportNavigationBusy])
   const reportChatDirty=useCallback(value=>{if(projectChatMode==='private')reportDraftDirty(value)},[projectChatMode,reportDraftDirty])
@@ -218,7 +234,7 @@ export default function ProjectEngagementWorkspace() {
           {tab === 'services' && <ServicesAndScope workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={load} onAccessError={handleOrganizationAccessError} onOpen={selectTab} onNavigationBusyChange={reportNavigationBusy} />}
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
           {['website-work','marketing-work','resources'].includes(tab)&&<_ProjectScopedPipelineView key={[navigationOwner,tab,searchParams.get('resourceGroupId')||''].join(':')} workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} signal={requestSignal} kind={tab==='website-work'?'website':tab==='marketing-work'?'marketing':undefined} resources={tab==='resources'} initialGroupId={tab==='resources'?searchParams.get('resourceGroupId')||'':''} onOpenResources={groupId=>selectTab('resources',groupId)} onNavigationBusyChange={reportNavigationBusy}/>}
-          {tab === 'work' && <><ProjectStagePlanPanel key={navigationOwner} scope={{organizationId:activeOrganizationId,projectId,engagementId:workspace.engagement?.id}} actorId={user?.id} signal={requestSignal} onStateChange={reportStageState} onAccessError={handleOrganizationAccessError} onOpenBrief={openBrief} onContinueFoundationPositioning={continueFoundation} onContinue={continueStage} onManualSetup={()=>selectTab('services')} onOpenOutput={openStageOutput}/><details className="mt-5"><summary>All project work</summary><fieldset disabled={isNavigationBusy}><WorkViews onOpenPlan={()=>selectTab('services')} onChanged={load} onBusy={reportNavigationBusy} signal={requestSignal} workspace={workspace} navigate={navigate} searchParams={searchParams} setSearchParams={setSearchParams}/></fieldset></details></>}
+          {tab === 'work' && <><ProjectStagePlanPanel key={navigationOwner} scope={{organizationId:activeOrganizationId,projectId,engagementId:workspace.engagement?.id}} actorId={user?.id} signal={requestSignal} onStateChange={reportStageState} onAccessError={handleOrganizationAccessError} onOpenBrief={openBrief} onContinueProductStructure={continueProductStructure} onContinueFoundationPositioning={continueFoundation} onContinue={continueStage} onManualSetup={()=>selectTab('services')} onOpenOutput={openStageOutput}/><details className="mt-5"><summary>All project work</summary><fieldset disabled={isNavigationBusy}><WorkViews onOpenPlan={()=>selectTab('services')} onChanged={load} onBusy={reportNavigationBusy} signal={requestSignal} workspace={workspace} navigate={navigate} searchParams={searchParams} setSearchParams={setSearchParams}/></fieldset></details></>}
           {tab === 'discussion' && <div className="studio-chat-layout">
             <div className="studio-conversation">
             <div className={projectChatMode === 'team' ? 'workspace-card p-4' : ''}>
@@ -231,7 +247,7 @@ export default function ProjectEngagementWorkspace() {
               <ProjectDiscussionPanel organizationId={activeOrganizationId} projectId={project.id} tasks={workspace.projectTasks} workstreams={workspace.workstreams} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={handleOrganizationAccessError} onApplied={load} />
             </section>
             <section className="project-ai-conversations" hidden={projectChatMode !== 'private'} aria-label="Project AI conversations">
-              <ContextConversationPanel directSend contextKind="project_team" projectId={project.id} label={`${project.name} · Project AI`} projectJourney={workspace} foundationSelection={foundationSelection?.scopeRevision===scopeRevision&&foundationSelection?.actorId===user?.id&&foundationSelection?.projectId===projectId&&foundationSelection?.organizationId===activeOrganizationId&&foundationSelection?.engagementId===workspace.engagement?.id?foundationSelection:null} onFoundationSelectionConsumed={id=>setFoundationSelection(value=>value?.selectionId===id?null:value)} projectStageSelection={stageSelection?.projectId===projectId&&stageSelection?.organizationId===activeOrganizationId&&stageSelection?.engagementId===workspace.engagement.id?stageSelection:null} onProjectStageSelectionConsumed={id=>setStageSelection(value=>value?.selectionId===id?null:value)} onOpenStageOutput={openStageOutput} onOpenBrief={openBrief} onOpenProjectWork={()=>selectTab('work')} onOpenManualSetup={()=>selectTab('services')} onProjectRequest={recordProjectRequest} onProjectChanged={load} onNavigationBusyChange={reportChatBusy} onDraftDirtyChange={reportChatDirty} />
+              <ContextConversationPanel directSend contextKind="project_team" initialConversation={activeProductEntry?.conversation} productStructureSelection={activeProductEntry?.selection} onProductStructureSelectionConsumed={id=>setProductEntry(entry=>entry?.selection?.selectionId===id?{...entry,selection:null}:entry)} projectId={project.id} label={`${project.name} · Project AI`} projectJourney={workspace} foundationSelection={foundationSelection?.scopeRevision===scopeRevision&&foundationSelection?.actorId===user?.id&&foundationSelection?.projectId===projectId&&foundationSelection?.organizationId===activeOrganizationId&&foundationSelection?.engagementId===workspace.engagement?.id?foundationSelection:null} onFoundationSelectionConsumed={id=>setFoundationSelection(value=>value?.selectionId===id?null:value)} projectStageSelection={stageSelection?.projectId===projectId&&stageSelection?.organizationId===activeOrganizationId&&stageSelection?.engagementId===workspace.engagement.id?stageSelection:null} onProjectStageSelectionConsumed={id=>setStageSelection(value=>value?.selectionId===id?null:value)} onOpenStageOutput={openStageOutput} onOpenBrief={openBrief} onOpenProjectWork={()=>selectTab('work')} onOpenManualSetup={()=>selectTab('services')} onProjectRequest={recordProjectRequest} onProjectChanged={load} onNavigationBusyChange={reportChatBusy} onDraftDirtyChange={reportChatDirty} />
             </section>
             </div>
           </div>}
