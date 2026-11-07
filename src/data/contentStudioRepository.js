@@ -25,6 +25,23 @@ async function invoke(organizationId, functionName, action, input = {}, { signal
   return data?.data
 }
 
+// Page-strategy errors carry explicit transaction evidence. Do not infer a
+// rollback from an HTTP status or extend that inference to Workshop writes.
+async function invokePageKeyword(organizationId, action, input, {signal}={}) {
+  const {data,error}=await supabase.functions.invoke('content-studio',{
+    body:{...input,action,organization_id:organizationId},signal,
+  })
+  if(error||data?.error){
+    let detail=data
+    if(error?.context?.clone)try{detail=await error.context.clone().json()}catch{/* Unknown transport outcome retains the original request. */}
+    throw Object.assign(Error(detail?.error||error?.message||'Page keyword request failed'),{
+      status:error?.status||error?.context?.status,code:detail?.code,
+      rollbackVerified:detail?.rollback_verified===true&&detail?.request_retained===false,
+    })
+  }
+  return data?.data
+}
+
 async function listBlogEventLinks(organizationId, brandId, options) {
   return dataOrThrow(supabase.from('content_event_links')
     .select('*, external_events!inner(id, brand_id, event_name, event_category, start_date, end_date), work_items(id, title, status, deleted_at)')
@@ -174,6 +191,8 @@ export function createContentStudioScope(organizationId, { signal } = {}) {
     return data
   },
   saveArtifact: input => invoke(organizationId, 'content-studio', 'save_artifact', input, options),
+  savePageKeywordStrategy: input => invokePageKeyword(organizationId, 'save_page_keyword_strategy', input, options),
+  recoverPageKeywordStrategy: identity => invokePageKeyword(organizationId, 'recover_page_keyword_strategy', identity, options),
   copyContentWriterVersion: input => invoke(organizationId, 'content-studio', 'copy_content_writer_version', input, options),
   saveBrandBrief: input => invoke(organizationId, 'content-studio', 'save_brand_brief', input, options),
   generateBrandStatement: input => invoke(organizationId, 'content-studio', 'generate_brand_statement', input, options),
