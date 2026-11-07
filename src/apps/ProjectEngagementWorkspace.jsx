@@ -5,6 +5,7 @@ import _ProjectOutputLibrary from '../components/ProjectOutputLibrary.jsx'
 import ProjectDeliveryContextPanel from '../components/ProjectDeliveryContextPanel.jsx'
 import ProjectOverviewSummary from '../components/ProjectOverviewSummary.jsx'
 import {projectDeliveryIntent} from '../data/projectDeliveryContext.js'
+import _ProjectBriefDialog from '../components/ProjectBriefDialog.jsx'
 import DescriptionDisclosure from '../components/DescriptionDisclosure.jsx'
 import _ProjectScopedPipelineView from '../components/ProjectScopedPipelineView.jsx'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -43,6 +44,7 @@ const loadFailureKind = (cause) => cause?.membershipMismatch || [401, 403].inclu
 export default function ProjectEngagementWorkspace() {
   const { projectId } = useParams()
   const {user}=useAuth()
+  const [foundationSelection,setFoundationSelection]=useState(null)
   const [stageSelection,setStageSelection]=useState(null),[exactOutput,setExactOutput]=useState(null)
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -62,7 +64,10 @@ export default function ProjectEngagementWorkspace() {
     return true
   }
   const { activeOrganizationId, activeMembership, selectionRequired, loading: organizationLoading, scopeRevision, requestSignal, handleOrganizationAccessError } = useOrganization()
+  const [briefOwner,setBriefOwner]=useState(null)
   const navigationOwner=[activeOrganizationId,projectId,scopeRevision].join(':')
+  const briefKey=JSON.stringify([navigationOwner,user?.id,activeMembership?.id,activeMembership?.role,activeMembership?.status])
+  const openBrief=()=>setBriefOwner(briefKey)
   const navCurrent=useRef({owner:navigationOwner,busy:false,dirty:false})
   if(navCurrent.current.owner!==navigationOwner)navCurrent.current={owner:navigationOwner,busy:false,dirty:false}
   const [navigationBusy,setNavigationBusy]=useState({owner:navigationOwner,value:false})
@@ -81,7 +86,13 @@ export default function ProjectEngagementWorkspace() {
   const [projectChatMode, setProjectChatMode] = useState('private')
   const workspace=loadedWorkspace?.project.id===projectId && loadedWorkspace?.project.organization_id===activeOrganizationId ? loadedWorkspace : null
   const reportStageState=useCallback(value=>{reportNavigationBusy(value.busy);reportDraftDirty(value.dirty)},[reportNavigationBusy,reportDraftDirty])
-  const continueStage=value=>{if(selectTab('discussion')===false)return;setProjectChatMode('private');setStageSelection({...value,selectionId:crypto.randomUUID(),projectId,organizationId:activeOrganizationId,engagementId:workspace.engagement.id})}
+  const continueFoundation=binding=>{
+    if(!workspace?.engagement?.id||!user?.id||selectTab('discussion')===false)return
+    setStageSelection(null)
+    setFoundationSelection({scopeRevision,selectionId:crypto.randomUUID(),actorId:user.id,organizationId:activeOrganizationId,projectId,engagementId:workspace.engagement.id,binding})
+    setProjectChatMode('private')
+  }
+  const continueStage=value=>{if(selectTab('discussion')===false)return;setFoundationSelection(null);setProjectChatMode('private');setStageSelection({...value,selectionId:crypto.randomUUID(),projectId,organizationId:activeOrganizationId,engagementId:workspace.engagement.id})}
   const openStageOutput=value=>{if(value.scope?.projectId!==projectId||value.scope?.organizationId!==activeOrganizationId||value.scope?.engagementId!==workspace?.engagement?.id)return;if(selectTab('outputs')!==false)setExactOutput(value)}
   const reportChatBusy=useCallback(value=>{if(projectChatMode==='private')reportNavigationBusy(value)},[projectChatMode,reportNavigationBusy])
   const reportChatDirty=useCallback(value=>{if(projectChatMode==='private')reportDraftDirty(value)},[projectChatMode,reportDraftDirty])
@@ -179,7 +190,7 @@ export default function ProjectEngagementWorkspace() {
         </header>
 
 
-        <details className="studio-project-settings mt-3 text-sm"><summary className="cursor-pointer text-[var(--anka-muted)]" aria-label="Project settings">Project settings</summary><div className="mt-4 space-y-4"><DescriptionDisclosure key={project.id} text={project.description || project.scope_statement || 'No project description recorded.'} label="Project description" />{identity.hasEngagement && workspace.engagement?.id && <Link to={`/sphere/engagements?engagement=${encodeURIComponent(workspace.engagement.id)}&tab=pipeline&project=${encodeURIComponent(projectId)}`} onClick={event=>{if(!allowLeavingCurrentView())event.preventDefault()}} className="rounded-xl border border-[var(--anka-violet)] px-4 py-2 text-sm text-[var(--anka-violet)]">Open Pipeline</Link>}<nav aria-label="Project configuration" className="flex flex-wrap gap-2"><button type="button" onClick={load} disabled={loading||isNavigationBusy} className="workspace-button">Refresh project</button><button type="button" className="workspace-button" disabled={isNavigationBusy} onClick={()=>selectTab('services')}>Services & pipeline plan</button><button type="button" className="workspace-button" disabled={isNavigationBusy} onClick={()=>selectTab('resources')}>Resources & connections</button></nav><ProjectLifecyclePanel key={`${activeOrganizationId}:${project.id}:${scopeRevision}`} project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={(result) => { setWorkspace(current => current ? { ...current, project: { ...current.project, archived_at: result.archived_at } } : current); load() }} onDeleted={() => navigate('/sphere/portfolio')} />
+        {briefOwner===briefKey&&<_ProjectBriefDialog key={briefKey} scope={{organizationId:activeOrganizationId,projectId,actorId:user?.id,signal:requestSignal}} membership={activeMembership} onClose={()=>setBriefOwner(null)} onRead={row=>setWorkspace(current=>current?.project?.id===row.id&&current.project.organization_id===row.organization_id?{...current,project:{...current.project,description:row.description}}:current)}/>}<details className="studio-project-settings mt-3 text-sm"><summary className="cursor-pointer text-[var(--anka-muted)]" aria-label="Project settings">Project settings</summary><div className="mt-4 space-y-4"><DescriptionDisclosure key={project.id} text={project.description || 'No business brief recorded.'} label="Business brief" /><button type="button" className="workspace-button" disabled={isNavigationBusy} onClick={openBrief}>Open business brief</button>{identity.hasEngagement && workspace.engagement?.id && <Link to={`/sphere/engagements?engagement=${encodeURIComponent(workspace.engagement.id)}&tab=pipeline&project=${encodeURIComponent(projectId)}`} onClick={event=>{if(!allowLeavingCurrentView())event.preventDefault()}} className="rounded-xl border border-[var(--anka-violet)] px-4 py-2 text-sm text-[var(--anka-violet)]">Open Pipeline</Link>}<nav aria-label="Project configuration" className="flex flex-wrap gap-2"><button type="button" onClick={load} disabled={loading||isNavigationBusy} className="workspace-button">Refresh project</button><button type="button" className="workspace-button" disabled={isNavigationBusy} onClick={()=>selectTab('services')}>Services & pipeline plan</button><button type="button" className="workspace-button" disabled={isNavigationBusy} onClick={()=>selectTab('resources')}>Resources & connections</button></nav><ProjectLifecyclePanel key={`${activeOrganizationId}:${project.id}:${scopeRevision}`} project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={(result) => { setWorkspace(current => current ? { ...current, project: { ...current.project, archived_at: result.archived_at } } : current); load() }} onDeleted={() => navigate('/sphere/portfolio')} />
 
         {!project.archived_at && tab !== 'discussion' && <ProjectManagerAssignment project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onAssigned={load} onAccessError={handleOrganizationAccessError} />}
         </div></details>
@@ -207,7 +218,7 @@ export default function ProjectEngagementWorkspace() {
           {tab === 'services' && <ServicesAndScope workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={load} onAccessError={handleOrganizationAccessError} onOpen={selectTab} onNavigationBusyChange={reportNavigationBusy} />}
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
           {['website-work','marketing-work','resources'].includes(tab)&&<_ProjectScopedPipelineView key={[navigationOwner,tab,searchParams.get('resourceGroupId')||''].join(':')} workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} signal={requestSignal} kind={tab==='website-work'?'website':tab==='marketing-work'?'marketing':undefined} resources={tab==='resources'} initialGroupId={tab==='resources'?searchParams.get('resourceGroupId')||'':''} onOpenResources={groupId=>selectTab('resources',groupId)} onNavigationBusyChange={reportNavigationBusy}/>}
-          {tab === 'work' && <><ProjectStagePlanPanel key={navigationOwner} scope={{organizationId:activeOrganizationId,projectId,engagementId:workspace.engagement?.id}} actorId={user?.id} signal={requestSignal} onStateChange={reportStageState} onAccessError={handleOrganizationAccessError} onContinue={continueStage} onManualSetup={()=>selectTab('services')} onOpenOutput={openStageOutput}/><details className="mt-5"><summary>All project work</summary><fieldset disabled={isNavigationBusy}><WorkViews onOpenPlan={()=>selectTab('services')} onChanged={load} onBusy={reportNavigationBusy} signal={requestSignal} workspace={workspace} navigate={navigate} searchParams={searchParams} setSearchParams={setSearchParams}/></fieldset></details></>}
+          {tab === 'work' && <><ProjectStagePlanPanel key={navigationOwner} scope={{organizationId:activeOrganizationId,projectId,engagementId:workspace.engagement?.id}} actorId={user?.id} signal={requestSignal} onStateChange={reportStageState} onAccessError={handleOrganizationAccessError} onOpenBrief={openBrief} onContinueFoundationPositioning={continueFoundation} onContinue={continueStage} onManualSetup={()=>selectTab('services')} onOpenOutput={openStageOutput}/><details className="mt-5"><summary>All project work</summary><fieldset disabled={isNavigationBusy}><WorkViews onOpenPlan={()=>selectTab('services')} onChanged={load} onBusy={reportNavigationBusy} signal={requestSignal} workspace={workspace} navigate={navigate} searchParams={searchParams} setSearchParams={setSearchParams}/></fieldset></details></>}
           {tab === 'discussion' && <div className="studio-chat-layout">
             <div className="studio-conversation">
             <div className={projectChatMode === 'team' ? 'workspace-card p-4' : ''}>
@@ -220,7 +231,7 @@ export default function ProjectEngagementWorkspace() {
               <ProjectDiscussionPanel organizationId={activeOrganizationId} projectId={project.id} tasks={workspace.projectTasks} workstreams={workspace.workstreams} scopeRevision={scopeRevision} requestSignal={requestSignal} onAccessError={handleOrganizationAccessError} onApplied={load} />
             </section>
             <section className="project-ai-conversations" hidden={projectChatMode !== 'private'} aria-label="Project AI conversations">
-              <ContextConversationPanel directSend contextKind="project_team" projectId={project.id} label={`${project.name} · Project AI`} projectJourney={workspace} projectStageSelection={stageSelection?.projectId===projectId&&stageSelection?.organizationId===activeOrganizationId&&stageSelection?.engagementId===workspace.engagement.id?stageSelection:null} onProjectStageSelectionConsumed={id=>setStageSelection(value=>value?.selectionId===id?null:value)} onOpenStageOutput={openStageOutput} onOpenProjectWork={()=>selectTab('work')} onOpenManualSetup={()=>selectTab('services')} onProjectRequest={recordProjectRequest} onProjectChanged={load} onNavigationBusyChange={reportChatBusy} onDraftDirtyChange={reportChatDirty} />
+              <ContextConversationPanel directSend contextKind="project_team" projectId={project.id} label={`${project.name} · Project AI`} projectJourney={workspace} foundationSelection={foundationSelection?.scopeRevision===scopeRevision&&foundationSelection?.actorId===user?.id&&foundationSelection?.projectId===projectId&&foundationSelection?.organizationId===activeOrganizationId&&foundationSelection?.engagementId===workspace.engagement?.id?foundationSelection:null} onFoundationSelectionConsumed={id=>setFoundationSelection(value=>value?.selectionId===id?null:value)} projectStageSelection={stageSelection?.projectId===projectId&&stageSelection?.organizationId===activeOrganizationId&&stageSelection?.engagementId===workspace.engagement.id?stageSelection:null} onProjectStageSelectionConsumed={id=>setStageSelection(value=>value?.selectionId===id?null:value)} onOpenStageOutput={openStageOutput} onOpenBrief={openBrief} onOpenProjectWork={()=>selectTab('work')} onOpenManualSetup={()=>selectTab('services')} onProjectRequest={recordProjectRequest} onProjectChanged={load} onNavigationBusyChange={reportChatBusy} onDraftDirtyChange={reportChatDirty} />
             </section>
             </div>
           </div>}
