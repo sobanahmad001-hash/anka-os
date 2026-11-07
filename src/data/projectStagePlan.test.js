@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {PROJECT_STAGE_PHASES,projectStagePlan,summarizeProjectStageSteps} from './projectStagePlan.js'
 const id=n=>'dd000000-0000-4000-8000-'+String(n).padStart(12,'0')
 const scope={organization_id:id(1),project_id:id(2),engagement_id:id(3)}
-const header=()=>({...scope,state:'available',plan_id:id(4),plan_version:2,can_manage:true,groups:[{id:id(5),kind:'website',publication_id:id(6),steps:[{key:'copy'}]}],bindings:[{group_id:id(5),publication_id:id(6),step_key:'copy',phase:'website.content'}]})
+const header=()=>({...scope,state:'available',plan_id:id(4),plan_version:2,can_manage:true,groups:[{id:id(5),configuration_current:true,kind:'website',publication_id:id(6),steps:[{key:'copy'}]}],bindings:[{group_id:id(5),publication_id:id(6),step_key:'copy',phase:'website.content'}]})
 const item=(extra={})=>({instance:1,work_item_id:id(7),work_required:true,work_done:true,work_status:'done',output:{artifact_id:id(8),artifact_version_id:id(9),version_number:1,artifact_type:'content',approval_id:id(10),content_checksum:'a'.repeat(64)},output_approved:true,material_current:true,needs_update:false,dependency_blocked:false,missing_work:false,...extra})
 const step=(extra={})=>({key:'copy',label:'Page copy',phase:'website.content',action:'run',items:[item()],...extra})
 const unit=(extra={})=>({...scope,plan_id:id(4),group_id:id(5),partition:{kind:'website_page',id:id(11),architecture_version_id:id(12)},state:'current',context_sha256:'b'.repeat(64),page:{initial_path:'home'},steps:[step()],...extra})

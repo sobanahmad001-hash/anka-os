@@ -10,6 +10,7 @@ import type { N7TextProvider } from '../_shared/n7TextProvider.ts'
 import { buildPrivateConversationPrompt, canonicalOpenAiContext, privateConversationScope, requireOwnerAuthoredPromptTurns } from '../_shared/contextChatPrompt.js'
 import { loadVisibleWorkSummary } from '../_shared/contextChatRecordSummary.js'
 import { readProjectStageChatPromptContext } from '../_shared/projectStageChatMessage.ts'
+import { readProjectChatBootstrap } from '../_shared/projectChatBootstrap.ts'
 
 type Json = Record<string, any>
 type Client = ReturnType<typeof createClient<any>>
@@ -306,7 +307,8 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
       briefTurn=await prepareDesignBrief(admin,userClient,{organization_id:organizationId,actor_id:user.id,conversation_id:conversation.id,message_id:messageId,request_id:dispatchRequestId},body.design_brief,
         {visibility:'private',engagement_id:null},{kind:'private_design_chat',message_ids:orderedHistory.map(row=>row.id),source_message_id:messageId,attachment_sources:designSources.manifest})
     }
-    const prompt = buildPrivateConversationPrompt(orderedHistory, messageId, conversation, canonicalContext) + designSources.text + projectSources.text
+    const bootstrap = await readProjectChatBootstrap(userClient, organizationId, conversation)
+    const prompt = buildPrivateConversationPrompt(orderedHistory, messageId, conversation, canonicalContext) + bootstrap.promptSuffix + designSources.text + projectSources.text
       + stageContext.promptSuffix
       + (briefTurn ? '\nCURRENT UNAPPROVED DESIGN DRAFT JSON:\n'+briefTurn.snapshot : '')
     const turnInstruction=briefTurn?.instruction || instruction
@@ -379,6 +381,7 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
     }
     const briefAudit=designBriefAudit(briefTurn,normalized.output_text)
     const manifest = {
+      ...bootstrap.manifest,
       ...stageContext.manifest,
       ...briefAudit.manifest,
       source_kind: 'private_context_conversation', context_kind: conversation.context_kind,
