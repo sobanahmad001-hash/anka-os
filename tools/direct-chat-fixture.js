@@ -129,6 +129,7 @@ export function createDirectChatFixture({ surface = 'content', state = 'empty', 
     getContextConversation: async input => {
       const row = data.rows.find(item => item.id === input.conversation_id)
       if (!row) throw failure('Conversation unavailable', 404)
+      if (input.send_access_only === true) return { conversation: { ...row }, recipients: (await fixture.chat.getProjectContextSharing({conversation_id: row.id})).recipients }
       return { conversation: { ...row }, messages: data.messages.filter(item => item.conversation_id === row.id && (!input.before_sequence || item.sequence < input.before_sequence)).map(item => ({ ...item })), has_older: false }
     },
     startContextConversation: async input => {

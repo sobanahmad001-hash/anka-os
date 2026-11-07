@@ -69,6 +69,22 @@ function fixture() {
   return { admin, rows, calls }
 }
 
+Deno.test('owner Send checks current access and recipients without reading history or sharing candidates', async () => {
+  const { admin, rows, calls } = fixture()
+  const read = (actor: string) => contextChatAction('get_context_conversation', admin as any,
+    { conversation_id: thread, send_access_only: true }, actor, org, { role: 'contributor' })
+  const first: any = await read(owner)
+  assertEquals(first.conversation.state, 'active')
+  assertEquals(first.recipients.map((r: any) => r.recipient_id), [recipient])
+  assertEquals(calls.filter(([kind]) => kind === 'from').map(([, table]) => table),
+    ['department_chat_conversations', 'projects', 'project_context_chat_shares'])
+  await assertRejects(() => read(recipient))
+  rows.project_context_chat_shares[0].revoked_at = new Date().toISOString()
+  assertEquals((await read(owner) as any).recipients, [])
+  rows.projects[0].archived_at = new Date().toISOString()
+  await assertRejects(() => read(owner))
+})
+
 Deno.test('project recipient sees only an active explicitly shared conversation and loses subsequent read on revocation', async () => {
   const { admin, rows } = fixture()
   const body = { conversation_id: thread }
