@@ -307,7 +307,9 @@ export async function handleRequest(request: Request, fetcher: typeof fetch = fe
       briefTurn=await prepareDesignBrief(admin,userClient,{organization_id:organizationId,actor_id:user.id,conversation_id:conversation.id,message_id:messageId,request_id:dispatchRequestId},body.design_brief,
         {visibility:'private',engagement_id:null},{kind:'private_design_chat',message_ids:orderedHistory.map(row=>row.id),source_message_id:messageId,attachment_sources:designSources.manifest})
     }
-    const bootstrap = await readProjectChatBootstrap(userClient, organizationId, conversation)
+    const bootstrap = source.project_stage_context == null
+      ? await readProjectChatBootstrap(userClient, organizationId, conversation)
+      : { promptSuffix: '', manifest: {} }
     const prompt = buildPrivateConversationPrompt(orderedHistory, messageId, conversation, canonicalContext) + bootstrap.promptSuffix + designSources.text + projectSources.text
       + stageContext.promptSuffix
       + (briefTurn ? '\nCURRENT UNAPPROVED DESIGN DRAFT JSON:\n'+briefTurn.snapshot : '')
