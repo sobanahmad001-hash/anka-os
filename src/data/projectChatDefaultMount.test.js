@@ -25,7 +25,8 @@ test('mounted project defaults to Chat, preserves explicit tabs and rejects late
   let organization = { activeOrganizationId: 'org-a', scopeRevision: 1, requestSignal: new AbortController().signal,
     activeMembership: { role: 'system_owner' }, handleOrganizationAccessError: () => false }
   let projectId = 'project-a', params = new URLSearchParams(), defer = false, resolveLate
-  const repository = { get: async (id, org) => defer ? new Promise(resolve => { resolveLate = resolve }) : workspace(org, id) }
+  let withEngagement=false,stageProps,chatProps
+  const repository = { get: async (id, org) => defer ? new Promise(resolve => { resolveLate = resolve }) : {...workspace(org,id),...(withEngagement?{engagement:{id:'eng-a'}}:{})} }
   const compiled = transformSync(readFileSync(new URL('../apps/ProjectEngagementWorkspace.jsx', import.meta.url), 'utf8'),
     { loader: 'jsx', format: 'cjs', jsxFactory: 'React.createElement' }).code
   const module = { exports: {} }
@@ -36,6 +37,8 @@ test('mounted project defaults to Chat, preserves explicit tabs and rejects late
     if (name.includes('workshopNavigation')) return navigation
     if (name === 'react-router-dom') return { Link: props => React.createElement('a', { href: props.to }, props.children),
       useParams: () => ({ projectId }), useNavigate: () => () => {}, useSearchParams: () => [params, next => { params = next }] }
+    if(name.includes('ProjectStagePlanPanel.jsx'))return {__esModule:true,default:props=>{stageProps=props;return null}}
+    if(name.includes('ContextConversationPanel.jsx'))return {__esModule:true,default:props=>{chatProps=props;return React.createElement('span',null,'ContextConversationPanel.jsx::'+props.projectId+':'+props.contextKind)}}
     if (name.startsWith('../components/') || name.startsWith('./')) return { __esModule: true,
       default: props => React.createElement('span', null, `${name}:${props.organizationId || ''}:${props.projectId || ''}:${props.contextKind || ''}`) }
     return nativeRequire(name)
@@ -61,6 +64,31 @@ test('mounted project defaults to Chat, preserves explicit tabs and rejects late
       assert.ok(nav&&metrics);assert.ok(rendered.indexOf(nav)<rendered.indexOf(metrics),'primary navigation precedes overview metric cards')
     }
   }
+  withEngagement=true
+  projectId='project-stage-three';params=new URLSearchParams({tab:'work'});await render()
+  const output={version_id:'00000000-0000-4000-8000-000000000001',conversation_id:'00000000-0000-4000-8000-000000000002'}
+  const previousStorage=globalThis.sessionStorage,values=new Map()
+  globalThis.sessionStorage={getItem:k=>values.get(k)??null,removeItem:k=>values.delete(k)}
+  try{
+    const key='anka:direct-chat:b1:'+JSON.stringify(['actor-a','org-a','project_team',projectId,''])
+    values.set(key,JSON.stringify({client_request_id:output.version_id,conversation_id:output.conversation_id}))
+    assert.match(stageProps.onContinueProductStructure(output),/pending/)
+    values.delete(key)
+    values.set(key+':draft',JSON.stringify({new_conversation_id:output.version_id,conversation_id:output.version_id,text:'Keep my draft',expires_at:Date.now()+30000}))
+    assert.match(stageProps.onContinueProductStructure(output),/other private conversation/)
+    assert.equal(params.get('tab'),'work')
+    assert.ok(values.has(key+':draft'))
+    values.clear()
+    await act(async()=>stageProps.onContinueProductStructure(output));await render()
+    assert.equal(selected(),'project-tab-discussion')
+    assert.deepEqual(chatProps.initialConversation,{id:output.conversation_id})
+    assert.deepEqual(chatProps.productStructureSelection.output,output)
+    assert.equal(chatProps.productStructureSelection.actorId,'actor-a')
+    await act(async()=>chatProps.onProductStructureSelectionConsumed(chatProps.productStructureSelection.selectionId))
+    assert.equal(chatProps.productStructureSelection,null)
+    assert.deepEqual(chatProps.initialConversation,{id:output.conversation_id})
+  }finally{globalThis.sessionStorage=previousStorage}
+  withEngagement=false
   params = new URLSearchParams(); defer = true
   projectId = 'project-delayed'; await render()
   assert.equal(typeof resolveLate, 'function')

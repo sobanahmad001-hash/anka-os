@@ -193,3 +193,44 @@ test('denied original receipt lookup retains pending request and never writes ag
  assert.match(ui.env.container.textContent,/Recovery access denied/)
  assert.equal(ui.writes.length,1)
 })
+
+const outputId='00000000-0000-4000-8000-000000000501'
+const originalChat='00000000-0000-4000-8000-000000000502'
+async function positioning(t,mode){
+ const header={...native.header,state:'unconfigured',plan_id:null,groups:[],bindings:[]}
+ const handed=[],requests=[]
+ const output={version_id:outputId,version_number:7,wording_sha256:'d'.repeat(64),binding_id:checkpoint,conversation_id:mode==='foreign'?null:originalChat}
+ const response={organization_id:header.organization_id,project_id:header.project_id,engagement_id:header.engagement_id,actor_id:actorId,binding_id:checkpoint,current:output,selected:null}
+ const client={rpc(name,args){
+  assert.equal(name,'read_project_positioning_output')
+  assert.deepEqual(args,{p_organization_id:header.organization_id,p_project_id:header.project_id,p_engagement_id:header.engagement_id,p_conversation_id:null,p_version_id:null})
+  requests.push(args)
+  return {abortSignal:async()=>({data:structuredClone(response)})}
+ }}
+ const ui=await mount(t,header,{actorId,positioningClient:client,onContinueProductStructure:value=>handed.push(value)})
+ await ui.click('Go to Brand positioning')
+ assert.match(ui.env.container.textContent,/Saved version 7/)
+ assert.ok(ui.env.container.textContent.includes(outputId))
+ assert.equal(ui.button('Continue with this version'),undefined)
+ const stage=elements(ui.env.container,'button').find(n=>n.textContent.includes('Product')&&n.textContent.includes('structure'))
+ await act(async()=>props(stage).onClick())
+ return {...ui,response,output,handed,requests}
+}
+for(const mode of ['current','foreign','new-version','new-binding']){
+ test('unconfigured stage output and product structure continuation '+mode,async t=>{
+  const ui=await positioning(t,mode)
+  assert.deepEqual(ui.handed,[])
+  if(mode==='foreign'){
+   assert.equal(ui.button('Continue with this version'),undefined)
+   assert.match(ui.env.container.textContent,/originating private Chat/)
+   return
+  }
+  if(mode==='new-version')ui.response.current={...ui.output,version_id:actorId,version_number:8}
+  if(mode==='new-binding')ui.response.binding_id=actorId
+  await ui.click('Continue with this version')
+  assert.equal(ui.requests.length,3)
+  assert.deepEqual(ui.handed,mode==='current'?[ui.output]:[])
+  assert.deepEqual(ui.calls,[])
+  if(mode!=='current')assert.match(ui.env.container.textContent,/changed/)
+ })
+}

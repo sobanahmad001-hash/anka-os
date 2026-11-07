@@ -20,13 +20,14 @@ function Output({output,onOpen,busy}){
 }
 
 // Read-only presentation. Status, counts and change impact belong to the canonical projection.
-export default function ProjectStagePlan({plan,foundationAction,onOpenBrief,onContinue,getStageAction,onManualSetup,onOpenWork,onOpenOutput,busy=false}){
+export default function ProjectStagePlan({plan,positioningOutput,foundationAction,onOpenBrief,onContinue,getStageAction,onManualSetup,onOpenWork,onOpenOutput,busy=false}){
  const detailRef=useRef(null)
  const uid=useId(),[trackId,setTrackId]=useState(null),[stageId,setStageId]=useState(null)
  const unavailable=plan?.state==='unavailable'
  const tracks=!unavailable&&plan?.tracks?.length?plan.tracks:suggestedTracks
  const track=tracks.find(row=>row.id===trackId)||tracks[0]
  const stage=track.stages?.find(row=>row.id===stageId)||track.stages?.[0]
+ const positioning=stage&&positioningOutput?.(stage)
  const nextAction=stage&&!unavailable&&!stage.context?getStageAction?.(track,stage):null
  const selectTrack=id=>{setTrackId(id);setStageId(null)}
  const selectStage=id=>{setStageId(id);requestAnimationFrame(()=>{detailRef.current?.focus({preventScroll:true});if(globalThis.matchMedia?.('(max-width:700px)').matches)detailRef.current?.scrollIntoView({block:'start'})})}
@@ -40,13 +41,13 @@ export default function ProjectStagePlan({plan,foundationAction,onOpenBrief,onCo
    {stage?<section ref={detailRef} tabIndex={-1} id={`${uid}-detail`} className="stage-plan-detail" aria-label={`Stage details: ${stage.title}`}>
     <p className="stage-plan-eyebrow">{track.title}</p><h4>{stage.title}</h4><div className="stage-plan-detail-status"><span>{stateLabel(stage)}</span>{stage.needsUpdate&&<span className="stage-plan-update">Needs update</span>}</div>
     {stage.id==='branding.brief'&&<div className="stage-plan-actions">{onOpenBrief&&<button type="button" className="workspace-button" disabled={busy} onClick={onOpenBrief}>Open business brief</button>}{track.stages.some(s=>s.id==='branding.positioning')&&<button type="button" className="workspace-button" disabled={busy} onClick={()=>selectStage('branding.positioning')}>Go to Brand positioning &amp; statement</button>}</div>}
-    {foundationAction?.(stage)}
+    {foundationAction?.(stage)}{stage.id==='branding.services'&&positioning}
     {stage.description&&<p>{stage.description}</p>}<Progress value={stage.configured===false?null:stage.progress}/>{stage.scopeLabel&&<p className="stage-plan-scope">{stage.scopeLabel}</p>}
     {stage.configured===false&&<p>{stage.configurationUnavailable?'Review the pipeline configuration in project setup before using this stage.':'A saved pipeline step is required for mapped stage work.'}</p>}
     {stage.blockedReason&&<p className="stage-plan-notice">{stage.blockedReason}</p>}
     {stage.needsUpdate&&<p className="stage-plan-notice">{stage.updateReason||'An upstream input changed. Review the affected work; recorded outputs and history are retained.'}</p>}
     {stage.items?.length>0&&<div className="stage-plan-items"><h5>Work in this stage</h5>{stage.items.map(item=><article key={item.id}><div><strong>{item.title}</strong><span>{stateLabel(item)}</span>{item.needsUpdate&&<span className="stage-plan-update">Needs update</span>}</div>{item.intent&&<p>Search intent: {item.intent}</p>}{item.keywords?.length>0&&<p>Keywords: {item.keywords.join(', ')}</p>}{item.scopeLabel&&<p>{item.scopeLabel}</p>}{item.context&&onContinue&&<button type="button" disabled={busy} onClick={()=>onContinue({track,stage,item})}>Continue in Chat <span className="sr-only">for {item.title}</span></button>}</article>)}</div>}
-    <div className="stage-plan-outputs"><h5>Outputs</h5>{stage.outputs?.length?<ul>{stage.outputs.map(output=><Output key={output.id} output={output} onOpen={onOpenOutput} busy={busy}/>)}</ul>:<p>No recorded outputs for this stage.</p>}</div>
+    <div className="stage-plan-outputs"><h5>Outputs</h5>{stage.id==='branding.positioning'&&positioning}{stage.outputs?.length?<ul>{stage.outputs.map(output=><Output key={output.id} output={output} onOpen={onOpenOutput} busy={busy}/>)}</ul>:(!positioning||stage.id!=='branding.positioning')&&<p>No recorded outputs for this stage.</p>}</div>
     <div className="stage-plan-actions">{nextAction&&<button type="button" className="stage-plan-continue" disabled={busy} onClick={nextAction.open}>{nextAction.label}</button>}{stage.context&&onContinue&&<button type="button" className="stage-plan-continue" disabled={busy} onClick={()=>onContinue({track,stage})}>Continue in Chat <span aria-hidden="true">↗</span></button>}{onOpenWork&&<button type="button" className="workspace-button" disabled={busy} onClick={onOpenWork}>Open project work</button>}</div>{stage.context&&<p className="stage-plan-footnote">Review the stage context in your message before sending.</p>}
    </section>:<p className="stage-plan-notice">No stages are mapped to this stream yet.</p>}
   </div>
