@@ -27,6 +27,21 @@ test('wording saying approved never supplies attestation; approval must be compl
   const ownerWording = await f.repo.prepare(scope, f.approval, f.approval, 'A saved message', reviewed, id(9), true)
   assert.equal(ownerWording.source_message_id, ownerWording.approval_message_id)
 })
+test('history scope comes from the exact owned project conversation and rejects conflicting row fields', async () => {
+  const f = fixture(), reviewed = await f.repo.review(scope)
+  const parent = { id: scope.conversation_id, organization_id: scope.organization_id, project_id: scope.project_id, owner_id: scope.actor_id, context_kind: 'project_team' }
+  const { organization_id, ...row } = f.approval
+  const prepare = (source, approval, conversation) => f.repo.prepare(scope, source, approval, row.body, reviewed, id(9), true, conversation)
+  for (const change of [{ id: id(99) }, { organization_id: id(99) }, { project_id: id(99) }, { owner_id: id(99) }, { context_kind: 'organization' }]) {
+    await assert.rejects(prepare(row, row, { ...parent, ...change }), /exact wording/)
+  }
+  await assert.rejects(prepare(row, row, undefined), /exact wording/)
+  for (const change of [{ organization_id: null }, { organization_id: id(99) }, { conversation_id: id(99) }]) {
+    await assert.rejects(prepare({ ...row, ...change }, row, parent), /exact wording/)
+    await assert.rejects(prepare(row, { ...row, ...change }, parent), /approval message/)
+  }
+  assert.deepEqual(f.calls.map(c => c.name), ['read_project_positioning_output'])
+})
 test('unknown save preserves original proposal and read-only recovery never retries, including null result', async () => {
   const f = fixture(), p = await f.repo.prepare(scope, f.source, f.approval, 'Exact chosen positioning.', await f.repo.review(scope), id(9), true)
   f.state.unknown = true

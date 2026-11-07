@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import WorkspaceDialog from './WorkspaceDialog.jsx'
 import { createProjectPositioningOutputRepository } from '../data/projectPositioningOutputRepository.js'
-export default function ProjectPositioningOutputActions({ client, scope, messages, request, onRequestHandled, signal, disabled, onStateChange, onContinueProductStructure }) {
+export default function ProjectPositioningOutputActions({ client, scope, conversation, messages, request, onRequestHandled, signal, disabled, onStateChange, onContinueProductStructure }) {
   const repository = useMemo(() => createProjectPositioningOutputRepository(client), [client])
   const scopeKey = JSON.stringify(scope), live = useRef(scopeKey); live.current = scopeKey
   const key = 'anka:positioning-output:' + scopeKey
@@ -25,7 +25,7 @@ export default function ProjectPositioningOutputActions({ client, scope, message
     if(disabled||busy||pending||!review)return
     const token=scopeKey;setBusy(true);setError('')
     try{
-      const proposal=await repository.prepare(scope,source,messages.find(m=>m.id===approvalId),wording,review.data,crypto.randomUUID(),attested)
+      const proposal=await repository.prepare(scope,source,messages.find(m=>m.id===approvalId),wording,review.data,crypto.randomUUID(),attested,conversation)
       if(live.current!==token||signal?.aborted)return
       sessionStorage.setItem(key,JSON.stringify(proposal));setPending(proposal)
       const result=await repository.confirm(proposal,{signal})
