@@ -179,7 +179,9 @@ export function projectStagePlan(header,partitions=[]){
  const units=partitions.map(p=>checkedPartition(header,p))
  const keys=new Set();for(const u of units){const key=[u.group_id,u.partition.kind,u.partition.id].join(':');if(keys.has(key))throw Error('Duplicate loaded canonical partition');keys.add(key)}
  const tracks=TRACKS.map(([id,title,description])=>({id,title,description,stages:PROJECT_STAGE_PHASES.filter(p=>p.track===id).map(phase=>{
-  const bindings=header.bindings.filter(b=>b.phase===phase.key&&header.groups.some(g=>g.id===b.group_id&&g.publication_id===b.publication_id&&g.kind===id&&g.steps?.some(s=>s.key===b.step_key)))
+  const phaseBindings=header.bindings.filter(b=>b.phase===phase.key)
+  const bindings=phaseBindings.filter(b=>header.groups.some(g=>g.configuration_current===true&&g.id===b.group_id&&g.publication_id===b.publication_id&&g.kind===id&&g.steps?.some(s=>s.key===b.step_key)))
+  const configurationUnavailable=!bindings.length&&phaseBindings.some(b=>header.groups.some(g=>g.id===b.group_id&&g.kind===id&&g.configuration_current!==true))
   const items=[]
   for(const u of units){
    const expected=bindings.filter(b=>b.group_id===u.group_id);if(!expected.length)continue
@@ -192,7 +194,7 @@ export function projectStagePlan(header,partitions=[]){
   }
   const allSteps=units.flatMap(u=>u.steps.filter(s=>bindings.some(b=>b.group_id===u.group_id&&b.step_key===s.key)&&s.phase===phase.key))
   const summary=items.length?summarizeProjectStageSteps(allSteps,{available:items.every(i=>i.context!==null),scope:header}):{status:null,progress:null,needsUpdate:false,outputs:[],blockedReason:bindings.length?'Select a registered page, campaign asset, cycle or foundation to load exact progress.':null}
-  return {id:phase.key,title:phase.label,configured:bindings.length>0,...summary,items,
+  return {id:phase.key,title:phase.label,configured:bindings.length>0,configurationUnavailable,...summary,items,
    scopeLabel:items.length?'Only '+items.length+' loaded partition'+(items.length===1?'':'s')+'; not a whole-project total.':null,
    context:items.length===1?items[0].context:null}
  })}))

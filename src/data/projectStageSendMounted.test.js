@@ -21,7 +21,10 @@ test('stage and attachment conflict keeps draft, references and original context
  const header={...native.header,...exact},unit={...native.unit,...exact},plan=projectStagePlan(header,[unit]),track=plan.tracks.find(r=>r.id==='website'),stage=track.stages.find(r=>r.id==='website.content')
  const captured=[];const append=fixture.chat.appendContextHumanMessage;fixture.chat.appendContextHumanMessage=async input=>{captured.push(structuredClone(input));return append(input)}
  globalThis.__stageSendTest={fixture,actor,allowlist,organization:{activeOrganizationId:organizationId,activeMembership:{role:'system_owner'},scopeRevision:1,requestSignal:signal,handleOrganizationAccessError(){}},rpc:async name=>({data:name==='read_project_stage_plan'?header:unit,error:null})}
- const vite=await createServer({server:{middlewareMode:true},appType:'custom',logLevel:'silent',plugins:[{name:'stage-send-mounted',enforce:'pre',resolveId(source){for(const [suffix,id] of [['/lib/supabase.js','client'],['AuthContext.jsx','auth'],['OrganizationContext.jsx','org'],['departmentChatRepository.js','chat'],['contextChatRunnerRepository.js','runner'],['integrationRepository.js','models'],['ProjectAttachmentPanel.jsx','attachments']])if(source.endsWith(suffix))return '\0stage-'+id},load(id){
+ const vite=await createServer({server:{middlewareMode:true},appType:'custom',logLevel:'silent',plugins:[{name:'stage-send-mounted',enforce:'pre',resolveId(source){for(const [suffix,id] of [['WorkspaceDialog.jsx','dialog'],['ProjectSetupPanel.jsx','setup'],['ProjectContentJourney.jsx','sibling'],['ProjectWebsiteExecution.jsx','sibling'],['/lib/supabase.js','client'],['AuthContext.jsx','auth'],['OrganizationContext.jsx','org'],['departmentChatRepository.js','chat'],['contextChatRunnerRepository.js','runner'],['integrationRepository.js','models'],['ProjectAttachmentPanel.jsx','attachments']])if(source.endsWith(suffix))return '\0stage-'+id},load(id){
+  if(id==='\0stage-dialog')return "import {createElement} from 'react'; export default function Dialog({title,children,onClose}){return createElement('section',null,children,createElement('button',{onClick:onClose},'Close '+title))}"
+  if(id==='\0stage-setup')return "import {createElement} from 'react'; export default function Setup(props){return createElement('p',{'aria-label':'Setup for '+props.projectId},'Review project setup')}"
+  if(id==='\0stage-sibling')return 'export default function Sibling(){return null}'
   if(id==='\0stage-client')return 'export const supabase={rpc:(...a)=>globalThis.__stageSendTest.rpc(...a),functions:{invoke(){throw Error("Unexpected live importer")}}}'
   if(id==='\0stage-auth')return 'export const useAuth=()=>({user:{id:globalThis.__stageSendTest.actor}})'
   if(id==='\0stage-org')return 'export const useOrganization=()=>globalThis.__stageSendTest.organization'
@@ -37,6 +40,10 @@ test('stage and attachment conflict keeps draft, references and original context
  t.after(async()=>{await act(async()=>root.unmount());await vite.close();Object.assign(globalThis,previous);delete globalThis.__stageSendTest})
  await render();await until(()=>named('Message')&&!named('Message').disabled)
  await act(async()=>props(named('Message')).onChange({target:{value:'Preserve this stage request'}}))
+ await click('Open pipeline and work details');await until(()=>button('Open project setup'))
+ await click('Open project setup');await until(()=>named('Setup for '+workspace.project.id))
+ assert.equal(named('Message').value,'Preserve this stage request');assert.equal(captured.length,0);assert.equal(fixture.data.counters.run,0)
+ await click('Close Review project setup')
  await render({selectionId:'explicit-stage-choice',track,stage});await until(()=>button('Remove stage context'))
  await click('Attach files');await until(()=>button('Select fixture reference'));await click('Select fixture reference');await click('Close fixture attachments')
  await act(async()=>props(named('Chat composer')).onSubmit({preventDefault(){}}));await flush();await until(()=>env.container.textContent.includes('Choose stage context or attached references'))

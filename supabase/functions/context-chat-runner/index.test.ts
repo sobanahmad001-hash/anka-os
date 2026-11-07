@@ -3,6 +3,76 @@ import { assertEquals, assertRejects, assertThrows } from 'jsr:@std/assert@1.0.1
 import { handleRequest, requireOpenAiCanonicalContextChoice, requirePrivateChatPaidExecution, requirePrivateConversationAccess } from './index.ts'
 import { buildPrivateConversationPrompt, canonicalOpenAiContext } from '../_shared/contextChatPrompt.js'
 
+Deno.test('ordinary project Send grounds two fresh unscoped chats through user readers and fails closed on unavailable scope', async () => {
+ const id='ee000000-0000-4000-8000-000000000001', chatA='ee000000-0000-4000-8000-000000000002', chatB='ee000000-0000-4000-8000-000000000003'
+ const oldFetch=globalThis.fetch,oldGet=Deno.env.get,oldRefresh=GoTrueClient.prototype.startAutoRefresh
+ GoTrueClient.prototype.startAutoRefresh=async()=>{}
+ const rate={provider:'openai',model_id:'verified',verified_at:new Date().toISOString(),source_url:'https://developers.openai.com/api/docs/pricing',input_usd_per_million:1,cached_input_usd_per_million:1,cache_write_usd_per_million:null,output_usd_per_million:1}
+ const config:Record<string,string>={SUPABASE_URL:'http://127.0.0.1:54321',SUPABASE_ANON_KEY:'offline-public',SUPABASE_SERVICE_ROLE_KEY:'offline-service',CONTEXT_CHAT_PAID_EXECUTION_ENABLED:'true',ANKA_OPENAI_TEST:'offline-key',N6_OPENAI_MODEL_PRICING_JSON:JSON.stringify([rate])}
+ let scenario='fresh',chat=chatA,settled=false,providers=0,reservations=0
+ const prompts:string[]=[],reads:Array<{path:string,select:string,authorization:string}>=[]
+ try {
+  Deno.env.get=name=>config[name]
+  globalThis.fetch=async(input,init)=>{
+   const url=new URL(input instanceof Request?input.url:String(input));if(url.origin!=='http://127.0.0.1:54321')throw Error('Remote forbidden')
+   const path=url.pathname,args=init?.body?JSON.parse(String(init.body)):{},authorization=new Headers(init?.headers).get('authorization')||''
+   reads.push({path,select:url.searchParams.get('select')||'',authorization})
+   let data:unknown
+   if(path==='/auth/v1/user')data={id}
+   else if(path.endsWith('/organization_memberships'))data={status:'active',member_kind:'team',role:'system_owner'}
+   else if(path.endsWith('/department_chat_messages')){
+    const row={id,conversation_id:chat,organization_id:id,owner_id:id,author_id:id,role:'user',status:'completed',sequence:1,body:chat===chatA?'Question from chat A':'Question from chat B',client_request_id:id}
+    if(!url.searchParams.has('id'))assertEquals(url.searchParams.get('conversation_id'),'eq.'+chat)
+    data=url.searchParams.has('id')?row:[row]
+   }
+   else if(path.endsWith('/department_chat_conversations'))data={id:chat,organization_id:id,owner_id:id,context_kind:'project_team',project_id:id,department_id:null,state:'active'}
+   else if(path.endsWith('/projects')){
+    const bootstrap=(url.searchParams.get('select')||'').includes('name')
+    if(bootstrap){assertEquals(authorization,'Bearer offline');if(scenario==='denied')return new Response(JSON.stringify({message:'private-diagnostic'}),{status:403,headers:{'content-type':'application/json'}})}
+    data=bootstrap&&scenario==='unavailable'?null:{id,organization_id:bootstrap&&scenario==='foreign'?chatB:id,name:'Verified Shared Project',archived_at:null}
+   }
+   else if(path.endsWith('/engagements')){assertEquals(authorization,'Bearer offline');assertEquals(url.searchParams.get('project_id'),'eq.'+id);assertEquals(url.searchParams.has('status'),false);const e={id,organization_id:id,project_id:scenario==='foreign_engagement'?chatB:id,status:scenario==='planning'?'planning':scenario==='inactive'?'completed':'active'};data=scenario==='disconnected'?[]:scenario==='ambiguous'?[e,{...e,id:chatB,status:'completed'}]:[e]}
+   else if(path.endsWith('/read_project_stage_plan')){
+    assertEquals(authorization,'Bearer offline');assertEquals(args.p_project_id,id)
+    if(scenario==='denied_plan')return new Response(JSON.stringify({message:'private-diagnostic'}),{status:403,headers:{'content-type':'application/json'}})
+    const configured=['configured','stale','null_current'].includes(scenario)
+    data={organization_id:id,project_id:id,engagement_id:scenario==='foreign_plan'?chatB:id,state:configured?'available':'unconfigured',plan_id:configured?id:null,groups:configured?[{id,publication_id:id,configuration_id:id,configuration_current:scenario==='stale'?false:scenario==='null_current'?null:true,steps:[{key:'brief'}]}]:[],bindings:configured?[{phase:'branding.brief',group_id:id,publication_id:id,step_key:'brief'}]:[]}
+   }
+   else if(path.endsWith('/context_chat_organization_models'))data={id,organization_id:id,connector_connection_id:id,model_id:'verified',revoked_at:null}
+   else if(path.endsWith('/integration_connections'))data={id,organization_id:id,provider:'openai',status:'verified',archived_at:null,secret_name:'ANKA_OPENAI_TEST'}
+   else if(path.endsWith('/project_document_message_sources'))data=[]
+   else if(path.endsWith('/append_context_chat_audited_reply')){if(!settled)return new Response(JSON.stringify({message:'No audit'}),{status:400,headers:{'content-type':'application/json'}});data={id,body:'Synthetic answer'}}
+   else if(path.endsWith('/recover_context_chat_completed_run'))data={status:'no_run'}
+   else if(path.endsWith('/read_project_chat_spend_policy'))data={mode:'usage_only'}
+   else if(path.endsWith('/reserve_context_chat_budget')){reservations++;data={status:'reserved',reservation_id:id}}
+   else if(path.endsWith('/claim_context_chat_dispatch'))data={status:'claimed',claim_id:id,model_configuration_id:id}
+   else if(path.endsWith('/ai_runs')){assertEquals(args.context_manifest.canonical_context_included,false);assertEquals(args.context_manifest.project_setup_bootstrap.project_id,id);data={id}}
+   else if(path.endsWith('/reconcile_context_chat_budget')){assertEquals(args.p_outcome,'settled');settled=true;data={status:'settled'}}
+   else throw Error('Unexpected '+path)
+   return new Response(JSON.stringify(data),{headers:{'content-type':'application/json'}})
+  }
+  const fetcher=(async(_input,init)=>{providers++;const body=JSON.parse(String(init?.body));prompts.push(body.input);return new Response(JSON.stringify({id:'synthetic-response',status:'completed',model:'verified',output:[{type:'message',content:[{type:'output_text',text:'Synthetic answer'}]}],usage:{input_tokens:10,output_tokens:3}}))}) as typeof fetch
+  for(const entry of ['freshA','freshB','denied','foreign','unavailable','ambiguous','foreign_engagement','denied_plan','foreign_plan','disconnected','configured','planning','inactive','stale','null_current']){
+   scenario=entry.startsWith('fresh')?'fresh':entry;chat=entry==='freshB'?chatB:chatA;settled=false
+   const before=providers,beforeReservations=reservations
+   const response=await handleRequest(new Request('https://example.test',{method:'POST',headers:{Authorization:'Bearer offline'},body:JSON.stringify({organization_id:id,message_id:id,model_configuration_id:id,dispatch_request_id:id})}),fetcher,{get:name=>config[name]})
+   const result=await response.json()
+   if(['freshA','freshB','disconnected','configured','planning','inactive','stale','null_current'].includes(entry)){assertEquals(response.status,200,JSON.stringify(result));assertEquals(result.status,'completed');assertEquals(providers,before+1)}
+   else{assertEquals(response.status,409);assertEquals(providers,before);assertEquals(reservations,beforeReservations);assertEquals(JSON.stringify(result).includes('private-diagnostic'),false)}
+  }
+  for(const prompt of prompts){assertEquals(prompt.includes('Verified Shared Project'),true);assertEquals(prompt.includes('"completion_verified":false'),true);assertEquals(prompt.includes('canonical_context'),false)}
+  assertEquals(prompts[0].includes('"state":"unconfigured"'),true);assertEquals(prompts[1].includes('"state":"unconfigured"'),true)
+  assertEquals(prompts[0].includes('Question from chat B'),false);assertEquals(prompts[1].includes('Question from chat A'),false)
+  assertEquals(prompts[2].includes('engagement_not_connected'),true)
+  assertEquals(prompts[3].includes('configured_completion_not_verified'),true)
+  assertEquals(prompts[4].includes('"engagement_connection":"connected","stage_read_eligible":true'),true)
+  assertEquals(prompts[5].includes('"engagement_connection":"connected","stage_read_eligible":false'),true)
+  assertEquals(prompts[5].includes('stage_read_unavailable'),true)
+  for(const prompt of prompts.slice(6)){assertEquals(prompt.includes('configuration_not_current'),true);assertEquals(prompt.includes('configured_completion_not_verified'),false)}
+  assertEquals(reads.some(r=>/organizations|tasks|work_items|deliverable_versions/.test(r.path)),false)
+ }finally{await new Promise(r=>setTimeout(r,20));globalThis.fetch=oldFetch;Deno.env.get=oldGet;GoTrueClient.prototype.startAutoRefresh=oldRefresh}
+})
+
 for (const phase of ['json_decode', 'normalize', 'model_match', 'token_cost', 'reservation_ceiling', 'ceiling_equal', 'valid']) {
  Deno.test('claimed handler records only fixed validation phase: '+phase, async()=>{
   const id='aa000000-0000-4000-8000-000000000001'
@@ -81,7 +151,8 @@ for(const mode of ['guarded','usage_only']) Deno.test('actual Project Chat runne
     data=url.searchParams.has('id')?row:[row]
    }
    else if(path.endsWith('/department_chat_conversations'))data={id,organization_id:id,owner_id:id,context_kind:'project_team',project_id:id,state:'active'}
-   else if(path.endsWith('/projects'))data={id,organization_id:id,archived_at:null}
+   else if(path.endsWith('/projects'))data={id,organization_id:id,name:'Synthetic Project',archived_at:null}
+   else if(path.endsWith('/engagements'))data=[]
    else if(path.endsWith('/context_chat_organization_models'))data={id,organization_id:id,connector_connection_id:id,model_id:'gpt-6.1-sol',revoked_at:null}
    else if(path.endsWith('/integration_connections'))data={id,organization_id:id,provider:'openai',status:'verified',archived_at:null,secret_name:'ANKA_OPENAI_OFFLINE_POLICY'}
    else if(path.endsWith('/project_document_message_sources'))data=[]
@@ -97,7 +168,8 @@ for(const mode of ['guarded','usage_only']) Deno.test('actual Project Chat runne
   const response=await handleRequest(new Request('https://example.test',{method:'POST',headers:{Authorization:'Bearer offline'},body:JSON.stringify({organization_id:id,message_id:id,model_configuration_id:id,dispatch_request_id:id})}),(()=>{providers++;throw Error('No provider')}) as typeof fetch,{get:name=>config[name]})
   const result=await response.json()
   assertEquals(response.status,409,JSON.stringify({result,calls}));assertEquals(result.must_not_submit,true)
-  assertEquals(calls.find(call=>call.path.endsWith('/reserve_context_chat_budget'))?.args.p_max_cost_microusd,mode==='usage_only'?20695:80480)
+  const reservedCost=calls.find(call=>call.path.endsWith('/reserve_context_chat_budget'))?.args.p_max_cost_microusd
+  assertEquals(mode==='usage_only'?reservedCost>20695&&reservedCost<80480:reservedCost===80480,true)
   assertEquals(calls.find(call=>call.path.endsWith('/read_project_chat_allowance'))?.args.p_cost,mode==='usage_only'?undefined:80480)
   assertEquals(providers,0)
  }finally{await new Promise(r=>setTimeout(r,20));globalThis.fetch=oldFetch;Deno.env.get=oldGet;GoTrueClient.prototype.startAutoRefresh=oldRefresh}
