@@ -7,6 +7,14 @@ const frozen = v => { if (v && typeof v === 'object') { Object.values(v).forEach
 const same = (a, b) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort())
 function scope(s) { exact(s, ['organization_id', 'project_id', 'engagement_id', 'actor_id', 'conversation_id']); need(Object.values(s).every(id), 'Exact owned Project Chat scope required'); return structuredClone(s) }
 const args = s => ({ p_organization_id: s.organization_id, p_project_id: s.project_id, p_engagement_id: s.engagement_id })
+function messageInScope(message, s, conversation) {
+  if (message?.conversation_id !== s.conversation_id) return false
+  if (Object.hasOwn(message, 'organization_id')) return message.organization_id === s.organization_id
+  // History rows carry their organization on the returned conversation.
+  return conversation?.id === message.conversation_id &&
+    conversation.organization_id === s.organization_id && conversation.project_id === s.project_id &&
+    conversation.owner_id === s.actor_id && conversation.context_kind === 'project_team'
+}
 function meta(m, conversationId = null) {
   exact(m, ['version_id', 'version_number', 'wording_sha256', 'binding_id', 'conversation_id'])
   need(id(m.version_id) && Number.isSafeInteger(m.version_number) && m.version_number > 0 && hash(m.wording_sha256) && id(m.binding_id) && (m.conversation_id === null || id(m.conversation_id)) && (!conversationId || m.conversation_id === conversationId), 'Exact saved positioning version required')
@@ -32,11 +40,11 @@ export function createProjectPositioningOutputRepository(client) {
   }
   return Object.freeze({
     review: (s, options) => read(s, null, options),
-    async prepare(s, source, approval, wording, reviewed, requestId, attested) {
+    async prepare(s, source, approval, wording, reviewed, requestId, attested, conversation) {
       s = scope(s)
       need(attested === true && id(requestId) && id(reviewed?.binding_id) && ['organization_id', 'project_id', 'engagement_id', 'actor_id'].every(k => reviewed[k] === s[k]), 'Review the chosen wording and explicitly attest to the selected owner approval message')
-      need(source?.conversation_id === s.conversation_id && source.organization_id === s.organization_id && source.status === 'completed' && ['assistant', 'user'].includes(source.role) && id(source.id) && typeof source.body === 'string' && typeof wording === 'string' && wording.trim().length > 0 && wording.length <= 8000 && source.body.includes(wording), 'Select exact wording from a completed saved message in this conversation')
-      need(approval?.conversation_id === s.conversation_id && approval.organization_id === s.organization_id && approval.status === 'completed' && approval.role === 'user' && approval.author_id === s.actor_id && id(approval.id) && Number.isSafeInteger(source.sequence) && Number.isSafeInteger(approval.sequence) && approval.sequence >= source.sequence, 'Select a separate completed owner approval message at or after the source; wording is never parsed as approval')
+      need(messageInScope(source, s, conversation) && source.status === 'completed' && ['assistant', 'user'].includes(source.role) && id(source.id) && typeof source.body === 'string' && typeof wording === 'string' && wording.trim().length > 0 && wording.length <= 8000 && source.body.includes(wording), 'Select exact wording from a completed saved message in this conversation')
+      need(messageInScope(approval, s, conversation) && approval.status === 'completed' && approval.role === 'user' && approval.author_id === s.actor_id && id(approval.id) && Number.isSafeInteger(source.sequence) && Number.isSafeInteger(approval.sequence) && approval.sequence >= source.sequence, 'Select a separate completed owner approval message at or after the source; wording is never parsed as approval')
       if (source.id === approval.id) need(source.role === 'user' && source.author_id === s.actor_id, 'Only owner-authored wording may use the same approval message')
       if (reviewed.current !== null) meta(reviewed.current)
       const value = { version: 1, scope: s, source_message_id: source.id, approval_message_id: approval.id, wording, binding_id: reviewed.binding_id, expected_version_id: reviewed.current?.version_id ?? null, request_id: requestId, attested: true }

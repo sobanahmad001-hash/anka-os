@@ -6,6 +6,7 @@ import { createServer } from 'vite'
 import { mountedEnvironment } from './testSupport/n1bMountedDom.js'
 import { createDirectChatFixture, createProjectNavigationPreviewFixture, actor, organizationId, allowlist } from '../../tools/direct-chat-fixture.js'
 import { directChatRecoveryKey } from './directChatRecovery.js'
+const ownerParagraph = 'Owner-edited exact positioning wording. '.repeat(10).slice(0, 375)
 const id = n => `ee000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const descendants = n => [n, ...n.childNodes.flatMap(descendants)]
 const props = n => n?.[Object.keys(n).find(k => k.startsWith('__reactProps$'))]
@@ -16,9 +17,8 @@ async function mount(t, pendingChat = false, ownerWording = false) {
   const values = { requestAnimationFrame:fn=>fn(), document: env.document, window: env.window, Event: env.window.Event, Node: env.window.Node, HTMLElement: env.window.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true, sessionStorage: { getItem: k => storage.get(k) || null, setItem: (k, v) => storage.set(k, v), removeItem: k => storage.delete(k) } }
   const previous = Object.fromEntries(Object.keys(values).map(k => [k, globalThis[k]])); Object.assign(globalThis, values)
   const fixture = createDirectChatFixture({ surface: 'project', state: 'populated' }), workspace = createProjectNavigationPreviewFixture(fixture.scope.project_id).workspace, conversation = fixture.data.rows[0]
-  for (const m of fixture.data.messages) m.organization_id = organizationId
   const source = fixture.data.messages.find(m => m.role === 'assistant'); source.body = 'UNSELECTED_PREFIX\nExact saved positioning wording.\nUNSELECTED_TAIL'
-  const approval = { id: id(8), organization_id: organizationId, conversation_id: conversation.id, owner_id: actor, author_id: actor, role: 'user', status: 'completed', sequence: 3, body: ownerWording ? 'OWNER_PREFIX\nOwner-edited exact positioning wording.\nOWNER_TAIL' : 'OWNER_APPROVAL_TEXT_LOCAL_ONLY', client_request_id: id(18) }; fixture.data.messages.push(approval)
+  const approval = { id: id(8), conversation_id: conversation.id, author_id: actor, role: 'user', status: 'completed', sequence: 3, body: ownerWording ? `${'Synthetic owner introduction 📝'.padEnd(76, '.')}\n\n${ownerParagraph}\n\nOWNER_TAIL` : 'OWNER_APPROVAL_TEXT_LOCAL_ONLY', client_request_id: id(18) }; fixture.data.messages.push(approval)
   const state = { binding: id(6), saved: null, wording: '', unknown: false, missing: false }, calls = [], sent = []
   const append = fixture.chat.appendContextHumanMessage; fixture.chat.appendContextHumanMessage = async input => { sent.push(structuredClone(input)); return append(input) }
   const base = { organization_id: organizationId, project_id: workspace.project.id, engagement_id: workspace.engagement.id, actor_id: actor }
@@ -129,16 +129,21 @@ test('external continuation refuses another conversation and drops unfinished di
 test('owner-authored edited wording uses the same saved owner message via separate source and approval choices', async t => {
   const m=await mount(t,false,true);await until(()=>!m.named('Message').disabled)
   await m.click('Review positioning wording from message 3');await until(()=>m.named('Saved positioning source message'))
-  const start=m.approval.body.indexOf('Owner-edited'),end=m.approval.body.indexOf('\nOWNER_TAIL')
+  const start = 78, end = 453
+  assert.equal(Object.hasOwn(m.approval, 'organization_id'), false)
+  assert.equal(m.approval.body.slice(start, end), ownerParagraph)
   await act(async()=>props(m.named('Saved positioning source message')).onSelect({target:{selectionStart:start,selectionEnd:end}}))
   assert.equal(m.named('Owner approval message').value,'')
   await act(async()=>props(m.named('Owner approval message')).onChange({target:{value:m.approval.id}}))
   assert.equal(m.button('Save reviewed positioning version').disabled,true)
   await act(async()=>props(m.named('Attest chosen wording and owner approval')).onChange({target:{checked:true}}))
-  await m.click('Save reviewed positioning version');await until(()=>m.button('Review product and service continuation'))
+  await m.click('Save reviewed positioning version')
+  assert.equal(m.all().find(n => props(n)?.role === 'alert')?.textContent || '', '')
+  await until(()=>m.button('Review product and service continuation'))
   const save=m.calls.find(c=>c.name==='save_project_positioning_output')
   assert.equal(save.args.p_source_message_id,m.approval.id);assert.equal(save.args.p_approval_message_id,m.approval.id)
-  assert.equal(save.args.p_wording,'Owner-edited exact positioning wording.')
+  assert.equal(save.args.p_wording, ownerParagraph)
+  assert.equal(m.calls.filter(c => c.name === 'save_project_positioning_output').length, 1)
   assert.doesNotMatch(JSON.stringify(save.args),/OWNER_PREFIX|OWNER_TAIL|Exact saved positioning wording/)
   assert.equal(m.fixture.data.messages.length,3);assert.equal(m.sent.length,0);assert.equal(m.fixture.data.counters.run,0)
 })
