@@ -11,7 +11,7 @@ import {projectDeliveryIntent} from '../data/projectDeliveryContext.js'
 import _ProjectBriefDialog from '../components/ProjectBriefDialog.jsx'
 import DescriptionDisclosure from '../components/DescriptionDisclosure.jsx'
 import _ProjectScopedPipelineView from '../components/ProjectScopedPipelineView.jsx'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { useOrganization } from '../context/OrganizationContext.jsx'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { projectEngagementWorkspace } from '../data/projectEngagementWorkspace'
@@ -179,6 +179,7 @@ export default function ProjectEngagementWorkspace() {
   const showRetainerPlanning = identity.hasEngagement
     && (project.engagement_type === 'retainer' || workspace.engagement?.engagement_type === 'retainer')
   const tabs = TABS
+  const Navigation = tab === 'discussion' ? 'div' : Fragment
   const selectedPrimaryTab = primaryTab(tab)
   const subTabs = tab === 'services' || tab === 'journey' ? SERVICES_TABS : selectedPrimaryTab === 'work' ? [...WORK_TABS.filter(([id])=>id!=='website-work'&&id!=='marketing-work'||(workspace.pipelineGroups||[]).some(group=>group.kind===(id==='website-work'?'website':'marketing'))), ...(showRetainerPlanning ? [['retainer-planning', 'Recurring Planning']] : [])] : selectedPrimaryTab === 'services' ? SERVICES_TABS : []
   const isNavigationBusy=navigationBusy.owner===navigationOwner&&navigationBusy.value
@@ -195,6 +196,7 @@ export default function ProjectEngagementWorkspace() {
   return (
     <main className={`workspace-page project-workspace studio-project ${tab === 'discussion' ? 'studio-chat-page' : ''}`}>
       <div className="workspace-container">
+        <Navigation {...(tab === 'discussion' ? {className: 'project-workspace-navigation'} : {})}>
         <button type="button" onClick={() => {if(allowLeavingCurrentView())navigate('/sphere/portfolio')}} className="text-sm font-medium text-[var(--anka-muted)] hover:text-[var(--anka-ink)]">← Portfolio Workspace</button>
         <header className="studio-project-header mt-3 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">
@@ -229,6 +231,7 @@ export default function ProjectEngagementWorkspace() {
           <Metric title="Review queue" value={summary.reviewQueue} note="Versions in review/revision" />
           <Metric title="Progress" value={summary.progress === null ? 'Not set' : `${summary.progress}%`} note={`Due ${date(project.due_date)}`} />
         </section></details>}
+        </Navigation>
         <div id="project-workspace-panel" role="tabpanel" aria-labelledby={`project-tab-${selectedPrimaryTab}`} className="mt-6" tabIndex={0}>
           {tab === 'overview' && <><ProjectOverviewSummary workspace={workspace} onOpen={selectTab} busy={isNavigationBusy||Boolean(error)}/><details className="project-advanced"><summary>Project brief, scope & supporting context</summary><Overview workspace={workspace} onOpen={selectTab}/></details></>}
           {tab === 'services' && <ServicesAndScope workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={load} onAccessError={handleOrganizationAccessError} onOpen={selectTab} onNavigationBusyChange={reportNavigationBusy} />}

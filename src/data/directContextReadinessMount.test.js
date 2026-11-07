@@ -12,6 +12,53 @@ const props = node => node?.[Object.keys(node).find(key => key.startsWith('__rea
 const defer = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
 const flush = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
 
+for (const method of ['getContextConversation', 'getProjectContextSharing']) {
+  test('Send keeps an unsent draft when the access check stalls in ' + method, async t => {
+    const ui = await mount(t, { surface: 'project', state: 'populated', initial: true })
+    await ui.type('Synthetic continuation')
+    const real = setTimeout, timers = []
+    globalThis.setTimeout = (cb, delay, ...args) => delay === 15000 ? (timers.push(cb), 0) : real(cb, delay, ...args)
+    t.after(() => { globalThis.setTimeout = real })
+    const original = ui.fixture.chat[method], late = defer()
+    ui.fixture.chat[method] = () => late.promise
+    await ui.send()
+    await act(async () => { for (const fire of timers) fire() })
+    assert.match(ui.environment.container.textContent, /timed out before sending.*Use Send/)
+    assert.equal(ui.named('Message').value, 'Synthetic continuation')
+    assert.equal(ui.button('Check recovery'), undefined)
+    assert.equal(ui.button('Send').disabled, false)
+    assert.deepEqual(ui.fixture.data.counters, {created:0,messages:0,run:0,recover:0})
+    late.resolve({recipients:[]})
+    ui.fixture.chat[method] = original
+    await ui.send(); await ui.consent(); await flush()
+    assert.equal(ui.fixture.data.counters.run, 1)
+    assert.equal(ui.fixture.data.counters.messages, 1)
+  })
+}
+
+test('post-dispatch refresh timeout keeps the exact request and recovers its reply without another send', async t => {
+  const ui = await mount(t, { surface: 'project', state: 'populated', initial: true })
+  await ui.type('Synthetic uncertain refresh')
+  const real = setTimeout, timers = []
+  globalThis.setTimeout = (cb, delay, ...args) => delay === 15000 ? (timers.push(cb), 0) : real(cb, delay, ...args)
+  t.after(() => { globalThis.setTimeout = real })
+  const read = ui.fixture.chat.getContextConversation
+  ui.fixture.chat.getContextConversation = input => input.send_access_only ? read(input) : new Promise(() => {})
+  await ui.send(); await ui.consent(); await flush()
+  await act(async () => { for (const fire of timers) fire() })
+  assert.ok(ui.button('Check recovery'))
+  const record = JSON.parse(ui.storage.get('anka:direct-chat:b1:' + JSON.stringify([actor, organizationId, 'project_team', ui.fixture.scope.project_id, ''])))
+  const human = ui.fixture.data.messages.find(row => row.client_request_id === record.client_request_id)
+  assert.equal(human.id, record.message_id)
+  assert.ok(record.dispatch_request_id)
+  ui.fixture.chat.getContextConversation = read
+  await ui.click('Check recovery')
+  assert.equal(ui.button('Check recovery'), undefined)
+  assert.equal(ui.fixture.data.counters.run, 1)
+  assert.equal(ui.fixture.data.counters.messages, 1)
+  assert.equal(ui.fixture.data.counters.recover, 1)
+})
+
 test('New Project Chat missing model never exposes allowance controls',async t=>{
  let calls=0;const ui=await mount(t,{surface:'project',role:'system_owner',allowlist:{connections:[]},allowanceRpc:async()=>{calls++;throw Error('unexpected')}});
  await ui.click('Chat settings');await flush();assert.equal(ui.button('Preview allowance'),undefined);

@@ -55,7 +55,7 @@
 /* Project Chat focuses the viewport on its conversation. Work keeps its original views. */
 .studio-chat-page { height:100%; min-height:620px; padding:14px 28px 12px; }
 .studio-chat-page > .workspace-container { position:relative; height:100%; display:flex; flex-direction:column; max-width:1440px; }
-.studio-chat-page > .workspace-container > button { align-self:flex-start; font-size:12px; }
+.studio-chat-page .project-workspace-navigation > button { align-self:flex-start; font-size:12px; }
 .studio-chat-page .studio-project-header { margin-top:6px; align-items:center; padding-right:132px; }
 .studio-chat-page .studio-project-header h1 { font-size:21px; line-height:1.35; }
 .studio-chat-page .studio-project-header > div:last-child { font-size:11px; }
@@ -145,3 +145,42 @@
 .studio-project.studio-chat-page .direct-chat-messages { max-height:none; }
 
 .studio-chat-page .studio-chat-layout { align-items:stretch; }
+
+.studio-chat-page .direct-chat-composer-feedback {
+  flex: 0 0 auto;
+  width: min(100% - 16px, 780px);
+  margin-inline: auto;
+  max-height: min(26dvh, 12rem);
+  overflow: auto;
+}
+.studio-chat-page .direct-chat-composer-feedback > * { margin: 0; }
+.studio-chat-page .direct-chat-message-stream > [role="status"],
+.studio-chat-page .direct-chat-message-stream > section:not(:empty) { margin-block: 8px; }
+
+.project-workspace-navigation { display: contents; }
+@media (max-width: 900px) {
+  .anka-shell:has(.studio-chat-page) .assistant-launcher {
+    position: static;
+    align-self: flex-end;
+    flex: none;
+    padding: 2px 12px;
+    margin-inline-end: 8px;
+  }
+  .anka-shell:has(.studio-chat-page) .assistant-launcher span:last-child { display: inline; }
+}
+@media (max-height: 620px) {
+  .studio-project.studio-chat-page { min-height: 0; padding-block: 2px; }
+  .studio-chat-page .project-workspace-navigation {
+    display: block;
+    flex: none;
+    max-height: 50px;
+    overflow: auto;
+    position: relative;
+  }
+  .studio-chat-page .workspace-container { padding-block: 0; }
+  .studio-chat-page .direct-chat-header { padding-block: 2px; }
+  .studio-chat-page .direct-chat-composer { padding: 4px 8px; margin-block: 2px; }
+  .studio-chat-page .direct-chat-composer textarea { min-height: 28px; height: 28px; margin-bottom: 2px; }
+  .studio-chat-page .direct-chat-composer > p { margin-top: 1px; }
+  .studio-chat-page .direct-chat-composer-feedback > * { padding-block: 3px; }
+}

@@ -176,6 +176,16 @@ export async function contextChatAction(
     }
   }
   if (action === 'get_context_conversation') {
+    if (body.send_access_only === true) {
+      if (conversation.context_kind !== 'project_team' || conversation.owner_id !== actorId) {
+        throw fail('Owned Project Chat required for send access', 403)
+      }
+      const { data, error } = await admin.from('project_context_chat_shares')
+        .select('recipient_id').eq('organization_id', organizationId)
+        .eq('project_id', conversation.project_id).eq('conversation_id', conversation.id).is('revoked_at', null)
+      if (error) throw error
+      return { conversation, recipients: data || [] }
+    }
     const before = body.before_sequence
     if (before !== undefined && (!Number.isSafeInteger(before) || Number(before) < 2)) {
       throw fail('Conversation page cursor is invalid')

@@ -94,6 +94,9 @@ test('real saved-message selection and separate attestation save exact version, 
   m.state.binding = id(6)
   await act(async () => props(m.named('Chat composer')).onSubmit({ preventDefault() {} })); await until(() => m.sent.length === 1)
   assert.equal(m.sent[0].message, draft); assert.equal(Object.hasOwn(m.sent[0], 'project_stage_context'), false)
+  await until(() => m.env.container.textContent.includes('Reply saved.'))
+  assert.equal(m.fixture.data.counters.run, 1)
+  assert.ok(m.fixture.data.messages.some(row => row.role === 'assistant' && row.in_reply_to_message_id === m.fixture.data.messages.find(item => item.body === draft)?.id))
 })
 test('uncertain positioning save checks original UUID and never resaves after missing recovery', async t => {
   const m = await mount(t); await until(() => !m.named('Message').disabled); m.state.unknown = true
