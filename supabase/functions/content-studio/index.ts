@@ -1,3 +1,4 @@
+import {pageKeywordIdentity,savePageKeywordStrategy,recoverPageKeywordStrategy} from '../_shared/pageKeywordStrategy.ts'
 import { CONTENT_ARTIFACT_TYPE_SET, createContentArtifactVersion } from '../_shared/contentArtifacts.ts'
 import { compileApprovedArtifactContext } from '../_shared/approvedArtifactContext.ts'
 import {
@@ -273,6 +274,10 @@ function requiredActionId(value: unknown, label: string) {
 export function contentStudioScope(body: Json): ServerOrganizationScope {
   const action = text(body.action, 60)
   const requestedOrganizationId = text(body.organization_id, 80) || null
+  if (action === 'save_page_keyword_strategy' || action === 'recover_page_keyword_strategy') {
+    const identity = pageKeywordIdentity(body)
+    return {root:{kind:'engagement',id:identity.engagement_id as string},requestedOrganizationId}
+  }
   if (action === 'save_artifact') {
     const artifactId = text(body.artifact_id, 80)
     return { root: artifactId
@@ -720,17 +725,19 @@ async function saveCustomFieldValue(context: ServerOrganizationContext, body: Js
   return data
 }
 
-export async function handleRequest(request: Request) {
+export async function handleRequest(request: Request, dependencies: {resolveContext?: typeof resolveServerOrganizationContext} = {}) {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (request.method !== 'POST') return response({ error: 'Method not allowed' }, 405)
   try {
     const body = await request.json() as Json
     const action = text(body.action, 60)
-    const context = await resolveServerOrganizationContext(request, contentStudioScope(body))
+    const context = await (dependencies.resolveContext || resolveServerOrganizationContext)(request, contentStudioScope(body))
     if (!hasContentAuthority(context.membership, action)) {
       return response({ error: action === 'approve_artifact'
         ? 'Content manager approval required' : 'Content department access required' }, 403)
     }
+    if (action === 'save_page_keyword_strategy') return response({data:await savePageKeywordStrategy(context,body)})
+    if (action === 'recover_page_keyword_strategy') return response({data:await recoverPageKeywordStrategy(context,body)})
     if (action === 'save_artifact') return response({ data: await saveArtifact(context, body, context.user.id) })
     if (action === 'copy_content_writer_version') {
       return response({ data: await copyContentWriterVersion(context, body, context.user.id) })
@@ -767,9 +774,12 @@ export async function handleRequest(request: Request) {
     return response({ error: 'Unsupported action' }, 400)
   } catch (error) {
     const status = error && typeof error === 'object' && 'status' in error ? Number(error.status) : 400
-    return response({ error: error instanceof Error ? error.message : 'Unexpected Content Studio error' },
+    const detail = error as {code?: string; rollback_verified?: boolean; request_retained?: boolean}
+    return response({ error: error instanceof Error ? error.message : 'Unexpected Content Studio error',
+      ...(detail.code ? {code:detail.code}:{}),...(detail.rollback_verified === undefined ? {} : {rollback_verified:detail.rollback_verified}),
+      ...(detail.request_retained === undefined ? {} : {request_retained:detail.request_retained}) },
       Number.isFinite(status) ? status : 400)
   }
 }
 
-if (import.meta.main) Deno.serve(handleRequest)
+if (import.meta.main) Deno.serve(request=>handleRequest(request))
