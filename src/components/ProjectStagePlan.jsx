@@ -20,7 +20,7 @@ function Output({output,onOpen,busy}){
 }
 
 // Read-only presentation. Status, counts and change impact belong to the canonical projection.
-export default function ProjectStagePlan({plan,onContinue,getStageAction,onManualSetup,onOpenWork,onOpenOutput,busy=false}){
+export default function ProjectStagePlan({plan,foundationAction,onOpenBrief,onContinue,getStageAction,onManualSetup,onOpenWork,onOpenOutput,busy=false}){
  const detailRef=useRef(null)
  const uid=useId(),[trackId,setTrackId]=useState(null),[stageId,setStageId]=useState(null)
  const unavailable=plan?.state==='unavailable'
@@ -39,8 +39,10 @@ export default function ProjectStagePlan({plan,onContinue,getStageAction,onManua
    <div className="stage-plan-stages"><div className="stage-plan-track-heading"><h4>{track.title}</h4>{track.scopeLabel&&<p>{track.scopeLabel}</p>}</div><ol aria-label={`${track.title} stages`}>{(track.stages||[]).map((row,index)=><li key={row.id}><button type="button" aria-pressed={stage?.id===row.id} aria-controls={`${uid}-detail`} onClick={()=>selectStage(row.id)}><span className={`stage-plan-number status-${row.status||'unknown'}`} aria-hidden="true">{row.status==='done'&&row.configured!==false?'✓':index+1}</span><span className="stage-plan-card-copy"><strong>{row.title}</strong><span className="stage-plan-card-meta"><span>{stateLabel(row)}</span>{row.needsUpdate&&<span className="stage-plan-update">Needs update</span>}</span><Progress value={row.configured===false?null:row.progress}/>{row.scopeLabel&&<small className="stage-plan-scope">{row.scopeLabel}</small>}</span><span aria-hidden="true">›</span></button></li>)}</ol></div>
    {stage?<section ref={detailRef} tabIndex={-1} id={`${uid}-detail`} className="stage-plan-detail" aria-label={`Stage details: ${stage.title}`}>
     <p className="stage-plan-eyebrow">{track.title}</p><h4>{stage.title}</h4><div className="stage-plan-detail-status"><span>{stateLabel(stage)}</span>{stage.needsUpdate&&<span className="stage-plan-update">Needs update</span>}</div>
+    {stage.id==='branding.brief'&&<div className="stage-plan-actions">{onOpenBrief&&<button type="button" className="workspace-button" disabled={busy} onClick={onOpenBrief}>Open business brief</button>}{track.stages.some(s=>s.id==='branding.positioning')&&<button type="button" className="workspace-button" disabled={busy} onClick={()=>selectStage('branding.positioning')}>Go to Brand positioning &amp; statement</button>}</div>}
+    {foundationAction?.(stage)}
     {stage.description&&<p>{stage.description}</p>}<Progress value={stage.configured===false?null:stage.progress}/>{stage.scopeLabel&&<p className="stage-plan-scope">{stage.scopeLabel}</p>}
-    {stage.configured===false&&<p>{stage.configurationUnavailable?'Review the pipeline configuration in project setup before using this stage.':'This stage needs a saved pipeline step before you can continue in Chat.'}</p>}
+    {stage.configured===false&&<p>{stage.configurationUnavailable?'Review the pipeline configuration in project setup before using this stage.':'A saved pipeline step is required for mapped stage work.'}</p>}
     {stage.blockedReason&&<p className="stage-plan-notice">{stage.blockedReason}</p>}
     {stage.needsUpdate&&<p className="stage-plan-notice">{stage.updateReason||'An upstream input changed. Review the affected work; recorded outputs and history are retained.'}</p>}
     {stage.items?.length>0&&<div className="stage-plan-items"><h5>Work in this stage</h5>{stage.items.map(item=><article key={item.id}><div><strong>{item.title}</strong><span>{stateLabel(item)}</span>{item.needsUpdate&&<span className="stage-plan-update">Needs update</span>}</div>{item.intent&&<p>Search intent: {item.intent}</p>}{item.keywords?.length>0&&<p>Keywords: {item.keywords.join(', ')}</p>}{item.scopeLabel&&<p>{item.scopeLabel}</p>}{item.context&&onContinue&&<button type="button" disabled={busy} onClick={()=>onContinue({track,stage,item})}>Continue in Chat <span className="sr-only">for {item.title}</span></button>}</article>)}</div>}

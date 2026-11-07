@@ -1,3 +1,4 @@
+import {createFoundationCheckpointRepository} from './foundationCheckpointRepository.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
@@ -15,18 +16,19 @@ new Function('require','module','exports',bundled.outputFiles[0].text)(name=>nam
 const Panel=module.exports.default
 const props=node=>node?.[Object.keys(node).find(k=>k.startsWith('__reactProps$'))]
 
-async function mount(t,header){
+async function mount(t,header,extra={}){
  const env=mountedEnvironment(),keys=['window','document','sessionStorage','requestAnimationFrame','IS_REACT_ACT_ENVIRONMENT']
+ const storage=new Map()
  const previous=Object.fromEntries(keys.map(k=>[k,globalThis[k]]))
- Object.assign(globalThis,{window:env.window,document:env.document,sessionStorage:{getItem:()=>null},requestAnimationFrame:fn=>fn(),IS_REACT_ACT_ENVIRONMENT:true})
+ Object.assign(globalThis,{window:env.window,document:env.document,sessionStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},requestAnimationFrame:fn=>fn(),IS_REACT_ACT_ENVIRONMENT:true})
  const calls=[],scope={organizationId:header.organization_id,projectId:header.project_id,engagementId:header.engagement_id}
  const repository={read:async()=>header,listPartitions:async()=>({items:[{title:'Home',partition:native.unit.partition}],offset:0,total:1,limit:25}),readPartition:async()=>native.unit}
  const root=createRoot(env.container)
- await act(async()=>root.render(React.createElement(Panel,{scope,actorId:'actor',repository,onBootstrapSetup:()=>calls.push('setup'),onManualSetup:()=>calls.push('manual'),onContinue:value=>calls.push(value)})))
+ await act(async()=>root.render(React.createElement(Panel,{scope,actorId:'actor',repository,onOpenBrief:()=>calls.push('brief'),onBootstrapSetup:()=>calls.push('setup'),onManualSetup:()=>calls.push('manual'),onContinue:value=>calls.push(value),...extra})))
  t.after(async()=>{await act(async()=>root.unmount());Object.assign(globalThis,previous)})
  const button=prefix=>elements(env.container,'button').find(n=>n.textContent.startsWith(prefix))
  const click=async prefix=>{const node=button(prefix);assert.ok(node,prefix);await act(async()=>props(node).onClick())}
- return {env,calls,button,click}
+ return {env,calls,button,click,storage}
 }
 
 test('empty foundation opens project setup directly, without creating a Chat selection',async t=>{
@@ -85,3 +87,109 @@ for (const configurationCurrent of [false,null]) {
   await ui.click('Open project setup');assert.deepEqual(ui.calls,['setup'])
  })
 }
+
+test('empty branding exposes the brief and positioning without a mapping or Chat continuation',async t=>{
+ const ui=await mount(t,{...native.header,state:'unconfigured',can_manage:true,plan_id:null,groups:[],bindings:[]})
+ assert.equal(props(ui.button('Map stages')).disabled,true)
+ await ui.click('Open business brief')
+ await ui.click('Go to Brand positioning')
+ assert.match(ui.env.container.textContent,/Brand positioning/)
+ assert.equal(ui.button('Open business brief'),undefined)
+ assert.equal(ui.button('Continue in Chat'),undefined)
+ assert.deepEqual(ui.calls,['brief'])
+})
+
+const actorId='00000000-0000-4000-8000-000000000101'
+const checkpoint='00000000-0000-4000-8000-000000000102'
+async function foundation(t,mode){
+ const header={...native.header,state:'unconfigured',can_manage:true,plan_id:null,groups:[],bindings:[]}
+ const writes=[], reads=[], handed=[]
+ let binding=null, original=null, matches=true, recoveryCount=0
+ const repo=createFoundationCheckpointRepository({auth:{getUser:async()=>({data:{user:{id:actorId}}})},rpc(name,args){
+  assert.equal(args.p_organization_id,header.organization_id);assert.equal(args.p_project_id,header.project_id);assert.equal(args.p_engagement_id,header.engagement_id)
+  return {async abortSignal(){
+   if(name==='bind_project_foundation_brief'){
+    writes.push(args)
+    assert.equal(args.p_expected_binding_id,null)
+    if(mode!=='uncertain')binding={request_id:args.p_request_id,checkpoint_id:checkpoint,source_version:2,brief_sha256:'a'.repeat(64)}
+    original=binding
+    if(['lost','uncertain','superseded','denied'].includes(mode))throw Error('response lost')
+    return {data:binding}
+   }
+   if(name==='recover_project_foundation_brief'){
+    assert.equal(args.p_request_id,writes[0].p_request_id)
+    recoveryCount++
+    if(mode==='denied')return {error:{code:'42501',message:'Recovery access denied'}}
+    if(mode==='superseded'&&recoveryCount===1)return {data:null}
+    return {data:original}
+   }
+   assert.equal(name,'read_project_foundation_brief');reads.push(args.p_checkpoint_id)
+   return {data:{organization_id:header.organization_id,project_id:header.project_id,engagement_id:header.engagement_id,actor_id:mode==='foreign'?checkpoint:actorId,
+    current_binding:binding,options:[{checkpoint_id:checkpoint,source_version:2}],has_more:false,
+    selected:args.p_checkpoint_id?{checkpoint_id:checkpoint,source_version:2,brief_sha256:'a'.repeat(64),brief_text:'Synthetic internal brief',matches_current_brief:matches}:null}}
+  }}
+ }})
+ const ui=await mount(t,header,{actorId,foundationRepository:repo,onContinueFoundationPositioning:b=>handed.push(b)})
+ return {...ui,writes,reads,handed,supersede:()=>{binding={...original,checkpoint_id:'00000000-0000-4000-8000-000000000103',request_id:crypto.randomUUID()}},changeBrief:()=>{matches=false},async inspect(){
+  await ui.click('Browse internal checkpoints')
+  const select=elements(ui.env.container,'select').find(n=>props(n).value==='')
+  await act(async()=>props(select).onChange({target:{value:checkpoint}}))
+  assert.doesNotMatch(ui.env.container.textContent,/Synthetic internal brief/)
+  await ui.click('Review selected checkpoint')
+ }}
+}
+for(const mode of ['saved','lost','uncertain','changed']){
+ test('unconfigured foundation checkpoint '+mode,async t=>{
+  const ui=await foundation(t,mode)
+  assert.deepEqual(ui.reads,[])
+  await ui.inspect()
+  assert.match(ui.env.container.textContent,/Synthetic internal brief/)
+  assert.equal(ui.writes.length,0)
+  await ui.click('Bind reviewed checkpoint')
+  assert.equal(ui.writes.length,1)
+  if(mode==='uncertain'){
+   await ui.click('Check original checkpoint binding')
+   assert.equal(ui.storage.size,1)
+   assert.equal(ui.writes.length,1)
+   assert.equal(ui.button('Bind reviewed checkpoint'),undefined)
+   return
+  }
+  assert.equal(ui.storage.size,0)
+  await ui.click('Go to Brand positioning')
+  await ui.click('Check bound brief')
+  if(mode==='changed')ui.changeBrief()
+  await ui.click('Continue in Chat for Brand positioning')
+  assert.equal(ui.writes.length,1);assert.deepEqual(ui.calls,[])
+  if(mode==='changed'){assert.deepEqual(ui.handed,[]);assert.match(ui.env.container.textContent,/changed/)}
+  else assert.deepEqual(ui.handed,[{request_id:ui.writes[0].p_request_id,checkpoint_id:checkpoint,source_version:2,brief_sha256:'a'.repeat(64)}])
+ })
+}
+test('foreign actor cannot disclose a selected checkpoint',async t=>{
+ const ui=await foundation(t,'foreign')
+ await ui.click('Browse internal checkpoints')
+ assert.match(ui.env.container.textContent,/scope changed/)
+ assert.deepEqual(ui.writes,[]);assert.deepEqual(ui.handed,[])
+})
+
+test('lost A is confirmed by its original receipt while B remains the current binding',async t=>{
+ const ui=await foundation(t,'superseded')
+ await ui.inspect()
+ await ui.click('Bind reviewed checkpoint')
+ assert.equal(ui.storage.size,1)
+ ui.supersede()
+ await ui.click('Check original checkpoint binding')
+ assert.equal(ui.storage.size,0)
+ assert.match(ui.env.container.textContent,/Bound checkpoint 00000000-0000-4000-8000-000000000103/)
+ assert.match(ui.env.container.textContent,/current binding has changed/)
+ assert.equal(ui.writes.length,1)
+ assert.deepEqual(ui.handed,[])
+})
+test('denied original receipt lookup retains pending request and never writes again',async t=>{
+ const ui=await foundation(t,'denied')
+ await ui.inspect()
+ await ui.click('Bind reviewed checkpoint')
+ await ui.click('Check original checkpoint binding')
+ assert.equal(ui.storage.size,1)
+ assert.match(ui.env.container.textContent,/Recovery access denied/)
+ assert.equal(ui.writes.length,1)
+})

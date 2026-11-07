@@ -1,4 +1,5 @@
 import {createProjectStagePlanRepository} from '../data/projectStagePlanRepository.js'
+import {createProjectFoundationPositioningHandoff} from '../data/projectFoundationPositioningHandoff.js'
 import {createRepositoryProjectStageChatContextAdapter,selectedProjectStageContext} from '../data/projectStageChatContext.js'
 import { readOnlyChatRequest } from '../data/readOnlyChatRequest.js'
 import WorkspaceDialog from './WorkspaceDialog.jsx'
@@ -50,7 +51,7 @@ function directSendBlocker(value, options) {
   return contextChatSendBlocker(value,options)
 }
 const ProjectChatAllowance = lazy(() => import('./ProjectChatAllowance.jsx'))
-export default function DirectContextChat({ systemOwner, contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError, initialConversation, onConversationListChange, onNavigationBusyChange, onDraftDirtyChange, designWorkspace, conversationLayout = false, onProjectRequest, onProjectChanged, projectJourney, onOpenProjectWork, onOpenManualSetup, projectStageSelection, onProjectStageSelectionConsumed, onOpenStageOutput }) {
+export default function DirectContextChat({ systemOwner, contextKind, departmentId, projectId, label, organizationId, user, signal, onAccessError, initialConversation, onConversationListChange, onNavigationBusyChange, onDraftDirtyChange, designWorkspace, conversationLayout = false, onProjectRequest, onProjectChanged, projectJourney, onOpenProjectWork, onOpenBrief, onOpenManualSetup, projectStageSelection, onProjectStageSelectionConsumed, foundationSelection, onFoundationSelectionConsumed, onOpenStageOutput }) {
   const workshopHistory = useContext(WorkshopChatHistoryContext)
   const hasExternalHistory = Boolean(workshopHistory?.render || workshopHistory?.externalHistory)
   const actorId = user.id
@@ -159,6 +160,60 @@ export default function DirectContextChat({ systemOwner, contextKind, department
   const stageScope={organizationId,projectId,engagementId:projectJourney?.engagement?.id}
   const stageScopeRef=useRef('');stageScopeRef.current=[organizationId,projectId,projectJourney?.engagement?.id].join(':')
   const stageStorageKey=recoveryKey+':stage:'+ (selected?.id||newId)
+  const [foundationReview,setFoundationReview]=useState(null),[foundationRange,setFoundationRange]=useState({start:0,end:0}),[foundationHandoff,setFoundationHandoff]=useState(null)
+  const foundationScope={organization_id:organizationId,project_id:projectId,engagement_id:projectJourney?.engagement?.id,actor_id:actorId,conversation_id:selected?.id||newId}
+  const foundationScopeRef=useRef('');foundationScopeRef.current=JSON.stringify(foundationScope)
+  const foundationDraftRef=useRef(draft);foundationDraftRef.current=draft
+  const foundationSeen=useRef(null)
+  const foundationEvent=useRef(null)
+  const foundationStorageKey=recoveryKey+':foundation-positioning:'+(selected?.id||newId)
+  useEffect(()=>{setFoundationReview(null);try{const saved=JSON.parse(sessionStorage.getItem(foundationStorageKey));setFoundationHandoff(saved||null)}catch{setFoundationHandoff(null);setError('Saved foundation reference is unavailable. Your draft is kept; review the checkpoint again.')}},[foundationStorageKey])
+  async function chooseFoundationPositioning(binding){
+    if(!current()||lock.current||pendingRef.current||setupLock.current||videoLock.current)return
+    await exclusive(async()=>{
+      if(!projectChat||!owner||selected?.state&&selected.state!=='active')throw Error('Use your own active private Project Chat for this handoff.')
+      if(selectedStage)throw Error('Remove mapped stage context before reviewing an unconfigured foundation handoff. Your draft is kept.')
+      if(foundationHandoff)throw Error('A reviewed foundation passage is already staged in this draft.')
+      const target=foundationScopeRef.current,token=revision.current
+      const reviewed=await createProjectFoundationPositioningHandoff(supabase).review(foundationScope,binding,{signal})
+      if(!current()||foundationScopeRef.current!==target||revision.current!==token)return
+      setFoundationRange({start:0,end:0});setFoundationReview(reviewed);setWorkDetailsOpen(false)
+    })
+  }
+  async function addFoundationPassage(){
+    if(!foundationReview||lock.current||pendingRef.current||!current())return
+    await exclusive(async()=>{
+      const target=foundationScopeRef.current,token=revision.current,existing=foundationDraftRef.current
+      const staged=await createProjectFoundationPositioningHandoff(supabase).stage(foundationReview,foundationRange,existing,foundationScope,{pending:Boolean(pendingRef.current),signal})
+      if(!current()||foundationScopeRef.current!==target||revision.current!==token||pendingRef.current)return
+      if(foundationDraftRef.current!==existing)throw Error('Your draft changed during review. Select the passage again; the latest draft is kept.')
+      sessionStorage.setItem(foundationStorageKey,JSON.stringify(staged.handoff))
+      writeDirectChatDraft(recoveryKey,{new_conversation_id:newId,conversation_id:selected?.id||null,text:staged.text,attempt:attempt.current})
+      setDraft(staged.text);setFoundationHandoff(staged.handoff);setFoundationReview(null)
+      setNotice('Selected checkpoint text added to your existing message. Review it, then use normal Send. No message or AI request was sent.')
+    })
+  }
+  function removeFoundationPassage(){
+    if(!foundationHandoff||busy||pendingRef.current)return
+    const section=foundationHandoff.composer_section
+    if(!draft.includes(section)){setError('The foundation passage was edited. Restore its exact text before removing this reference; your draft is kept.');return}
+    const next=draft.replace(draft.includes('\n\n'+section)?'\n\n'+section:section,'')
+    try{writeDirectChatDraft(recoveryKey,{new_conversation_id:newId,conversation_id:selected?.id||null,text:next,attempt:attempt.current});sessionStorage.removeItem(foundationStorageKey)}catch{setError('Draft recovery storage is unavailable. Your draft is kept.');return}
+    setFoundationHandoff(null);setDraft(next);setNotice('Staged foundation passage removed. Your other draft text is kept.')
+  }
+  useEffect(()=>{
+    const value=foundationSelection
+    if(!value?.selectionId||foundationSeen.current===value.selectionId)return
+    if(foundationEvent.current?.id!==value.selectionId)foundationEvent.current={id:value.selectionId,target:stageRestorePending?initialRestoreTarget:(selected?.id||newId),revision:revision.current}
+    if(stageRestorePending||busy||setupBusy||videoBusy)return
+    foundationSeen.current=value.selectionId
+    if(foundationEvent.current.target!==(selected?.id||newId)||foundationEvent.current.revision!==revision.current){setError('The conversation changed before the foundation handoff could open. Your draft is kept.');onFoundationSelectionConsumed?.(value.selectionId);return}
+    if(pendingRef.current){setError('Check recovery for the original Chat request before continuing positioning. Your draft is kept.');onFoundationSelectionConsumed?.(value.selectionId);return}
+    if(value.organizationId!==organizationId||value.projectId!==projectId||value.engagementId!==projectJourney?.engagement?.id||value.actorId!==actorId){setError('The foundation handoff belongs to another exact project scope. Your draft is kept.');onFoundationSelectionConsumed?.(value.selectionId);return}
+    chooseFoundationPositioning(value.binding).finally(()=>onFoundationSelectionConsumed?.(value.selectionId))
+  // The external entry is consumed only in its original restored conversation.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[foundationSelection?.selectionId,stageRestorePending,busy,setupBusy,videoBusy,selected?.id,newId,organizationId,projectId,projectJourney?.engagement?.id,actorId])
   useEffect(()=>{if(!projectChat)return;try{const saved=JSON.parse(sessionStorage.getItem(stageStorageKey));if(saved){selectedProjectStageContext(saved.context,{organization_id:organizationId,project_id:projectId,engagement_id:projectJourney?.engagement?.id});setSelectedStage(saved)}else setSelectedStage(null)}catch{setSelectedStage(null);setError('Saved stage context is unavailable. Select the stage again before using it.')}},[stageStorageKey,projectChat,organizationId,projectId,projectJourney?.engagement?.id])
   async function chooseProjectStage(value){
    if(lock.current||pendingRef.current||setupLock.current||journeyLock.current||videoLock.current||!current())return
@@ -532,6 +587,12 @@ export default function DirectContextChat({ systemOwner, contextKind, department
       const briefSnapshot = ai && designWorkspace?.captureBriefForSend ? designWorkspace.captureBriefForSend() : null
       if (ai && !await consent.confirm()) return
       if (!sameSend()) return
+      if(foundationHandoff){
+        if(selectedStage||!projectChat||!owner)throw Error('The foundation handoff cannot use a mapped or foreign conversation context. Your draft is kept.')
+        const foundationTarget=foundationScopeRef.current
+        await createProjectFoundationPositioningHandoff(supabase).beforeSend({text,handoff:foundationHandoff,scope:foundationScope},{signal})
+        if(!sameSend()||foundationScopeRef.current!==foundationTarget)return
+      }
       const metadata = { conversation_id: target, client_request_id: crypto.randomUUID(), ...(ai ? { dispatch_request_id: crypto.randomUUID() } : {}) }
       remember({ conversation_id: target, client_request_id: metadata.client_request_id })
       attempt.current = { text, isNew: !selected, conversation_id: target, client_request_id: metadata.client_request_id, ...(stageWire?{project_stage_context:stageWire}:{}), ...(!stageWire&&privateDesign ? { design_attachment_ids: [...designAttachmentIds] } : {}), ...(!stageWire&&contextKind === 'project_team' && owner && selected ? { project_document_ids: [...projectDocumentIds] } : {}) }
@@ -561,7 +622,7 @@ export default function DirectContextChat({ systemOwner, contextKind, department
       }
       const latest = await read(target)
       if (!sameSend()) return
-      apply(latest); clearPending(); setDraft('');setWebsiteSendContext(null); drafts.current.delete(target)
+      apply(latest); clearPending(); setDraft('');setWebsiteSendContext(null);setFoundationHandoff(null);sessionStorage.removeItem(foundationStorageKey); drafts.current.delete(target)
       setNotice(ai ? 'Reply saved.' : 'Message saved without an AI reply.')
     })
   }
@@ -773,11 +834,13 @@ export default function DirectContextChat({ systemOwner, contextKind, department
     </div>
   </section>
 {projectChat&&workDetailsOpen&&<WorkspaceDialog wide className="stage-plan-dialog" title="Project plan" busyMessage={stageActivity.dirty&&!stageActivity.busy?'Review or discard your stage mapping edits before closing.':undefined} busy={journeyLocked||busy||setupBusy||videoBusy} onClose={()=>setWorkDetailsOpen(false)}>
-      <Suspense fallback={<p role="status">Reading project plan…</p>}><ProjectStagePlanPanel scope={stageScope} actorId={actorId} signal={signal} busy={designActionActivity.busy||designActionActivity.dirty||busy||Boolean(pending)||setupBusy||videoBusy||journeyActivity.dirty||journeyActivity.busy||websiteActivity.dirty||websiteActivity.busy||assetRelationsLocked} onStateChange={reportStageActivity} onAccessError={onAccessError} onContinue={chooseProjectStage} onBootstrapSetup={()=>{setWorkDetailsOpen(false);setSetupOpen(true)}} onManualSetup={onOpenManualSetup} onOpenWork={onOpenProjectWork} onOpenOutput={onOpenStageOutput}/></Suspense><details className="stage-legacy-tools" open={websiteToolsOpen||undefined}><summary>Existing execution tools</summary>{onOpenProjectWork&&<button type="button" className="workspace-button" disabled={journeyLocked||busy} onClick={()=>{if(onOpenProjectWork()!==false)setWorkDetailsOpen(false)}}>Open project pipeline & work</button>}
+      <Suspense fallback={<p role="status">Reading project plan…</p>}><ProjectStagePlanPanel scope={stageScope} actorId={actorId} signal={signal} busy={designActionActivity.busy||designActionActivity.dirty||busy||Boolean(pending)||setupBusy||videoBusy||journeyActivity.dirty||journeyActivity.busy||websiteActivity.dirty||websiteActivity.busy||assetRelationsLocked} onStateChange={reportStageActivity} onAccessError={onAccessError} onOpenBrief={onOpenBrief&&(()=>{setWorkDetailsOpen(false);onOpenBrief()})} onContinue={chooseProjectStage} onContinueFoundationPositioning={chooseFoundationPositioning} onBootstrapSetup={()=>{setWorkDetailsOpen(false);setSetupOpen(true)}} onManualSetup={onOpenManualSetup} onOpenWork={onOpenProjectWork} onOpenOutput={onOpenStageOutput}/></Suspense><details className="stage-legacy-tools" open={websiteToolsOpen||undefined}><summary>Existing execution tools</summary>{onOpenProjectWork&&<button type="button" className="workspace-button" disabled={journeyLocked||busy} onClick={()=>{if(onOpenProjectWork()!==false)setWorkDetailsOpen(false)}}>Open project pipeline & work</button>}
       {projectChat&&projectJourney&&selected?.id&&assetRelationsOpen&&<Suspense fallback={<p role="status">Opening conversation asset context…</p>}><ProjectAssetConversation key={selected.id} workspace={projectJourney} organizationId={organizationId} projectId={projectId} actorId={actorId} conversationId={selected.id} owner={owner} signal={signal} externallyBusy={designActionActivity.busy||designActionActivity.dirty||busy||Boolean(pending)||setupBusy||videoBusy||journeyActivity.busy||journeyActivity.dirty||websiteActivity.busy||websiteActivity.dirty} onLockChange={reportAssetRelationsLock} onClose={()=>setAssetRelationsOpen(false)}/></Suspense>}{projectChat&&projectJourney&&selected?.id&&<Suspense fallback={<p role="status">Opening Content journey…</p>}><ProjectContentJourney key={selected.id} workspace={projectJourney} conversationId={selected.id} actorId={actorId} owner={owner} messages={messages} onStateChange={reportJourneyActivity} busy={designActionActivity.busy||designActionActivity.dirty||busy||Boolean(pending)||setupBusy||videoBusy||assetRelationsLocked||websiteActivity.busy||websiteActivity.dirty} onChanged={onProjectChanged}/><ProjectWebsiteExecution messages={messages} request={websiteActionRequest} onRequestHandled={consumeWebsiteActionRequest} key={"website:"+selected.id} workspace={projectJourney} conversationId={selected.id} actorId={actorId} owner={owner} onStateChange={reportWebsiteActivity} onChanged={onProjectChanged} busy={designActionActivity.busy||designActionActivity.dirty||busy||Boolean(pending)||setupBusy||videoBusy||assetRelationsLocked||journeyActivity.dirty||journeyActivity.busy}/></Suspense>}
     </details></WorkspaceDialog>}
       {projectChat&&setupOpen&&<WorkspaceDialog wide title="Review project setup" busy={setupBusy} onClose={()=>setSetupOpen(false)}><Suspense fallback={<p role="status">Opening project setup…</p>}><ProjectSetupPanel key={attachmentScopeKey} organizationId={organizationId} projectId={projectId} engagementId={projectJourney?.engagement?.id} actorId={actorId} signal={signal} initialMode="chat" onChanged={onProjectChanged} onNavigationBusyChange={reportSetupBusy} restoredProposal={setupRestored} onAccessError={onAccessError} onAssist={ready&&mappingTransport?disclosure=>mappingAction('request',disclosure):null} onRecover={mappingTransport?disclosure=>mappingAction('recover',disclosure):null}/></Suspense></WorkspaceDialog>}
       {importOpened && contextKind === 'project_team' && projectId && <div hidden={!importOpen}><Suspense fallback={<p role="status">Opening local spreadsheet inspector…</p>}><ProjectAttachmentPanel documentProps={{ conversationKey: selected?.id || newId, conversationId: owner ? selected?.id : null, requestScope, busy: busy || Boolean(pending),canReturnToChat:!busy,recoveryPending:Boolean(pending), ensureConversation: ensureProjectDocumentConversation, run: exclusive, selectedIds: projectDocumentIds, onSelection: setProjectDocumentIds,onReadyForChat:()=>{if(!current())return;setDraft(old=>old.trim()?old:'Explain what the selected document contains and ask about any real ambiguities. Treat it as a Chat reference; do not create or change project records.');setNotice(mappingState.current?.ready?'Document selected. Review your message and press Send to request its reading; no AI call was made by upload.':'Document selected privately. AI reading is unavailable until an approved model is ready; upload made no AI call.');returnFromAttachment()} }} key={attachmentScopeKey} projectId={projectId} projectLabel={label} repository={importRepository} recoveryScope={importScope} onMappingAssist={ready&&mappingTransport?disclosure=>mappingAction('request',disclosure):null} onMappingRecover={mappingTransport?disclosure=>mappingAction('recover',disclosure):null} onClose={returnFromAttachment} onReturnToChat={returnFromAttachment} onReadingState={registerAttachmentReading} /></Suspense></div>}
+    {foundationHandoff&&<div role="status"><p>A selected Business brief passage is staged for positioning. Normal Send will recheck its exact binding.</p><button type="button" disabled={busy||Boolean(pending)} onClick={removeFoundationPassage}>Remove staged foundation passage</button></div>}
+    {foundationReview&&<WorkspaceDialog title="Review foundation passage for positioning" busy={busy} onClose={()=>setFoundationReview(null)}><p>Select the exact checkpoint text you want to disclose in this private Project Chat. Only your selected passage is added to the normal message. It is reference material, not completed work. Normal conversation sharing and Send disclosures still apply.</p><label>Business brief checkpoint text<textarea aria-label="Foundation checkpoint text" readOnly value={foundationReview.brief_text} onSelect={event=>setFoundationRange({start:event.target.selectionStart,end:event.target.selectionEnd})}/></label><p>Selected passage</p><pre aria-label="Selected foundation passage">{foundationReview.brief_text.slice(foundationRange.start,foundationRange.end)}</pre><button type="button" disabled={busy||Boolean(pending)||foundationRange.end<=foundationRange.start} onClick={addFoundationPassage}>Add selected passage to message</button><button type="button" disabled={busy} onClick={()=>setFoundationReview(null)}>Keep draft without this handoff</button></WorkspaceDialog>}
     {consent.dialog && <TextAiConsent {...consent.dialog} provider={model?.provider} model={`${model?.connectionName} · ${model?.label}`} scope={`${contextKind} conversation`} canonical={canonical && canCanonical} />}
     {privateDesign && videoOpened && selected && owner && <section ref={videoPane} hidden={!videoOpen} className="direct-chat-video workspace-card p-4 mt-3" aria-label="Private video workbench">
       <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">Private video · {selected.title}</h3><button type="button" disabled={videoBusy} onClick={() => { if (videoLock.current) return; setVideoOpen(false); videoButton.current?.focus() }}>Back to chat</button></div>
