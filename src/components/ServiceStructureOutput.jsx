@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase.js'
 import { createDepartmentChatRepository } from '../data/departmentChatTransport.js'
 import { readPositioningStageOutput } from '../data/positioningStageOutput.js'
 
-export default function ServiceStructureOutput({ scope, phase, busy, canManage, signal, client = supabase }) {
+export default function ServiceStructureOutput({ scope, phase, busy, canManage, signal, client = supabase, renderKeywordInput }) {
   const { organizationId, projectId, engagementId, actorId } = scope
   const keyword = phase === 'website.keywords'
   const storageKey = ['anka:service-structure', organizationId, projectId, engagementId, actorId].join(':')
@@ -89,7 +89,7 @@ export default function ServiceStructureOutput({ scope, phase, busy, canManage, 
     if (row?.version_id !== pending.id || row.conversation_id !== pending.conversation) throw Error('No matching saved version was found at this check.')
     clearPending(); setReview(null); await refresh(abort)
   }
-  async function retrieve(abort) {
+  async function retrieveExact(abort) {
     const result = await read(version.conversation_id, version.version_id, abort)
     const row = result.selected
     if (row?.version_id !== version.version_id || row.conversation_id !== version.conversation_id || row.wording_sha256 !== version.wording_sha256 || typeof row.wording !== 'string') throw Error('Exact version unavailable.')
@@ -98,7 +98,11 @@ export default function ServiceStructureOutput({ scope, phase, busy, canManage, 
       const fresh = await readPositioningStageOutput(client, scope, abort)
       if (fresh.current?.version_id !== row.positioning_version_id || fresh.current.binding_id !== fresh.bindingId) throw Error('Positioning or its brief changed. Review the current service structure.')
     }
-    setSelected(row)
+    return row
+  }
+  async function retrieve(abort) {
+    setSelected(null)
+    setSelected(await retrieveExact(abort))
   }
   const disabled = busy || working
   return <section aria-label={keyword ? 'Service structure input' : 'Product and service structure output'}>
@@ -106,6 +110,7 @@ export default function ServiceStructureOutput({ scope, phase, busy, canManage, 
     {version ? <p>Saved service structure v{version.version_number}. Stage completion is tracked separately.</p> : state && <p>No service structure version saved.</p>}
     {version?.conversation_id && <button type="button" disabled={disabled || (keyword && (!current || positioning.version_id !== version.positioning_version_id))} onClick={() => act(retrieve)}>{keyword ? 'Use this version as keyword research input' : 'Read saved service structure'}</button>}
     {selected && <div><strong>{keyword ? 'Selected keyword research input' : 'Saved wording'} · v{selected.version_number}</strong><pre>{selected.wording}</pre></div>}
+    {keyword && selected && current && selected.version_id === version?.version_id && renderKeywordInput?.(selected, positioning.binding_id, () => retrieveExact(controller.current.signal))}
     {!keyword && canManage && current && !review && !pending && <button type="button" disabled={disabled} onClick={() => act(openReview)}>Review service structure from private Chat</button>}
     {review && !pending && <fieldset disabled={disabled}><legend>Review exact service structure</legend>
       {review.older && <button type="button" onClick={() => act(abort => openReview(abort,true))}>Load earlier messages</button>}

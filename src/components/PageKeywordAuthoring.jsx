@@ -15,7 +15,7 @@ export default function PageKeywordAuthoring(props) {
   return <PageStrategyEditor key={keys.draft} {...props} studio={studio} pages={projectWebsitePages} />
 }
 
-export function PageStrategyEditor({asset, actorId, studio, pages, signal, onClose, Form = ArtifactForm}) {
+export function PageStrategyEditor({asset, actorId, studio, pages, signal, onClose, verifyInputs, Form = ArtifactForm}) {
   const keys = keywordAuthoringKeys(asset, actorId)
   const [source, setSource] = useState(null)
   const [error, setError] = useState('')
@@ -58,7 +58,8 @@ export function PageStrategyEditor({asset, actorId, studio, pages, signal, onClo
         !input.content.keywords?.some(row => row.target_page_key === asset.pageKey)) {
       throw Error('The page or strategy changed. Your draft is retained. Reopen its original project.')
     }
-    if (sessionStorage.getItem(keys.attempt)) throw Error('An original strategy save is already retained.')
+    if (verifyInputs) await verifyInputs()
+    if (!current() || sessionStorage.getItem(keys.attempt)) throw Error('Reopen the original page and check any retained attempt.')
     const identity = keywordRequestIdentity(asset, crypto.randomUUID())
     const original = {contractVersion:1, id:identity.request_id, identity, organizationId:asset.organizationId,
       actorId, pageId:asset.id, pageKey:asset.pageKey, input}

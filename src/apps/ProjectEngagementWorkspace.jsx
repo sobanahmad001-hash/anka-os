@@ -1,3 +1,4 @@
+import _AssistantFloat from '../components/AssistantFloat.jsx'
 import {directChatRecoveryKey,readDirectChatRecovery} from '../data/directChatRecovery.js'
 import {readDirectChatDraft} from '../data/directChatDraft.js'
 import {attachmentConversationHint} from '../data/projectAttachmentReading.js'
@@ -204,7 +205,7 @@ export default function ProjectEngagementWorkspace() {
             <h1 className="mt-1 break-words text-2xl font-semibold tracking-tight text-[var(--anka-ink)] sm:text-3xl">{project.name}</h1>
             <p className={`mt-2 text-sm text-[var(--anka-muted)] ${tab === 'discussion' ? 'sr-only' : ''}`}>{[identity.clientName, identity.brandName].filter(Boolean).join(' · ') || (identity.workType === 'Internal Work' ? 'Internal project; no client identity is required.' : 'No client or brand identity is attached.')}</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2"><button type="button" onClick={load} disabled={loading||isNavigationBusy} className="workspace-button hover:bg-[var(--anka-surface-raised)] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={project.status} /><ProjectDraftActivation project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onActivated={load} onAccessError={handleOrganizationAccessError} /></div>
+          <div className="flex flex-wrap items-center gap-2">{tab==='discussion'&&<_AssistantFloat inHeader disabled={isNavigationBusy}/>}<button type="button" onClick={load} disabled={loading||isNavigationBusy} className="workspace-button hover:bg-[var(--anka-surface-raised)] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button><Status value={project.status} /><ProjectDraftActivation project={project} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onActivated={load} onAccessError={handleOrganizationAccessError} /></div>
         </header>
 
 
