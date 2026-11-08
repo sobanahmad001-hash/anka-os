@@ -2,16 +2,18 @@
 
 :root {
   color-scheme: light;
-  --anka-canvas: #F3F6F7;
+  --anka-canvas: #F5F5F5;
   --anka-surface: #FFFFFF;
-  --anka-surface-raised: #E9EFF1;
-  --anka-ink: #172A31;
-  --anka-muted: #536870;
-  --anka-line: #CCD9DD;
-  --anka-violet: #08756D;
-  --anka-violet-soft: #E2F2EF;
+  --anka-surface-raised: #F0F0F0;
+  --anka-stone: #EEEAE3;
+  --anka-stone-ink: #615440;
+  --anka-ink: #202020;
+  --anka-muted: #565656;
+  --anka-line: #DADADA;
+  --anka-violet: #6934C6;
+  --anka-violet-soft: #EEE8FA;
   --anka-on-violet: #FFFFFF;
-  --anka-focus: #08756D;
+  --anka-focus: #6934C6;
   --anka-success: #166534;
   --anka-success-soft: #E7F3E9;
   --anka-warning: #365C75;
@@ -23,16 +25,18 @@
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --anka-canvas: #131E23;
-  --anka-surface: #1B2A30;
-  --anka-surface-raised: #24363E;
-  --anka-ink: #EDF4F5;
-  --anka-muted: #B0C3CA;
-  --anka-line: #405861;
-  --anka-violet: #80D8CE;
-  --anka-violet-soft: #203F3E;
-  --anka-on-violet: #102E2A;
-  --anka-focus: #A0E9DF;
+  --anka-canvas: #222222;
+  --anka-surface: #191919;
+  --anka-surface-raised: #2B2B2B;
+  --anka-stone: #37332E;
+  --anka-stone-ink: #DDCDB5;
+  --anka-ink: #F4F4F4;
+  --anka-muted: #BCBCBC;
+  --anka-line: #464646;
+  --anka-violet: #A78BFA;
+  --anka-violet-soft: #332B42;
+  --anka-on-violet: #191321;
+  --anka-focus: #A78BFA;
   --anka-success: #8CDBA5;
   --anka-success-soft: #203C2A;
   --anka-warning: #B5D7EE;

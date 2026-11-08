@@ -1,0 +1,14 @@
+.assistant-reply-markdown { min-width:0; max-width:100%; overflow-wrap:anywhere; white-space:normal; }
+.assistant-reply-markdown > * + * { margin-block-start:.6rem; }
+.assistant-reply-markdown :is(h1,h2,h3,h4,h5,h6) { font-size:1.07em; font-weight:650; }
+.assistant-reply-markdown :is(ul,ol) { padding-inline-start:1.5rem; }
+.assistant-reply-markdown ul { list-style:disc; }
+.assistant-reply-markdown ol { list-style:decimal; }
+.assistant-reply-markdown blockquote { border-inline-start:3px solid var(--anka-line); padding-inline-start:.8rem; }
+.assistant-reply-markdown a { color:var(--anka-violet); text-decoration:underline; }
+.assistant-reply-markdown :is(pre,.reply-table-scroll) { max-width:100%; overflow-x:auto; }
+.assistant-reply-markdown pre { white-space:pre; padding:.6rem; background:var(--anka-surface-raised); }
+.assistant-reply-markdown table { width:100%; border-collapse:collapse; font-size:.94em; }
+.assistant-reply-markdown :is(th,td) { min-width:6rem; padding:.4rem .65rem; border:1px solid var(--anka-line); text-align:start; vertical-align:top; }
+.assistant-reply-markdown th { background:var(--anka-surface-raised); font-weight:650; }
+.assistant-reply-markdown .reply-table-scroll:focus-visible { outline:2px solid var(--anka-focus); outline-offset:-2px; }

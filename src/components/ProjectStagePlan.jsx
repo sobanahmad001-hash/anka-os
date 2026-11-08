@@ -20,7 +20,7 @@ function Output({output,onOpen,busy}){
 }
 
 // Read-only presentation. Status, counts and change impact belong to the canonical projection.
-export default function ProjectStagePlan({plan,serviceStructureOutput,positioningOutput,foundationAction,onOpenBrief,onContinue,getStageAction,onManualSetup,onOpenWork,onOpenOutput,busy=false}){
+export default function ProjectStagePlan({plan,websiteGoals,serviceStructureOutput,positioningOutput,foundationAction,onOpenBrief,onContinue,getStageAction,onManualSetup,onOpenWork,onOpenOutput,busy=false}){
  const detailRef=useRef(null)
  const uid=useId(),[trackId,setTrackId]=useState(null),[stageId,setStageId]=useState(null)
  const unavailable=plan?.state==='unavailable'
@@ -42,6 +42,7 @@ export default function ProjectStagePlan({plan,serviceStructureOutput,positionin
    {stage?<section ref={detailRef} tabIndex={-1} id={`${uid}-detail`} className="stage-plan-detail" aria-label={`Stage details: ${stage.title}`}>
     <p className="stage-plan-eyebrow">{track.title}</p><h4>{stage.title}</h4><div className="stage-plan-detail-status"><span>{stateLabel(stage)}</span>{stage.needsUpdate&&<span className="stage-plan-update">Needs update</span>}</div>
     {stage.id==='branding.brief'&&<div className="stage-plan-actions">{onOpenBrief&&<button type="button" className="workspace-button" disabled={busy} onClick={onOpenBrief}>Open business brief</button>}{track.stages.some(s=>s.id==='branding.positioning')&&<button type="button" className="workspace-button" disabled={busy} onClick={()=>selectStage('branding.positioning')}>Go to Brand positioning &amp; statement</button>}</div>}
+    {stage.id==='website.goals'&&websiteGoals?.(()=>selectStage('website.keywords'))}
     {foundationAction?.(stage)}{stage.id==='website.keywords'&&structure}{stage.id==='branding.services'&&positioning}
     {stage.description&&<p>{stage.description}</p>}<Progress value={stage.configured===false?null:stage.progress}/>{stage.scopeLabel&&<p className="stage-plan-scope">{stage.scopeLabel}</p>}
     {stage.configured===false&&<p>{stage.configurationUnavailable?'Review the pipeline configuration in project setup before using this stage.':'A saved pipeline step is required for mapped stage work.'}</p>}
