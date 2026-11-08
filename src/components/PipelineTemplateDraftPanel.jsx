@@ -48,18 +48,31 @@ export default function PipelineTemplateDraftPanel({ catalog, services, membersh
         const recorded = new Set((catalog.approvals || [])
           .filter(row => row.pipeline_template_version_id === version.id)
           .map(row => row.department_id))
+        const selected = (catalog.selections || []).filter(item => item.pipeline_template_version_id === version.id)
+          .sort((a, b) => a.position - b.position)
+        const websitePageMarketing = selected.length === 2
+          && selected.every(item => item.organization_id === version.organization_id
+            && item.service_catalog?.organization_id === version.organization_id
+            && item.service_catalog.id === item.service_id && item.service_catalog.is_active)
+          && selected[0].service_catalog.slug === 'setup_development_website_page_build'
+          && selected[0].service_catalog.department_id === 'development'
+          && selected[1].service_catalog.slug === 'setup_marketing_page_seo_optimization'
+          && selected[1].service_catalog.department_id === 'marketing'
+          && !catalog.versions.some(row => row.pipeline_template_id === version.pipeline_template_id && row.version_number > version.version_number)
         const isPublished = published.has(version.id)
-        const canApprove = crossDepartment && !isPublished
+        const canApprove = !websitePageMarketing && crossDepartment && !isPublished
           && canApprovePipelineTemplateDepartment(membership, membership?.departmentId)
           && departments.includes(membership.departmentId)
         return <div key={version.id} className="rounded-xl border border-white/[0.06] bg-white/[0.025] px-3 py-3 text-sm">
           <span className="font-medium">{templateById.get(version.pipeline_template_id)?.slug || 'Pipeline'} · v{version.version_number} · {version.name}</span>
           <span className="ml-2 text-xs text-slate-500">{isPublished ? 'Published' : 'Draft'}</span>
           <p className="mt-1 text-xs text-slate-500">Departments: {departments.join(', ') || 'Selection unavailable'}</p>
-          {crossDepartment && !isPublished && <p className="mt-1 text-xs text-slate-400">Recorded head approvals: {departments.map(id => `${id} ${recorded.has(id) ? 'recorded' : 'pending'}`).join(' · ')}. Current head roles are rechecked at publication.</p>}
+          {websitePageMarketing && !isPublished && <p className="mt-1 text-xs text-slate-400">An organization admin can publish this Website plan. Marketing page SEO follows human delivery review.</p>}
+          {crossDepartment && !websitePageMarketing && !isPublished && <p className="mt-1 text-xs text-slate-400">Recorded head approvals: {departments.map(id => `${id} ${recorded.has(id) ? 'recorded' : 'pending'}`).join(' · ')}. Current head roles are rechecked at publication.</p>}
           {!isPublished && (canApprove || canPublish) && <div className="mt-3 flex flex-wrap gap-2">
             {canApprove && <button type="button" disabled={busy} onClick={() => onApprove(version.id, membership.departmentId)} className="rounded-lg border border-violet-500/40 px-3 py-1.5 text-xs font-semibold text-violet-200 disabled:opacity-40">Approve exact v{version.version_number} for {membership.departmentId}</button>}
-            {canPublish && <button type="button" disabled={busy} onClick={() => onPublish(version.id)} className="rounded-lg bg-violet-500 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">Publish exact v{version.version_number}</button>}
+            {canPublish && websitePageMarketing && <button type="button" disabled={busy} onClick={() => onPublish(version.id, true)} className="workspace-button workspace-button-primary">Publish Website page build, review and Marketing page SEO · v{version.version_number}</button>}
+            {canPublish && !websitePageMarketing && <button type="button" disabled={busy} onClick={() => onPublish(version.id)} className="rounded-lg bg-violet-500 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">Publish exact v{version.version_number}</button>}
           </div>}
         </div>
       })}

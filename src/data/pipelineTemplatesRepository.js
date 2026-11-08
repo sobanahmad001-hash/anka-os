@@ -139,7 +139,7 @@ export function createPipelineTemplatesRepository(supabase) {
           .eq('organization_id', organization)
           .order('version_number', { ascending: false }), signal),
         dataOrThrow(supabase.from('pipeline_template_version_services')
-          .select('organization_id, pipeline_template_id, pipeline_template_version_id, service_id, position, service_catalog(id, slug, name, department_id, is_active, display_order)')
+          .select('organization_id, pipeline_template_id, pipeline_template_version_id, service_id, position, service_catalog(id, organization_id, slug, name, department_id, is_active, display_order)')
           .eq('organization_id', organization).order('position'), signal),
         dataOrThrow(supabase.from('pipeline_template_publications').select('*')
           .eq('organization_id', organization)
@@ -170,6 +170,19 @@ export function createPipelineTemplatesRepository(supabase) {
         p_pipeline_template_version_id: uuid(versionId, 'Pipeline template version'),
         p_department_id: required(departmentId, 'Department'),
       }), signal)
+    },
+
+    async publishWebsitePageMarketing(organizationId, versionId, { signal } = {}) {
+      const organization = uuid(organizationId, 'Organization')
+      const version = uuid(versionId, 'Preset version')
+      const data = await dataOrThrow(supabase.rpc('publish_website_page_marketing_plan', {
+        p_organization_id: organization, p_version_id: version,
+      }), signal)
+      if (data?.organization_id !== organization || data.version_id !== version || data.plan_kind !== 'website'
+        || !data.execution_publication_id || !data.preset_publication_id || !data.published_by) {
+        throw new Error('Publication receipt differs from the reviewed Website version')
+      }
+      return data
     },
 
     async publishVersion(versionId, { signal } = {}) {
