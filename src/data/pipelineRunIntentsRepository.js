@@ -12,6 +12,12 @@ async function dataOrThrow(query, signal) {
   return data
 }
 
+function singleRelation(value) {
+  if (!Array.isArray(value)) return value ?? null
+  if (value.length > 1) throw new Error('Expected a single execution record')
+  return value[0] ?? null
+}
+
 export function createPipelineRunIntentsRepository(supabase) {
   if (!supabase?.from || !supabase?.rpc) throw new TypeError('A Supabase-compatible client is required')
   return Object.freeze({
@@ -37,12 +43,42 @@ export function createPipelineRunIntentsRepository(supabase) {
       ])
       const reviewByIntent = new Map((reviews || []).map(review => [review.run_intent_id, review]))
       const planByIntent = new Map((plans || []).map(plan => [plan.run_intent_id, plan]))
-      const jobByIntent = new Map((jobs || []).map(job => [job.run_intent_id, job]))
+      const jobByIntent = new Map((jobs || []).map(job => [job.run_intent_id, {
+        ...job,
+        input_approval: singleRelation(job.input_approval),
+        configured_steps: (job.configured_steps || []).map(step => {
+          const output = singleRelation(step.output)
+          return {
+            ...step,
+            progress: singleRelation(step.progress),
+            output: output && { ...output, review: singleRelation(output.review) },
+          }
+        }),
+      }]))
       return rows.map(row => ({
         ...row, review: reviewByIntent.get(row.id) || null,
         plan: planByIntent.get(row.id) || null,
         job: jobByIntent.get(row.id) || null,
       }))
+    },
+    async readDeliveryVersion({ organizationId, projectId, stepId }, { signal } = {}) {
+      const receipt = await dataOrThrow(supabase.rpc('read_website_delivery_version', {
+        p_organization_id: requiredId(organizationId, 'Organization'),
+        p_project_id: requiredId(projectId, 'Project'),
+        p_marketing_step_id: requiredId(stepId, 'Marketing step'),
+      }), signal)
+      if (!receipt) return { pending: true }
+      if (receipt.marketing_step_id !== stepId) throw new Error('Receiving step changed')
+      const [version, review] = await Promise.all([
+        dataOrThrow(supabase.from('artifact_versions').select('id,version_number,content')
+          .eq('organization_id', organizationId).eq('id', receipt.copy_version_id).single(), signal),
+        dataOrThrow(supabase.from('ai_execution_step_action_events').select('id,action,evidence,occurred_at')
+          .eq('organization_id', organizationId).eq('id', receipt.review_event_id).single(), signal),
+      ])
+      if (version.id !== receipt.copy_version_id || review.id !== receipt.review_event_id ||
+          review.action !== 'approve' || version.content.source_architecture_version_id !== receipt.architecture_version_id ||
+          version.content.target_page_key !== receipt.page_key) throw new Error('Delivery review or page source changed')
+      return { receipt, version, review }
     },
     findRequest({organizationId,engagementId,actorId,requestId},{signal}={}) {
       return dataOrThrow(supabase.from('pipeline_run_intents').select('id,request_id,requested_by,pipeline_group_id,status').eq('organization_id',requiredId(organizationId,'Organization')).eq('engagement_id',requiredId(engagementId,'Engagement')).eq('requested_by',requiredId(actorId,'Actor')).eq('request_id',requiredId(requestId,'Request')).maybeSingle(),signal)

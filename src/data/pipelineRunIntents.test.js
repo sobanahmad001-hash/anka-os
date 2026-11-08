@@ -295,3 +295,33 @@ test('explicit independent run binds one group while Legacy transport stays unch
  assert.equal(calls[1].name,'start_project_pipeline_group_run');assert.equal(calls[1].args.p_pipeline_group_id,OTHER);assert.equal(calls[1].args.p_request_id,ID);assert.deepEqual(calls[1].args.p_asset_ids,[])
  assert.throws(()=>repo.start({...input,pipelineGroupId:'latest'}),/UUID/);assert.equal(calls.length,2)
 })
+
+test('run cards read PostgREST progress and input approvals for manual dependencies', async () => {
+  const completed = { status: 'completed', state_version: 2 }
+  const tables = {
+    pipeline_run_intents: [{ id: ID }, { id: OTHER }],
+    ai_execution_jobs: [
+      { run_intent_id: ID, input_approval: [], configured_steps: [{ progress: [], output: [] }] },
+      { run_intent_id: OTHER, input_approval: [{ id: ID }], configured_steps: [{ progress: [completed], output: [{id: ID, review: []}] },
+          {progress: completed, output: {id: OTHER, review: [{decision: 'accepted'}]}}] },
+    ],
+  }
+  const repo = createPipelineRunIntentsRepository({
+    rpc() {},
+    from(table) {
+      return {
+        select() { return this }, eq() { return this }, in() { return this },
+        order() { return this }, limit() { return this },
+        then(resolve) { return resolve({ data: tables[table] || [] }) },
+      }
+    },
+  })
+  const [waiting, reviewed] = await repo.list(ID, OTHER)
+  assert.equal(waiting.job.input_approval, null)
+  assert.equal(waiting.job.configured_steps[0].progress, null)
+  assert.equal(waiting.job.configured_steps[0].output, null)
+  assert.deepEqual(reviewed.job.configured_steps[0].output, {id: ID, review: null})
+  assert.deepEqual(reviewed.job.configured_steps[1].output, {id: OTHER, review: {decision: 'accepted'}})
+  assert.deepEqual(reviewed.job.input_approval, { id: ID })
+  assert.deepEqual(reviewed.job.configured_steps[0].progress, completed)
+})

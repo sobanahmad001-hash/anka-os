@@ -265,10 +265,11 @@ function ScopedOperatingSpine({ initialView = 'engagements' }) {
     } finally { if (!requestSignal.aborted) setSaving(false) }
   }
 
-  async function publishPipelineVersion(versionId) {
+  async function publishPipelineVersion(versionId, websitePageMarketing = false) {
     setSaving(true); setError(''); setNotice('')
     try {
-      await pipelineTemplates.publishVersion(versionId, { signal: requestSignal })
+      if (websitePageMarketing) await pipelineTemplates.publishWebsitePageMarketing(activeOrganizationId, versionId, { signal: requestSignal })
+      else await pipelineTemplates.publishVersion(versionId, { signal: requestSignal })
       if (requestSignal.aborted) return
       await loadAll()
       if (!requestSignal.aborted) setNotice('Exact preset version published.')

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import WebsiteDeliveryVersion from './WebsiteDeliveryVersion.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { projectPipelineConfigurations } from '../data/projectPipelineConfigurations.js'
 import { pipelineRunIntents } from '../data/pipelineRunIntents.js'
@@ -341,7 +342,7 @@ function ScopedPipelineRunIntentPanel({ organizationId, engagement, assets, work
           </div>}
         </div>}
         <ReviewedStageInputs review={row.input_manifest?.stage_review} />
-        <RunCardDetails row={row} userId={user?.id} manualEligible={manualEligible}
+        <RunCardDetails deliveryScope={membership?.departmentId === 'marketing' && engagement.project_id ? { organizationId, projectId: engagement.project_id } : null} row={row} userId={user?.id} manualEligible={manualEligible}
           reviewEligible={reviewEligible} outputDraft={outputDraft} setOutputDraft={setOutputDraft}
           onOpenOutput={openOutput} onReviewOutput={reviewOutput}
           manualDraft={manualDraft} setManualDraft={setManualDraft} busy={busy}
@@ -394,7 +395,7 @@ function ScopedPipelineRunIntentPanel({ organizationId, engagement, assets, work
   </section>
 }
 
-function RunCardDetails({ row, userId, manualEligible, reviewEligible, outputDraft, setOutputDraft,
+function RunCardDetails({ deliveryScope, row, userId, manualEligible, reviewEligible, outputDraft, setOutputDraft,
   onOpenOutput, onReviewOutput, manualDraft, setManualDraft, busy, onManualAction }) {
   const work = row.plan?.work_manifest || []
   const configured = [...(row.job?.configured_steps || [])].sort((a, b) => a.ordinal - b.ordinal)
@@ -421,6 +422,7 @@ function RunCardDetails({ row, userId, manualEligible, reviewEligible, outputDra
         return <li key={step.id}>
           {step.definition_step?.label || step.step_key} · instance {step.instance_number} · {kind?.replaceAll('_', ' ')} · {status?.replaceAll('_', ' ')}
           {step.definition_step?.depends_on?.length ? ' · after ' + step.definition_step.depends_on.join(', ') : ''}
+          {deliveryScope && step.step_key === 'marketing_page_seo' && step.definition_step?.department_id === 'marketing' && <WebsiteDeliveryVersion key={step.id} {...deliveryScope} stepId={step.id} />}
           {step.reused_artifact_version_id && <p className="mt-1 break-all text-[var(--anka-success)]">Satisfied by exact approved version {step.reused_artifact_version_id} · original approval {step.reuse_approval_id}. No regeneration or provider reservation.</p>}
           {step.output && <p className="mt-1 text-[var(--anka-success)]">
             AI output {step.output.id.slice(0, 8)} · {step.output.provider} / {step.output.model_id}
