@@ -190,7 +190,7 @@ function websitePageBriefs(value: unknown, pages: ReturnType<typeof websitePages
   })
 }
 
-function websitePages(value: unknown) {
+function websitePages(value: unknown, source: 'submitted' | 'stored' = 'submitted') {
   if (!Array.isArray(value) || !value.length) throw new Error('At least one website page is required')
   if (value.length > 200) throw new Error('Website architecture supports at most 200 pages')
   const pages = value.map((item, index) => {
@@ -199,7 +199,7 @@ function websitePages(value: unknown) {
     }
     const page = item as Json
     const pageType = requiredText(page, 'page_type', 40)
-    if (!['hub', 'service', 'supporting'].includes(pageType)) {
+    if (!['hub', 'service', 'supporting'].includes(pageType) && !(source === 'stored' && pageType === 'landing')) {
       throw new Error(`page type in website page ${index + 1} must be hub, service, or supporting`)
     }
     const slug = normalizeWebsitePath(page.slug)
@@ -268,7 +268,7 @@ function websitePages(value: unknown) {
 
 export function assertWebsitePageIdentityTransition(previous: unknown, next: unknown) {
   if (!previous || typeof previous !== 'object' || Array.isArray(previous)) return
-  const previousPages = websitePages((previous as Json).pages)
+  const previousPages = websitePages((previous as Json).pages, 'stored')
   const nextPages = websitePages(next)
   const previousByPath = new Map(previousPages.map(page => [page.slug, page.page_key]))
   for (const page of nextPages) {
