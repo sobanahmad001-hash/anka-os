@@ -91,3 +91,47 @@ Deno.test('B06a handler rejects changed intent with the same replay key', async 
     assertEquals(state.comments.size, 1)
   })
 })
+
+Deno.test('list_approvers resolves active team names using the supported profile columns', async () => {
+  await withOfflineHandler(async () => {
+    const authFetch = globalThis.fetch
+    const org = '11111111-1111-4111-8111-111111111111'
+    const members = [ACTOR_ID, SECOND_KEY].map(user_id => ({ user_id, role: 'member', department_id: 'content' }))
+    globalThis.fetch = async (input, init) => {
+      const request = new Request(input, init)
+      const url = new URL(request.url)
+      const params = url.searchParams
+      assertEquals(request.method, 'GET')
+      switch (url.pathname) {
+        case '/auth/v1/user':
+          return authFetch(request)
+        case '/rest/v1/artifact_versions':
+          assertEquals(params.get('id'), 'eq.' + FIRST_KEY)
+          return json([{ id: FIRST_KEY, organization_id: org, artifact_id: REQUEST_ID }])
+        case '/rest/v1/organizations':
+          assertEquals(params.get('id'), 'eq.' + org)
+          return json([{ id: org }])
+        case '/rest/v1/organization_memberships':
+          assertEquals(params.get('organization_id'), 'eq.' + org)
+          assertEquals(params.get('member_kind'), 'eq.team')
+          assertEquals(params.get('status'), 'eq.active')
+          if (params.get('user_id') === 'eq.' + ACTOR_ID) return json([{ id: FIRST_KEY }])
+          return json(members)
+        case '/rest/v1/profiles':
+          assertEquals(params.get('id'), 'in.(' + members.map(row => row.user_id).join(',') + ')')
+          if (params.get('select') !== 'id,full_name') return json({ code: '42703', message: 'Unknown profile column' }, 400)
+          return json([{ id: ACTOR_ID, full_name: 'QA Reviewer' }])
+        default:
+          throw new Error('Unexpected approval read: ' + url.pathname)
+      }
+    }
+    const res = await handleRequest(new Request('http://127.0.0.1/review', {
+      method: 'POST', headers: { Authorization: 'Bearer offline-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'list_approvers', artifact_version_id: FIRST_KEY }),
+    }))
+    assertEquals(res.status, 200)
+    const { data } = await res.json()
+    assertEquals(data.map((row: {full_name: string}) => row.full_name), ['QA Reviewer', 'Team member'])
+    assertEquals(data.map((row: {user_id: string}) => row.user_id), members.map(row => row.user_id))
+  })
+})
