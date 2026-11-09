@@ -86,7 +86,7 @@ async function listApprovers(admin: Client, organizationId: string) {
   if (error) throw error
   const userIds = (memberships || []).map((membership: Json) => String(membership.user_id))
   const { data: profiles, error: profileError } = userIds.length
-    ? await admin.from('profiles').select('id, full_name, email').in('id', userIds)
+    ? await admin.from('profiles').select('id, full_name').in('id', userIds)
     : { data: [], error: null }
   if (profileError) throw profileError
   const profileById = new Map<string, Json>()
@@ -94,7 +94,7 @@ async function listApprovers(admin: Client, organizationId: string) {
   return (memberships || []).map((membership: Json) => ({
     ...membership,
     full_name: text(profileById.get(String(membership.user_id))?.full_name) || 'Team member',
-    email: text(profileById.get(String(membership.user_id))?.email),
+    email: '',
   }))
 }
 
