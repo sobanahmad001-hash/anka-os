@@ -11,7 +11,8 @@ test('stage presentation withholds invented completion and preserves supplied ev
  const render=plan=>renderToStaticMarkup(createElement(StagePlan,{plan,onContinue(){}}))
  const empty=render(null)
  assert.match(empty,/No mapped stage plan yet/)
- assert.match(empty,/Not configured/)
+ assert.match(empty,/Pipeline step not mapped/)
+ assert.match(empty,/No active stage mappings for this stream/)
  assert.doesNotMatch(empty,/>Done</)
  assert.doesNotMatch(empty,/of \d+ required/)
  const stage={id:'content',title:'Page content',configured:true,status:'in_review',needsUpdate:true,progress:{completed:8,total:12,label:'pages approved'},outputs:[{id:'v3',title:'Homepage content',versionLabel:'Version 3',path:'/sphere/workspace/projects/project?tab=outputs'}],items:[{id:'home',title:'Homepage',configured:true,status:'done',intent:'Commercial',keywords:['project planning']},{id:'about',title:'About',configured:true,status:'in_progress'}]}

@@ -27,6 +27,7 @@ import './projectConversationLayout.css'
 import ProjectDeliverySetup from '../components/ProjectDeliverySetup.jsx'
 import { projectWorkCard } from '../data/projectWorkCard.js'
 import _ProjectReviewEvidencePanel from './ProjectReviewEvidencePanel.jsx'
+import { architectureReviewLink } from '../data/projectArchitectureEditor.js'
 import { appendWorkshopNavigation, parseWorkshopNavigation } from '../data/workshopNavigation.js'
 
 const TABS = [
@@ -177,6 +178,7 @@ export default function ProjectEngagementWorkspace() {
   }
 
   const { project, identity, summary } = workspace
+  const architecture = tab === 'discussion' && !error && !loading ? architectureReviewLink(workspace) : null
   const showRetainerPlanning = identity.hasEngagement
     && (project.engagement_type === 'retainer' || workspace.engagement?.engagement_type === 'retainer')
   const tabs = TABS
@@ -245,6 +247,12 @@ export default function ProjectEngagementWorkspace() {
               {projectChatMode === 'team' && <p className="text-xs font-semibold uppercase tracking-wide text-[var(--anka-violet)]">{project.name} · Chat</p>}
               {projectChatMode === 'team' && <><h2 className="mt-1 text-lg font-semibold">Talk with your project team</h2>
               <p className="mt-1 text-sm leading-5 text-[var(--anka-muted)]">Team discussion is shared with this project. AI conversations start private; sharing stays under your control.</p></>}
+              {architecture && <section aria-label="Saved website architecture" className="workspace-card my-3 p-3">
+                <p><strong>{architecture.title} v{architecture.number} saved</strong> · {architecture.approved ? 'Architecture approved' : 'Awaiting architecture approval'}</p>
+                <button className="workspace-button mt-2" disabled={isNavigationBusy} onClick={() => { if (allowLeavingCurrentView()) navigate(architecture.path) }}>
+                  {architecture.approved ? 'Open approved architecture' : 'Review architecture in Content Studio'}
+                </button>
+              </section>}
               <nav aria-label="Project chat views" className="studio-chat-switch"><button type="button" disabled={isNavigationBusy} onClick={()=>{if(allowLeavingCurrentView())setProjectChatMode(projectChatMode==='private'?'team':'private')}}>{projectChatMode==='private'?'Team discussion ↗':'← AI conversations'}</button></nav>
             </div>
             <section hidden={projectChatMode !== 'team'} aria-label="Shared project team discussion">
