@@ -1,6 +1,6 @@
 import {inspectFoundationContext} from './pipelineFoundationReview.js'
 import ProjectDeliveryPlanPanel from './ProjectDeliveryPlanPanel.jsx'
-import {planStageDefaults} from '../data/serviceDrivenPlan.js'
+import {eligiblePlanServiceIds,planStageDefaults} from '../data/serviceDrivenPlan.js'
 import _ProjectCampaignPlanningPanel from './ProjectCampaignPlanningPanel.jsx'
 import _ProjectReportingBindingsPanel from './ProjectReportingBindingsPanel.jsx'
 import _ProjectWebsitePagesPanel from './ProjectWebsitePagesPanel.jsx'
@@ -60,7 +60,7 @@ function ScopedProjectPipelineConfigurationPanel({ organizationId, engagement, s
   const active = view.activations[0]
   const activeConfig = view.configurations.find(row => row.id === active?.configuration_id)
   const approvedLimit=Number.isSafeInteger(activeConfig?.max_ai_cost_microusd)&&activeConfig.max_ai_cost_microusd>=0?activeConfig.max_ai_cost_microusd:0
-  const serviceIds = new Set(services.filter(row => ['planned', 'active'].includes(row.status)).map(row => row.service_id))
+  const serviceIds = eligiblePlanServiceIds(boundPlan?.pipeline_group_id === groupId && boundPlan?.definition_publication_id === publicationId ? boundPlan : null, services)
   const eligibleSteps = definitionSteps.filter(step => serviceIds.has(step.service_id))
   const aiSelected = eligibleSteps.some(step => (quantities[step.key] || stageActions[step.key]==='reuse') && ['ai_assisted', 'automatic'].includes(step.kind))
   // UI spending edits are Admin-only; other managers retain only this group's active limit.
