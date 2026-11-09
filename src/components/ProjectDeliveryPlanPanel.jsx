@@ -5,13 +5,14 @@ import {inspectServicePlan} from '../data/serviceDrivenPlan.js'
 export default function ProjectDeliveryPlanPanel(props){return <Plan key={[props.organizationId,props.projectId,props.engagementId,props.actorId].join(':')} {...props}/>}
 function Plan({organizationId,projectId,engagementId=null,actorId,signal,repository=projectDeliveryPlans,onChanged,onChoosePipeline,onNavigationBusyChange,disabled=false}){
  const [context,setContext]=useState(engagementId),[data,setData]=useState(null),[choices,setChoices]=useState({}),[review,setReview]=useState(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[historical,setHistorical]=useState(null)
+ const [bindingChoices,setBindingChoices]=useState([])
  const storageKey=`anka:project-plan:${actorId}:${organizationId}:${projectId}`,alive=useRef(false),generation=useRef(0),flight=useRef(false),latest=useRef(null)
  const [pending,setPending]=useState(()=>{try{const p=JSON.parse(sessionStorage.getItem(storageKey)||'null');return p&&typeof p.requestId==='string'&&typeof p.engagementId==='string'?p:null}catch{return {requestId:'',engagementId:''}}})
  latest.current={context,choices,data,review,disabled,busy,pending,onChanged,onChoosePipeline};const current=useCallback(token=>alive.current&&!signal?.aborted&&(token===undefined||token===generation.current),[signal])
  const scope={organizationId,projectId,engagementId:context},locked=disabled||busy||Boolean(pending),plan=inspectServicePlan(data)
  useEffect(()=>{alive.current=true;return()=>{alive.current=false}},[])
  useEffect(()=>{onNavigationBusyChange?.(busy||Boolean(pending));return()=>onNavigationBusyChange?.(false)},[busy,pending,onNavigationBusyChange])
- async function refresh(options={}){const token=++generation.current;setError('');setReview(null);setHistorical(null);const result=await repository.read({organizationId,projectId,engagementId:context},{choices,...options,signal});if(current(token)){setData(result);if(result.engagement_id!==context){setChoices({});setContext(result.engagement_id)}}return result}
+ async function refresh(options={}){const token=++generation.current;setError('');setReview(null);setHistorical(null);setBindingChoices([]);const result=await repository.read({organizationId,projectId,engagementId:context},{choices,...options,signal});if(current(token)){setData(result);if(result.engagement_id!==context){setChoices({});setContext(result.engagement_id)}}return result}
  useEffect(()=>{void refresh().catch(e=>{if(current())setError(e.message)})},[context,organizationId,projectId,repository]) // eslint-disable-line react-hooks/exhaustive-deps
  async function run(fn){if(flight.current||disabled||signal?.aborted||!alive.current)return;flight.current=true;setBusy(true);setError('');try{await fn()}catch(e){if(current()){setError(e.message);if(e.knownRollback){sessionStorage.removeItem(storageKey);setPending(null);setReview(null)}}}finally{flight.current=false;if(current())setBusy(false)}}
  async function inspect(){const result=await refresh();if(current()&&result.draft&&latest.current.context===result.engagement_id)setReview({draft:result.draft,choices:structuredClone(choices)})}
@@ -19,6 +20,21 @@ function Plan({organizationId,projectId,engagementId=null,actorId,signal,reposit
  async function recover(){if(!pending?.requestId)return;const result=await repository.read({...scope,engagementId:pending.engagementId},{requestId:pending.requestId,signal});if(!current())return;if(!result.selected)throw Error('The original plan save is not yet verified. Nothing is resent; keep this request and check recovery again.');sessionStorage.removeItem(storageKey);setPending(null);setNotice('Original project plan recovered without another write.');await refresh();if(current())await latest.current.onChanged?.()}
  async function history(versionId){const token=++generation.current;setReview(null);const result=await repository.read(scope,{versionId,signal});if(current(token))setHistorical(result.selected)}
  function choose(key,value){if(locked||latest.current.busy||latest.current.pending||latest.current.disabled||latest.current.data?.draft?.can_manage!==true)return;setChoices(p=>{const next={...p};if(value)next[key]=value;else delete next[key];return next});setReview(null)}
+ const bindingOptions=data?.draft?.website_scope_options || []
+ async function bindWebsiteScopes(){
+  if(locked || data?.draft?.can_manage!==true || !context || data.engagement_id!==context) return
+  const selected=bindingChoices.filter(option=>bindingOptions.includes(option))
+  if(!selected.length) return
+  setReview(null)
+  setBindingChoices([])
+  setData(null)
+  try {
+   await repository.bindWebsiteScopes(scope,selected,signal)
+  } finally {
+   if(current()) await refresh()
+  }
+  if(current()) setNotice('Website services mapped to existing scope. Review the assembled plan to save a plan version.')
+ }
  const displayed=historical?.snapshot||data?.latest?.snapshot
  return <section aria-label="Service-driven project plan" className="workspace-card space-y-3 p-4" style={{minWidth:0,overflowWrap:'anywhere'}}>
  <h3 className="font-semibold">Project delivery plan</h3><p className="text-sm">Selected services assemble a plan from published Administration templates. Review changes before applying. Branding, Website and Marketing stay independent; existing Work and Workshop records keep their original identities.</p>
@@ -26,6 +42,16 @@ function Plan({organizationId,projectId,engagementId=null,actorId,signal,reposit
  {data&&!data.engagement_id&&<label className="block">Project engagement<select aria-label="Plan engagement" disabled={locked} value={context||''} onChange={e=>{setContext(e.target.value||null);setChoices({});setReview(null)}}><option value="">Choose the exact engagement</option>{data.engagements?.map(e=><option key={e.id} value={e.id}>{e.name||'Project engagement'}</option>)}</select></label>}
  {data?.engagements?.length===0&&<p>No active engagement is available. Existing project work remains in Work.</p>}
  {data?.draft&&<><p>{data.latest?`Saved plan v${data.latest.version_number}`:'No plan saved yet'} · {plan.changes.length} service changes to review</p>
+ {data.draft.can_manage && bindingOptions.length>0 && <fieldset disabled={locked}><legend>Use existing Website scope</legend>
+ <p>Choose the Website services covered by these existing quantities.</p>
+ {bindingOptions.map(option=><label className="block" key={option.scope_id+option.leaf_id}>
+ <input type="checkbox" checked={bindingChoices.includes(option)} onChange={event=>{
+  const checked=event.target.checked
+  setReview(null)
+  setBindingChoices(previous=>checked?[...previous.filter(row=>row.scope_id!==option.scope_id&&row.leaf_id!==option.leaf_id),option]:previous.filter(row=>row!==option))
+ }}/> {option.parent_name} × 1 → {option.leaf_name}</label>)}
+ <button type="button" className="workspace-button" disabled={!bindingChoices.length} onClick={()=>run(bindWebsiteScopes)}>Save selected scope mappings</button>
+ </fieldset>}
  {!plan.contributions.length&&<p>Describe the services in Project Chat or select them manually in project setup, then review the assembled plan here.</p>}
  <ul>{plan.changes.map((c,i)=><li key={i}>{c.name}: {c.action}{c.before&&c.after?` · ${c.before.quantity} → ${c.after.quantity} ${c.after.unit||''}`:''}</li>)}</ul>
  <_FoundationReview foundation={data.draft.foundation}/>{plan.unmapped.map(c=><div key={c.scope_id||c.service_id}><p role="status">{c.name}: {c.planning_issue}. The service stays in the plan; no workflow is invented.</p>{c.definition_choice_key&&c.definition_options?.length>0?<label>Published plan for {c.name}<select aria-label={'Published plan for '+c.name} disabled={locked||data.draft.can_manage!==true} value={choices[c.definition_choice_key]||''} onChange={e=>choose(c.definition_choice_key,e.target.value)}><option value="">Choose an exact published plan</option>{c.definition_options.map((option,index)=><option key={option.publication_id} value={option.publication_id}>{option.name}{option.version_number?` · v${option.version_number}`:''}{c.definition_options.filter(row=>row.name===option.name&&row.version_number===option.version_number).length>1?` · option ${index+1}`:''}</option>)}</select><span>Review project plan changes again after choosing.</span></label>:c.definition_choice_key&&<p>No eligible published plan is available for this service. Administration must resolve the mapping or publish a matching plan; this screen does not publish templates.</p>}{c.definition_options?.length>0&&<details><summary>Source details</summary>{c.definition_options.map((option,index)=><p key={option.publication_id}>{option.name}{option.version_number?` · v${option.version_number}`:''}{c.definition_options.filter(row=>row.name===option.name&&row.version_number===option.version_number).length>1?` · option ${index+1}`:''}: {option.publication_id}</p>)}</details>}</div>)}
@@ -38,6 +64,7 @@ function Plan({organizationId,projectId,engagementId=null,actorId,signal,reposit
  {displayed&&<details open={Boolean(historical)}><summary>{historical?`Historical plan v${historical.version_number}`:'Saved plan and retained pipelines'}</summary><_FoundationReview foundation={displayed.foundation}/>{displayed.groups.map(g=><p key={g.bucket_key}>{g.kind} · {g.cadence} · {g.contributions.map(c=>c.name).join(', ')}{!historical&&onChoosePipeline&&g.pipeline_group_id&&<button type="button" className="workspace-button" disabled={locked} onClick={()=>{if(!latest.current.disabled&&!flight.current&&!latest.current.pending)latest.current.onChoosePipeline?.(g)}}>Review stages in this pipeline</button>}</p>)}<p>{displayed.retained_groups?.length||0} earlier pipeline identities retained. Work, output and completion records remain canonical.</p></details>}
  <details><summary>Plan version history ({data.history_total})</summary><p>Showing the most recent {data.history.length} immutable versions. Earlier versions remain retained.</p>{data.history.map(v=><button type="button" className="workspace-button" disabled={locked} key={v.id} onClick={()=>run(()=>history(v.id))}>Open plan v{v.version_number}</button>)}{historical&&<button type="button" className="workspace-button" disabled={locked} onClick={()=>{setHistorical(null);setReview(null)}}>Return to current plan</button>}</details>
  </>}
+ {!data&&error&&<button type="button" disabled={locked} onClick={()=>run(()=>refresh())}>Refresh project plan</button>}
  {pending&&<p role="status">A plan save needs recovery. New saves remain blocked. <button type="button" className="workspace-button" disabled={busy||disabled} onClick={()=>run(recover)}>Recover original plan save</button></p>}
  {notice&&<p role="status">{notice}</p>}{error&&<p role="alert">{error}</p>}{busy&&<p role="status">Checking this exact project plan…</p>}
  </section>

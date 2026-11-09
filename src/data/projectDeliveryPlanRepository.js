@@ -6,6 +6,15 @@ export function createProjectDeliveryPlanRepository(client){
  function same(data,s){return data?.organization_id===s.organizationId&&data?.project_id===s.projectId&&(!s.engagementId||data.engagement_id===s.engagementId)}
  return Object.freeze({
   async read(s,{choices={},requestId=null,versionId=null,signal}={}){const data=await call('get_project_delivery_plan',{...scope(s),p_group_choices:choices,p_request_id:requestId?id(requestId):null,p_version_id:versionId?id(versionId):null},signal);if(!same(data,s)||!Array.isArray(data.history)||[data.latest,data.selected].filter(Boolean).some(v=>!same(v,s)||!same(v.snapshot,s))||data.draft&&!same(data.draft,s)||data.engagements?.some(e=>e.organization_id!==s.organizationId||e.project_id!==s.projectId))throw Error('Project plan response belongs to another exact context');return data},
+  async bindWebsiteScopes(s, options, signal) {
+   if (!s.engagementId || !Array.isArray(options) || !options.length || options.length > 3) throw Error('Choose one to three Website services')
+   const bindings = options.map(option => {
+    if (!Number.isSafeInteger(option.scope_revision) || option.scope_revision < 0) throw Error('Review the current scope revision')
+    return {scope_id:id(option.scope_id), revision:option.scope_revision, leaf_id:id(option.leaf_id),
+     parent_service_id:id(option.parent_service_id), engagement_service_id:id(option.engagement_service_id)}
+   })
+   await call('apply_website_scope_leaf_bindings', {...scope(s), p_bindings:bindings}, signal)
+  },
   async apply(s,{requestId,reviewSha256,choices={},signal}){if(!s.engagementId||!/^[a-f0-9]{64}$/.test(reviewSha256||''))throw Error('Review the current exact project plan');const data=await call('apply_project_delivery_plan',{...scope(s),p_request_id:id(requestId),p_review_sha256:reviewSha256,p_group_choices:choices},signal);if(!same(data,s)||data.request_id!==requestId||!same(data.snapshot,s))throw Error('Saved plan receipt differs; recover the original request');return data}
  })
 }
