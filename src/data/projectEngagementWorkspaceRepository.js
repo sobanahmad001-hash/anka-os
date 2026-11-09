@@ -83,7 +83,7 @@ assertProjectId(projectId)
     : EMPTY
   const artifactRows = rows(artifacts, 'artifacts')
   const artifactVersions = artifactRows.length
-    ? await supabase.from('artifact_versions').select('id, organization_id, artifact_id, version_number, change_summary, data_classification, created_at').eq('organization_id', organizationId).abortSignal(signal).eq('organization_id', org).in('artifact_id', artifactRows.map((item) => item.id)).order('created_at', { ascending: false })
+    ? await supabase.from('artifact_versions').select('id, organization_id, artifact_id, version_number, first_page_title:content->pages->0->>title, second_page_title:content->pages->1->>title, change_summary, data_classification, created_at').eq('organization_id', organizationId).abortSignal(signal).eq('organization_id', org).in('artifact_id', artifactRows.map((item) => item.id)).order('created_at', { ascending: false })
     : EMPTY
   return {
     project,

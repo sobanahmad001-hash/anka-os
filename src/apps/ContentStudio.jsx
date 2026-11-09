@@ -1,4 +1,5 @@
 import '../components/contentToolsPresentation.css'
+import { matchesArchitectureEditor } from '../data/projectArchitectureEditor.js'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useOrganization } from '../context/OrganizationContext.jsx'
@@ -74,6 +75,7 @@ export default function ContentStudio() {
   const [engagements, setEngagements] = useState([])
   const [workspace, setWorkspace] = useState(null)
   const [type, setType] = useState('discovery')
+  const linkedArchitecture = searchParams.has('architecture')
   const requestedTab = navigationContext.workshopTab || ''
   const [tab, setTab] = useState(['home', 'general', 'queue', 'calendar', 'writer', 'library', 'artifacts', 'requests', 'brand', 'chat'].includes(requestedTab) ? requestedTab : 'home')
   const [loading, setLoading] = useState(true)
@@ -286,8 +288,10 @@ export default function ContentStudio() {
       </nav>
       {!repositories ? <div className="py-20 text-center text-sm text-[var(--anka-muted)]">Select an active organization to open Content Studio.</div> : tab === 'general' ? <GeneralContentRequestsPanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.requests} /> : tab === 'library' ? <ContentLibraryPanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.studio} initialArtifactId={searchParams.get('artifact') || ''} initialVersionId={searchParams.get('version') || navigationContext.output?.versionId || ''} /> : tab === 'home' ? <ContentWorkshopHomePanel key={`${activeOrganizationId}:${scopeRevision}:${engagementId}`} workspace={workspace} loadState={loading ? 'loading' : workspaceDenied ? 'denied' : error && !workspace ? 'error' : 'ready'} stale={workspaceStale} error={error} onRetry={() => loadWorkspace(engagementId)} onNewContent={() => selectTab('writer')} onOpenBrief={() => selectTab('brand')} onOpenEditor={(item, editorTab) => { setType(item.contentType); selectTab(editorTab) }} /> : loading && tab !== 'writer' ? <div className="py-20 text-center text-sm text-[var(--anka-muted)]">Loading Content Studio…</div> : tab === 'queue' ? <ContentQueuePanel key={`${activeOrganizationId}:${scopeRevision}`} repository={repositories.queue} /> : !workspace ? <div className="rounded-2xl border border-dashed border-[var(--anka-line)] px-6 py-16 text-center text-sm text-[var(--anka-muted)]">Activate a Content service on an engagement to begin, or use General requests without an engagement.</div> : tab === 'writer' ? (
         <ContentWriterEditor key={`${activeOrganizationId}:${scopeRevision}:${workspace.engagement.id}`} workspace={workspace} studio={studio} saving={saving} act={act} onRefresh={() => loadWorkspace(engagementId)} refreshing={loading} stale={workspaceStale} stageId={bestContentStage(workspace.stages, 'content')?.id || null} defaultLanguage={resolveContentLanguage({ approvedBrandLanguage: approvedVisionLanguage(workspace), organizationDefaultLanguage: workspace.organizationSettings?.content_language || workspace.organizationSettings?.default_language }).language} />
+      ) : tab === 'artifacts' && linkedArchitecture && (workspaceStale || !matchesArchitectureEditor(workspace, searchParams.get('architecture'), searchParams.get('version'))) ? (
+        <p role="status">The linked architecture version is unavailable or has changed. Return to the project to review the current version.</p>
       ) : tab === 'artifacts' ? (
-        <ArtifactWorkspace key={`${activeOrganizationId}:${scopeRevision}:${workspace.engagement.id}`} studio={studio} customFields={repositories.customFields} workspace={workspace} type={type} setType={setType} saving={saving} act={act} onRefresh={() => loadWorkspace(engagementId)} originLinkId={originLinkId} />
+        <ArtifactWorkspace key={`${activeOrganizationId}:${scopeRevision}:${workspace.engagement.id}`} studio={studio} customFields={repositories.customFields} workspace={workspace} type={linkedArchitecture ? 'website_architecture' : type} setType={next => { setType(next); if (linkedArchitecture) selectTab('artifacts') }} saving={saving} act={act} onRefresh={() => loadWorkspace(engagementId)} originLinkId={originLinkId} />
       ) : tab === 'calendar' ? (
         <BlogCalendarPanel workspace={workspace} saving={saving} originLinkId={originLinkId} onStart={openBlogDraft} onPublish={link => updateBlogLink(link, 'published', 'Approved blog content marked as published.')} />
       ) : tab === 'requests' ? (
