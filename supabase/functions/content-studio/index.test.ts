@@ -689,6 +689,16 @@ Deno.test('B03a rejects normalized duplicate paths, duplicate order and all ance
   ] }), Error, 'ancestor cycle')
 })
 
+Deno.test('stored landing is readable only for comparing architecture identities', () => {
+  const landing = { slug: 'offer', title: 'Offer', parent_slug: null, page_type: 'landing', purpose: 'Explain the offer' }
+  const previous = { pages: [landing] }
+  const home = { ...landing, page_key: 'page:home', slug: 'home', title: 'Home', page_type: 'hub' }
+  assertWebsitePageIdentityTransition(previous, [home])
+  assertThrows(() => assertWebsitePageIdentityTransition(previous, [{ ...home, slug: landing.slug }]), Error, 'cannot be changed')
+  assertThrows(() => assertWebsitePageIdentityTransition(previous, [landing]), Error, 'page type')
+  assertThrows(() => assertWebsitePageIdentityTransition({ pages: [{ ...landing, page_type: 'unknown' }] }, [home]), Error, 'page type')
+})
+
 Deno.test('B03a retains page identity across rename and rejects same-path key replacement', () => {
   const previous = { pages: [{ slug: 'home', title: 'Home', parent_slug: null, page_type: 'hub', purpose: 'Orient' }] }
   assertWebsitePageIdentityTransition(previous, [{

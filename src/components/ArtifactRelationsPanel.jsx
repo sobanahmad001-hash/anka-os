@@ -56,7 +56,7 @@ export default function ArtifactRelationsPanel({ artifact, requestContext }) {
         const [relationRows, artifactRows, requestRows, releasedRows] = await Promise.all([
           artifactRelations.list(sourceArtifactId),
           artifactRelations.candidates(artifact),
-          artifactRelations.requestCandidates(artifact),
+          artifactRelations.requestCandidates({ organizationId: artifact.organization_id }),
           artifactRelations.releasedDesignSystemVersions(),
         ])
         setRelations(relationRows || [])
