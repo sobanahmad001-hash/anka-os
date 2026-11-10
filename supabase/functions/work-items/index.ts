@@ -5,7 +5,7 @@ type Json = Record<string, unknown>
 
 const ACTIONS = new Set([
   'save', 'delete', 'add_dependency', 'remove_dependency',
-  'acknowledge_automation_flag', 'generate_content_tasks', 'project_work_command', 'move',
+  'acknowledge_automation_flag', 'generate_content_tasks', 'project_work_command', 'save_brand_deliverable_card', 'move',
   'update_project_task', 'transition_task', 'decide_project_task_change_proposal', 'set_timezone', 'schedule_marketing_calendar',
 ])
 const WORK_ITEM_TYPES = new Set(['task', 'bug', 'request'])
@@ -192,6 +192,14 @@ export async function handleRequest(request: Request) {
     const { admin, user, userClient } = await requireContext(request)
     const organizationId = selectedOrganizationId(body)
     if (!organizationId) return response({ error: 'Active organization is required' }, 400)
+    if (action === 'save_brand_deliverable_card') {
+      const {data,error} = await admin.rpc('save_brand_deliverable_card',{
+        p_organization:organizationId, p_actor:user.id, p_project:body.projectId, p_service:body.serviceId,
+        p_deliverable:body.deliverableId, p_expected_revision:expectedVersion(body.expectedRevision,false), p_plan:body.plan,
+      })
+      if(error) return response({error: error.message}, error.code==='42501'?403:error.code==='40001'?409:400)
+      return response({data})
+    }
     if (action === 'project_work_command') {
       const args = projectWorkCommandArgs(body, organizationId, user.id)
       if (!args) return response({error: 'Exact project, engagement, service and original request required'}, 400)
