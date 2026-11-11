@@ -5,7 +5,7 @@ function attrs(tag){
  for(const m of tag.matchAll(/\s+([:\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g))out[m[1].toLowerCase()]=decode(m[2]??m[3]??m[4])
  return out
 }
-function pageUrl(raw,base,origin){
+export function pageUrl(raw,base,origin){
  try{
   const u=new URL(raw,base)
   if(u.origin!==origin||u.username||u.password||u.search||u.pathname.length>1200||/%2f|%5c|%00/i.test(u.pathname))return ''
