@@ -159,3 +159,8 @@ entrypoint = "./functions/website-native-design/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/website-publication/index.ts"
+
+[functions.website-rankings]
+enabled = true
+verify_jwt = true
+entrypoint = './functions/website-rankings/index.ts'
