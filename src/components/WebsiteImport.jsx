@@ -1,3 +1,4 @@
+import LargeSiteScan from './LargeSiteScan.jsx'
 import {useEffect,useState} from 'react'
 import {useAuth} from '../context/AuthContext.jsx'
 import {supabase} from '../lib/supabase.js'
@@ -9,7 +10,7 @@ export function WebsiteImportSource({project,pageId}){
  const [source,setSource]=useState(null)
  useEffect(()=>{let active=true;supabase.rpc('read_website_import_source',{p_org:project.organization_id,p_project:project.id,p_page:pageId}).then(({data})=>{if(active)setSource(data)});return()=>{active=false}},[project.id,project.organization_id,pageId])
  if(!source)return null
- return <section><h4>Last imported metadata</h4><p>{source.meta.url} · HTTP {source.meta.status}{source.wpId?' · WordPress #'+source.wpId:''}</p><p>Title: {source.meta.title||'Missing'} · H1: {source.meta.h1||'Missing'}</p><p>Description: {source.meta.description||'Missing'}</p><p>Canonical: {source.meta.canonical||'Not declared'}</p></section>
+ return <section><h4>Last imported metadata</h4><p>{source.observationSource==='discovery_service'?'Observed by website discovery':'Reviewed import · service provenance unverified'}</p>{source.managedTitle===false&&<p>Inventory title is managed manually.</p>}<p>{source.meta.url} · HTTP {source.meta.status}{source.wpId?' · WordPress #'+source.wpId:''}</p><p>Title: {source.meta.title||'Missing'} · H1: {source.meta.h1||'Missing'}</p><p>Description: {source.meta.description||'Missing'}</p><p>Canonical: {source.meta.canonical||'Not declared'}</p></section>
 }
 export default function WebsiteImport({project,onApplied,onClose}){
  const {user}=useAuth(),scope={p_org:project.organization_id,p_project:project.id}
@@ -61,7 +62,7 @@ export default function WebsiteImport({project,onApplied,onClose}){
  return <section className="space-y-3"><h3>Import existing website</h3><fieldset disabled={busy||!!pending} className="grid gap-3"><label>Public HTTPS domain <input className={field} value={domain} placeholder="example.com" onChange={e=>{setDomain(e.target.value);setPreview(null)}}/></label>
  <label>Optional keyword spreadsheet <input type="file" accept=".csv,.xlsx" onChange={e=>file(e.target.files[0])}/></label><p>Columns: URL, keyword, role, intent, locale. Use primary or supporting for the role. Observed Search Console queries remain in Rankings.</p>
  {sheet&&<label>Worksheet <select value={which} onChange={e=>{selectSheet(Number(e.target.value));setPreview(null)}}>{sheet.map((s,i)=><option key={i} value={i}>{s.name}</option>)}</select></label>}
- <button className={btn} disabled={!domain.trim()} onClick={discover}>Preview website import</button>
+ <button className={btn} disabled={!domain.trim()} onClick={discover}>Preview website import</button><LargeSiteScan project={project} domain={domain} keywords={()=>sheet?sheetKeywords(sheet[which]):[]} onApplied={onApplied}/>
  {preview&&<section className="space-y-3"><h4>Review pages and keywords · {preview.origin}</h4>{[...preview.notices,...preview.warnings].map((s,i)=><p key={i}>{s}</p>)}{!preview.candidates.length&&<p>No importable pages discovered.</p>}
  {preview.candidates.map((c,i)=><article key={i} className="rounded border p-3"><label><input type="checkbox" checked={c.selected} disabled={!['new','changed'].includes(c.state)} onChange={e=>change(i,{selected:e.target.checked})}/> {c.state} · {c.meta.url}</label>{c.reason&&<p>{c.reason}</p>}
  <p>HTTP {c.meta.status} · WordPress {c.wpId||'ID unavailable'} · H1: {c.meta.h1||'Missing'}</p><p>Description: {c.meta.description||'Missing'} · Canonical: {c.meta.canonical||'Not declared'}</p>
