@@ -1,4 +1,5 @@
 import SuppliedBrandAssets from '../components/SuppliedBrandAssets.jsx'
+import BrandingLibrary from '../components/BrandingLibrary.jsx'
 import BrandDeliverableCards from '../components/BrandDeliverableCards.jsx'
 import _AssistantFloat from '../components/AssistantFloat.jsx'
 import {directChatRecoveryKey,readDirectChatRecovery} from '../data/directChatRecovery.js'
@@ -242,6 +243,7 @@ export default function ProjectEngagementWorkspace() {
           {tab === 'services' && <ServicesAndScope workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={load} onAccessError={handleOrganizationAccessError} onOpen={selectTab} onNavigationBusyChange={reportNavigationBusy} />}
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
           {['website-work','marketing-work','resources'].includes(tab)&&<_ProjectScopedPipelineView key={[navigationOwner,tab,searchParams.get('resourceGroupId')||''].join(':')} workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} signal={requestSignal} kind={tab==='website-work'?'website':tab==='marketing-work'?'marketing':undefined} resources={tab==='resources'} initialGroupId={tab==='resources'?searchParams.get('resourceGroupId')||'':''} onOpenResources={groupId=>selectTab('resources',groupId)} onNavigationBusyChange={reportNavigationBusy}/>}
+          {['website-work','marketing-work'].includes(tab) && <BrandingLibrary key={navigationOwner} workspace={workspace}/>}
           {tab === 'branding-work' && <BrandDeliverableCards key={navigationOwner} workspace={workspace} actorId={user?.id} onRefresh={load}/>}
           {tab === 'work' && <><ProjectStagePlanPanel key={navigationOwner} scope={{organizationId:activeOrganizationId,projectId,engagementId:workspace.engagement?.id}} actorId={user?.id} signal={requestSignal} onStateChange={reportStageState} onAccessError={handleOrganizationAccessError} onOpenBrief={openBrief} onContinueProductStructure={continueProductStructure} onContinueFoundationPositioning={continueFoundation} onContinue={continueStage} onManualSetup={()=>selectTab('services')} onOpenOutput={openStageOutput}/><details className="mt-5"><summary>All project work</summary><fieldset disabled={isNavigationBusy}><WorkViews onOpenPlan={()=>selectTab('services')} onChanged={load} onBusy={reportNavigationBusy} signal={requestSignal} workspace={workspace} navigate={navigate} searchParams={searchParams} setSearchParams={setSearchParams}/></fieldset></details></>}
           {tab === 'discussion' && <div className="studio-chat-layout">
