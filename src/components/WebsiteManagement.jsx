@@ -1,3 +1,4 @@
+import WebsiteImport, {WebsiteImportSource} from './WebsiteImport.jsx'
 import {useEffect,useState} from 'react'
 import {supabase} from '../lib/supabase.js'
 import {comparisonPeriod,pageRankingReport} from '../data/websitePageRankings.js'
@@ -36,6 +37,7 @@ function Editor({page,onSave,onClose,busy}){
 }
 export default function WebsiteManagement({project}){
   const [pages,setPages]=useState(null),[edit,setEdit]=useState(null),[selected,setSelected]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[refresh,reload]=useState(0)
+  const [importing,setImporting]=useState(false)
   const org=project.organization_id,id=project.id
   useEffect(()=>{let active=true;setPages(null);supabase.rpc('website_manual_inventory',{p_org:org,p_project:id}).then(({data,error:e})=>{if(active){if(e)setError(e.message);else setPages(data)}});return()=>{active=false}},[id,org,refresh])
   async function save(v){
@@ -47,8 +49,8 @@ export default function WebsiteManagement({project}){
   }
   const page=pages?.find(p=>p.id===selected)
   return <section aria-label="Website management" className="workspace-card p-4 space-y-4"><h2>Website page inventory</h2>{error&&<p role="alert">{error}</p>}
-  {edit?<Editor key={edit.id} page={edit} onSave={save} onClose={()=>setEdit(null)} busy={busy}/>:<>{pages?<><button className={button} onClick={()=>setEdit({id:crypto.randomUUID(),sourceId:null,title:'',path:'',url:'',state:'new',brief:'',mode:'undecided',targets:[],sourceTargets:[],revision:0})}>Add page</button>{pages.length===0&&<p>No pages recorded.</p>}<ul>{pages.map(p=><li key={p.id}><button className={button} onClick={()=>setSelected(p.id)}>{p.title} · {p.path}</button></li>)}</ul>
-  {page&&<section className="space-y-3"><h3>{page.title}</h3><p>{page.url||page.path}</p><h4>Page brief</h4><p className="whitespace-pre-wrap">{page.brief||'No manual brief recorded.'}</p><button className={button} onClick={()=>setEdit(page)}>Edit page and targets</button><h4>Page keyword assignments</h4><Assignments pages={[page]}/><Rankings key={page.id+':'+page.revision} page={page} project={project}/></section>}
+  {importing?<WebsiteImport project={project} onClose={()=>setImporting(false)} onApplied={()=>reload(r=>r+1)}/>:edit?<Editor key={edit.id} page={edit} onSave={save} onClose={()=>setEdit(null)} busy={busy}/>:<>{pages?<><button className={button} onClick={()=>setImporting(true)}>Import existing website</button> <button className={button} onClick={()=>setEdit({id:crypto.randomUUID(),sourceId:null,title:'',path:'',url:'',state:'new',brief:'',mode:'undecided',targets:[],sourceTargets:[],revision:0})}>Add page</button>{pages.length===0&&<p>No pages recorded.</p>}<ul>{pages.map(p=><li key={p.id}><button className={button} onClick={()=>setSelected(p.id)}>{p.title} · {p.path}</button></li>)}</ul>
+  {page&&<section className="space-y-3"><h3>{page.title}</h3><WebsiteImportSource key={page.id} project={project} pageId={page.id}/><p>{page.url||page.path}</p><h4>Page brief</h4><p className="whitespace-pre-wrap">{page.brief||'No manual brief recorded.'}</p><button className={button} onClick={()=>setEdit(page)}>Edit page and targets</button><h4>Page keyword assignments</h4><Assignments pages={[page]}/><Rankings key={page.id+':'+page.revision} page={page} project={project}/></section>}
   <h3>Site-wide keyword assignments</h3><Assignments pages={pages}/></>:<p>Loading page inventory…</p>}</>}</section>
 }
 function Assignments({pages}){
