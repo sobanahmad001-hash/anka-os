@@ -20,21 +20,21 @@ create table private.website_scan_pages(
 alter table private.website_scan_pages add column service_observed boolean not null default false;
 alter table private.website_import_sources add column observation_job uuid references private.website_scan_jobs(id);
 create function private.website_clear_observation_origin() returns trigger
-language plpgsql set search_path='' as $
+language plpgsql set search_path='' as $$
 begin
  new.observation_job:=null;
  return new;
-end; $;
+end; $$;
 revoke all on function private.website_clear_observation_origin() from public,anon,authenticated;
 create trigger website_import_observation_origin before insert or update of meta,origin,observed_url,wp_id on private.website_import_sources
 for each row execute function private.website_clear_observation_origin();
 create or replace function public.read_website_import_source(p_org uuid,p_project uuid,p_page uuid)
-returns jsonb language plpgsql security definer set search_path='' as $
+returns jsonb language plpgsql security definer set search_path='' as $$
 begin
  perform private.website_read_authorized(p_org,p_project);
  if not coalesce(private.can_access_project(p_project),false) then raise exception 'Project unavailable' using errcode='42501';end if;
  return (select jsonb_build_object('origin',origin,'wpId',wp_id,'meta',meta,'observationSource',case when observation_job is null then 'reviewed_import' else 'discovery_service' end,'managedTitle',manage_title) from private.website_import_sources where project_id=p_project and page_id=p_page);
-end; $;
+end; $$;
 create index website_scan_page_decision on private.website_scan_pages(job_id,decision,url);
 create table private.website_scan_batches(
  job_id uuid not null references private.website_scan_jobs(id),request_id uuid not null,actor uuid not null,
