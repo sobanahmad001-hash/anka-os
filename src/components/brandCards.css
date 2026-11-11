@@ -24,3 +24,11 @@
 .brand-card h2, .brand-card h3 { font-weight: 600; }
 .brand-card a, [aria-label="Existing brand assets"] a { text-decoration: underline; }
 [aria-label="Existing brand assets"] form { display: grid; gap: .8rem; max-width: 44rem; }
+
+.brand-library-groups { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,19rem),1fr)); gap:1.5rem; }
+.brand-library h2,.brand-library h3,.brand-library h4 { font-weight:600; }
+.brand-library h2 { margin-bottom:1rem; }
+.brand-library article { border-top:1px solid var(--anka-line); padding:.75rem 0; }
+.brand-library-actions { display:flex; flex-wrap:wrap; gap:1rem; }
+.brand-library button,.brand-library a { color:var(--anka-violet); text-decoration:underline; }
+.brand-library select { max-width:100%; }
