@@ -164,3 +164,8 @@ entrypoint = "./functions/website-publication/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = './functions/website-rankings/index.ts'
+
+[functions.website-discovery]
+enabled = true
+verify_jwt = true
+entrypoint = './functions/website-discovery/index.ts'
