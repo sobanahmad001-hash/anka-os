@@ -32,3 +32,6 @@
 .brand-library-actions { display:flex; flex-wrap:wrap; gap:1rem; }
 .brand-library button,.brand-library a { color:var(--anka-violet); text-decoration:underline; }
 .brand-library select { max-width:100%; }
+.visual-identity-card { display:grid; gap:.5rem; justify-items:start; margin:.6rem 0; }
+.visual-identity-card label { display:grid; gap:.25rem; width:100%; }
+.visual-identity-card input { min-width:0; border:1px solid var(--anka-line); border-radius:.5rem; padding:.5rem; background:var(--anka-surface); color:var(--anka-ink); }

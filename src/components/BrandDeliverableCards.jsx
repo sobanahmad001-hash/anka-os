@@ -1,7 +1,7 @@
 import './brandCards.css'
 import {useEffect,useRef,useState} from 'react'
 import BrandingLibrary from './BrandingLibrary.jsx'
-import {brandKinds,brandingServiceSlugs} from '../data/manualBranding.js'
+import {brandKinds,brandingServiceSlugs,figmaSourceUrl as figma} from '../data/manualBranding.js'
 import BrandVersionReview from './BrandVersionReview.jsx'
 import {Link} from 'react-router-dom'
 import {supabase} from '../lib/supabase.js'
@@ -9,9 +9,6 @@ import {delivery} from '../data/delivery.js'
 
 const stages={brief:'Brief',in_progress:'In progress',in_review:'In review',handoff:'Handoff',done:'Done'}
 
-function figma(value){
- try{const url=new URL(value);return url.protocol==='https:'&&!url.username&&!url.password&&!url.port&&['figma.com','www.figma.com'].includes(url.hostname)&&/^\/(design|file|proto)\/[\w-]+/.test(url.pathname)?url.href:''}catch{return ''}
-}
 function newForm(){return {brandKind:'',stage:'brief',next:'',brief:'',owner:'',evidence:'',title:'',workstream:'',version:'',sourceVersion:'',sourceFile:''}}
 export default function BrandDeliverableCards({workspace,actorId,onRefresh}){
  const {project,engagement}=workspace
@@ -80,7 +77,8 @@ export default function BrandDeliverableCards({workspace,actorId,onRefresh}){
   if(signed.error)throw signed.error
   setDownload({id:version.id,url:signed.data.signedUrl})
  }
- const library=<BrandingLibrary workspace={workspace} refresh={refresh} onOpen={open} onCreate={engagement&&services.length?kind=>open('new',kind):null}/>
+ const visualIdentityService=engagement && services.find(row=>row.service_catalog.department_id==='design' && ['setup_design_visual_identity','brand_visual_identity'].includes(row.service_catalog.slug))
+ const library=<BrandingLibrary actorId={actorId} visualIdentityService={visualIdentityService} onIdentityChange={async()=>{await onRefresh();setRefresh(n=>n+1)}} workspace={workspace} refresh={refresh} onOpen={open} onCreate={engagement&&services.length?kind=>open('new',kind):null}/>
  if(!engagement||!services.length)return <>{library}<p>Select a Branding service in Scope &amp; Services to create work.</p></>
  return <>{library}<section className="workspace-card brand-card p-4" aria-label="Branding and Design cards"><h2>Branding work cards</h2>
  {error&&<p role="alert">{error}</p>}
