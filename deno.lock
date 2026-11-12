@@ -6,6 +6,7 @@
     "npm:@supabase/auth-js@2.112.4": "2.112.4",
     "npm:@supabase/supabase-js@2.112.4": "2.112.4",
     "npm:fflate@0.8.3": "0.8.3",
+    "npm:http-parser-js@0.5.10": "0.5.10",
     "npm:unpdf@1.9.0": "1.9.0"
   },
   "jsr": {
@@ -68,6 +69,9 @@
     "fflate@0.8.3": {
       "integrity": "sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA=="
     },
+    "http-parser-js@0.5.10": {
+      "integrity": "sha512-Pysuw9XpUq5dVc/2SMHpuTY01RFl8fttgcyunjL7eEMhGM3cI4eOmiCycJDVCo/7O7ClfQD3SaI6ftDzqOXYMA=="
+    },
     "iceberg-js@0.8.1": {
       "integrity": "sha512-1dhVQZXhcHje7798IVM+xoo/1ZdVfzOMIc8/rgVSijRK38EDqOJoGula9N/8ZI5RD8QTxNQtK/Gozpr+qUqRRA=="
     },
@@ -112,6 +116,7 @@
         "npm:eslint@^9.39.4",
         "npm:fflate@0.8.3",
         "npm:globals@^17.4.0",
+        "npm:http-parser-js@0.5.10",
         "npm:pngjs@7.0.0",
         "npm:react-dom@^19.2.4",
         "npm:react-markdown@^10.1.0",
