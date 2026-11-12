@@ -23,3 +23,7 @@ export function approvedBrandVersion(deliverable,id) {
     (!v.client_approval_required&&['ready_for_client_review','client_reviewing'].includes(v.review_status))
   return allowed && v.approvals.some(a=>a.decision==='approved' && a.approval_type===required)?v:null
 }
+
+export function figmaSourceUrl(value){
+ try{const url=new URL(value);return url.protocol==='https:'&&!url.username&&!url.password&&!url.port&&['figma.com','www.figma.com'].includes(url.hostname)&&/^\/(design|file|proto)\/[\w-]+/.test(url.pathname)?url.href:''}catch{return ''}
+}
