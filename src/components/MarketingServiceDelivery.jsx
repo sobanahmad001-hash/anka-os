@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase.js'
 import { readMarketingWorkPages } from '../data/manualMarketingWork.js'
-import { addDays, deliveryServices, periodCards, periodEnd, serviceDefaults } from '../data/marketingServiceDelivery.js'
+import { addDays, deliveryServices, periodCards, periodEnd, serviceDefaults, sharedDeliveryMonth } from '../data/marketingServiceDelivery.js'
 
 const stages={draft:'Draft',in_review:'In review',approved:'Approved',scheduled:'Scheduled',delivered:'Delivered'}
 const cadences=['once','per_batch','weekly','monthly','quarterly','custom']
@@ -144,13 +144,44 @@ function Service({workspace,service}){
   </fieldset>}
  </>
 }
+function SharedDelivery({projectId, services}) {
+ const [cards,setCards]=useState(null)
+ const [error,setError]=useState('')
+ const [view,setView]=useState('Board')
+ const [month,setMonth]=useState(()=>today().slice(0,7))
+ const [revision,refresh]=useState(0)
+ const names=new Map(services.map(service=>[service.id,service.service_catalog.name]))
+ const scope=JSON.stringify([...names.keys()].sort())
+ useEffect(()=>{
+   let current=true
+   setCards(null)
+   setError('')
+   const ids=JSON.parse(scope)
+   readMarketingWorkPages(()=>supabase.from('marketing_delivery_cards')
+     .select('id,service_id,stage,planned_date,scheduled_on,delivered_on,work_items!inner(title,deleted_at)')
+     .eq('project_id',projectId).in('service_id',ids).is('work_items.deleted_at',null))
+     .then(rows=>{if(current)setCards(rows)})
+     .catch(e=>{if(current)setError(e.message)})
+   return ()=>{current=false}
+ },[projectId,scope,revision])
+ const item=card=><li key={card.id}>{card.work_items.title} · {names.get(card.service_id)}</li>
+ const days=cards && view==='Calendar'?sharedDeliveryMonth(cards,month):[]
+ return <section aria-label="Shared delivery">
+   <nav aria-label="Shared delivery views">{['Board','Calendar'].map(v=><button key={v} type="button" aria-pressed={view===v} onClick={()=>setView(v)}>{v}</button>)}</nav>
+   {error?<p role="alert">{error} <button type="button" onClick={()=>refresh(n=>n+1)}>Retry</button></p>:!cards?<p role="status">Loading delivery cards…</p>:
+    view==='Board'?(cards.length?<div className="grid gap-3 md:grid-cols-4">{Object.entries(stages).map(([stage,label])=><section key={stage}><h4>{label}</h4><ul>{cards.filter(c=>c.stage===stage).map(item)}</ul></section>)}</div>:<p>No delivery cards.</p>):
+    <><label>Calendar month <input type="month" value={month} onChange={e=>setMonth(e.target.value)}/></label>
+    {days.length?days.map(([day,entries])=><section key={day}><h4><time dateTime={day}>{day}</time></h4><ul>{entries.map(item)}</ul></section>):<p>No delivery cards this month.</p>}</>}
+ </section>
+}
+
 export default function MarketingServiceDelivery({workspace}){
  const services=deliveryServices(workspace)
  const [id,setId]=useState('')
  const service=services.find(s=>s.id===id) || services[0]
  if(!service)return null
  return <section aria-label="Marketing service delivery" className="workspace-card p-4"><h3>Marketing service delivery</h3>
- <label>Delivery service <select aria-label="Delivery service" value={service.id} onChange={e=>setId(e.target.value)}>{services.map(s=><option key={s.id} value={s.id}>{s.service_catalog.name}</option>)}</select></label>
+ <label>Delivery service <select aria-label="Delivery service" value={id==='all'?'all':service.id} onChange={e=>setId(e.target.value)}><option value="all">All delivery services</option>{services.map(s=><option key={s.id} value={s.id}>{s.service_catalog.name}</option>)}</select></label>
  <p><Link to={'/sphere/marketing/studio?tab=campaigns&engagement='+workspace.engagement.id}>Manage engagement campaigns</Link></p>
- <Service key={service.id} workspace={workspace} service={service}/></section>
+ {id==='all'?<SharedDelivery key={JSON.stringify([workspace.project.id,...services.map(s=>s.id).sort()])} projectId={workspace.project.id} services={services}/>:<Service key={service.id} workspace={workspace} service={service}/>}</section>
 }

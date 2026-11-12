@@ -46,6 +46,21 @@ export function periodEnd(start,cadence) {
   if(cadence==='monthly'||cadence==='quarterly')return addDays(addMonths(start,cadence==='monthly'?1:3),-1)
   return start
 }
+export function deliveryCalendarDate(card) {
+  return card.delivered_on || card.scheduled_on || card.planned_date || null
+}
+
+export function sharedDeliveryMonth(cards, month) {
+  const days = new Map()
+  for (const card of cards) {
+    const day = deliveryCalendarDate(card)
+    if (!day || day.slice(0, 7) !== month) continue
+    if (!days.has(day)) days.set(day, [])
+    days.get(day).push(card)
+  }
+  return [...days].sort(([left], [right]) => left.localeCompare(right))
+}
+
 export function periodCards(period,cards) {
   const within=date=>date && date>=period.starts_on && date<=period.ends_on
   const visible=[],calendar=new Map(),actual=new Map()
@@ -61,8 +76,8 @@ export function periodCards(period,cards) {
       actual.set(unit,(actual.get(unit)||0)+c.delivered_units)
     }
     if(original || within(c.planned_date) || within(c.scheduled_on) || within(c.delivered_on))visible.push(c)
-    const day=within(c.delivered_on)?c.delivered_on:within(c.scheduled_on)?c.scheduled_on:within(c.planned_date)?c.planned_date:null
-    if(day){if(!calendar.has(day))calendar.set(day,[]);calendar.get(day).push(c)}
+    const day=deliveryCalendarDate(c)
+    if(within(day)){if(!calendar.has(day))calendar.set(day,[]);calendar.get(day).push(c)}
   }
   return {visible,calendar,committed,planned,scheduled,actual}
 }
