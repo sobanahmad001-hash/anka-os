@@ -1,3 +1,5 @@
+import MarketingServiceDelivery from '../components/MarketingServiceDelivery.jsx'
+import { deliveryServices } from '../data/marketingServiceDelivery.js'
 import { organicServices, seoServices } from '../data/manualMarketingWork.js'
 import ManualSeoWork from '../components/ManualSeoWork.jsx'
 import OrganicSocialWork from '../components/OrganicSocialWork.jsx'
@@ -191,7 +193,7 @@ export default function ProjectEngagementWorkspace() {
   const tabs = TABS
   const Navigation = tab === 'discussion' ? 'div' : Fragment
   const selectedPrimaryTab = primaryTab(tab)
-  const subTabs = tab === 'services' || tab === 'journey' ? SERVICES_TABS : selectedPrimaryTab === 'work' ? [...WORK_TABS.filter(([id])=>id!=='marketing-work'||organicServices(workspace).length>0||seoServices(workspace).length>0||(workspace.pipelineGroups||[]).some(group=>group.kind==='marketing')), ...(showRetainerPlanning ? [['retainer-planning', 'Recurring Planning']] : [])] : selectedPrimaryTab === 'services' ? SERVICES_TABS : []
+  const subTabs = tab === 'services' || tab === 'journey' ? SERVICES_TABS : selectedPrimaryTab === 'work' ? [...WORK_TABS.filter(([id])=>id!=='marketing-work'||deliveryServices(workspace).length>0||organicServices(workspace).length>0||seoServices(workspace).length>0||(workspace.pipelineGroups||[]).some(group=>group.kind==='marketing')), ...(showRetainerPlanning ? [['retainer-planning', 'Recurring Planning']] : [])] : selectedPrimaryTab === 'services' ? SERVICES_TABS : []
   const isNavigationBusy=navigationBusy.owner===navigationOwner&&navigationBusy.value
   const onTabKeyDown = (event, index) => {
     if(isNavigationBusy)return
@@ -247,6 +249,7 @@ export default function ProjectEngagementWorkspace() {
           {tab === 'services' && <ServicesAndScope workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} scopeRevision={scopeRevision} requestSignal={requestSignal} onChanged={load} onAccessError={handleOrganizationAccessError} onOpen={selectTab} onNavigationBusyChange={reportNavigationBusy} />}
           {tab === 'journey' && <Journey workspace={workspace} navigate={navigate} />}
           {tab==='website-work'&&<WebsiteManagement key={navigationOwner} project={workspace.project} workspace={workspace}/>}
+          {tab==='marketing-work' && <MarketingServiceDelivery key={navigationOwner+'-delivery'} workspace={workspace}/>}
           {tab==='marketing-work' && <ManualSeoWork key={navigationOwner+'-seo'} workspace={workspace}/>}
           {tab==='marketing-work' && <OrganicSocialWork key={navigationOwner+'-social'} workspace={workspace}/>}
           {['website-work','marketing-work','resources'].includes(tab)&&<_ProjectScopedPipelineView key={[navigationOwner,tab,searchParams.get('resourceGroupId')||''].join(':')} workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} signal={requestSignal} kind={tab==='website-work'?'website':tab==='marketing-work'?'marketing':undefined} resources={tab==='resources'} initialGroupId={tab==='resources'?searchParams.get('resourceGroupId')||'':''} onOpenResources={groupId=>selectTab('resources',groupId)} onNavigationBusyChange={reportNavigationBusy}/>}
