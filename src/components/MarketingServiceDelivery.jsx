@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import MarketingMeasurement from './MarketingMeasurement.jsx'
 import { supabase } from '../lib/supabase.js'
 import { readMarketingWorkPages } from '../data/manualMarketingWork.js'
 import { addDays, deliveryServices, periodCards, periodEnd, serviceDefaults, sharedDeliveryMonth } from '../data/marketingServiceDelivery.js'
@@ -130,10 +131,12 @@ function Service({workspace,service}){
     <p>Actual delivery · {[...data.actual].map(([unit,n])=>n+' '+unit).join(', ') || '0 '+period.unit}</p>
     <p>Planned {data.planned} · Scheduled {data.scheduled} · Planning gap {Math.max(0,period.goal-data.planned)} {period.unit}</p>
     {period.scope_note && <p>{period.scope_note}</p>}
+    <MarketingMeasurement key={period.id} workspace={workspace} service={service} period={period}/>
     <nav aria-label="Delivery views">{['Board','Calendar'].map(v=><button key={v} aria-pressed={view===v} onClick={()=>setView(v)}>{v}</button>)}</nav>
     {view==='Board'?<div className="grid gap-3 md:grid-cols-4">{Object.entries(stages).map(([stage,label])=><section key={stage}><h4>{label}</h4>{data.visible.filter(c=>c.stage===stage).map(cardButton)}</section>)}</div>:
      <ol>{[...data.calendar.keys()].sort().map(d=><li key={d}><time>{d}</time> {data.calendar.get(d).map(cardButton)}</li>)}</ol>}
     <button onClick={()=>{select({id:crypto.randomUUID(),period_id:period.id,planned_date:period.starts_on,committed_units:1,brief:'',subject:''});setEditPeriod(null)}}>New delivery card</button>
+    {picked?.work_item_id && <MarketingMeasurement key={picked.id} workspace={workspace} service={service} period={period} card={picked}/>}
     {picked && <DeliveryCard key={picked.id+':'+(picked.work_items?.row_version || 'new')} card={picked} period={period} workspace={workspace} campaigns={records.campaigns}
       subjectLabel={records.defaults.subjectLabel} busy={busy} onClose={()=>select(null)} onSave={details=>write(()=>supabase.functions.invoke('work-items',{body:{
        action:'save_marketing_delivery_card',organizationId:project.organization_id,projectId:project.id,serviceId:service.id,cardId:picked.id,
