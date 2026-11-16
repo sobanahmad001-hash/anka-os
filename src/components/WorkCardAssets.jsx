@@ -1,3 +1,4 @@
+import ProjectFigma from './ProjectFigma.jsx'
 import ProjectDrive, {driveFileId} from './ProjectDrive.jsx'
 import {useEffect,useRef,useState} from 'react'
 import {uploadIdentity,duplicateUpload} from '../data/workCardAssetUpload.js'
@@ -66,6 +67,7 @@ function AssetPicker({project,cardKey}){
  }
  return <fieldset disabled={busy} className="workspace-card min-w-0 max-w-full space-y-3 p-3 [&_input]:max-w-full [&_button]:whitespace-normal">
  {cardKey&&<nav aria-label="Card asset actions" className="flex flex-wrap gap-1">{[['attached','Attached assets'],['choose','Choose project asset'],['upload','Upload file'],['link','Paste link']].map(([v,label])=><button className="workspace-button" type="button" key={v} aria-pressed={v===mode} onClick={()=>{setMode(v);setUsage(null)}}>{label}</button>)}</nav>}
+ {cardKey&&<ProjectFigma project={project} cardKey={cardKey} onAttached={()=>{setMode('attached');refresh(n=>n+1)}}/>}
  {cardKey&&<ProjectDrive project={project} cardKey={cardKey} onAttached={()=>{setMode('attached');refresh(n=>n+1)}}/>}
  {error&&<p role="alert">{error}</p>}
  {mode==='attached'&&data&&<ul>{data.attached.length?data.attached.map(a=>row(a,false)):<li>No assets attached.</li>}</ul>}
