@@ -1,3 +1,4 @@
+import ProjectDrive, {driveFileId} from './ProjectDrive.jsx'
 import {useEffect,useRef,useState} from 'react'
 import {uploadIdentity,duplicateUpload} from '../data/workCardAssetUpload.js'
 import {Link} from 'react-router-dom'
@@ -54,6 +55,7 @@ function AssetPicker({project,cardKey}){
  function row(asset,choose){
   return <li key={asset.kind+asset.id} className="flex min-w-0 flex-wrap items-center gap-2 [overflow-wrap:anywhere]"><span className="min-w-0 max-w-full">{asset.label}</span>
    {asset.url&&<a href={asset.url} target="_blank" rel="noreferrer">Open link</a>}
+   {driveFileId(asset.url)&&<ProjectDrive project={project} fileId={driveFileId(asset.url)}/>}
    {asset.bucket&&asset.path&&<button type="button" onClick={()=>act(async()=>{
     const value=await checked(supabase.storage.from(asset.bucket).createSignedUrl(asset.path,60))
     setUsage({asset,start:0,rows:[],download:value.signedUrl})
@@ -64,6 +66,7 @@ function AssetPicker({project,cardKey}){
  }
  return <fieldset disabled={busy} className="workspace-card min-w-0 max-w-full space-y-3 p-3 [&_input]:max-w-full [&_button]:whitespace-normal">
  {cardKey&&<nav aria-label="Card asset actions" className="flex flex-wrap gap-1">{[['attached','Attached assets'],['choose','Choose project asset'],['upload','Upload file'],['link','Paste link']].map(([v,label])=><button className="workspace-button" type="button" key={v} aria-pressed={v===mode} onClick={()=>{setMode(v);setUsage(null)}}>{label}</button>)}</nav>}
+ {cardKey&&<ProjectDrive project={project} cardKey={cardKey} onAttached={()=>{setMode('attached');refresh(n=>n+1)}}/>}
  {error&&<p role="alert">{error}</p>}
  {mode==='attached'&&data&&<ul>{data.attached.length?data.attached.map(a=>row(a,false)):<li>No assets attached.</li>}</ul>}
  {mode==='choose'&&<><label>Search assets <input maxLength={200} value={search} onChange={e=>{setSearch(e.target.value);setOffset(0)}}/></label>
