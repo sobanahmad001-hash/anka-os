@@ -3,10 +3,10 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { monthInTimezone, effectiveMarketingTimezone } from '../data/marketingCalendar.js'
 
-function Month({workspace,service,month}) {
+function Month({workspace,service,month,initialCard}) {
   const project=workspace.project
   const [rows,setRows]=useState([])
-  const [selection,select]=useState('')
+  const [selection,select]=useState(initialCard||'')
   const [refresh,reload]=useState(0)
   const [search,setSearch]=useState('')
   const [offset,setOffset]=useState(0)
@@ -90,14 +90,14 @@ function Month({workspace,service,month}) {
     </>}
   </fieldset>
 }
-export default function ManualSeoWork({workspace}) {
+export default function ManualSeoWork({workspace,focus}) {
   const services=seoServices(workspace)
-  const [service,setService]=useState(services[0]?.id || '')
-  const [month,setMonth]=useState(()=>monthInTimezone(new Date(),effectiveMarketingTimezone(workspace.project,workspace.client)))
+  const [service,setService]=useState(services.find(s=>s.id===focus?.service)?.id||services[0]?.id || '')
+  const [month,setMonth]=useState(()=>focus?.month||monthInTimezone(new Date(),effectiveMarketingTimezone(workspace.project,workspace.client)))
   if(!services.length)return null
   return <section aria-label="Manual SEO" className="workspace-card p-4"><h3>SEO reviews and actions</h3>
     <label>SEO service <select aria-label="SEO service" value={service} onChange={e=>setService(e.target.value)}>{services.map(s=><option key={s.id} value={s.id}>{s.service_catalog.name}</option>)}</select></label>
     <label>Review month <input type="month" value={month} onChange={e=>setMonth(e.target.value)}/></label>
-    {service && month && <Month key={workspace.project.id+service+month} workspace={workspace} service={service} month={month}/>}
+    {service && month && <Month initialCard={focus?.card} key={workspace.project.id+service+month} workspace={workspace} service={service} month={month}/>}
   </section>
 }

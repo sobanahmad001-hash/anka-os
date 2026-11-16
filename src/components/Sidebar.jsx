@@ -1,3 +1,4 @@
+import {useExecutionNavigation} from '../config/executionNavigation.js'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useOrganization } from '../context/OrganizationContext'
@@ -5,9 +6,10 @@ import { environmentNav, getEnvironmentFromPath, isNavigationItemActive, visible
 import { featureFlags } from '../config/featureFlags'
 
 export default function Sidebar({ collapsed = false, compact = false }) {
-  const { profile } = useAuth()
+  const { user, profile } = useAuth()
   const { activeMembership } = useOrganization()
   const location = useLocation()
+  const [showExecution]=useExecutionNavigation(user?.id)
   const activeEnvKey = getEnvironmentFromPath(location.pathname)
   const activeEnv = environmentNav.find((environment) => environment.key === activeEnvKey)
     || environmentNav.find((environment) => environment.key === 'sphere')
@@ -17,6 +19,7 @@ export default function Sidebar({ collapsed = false, compact = false }) {
   const visibleItems = visibleEnvironmentItems(activeEnv, {
     activeMembership,
     profileRole: profile?.role,
+    showExecution,
     aiAssistance: featureFlags.aiAssistance,
   })
 

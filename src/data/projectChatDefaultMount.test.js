@@ -18,7 +18,7 @@ const workspace = (org, id) => buildProjectEngagementWorkspace(Object.fromEntrie
     'artifactVersions', 'artifactApprovals', 'engagementActivity'].map(key => [key, []]),
 ]))
 
-test('mounted project defaults to Chat, preserves explicit tabs and rejects late cross-scope reads', async t => {
+test('mounted project defaults to Work, preserves explicit tabs and rejects late cross-scope reads', async t => {
   const env = mountedEnvironment()
   const previous = { document: globalThis.document, window: globalThis.window, IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT }
   Object.assign(globalThis, { document: env.document, window: env.window, IS_REACT_ACT_ENVIRONMENT: true })
@@ -31,6 +31,7 @@ test('mounted project defaults to Chat, preserves explicit tabs and rejects late
     { loader: 'jsx', format: 'cjs', jsxFactory: 'React.createElement' }).code
   const module = { exports: {} }
   const require = name => {
+    if (name.includes('executionNavigation')) return {useExecutionNavigation:()=>[globalThis.localStorage?.getItem('test')==='on',()=>{}]}
     if (name.includes('AuthContext')) return {useAuth:()=>({user:{id:'actor-a'}})}
     if (name.includes('OrganizationContext')) return { useOrganization: () => organization }
     if (name.includes('projectEngagementWorkspace')) return { projectEngagementWorkspace: repository }
@@ -49,10 +50,10 @@ test('mounted project defaults to Chat, preserves explicit tabs and rejects late
   const render = () => act(async () => { root.render(React.createElement(Component)); await new Promise(resolve => setTimeout(resolve, 0)) })
   const selected = () => propsOf(nodes(env.container).find(node => propsOf(node)?.role === 'tabpanel'))?.['aria-labelledby']
   await render()
-  assert.equal(selected(), 'project-tab-discussion')
-  assert.deepEqual(nodes(env.container).filter(node=>propsOf(node)?.role==='tab').map(node=>node.textContent),['Chat','Plan & Work','Assets','Settings'])
-  assert.match(env.container.textContent, /ProjectDiscussionPanel.jsx:org-a:project-a/)
-  assert.match(env.container.textContent, /ContextConversationPanel.jsx::project-a:project_team/)
+  assert.equal(selected(), 'project-tab-work')
+  assert.deepEqual(nodes(env.container).filter(node=>propsOf(node)?.role==='tab').map(node=>node.textContent),['Work','Assets','Settings'])
+  assert.match(env.container.textContent, /SharedProjectWork.jsx/)
+  assert.doesNotMatch(env.container.textContent, /ContextConversationPanel.jsx/)
   for (const [tab, primary] of [['overview', 'overview'], ['discussion', 'discussion'], ['work', 'work'],
     ['project-tasks', 'work'], ['engagement-work', 'work'], ['planning', 'work'], ['retainer-planning', 'work'],
     ['website-work','work'],['marketing-work','work'],['resources','overview'],['services', 'overview'], ['journey', 'overview'], ['outputs', 'outputs'], ['reviews', 'work'], ['activity', 'overview'],
@@ -65,6 +66,8 @@ test('mounted project defaults to Chat, preserves explicit tabs and rejects late
     }
   }
   withEngagement=true
+  const storage=globalThis.localStorage;globalThis.localStorage={getItem:()=> 'on'}
+  t.after(()=>{globalThis.localStorage=storage})
   projectId='project-stage-three';params=new URLSearchParams({tab:'work'});await render()
   const output={version_id:'00000000-0000-4000-8000-000000000001',conversation_id:'00000000-0000-4000-8000-000000000002'}
   const previousStorage=globalThis.sessionStorage,values=new Map()
@@ -95,10 +98,10 @@ test('mounted project defaults to Chat, preserves explicit tabs and rejects late
   defer = false
   organization = { ...organization, activeOrganizationId: 'org-b', scopeRevision: 2, requestSignal: new AbortController().signal }
   projectId = 'project-b'; await render()
-  assert.match(env.container.textContent, /ProjectDiscussionPanel.jsx:org-b:project-b/)
+  assert.equal(selected(),'project-tab-work')
   await act(async () => resolveLate(workspace('org-a', 'project-delayed')))
   assert.doesNotMatch(env.container.textContent, /project-delayed|org-a/)
-  assert.equal(selected(), 'project-tab-discussion')
+  assert.equal(selected(), 'project-tab-work')
   const documentSource = readFileSync(new URL('../apps/LivingProjectReference.jsx', import.meta.url), 'utf8')
   assert.match(documentSource, /encodeURIComponent\(projectId\)\}\?tab=overview/)
 })

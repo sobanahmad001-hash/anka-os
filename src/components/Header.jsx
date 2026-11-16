@@ -1,3 +1,4 @@
+import {useExecutionNavigation} from '../config/executionNavigation.js'
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
@@ -8,7 +9,7 @@ import { useNotifications } from '../hooks/useNotifications'
 import AppearanceSelector from './AppearanceSelector.jsx'
 
 export default function Header({ sidebarCollapsed = false, onToggleSidebar }) {
-  const { profile, signOut } = useAuth()
+  const { user, profile, signOut } = useAuth()
   const { activeMembership, memberships, activeOrganizationId, selectionRequired, loading: organizationLoading, error: organizationError, selectOrganization } = useOrganization()
   const navigate = useNavigate()
   const location = useLocation()
@@ -20,10 +21,12 @@ export default function Header({ sidebarCollapsed = false, onToggleSidebar }) {
   const notificationToggleRef = useRef(null)
   const { notifications, unread, markRead, markAllRead } = useNotifications()
 
+  const [showExecution]=useExecutionNavigation(user?.id)
   const activeEnv = environmentNav.find(e => e.key === getEnvironmentFromPath(location.pathname))
   const mobileItems = visibleEnvironmentItems(activeEnv, {
     activeMembership,
     profileRole: profile?.role,
+    showExecution,
     aiAssistance: featureFlags.aiAssistance,
   })
 

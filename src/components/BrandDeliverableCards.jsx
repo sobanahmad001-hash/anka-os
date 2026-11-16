@@ -10,7 +10,7 @@ import {delivery} from '../data/delivery.js'
 const stages={brief:'Brief',in_progress:'In progress',in_review:'In review',handoff:'Handoff',done:'Done'}
 
 function newForm(){return {brandKind:'',stage:'brief',next:'',brief:'',owner:'',evidence:'',title:'',workstream:'',version:'',sourceVersion:'',sourceFile:''}}
-export default function BrandDeliverableCards({workspace,actorId,onRefresh}){
+export default function BrandDeliverableCards({workspace,actorId,onRefresh,initialId}){
  const {project,engagement}=workspace
  const members=workspace.teamMembers.map(member=>({
   ...member,
@@ -47,6 +47,12 @@ export default function BrandDeliverableCards({workspace,actorId,onRefresh}){
   if(uploadInput.current)uploadInput.current.value=''
   freshId.current=crypto.randomUUID();setSource('');setFile(null);setChange('');setDownload('');setError('')
  }
+ const opened=useRef(null)
+ useEffect(()=>{
+   if(initialId && cards?.some(c=>c.deliverable_id===initialId) && opened.current!==initialId){
+     opened.current=initialId;open(initialId)
+   }
+ },[initialId,cards])
  function field(key,value){setForm(old=>({...old,[key]:value}));setDownload('')}
  async function run(fn){if(flight.current)return;flight.current=true;setBusy(true);setError('')
   try{await fn()}catch(e){setError(e.message)}finally{flight.current=false;setBusy(false)}}

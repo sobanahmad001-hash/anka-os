@@ -36,8 +36,8 @@ function Editor({page,onSave,onClose,busy}){
   {v.mode==='targets'&&<>{v.targets.map((t,i)=><fieldset className="grid gap-2 sm:grid-cols-2" key={i}><legend>Keyword {i+1}</legend>{['query','intent','locale'].map(k=><label key={k}>{({query:'Keyword',intent:'Search intent',locale:'Locale'})[k]}<input required className={field} value={t[k]} onChange={e=>target(i,k,e.target.value)}/></label>)}<label>Role<select className={field} value={t.role} onChange={e=>target(i,'role',e.target.value)}><option value="primary">Primary</option><option value="supporting">Supporting</option></select></label><button type="button" className={button} onClick={()=>update('targets',v.targets.filter((_,j)=>j!==i))}>Remove keyword</button></fieldset>)}<button type="button" className={button} onClick={()=>update('targets',[...v.targets,emptyTarget()])}>Add keyword</button></>}
   <div><button className={button} type="submit">Save page</button> <button type="button" className={button} onClick={onClose}>Cancel</button></div></fieldset></form>
 }
-export default function WebsiteManagement({project,workspace}){
-  const [page,setPage]=useState(null),[edit,setEdit]=useState(null),[selected,setSelected]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[refresh,reload]=useState(0)
+export default function WebsiteManagement({project,workspace,initialId}){
+  const [page,setPage]=useState(null),[edit,setEdit]=useState(null),[selected,setSelected]=useState(initialId||null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[refresh,reload]=useState(0)
   const [importing,setImporting]=useState(false)
   const org=project.organization_id,id=project.id
   useEffect(()=>{
