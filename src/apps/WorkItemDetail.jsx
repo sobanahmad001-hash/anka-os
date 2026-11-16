@@ -1,3 +1,4 @@
+import WorkCardAssets from '../components/WorkCardAssets.jsx'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
@@ -75,6 +76,7 @@ export default function WorkItemDetail() {
     </header>
 
     <main className="workspace-container workspace-page space-y-5">
+      {state==='ready'&&<WorkCardAssets project={{id:record.project_id,organization_id:activeOrganizationId}} cardKey={detail.kind+':'+record.id}/>}
       {state === 'stale' && <Notice tone="amber" title="Stale record" message={`This ${typeLabel} is archived or removed. Its available history remains visible, but action links are disabled.`} />}
       {error && <Notice tone="red" title="Some detail could not refresh" message={error} />}
 

@@ -1,3 +1,4 @@
+import WorkCardAssets from './WorkCardAssets.jsx'
 import { readMarketingWorkPages, organicServices } from '../data/manualMarketingWork.js'
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase.js'
@@ -83,6 +84,7 @@ function SocialMonth({ workspace, service, month ,initialCard}) {
       {view==='Board' ? <div className="grid gap-3 md:grid-cols-3">{stages.map(stage=><section key={stage}><h4>{label(stage)}</h4>{data.board.filter(c=>c.stage===stage).map(cardButton)}</section>)}</div>
       : <ol aria-label="Calendar by date">{[...data.calendar.keys()].sort().map(day=><li key={day}><time dateTime={day}>{day}</time> {data.calendar.get(day).map(cardButton)}</li>)}</ol>}
       {data.cycle && <button type="button" onClick={()=>setForm({id:crypto.randomUUID(),kind:'post',stage:'draft',title:'',description:'',assignee_id:'',planned_date:month+'-01'})}>New social card</button>}
+      {form?.work_item_id&&<WorkCardAssets project={workspace.project} cardKey={'engagement_work_item:'+form.work_item_id}/>}
       {form && <form onSubmit={submit} className="grid gap-2">
         <h4>{form.work_item_id?'Edit social card':'New social card'}</h4>
         {form.original_month && <p>Original commitment {form.original_month.slice(0,7)}</p>}

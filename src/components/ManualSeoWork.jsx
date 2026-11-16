@@ -1,3 +1,4 @@
+import WorkCardAssets from './WorkCardAssets.jsx'
 import { readMarketingWorkPages, seoServices } from '../data/manualMarketingWork.js'
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase.js'
@@ -75,7 +76,7 @@ function Month({workspace,service,month,initialCard}) {
       <div><button type="button" disabled={!offset} onClick={()=>setOffset(offset-25)}>Previous assignments</button>
         <button type="button" disabled={!options || offset+25>=options.total} onClick={()=>setOffset(offset+25)}>Next assignments</button></div>
       {creator}<button>Create monthly review</button></form>}
-    {selected && <><h4>{selected.work_items.title}</h4>
+    {selected && <><h4>{selected.work_items.title}</h4><WorkCardAssets project={workspace.project} cardKey={'engagement_work_item:'+selected.work_item_id}/>
       <p>{selected.page_path} · {selected.target.query} · {selected.target.locale} · {selected.state}</p>
       <p>Owner · {workspace.teamMembers.find(m=>m.id===selected.work_items.assignee_id)?.name || 'Recorded owner'}</p>
       {selected.parent_review && <button type="button" onClick={()=>open(selected.parent_review)}>Open monthly review</button>}
