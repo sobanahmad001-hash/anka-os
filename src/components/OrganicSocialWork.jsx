@@ -7,7 +7,7 @@ import { organicSocialCycle } from '../data/organicSocialCycle.js'
 const stages = ['draft','in_review','approved','scheduled','published']
 const label = value => value.replaceAll('_',' ')
 
-function SocialMonth({ workspace, service, month }) {
+function SocialMonth({ workspace, service, month ,initialCard}) {
   const project = workspace.project.id
   const [data,setData] = useState(null)
   const [epoch,reload] = useState(0)
@@ -32,6 +32,7 @@ function SocialMonth({ workspace, service, month }) {
       if (!active) return
       const targets = {post:cycle.data?.post_goal ?? null,reel:cycle.data?.reel_goal ?? null}
       setGoals({post:targets.post ?? '',reel:targets.reel ?? ''})
+      if(initialCard && epoch===0){const target=cards.find(c=>c.id===initialCard);if(target)open(target)}
       setData({cycle:cycle.data,...organicSocialCycle({projectId:project,month,cards,goals:targets})})
     }
     read().catch(err => { if (active) setError(err.message) })
@@ -101,14 +102,14 @@ function SocialMonth({ workspace, service, month }) {
     </fieldset>}
   </>
 }
-export default function OrganicSocialWork({workspace}) {
+export default function OrganicSocialWork({workspace,focus}) {
   const services=organicServices(workspace)
-  const [service,select]=useState(services[0]?.id || '')
-  const [month,setMonth]=useState(()=>monthInTimezone(new Date(),effectiveMarketingTimezone(workspace.project,workspace.client)))
+  const [service,select]=useState(services.find(s=>s.id===focus?.service)?.id||services[0]?.id || '')
+  const [month,setMonth]=useState(()=>focus?.month||monthInTimezone(new Date(),effectiveMarketingTimezone(workspace.project,workspace.client)))
   if (!services.length) return null
   return <section className="workspace-card p-4"><h3>Organic Social</h3>
     <label>Social service <select aria-label="Social service" value={service} onChange={e=>select(e.target.value)}>{services.map(s=><option key={s.id} value={s.id}>{s.service_catalog.name}</option>)}</select></label>
     <label>Cycle month <input type="month" value={month} onChange={e=>setMonth(e.target.value)}/></label>
-    {month && service && <SocialMonth key={workspace.project.id+service+month} workspace={workspace} service={service} month={month}/>}
+    {month && service && <SocialMonth initialCard={focus?.card} key={workspace.project.id+service+month} workspace={workspace} service={service} month={month}/>}
   </section>
 }

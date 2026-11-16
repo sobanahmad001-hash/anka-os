@@ -78,10 +78,10 @@ function DeliveryCard({card,period,workspace,campaigns,subjectLabel,onSave,busy,
  </section>
 }
 
-function Service({workspace,service}){
+function Service({workspace,service,focus}){
  const project=workspace.project
- const [records,setRecords]=useState(null),[periodId,setPeriodId]=useState(''),[revision,refresh]=useState(0)
- const [editPeriod,setEditPeriod]=useState(null),[selection,select]=useState(null),[view,setView]=useState('Board')
+ const [records,setRecords]=useState(null),[periodId,setPeriodId]=useState(focus?.period||''),[revision,refresh]=useState(0)
+ const [editPeriod,setEditPeriod]=useState(null),[selection,select]=useState(focus?.card?{id:focus.card}:null),[view,setView]=useState('Board')
  const [busy,setBusy]=useState(false),[error,setError]=useState('')
  useEffect(()=>{
   let current=true
@@ -102,7 +102,7 @@ function Service({workspace,service}){
  },[service,project.id,project.organization_id,workspace.engagement.id,revision])
  const period=records?.periods.find(p=>p.id===periodId)
  const data=period?periodCards(period,records.cards):null
- const picked=records?.cards.find(c=>c.id===selection?.id) || selection
+ const picked=records?.cards.find(c=>c.id===selection?.id) || (selection?.id===focus?.card?null:selection)
  function newPeriod(){
   const start=period?addDays(period.ends_on,1):today()
   const defaults=period || records.defaults
@@ -178,13 +178,13 @@ function SharedDelivery({projectId, services}) {
  </section>
 }
 
-export default function MarketingServiceDelivery({workspace}){
+export default function MarketingServiceDelivery({workspace,focus}){
  const services=deliveryServices(workspace)
- const [id,setId]=useState('')
+ const [id,setId]=useState(focus?.service||'')
  const service=services.find(s=>s.id===id) || services[0]
  if(!service)return null
  return <section aria-label="Marketing service delivery" className="workspace-card p-4"><h3>Marketing service delivery</h3>
  <label>Delivery service <select aria-label="Delivery service" value={id==='all'?'all':service.id} onChange={e=>setId(e.target.value)}><option value="all">All delivery services</option>{services.map(s=><option key={s.id} value={s.id}>{s.service_catalog.name}</option>)}</select></label>
  <p><Link to={'/sphere/marketing/studio?tab=campaigns&engagement='+workspace.engagement.id}>Manage engagement campaigns</Link></p>
- {id==='all'?<SharedDelivery key={JSON.stringify([workspace.project.id,...services.map(s=>s.id).sort()])} projectId={workspace.project.id} services={services}/>:<Service key={service.id} workspace={workspace} service={service}/>}</section>
+ {id==='all'?<SharedDelivery key={JSON.stringify([workspace.project.id,...services.map(s=>s.id).sort()])} projectId={workspace.project.id} services={services}/>:<Service focus={service.id===focus?.service?focus:undefined} key={service.id} workspace={workspace} service={service}/>}</section>
 }

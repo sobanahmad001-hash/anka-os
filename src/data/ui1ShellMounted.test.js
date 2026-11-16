@@ -22,12 +22,14 @@ test('shell preserves scoped routes, collapse state, mobile navigation and Escap
   let signedOut = 0
   let unread = 0
   const components = {}
+  let showExecution = false
   function load(name) {
     if (components[name]) return components[name]
     const source = readFileSync(new URL(`../components/${name}.jsx`, import.meta.url), 'utf8')
     const compiled = transformSync(source, { loader: 'jsx', format: 'cjs', jsxFactory: 'React.createElement' }).code
     const module = { exports: {} }
     const require = name => {
+      if (name.includes('executionNavigation')) return { useExecutionNavigation: () => [showExecution] }
       if (name.includes('AuthContext')) return { useAuth: () => ({ profile, signOut: () => signedOut++ }) }
       if (name.includes('OrganizationContext')) return { useOrganization: () => ({ activeMembership: membership, memberships: [], activeOrganizationId: 'org-a', selectOrganization() {} }) }
       if (name.includes('environmentNav')) return navigation
@@ -56,6 +58,10 @@ test('shell preserves scoped routes, collapse state, mobile navigation and Escap
   assert.equal(elements(env.container, 'a').some(node => props(node).href === '#main-workspace'), true)
   const sidebar = () => elements(env.container, 'aside')[0]
   const links = () => elements(sidebar(), 'a').map(node => props(node).href)
+  assert.ok(!links().includes('/sphere/design'))
+  assert.ok(!links().includes('/assistant'))
+  showExecution = true
+  await render()
   assert.ok(links().includes('/sphere/design'))
   assert.ok(!links().includes('/sphere/content'))
   assert.ok(!links().includes('/settings'))

@@ -3,11 +3,15 @@ import { Outlet, useLocation } from 'react-router-dom'
 import Header from './Header'
 import Sidebar from './Sidebar'
 import AssistantFloat from './AssistantFloat'
+import { useAuth } from '../context/AuthContext'
+import { useExecutionNavigation } from '../config/executionNavigation.js'
 import OrganizationGate from './OrganizationGate'
 import './workspaceShell.css'
 import './osDeliveryPresentation.css'
 
 export default function Layout() {
+  const { user } = useAuth()
+  const [showExecution] = useExecutionNavigation(user?.id)
   const { pathname } = useLocation()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   return (
@@ -21,7 +25,7 @@ export default function Layout() {
             <Outlet />
           </main>
         </div>
-        <AssistantFloat />
+        {showExecution && <AssistantFloat />}
       </OrganizationGate>
     </div>
   )

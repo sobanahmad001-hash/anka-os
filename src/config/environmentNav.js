@@ -64,9 +64,10 @@ export function isNavigationItemActive(item, pathname) {
 }
 
 export function isNavigationItemVisible(item, {
-  environmentKey, activeMembership, profileRole, aiAssistance = true,
+  environmentKey, activeMembership, profileRole, aiAssistance = true, showExecution = true,
 } = {}) {
   if (!activeMembership?.organizationId) return false
+  if (!showExecution && (item.dept || item.path === '/assistant')) return false
   if (item.path === '/assistant' && !aiAssistance) return false
   if (item.peopleAdmin) return ['system_owner','operations_admin','executive','project_owner'].includes(activeMembership.role)
   if (item.legacyAdmin) return profileRole === 'admin'
