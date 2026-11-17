@@ -40,6 +40,7 @@ test('mounted project defaults to Work, preserves explicit tabs and rejects late
       useParams: () => ({ projectId }), useNavigate: () => () => {}, useSearchParams: () => [params, next => { params = next }] }
     if(name.includes('ProjectStagePlanPanel.jsx'))return {__esModule:true,default:props=>{stageProps=props;return null}}
     if(name.includes('ContextConversationPanel.jsx'))return {__esModule:true,default:props=>{chatProps=props;return React.createElement('span',null,'ContextConversationPanel.jsx::'+props.projectId+':'+props.contextKind)}}
+    if (name === '../components/SearchConsole.jsx') return { SearchConsoleSettings: () => null }
     if (name.startsWith('../components/') || name.startsWith('./')) return { __esModule: true,
       default: props => React.createElement('span', null, `${name}:${props.organizationId || ''}:${props.projectId || ''}:${props.contextKind || ''}`) }
     return nativeRequire(name)
