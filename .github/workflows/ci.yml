@@ -23,6 +23,8 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
+      - run: deno test --frozen supabase/functions/project-search-console/provider.test.ts
+      - run: deno check --frozen supabase/functions/project-search-console/index.ts
       - run: deno test --frozen supabase/functions/project-figma/frames.test.ts
       - run: deno check --frozen supabase/functions/project-figma/index.ts
       - run: deno test --allow-env --frozen supabase/functions/artifact-approvals/index.test.ts supabase/functions/artifact-approvals/requestChanges.test.ts
