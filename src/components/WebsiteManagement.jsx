@@ -1,3 +1,4 @@
+import {SearchConsolePage} from './SearchConsole.jsx'
 import WorkCardAssets from './WorkCardAssets.jsx'
 import WebsiteInventoryBrowser, {PageWork} from './WebsiteInventoryBrowser.jsx'
 import WebsiteImport, {WebsiteImportSource} from './WebsiteImport.jsx'
@@ -57,7 +58,7 @@ export default function WebsiteManagement({project,workspace,initialId}){
 
   return <section aria-label="Website management" className="workspace-card p-4 space-y-4"><h2>Website page inventory</h2>{error&&<p role="alert">{error}</p>}
   {importing?<WebsiteImport project={project} onClose={()=>setImporting(false)} onApplied={()=>reload(r=>r+1)}/>:edit?<Editor key={edit.id} page={edit} onSave={save} onClose={()=>setEdit(null)} busy={busy}/>:<><button className={button} onClick={()=>setImporting(true)}>Import existing website</button> <button className={button} onClick={()=>setEdit({id:crypto.randomUUID(),sourceId:null,title:'',path:'',url:'',state:'new',brief:'',mode:'undecided',targets:[],sourceTargets:[],revision:0})}>Add page</button><WebsiteInventoryBrowser workspace={workspace} refresh={refresh} onOpen={setSelected}/>
-{page&&<section className="space-y-3"><h3>{page.title}</h3><WorkCardAssets project={project} cardKey={'page:'+page.id}/><WebsiteImportSource key={page.id} project={project} pageId={page.id}/><p>{page.url||page.path}</p><h4>Page brief</h4><p className="whitespace-pre-wrap">{page.brief||'No manual brief recorded.'}</p><button className={button} onClick={()=>setEdit(page)}>Edit page and targets</button><h4>Page keyword assignments</h4><Assignments pages={[page]}/><PageWork page={page} workspace={workspace} onChange={()=>reload(r=>r+1)}/><Rankings key={page.id+':'+page.revision} page={page} project={project}/></section>}
+{page&&<section className="space-y-3"><h3>{page.title}</h3><WorkCardAssets project={project} cardKey={'page:'+page.id}/><WebsiteImportSource key={page.id} project={project} pageId={page.id}/><p>{page.url||page.path}</p><h4>Page brief</h4><p className="whitespace-pre-wrap">{page.brief||'No manual brief recorded.'}</p><button className={button} onClick={()=>setEdit(page)}>Edit page and targets</button><h4>Page keyword assignments</h4><Assignments pages={[page]}/><PageWork page={page} workspace={workspace} onChange={()=>reload(r=>r+1)}/><SearchConsolePage key={page.id} page={page} project={project}/><Rankings key={page.id+':'+page.revision} page={page} project={project}/></section>}
   </>}</section>
 }
 function Assignments({pages}){

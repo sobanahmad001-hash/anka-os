@@ -1,3 +1,4 @@
+import {SearchConsoleSettings} from '../components/SearchConsole.jsx'
 import ProjectFigma from '../components/ProjectFigma.jsx'
 import ProjectDrive from '../components/ProjectDrive.jsx'
 import WorkCardAssets from '../components/WorkCardAssets.jsx'
@@ -262,6 +263,7 @@ export default function ProjectEngagementWorkspace() {
           {(execution||tab==='resources')&&['website-work','marketing-work','resources'].includes(tab)&&<_ProjectScopedPipelineView key={[navigationOwner,tab,searchParams.get('resourceGroupId')||''].join(':')} workspace={workspace} organizationId={activeOrganizationId} membership={activeMembership} signal={requestSignal} kind={tab==='website-work'?'website':tab==='marketing-work'?'marketing':undefined} resources={tab==='resources'} initialGroupId={tab==='resources'?searchParams.get('resourceGroupId')||'':''} onOpenResources={groupId=>selectTab('resources',groupId)} onNavigationBusyChange={reportNavigationBusy}/>}
           {['website-work','marketing-work'].includes(tab) && <BrandingLibrary key={navigationOwner} workspace={workspace}/>}
           {tab === 'branding-work' && <BrandDeliverableCards key={navigationOwner} workspace={workspace} initialId={focus.deliverable} actorId={user?.id} onRefresh={load}/>}
+          {tab==='overview'&&<SearchConsoleSettings key={navigationOwner+'-gsc'} workspace={workspace} membership={activeMembership} signal={requestSignal} onNavigationBusyChange={reportNavigationBusy}/>}
           {tab==='overview'&&<ProjectFigma key={navigationOwner+'-figma'} project={workspace.project}/>}
           {tab==='overview'&&<ProjectDrive key={navigationOwner} project={workspace.project}/>}
           {tab==='overview'&&<label><input type="checkbox" checked={execution} onChange={e=>toggleExecution(e.target.checked)}/> Show Chat and execution tools on this browser</label>}
