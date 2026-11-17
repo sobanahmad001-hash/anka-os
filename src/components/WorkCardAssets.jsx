@@ -12,19 +12,20 @@ async function checked(query){
 }
 
 export default function WorkCardAssets({project,cardKey}){
+ const [busy,setBusy]=useState(false)
  const [open,setOpen]=useState(false),[mode,setMode]=useState(cardKey?'attached':'choose')
  const start=next=>{setMode(next);setOpen(true)}
- return <section><button type="button" className="workspace-button" aria-expanded={open} onClick={()=>setOpen(!open)}>{cardKey?'Card assets':'Project asset library'}</button>
+ return <section><button type="button" className="workspace-button" disabled={busy} aria-expanded={open} onClick={()=>setOpen(!open)}>{cardKey?'Card assets':'Project asset library'}</button>
  {cardKey&&<nav aria-label="Work card actions" className="flex flex-wrap gap-2">
- { [['write','Write content'],['attach','Attach file or link'],['choose','Reuse project asset']].map(([next,label])=><button type="button" key={next} className="workspace-button" onClick={()=>start(next)}>{label}</button>)}
+ { [['write','Write content'],['attach','Attach file or link'],['choose','Reuse project asset']].map(([next,label])=><button type="button" key={next} disabled={busy} className="workspace-button" onClick={()=>start(next)}>{label}</button>)}
  </nav>}
- {open&&<AssetPicker mode={mode} setMode={setMode} key={[project.organization_id,project.id,cardKey].join(':')} project={project} cardKey={cardKey}/>}</section>
+ {open&&<AssetPicker busy={busy} setBusy={setBusy} mode={mode} setMode={setMode} key={[project.organization_id,project.id,cardKey].join(':')} project={project} cardKey={cardKey}/>}</section>
 }
 
-function AssetPicker({project,cardKey,mode,setMode}){
+function AssetPicker({project,cardKey,mode,setMode,busy,setBusy}){
  const [cardKind,cardId]=cardKey?.split(':')||[]
  const [search,setSearch]=useState(''),[offset,setOffset]=useState(0),[revision,refresh]=useState(0)
- const [data,setData]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false)
+ const [data,setData]=useState(null),[error,setError]=useState('')
  const [url,setUrl]=useState(''),[usage,setUsage]=useState(null)
  const [file,setFile]=useState(null),flight=useRef(false)
  const scope={p_org:project.organization_id,p_project:project.id}
