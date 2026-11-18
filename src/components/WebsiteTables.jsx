@@ -19,7 +19,7 @@ export default function WebsiteTables({workspace,refresh,onOpen}){
  const owners=[...new Map([...(workspace.engagementWorkItems||[]),...(workspace.projectTasks||[])].filter(w=>w.owner?.id).map(w=>[w.owner.id,w.owner.name])).entries()]
  const change=(fn,v)=>{setOffset(0);setExpanded(null);fn(v)}
  useEffect(()=>{
-  let active=true;setData(null);setError('');setSelected([]);setExpanded(null)
+  let active=true;setData(null);setError('');setExpanded(null)
   const timer=setTimeout(()=>{
    supabase.rpc('website_pages_table',{p_org:project.organization_id,p_project:project.id,p_search:search.trim(),p_filter:filter,p_owner:owner||null,p_offset:offset,p_sort:sort,p_attention:attention})
     .then(({data,error})=>{if(active){setData(data);setError(error?.message||'')}}).catch(e=>{if(active)setError(e.message)})
