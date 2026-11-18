@@ -36,7 +36,7 @@ export default function BulkKeywordReview({project,page,items,onClose,onSaved,re
   }catch(e){if(active.current)setError(e.message)}finally{running.delete(key);flight.current=false;if(active.current)setBusy(false)}
  }
  function close(){
-  if(running.has(key)||review?.rows.some(r=>r.status==='retry'))return
+  if(running.has(key)||review?.rows.some(r=>r.status==='retry'&&r.request))return
   sessionStorage.removeItem(key);onClose()
  }
  const valid=review?.action!=='selected'||review.rows.every(row=>row.status==='saved'||row.status==='conflict'||row.intent.trim()&&row.locale.trim())
@@ -51,6 +51,6 @@ export default function BulkKeywordReview({project,page,items,onClose,onSaved,re
  {row.error&&<p role="alert">{row.error}</p>}</section>)}
  <button type="button" disabled={!valid||review.rows.every(row=>['saved','conflict'].includes(row.status))} onClick={submit}>{review.rows.some(row=>row.request)?'Retry unsaved rows':'Confirm selected decisions'}</button>
  </>}
- <button type="button" disabled={review?.rows.some(r=>r.status==='retry')} onClick={close}>Close review</button>
+ <button type="button" disabled={review?.rows.some(r=>r.status==='retry'&&r.request)} onClick={close}>Close review</button>
  </fieldset>
 }

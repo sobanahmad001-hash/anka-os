@@ -56,7 +56,10 @@ function KeywordGroup({project,page,onOpen,onUpdated}){
  const recoveryKey='anka:keyword-review:'+user?.id+':'+project.organization_id+':'+project.id+':'+page.id
  const [search,setSearch]=useState(''),[sort,setSort]=useState('clicks'),[state,setState]=useState('all'),[offset,setOffset]=useState(0),[data,setData]=useState(null),[error,setError]=useState('')
  const change=(fn,v)=>{setOffset(0);fn(v)}
- useEffect(()=>{try{if(sessionStorage.getItem(recoveryKey))setReviewing(true)}catch{}},[recoveryKey])
+ useEffect(()=>{
+  setSelected([])
+  try{setReviewing(Boolean(sessionStorage.getItem(recoveryKey)))}catch{setReviewing(false)}
+ },[recoveryKey])
  useEffect(()=>{
   let active=true;setData(null);setError('');setSelected([])
   const timer=setTimeout(()=>{
