@@ -1,3 +1,6 @@
+import BulkKeywordReview from './BulkKeywordReview.jsx'
+import {eligibleKeyword} from '../data/bulkKeywordReview.js'
+import {useAuth} from '../context/AuthContext.jsx'
 import {useEffect,useState} from 'react'
 import {supabase} from '../lib/supabase.js'
 import {assessQuery} from '../data/keywordAssessment.js'
@@ -10,6 +13,7 @@ function Pager({offset,total,onChange,label}){
 }
 export default function WebsiteTables({workspace,refresh,onOpen}){
  const {project}=workspace
+ const [tableRevision,updateTable]=useState(0)
  const [view,setView]=useState('pages'),[search,setSearch]=useState(''),[sort,setSort]=useState('title'),[attention,setAttention]=useState('all')
  const [filter,setFilter]=useState('all'),[owner,setOwner]=useState(''),[offset,setOffset]=useState(0),[expanded,setExpanded]=useState(null),[data,setData]=useState(null),[error,setError]=useState('')
  const owners=[...new Map([...(workspace.engagementWorkItems||[]),...(workspace.projectTasks||[])].filter(w=>w.owner?.id).map(w=>[w.owner.id,w.owner.name])).entries()]
@@ -21,9 +25,9 @@ export default function WebsiteTables({workspace,refresh,onOpen}){
     .then(({data,error})=>{if(active){setData(data);setError(error?.message||'')}}).catch(e=>{if(active)setError(e.message)})
   },150)
   return()=>{active=false;clearTimeout(timer)}
- },[project.id,project.organization_id,search,sort,attention,filter,owner,offset,refresh])
+ },[project.id,project.organization_id,search,sort,attention,filter,owner,offset,refresh,tableRevision])
  const expand=p=><button type="button" className="workspace-button" aria-expanded={expanded===p.id} onClick={()=>setExpanded(expanded===p.id?null:p.id)}>Keywords for {p.title}</button>
- const group=p=><KeywordGroup key={p.id+':'+refresh} project={project} page={p} onOpen={onOpen}/>
+ const group=p=><KeywordGroup key={p.id+':'+refresh} project={project} page={p} onOpen={onOpen} onUpdated={()=>updateTable(n=>n+1)}/>
  return <section aria-label="Website tables" className="min-w-0 space-y-3">
  <div className="flex gap-2">{['pages','keywords'].map(v=><button type="button" className="workspace-button" key={v} aria-pressed={view===v} onClick={()=>{setView(v);setExpanded(null)}}>{v==='pages'?'Pages':'Keywords'}</button>)}</div>
  <div className="flex flex-wrap gap-3">
@@ -46,31 +50,42 @@ export default function WebsiteTables({workspace,refresh,onOpen}){
  </>}
  </section>
 }
-function KeywordGroup({project,page,onOpen}){
+function KeywordGroup({project,page,onOpen,onUpdated}){
+ const {user}=useAuth()
+ const [selected,setSelected]=useState([]),[reviewing,setReviewing]=useState(false),[revision,reload]=useState(0)
+ const recoveryKey='anka:keyword-review:'+user?.id+':'+project.organization_id+':'+project.id+':'+page.id
  const [search,setSearch]=useState(''),[sort,setSort]=useState('clicks'),[state,setState]=useState('all'),[offset,setOffset]=useState(0),[data,setData]=useState(null),[error,setError]=useState('')
  const change=(fn,v)=>{setOffset(0);fn(v)}
  useEffect(()=>{
-  let active=true;setData(null);setError('')
+  setSelected([])
+  try{setReviewing(Boolean(sessionStorage.getItem(recoveryKey)))}catch{setReviewing(false)}
+ },[recoveryKey])
+ useEffect(()=>{
+  let active=true;setData(null);setError('');setSelected([])
   const timer=setTimeout(()=>{
    supabase.rpc('website_keywords_table',{p_org:project.organization_id,p_project:project.id,p_page:page.id,p_search:search,p_state:state,p_sort:sort,p_offset:offset})
     .then(({data,error})=>{if(active){setData(data);setError(error?.message||'')}}).catch(e=>{if(active)setError(e.message)})
   },150)
   return()=>{active=false;clearTimeout(timer)}
- },[project.id,project.organization_id,page.id,search,sort,state,offset])
+ },[project.id,project.organization_id,page.id,search,sort,state,offset,revision])
  return <section aria-label={'Keywords for '+page.title} className="min-w-0 space-y-3 p-2"><h3>{page.title} keywords</h3>
- <div className="flex flex-wrap gap-3"><label>Search this page’s keywords <input maxLength={240} value={search} onChange={e=>change(setSearch,e.target.value)}/></label>
+ <fieldset disabled={reviewing} className="flex flex-wrap gap-3"><label>Search this page’s keywords <input maxLength={240} value={search} onChange={e=>change(setSearch,e.target.value)}/></label>
  <Filter label="Decision" value={state} options={['all','assigned','selected','dismissed','suggested'].map(v=>[v,v])} onChange={v=>change(setState,v)}/>
- <Filter label="Sort keywords" value={sort} options={['clicks','impressions','position','query'].map(v=>[v,v])} onChange={v=>change(setSort,v)}/></div>
+ <Filter label="Sort keywords" value={sort} options={['clicks','impressions','position','query'].map(v=>[v,v])} onChange={v=>change(setSort,v)}/></fieldset>
  {error&&<p role="alert">{error}</p>}{!data&&!error&&<p role="status">Loading keywords…</p>}
  {data&&<><p>{data.start?data.start+' to '+data.end:'No observed reporting period.'}</p>
  <div className="overflow-x-auto" role="region" aria-label={'Keyword table for '+page.title} tabIndex={0}><table className={table}><caption className="text-left">{page.url||page.path}</caption>
- <thead><tr>{['Keyword','Role','Decision','Clicks','Impressions','Average position','Review flags'].map(v=><th scope="col" key={v}>{v}</th>)}</tr></thead>
+ <thead><tr>{['Select','Keyword','Role','Decision','Clicks','Impressions','Average position','Review flags'].map(v=><th scope="col" key={v}>{v}</th>)}</tr></thead>
  <tbody>{data.items.map(row=>{
   const assessment=row.impressions!==null?assessQuery(row,data.page,data.source,project.name):null
-  return <tr key={row.query}><th scope="row">{row.query}</th><td>{row.roles||(assessment?'Suggested '+assessment.role:'Unassigned')}</td><td>{row.state}</td><td>{row.clicks??'—'}</td><td>{row.impressions??'—'}</td><td>{row.position?.toFixed(1)??'—'}</td><td>{assessment?<><p>{assessment.explanation}</p>{assessment.flags.map(f=><p key={f}>{f}</p>)}</>:'No current query evidence'}</td></tr>
+  return <tr key={row.query}><td><input type="checkbox" aria-label={"Select "+row.query} disabled={reviewing||!eligibleKeyword(row)} checked={selected.includes(row.query)} onChange={e=>setSelected(e.target.checked?[...selected,row.query]:selected.filter(q=>q!==row.query))}/></td><th scope="row">{row.query}</th><td>{row.roles||(assessment?'Suggested '+assessment.role:'Unassigned')}</td><td>{row.state}</td><td>{row.clicks??'—'}</td><td>{row.impressions??'—'}</td><td>{row.position?.toFixed(1)??'—'}</td><td>{assessment?<><p>{assessment.explanation}</p>{assessment.flags.map(f=><p key={f}>{f}</p>)}</>:'No current query evidence'}</td></tr>
  })}</tbody></table></div>
  {!data.total&&<p>No keywords match these filters.</p>}
- <Pager offset={offset} total={data.total} onChange={setOffset} label="keywords"/>
+ {!reviewing&&<><label><input type="checkbox" checked={data.items.some(eligibleKeyword)&&data.items.filter(eligibleKeyword).every(row=>selected.includes(row.query))} onChange={e=>setSelected(e.target.checked?data.items.filter(eligibleKeyword).map(row=>row.query):[])}/> Select all eligible suggestions on this visible page</label>
+ <button type="button" disabled={!selected.length} onClick={()=>setReviewing(true)}>Review {selected.length} selected rows</button>
+ <Pager offset={offset} total={data.total} onChange={setOffset} label="keywords"/></>}
+ {reviewing&&<BulkKeywordReview key={recoveryKey} recoveryKey={recoveryKey} project={project} page={page} items={data.items.filter(row=>selected.includes(row.query))}
+ onClose={()=>{setReviewing(false);reload(n=>n+1);onUpdated()}} onSaved={()=>{setReviewing(false);reload(n=>n+1);onUpdated()}}/>}
  <button type="button" className="workspace-button" onClick={()=>onOpen(page.id)}>Review and accept keywords on {page.title}</button>
  </>}
  </section>
