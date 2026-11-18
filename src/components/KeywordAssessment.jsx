@@ -37,7 +37,7 @@ export default function KeywordAssessment({project,page,onChanged}){
  {data&&<><p>{data.start?data.start+' to '+data.end+' · Last sync '+new Date(data.synced).toLocaleString():'No current Search Console snapshot.'}</p>
  <fieldset disabled={busy}>
  {data.rows.slice(0,50).map(row=>{
-  const assessment=assessQuery(row,data.page,data.source),decision=data.decisions.find(d=>d.query===row.query)
+  const assessment=assessQuery(row,data.page,data.source,project.name),decision=data.decisions.find(d=>d.query===row.query)
   return <article className="workspace-card p-3 space-y-2" key={row.query}><h5>{row.query}</h5>
    <p>{row.clicks} clicks · {row.impressions} impressions · {(row.ctr*100).toFixed(2)}% CTR · Average position {row.position.toFixed(1)}</p>
    <p>{decision?.state||'suggested'} · Suggested role {assessment.role} · {assessment.explanation}</p>
