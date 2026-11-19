@@ -18,6 +18,7 @@ test('table startup and visible selection exclude existing and dismissed targets
  const module={exports:{}}
  const require=name=>{
   if(name==='react')return React
+  if(name.includes('WebsitePageHealth'))return {usePageHealth:()=>({rows:[]}),HealthSummary:()=>null}
   if(name.includes('AuthContext'))return {useAuth:()=>({user:{id:'actor'}})}
   if(name.includes('supabase'))return {supabase:{rpc:async name=>{
    if(name==='website_keywords_table')keywordReads++
