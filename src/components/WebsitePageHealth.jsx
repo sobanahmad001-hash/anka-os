@@ -24,6 +24,7 @@ function Work({rows,workspace}){
 export function HealthSummary({row,workspace,compact=false}){
  if(!row)return <p>Evidence not loaded · status unknown</p>
  const health=summarizePageHealth(row)
+ if(compact)return <div className="space-y-1">{health.aspects.map(a=><p key={a.key}><strong>{a.label}</strong> · {a.status}{a.stale&&a.status!=='Stale'?' · Recheck':''}{a.issues?' · '+a.issues+' findings':''}</p>)}</div>
  return <div className="space-y-3">{health.aspects.map(a=><section key={a.key} aria-label={a.label+' status'}>
   <p><strong>{a.label}</strong> · {a.status}{a.stale&&a.status!=='Stale'?' · Recheck required':''}</p>
   <p>{a.issues} recorded findings{a.severity?' · '+a.severity:''} · {a.unknown} unchecked areas</p>
