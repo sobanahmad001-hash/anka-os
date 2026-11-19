@@ -1,3 +1,4 @@
+import {usePageHealth,HealthSummary} from './WebsitePageHealth.jsx'
 import BulkKeywordReview from './BulkKeywordReview.jsx'
 import {eligibleKeyword} from '../data/bulkKeywordReview.js'
 import {useAuth} from '../context/AuthContext.jsx'
@@ -16,6 +17,7 @@ export default function WebsiteTables({workspace,refresh,onOpen}){
  const [tableRevision,updateTable]=useState(0)
  const [view,setView]=useState('pages'),[search,setSearch]=useState(''),[sort,setSort]=useState('title'),[attention,setAttention]=useState('all')
  const [filter,setFilter]=useState('all'),[owner,setOwner]=useState(''),[offset,setOffset]=useState(0),[expanded,setExpanded]=useState(null),[data,setData]=useState(null),[error,setError]=useState('')
+ const health=usePageHealth(project,data?.items.map(p=>p.id)||[],String(refresh)+':'+tableRevision)
  const owners=[...new Map([...(workspace.engagementWorkItems||[]),...(workspace.projectTasks||[])].filter(w=>w.owner?.id).map(w=>[w.owner.id,w.owner.name])).entries()]
  const change=(fn,v)=>{setOffset(0);setExpanded(null);fn(v)}
  useEffect(()=>{
@@ -41,9 +43,9 @@ export default function WebsiteTables({workspace,refresh,onOpen}){
  {!data&&!error&&<p role="status">Loading pages…</p>}
  {data&&<><p>{data.start?data.start+' to '+data.end:'No completed reporting period.'}</p>
  {view==='pages'?<><div className="overflow-x-auto" role="region" aria-label="Website page table" tabIndex={0}><table className={table}><caption className="text-left font-semibold">Website pages</caption>
- <thead><tr>{['Page','URL','Selected keywords','Clicks','Impressions','Attention','Actions'].map(v=><th scope="col" key={v}>{v}</th>)}</tr></thead>
+ <thead><tr>{['Page','URL','Selected keywords','Clicks','Impressions','Attention','Health and Work','Actions'].map(v=><th scope="col" key={v}>{v}</th>)}</tr></thead>
  <tbody>{data.items.map(p=><tr key={p.id}><th scope="row">{p.title}</th><td className="max-w-64 break-words">{p.url||p.path}</td><td>{p.keywords}</td><td>{p.clicks??'—'}</td><td>{p.impressions??'—'}</td><td>{!p.observed?'No observed query evidence':!p.keywords?'Review observed queries':'—'}</td>
- <td><button type="button" className="workspace-button" onClick={()=>onOpen(p.id)}>Open {p.title}</button>{expand(p)}</td></tr>)}</tbody></table></div>
+ <td><HealthSummary row={health.rows.find(r=>r.id===p.id)} workspace={workspace} compact/></td><td><button type="button" className="workspace-button" onClick={()=>onOpen(p.id)}>Open {p.title}</button>{expand(p)}</td></tr>)}</tbody></table></div>
  {expanded&&data.items.filter(p=>p.id===expanded).map(group)}</>:<div className="space-y-2">{data.items.map(p=><section key={p.id} className="rounded-lg border border-[var(--anka-line)] p-3"><h3>{expand(p)}</h3><p className="break-words">{p.url||p.path} · {p.keywords} selected keywords</p>{expanded===p.id&&group(p)}</section>)}</div>}
  {!data.total&&<p>No pages match these filters.</p>}
  <Pager offset={offset} total={data.total} onChange={setOffset} label="pages"/>
